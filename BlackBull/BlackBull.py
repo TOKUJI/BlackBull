@@ -1,20 +1,24 @@
-from functools import partial
+from functools import partial, reduce
+from collections import OrderedDict
 
 # import from this package
 from .util import RouteRecord
 from .logger import get_logger_set
 logger, log = get_logger_set('BlackBull')
 
+@log
 async def scheme(scope, ctx, next_):
-    logger.info('in scheme({scope}, {ctx}, {next_}'.format(scope=scope, ctx=ctx, next_=next_))
+    if scope['type'] == 'http':
+        ctx['response'] = OrderedDict()
+        ctx['response']['start'] = {'type': 'http.response.start', 'status': 200, 'headers': [], }
+        ctx['response']['body'] = {'type': 'http.response.body', 'body': None}
+        ctx['response']['disconnect'] = {'type': 'http.disconnect', }
+
     ctx = await next_(scope, ctx)
 
     if scope['type'] == 'http':
-        message = []
-        message.append({'type': 'http.response.start', 'status': 200, 'headers': [], })
-        message.append({'type': 'http.response.body', 'body': ctx['response']['text'].encode(), })
-        message.append({'type': 'http.disconnect', })
-        ctx['response']['message'] = message
+        ctx['response']['body']['body'] = ctx['response']['message'].encode()
+
     return ctx
 
 
@@ -23,7 +27,7 @@ class BlackBull:
                  router = RouteRecord(),
                  ):
         self._router = router
-        self.stack = [scheme]
+        self.stack = [scheme, ]
 
     async def use(self, fn):
         """ fn must require 3 arguments
@@ -36,20 +40,21 @@ class BlackBull:
             endpoint, methods = self._router.find(scope['path'])
             logger.debug(endpoint)
 
+            @log
             async def __fn(receive, send):
                 event = await receive()
-                logger.debug('_fn({}, {}) is called'.format(event, send))
                 nonlocal endpoint
 
-                for fn in self.stack:
-                    endpoint = partial(fn, next_=endpoint)
+                endpoint = reduce(lambda a, b: partial(b, next_=a),
+                                  reversed(self.stack),
+                                  endpoint)
 
-                ctx = await endpoint(scope, {'event': event, 'response': {}})
-                logger.debug(ctx)
-                for s in ctx['response']['message']:
-                    await send(s)
+                ctx = await endpoint(scope, {'event': event})
 
+                for v in ctx['response'].values():
+                    await send(v)
             return __fn
+
         f = _fn(scope)
         return f
 
