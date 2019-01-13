@@ -11,13 +11,18 @@ async def scheme(scope, ctx, next_):
     if scope['type'] == 'http':
         ctx['response'] = OrderedDict()
         ctx['response']['start'] = {'type': 'http.response.start', 'status': 200, 'headers': [], }
-        ctx['response']['body'] = {'type': 'http.response.body', 'body': None}
+        ctx['response']['body'] = {'type': 'http.response.body', 'body': ''}
         ctx['response']['disconnect'] = {'type': 'http.disconnect', }
-
-    ctx = await next_(scope, ctx)
+    try:
+        ctx = await next_(scope, ctx)
+    except Exception as e:
+        logger.error(e)
 
     if scope['type'] == 'http':
-        ctx['response']['body']['body'] = ctx['response']['message'].encode()
+        ctx['response']['body']['body'] = ctx['response']['body']['body'].encode()
+        for k in ctx['response'].keys():
+            if k not in ('start', 'body', 'disconnect'):
+                ctx['response'].pop(k, None)
 
     return ctx
 
@@ -36,27 +41,28 @@ class BlackBull:
         self.stack.append(fn)
 
     def __call__(self, scope):
-        def _fn(scope):
-            endpoint, methods = self._router.find(scope['path'])
-            logger.debug(endpoint)
+        endpoint, methods = self._router.find(scope['path'])
+        logger.debug(endpoint)
 
-            @log
-            async def __fn(receive, send):
-                event = await receive()
-                nonlocal endpoint
+        @log
+        async def __fn(receive, send):
+            event = await receive()
+            nonlocal endpoint
 
-                endpoint = reduce(lambda a, b: partial(b, next_=a),
-                                  reversed(self.stack),
-                                  endpoint)
+            endpoint = reduce(lambda a, b: partial(b, next_=a),
+                              reversed(self.stack),
+                              endpoint)
 
-                ctx = await endpoint(scope, {'event': event})
+            ctx = await endpoint(scope, {'event': event})
+            for k in ctx['response'].keys():
+                logger.info(k)
 
-                for v in ctx['response'].values():
-                    await send(v)
-            return __fn
+            for v in ctx['response'].values():
+                logger.info(v)
+                await send(v)
 
-        f = _fn(scope)
-        return f
+        return __fn
+
 
     def route(self, method='GET', path='/'):
         """ set endpoint function here"""
