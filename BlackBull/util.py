@@ -1,5 +1,16 @@
 from functools import wraps
 
+
+def pop_safe(key, source, target, *, new_key=None):
+
+    if key in source:
+        if new_key:
+            target[new_key] = source.pop(key)
+        else:
+            target[key] = source.pop(key)
+    return target
+
+
 class serializable(object):
     """ This is ABC of util.serializable classes. Any derived class of this class
     should implement save and load method.
@@ -79,7 +90,7 @@ class RouteRecord(UserDict):
 
             if isinstance(method, str):
                 self.__setitem__(path, (wrapper, [method]))
-            else:
+            else: # TODO: should check whether method is iterable or not
                 self.__setitem__(path, (wrapper, method))
 
             return wrapper

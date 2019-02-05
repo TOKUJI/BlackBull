@@ -31,7 +31,7 @@ class FrameFactory(object):
 
     def create(self, type_, flags, stream_identifier, *, data=None, **kwds):
         logger.info(type_)
-        frame = self._factory[type_](0 if not data else len(data),
+        frame = self._factory[type_](0 if data == None else len(data),
                                      type_.value,
                                      flags,
                                      stream_identifier,
@@ -40,6 +40,10 @@ class FrameFactory(object):
         return frame
 
     def load(self, data):
+        if len(data) < 9:
+            logger.error(data)
+            raise Exception('not enough data length: {}'.format(data))
+
         length = int.from_bytes(data[:3], 'big', signed=False)
         type_ = data[3:4]
         flags = int.from_bytes(data[4:5], 'big', signed=False)
@@ -58,7 +62,7 @@ class FrameFactory(object):
             super().__setattr__(key, value)
 
 
-class FrameBase(object):
+class FrameBase:
     """docstring for FrameBase"""
     factory = None
 
@@ -79,11 +83,16 @@ class FrameBase(object):
         res += self.flags.to_bytes(1, 'big', signed=False)
         res += self.stream_identifier.to_bytes(4, 'big', signed=False)
 
-        logger.info('{}'.format(res))
+        logger.debug('FrameBase is saving a frame {}'.format(res))
         return res
 
     def has_continuation(self):
         return False
+
+    def __eq__(self, other):
+        return self.type_ == other.type_ and\
+               self.flags == other.flags and\
+               self.stream_identifier == other.stream_identifier
 
     @staticmethod
     def FrameType():
@@ -171,6 +180,7 @@ class WindowUpdate(FrameBase):
     def FrameType():
         return FrameTypes.WINDOW_UPDATE
 
+
 class HeadersFlags(Enum):
     END_STREAM = 0x1
     END_HEADERS = 0x4
@@ -215,8 +225,10 @@ class Headers(FrameBase, dict):
             self[k] = v
             logger.debug('{}: {}'.format(k, v))
 
+
     def set_table_size(self, size):
         self.table_size = size
+
 
     def save(self):
         encoder = Encoder()
@@ -226,10 +238,25 @@ class Headers(FrameBase, dict):
         base = super().save()
         return base + payload
 
+
     def has_continuation(self):
         if not self.end_stream:
             return True
         return False
+
+
+    def __getattr__(self, key):
+        if key == 'stream_dependency':
+            self.stream_dependency = 0
+            return self.stream_dependency
+
+        elif key == 'priority_weight':
+            self.priority_weight = 1
+            return self.priority_weight
+
+        else:
+            raise AttributeError(key)
+
 
     @staticmethod
     def FrameType():
@@ -290,13 +317,13 @@ class Data(FrameBase):
         else:
             data_length = length
 
-        self.data = payload.read(data_length)
+        self.payload = payload.read(data_length)
 
     def save(self):
-        self.length = len(self.data)
+        self.length = len(self.payload)
         base = super().save()
-        logger.info('payload is {}'.format(self.data))
-        return base + self.data
+        logger.info('payload is {}'.format(self.payload))
+        return base + self.payload
 
     @staticmethod
     def FrameType():
@@ -310,14 +337,19 @@ class Priority(FrameBase):
 
         payload = BytesIO(data)
 
-        self.dependent_stream = int.from_bytes(payload.read(4), 'big', signed=False)
+        _t = int.from_bytes(payload.read(4), 'big', signed=False)
+
+        self.exclusion = 0x80000000 & _t
+        self.dependent_stream = _t & 0x7fffffff
         self.weight = int.from_bytes(payload.read(1), 'big', signed=False)
+        logger.debug('exclusion: {}, dependent_stream: {}, weight: {}'.format(self.exclusion, self.dependent_stream, self.weight))
 
     def save(self):
         base = super().save()
 
-        payload = self.dependent_stream.to_bytes(4, 'big', signed=False) +\
-               self.weight.to_bytes(1, 'big', signed=False)
+        _t = self.exclusion | self.dependent_stream
+        payload = _t.to_bytes(4, 'big', signed=False) +\
+                  self.weight.to_bytes(1, 'big', signed=False)
         self.length = 5
 
         return base + payload
@@ -329,29 +361,51 @@ class Priority(FrameBase):
 
 class Ping(FrameBase):
     """docstring for Ping"""
-    def __init__(self, length: int, type_, flags: int, stream_identifier: int, *, data=None, **kwds):
+    def __init__(self, length: int, type_, flags: int, stream_identifier: int, *, data, **kwds):
         super().__init__(length, type_, flags, stream_identifier)
         logger.debug('Ping is called.')
+        logger.debug('FRAME_SIZE: {}'.format(length))
+        if length != 8:
+            raise Exception('FRAME_SIZE_ERROR: {}'.format(length))
 
         self.payload = data
+        logger.debug('payload is {}'.format(self.payload))
 
     def save(self):
+        logger.debug('Ping is saving: {}'.format(self.payload))
         base = super().save()
-        return base + self.payload
+        res = base + self.payload
+        logger.debug('Ping is saving: {}'.format(res))
+        return res
 
     @staticmethod
     def FrameType():
         return FrameTypes.PING
 
+    def __eq__(self, other):
+        return super().__eq__(other) and (self.payload == other.payload)
+
         
 class Stream(object):
-    def __init__(self, parent, weight, window_size=None):
+    def __init__(self, identifier, parent=0, weight=1, window_size=None):
+        from collections import deque
         self.parent = parent
         self.weight = weight
+        self.identifier = identifier
         if window_size:
             self.window_size = window_size
 
-        self.stack = None
+        self.stack = deque()
+        self.scope = None
+        self.event = None
 
-    def __setattr__(self, key, value):
-        pass
+
+    def append(self, frame):
+        self.stack.append(frame)
+
+
+    def pop_left(self):
+        return self.stack.pop_left()
+
+    # def __setattr__(self, key, value):
+    #     pass

@@ -2,18 +2,29 @@ import asyncio
 import ssl
 from collections import defaultdict, deque
 from urllib.parse import urlparse
-from functools import partial
 
 # private library
-from .util import HTTP2
-from .rsock import create_socket
-from .frame import FrameFactory, FrameTypes, FrameBase, HeadersFlags, DataFlags
-from .logger import get_logger_set
+from ..util import HTTP2, pop_safe
+from ..rsock import create_socket
+from ..frame import FrameFactory, FrameTypes, FrameBase, HeadersFlags, DataFlags, Stream
+from ..logger import get_logger_set
+from .response import RespondFactory
 logger, log = get_logger_set('server')
 
 class HandlerBase:
-    """docstring for HandlerBase"""
     def __init__(self, app, reader, writer):
+        """docstring for HandlerBase
+        Parameters
+        ----------
+        app:
+            An ASGI application that handles scope (when app is called for the
+            first time) and receive and send (when it is called for the second
+            time)
+        reader:
+            An reader object that receives from TCP/IP socket.
+        writer:
+            An writer object that send to TCP/IP socket.
+        """
         self.app = app
         self.reader = reader
         self.writer = writer
@@ -25,12 +36,13 @@ class HTTP2Handler(HandlerBase):
     def __init__(self, app, reader, writer):
         super().__init__(app, reader, writer)
         self.client_stream_window_size = {}
-        self.streams = defaultdict(deque)
+        self.streams = {'root': Stream(0, None, 1)}
         self.factory = FrameFactory()
 
 
     async def send_frame(self, frame: FrameBase):
         """Send a frame to the recipient."""
+        logger.debug('sending {}'.format(frame))
         self.writer.write(frame.save())
         await self.writer.drain()
 
@@ -40,33 +52,53 @@ class HTTP2Handler(HandlerBase):
 
         # to distinguish the type of incoming frame
         data = await self.reader.read(9)
-        logger.debug('parse_stream(): {}'.format(data))
-        if len(data) != 9:
+        if len(data) == 0:
+            logger.info('StreamReader got EOF')
             return
 
+        logger.debug('parse_stream(): {}'.format(data))
+
         size = int.from_bytes(data[:3], 'big', signed=False)
-        data += await self.reader.read(size)
+        data += await self.reader.read(size) # Add error handling for the case of insufficient data
 
         frame = self.factory.load(data)
         return frame
 
-    async def make_scope(self, headers=None, data=None):
-        logger.info(headers)
-        scope = {}
-        scope['type'] = 'http'
-        scope['http_version'] = '2'
-        scope['method'] = headers[':method']
-        scope['scheme'] = headers[':scheme']
-        scope['path'] = headers[':path']
 
-        parsed = urlparse(headers[':path'])
-        scope['query_string'] = parsed.query
-        scope['root_path'] = ''
-        scope['headers'] = [(k, v) for k, v in headers.items()]
-        scope['client'] = None
-        scope['server'] = headers[':authority'].split(':')
+    async def make_scope(self, headers=None, *, scope=None):
+        if scope is None:
+            scope = {}
+            scope['type'] = 'http'
+            scope['http_version'] = '2'
+
+        logger.debug(scope)
+
+        pop_safe(':method', headers, scope, new_key='method')
+        pop_safe(':scheme', headers, scope, new_key='scheme')
+        pop_safe(':path', headers, scope, new_key='path')
+
+        if 'path' in scope:
+            parsed = urlparse(scope['path'])
+            scope['query_string'] = parsed.query
+            scope['root_path'] = ''
+            scope['client'] = None
+
+        if ':authority' in headers:
+            scope['headers'] = headers.pop(':authority').split(':')
+
+        scope.update(headers)
 
         return scope
+
+
+    async def make_event(self, data=None, *, event=None):
+        logger.info(data.payload)
+        if not event:
+            event = {'type': 'http.request', 'body': data.payload}
+
+        return event            
+
+
 
     def make_sender(self, stream_identifier):
         async def send(data: dict):
@@ -94,41 +126,22 @@ class HTTP2Handler(HandlerBase):
 
 
     async def handle_frame(self, frame):
+        # if you create Responder object frame by frame,
+        # they cannot share scope object. TODO:
         if frame.FrameType() == FrameTypes.HEADERS:
             logger.debug('Handling HEADERS')
-            scope = await self.make_scope(headers=frame)
-            fn = self.app(scope)
+            await RespondFactory.create(frame).respond(self)
 
-            receive = partial(self.make_scope, headers=frame)
-            await fn(receive, self.make_sender(frame.stream_identifier))
+        elif frame.FrameType() == FrameTypes.DATA:
+            logger.debug('Handling DATA')
+            await RespondFactory.create(frame).respond(self)
 
-        elif frame.FrameType() == FrameTypes.SETTINGS:
-            if frame.flags == 0x0:
-                if hasattr(frame, 'initial_window_size'):
-                    self.initial_window_size = frame.initial_window_size
-                if hasattr(frame, 'header_table_size'):
-                    # TODO: update header_table_size
-                    pass
-                res = self.factory.create(FrameTypes.SETTINGS,
-                                          0x1,
-                                          frame.stream_identifier)
-                await self.send_frame(res)
+        elif frame.FrameType() in (FrameTypes.PING, FrameTypes.WINDOW_UPDATE, FrameTypes.SETTINGS, FrameTypes.PRIORITY):
+            await RespondFactory.create(frame).respond(self)
 
-            elif frame.flags == 0x1:
-                logger.debug('Got ACK')
+        else:
+            logger.warn('something wrong happend while handling this frame: {}'.format(frame))
 
-        elif frame.FrameType() == FrameTypes.PING:
-            res = self.factory.create(FrameTypes.PING,
-                                      0x1,
-                                      frame.stream_identifier,
-                                      data=frame.payload)
-            await self.send_frame(res)
-
-        elif frame.FrameType() == FrameTypes.WINDOW_UPDATE:
-            if frame.stream_identifier == 0:
-                self.client_window_size = frame.window_size
-            else:
-                self.client_stream_window_size[frame.stream_identifier] = frame.window_size
 
     def is_connect(self, frame):
         if not frame or frame.FrameType() == FrameTypes.GOAWAY:
@@ -141,21 +154,23 @@ class HTTP2Handler(HandlerBase):
         my_settings = self.factory.create(FrameTypes.SETTINGS, 0x0, 0)
         await self.send_frame(my_settings)
 
+        # Then, parse and handle frames in this do-while loop
         frame = await self.parse_stream()
         while self.is_connect(frame):
 
-            if frame.has_continuation():
-                self.streams[frame.stream_identifier].append(frame)
-                continue
+            # if frame.has_continuation():
+            #     self.streams[frame.stream_identifier]
+            #     continue
 
-            elif frame.stream_identifier in self.streams and \
+            if frame.stream_identifier in self.streams and \
                  frame.FrameType() in (FrameTypes.DATA, FrameTypes.HEADERS):
 
                 logger.debug('{} is a part of previous frames'.format(frame.stream_identifier))
-                self.streams[frame.stream_identifier].append(frame)
-                if frame.flags & DataFlags.END_STREAM.value:
-                    logger.debug('find end_stream')
-                    await self.handle_request(self.streams[frame.stream_identifier].popleft())
+                await self.handle_frame(frame)
+                # self.streams[frame.stream_identifier].append(frame)
+                # if frame.flags & DataFlags.END_STREAM.value:
+                #     logger.debug('find end of stream')
+                #     await self.handle_request(self.streams[frame.stream_identifier].popleft())
 
             else:
                 logger.debug('Handle this frame solely: {}'.format(frame))
