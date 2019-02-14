@@ -94,7 +94,7 @@ class HTTP2Handler(HandlerBase):
     async def make_event(self, data=None, *, event=None):
         logger.info(data.payload)
         if not event:
-            event = {'type': 'http.request', 'body': data.payload}
+            event = {'event': {'type': 'http.request', 'body': data.payload}}
 
         return event            
 

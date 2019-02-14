@@ -6,6 +6,16 @@ from .util import RouteRecord
 from .logger import get_logger_set
 logger, log = get_logger_set('BlackBull')
 
+def make_response_template(scope):
+    ret = {}
+    if scope['type'] == 'http':
+        ret['start'] = {'type': 'http.response.start', 'status': 200, 'headers': [], }
+        ret['body'] = {'type': 'http.response.body', 'body': body}
+        ret['disconnect'] = {'type': 'http.disconnect', }
+
+
+    pass
+
 @log
 async def scheme(scope, ctx, next_):
     try:
@@ -21,11 +31,6 @@ async def scheme(scope, ctx, next_):
             body = response
         elif type(response) == str:
             body = response.encode()
-
-        if scope['type'] == 'http':
-            ret['start'] = {'type': 'http.response.start', 'status': 200, 'headers': [], }
-            ret['body'] = {'type': 'http.response.body', 'body': body}
-            ret['disconnect'] = {'type': 'http.disconnect', }
 
         return ret
 

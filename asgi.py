@@ -1,8 +1,11 @@
 import asyncio
+import json
 from functools import partial
 from BlackBull import BlackBull
 from BlackBull.logger import get_logger_set, ColoredFormatter
 logger, log = get_logger_set()
+# from playhouse.shortcuts import model_to_dict, dict_to_model
+from render import render_login_page, render_dummy_page, render_table_page
 
 print('========================================================')
 import logging
@@ -25,14 +28,18 @@ app = BlackBull()
 @app.route(path='/')
 async def top(scope, ctx):
     message = ctx['event']
-    ctx['response']['body']['body'] = 'accepted'
+    # ctx['response']['body']['body'] = render_login_page()
+    return render_login_page()
 
-    return ctx
 
 @app.route(path='/favicon.ico')
 async def favicon(scope, ctx):
-    logger.info('favicon.ico')
     return ctx
+
+
+@app.route(method='POST', path='/login')
+async def login(scope, ctx):
+    return str(scope) + str(ctx)
 
 
 if __name__ == "__main__":
