@@ -2,7 +2,7 @@ from functools import partial
 
 from ..frame import FrameTypes, Stream
 from ..logger import get_logger_set
-from ..util import update_scope
+
 logger, log = get_logger_set('server.response')
 
 empty_event = {'event':{'type': 'http.request', 'body': b''}}
@@ -115,21 +115,18 @@ class Respond2Header(RespondBase):
                        parent=self.frame.stream_dependency,
                        weight=self.frame.priority_weight,
                        )
-        logger.debug(handler.streams[stream_id].scope)
+        stream = handler.streams[stream_id] # to be shorten the description
 
-        handler.streams[stream_id].scope = \
-            update_scope( # In real, this function updates the scope.
-                headers=self.frame,
-                scope=handler.streams[stream_id].scope
-                )
-        logger.debug(handler.streams[stream_id].scope)
+        logger.debug(stream.scope)
+        handler.streams[stream_id].update_scope(headers=self.frame)
+        logger.debug(stream.scope)
         
         if self.frame.end_stream:
-            fn = handler.app(handler.streams[stream_id].scope)
+            fn = handler.app(stream.scope)
             async def receive():
                 return empty_event
             await fn(receive, handler.make_sender(stream_id))
-            handler.streams[stream_id].frame = None
+            stream.frame = None
 
 
     @staticmethod

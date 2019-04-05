@@ -2,11 +2,13 @@ import asyncio
 import typing
 from enum import Enum, auto
 from io import BytesIO
+from urllib.parse import urlparse
 from hpack import Encoder, Decoder
 
 # private programs
 # from . import message
 from .logger import get_logger_set
+from .util import pop_safe
 logger, log = get_logger_set('frame')
 
 
@@ -457,6 +459,31 @@ class Stream(object):
         self.event['body'] = data.payload
 
         return self.event            
+
+
+    def update_scope(self, headers=None,):
+        """ Make or update the scope by the headers. """
+        if not self.scope:
+            self.scope = {'type': 'http', 'http_version': "2"}
+
+        if headers is None:
+            return self.scope
+
+        pop_safe(':method', headers, self.scope, new_key='method')
+        pop_safe(':scheme', headers, self.scope, new_key='scheme')
+        pop_safe(':path', headers, self.scope, new_key='path')
+
+        if 'path' in self.scope:
+            parsed = urlparse(self.scope['path'])
+            self.scope['query_string'] = parsed.query
+            self.scope['root_path'] = ''
+            self.scope['client'] = None
+
+        if ':authority' in headers:
+            self.scope['headers'] = headers.pop(':authority').split(':')
+
+        self.scope.update(headers)
+        return self.scope
 
 
     async def lock(self):

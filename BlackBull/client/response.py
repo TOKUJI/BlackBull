@@ -1,6 +1,5 @@
 from ..frame import FrameTypes
 from ..logger import get_logger_set
-from ..util import update_scope
 logger, log = get_logger_set('client.response')
 
 class RespondFactory:
@@ -124,12 +123,7 @@ class Respond2Header(RespondBase):
             stream = handler.create_stream(stream_id)
 
         logger.debug(stream.scope)
-
-        stream.scope = \
-            update_scope( # In real, this function updates the scope.
-                headers=self.frame,
-                scope=stream.scope
-                )
+        stream.update_scope(headers=self.frame)
         logger.debug(stream.scope)
         
         if self.frame.end_stream:
