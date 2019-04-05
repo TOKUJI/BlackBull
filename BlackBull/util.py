@@ -1,4 +1,5 @@
 from functools import wraps
+from urllib.parse import urlparse
 
 
 def pop_safe(key, source, target, *, new_key=None):
@@ -9,6 +10,33 @@ def pop_safe(key, source, target, *, new_key=None):
         else:
             target[key] = source.pop(key)
     return target
+
+
+def update_scope(headers=None, *, scope=None):
+    """ Make or update the scope by the headers. """
+    if scope is None:
+        scope = {}
+        scope['type'] = 'http'
+        scope['http_version'] = '2'
+
+    if headers is None:
+        return scope
+
+    pop_safe(':method', headers, scope, new_key='method')
+    pop_safe(':scheme', headers, scope, new_key='scheme')
+    pop_safe(':path', headers, scope, new_key='path')
+
+    if 'path' in scope:
+        parsed = urlparse(scope['path'])
+        scope['query_string'] = parsed.query
+        scope['root_path'] = ''
+        scope['client'] = None
+
+    if ':authority' in headers:
+        scope['headers'] = headers.pop(':authority').split(':')
+
+    scope.update(headers)
+    return scope
 
 
 class serializable(object):
@@ -38,6 +66,10 @@ import re
 URI = r'/?[0-9a-zA-Z]*?/?'
 HTTP2 = b'PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n'
 # 0x505249202a20485454502f322e300d0a0d0a534d0d0a0d0a
+def parse_post_data(string):
+    matches = re.findall(r'(\w+)=(\w+)&?', string)
+    d = {k:v for k, v in matches}
+    return d
 
 # http://taichino.com/programming/1538
 from collections import UserDict

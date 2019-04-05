@@ -1,12 +1,11 @@
 import asyncio
 import ssl
 from collections import defaultdict, deque
-from urllib.parse import urlparse
 
 # private library
 from ..util import HTTP2, pop_safe
 from ..rsock import create_socket
-from ..frame import FrameFactory, FrameTypes, FrameBase, HeadersFlags, DataFlags, Stream
+from ..frame import FrameFactory, FrameTypes, FrameBase, HeadersFlags, DataFlags, SettingFlags, Stream
 from ..logger import get_logger_set
 from .response import RespondFactory
 logger, log = get_logger_set('server')
@@ -21,9 +20,9 @@ class HandlerBase:
             first time) and receive and send (when it is called for the second
             time)
         reader:
-            An reader object that receives from TCP/IP socket.
+            An reader object that receives TCP/IP sockets.
         writer:
-            An writer object that send to TCP/IP socket.
+            An writer object that sends TCP/IP sockets.
         """
         self.app = app
         self.reader = reader
@@ -65,44 +64,15 @@ class HTTP2Handler(HandlerBase):
         return frame
 
 
-    async def make_scope(self, headers=None, *, scope=None):
-        if scope is None:
-            scope = {}
-            scope['type'] = 'http'
-            scope['http_version'] = '2'
-
-        logger.debug(scope)
-
-        pop_safe(':method', headers, scope, new_key='method')
-        pop_safe(':scheme', headers, scope, new_key='scheme')
-        pop_safe(':path', headers, scope, new_key='path')
-
-        if 'path' in scope:
-            parsed = urlparse(scope['path'])
-            scope['query_string'] = parsed.query
-            scope['root_path'] = ''
-            scope['client'] = None
-
-        if ':authority' in headers:
-            scope['headers'] = headers.pop(':authority').split(':')
-
-        scope.update(headers)
-
-        return scope
-
-
-    async def make_event(self, data=None, *, event=None):
-        logger.info(data.payload)
-        if not event:
-            event = {'event': {'type': 'http.request', 'body': data.payload}}
-
-        return event            
-
+    def make_header(self):
+        """ Make or update the header by the scope. """
+        pass
 
 
     def make_sender(self, stream_identifier):
         async def send(data: dict):
             nonlocal stream_identifier
+            logger.debug(data)
             if data['type'] == 'http.response.start':
                 frame = self.factory.create(FrameTypes.HEADERS,
                                             HeadersFlags.END_HEADERS.value,
@@ -151,26 +121,16 @@ class HTTP2Handler(HandlerBase):
 
     async def run(self):
         # Send the settings at first.
-        my_settings = self.factory.create(FrameTypes.SETTINGS, 0x0, 0)
+        my_settings = self.factory.create(FrameTypes.SETTINGS, SettingFlags.INIT, 0)
         await self.send_frame(my_settings)
 
         # Then, parse and handle frames in this do-while loop
         frame = await self.parse_stream()
+
         while self.is_connect(frame):
-
-            # if frame.has_continuation():
-            #     self.streams[frame.stream_identifier]
-            #     continue
-
             if frame.stream_identifier in self.streams and \
-                 frame.FrameType() in (FrameTypes.DATA, FrameTypes.HEADERS):
-
-                logger.debug('{} is a part of previous frames'.format(frame.stream_identifier))
+                frame.FrameType() in (FrameTypes.DATA, FrameTypes.HEADERS):
                 await self.handle_frame(frame)
-                # self.streams[frame.stream_identifier].append(frame)
-                # if frame.flags & DataFlags.END_STREAM.value:
-                #     logger.debug('find end of stream')
-                #     await self.handle_request(self.streams[frame.stream_identifier].popleft())
 
             else:
                 logger.debug('Handle this frame solely: {}'.format(frame))

@@ -1,5 +1,8 @@
 from functools import partial, reduce
 from collections import OrderedDict
+from http import HTTPStatus
+import sys
+import traceback
 
 # import from this package
 from .util import RouteRecord
@@ -10,29 +13,40 @@ def make_response_template(scope):
     ret = {}
     if scope['type'] == 'http':
         ret['start'] = {'type': 'http.response.start', 'status': 200, 'headers': [], }
-        ret['body'] = {'type': 'http.response.body', 'body': body}
+        ret['body'] = {'type': 'http.response.body', 'body': ""}
         ret['disconnect'] = {'type': 'http.disconnect', }
 
+    return ret
 
-    pass
 
 @log
 async def scheme(scope, ctx, next_):
     try:
-        response = await next_(scope, ctx)
+        logger.info(scope)
+        ret = make_response_template(scope)
     except Exception as e:
         logger.error(e)
 
-    ret = OrderedDict()
-    if type(response) == dict: # assume the response contains start, body, response.
-        return response
-    else:
-        if type(response) == bytes:
-            body = response
-        elif type(response) == str:
-            body = response.encode()
+    try:
+        response = await next_(scope, ctx)
+        logger.debug(response)
 
-        return ret
+        if type(response) == dict: # assume the response contains start, body, response.
+            ret = response
+        elif type(response) == bytes:
+            ret['body']['body'] = response
+        elif type(response) == str:
+            ret['body']['body'] = response.encode()
+        else:
+            raise BaseException('Invalid type of response from Application')
+
+    except Exception as e:
+        logger.error(e)
+        logger.error(traceback.extract_tb(sys.exc_info()[2]).format())
+        ret['body']['body'] = str(e)
+        ret['start']['status'] = HTTPStatus.INTERNAL_SERVER_ERROR.value
+
+    return ret
 
 
 class BlackBull:
@@ -72,13 +86,17 @@ class BlackBull:
                               endpoint)
 
             ret = await middleware_stack(scope, event)
+            logger.debug('ASGI app has made the result {}'.format(ret))
             for k, v in ret.items():
-                logger.info('{}: {}'.format(k, v))
+                logger.debug('{}: {}'.format(k, v))
                 await send(v)
 
         return __fn
 
 
     def route(self, method='GET', path='/'):
-        """ set endpoint function here"""
+        """ Set endpoint function here.
+        The endpoint function should have 2 input variable
+
+        """
         return self._router.route(method=method, path=path)

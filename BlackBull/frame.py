@@ -1,3 +1,4 @@
+import asyncio
 import typing
 from enum import Enum, auto
 from io import BytesIO
@@ -30,10 +31,11 @@ class FrameFactory(object):
         self._factory = {klass.FrameType(): klass for klass in FrameBase.__subclasses__()}
 
     def create(self, type_, flags, stream_identifier, *, data=None, **kwds):
-        logger.info(type_)
+        logger.info(f'type:{type_}, flags:{flags}, id:{stream_identifier}')
+
         frame = self._factory[type_](0 if data == None else len(data),
                                      type_.value,
-                                     flags,
+                                     flags if type(flags) is int else flags.value,
                                      stream_identifier,
                                      data=data,
                                      decoder=self.decoder,)
@@ -76,6 +78,7 @@ class FrameBase:
                      'stream_identifier={} '.format(self.stream_identifier) +\
                      'and payload size={}'.format(self.length))
 
+    @log
     def save(self):
         res = b''
         res += self.length.to_bytes(3, 'big', signed=False)
@@ -83,7 +86,7 @@ class FrameBase:
         res += self.flags.to_bytes(1, 'big', signed=False)
         res += self.stream_identifier.to_bytes(4, 'big', signed=False)
 
-        logger.debug('FrameBase is saving a frame {}'.format(res))
+        logger.debug(f'FrameBase is saving a frame {res}')
         return res
 
     def has_continuation(self):
@@ -98,6 +101,10 @@ class FrameBase:
     def FrameType():
         raise message.NotImplemented_('A subclass of FrameBase should implement FrameType() method')
 
+
+class SettingFlags(Enum):
+    INIT= 0x0
+    ACK = 0x1
 
 class SettingFrame(FrameBase):
     """docstring for SettingFrame"""
@@ -198,10 +205,11 @@ class Headers(FrameBase, dict):
         self.end_headers = HeadersFlags.END_HEADERS.value & self.flags
         self.padded = HeadersFlags.PADDED.value & self.flags
         self.priority = HeadersFlags.PRIORITY.value & self.flags
-        logger.debug('{}, {}, {}, {}'.format(self.end_stream,
-                                             self.end_headers,
-                                             self.padded,
-                                             self.priority))
+        logger.debug(f'end_stream = {self.end_stream > 0}, ' \
+                     f'end_header = {self.end_headers > 0}, ' \
+                     f'padded = {self.padded > 0}, '\
+                     f'priority = {self.priority > 0}, '
+                    )
         # set decoder
         self.decoder = decoder
 
@@ -229,13 +237,15 @@ class Headers(FrameBase, dict):
     def set_table_size(self, size):
         self.table_size = size
 
-
+    @log
     def save(self):
         encoder = Encoder()
         payload = encoder.encode(self)
+        # self.payload = payload
         self.length = len(payload)
 
         base = super().save()
+        logger.debug(base + payload)
         return base + payload
 
 
@@ -308,7 +318,10 @@ class Data(FrameBase):
         self.end_stream = DataFlags.END_STREAM.value & self.flags
         self.padded = DataFlags.PADDED.value & self.flags
 
-        payload = BytesIO(data)
+        if isinstance(data, str):
+            payload = BytesIO(data.encode())
+        else:
+            payload = BytesIO(data)
 
         if self.padded:
             pad_length = int.from_bytes(payload.read(1), 'big', signed=False)
@@ -318,6 +331,7 @@ class Data(FrameBase):
             data_length = length
 
         self.payload = payload.read(data_length)
+        logger.debug(self.payload)
 
     def save(self):
         self.length = len(self.payload)
@@ -372,11 +386,11 @@ class Ping(FrameBase):
         logger.debug('payload is {}'.format(self.payload))
 
     def save(self):
-        logger.debug('Ping is saving: {}'.format(self.payload))
         base = super().save()
         res = base + self.payload
         logger.debug('Ping is saving: {}'.format(res))
         return res
+
 
     @staticmethod
     def FrameType():
@@ -385,7 +399,7 @@ class Ping(FrameBase):
     def __eq__(self, other):
         return super().__eq__(other) and (self.payload == other.payload)
 
-        
+
 class Stream(object):
     def __init__(self, identifier, parent=0, weight=1, window_size=None):
         from collections import deque
@@ -395,17 +409,69 @@ class Stream(object):
         if window_size:
             self.window_size = window_size
 
-        self.stack = deque()
+        self.children = {}
         self.scope = None
         self.event = None
+        self._lock = asyncio.Lock()
 
 
-    def append(self, frame):
-        self.stack.append(frame)
+    def add_child(self, id_):
+        if id_ in self.get_children():
+            return
+
+        child = Stream(id_, self.identifier, )
+        self.children[child.identifier] = child
+
+        return child
 
 
-    def pop_left(self):
-        return self.stack.pop_left()
+    def get_children(self):
+        r = []
+        for c in self.children.values():
+            r.append(c)
+            r += c.get_children()
+        return r
+
+    def find_child(self, identifier):
+        if self.identifier == identifier:
+            return self
+
+        if identifier in self.children:
+            return self.children[identifier]
+        
+        for k, v in self.children.items():
+            r = v.find_child(identifier)
+            if r:
+                return r
+
+        return None
+
+
+    def update_event(self, data=None):
+        """ Make or update the event by the data frame. """
+        if not self.event:
+            self.event = {'type': 'http.request', 'body': ''}
+
+        if not data:
+            return self.event
+        self.event['body'] = data.payload
+
+        return self.event            
+
+
+    async def lock(self):
+        await self._lock.acquire()
+        return self
+
+    def release(self):
+        self._lock.release()
+        return self
+
+    def is_locked(self):
+        return self._lock.locked()
+
+    def __str__(self):
+        return f'Stream(ID: {self.identifier}, )'
 
     # def __setattr__(self, key, value):
     #     pass
