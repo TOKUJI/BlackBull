@@ -33,6 +33,7 @@ class User(BaseModel):
         User.create(id=uuid.uuid4(), name=name, password=password)
         await Account.register(user=User.get(name=name), amount=amount)
 
+
     @staticmethod
     async def authenticate(name, password):
         user = User.get(name=name)

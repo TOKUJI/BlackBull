@@ -7,7 +7,7 @@ logger, log = get_logger_set()
 
 # Test targets
 from BlackBull import BlackBull
-from BlackBull.util import update_scope
+# from BlackBull.util import update_scope
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -31,15 +31,15 @@ async def dummy_event():
     return event
 
 
-@pytest.mark.asyncio
-async def test_route(app):
-    # scope = MagicMock(update_scope())
-    scope = update_scope()
-    scope['path'] = '/test'
+# @pytest.mark.asyncio
+# async def test_route(app):
+#     # scope = MagicMock(update_scope())
+#     scope = update_scope()
+#     scope['path'] = '/test'
 
-    # Check the result here because app does not return any value
-    async def assert_here(b):
-        logger.debug(b)
-        return b
+#     # Check the result here because app does not return any value
+#     async def assert_here(b):
+#         logger.debug(b)
+#         return b
  
-    await app(scope)(dummy_event, assert_here)
+#     await app(scope)(dummy_event, assert_here)

@@ -1,7 +1,7 @@
 from functools import wraps
 from logging import getLogger, NullHandler, Formatter, DEBUG
 from copy import copy
-
+from asyncio import iscoroutinefunction
 
 def get_logger_set(name=None):
     """ Returns a pair of logger and its decorator. """
@@ -11,14 +11,38 @@ def get_logger_set(name=None):
         logger = getLogger('BlackBull')
 
     def _log(fn):
-        @wraps(fn)
-        def wrapper(*args, **kwds):
-            logger.debug('{}({}, {})'.format(fn.__name__, args, kwds))
-            res = fn(*args, **kwds)
-            return res
-        return wrapper
+        if iscoroutinefunction(fn):
+            @wraps(fn)
+            async def async_wrapper(*args, **kwds):
+                logger.debug(f'{fn.__name__}({args}, {kwds})')
+                res = await fn(*args, **kwds)
+                return res
+            return async_wrapper
+        else:
+            def wrapper(*args, **kwds):
+                logger.debug(f'{fn.__name__}({args}, {kwds})')
+                res = fn(*args, **kwds)
+                return res
+            return wrapper
+
     return logger, _log
 
+def log(logger):
+    def _log(fn):
+        if iscoroutinefunction(fn):
+            @wraps(fn)
+            async def async_wrapper(*args, **kwds):
+                logger.debug(f'{fn.__name__}({args}, {kwds})')
+                res = await fn(*args, **kwds)
+                return res
+            return async_wrapper
+        else:
+            def wrapper(*args, **kwds):
+                logger.debug(f'{fn.__name__}({args}, {kwds})')
+                res = fn(*args, **kwds)
+                return res
+            return wrapper
+    return _log
 
 # https://stackoverflow.com/questions/384076/how-can-i-color-python-logging-output
 MAPPING = {

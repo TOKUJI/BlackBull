@@ -23,13 +23,13 @@ def run_server():
     process.terminate()
 
 
-def test_marshaling():
-    l = LedgerInfo(prefix='aaa')
-    s = json.dumps(l, cls=LedgerInfo.Encoder)
-    logger.info(s)
-    a = json.loads(s, cls=LedgerInfo.Decoder)
-    logger.info(a)
-    assert l == a
+# def test_marshaling():
+#     l = LedgerInfo(prefix='aaa')
+#     s = json.dumps(l, cls=LedgerInfo.Encoder)
+#     logger.info(s)
+#     a = json.loads(s, cls=LedgerInfo.Decoder)
+#     logger.info(a)
+#     assert l == a
 
 
 @pytest.mark.asyncio
@@ -45,12 +45,25 @@ async def test_info():
 
 
 # @pytest.mark.asyncio
+# async def test_login():
+#     c = Plugin(name='test', port=8000)
+#     await c.connect()
+#     f = c.listen()
+#     result = await c.login('alice', 'alice')
+#     assert c.is_login == True
+#     c.disconnect()
+
+
+
+# @pytest.mark.asyncio
 # async def test_balance():
 #     c = Plugin(name='test', port=8000)
 #     await c.connect()
-#     c.get_balance()
+#     await c.login('alice', 'alice')
+#     balance = await c.get_balance()
+#     assert balance == 1000
 #     c.disconnect()
-
+# 
 
 # @pytest.mark.asyncio
 # async def test_account(run_server):

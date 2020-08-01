@@ -12,7 +12,7 @@ logger, log = get_logger_set('BlackBull')
 def make_response_template(scope):
     ret = {}
     if scope['type'] == 'http':
-        ret['start'] = {'type': 'http.response.start', 'status': 200, 'headers': [], }
+        ret['start'] = {'type': 'http.response.start', 'status': 200, 'headers': scope['headers'], }
         ret['body'] = {'type': 'http.response.body', 'body': ""}
         ret['disconnect'] = {'type': 'http.disconnect', }
 
@@ -86,7 +86,7 @@ class BlackBull:
                               endpoint)
 
             ret = await middleware_stack(scope, event)
-            logger.debug('ASGI app has made the result {}'.format(ret))
+            logger.debug(f'ASGI app has made the result {ret}')
             for k, v in ret.items():
                 logger.debug('{}: {}'.format(k, v))
                 await send(v)

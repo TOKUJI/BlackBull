@@ -17,7 +17,7 @@ cf = ColoredFormatter('%(levelname)-17s:%(name)s:%(lineno)d %(message)s')
 handler.setFormatter(cf)
 logger.addHandler(handler)
 
-fh = logging.FileHandler('app.log',)
+fh = logging.FileHandler('asgi.log',)
 fh.setLevel(logging.DEBUG)
 ff = logging.Formatter('%(levelname)-17s:%(name)s:%(lineno)d %(message)s')
 fh.setFormatter(ff)
@@ -50,8 +50,6 @@ if __name__ == "__main__":
         watcher = BlackBull.watch.Watcher()
 
         watcher.add_watch(__file__, BlackBull.watch.force_reload(__file__))
-        # watcher.add_watch('data_store.py', BlackBull.watch.force_reload(__file__))
-        # watcher.add_watch('render.py', BlackBull.watch.force_reload(__file__))
         watcher.add_watch('BlackBull', BlackBull.watch.force_reload(__file__))
 
         tasks = []
@@ -63,5 +61,5 @@ if __name__ == "__main__":
 
         await asyncio.gather(*tasks)
 
-    asyncio.run(main(app))  
+    asyncio.run(main(app))
     

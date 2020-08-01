@@ -1,9 +1,10 @@
 from functools import partial
 
-from ..frame import FrameTypes, Stream
-from ..logger import get_logger_set
+from ..stream import Stream
+from ..frame import FrameTypes
+from ..logger import get_logger_set, log
 
-logger, log = get_logger_set('server.response')
+logger, _ = get_logger_set('server.response')
 
 empty_event = {'event':{'type': 'http.request', 'body': b''}}
 
@@ -81,17 +82,17 @@ class Respond2Settings(RespondBase):
 class Respond2Priority(RespondBase):
     async def respond(self, handler):
         if self.frame.exclusion:
-            for x in handler.streams:
+            for x in handler.root_stream.get_children():
                 if x.parent == self.frame.dependent_stream:
                     x.parent = self.frame.stream_identifier
 
-        if self.frame.stream_identifier not in handler.streams:
-            handler.streams[self.frame.stream_identifier] = Stream(self.frame.stream_identifier,
-                                          parent=self.frame.dependent_stream,
-                                          weight=self.frame.weight,
-                                          )
-        else:
-            handler.streams[self.frame.stream_identifier].weight = self.frame.weight
+        stream_id = self.frame.stream_identifier # to be shorten the description
+        stream = handler.root_stream.find_child(stream_id)
+
+        if not stream:
+            stream = handler.root_stream.find_child(self.frame.dependent_stream).add_child(stream_id)
+
+        stream.weight = self.frame.weight
 
 
     @staticmethod
@@ -102,24 +103,20 @@ class Respond2Priority(RespondBase):
 class Respond2Header(RespondBase):
     async def respond(self, handler):
         """
-        Open a stream if the stream_identifier is not in the dict of stream.
-        Append the payload of the header to the current scope object.
+        Opens a stream if the stream_identifier is not in the dict of stream.
+        Appends the payload of the header to the current scope object.
         If the header frame indicates the end of stream, run the operating
         function, get the result and respond it to the client.
         """
         stream_id = self.frame.stream_identifier # to be shorten the description
+        stream = handler.root_stream.find_child(stream_id)
 
-        if stream_id not in handler.streams:
-            handler.streams[stream_id] = \
-                Stream(stream_id,
-                       parent=self.frame.stream_dependency,
-                       weight=self.frame.priority_weight,
-                       )
-        stream = handler.streams[stream_id] # to be shorten the description
+        if not stream:
+            # If stream is not found, that means a request to add a stream is received.
+            stream = handler.root_stream.find_child(self.frame.stream_dependency).add_child(stream_id)
+            stream.weight = self.frame.priority_weight
 
-        logger.debug(stream.scope)
-        handler.streams[stream_id].update_scope(headers=self.frame)
-        logger.debug(stream.scope)
+        stream.update_scope(headers=self.frame)
         
         if self.frame.end_stream:
             fn = handler.app(stream.scope)
@@ -135,18 +132,18 @@ class Respond2Header(RespondBase):
 
 class Respond2Data(RespondBase):
 
+    @log(logger)
     async def respond(self, handler):
         """
         To parse the payload of a DATA frame, scope['content-type'] is required.
         If the frame indicates the end of stream, run the operating
         function, get the result and respond it to the client.
         """
+        logger.debug(self.frame)
         stream_id = self.frame.stream_identifier # to be shorten the description
-        stream = handler.streams[stream_id] # to be shorten the description
+        stream = handler.find_stream(stream_id) # to be shorten the description
 
-        logger.debug(stream.event)
         stream.update_event(data=self.frame)
-        logger.debug(stream.event)
         
         logger.debug(f'is this frame the end of stream? {self.frame.end_stream}')
 

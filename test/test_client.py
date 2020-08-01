@@ -8,10 +8,12 @@ logger, log = get_logger_set()
 
 # Test targets
 from plugin import Plugin, LedgerInfo
-from BlackBull.client import Client
+from BlackBull.client import Client, EventEmitter
 
 
-@pytest.fixture(scope="session", autouse=True)
+
+
+@pytest.fixture(scope="session", autouse=False)
 def run_server():
     from subprocess import Popen
     # process = Popen(['daphne', 'main:app'])
@@ -41,29 +43,29 @@ async def test_connect():
     assert is_connected == False
 
 
-@pytest.mark.asyncio
-async def test_stream():
-    c = Client(name='test', port=8000)
-    s1 = c.get_stream()
-    s2 = c.get_stream()
-    s = c.find_stream(s1.identifier)
-    assert s1 == s
+# @pytest.mark.asyncio
+# async def test_stream():
+#     c = Client(name='test', port=8000)
+#     s1 = c.get_stream()
+#     s2 = c.get_stream()
+#     s = c.find_stream(s1.identifier)
+#     assert s1 == s
 
 
-if __name__ == '__main__':
-    print('main')
-    from BlackBull.logger import get_logger_set
-    logger, log = get_logger_set('test')
-    logging.getLogger("asyncio").setLevel(logging.DEBUG)
-    logger.setLevel(logging.DEBUG)
-    handler = logging.StreamHandler()
-    handler.setLevel(logging.WARNING)
-    cf = ColoredFormatter('%(levelname)-12s:%(name)s:%(lineno)d %(message)s')
-    handler.setFormatter(cf)
-    logger.addHandler(handler)
+# if __name__ == '__main__':
+#     print('main')
+#     from BlackBull.logger import get_logger_set
+#     logger, log = get_logger_set('test')
+#     logging.getLogger("asyncio").setLevel(logging.DEBUG)
+#     logger.setLevel(logging.DEBUG)
+#     handler = logging.StreamHandler()
+#     handler.setLevel(logging.WARNING)
+#     cf = ColoredFormatter('%(levelname)-12s:%(name)s:%(lineno)d %(message)s')
+#     handler.setFormatter(cf)
+#     logger.addHandler(handler)
 
-    fh = logging.FileHandler('test.log',)
-    fh.setLevel(logging.DEBUG)
-    ff = logging.Formatter('%(levelname)-12s:%(name)s:%(lineno)d %(message)s')
-    fh.setFormatter(ff)
-    logger.addHandler(fh)
+#     fh = logging.FileHandler('test.log',)
+#     fh.setLevel(logging.DEBUG)
+#     ff = logging.Formatter('%(levelname)-12s:%(name)s:%(lineno)d %(message)s')
+#     fh.setFormatter(ff)
+#     logger.addHandler(fh)

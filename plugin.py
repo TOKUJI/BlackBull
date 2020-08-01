@@ -1,10 +1,11 @@
 import asyncio
 import json
 
-from BlackBull.client import Client, Listener, RespondFactory
+from BlackBull.client import Client, EventEmitter, RespondFactory
 from BlackBull.logger import get_logger_set, ColoredFormatter
 logger, log = get_logger_set()
-from BlackBull.frame import FrameTypes, HeadersFlags, Stream, DataFlags
+from BlackBull.frame import FrameTypes, HeadersFlags, DataFlags
+from BlackBull.stream import eos
 
 logger, log = get_logger_set('plugin')
 
@@ -81,9 +82,10 @@ class Plugin(Client):
         # Get an available stream and set an event to the stream.
         s = self.get_stream()
         event = self.register_event(s.identifier)
-        logger.debug(f'An event for stream No. {s.identifier} is prepared')
 
-        async with s.lock:
+        async with s.get_lock():
+            event = self.register_event(s.identifier, condition=eos)
+
             # Send a request to get information of the ledger.
             header = self.factory.create(FrameTypes.HEADERS,
                                          HeadersFlags.END_HEADERS.value,
@@ -97,14 +99,11 @@ class Plugin(Client):
                                        data=bytearray(f'user_name={name}&user_password={password}', 'utf-8'),)
             await self.send_frame(header)
             await self.send_frame(body)
-            logger.debug('Plugin has sent login request')
+            logger.info('Plugin has sent login request')
 
             await event.wait()
             logger.debug(s)
-            logger.debug(s.event)
-            payload = json.loads(s.event['body'], cls=LedgerInfo.Decoder)
-            logger.debug(payload)
-
+            # payload = json.loads(s.event['body'], cls=LedgerInfo.Decoder)
             self.is_login = True
 
     @log
@@ -114,35 +113,41 @@ class Plugin(Client):
             raise Exception('Not connected')
 
         # Get available stream
-        s = await self.get_stream()
+        s = self.get_stream()
+        lock = s.get_lock()
 
-        def eos(frame): # eos: end of stream
-            logger.debug(f'{frame}, {frame.FrameType()}, {frame.flags}')
-            if frame.FrameType() == FrameTypes.DATA and frame.flags & DataFlags.END_STREAM.value > 0 or\
-                frame.FrameType() == FrameTypes.HEADERS and frame.flags & HeadersFlags.END_STREAM.value > 0:
-                return True
-            return False
+        def make_predictable(stream, condition):
+            def predictable():
 
-        event = self.register_event(s.identifier, condition=eos)
-        logger.debug(f'An event for stream No. {s.identifier} is prepared')
+                pass
+            return predictable
 
-        # Send a request to get information of the ledger.
-        header = self.factory.create(FrameTypes.HEADERS,
-                                     HeadersFlags.END_HEADERS.value | HeadersFlags.END_STREAM.value,
-                                     s.identifier)
-        header[':method'] = 'GET'
-        header[':scheme'] = 'http'
-        header[':path'] = '/info'
-        await self.send_frame(header)
+        async with lock:
+            lock.wait_for(make_predictable(s.identifier, eos))
+            # event = self.register_event(s.identifier, condition=eos)
 
-        # need to get the result, unmarshal it and return ledger info.
-        await event.wait()
-        logger.debug(s.event)
-        payload = json.loads(s.event['body'], cls=LedgerInfo.Decoder)
-        logger.debug(payload)
+            # Send a request to get information of the ledger.
+            header = self.factory.create(
+                FrameTypes.HEADERS,
+                HeadersFlags.END_HEADERS.value | HeadersFlags.END_STREAM.value,
+                s.identifier
+            )
+            header[':method'] = 'GET'
+            header[':scheme'] = 'http'
+            header[':path'] = '/info'
+            await self.send_frame(header)
 
-        s.release()
+            # need to get the result, unmarshal it and return ledger info.
+            await lock.wait()
+            payload = json.loads(s.event['body'], cls=LedgerInfo.Decoder)
+
         return payload
+
+
+    @log
+    async def get_balance(self):
+
+        pass
 
 
     async def get_account(self):
@@ -167,8 +172,8 @@ class Plugin(Client):
         # need to get the result, unmarshal it and return ledger info.
         await event.wait()
         logger.debug(s)
-        logger.debug(s.event)
-        payload = json.loads(s.event['body']['body'], cls=LedgerInfo.Decoder)
+
+        payload = json.loads(s.event['body'], cls=LedgerInfo.Decoder)
         logger.debug(payload)
 
         return payload

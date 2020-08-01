@@ -3,9 +3,10 @@ import ssl
 from collections import defaultdict, deque
 
 # private library
-from ..util import HTTP2, pop_safe
+from ..util import HTTP2, pop_safe, EventEmitter
+from ..stream import Stream
 from ..rsock import create_socket
-from ..frame import FrameFactory, FrameTypes, FrameBase, HeadersFlags, DataFlags, SettingFlags, Stream
+from ..frame import FrameFactory, FrameTypes, FrameBase, HeadersFlags, DataFlags, SettingFlags
 from ..logger import get_logger_set
 from .response import RespondFactory
 logger, log = get_logger_set('server')
@@ -16,9 +17,8 @@ class HandlerBase:
         Parameters
         ----------
         app:
-            An ASGI application that handles scope (when app is called for the
-            first time) and receive and send (when it is called for the second
-            time)
+            An ASGI application that handles the scope (when app is called for the first time).
+            Then the app receives and send (when it is called for the second time)
         reader:
             An reader object that receives TCP/IP sockets.
         writer:
@@ -35,8 +35,15 @@ class HTTP2Handler(HandlerBase):
     def __init__(self, app, reader, writer):
         super().__init__(app, reader, writer)
         self.client_stream_window_size = {}
-        self.streams = {'root': Stream(0, None, 1)}
+        self.root_stream = Stream(0, None, 1)
         self.factory = FrameFactory()
+
+
+    def find_stream(self, id_):
+        if id_ == 0:
+            return self.root_stream
+        else:
+            return self.root_stream.find_child(id_)
 
 
     async def send_frame(self, frame: FrameBase):
@@ -96,14 +103,7 @@ class HTTP2Handler(HandlerBase):
 
 
     async def handle_frame(self, frame):
-        # if you create Responder object frame by frame,
-        # they cannot share scope object. TODO:
-        if frame.FrameType() == FrameTypes.HEADERS:
-            logger.debug('Handling HEADERS')
-            await RespondFactory.create(frame).respond(self)
-
-        elif frame.FrameType() == FrameTypes.DATA:
-            logger.debug('Handling DATA')
+        if frame.FrameType() in (FrameTypes.HEADERS, FrameTypes.DATA):
             await RespondFactory.create(frame).respond(self)
 
         elif frame.FrameType() in (FrameTypes.PING, FrameTypes.WINDOW_UPDATE, FrameTypes.SETTINGS, FrameTypes.PRIORITY):
@@ -122,25 +122,17 @@ class HTTP2Handler(HandlerBase):
     async def run(self):
         # Send the settings at first.
         my_settings = self.factory.create(FrameTypes.SETTINGS, SettingFlags.INIT, 0)
-        await self.send_frame(my_settings)
 
         # Then, parse and handle frames in this do-while loop
         frame = await self.parse_stream()
 
         while self.is_connect(frame):
-            if frame.stream_identifier in self.streams and \
-                frame.FrameType() in (FrameTypes.DATA, FrameTypes.HEADERS):
-                await self.handle_frame(frame)
-
-            else:
-                logger.debug('Handle this frame solely: {}'.format(frame))
-                await self.handle_frame(frame)
-
+            await self.handle_frame(frame)
             frame = await self.parse_stream()
 
 
 class ASGIServer:
-    """ An ASGI Server class. When ssl_context or certfile is set,
+    """An ASGI Server class. When ssl_context or certfile is set,
     this server runs as a HTTPS server.
     """
 
@@ -163,8 +155,12 @@ class ASGIServer:
             self.ssl = context
 
     async def client_connected_cb(self, reader, writer):
-        """Handler must handles every exception in it and not raise any exception."""
+        """
+        This function is called when the server receives an access request from a client.
+        Handler must handles every exception in it and not raise any exception.
+        """
         request_data = await reader.read(24)
+
         if request_data == HTTP2:
             logger.info('HTTP/2 connection is requested.')
             handler = HTTP2Handler(self.app, reader, writer)
@@ -179,6 +175,7 @@ class ASGIServer:
         writer.close()
 
     async def run(self, port=80):
+        """Run an asyncio server with the setting in this object."""
         rsock_ = create_socket((None, port))
         if self.ssl:
             self.socket = self.ssl.wrap_socket(rsock_, server_side=True)

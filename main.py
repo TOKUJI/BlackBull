@@ -1,12 +1,14 @@
 import asyncio
 from functools import partial
 import json
+import logging
 
 from BlackBull import BlackBull
 from BlackBull.BlackBull import make_response_template
 from BlackBull.util import parse_post_data
-from BlackBull.logger import get_logger_set, ColoredFormatter
-logger, log = get_logger_set()
+from BlackBull.logger import get_logger_set, ColoredFormatter, log
+# logger, _ = get_logger_set()
+logger = logging.getLogger()
 
 
 # application local
@@ -62,36 +64,44 @@ async def info(scope, ctx):
     res['body']['body'] = json.dumps(info, cls=LedgerInfo.Encoder)
     return res
 
+@app.route(path='/balance')
+async def balance(scope, ctx):
+    return ""
+
 
 @app.route(path='/favicon.ico')
 async def favicon(scope, ctx):
     return open('favicon.ico', 'rb').read()
 
-
+@log(logger)
 @app.route(method='POST', path='/login')
 async def login(scope, ctx):
-    data = {}
+
     try:
-        logger.debug(ctx['body'])
         d = parse_post_data(ctx['body'].decode())
         logger.debug(d)
     except:
         logger.error(f'Failed to get information of input')
 
+    res = make_response_template(scope)
+
     try:
         # check if the user is in the DB
         if await User.authenticate(d['user_name'], d['user_password']):
             user = User.get(name=d['user_name'])
-            data['user'] = user
-            res = render_dummy_page(data=data)
+            res['body']['body'] = render_dummy_page(data={'user': user})
 
             session_id = SessionManager.register(user=user)
+            res['start']['headers'].append([b'set-cookie', session_id])
+            logger.debug(res)
             # Set this id to the cookie of the response.
         else:
-            res = render_403_page()
+            res['body']['body'] = render_403_page()
+
     except Exception as e:
         logger.error(e)
-        res = render_403_page()
+        res['body']['body'] = render_403_page()
+
     finally:
         logger.info(res)
         return res

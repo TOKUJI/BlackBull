@@ -1,6 +1,6 @@
 from ..frame import FrameTypes
-from ..logger import get_logger_set
-logger, log = get_logger_set('client.response')
+from ..logger import get_logger_set, log
+logger, _ = get_logger_set('client.response')
 
 class RespondFactory:
     @staticmethod
@@ -30,6 +30,7 @@ class Respond2Ping(RespondBase):
                                      self.frame.stream_identifier,
                                      self.frame.payload)
         await handler.send_frame(res)
+        return handler
 
 
     @staticmethod
@@ -77,13 +78,14 @@ class Respond2Settings(RespondBase):
         return FrameTypes.SETTINGS
 
 class Respond2Data(RespondBase):
-
+    @log(logger)
     async def respond(self, handler):
         """
         To parse the payload of a DATA frame, scope['content-type'] is required.
         If the frame indicates the end of stream, run the operating
         function, get the result and respond it to the client.
         """
+        logger.debug(self.frame)
         stream_id = self.frame.stream_identifier # to be shorten the description
         stream = handler.find_stream(stream_id)
         if not stream:
@@ -95,13 +97,6 @@ class Respond2Data(RespondBase):
         
         if self.frame.end_stream:
             return stream.scope, stream.event
-            # fn = handler.app(handler.streams[stream_id].scope)
-
-            # async def receive():
-            #     return handler.streams[stream_id].event
-
-            # await fn(receive, handler.make_sender(stream_id))
-            # handler.streams[stream_id].event = None
 
 
     @staticmethod

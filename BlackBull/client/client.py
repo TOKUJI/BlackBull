@@ -1,14 +1,17 @@
 import asyncio
 import ssl
 from functools import wraps
+from collections import defaultdict
 import concurrent.futures
 
 # private library
 from ..util import HTTP2
 from ..rsock import create_socket
-from ..frame import FrameFactory, FrameTypes, DataFlags, HeadersFlags, SettingFlags, Stream
-from ..logger import get_logger_set
-logger, log = get_logger_set('client')
+from ..frame import FrameFactory, FrameTypes, DataFlags, HeadersFlags, SettingFlags
+from ..stream import Stream
+from ..logger import get_logger_set, log
+logger, _ = get_logger_set('client')
+
 
 from .response import RespondFactory
 
@@ -33,23 +36,34 @@ def connect(fn):
     return _fn
 
 
-class Listener:
-    def __init__(self, condition, *, event=None, callback=None):
-        self.event = event
-        self.condition = condition
-        self.callback = callback
+# class Listener:
+#     def __init__(self, condition, *, event=None, callback=None):
+#         """ A simple listener that can dispatch an event and accept to call a callback function.
+#         Parameters
+#         condition:
+#             A function that requires a frame
+#         event:
+#             An event that is called when the condition is satisfied.
+#         callback:
+#             A callback function which is called just after the condition is satisfied.
+#         """
+#         # TODO check prototype
+#         self.event = event
+#         self.condition = condition
+#         self.callback = callback
 
-    def match(self, frame):
-        return self.condition(frame)
-
-    def __call__(self, frame):
-        if self.match(frame):
-            logger.debug('This listener got the frame that matches the condition.')
-            if self.event:
-                self.event.set()
-                logger.debug('The event has been set')
-            if self.callback:
-                self.callback(frame)
+#     def __call__(self, frame):
+#         if self.condition(frame):
+#             logger.debug('This listener got the frame that matches the condition.')
+#             try:
+#                 if self.event:
+#                     self.event.set()
+#                     logger.debug('The event has been set')
+#                 if self.callback:
+#                     self.callback(frame)
+#             finally:
+#                 return True
+#         return False
 
 
 def create_ssl_context(debug=True):
@@ -76,7 +90,9 @@ class Client:
 
         self.connect_event = asyncio.Event()
         self.disconnect_event = asyncio.Event()
+        self.receiver_frame_event = asyncio.Event()
         self.connected = False
+
 
         # self._handlers = {}
 
@@ -84,6 +100,7 @@ class Client:
                        'connect': self.connect_event
                        }
 
+        self.event_emitter = EventEmitter()
 
     # def add_handler(self, key, handler):
     #     self._handlers[key] = handler
@@ -94,23 +111,27 @@ class Client:
     #         self._handlers.pop(key)
 
 
-    @log
+    @log(logger)
     def register_event(self, event_id, condition=lambda x: True):
         """
         event_id 
         """
+        logger.debug(f'An event for stream No. {event_id} is prepared')
         self.events[event_id] = [asyncio.Event(), condition]
         return self.events[event_id][0]
 
-    @log
+    @log(logger)
     def emit_event(self, frame):
-        if frame.stream_identifier not in self.events:
-            return
+        self.event_emitter.emit(self.receive_frame_event, frame)
 
-        event, condition = self.events[frame.stream_identifier]
-        if condition(frame):
-            logger.debug(f'{frame} raises an event.')
-            event.set()
+        # if frame.stream_identifier not in self.events:
+        #     return
+
+        # event, condition = self.events[frame.stream_identifier]
+        # logger.debug(f'{event}, {condition}')
+        # if condition(frame):
+        #     logger.debug(f'{frame} raises an event.')
+        #     event.set()
 
 
     def create_stream(self, identifier, parent, weight):
@@ -122,14 +143,14 @@ class Client:
         return stream
 
 
-    def find_stream(self, identifier):
-        if identifier == 0:
+    def find_stream(self, id_):
+        if id_ == 0:
             return self.root_stream
         else:
-            return self.root_stream.find_child(identifier)
+            return self.root_stream.find_child(id_)
 
 
-    async def get_stream(self):
+    def get_stream(self):
         """
         Search an available stream then lock and return it.
         TODO: if there is no available stream, then derive a stream from an existing stream.
@@ -141,12 +162,12 @@ class Client:
         for stream in children:
             if stream.identifier % 2 == 1:
                 if not stream.is_locked():
-                    return await stream.lock()
+                    return stream
                 if stream.identifier > eos:
                     eos += 2
 
         logger.debug(f'Maximum identifier of the stream is {eos - 2}')
-        return await self.create_stream(eos, 0, 1).lock()
+        return self.create_stream(eos, 0, 1)
 
 
     async def connect(self):
@@ -186,11 +207,14 @@ class Client:
     def is_connected(self):
         return self.connected
 
-    @log
+    @log(logger)
     async def receive_frame(self):
+        """ Receives data from the reader, creates a frame."""
         try:
+            # @TODO Absorbs data as many as possible. Adds an except section below.
             read_task = asyncio.create_task(self.reader.read(16384))
             disconnect_task = asyncio.create_task(self.disconnect_event.wait())
+
             done, pending = await asyncio.wait([read_task, disconnect_task],
                                                return_when=asyncio.FIRST_COMPLETED)
 
@@ -217,7 +241,7 @@ class Client:
         frame = await self.receive_frame()
 
         while frame:
-            logger.debug('handle_response() got a frame: {}'.format(frame))
+            logger.debug(f'handle_response() got a frame: {frame}')
             await RespondFactory.create(frame).respond(self)
 
             # for handler in self._handlers.values():
@@ -243,6 +267,10 @@ class Client:
 
         self.writer.write(data)
         await self.writer.drain()
+
+
+    def lock(self):
+        return self._lock.lock()
 
 
     def __del__(self):

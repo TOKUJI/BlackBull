@@ -1,4 +1,6 @@
 from functools import wraps
+from collections import defaultdict
+import asyncio
 
 def pop_safe(key, source, target, *, new_key=None):
 
@@ -98,6 +100,49 @@ class RouteRecord(UserDict):
 
             return wrapper
         return register
+
+
+class EventEmitter:
+    """ Asynchronous EventEmitter? """
+    def __init__(self):
+        self._listeners = defaultdict(list)
+        self._listeners_once = defaultdict(list)
+
+
+    def on(self, event, listener):
+        """ Register a lister to this class. This listener will be called unless removed."""
+        self._listeners[event].append(listener)
+
+
+    def once(self, event, listener):
+        """ Register a lister to this class. """
+        self._listeners_once[event].append(listener)
+
+
+    def off(self, event, listener):
+        l = self._listeners[event]
+        index = max(loc for loc, val in enumerate(l) if val == listener)
+        l.pop(index)
+
+
+    def emit(self, event, *args, **kwds):
+        for l in self._listeners[event]:
+            async def f(*args, **kwds):
+                await event.wait()
+                l(*args, **kwds)
+
+            asyncio.create_task(f(*args, **kwds))
+
+        for l in self._listeners_once[event]:
+            async def f(*args, **kwds):
+                await event.wait()
+                l(*args, **kwds)
+
+            asyncio.create_task(f(*args, **kwds))
+        self._listeners_once.pop(event)
+
+        event.set()
+
 
 # type definitions
 from enum import Enum, auto
