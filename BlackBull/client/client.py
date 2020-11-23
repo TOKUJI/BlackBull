@@ -5,7 +5,7 @@ from collections import defaultdict
 import concurrent.futures
 
 # private library
-from ..util import HTTP2
+from ..util import HTTP2, EventEmitter
 from ..rsock import create_socket
 from ..frame import FrameFactory, FrameTypes, DataFlags, HeadersFlags, SettingFlags
 from ..stream import Stream
@@ -23,14 +23,14 @@ def connect(fn):
 
         # if 'root' not in args[0].streams:
         #     args[0].streams['root'] = Stream(0, None)
-        #     # post a request, 
+        #     # post a request,
         #     header = args[0].factory.create(FrameTypes.HEADERS,
         #                                  HeadersFlags.END_HEADERS,
         #                                  args[0].streams['root'].identifier)
         #     data = args[0].factory.create(FrameTypes.DATA,
         #                                DataFlags.END_STREAM,
         #                                args[0].streams['root'].identifier,
-        #                                data=b'') # user_name, user_password, 
+        #                                data=b'') # user_name, user_password,
 
         return await fn(*args, **kwds)
     return _fn

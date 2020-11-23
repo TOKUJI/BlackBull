@@ -10,13 +10,12 @@ logger, _ = get_logger_set('test_HTTP2Handler')
 
 # Test targets
 from BlackBull.server import HTTP2Handler
-from ..util import HTTP2
+from BlackBull.util import HTTP2
 
-in_ = io.ByteIO(HTTP2)
-out_= io.ByteIO("")
+in_ = io.BytesIO(HTTP2)
+out_= io.BytesIO(b"")
+
 
 def test_():
-    
-    h = HTTP2Hander()
 
     pass

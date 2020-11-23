@@ -41,5 +41,5 @@ async def dummy_event():
 #     async def assert_here(b):
 #         logger.debug(b)
 #         return b
- 
+
 #     await app(scope)(dummy_event, assert_here)

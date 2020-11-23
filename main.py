@@ -15,7 +15,6 @@ logger = logging.getLogger()
 from data_store import User, UserEncoder, Account, init_db, SessionManager
 # from playhouse.shortcuts import model_to_dict, dict_to_model
 from render import render_login_page, render_dummy_page, render_table_page, render_403_page
-from plugin import LedgerInfo
 
 
 def logger_config(logger):

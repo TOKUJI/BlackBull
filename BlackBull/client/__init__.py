@@ -1,2 +1,2 @@
-from .client import Client, EventEmitter
+from .client import Client
 from .response import RespondFactory

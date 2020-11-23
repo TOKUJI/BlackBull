@@ -7,14 +7,13 @@ from BlackBull.logger import get_logger_set
 logger, log = get_logger_set()
 
 # Test targets
-from plugin import Plugin, LedgerInfo
-from BlackBull.client import Client, EventEmitter
-
+from BlackBull.client import Client
+from BlackBull.util import EventEmitter
 
 
 
 @pytest.fixture(scope="session", autouse=False)
-def run_server():
+def server():
     from subprocess import Popen
     # process = Popen(['daphne', 'main:app'])
     process = Popen(['python', 'main.py'])
@@ -27,7 +26,7 @@ def run_server():
 
 
 @pytest.mark.asyncio
-async def test_connect():
+async def test_connect(server):
     asyncio.get_running_loop().set_debug(True)
     c = Client(name='test', port=8000)
 
