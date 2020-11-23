@@ -44,7 +44,7 @@ async def test_EventEmitter_on():
     emitter.emit(event1)
     await asyncio.sleep(1) # Waits to run a function
     assert called == True, "The listener is not called after the emition of the event."
- 
+
 
 @pytest.mark.asyncio
 async def test_EventEmitter_twice():

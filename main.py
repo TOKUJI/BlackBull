@@ -7,7 +7,6 @@ from BlackBull import BlackBull
 from BlackBull.BlackBull import make_response_template
 from BlackBull.util import parse_post_data
 from BlackBull.logger import get_logger_set, ColoredFormatter, log
-# logger, _ = get_logger_set()
 logger = logging.getLogger()
 
 
@@ -127,6 +126,4 @@ if __name__ == "__main__":
 
         await asyncio.gather(*tasks)
 
-    # logger_config(logger)
     asyncio.run(main(app))
-    

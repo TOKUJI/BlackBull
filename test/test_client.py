@@ -1,3 +1,4 @@
+import time
 import asyncio
 import pytest
 import concurrent.futures
@@ -15,9 +16,7 @@ from BlackBull.util import EventEmitter
 @pytest.fixture(scope="session", autouse=False)
 def server():
     from subprocess import Popen
-    # process = Popen(['daphne', 'main:app'])
     process = Popen(['python', 'main.py'])
-    import time
     time.sleep(2)
 
     yield process
