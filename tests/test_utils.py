@@ -1,16 +1,12 @@
 import asyncio
 import pytest
-import json
-import logging
-import asyncio
-
-from BlackBull.logger import get_logger_set, ColoredFormatter
-logger, _ = get_logger_set('test_util')
-
+from BlackBull import EventEmitter
+from BlackBull.logger import get_logger_set  # , ColoredFormatter
 
 # Test targets
 # from plugin import Plugin, LedgerInfo
-from BlackBull import EventEmitter
+
+logger, _ = get_logger_set('test_util')
 
 
 @pytest.mark.asyncio
@@ -24,11 +20,11 @@ async def test_EventEmitter_on():
 
     is_a_function()
 
-    assert called == True, "is_a_function has not called."
+    assert called is True, "is_a_function has not called."
 
     called = False
 
-    assert called == False, "Failed to reset a variable."
+    assert called is False, "Failed to reset a variable."
 
     event1 = asyncio.Event()
     event2 = asyncio.Event()
@@ -36,14 +32,14 @@ async def test_EventEmitter_on():
     emitter = EventEmitter()
 
     emitter.on(event1, is_a_function)
-    assert called == False, "The listener is called before the emition of the event."
+    assert called is False, "The listener is called before the emition of the event."
 
     emitter.emit(event2)
-    assert called == False, "The listener is called before the emition of the event."
+    assert called is False, "The listener is called before the emition of the event."
 
     emitter.emit(event1)
-    await asyncio.sleep(1) # Waits to run a function
-    assert called == True, "The listener is not called after the emition of the event."
+    await asyncio.sleep(1)  # Waits to run a function
+    assert called is True, "The listener is not called after the emition of the event."
 
 
 @pytest.mark.asyncio
@@ -63,8 +59,9 @@ async def test_EventEmitter_twice():
     emitter.on(event, add1)
 
     emitter.emit(event)
-    await asyncio.sleep(1) # Waits to run a function
+    await asyncio.sleep(1)  # Waits to run a function
     assert count == 2, "The listener is not called after the emition of the event."
+
 
 @pytest.mark.asyncio
 async def test_EventEmitter_parameter():
@@ -82,8 +79,9 @@ async def test_EventEmitter_parameter():
     emitter.on(event, add1)
 
     emitter.emit(event, 2)
-    await asyncio.sleep(1) # Waits to run a function
+    await asyncio.sleep(1)  # Waits to run a function
     assert count == 2, "The listener is not called after the emition of the event."
+
 
 @pytest.mark.asyncio
 async def test_EventEmitter_off():
@@ -103,5 +101,5 @@ async def test_EventEmitter_off():
     emitter.off(event, add1)
 
     emitter.emit(event)
-    await asyncio.sleep(1) # Waits to run a function
+    await asyncio.sleep(1)  # Waits to run a function
     assert count == 1, "The listener is not called after the emition of the event."

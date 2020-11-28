@@ -9,8 +9,7 @@ logger, log = get_logger_set()
 
 # Test targets
 from BlackBull.client import Client
-from BlackBull.util import EventEmitter
-
+from BlackBull.utils import EventEmitter
 
 
 @pytest.fixture(scope="session", autouse=False)
@@ -30,15 +29,15 @@ async def test_connect(server):
     c = Client(name='test', port=8000)
 
     is_connected = c.is_connected()
-    assert is_connected == False
+    assert is_connected is False
 
     await c.connect()
     is_connected = c.is_connected()
-    assert is_connected == True
+    assert is_connected is True
 
     c.disconnect()
     is_connected = c.is_connected()
-    assert is_connected == False
+    assert is_connected is False
 
 
 # @pytest.mark.asyncio

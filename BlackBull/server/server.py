@@ -1,15 +1,17 @@
 import asyncio
 import ssl
 from collections import defaultdict, deque
+import traceback
 
 # private library
-from ..util import HTTP2, pop_safe, EventEmitter
+from ..utils import HTTP2, pop_safe, EventEmitter, check_port
 from ..stream import Stream
 from ..rsock import create_socket
 from ..frame import FrameFactory, FrameTypes, FrameBase, HeadersFlags, DataFlags, SettingFlags
 from ..logger import get_logger_set
 from .response import RespondFactory
 logger, log = get_logger_set('server')
+
 
 class HandlerBase:
     def __init__(self, app, reader, writer):
@@ -31,6 +33,7 @@ class HandlerBase:
     def run(self):
         raise NotImplementedError()
 
+
 class HTTP2Handler(HandlerBase):
     def __init__(self, app, reader, writer):
         super().__init__(app, reader, writer)
@@ -38,20 +41,17 @@ class HTTP2Handler(HandlerBase):
         self.root_stream = Stream(0, None, 1)
         self.factory = FrameFactory()
 
-
     def find_stream(self, id_):
         if id_ == 0:
             return self.root_stream
         else:
             return self.root_stream.find_child(id_)
 
-
     async def send_frame(self, frame: FrameBase):
         """Send a frame to the recipient."""
         logger.debug('sending {}'.format(frame))
         self.writer.write(frame.save())
         await self.writer.drain()
-
 
     async def parse_stream(self):
         """Read the stream, get some data of the incoming frame, and parse it"""
@@ -65,16 +65,14 @@ class HTTP2Handler(HandlerBase):
         logger.debug('parse_stream(): {}'.format(data))
 
         size = int.from_bytes(data[:3], 'big', signed=False)
-        data += await self.reader.read(size) # Add error handling for the case of insufficient data
+        data += await self.reader.read(size)  # Add error handling for the case of insufficient data
 
         frame = self.factory.load(data)
         return frame
 
-
     def make_header(self):
         """ Make or update the header by the scope. """
         pass
-
 
     def make_sender(self, stream_identifier):
         async def send(data: dict):
@@ -101,7 +99,6 @@ class HTTP2Handler(HandlerBase):
 
         return send
 
-
     async def handle_frame(self, frame):
         if frame.FrameType() in (FrameTypes.HEADERS, FrameTypes.DATA):
             await RespondFactory.create(frame).respond(self)
@@ -112,12 +109,10 @@ class HTTP2Handler(HandlerBase):
         else:
             logger.warn('something wrong happend while handling this frame: {}'.format(frame))
 
-
     def is_connect(self, frame):
         if not frame or frame.FrameType() == FrameTypes.GOAWAY:
             return False
         return True
-
 
     async def run(self):
         # Send the settings at first.
@@ -137,7 +132,7 @@ class ASGIServer:
     """
 
     def __init__(self, app, *,
-                 ssl_context =None, certfile=None, keyfile=None, password=None, **kwds):
+                 ssl_context=None, certfile=None, keyfile=None, password=None, **kwds):
         self.app = app
 
         # Create TLS context
@@ -145,21 +140,21 @@ class ASGIServer:
             raise TypeError('SSLContext and certfile must not be set at the same time')
 
         if ssl_context:
-            self.ssl = ssl_context
+            self.ssl_context = ssl_context
         elif certfile:
             context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
-            context.set_alpn_protocols(['HTTP/1.1', 'h2']) # to enable HTTP/2, add 'h2'
-            context.load_cert_chain('server.crt', keyfile='server.key')
+            context.set_alpn_protocols(['HTTP/1.1', 'h2'])  # to enable HTTP/2, add 'h2'
+            context.load_cert_chain(certfile=certfile, keyfile=keyfile)
             context.options |= ssl.OP_NO_TLSv1 | ssl.OP_NO_TLSv1_1
             context.options |= ssl.OP_NO_COMPRESSION
-            self.ssl = context
+            self.ssl_context = context
 
     async def client_connected_cb(self, reader, writer):
         """
         This function is called when the server receives an access request from a client.
         Handler must handles every exception in it and not raise any exception.
         """
-        request_data = await reader.read(24)
+        request_data = await reader.read(len(HTTP2))
 
         if request_data == HTTP2:
             logger.info('HTTP/2 connection is requested.')
@@ -174,13 +169,52 @@ class ASGIServer:
         await handler.run()
         writer.close()
 
-    async def run(self, port=80):
-        """Run an asyncio server with the setting in this object."""
-        rsock_ = create_socket((None, port))
-        if self.ssl:
-            self.socket = self.ssl.wrap_socket(rsock_, server_side=True)
-        await asyncio.start_server(self.client_connected_cb, sock=self.socket)
-
     def route(self, method='GET', path='/'):
         return self._route.route(method=method, path=path)
 
+    def open_socket(self, port=0):
+        if not check_port(port=port):
+            logger.error(f'Port ({port}) is not available. Try another port.')
+            return
+
+        rsock_ = create_socket(('::1', port))
+
+        if rsock_ is None:
+            logger.error(f'Faield to open port ({port}.) Try another port.')
+            return
+
+        self.port = rsock_.getsockname()[1]
+
+        if self.ssl_context:
+            self.socket = self.ssl_context.wrap_socket(rsock_, server_side=True)
+
+    def close_socket(self):
+        self.socket.close()
+
+    async def run(self, port=80):
+        if self.socket is None:
+            self.open_socket(port)
+        """Run an asyncio server with the setting in this object."""
+        self.server = await asyncio.start_server(self.client_connected_cb, sock=self.socket)
+        logger.info(f'Server ({self.server}) has been created.')
+
+        try:
+            await self.server.serve_forever()
+
+        except KeyboardInterrupt:
+            logger.info('KeyboardInterrupt is caught.')
+
+        except asyncio.exceptions.CancelledError as e:
+            logger.info(type(e))
+
+        except BaseException as e:
+            logger.error(type(e))
+            logger.error(traceback.format_exc())
+
+        finally:
+            logger.info('Server has been stopped.')
+
+    def close(self):
+        logger.info('ASGIServer.close() is called.')
+        logger.info(self.__dict__)
+        self.close_socket()

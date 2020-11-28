@@ -81,8 +81,8 @@ async def login(scope, ctx):
     try:
         d = parse_post_data(ctx['body'].decode())
         logger.debug(d)
-    except:
-        logger.error(f'Failed to get information of input')
+    except BaseException:
+        logger.error('Failed to get information of input')
 
     res = make_response_template(scope)
 

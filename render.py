@@ -19,5 +19,3 @@ def render_403_page():
     except Exception as e:
         logger.error(e)
         return 'Failed to render_403_page'
-
-

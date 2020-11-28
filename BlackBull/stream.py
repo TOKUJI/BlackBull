@@ -1,7 +1,7 @@
 import asyncio
 from urllib.parse import urlparse
 
-from .util import pop_safe
+from .utils import pop_safe
 
 
 class Stream(object):
@@ -44,7 +44,7 @@ class Stream(object):
 
         if identifier in self.children:
             return self.children[identifier]
-        
+
         for k, v in self.children.items():
             r = v.find_child(identifier)
             if r:
@@ -62,7 +62,7 @@ class Stream(object):
             return self.event
         self.event['body'] = data.payload
 
-        return self.event            
+        return self.event
 
 
     def update_scope(self, headers=None,):

@@ -7,7 +7,7 @@ from hpack import Encoder, Decoder
 # private programs
 # from . import message
 from .logger import get_logger_set
-from .util import pop_safe
+from .utils import pop_safe
 logger, log = get_logger_set('frame')
 
 
@@ -123,6 +123,7 @@ class SettingFrame(FrameBase):
                        b'\x00\x03': self.set_max_concurrent_streams,
                        b'\x00\x04': self.set_initial_window_size,
                        b'\x00\x05': self.set_max_frame_size,
+                       b'\x00\x06': self.set_max_header_list_size,
                        }
 
         payload = BytesIO(data)
@@ -137,8 +138,8 @@ class SettingFrame(FrameBase):
             try:
                 self.params[identifier](value)
             except KeyError:
-                logger.error('unknown identifier: {}, {}'.format(identifier,
-                    int.from_bytes(value, 'big', signed=False)))
+                logger.error(f'unknown identifier: {identifier}, '
+                             f'{int.from_bytes(value, "big", signed=False)}')
 
     def set_header_table_size(self, value):
         self.header_table_size = int.from_bytes(value, 'big', signed=False)
@@ -158,6 +159,10 @@ class SettingFrame(FrameBase):
 
     def set_max_frame_size(self, value):
         self.max_frame_size = int.from_bytes(value, 'big', signed=False)
+        logger.debug('max_frame_size: {}'.format(self.max_frame_size))
+
+    def set_max_header_list_size(self, value):
+        self.max_header_list_size = int.from_bytes(value, 'big', signed=False)
         logger.debug('max_frame_size: {}'.format(self.max_frame_size))
 
     def save(self):

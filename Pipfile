@@ -12,6 +12,8 @@ mako = "*"
 pytest = "*"
 pytest-asyncio = "*"
 daphne = "*"
+httpx = {extras = ["http2"], version = "*"}
+flake8 = "*"
 
 [requires]
 python_version = "3.8"

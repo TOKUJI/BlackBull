@@ -1,6 +1,27 @@
+from logging import getLogger
 from functools import wraps
 from collections import defaultdict
 import asyncio
+import re
+from collections import UserDict
+from enum import Enum, auto
+import socket
+from contextlib import closing
+
+logger = getLogger(__name__)
+
+
+def check_port(host='localhost', port=None):
+    """
+    Returns True: Port is not used.
+    Returns False: Port is used.
+    """
+    with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as sock:
+        if sock.connect_ex((host, port)) == 0:
+            return False
+        else:
+            return True
+
 
 def pop_safe(key, source, target, *, new_key=None):
 
@@ -26,26 +47,26 @@ class serializable(object):
         return NotImplementedError('serializable.save()')
 
     @classmethod
-    def load(cls, str_): # must return a pair (serializable, remaining_text)
+    def load(cls, str_):  # must return a pair (serializable, remaining_text)
         return NotImplementedError('serializable.load()')
 
-import datetime
+
 # RFC 5322 Date and Time specification
 IMFFixdate = '%a, %d %b %Y %H:%M:%S %Z'
 
 
-import re
-
 URI = r'/?[0-9a-zA-Z]*?/?'
 HTTP2 = b'PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n'
 # 0x505249202a20485454502f322e300d0a0d0a534d0d0a0d0a
+
+
 def parse_post_data(string):
     matches = re.findall(r'(\w+)=(\w+)&?', string)
-    d = {k:v for k, v in matches}
+    d = {k: v for k, v in matches}
     return d
 
+
 # http://taichino.com/programming/1538
-from collections import UserDict
 class RouteRecord(UserDict):
     """docstring for RouteRecord"""
     def __init__(self, *args, **kwds):
@@ -75,9 +96,8 @@ class RouteRecord(UserDict):
             return True
         else:
             for k in self.regex_.keys():
-                m = k.match(item)
-                _logger.debug('{} matches {}? {}'.format(k, item, m))
-                if m:
+                if m := k.match(item):
+                    logger.debug('{} matches {}? {}'.format(k, item, m))
                     return True
 
         return False
@@ -95,7 +115,7 @@ class RouteRecord(UserDict):
 
             if isinstance(method, str):
                 self.__setitem__(path, (wrapper, [method]))
-            else: # TODO: should check whether method is iterable or not
+            else:  # TODO: should check whether method is iterable or not
                 self.__setitem__(path, (wrapper, method))
 
             return wrapper
@@ -108,22 +128,18 @@ class EventEmitter:
         self._listeners = defaultdict(list)
         self._listeners_once = defaultdict(list)
 
-
     def on(self, event, listener):
         """ Register a lister to this class. This listener will be called unless removed."""
         self._listeners[event].append(listener)
-
 
     def once(self, event, listener):
         """ Register a lister to this class. """
         self._listeners_once[event].append(listener)
 
-
     def off(self, event, listener):
         l = self._listeners[event]
         index = max(loc for loc, val in enumerate(l) if val == listener)
         l.pop(index)
-
 
     def emit(self, event, *args, **kwds):
         for l in self._listeners[event]:
@@ -145,19 +161,18 @@ class EventEmitter:
 
 
 # type definitions
-from enum import Enum, auto
-
 class MessageType(Enum):
     REQUEST = auto()
     RESPONSE = auto()
 
+
 class HeaderFields(Enum):
     CONTENT_TYPE = 'Content-Type'
     TRANSFER_ENCODING = 'Transfer-Encoding'
+
 
 class TransferCodings(Enum):
     CHUNKED = 'chunked'
     COMPRESS = 'compress'
     DEFLATE = 'deflate'
     GZIP = 'gzip'
-

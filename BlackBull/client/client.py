@@ -5,7 +5,7 @@ from collections import defaultdict
 import concurrent.futures
 
 # private library
-from ..util import HTTP2, EventEmitter
+from ..utils import HTTP2, EventEmitter
 from ..rsock import create_socket
 from ..frame import FrameFactory, FrameTypes, DataFlags, HeadersFlags, SettingFlags
 from ..stream import Stream
