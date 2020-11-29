@@ -39,7 +39,7 @@ async def favicon(scope, ctx):
     return ctx
 
 
-@app.route(method='POST', path='/login')
+@app.route(methods='POST', path='/login')
 async def login(scope, ctx):
     return str(scope) + str(ctx)
 

@@ -1,10 +1,10 @@
 import asyncio
 import pytest
-from BlackBull import EventEmitter
 from BlackBull.logger import get_logger_set  # , ColoredFormatter
 
 # Test targets
-# from plugin import Plugin, LedgerInfo
+from BlackBull import EventEmitter
+from BlackBull.utils import Router
 
 logger, _ = get_logger_set('test_util')
 
@@ -103,3 +103,88 @@ async def test_EventEmitter_off():
     emitter.emit(event)
     await asyncio.sleep(1)  # Waits to run a function
     assert count == 1, "The listener is not called after the emition of the event."
+
+
+@pytest.fixture
+def router():
+    router = Router()
+    yield router
+
+
+def test_router_add(router):
+    key = 'test'
+
+    @router.route(path=key)
+    def fn(*args, **kwargs):
+        pass
+
+    f, m = router[key]
+
+    assert f == fn
+    assert m == ['GET']
+
+
+def test_router_add_post(router):
+    key = 'test'
+
+    @router.route(path=key, methods='post')
+    def fn(*args, **kwargs):
+        pass
+
+    f, m = router[key]
+
+    assert f == fn
+    assert m == ['POST']
+
+
+def test_router_regex(router):
+    key = r'^test/\d+$'
+
+    @router.route(path=key, methods='get')
+    def fn(*args, **kwargs):
+        pass
+
+    f, m = router['test/1234']
+
+    assert f == fn
+    assert m == ['GET']
+
+
+def test_router_regex_with_group_name1(router):
+    key = r'^test/(?P<id_>\d+)$'
+
+    @router.route(path=key, methods='get')
+    def fn(*args, **kwargs):
+        return kwargs.pop('id_', None)
+
+    f, m = router['test/1234']
+
+    assert m == ['GET']
+    assert f() == '1234'
+
+
+def test_router_regex_with_group_name2(router):
+    key = r'^test/(?P<id_>\d+)$'
+
+    @router.route(path=key, methods='get')
+    def fn(id_, *args, **kwargs):
+        return id_
+
+    f, m = router['test/1234']
+
+    assert m == ['GET']
+    assert f() == '1234'
+
+
+# def test_router_F_string(router):
+#     key = 'test/{id_}'
+
+#     @router.route(path=key, methods='get')
+#     def fn(*args, **kwargs):
+#         return kwargs.pop('id_', None)
+
+#     f, m = router['test/1234']
+
+#     assert f == fn
+#     assert m == ['GET']
+#     assert f() == '1234'

@@ -1,5 +1,5 @@
 from logging import getLogger
-from functools import wraps
+from functools import wraps, partial
 from collections import defaultdict
 import asyncio
 import re
@@ -67,29 +67,43 @@ def parse_post_data(string):
 
 
 # http://taichino.com/programming/1538
-class RouteRecord(UserDict):
-    """docstring for RouteRecord"""
+class Router(UserDict):
+    """docstring for RouteRecord
+    This class has 2 dictionaries: self.data and self.regex_.
+    key: str or re.Pattern
+    value: (function, methods)
+    """
+    f_string = re.compile(r'{[a-zA-Z_]\w*?}', flags=re.ASCII)
     def __init__(self, *args, **kwds):
-        super(RouteRecord, self).__init__(*args, **kwds)
+        super(Router, self).__init__(*args, **kwds)
         self.regex_ = {}
 
     def __setitem__(self, key, value):
-        if isinstance(key, re.Pattern):
-            self.regex_[key] = value
-        else:
+        """
+        If key is a regular expression, this class holds it for the key and
+        its compiled regular expression objects.
+        If key is a regular expression objects, this class keeps it in self.regex_
+        """
+        if isinstance(key, str):
             self.data[key] = value
-            if key[-1] != '$':
-                key = key + '$'
             self.regex_[re.compile(key)] = value
 
+        elif isinstance(key, re.Pattern):
+            self.regex_[key] = value
+
     def __getitem__(self, key):
-        try:
+        if key in self.data:
             return self.data[key]
-        except:
-            for k, v in self.regex_.items():
-                if k.match(key):
-                    return v
-            raise KeyError('{} is not found'.format(key))
+
+        # @todo Consider to use List class for self.regex_ to improve performance.
+        # Because self.regex_ is merely used as an array like container in this class.
+        for k, (fn, methods) in self.regex_.items():
+            if m := k.match(key):
+                if gdict := m.groupdict():
+                    fn = partial(fn, **gdict)
+                return (fn, methods)
+
+        raise KeyError(f'{key} is not found')
 
     def __contains__(self, item):
         if item in self.data:
@@ -97,26 +111,28 @@ class RouteRecord(UserDict):
         else:
             for k in self.regex_.keys():
                 if m := k.match(item):
-                    logger.debug('{} matches {}? {}'.format(k, item, m))
+                    logger.debug(f'{k} matches {item}? {m}')
                     return True
 
         return False
 
     def find(self, path):
-        m = self.__getitem__(path)
-        return m[0], m[1]
+        function, methods = self.__getitem__(path)
+        return function, methods
 
-    def route(self, method='GET', path='/'):
+    def route(self, methods=['GET'], path='/'):
         """ Register a function in the routing table of this server. """
         def register(fn):
             @wraps(fn)
             def wrapper(*args, **kwds):
                 return fn(*args, **kwds)
 
-            if isinstance(method, str):
-                self.__setitem__(path, (wrapper, [method]))
+            # Convert method names to uppercase characters.
+            if isinstance(methods, str):
+                self.__setitem__(path, (wrapper, [methods.upper()]))
+
             else:  # TODO: should check whether method is iterable or not
-                self.__setitem__(path, (wrapper, method))
+                self.__setitem__(path, (wrapper, [method.upper() for method in methods]))
 
             return wrapper
         return register

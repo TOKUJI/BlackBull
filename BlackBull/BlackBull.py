@@ -6,7 +6,7 @@ import sys
 import traceback
 
 # import from this package
-from .utils import RouteRecord
+from .utils import Router
 from .logger import get_logger_set
 logger, log = get_logger_set('BlackBull')
 
@@ -53,7 +53,7 @@ async def scheme(scope, ctx, next_):
 
 class BlackBull:
     def __init__(self,
-                 router=RouteRecord(),
+                 router=Router(),
                  loop=None
                  ):
         self._router = router
@@ -75,7 +75,7 @@ class BlackBull:
 
     def __call__(self, scope):
         logger.info(scope)
-        endpoint, methods = self._router.find(scope['path'])
+        endpoint, methods = self._router[scope['path']]
         logger.debug(endpoint)
 
         @log
@@ -104,12 +104,12 @@ class BlackBull:
 
         return __fn
 
-    def route(self, method='GET', path='/'):
+    def route(self, methods=['GET'], path='/'):
         """
         Set endpoint function here.
         The endpoint function should have 2 input variable
         """
-        return self._router.route(method=method, path=path)
+        return self._router.route(methods=methods, path=path)
 
     def create_server(self, port=0):
         from .server import ASGIServer
