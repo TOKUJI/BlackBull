@@ -68,7 +68,7 @@ def parse_post_data(string):
 
 # http://taichino.com/programming/1538
 class Router(UserDict):
-    """docstring for RouteRecord
+    """
     This class has 2 dictionaries: self.data and self.regex_.
     key: str or re.Pattern
     value: (function, methods)
@@ -81,7 +81,7 @@ class Router(UserDict):
 
     def __setitem__(self, key, value):
         """
-        If key is a regular expression, this class holds it for the key and
+        If 'key' is a str, this class holds it for the key and
         its compiled regular expression objects.
         If key is a regular expression objects, this class keeps it in self.regex_
         """
@@ -101,11 +101,8 @@ class Router(UserDict):
         # @todo Consider to use List class for self.regex_ to improve performance.
         # Because self.regex_ is merely used as an array like container in this class.
         for p, (fn, methods) in self.regex_.items():
-            logger.info((p, key))
             if m := p.match(key):
-                logger.info(m)
                 if gdict := m.groupdict():
-                    logger.info(gdict)
                     fn = partial(fn, **gdict)
                 return (fn, methods)
 
@@ -114,11 +111,11 @@ class Router(UserDict):
     def __contains__(self, item):
         if item in self.data:
             return True
-        else:
-            for k in self.regex_.keys():
-                if m := k.match(item):
-                    logger.debug(f'{k} matches {item}? {m}')
-                    return True
+
+        for k in self.regex_.keys():
+            if m := k.match(item):
+                logger.debug(f'{k} matches {item}? {m}')
+                return True
 
         return False
 
