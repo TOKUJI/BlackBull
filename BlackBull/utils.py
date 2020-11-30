@@ -73,7 +73,8 @@ class Router(UserDict):
     key: str or re.Pattern
     value: (function, methods)
     """
-    f_string = re.compile(r'{[a-zA-Z_]\w*?}', flags=re.ASCII)
+    f_string = re.compile(r'\{([a-zA-Z_]\w*?)\}', flags=re.ASCII)
+
     def __init__(self, *args, **kwds):
         super(Router, self).__init__(*args, **kwds)
         self.regex_ = {}
@@ -86,7 +87,9 @@ class Router(UserDict):
         """
         if isinstance(key, str):
             self.data[key] = value
-            self.regex_[re.compile(key)] = value
+
+            s = self.f_string.sub(r'(?P<\1>[a-zA-Z0-9_\-\.\~]+)', key)
+            self.regex_[re.compile(s)] = value
 
         elif isinstance(key, re.Pattern):
             self.regex_[key] = value
@@ -97,9 +100,12 @@ class Router(UserDict):
 
         # @todo Consider to use List class for self.regex_ to improve performance.
         # Because self.regex_ is merely used as an array like container in this class.
-        for k, (fn, methods) in self.regex_.items():
-            if m := k.match(key):
+        for p, (fn, methods) in self.regex_.items():
+            logger.info((p, key))
+            if m := p.match(key):
+                logger.info(m)
                 if gdict := m.groupdict():
+                    logger.info(gdict)
                     fn = partial(fn, **gdict)
                 return (fn, methods)
 
@@ -115,10 +121,6 @@ class Router(UserDict):
                     return True
 
         return False
-
-    def find(self, path):
-        function, methods = self.__getitem__(path)
-        return function, methods
 
     def route(self, methods=['GET'], path='/'):
         """ Register a function in the routing table of this server. """

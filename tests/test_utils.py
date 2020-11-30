@@ -38,7 +38,7 @@ async def test_EventEmitter_on():
     assert called is False, "The listener is called before the emition of the event."
 
     emitter.emit(event1)
-    await asyncio.sleep(1)  # Waits to run a function
+    await asyncio.sleep(0)  # Waits to run a function
     assert called is True, "The listener is not called after the emition of the event."
 
 
@@ -59,7 +59,7 @@ async def test_EventEmitter_twice():
     emitter.on(event, add1)
 
     emitter.emit(event)
-    await asyncio.sleep(1)  # Waits to run a function
+    await asyncio.sleep(0)  # Waits to run a function
     assert count == 2, "The listener is not called after the emition of the event."
 
 
@@ -79,7 +79,7 @@ async def test_EventEmitter_parameter():
     emitter.on(event, add1)
 
     emitter.emit(event, 2)
-    await asyncio.sleep(1)  # Waits to run a function
+    await asyncio.sleep(0)  # Waits to run a function
     assert count == 2, "The listener is not called after the emition of the event."
 
 
@@ -101,7 +101,7 @@ async def test_EventEmitter_off():
     emitter.off(event, add1)
 
     emitter.emit(event)
-    await asyncio.sleep(1)  # Waits to run a function
+    await asyncio.sleep(0)  # Waits to run a function
     assert count == 1, "The listener is not called after the emition of the event."
 
 
@@ -176,15 +176,15 @@ def test_router_regex_with_group_name2(router):
     assert f() == '1234'
 
 
-# def test_router_F_string(router):
-#     key = 'test/{id_}'
+def test_router_F_string(router):
+    key = 'test/{id_}'
 
-#     @router.route(path=key, methods='get')
-#     def fn(*args, **kwargs):
-#         return kwargs.pop('id_', None)
+    @router.route(path=key, methods='get')
+    def fn(*args, **kwargs):
+        return kwargs.pop('id_', None)
 
-#     f, m = router['test/1234']
+    id_ = 'a24_12-3.4~'
+    f, m = router[f'test/{id_}']
 
-#     assert f == fn
-#     assert m == ['GET']
-#     assert f() == '1234'
+    assert m == ['GET']
+    assert f() == id_
