@@ -62,7 +62,7 @@ class HTTP2Handler(HandlerBase):
             logger.info('StreamReader got EOF')
             return
 
-        logger.debug('parse_stream(): {}'.format(data))
+        logger.debug(f'parse_stream(): {data}')
 
         size = int.from_bytes(data[:3], 'big', signed=False)
         data += await self.reader.read(size)  # Add error handling for the case of insufficient data
@@ -75,7 +75,7 @@ class HTTP2Handler(HandlerBase):
         pass
 
     def make_sender(self, stream_identifier):
-        async def send(data: dict):
+        async def send(data):
             nonlocal stream_identifier
             logger.debug(data)
             if data['type'] == 'http.response.start':
@@ -106,8 +106,11 @@ class HTTP2Handler(HandlerBase):
         elif frame.FrameType() in (FrameTypes.PING, FrameTypes.WINDOW_UPDATE, FrameTypes.SETTINGS, FrameTypes.PRIORITY):
             await RespondFactory.create(frame).respond(self)
 
+        elif frame.FrameType() in (FrameTypes.RST_STREAM,):
+            await RespondFactory.create(frame).respond(self)
+
         else:
-            logger.warn('something wrong happend while handling this frame: {}'.format(frame))
+            logger.warn(f'something wrong happend while handling this frame: {frame}')
 
     def is_connect(self, frame):
         if not frame or frame.FrameType() == FrameTypes.GOAWAY:
@@ -169,8 +172,8 @@ class ASGIServer:
         await handler.run()
         writer.close()
 
-    def route(self, method='GET', path='/'):
-        return self._route.route(method=method, path=path)
+    # def route(self, method='GET', path='/'):
+    #     return self._route.route(method=method, path=path)
 
     def open_socket(self, port=0):
         if not check_port(port=port):

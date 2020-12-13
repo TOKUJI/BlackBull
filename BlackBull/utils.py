@@ -11,6 +11,14 @@ from contextlib import closing
 logger = getLogger(__name__)
 
 
+async def do_nothing(*args, **kwargs):
+    pass
+
+
+class HTTPMethods(Enum):
+    pass
+
+
 def check_port(host='localhost', port=None):
     """
     Returns True: Port is not used.
@@ -74,6 +82,7 @@ class Router(UserDict):
     value: (function, methods)
     """
     f_string = re.compile(r'\{([a-zA-Z_]\w*?)\}', flags=re.ASCII)
+    NOT_FOUND_KEY = 'NOT_FOUND'
 
     def __init__(self, *args, **kwds):
         super(Router, self).__init__(*args, **kwds)
@@ -95,6 +104,7 @@ class Router(UserDict):
             self.regex_[key] = value
 
     def __getitem__(self, key):
+        logger.debug(key)
         if key in self.data:
             return self.data[key]
 
@@ -106,7 +116,12 @@ class Router(UserDict):
                     fn = partial(fn, **gdict)
                 return (fn, methods)
 
-        raise KeyError(f'{key} is not found')
+        logger.debug(f'No Entry: {key}, {self}')
+        logger.debug(self.data)
+        logger.debug(self.regex_)
+        return self[self.NOT_FOUND_KEY]
+        # return self.not_found_fn, ['get']
+        # raise KeyError(f'{key} is not found')
 
     def __contains__(self, item):
         if item in self.data:
@@ -119,22 +134,57 @@ class Router(UserDict):
 
         return False
 
-    def route(self, methods=['GET'], path='/'):
+    def route(self, methods=['get'], path='/', functions=[]):
         """ Register a function in the routing table of this server. """
-        def register(fn):
-            @wraps(fn)
+        logger.debug(f'Router.route() is called. {functions}')
+        if isinstance(methods, str):
+            methods = [methods.lower()]
+        else:  # TODO: should check whether method is iterable or not
+            methods = [method.lower() for method in methods]
+
+        def register(functions):
+            logger.debug(f'Router.route.register() is called. {functions}')
+
+            @wraps(functions)
             def wrapper(*args, **kwds):
-                return fn(*args, **kwds)
+                logger.debug('Router.route.register.wrapper() is called.')
+                return functions(*args, **kwds, next_=do_nothing)
 
             # Convert method names to uppercase characters.
-            if isinstance(methods, str):
-                self.__setitem__(path, (wrapper, [methods.upper()]))
-
-            else:  # TODO: should check whether method is iterable or not
-                self.__setitem__(path, (wrapper, [method.upper() for method in methods]))
+            self[path] = (wrapper, methods)
 
             return wrapper
-        return register
+
+        if functions:
+            logger.debug(f'{functions}')
+            if len(functions) == 0:
+                logger.warning('There is no function in this routing request.')
+
+            elif len(functions) == 1:
+                fns = [partial(functions[0], next_=do_nothing)]
+
+            else:
+                fns = []
+                next_ = partial(functions[-1], next_=do_nothing)
+
+                for fn in functions[-2::-1]:
+                    temp = partial(fn, **{'next_': next_})
+                    fns.append(temp)
+                    next_ = temp
+
+            self[path] = (fns[-1], methods)
+
+        else:
+            return register
+
+    def route_404(self):
+        """ Register a function for 404. """
+        logger.debug('Router.route_404() is called.')
+        fn = self.route(methods=['get'], path=self.NOT_FOUND_KEY)
+
+        logger.debug(self.data)
+        logger.debug(self.regex_)
+        return fn
 
 
 class EventEmitter:

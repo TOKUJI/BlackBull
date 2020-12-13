@@ -15,7 +15,7 @@ _logger = getLogger('watch')
 def _log(fn):
     @wraps(fn)
     def wrapper(*args, **kwds):
-        _logger.debug('{}({}, {})'.format(fn.__name__, args, kwds))
+        _logger.debug(f'{fn.__name__}({args}, {kwds})')
         res = fn(*args, **kwds)
         return res
     return wrapper
@@ -95,7 +95,7 @@ class _InotifyEvent(Structure):
             ]
 
     def __repr__(self):
-        return 'wd:{}, mask:{}, cookie:{}, len:{}'.format(self.wd, self.get_event_names(self.mask), self.cookie, self.len)
+        return f'wd:{self.wd}, mask:{self.get_event_names(self.mask)}, cookie:{self.cookie}, len:{self.len}'
 
     def get_event_names(self, event_type):
         names = []

@@ -1,20 +1,24 @@
-from multiprocessing import Process
-import asyncio
-import pytest
-# from unittest.mock import MagicMock
+from http import HTTPStatus
 
 from BlackBull.logger import get_logger_set
 
-import httpx
+# Library for test-fixture
+from multiprocessing import Process
+import asyncio
+import pytest
+
 # Test targets
 from BlackBull import BlackBull
+from BlackBull.response import respond
 # from BlackBull.stream import Stream
 
-# socket.bind(('', 0)) will be assigned an available port.
+# Library for tests
+import httpx
+
 logger, log = get_logger_set()
 
 
-def dummy(app):
+def run_application(app):
     logger.info('dummy is called.')
     loop = asyncio.new_event_loop()
     task = loop.create_task(app.run())
@@ -24,15 +28,21 @@ def dummy(app):
 @pytest.fixture  # (scope="session", autouse=True)
 async def app():
     # run before the test
+    logger.info('At set-up.')
     app = BlackBull()
     app.create_server()
 
     @app.route(path='/test')
-    async def test_(scope, ctx):
-        logger.debug('test_({}, {})'.format(scope, ctx))
-        return str(scope) + str(ctx)
+    async def test_(scope, receive, send, **kwargs):
+        logger.debug(f'test_({scope}, {receive}, {send}, {kwargs})')
+        await respond(send, 'sample')
 
-    p = Process(target=dummy, args=(app,))
+    @app.route_404
+    async def test_404(scope, receive, send, **kwargs):
+        logger.debug(f'test_404({scope}, {receive}, {send}, {kwargs})')
+        await respond(send, b'not found test.', status=HTTPStatus.NOT_FOUND)
+
+    p = Process(target=run_application, args=(app,))
     p.start()
 
     yield app
@@ -49,46 +59,32 @@ async def app():
 
 
 @pytest.mark.asyncio
-async def test_connect(app):
-    logger.info(app)
+async def test_response_200(app):
     async with httpx.AsyncClient(http2=True, verify=False) as c:
+        res = await c.get(f'https://localhost:{app.port}/test', headers={'key': 'value'})
+        assert res.status_code == 200
 
-        logger.info('Start sending requests.')
 
-        logger.info(f'https://localhost:{app.port}/test')
-        first = c.get(f'https://localhost:{app.port}/test', headers={'key': 'value'})
+@pytest.mark.asyncio
+async def test_response_404_fn(app):
 
-        logger.info(f'https://localhost:{app.port}/test')
-        second = c.post(f'https://localhost:{app.port}/test', data=b'hello')
+    async with httpx.AsyncClient(http2=True, verify=False) as c:
+        res = await c.get(f'https://localhost:{app.port}/badpath', headers={'key': 'value'})
 
-        logger.info(f'https://localhost:{app.port}/test')
-        third = c.get(f'https://localhost:{app.port}/test')
+        assert res.status_code == 404
+        assert res.content == b'not found test.'
 
-        logger.info('All requests have been sent.')
 
-        first_response = await first
-        logger.info('Got response for the first request.')
-        logger.info(first_response)
+@pytest.mark.asyncio
+async def test_add_route_during_running(app):
+    # Check the result here because app does not return any value
+    path = 'test2'
 
-        second_response = await second
-        logger.info('Got response for the second request.')
-        logger.info(second_response)
+    @app.route(path='/test2')
+    async def test2(scope, ctx):
+        logger.debug('test_({}, {})'.format(scope, ctx))
+        return str(scope) + str(ctx)
 
-        third_response = await third
-        logger.info('Got response for the third request.')
-        logger.info(third_response)
-
-    # Create an client, then open connection().
-
-# @pytest.mark.asyncio
-# async def test_route(app):
-#     # scope = MagicMock(update_scope())
-#     scope = update_scope()
-#     scope['path'] = '/test'
-
-#     # Check the result here because app does not return any value
-#     async def assert_here(b):
-#         logger.debug(b)
-#         return b
-
-#     await app(scope)(dummy_event, assert_here)
+    async with httpx.AsyncClient(http2=True, verify=False) as c:
+        res = await c.get(f'https://localhost:{app.port}/{path}', headers={'key': 'value'})
+        assert res.status_code == 200

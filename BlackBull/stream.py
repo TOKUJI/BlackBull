@@ -5,7 +5,7 @@ from .utils import pop_safe
 
 
 class Stream(object):
-    def __init__(self, identifier, parent=0, weight=1, window_size=None):
+    def __init__(self, identifier, parent=None, weight=1, window_size=None):
         from collections import deque
         self.parent = parent
         self.weight = weight
@@ -20,16 +20,17 @@ class Stream(object):
 
         self.end_stream = False
 
-
     def add_child(self, id_):
         if id_ in self.get_children():
             return
 
-        child = Stream(id_, self.identifier, )
+        child = Stream(id_, self, )
         self.children[child.identifier] = child
 
         return child
 
+    def drop_child(self, id_):
+        del self.children[id_]
 
     def get_children(self):
         r = []
@@ -52,7 +53,6 @@ class Stream(object):
 
         return None
 
-
     def update_event(self, data=None):
         """ Make or update the event by the data frame. """
         if not self.event:
@@ -63,7 +63,6 @@ class Stream(object):
         self.event['body'] = data.payload
 
         return self.event
-
 
     def update_scope(self, headers=None,):
         """ Make or update the scope by the headers. """
@@ -90,39 +89,38 @@ class Stream(object):
 
         return self.scope
 
-
     def get_lock(self):
         if not self.is_locked():
             self._lock = asyncio.Condition()
         return self._lock
 
-
     def release(self):
         self._lock.release()
-
 
     def is_locked(self):
         if not self._lock:
             return False
         return self._lock.locked()
 
-
     def is_eos(self):
         return self.end_stream
-
 
     def flip_eos(self):
         self.end_stream = True
         # self.end_stream = False
 
+    def close(self):
+        [child.close() for child in self.children.values()]
+        self.parent.drop_child(self.identifier)
+        del self
+
     def __repr__(self):
         return f'Stream(ID: {self.identifier}, scope={self.scope}, end_stream={self.end_stream})'
 
 
-def eos(frame): # eos: end of stream
+def eos(frame):  # eos: end of stream
     logger.debug(f'{frame}, {frame.FrameType()}, {frame.flags}')
     if frame.FrameType() == FrameTypes.DATA and frame.flags & DataFlags.END_STREAM.value > 0 or\
-        frame.FrameType() == FrameTypes.HEADERS and frame.flags & HeadersFlags.END_STREAM.value > 0:
+       frame.FrameType() == FrameTypes.HEADERS and frame.flags & HeadersFlags.END_STREAM.value > 0:
         return True
     return False
-

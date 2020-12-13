@@ -1,12 +1,13 @@
 import logging
 import asyncio
 # import json
-# from functools import partial
 from BlackBull import BlackBull
+from BlackBull.utils import do_nothing
+from BlackBull.response import respond
 from BlackBull.logger import get_logger_set, ColoredFormatter
-# from playhouse.shortcuts import model_to_dict, dict_to_model
 from render import render_login_page, render_dummy_page, render_table_page
 
+# fileConfig('logging.conf')
 logger, log = get_logger_set()
 
 print('========================================================')
@@ -28,10 +29,16 @@ app = BlackBull()
 
 
 @app.route(path='/')
-async def top(scope, ctx):
-    message = ctx['event']
-    # ctx['response']['body']['body'] = render_login_page()
-    return render_login_page()
+async def top(scope, receive, send, next_func=do_nothing):
+    """
+    The top level middleware. This middleware is the end point of the stack.
+    """
+    request = await receive()
+    logger.info(request)
+
+    next_func(scope, receive, send)
+
+    await respond(send, render_login_page())
 
 
 @app.route(path='/favicon.ico')
@@ -44,9 +51,14 @@ async def login(scope, ctx):
     return str(scope) + str(ctx)
 
 
+@app.not_found
+async def not_found(scope, receive, send):
+    await respond(send, b'Not found in asgi.py.')
+
+
 if __name__ == "__main__":
     # asyncio.run(app.run(port=8000), debug=True)
     try:
-        asyncio.run(app.run(port=8000))
+        asyncio.run(app.run(port=8000, debug=True))
     except KeyboardInterrupt:
         logger.info('Caught a keyboard interrupt.')
