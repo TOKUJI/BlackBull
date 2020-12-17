@@ -6,7 +6,7 @@ import traceback
 
 # import from this package
 from .utils import Router, do_nothing
-from .response import respond
+from .response import Response
 from .logger import get_logger_set
 logger, log = get_logger_set()
 
@@ -80,7 +80,7 @@ class BlackBull:
         return self._loop
 
     async def not_found_fn(self, scope, receive, send, next_=do_nothing):
-        await respond(send, b'NOT FOUND', status=HTTPStatus.NOT_FOUND)
+        await Response(send, b'NOT FOUND', status=HTTPStatus.NOT_FOUND)
 
     async def use(self, fn):
         """ fn must require 3 arguments
@@ -90,15 +90,9 @@ class BlackBull:
 
     async def __call__(self, scope, receive, send):
         logger.info((scope, receive, send))
-        try:
-            logger.debug(scope['path'])
-            function, methods = self._router[scope['path']]
-            logger.debug((self, function))
-
-        except KeyError:
-            logger.error(f'Bad URL is requested {scope["path"]}')
-            function = self.not_found_fn
-            methods = ['get']
+        logger.debug(scope['path'])
+        function, methods = self._router[scope['path']]
+        logger.debug((self, function))
 
         await function(scope, receive, send)
         # event = await receive()
@@ -121,12 +115,12 @@ class BlackBull:
         #     logger.debug(f'{k}: {v}')
         #     await send(v)
 
-    def route(self, methods=['GET'], path='/'):
+    def route(self, methods=['GET'], path='/', functions=[]):
         """
         Set endpoint function here.
         The endpoint function should have 2 input variable
         """
-        return self._router.route(methods=methods, path=path)
+        return self._router.route(methods=methods, path=path, functions=functions)
 
     def route_404(self, fn):
         return self._router.route_404()(fn)

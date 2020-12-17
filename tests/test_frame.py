@@ -1,4 +1,4 @@
-from BlackBull.frame import SettingFrame, Priority
+from blackbull.frame import SettingFrame, Priority
 from logging import getLogger
 logger = getLogger(__name__)
 """

@@ -1,7 +1,8 @@
 import asyncio
+from typing import Union
 from http import HTTPStatus
 
-from BlackBull.logger import get_logger_set
+from .logger import get_logger_set
 logger, log = get_logger_set()
 
 
@@ -14,7 +15,7 @@ def make_start(status, headers=[]):
     return res
 
 
-def make_body(content):
+def make_body(content: bytes):
     res = {
         'type': 'http.response.body',
         'body': content,
@@ -23,9 +24,13 @@ def make_body(content):
     return res
 
 
-async def respond(send, content, status=HTTPStatus.OK,):
+async def Response(send, content: Union[str, bytes], status=HTTPStatus.OK,):
     start = make_start(status=status)
     await send(start)
 
-    body = make_body(content)
+    if isinstance(content, str):
+        body = make_body(content.encode())
+    else:
+        body = make_body(content)
+
     await send(body)

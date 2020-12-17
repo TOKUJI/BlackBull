@@ -1,11 +1,10 @@
 import asyncio
 import pytest
-from BlackBull.logger import get_logger_set  # , ColoredFormatter
+from blackbull.logger import get_logger_set  # , ColoredFormatter
 
 # Test targets
-from BlackBull import EventEmitter
-from BlackBull.utils import Router
-from BlackBull.response import respond
+from blackbull import EventEmitter, Response
+from blackbull.utils import Router
 
 logger, _ = get_logger_set('test_util')
 

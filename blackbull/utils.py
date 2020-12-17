@@ -106,11 +106,13 @@ class Router(UserDict):
     def __getitem__(self, key):
         logger.debug(key)
         if key in self.data:
+            logger.debug(self.data[key])
             return self.data[key]
 
         # @todo Consider to use List class for self.regex_ to improve performance.
         # Because self.regex_ is merely used as an array like container in this class.
         for p, (fn, methods) in self.regex_.items():
+            logger.debug((p, fn, methods))
             if m := p.match(key):
                 if gdict := m.groupdict():
                     fn = partial(fn, **gdict)
@@ -148,7 +150,8 @@ class Router(UserDict):
             @wraps(functions)
             def wrapper(*args, **kwds):
                 logger.debug('Router.route.register.wrapper() is called.')
-                return functions(*args, **kwds, next_=do_nothing)
+                # return functions(*args, **kwds, next_=do_nothing)
+                return functions(*args, **kwds)
 
             # Convert method names to uppercase characters.
             self[path] = (wrapper, methods)

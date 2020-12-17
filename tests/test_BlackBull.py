@@ -1,6 +1,6 @@
 from http import HTTPStatus
 
-from BlackBull.logger import get_logger_set
+from blackbull.logger import get_logger_set
 
 # Library for test-fixture
 from multiprocessing import Process
@@ -8,9 +8,7 @@ import asyncio
 import pytest
 
 # Test targets
-from BlackBull import BlackBull
-from BlackBull.response import respond
-# from BlackBull.stream import Stream
+from blackbull import BlackBull, Response
 
 # Library for tests
 import httpx
@@ -32,15 +30,37 @@ async def app():
     app = BlackBull()
     app.create_server()
 
+    # Routing not using middleware.
     @app.route(path='/test')
-    async def test_(scope, receive, send, **kwargs):
-        logger.debug(f'test_({scope}, {receive}, {send}, {kwargs})')
-        await respond(send, 'sample')
+    async def test_(scope, receive, send):
+        logger.debug(f'test_({scope}, {receive}, {send})')
+        await Response(send, 'sample')
 
     @app.route_404
-    async def test_404(scope, receive, send, **kwargs):
-        logger.debug(f'test_404({scope}, {receive}, {send}, {kwargs})')
-        await respond(send, b'not found test.', status=HTTPStatus.NOT_FOUND)
+    async def test_404(scope, receive, send):
+        logger.debug(f'test_404({scope}, {receive}, {send})')
+        await Response(send, 'not found test.', status=HTTPStatus.NOT_FOUND)
+
+    # Routing using middleware.
+    async def test_fn1(scope, receive, send, next_):
+        logger.info('test_fn1 starts.')
+        res = await next_(scope, receive, send)
+        logger.info(f'test_fn1 ends. res = {res}')
+        await Response(send, res + 'fn1')
+
+    async def test_fn2(scope, receive, send, next_):
+        logger.info('test_fn2 starts.')
+        res = await next_(scope, receive, send)
+        logger.info(f'test_fn2 ends. res = {res}')
+        return res + 'fn2'
+
+    async def test_fn3(scope, receive, send, next_):
+        logger.info('test_fn3 starts.')
+        await next_(scope, receive, send)
+        logger.info('test_fn3 ends.')
+        return 'fn3'
+
+    app.route(methods='get', path='/test2', functions=[test_fn1, test_fn2, test_fn3])
 
     p = Process(target=run_application, args=(app,))
     p.start()
@@ -76,15 +96,10 @@ async def test_response_404_fn(app):
 
 
 @pytest.mark.asyncio
-async def test_add_route_during_running(app):
-    # Check the result here because app does not return any value
-    path = 'test2'
-
-    @app.route(path='/test2')
-    async def test2(scope, ctx):
-        logger.debug('test_({}, {})'.format(scope, ctx))
-        return str(scope) + str(ctx)
-
+async def test_routing_middleware(app):
+    logger.info('Registered.')
     async with httpx.AsyncClient(http2=True, verify=False) as c:
-        res = await c.get(f'https://localhost:{app.port}/{path}', headers={'key': 'value'})
+        res = await c.get(f'https://localhost:{app.port}/test2', headers={'key': 'value'})
+
         assert res.status_code == 200
+        assert res.content == b'fn3fn2fn1'

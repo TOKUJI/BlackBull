@@ -1,10 +1,10 @@
 import logging
 import asyncio
 # import json
-from BlackBull import BlackBull
-from BlackBull.utils import do_nothing
-from BlackBull.response import respond
-from BlackBull.logger import get_logger_set, ColoredFormatter
+from blackbull import BlackBull
+from blackbull.utils import do_nothing
+from blackbull.response import respond
+from blackbull.logger import get_logger_set, ColoredFormatter
 from render import render_login_page, render_dummy_page, render_table_page
 
 # fileConfig('logging.conf')
@@ -44,6 +44,11 @@ async def top(scope, receive, send, next_func=do_nothing):
 @app.route(path='/favicon.ico')
 async def favicon(scope, ctx):
     return ctx
+
+
+@app.route(methods='POST', path='/login')
+async def login(scope, ctx):
+    return str(scope) + str(ctx)
 
 
 @app.route(methods='POST', path='/login')

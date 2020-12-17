@@ -3,13 +3,13 @@ import asyncio
 import pytest
 import concurrent.futures
 
-from BlackBull.frame import FrameFactory, FrameTypes
-from BlackBull.logger import get_logger_set
+from blackbull.frame import FrameFactory, FrameTypes
+from blackbull.logger import get_logger_set
 logger, log = get_logger_set()
 
 # Test targets
-from BlackBull.client import Client
-from BlackBull.utils import EventEmitter
+from blackbull.client import Client
+from blackbull.utils import EventEmitter
 
 
 @pytest.fixture(scope="session", autouse=False)
@@ -51,7 +51,7 @@ async def test_connect(server):
 
 # if __name__ == '__main__':
 #     print('main')
-#     from BlackBull.logger import get_logger_set
+#     from blackbull.logger import get_logger_set
 #     logger, log = get_logger_set('test')
 #     logging.getLogger("asyncio").setLevel(logging.DEBUG)
 #     logger.setLevel(logging.DEBUG)
