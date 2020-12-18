@@ -64,6 +64,10 @@ async def not_found(scope, receive, send):
 
 if __name__ == "__main__":
     try:
-        asyncio.run(app.run(port=8000, debug=True))
+        asyncio.run(
+            app.run(port=8000,
+                    debug=True,
+                    certfile='server.crt',
+                    keyfile='server.key'))
     except KeyboardInterrupt:
         logger.info('Caught a keyboard interrupt.')

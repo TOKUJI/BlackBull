@@ -125,18 +125,25 @@ class BlackBull:
     def route_404(self, fn):
         return self._router.route_404()(fn)
 
-    def create_server(self, port=0):
+    def create_server(self, port, certfile, keyfile):
         from .server import ASGIServer
-        self.server = ASGIServer(self, certfile='server.crt', keyfile='server.key', loop=self.loop)
+        self.server = ASGIServer(
+            self,
+            certfile=certfile,
+            keyfile=keyfile,
+            loop=self.loop)
         self.server.open_socket(port)
         logger.info(self.server)
 
-    async def run(self, port=0, debug=False):
+    async def run(self, certfile, keyfile, port=0, debug=False):
         logger.info('Run is called.')
         tasks = []
 
         if not hasattr(self, 'server'):
-            self.create_server(port)
+            self.create_server(
+                port,
+                certfile=certfile,
+                keyfile=keyfile)
 
         if debug:
             from .watch import Watcher, force_reload
