@@ -1,4 +1,5 @@
 import asyncio
+import json
 from typing import Union
 from http import HTTPStatus
 
@@ -32,5 +33,19 @@ async def Response(send, content: Union[str, bytes], status=HTTPStatus.OK,):
         body = make_body(content.encode())
     else:
         body = make_body(content)
+
+    await send(body)
+
+
+async def JSONResponse(send, content, status=HTTPStatus.OK):
+    start = make_start(status=status)
+    await send(start)
+
+    try:
+        body = make_body(json.dumps(content).encode())
+        logger.debug(body)
+
+    except BaseException as e:
+        logger.error(e)
 
     await send(body)

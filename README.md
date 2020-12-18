@@ -88,3 +88,14 @@ This server uses pytest. Some tests depends on a sample applciation.
 # Sample application
 
 main.py runs a web server that provide basic financial ledger service. This depends on peewee, mako
+
+# Todo
+
+These are todo for the developper.
+
+1. Response (JSON, HTML, Stream, WebSocket)
+1. Event handling (?)
+1. Server
+1. Template
+1. Model
+1. Cacheing
