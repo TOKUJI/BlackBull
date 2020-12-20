@@ -93,9 +93,9 @@ main.py runs a web server that provide basic financial ledger service. This depe
 
 These are todo for the developper.
 
-1. Response (JSON, HTML, Stream, WebSocket)
+1. Response (Stream)
+1. Cacheing
 1. Event handling (?)
-1. Server
+1. Server (HTTP2, HTTP1.1, WebSocket)
 1. Template
 1. Model
-1. Cacheing
