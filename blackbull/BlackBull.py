@@ -5,7 +5,8 @@ import sys
 import traceback
 
 # import from this package
-from .utils import Router, do_nothing, Scheme
+from .utils import do_nothing, Scheme, HTTPMethods
+from .router import Router
 from .response import Response
 from .logger import get_logger_set
 logger, log = get_logger_set()
@@ -135,7 +136,7 @@ class BlackBull:
         #     logger.debug(f'{k}: {v}')
         #     await send(v)
 
-    def route(self, methods=['GET'], path='/', scheme=Scheme.http, functions=[]):
+    def route(self, methods=[HTTPMethods.get], path='/', scheme=Scheme.http, functions=[]):
         """
         Set endpoint function here.
         The endpoint function should have 2 input variable

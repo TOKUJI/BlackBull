@@ -89,14 +89,6 @@ async def app():
     @app.route(path='/websocket2', scheme=Scheme.websocket)
     async def websocket2(scope, receive, send):
         while msg := (await receive()):
-            if 'text' in msg:
-                logger.debug(f'Got a text massage ({msg}.)')
-            elif 'bytes' in msg:
-                logger.debug(f'Got a byte-string massage ({msg}.)')
-            else:
-                logger.info('The received message does not contain any message.')
-                break
-
             await WebSocketResponse(send, msg)
 
     app.route(path='/websocket2', scheme=Scheme.websocket,
@@ -155,12 +147,12 @@ async def test_routing_middleware(app):
 @pytest.mark.asyncio
 async def test_websocket_response(app, ssl_context):
     uri = f"wss://localhost:{app.port}/websocket"
-    client = await asyncio.wait_for(websockets.connect(uri, ssl=ssl_context), timeout=0.5)
+    client = await asyncio.wait_for(websockets.connect(uri, ssl=ssl_context), timeout=0.1)
 
     async with client:
         name = 'Toshio'
         await client.send(name)
         logger.error('Have sent.')
 
-        greeting = await asyncio.wait_for(client.recv(), timeout=0.5)
+        greeting = await asyncio.wait_for(client.recv(), timeout=0.1)
         assert greeting == name
