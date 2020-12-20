@@ -7,6 +7,7 @@ from collections import UserDict
 from enum import Enum, auto
 import socket
 from contextlib import closing
+from typing import Tuple, Type
 
 logger = getLogger(__name__)
 
@@ -16,7 +17,15 @@ async def do_nothing(*args, **kwargs):
 
 
 class HTTPMethods(Enum):
-    pass
+    get = auto()
+    put = auto()
+    post = auto()
+    delete = auto()
+
+
+class Scheme(Enum):
+    http = 'http'
+    websocket = 'websocket'
 
 
 def check_port(host='localhost', port=None):
@@ -29,6 +38,21 @@ def check_port(host='localhost', port=None):
             return False
         else:
             return True
+
+
+websocket_connect = {'type': 'websocket.connect'}
+websocket_accept = {"type": "websocket.accept", "subprotocol": None}
+
+
+async def websocket(scope, receive, send, inner):
+    msg = await receive()
+
+    if msg != websocket_connect:
+        raise ValueError('Received Message does not request to open a websocket connection.')
+
+    await send(websocket_accept)
+    await inner(scope, receive, send)
+    await send({'type': 'websocket.close'})
 
 
 def pop_safe(key, source, target, *, new_key=None):
@@ -79,7 +103,7 @@ class Router(UserDict):
     """
     This class has 2 dictionaries: self.data and self.regex_.
     key: str or re.Pattern
-    value: (function, methods)
+    value: (function, methods, scheme)
     """
     f_string = re.compile(r'\{([a-zA-Z_]\w*?)\}', flags=re.ASCII)
     NOT_FOUND_KEY = 'NOT_FOUND'
@@ -88,32 +112,38 @@ class Router(UserDict):
         super(Router, self).__init__(*args, **kwds)
         self.regex_ = {}
 
-    def __setitem__(self, key, value):
+    def __setitem__(self, key: Tuple[str, Type[Scheme]], value):
         """
         If 'key' is a str, this class holds it for the key and
         its compiled regular expression objects.
         If key is a regular expression objects, this class keeps it in self.regex_
         """
-        if isinstance(key, str):
+        path, scheme = key
+        logger.debug(key)
+        if isinstance(path, str):
             self.data[key] = value
 
-            s = self.f_string.sub(r'(?P<\1>[a-zA-Z0-9_\-\.\~]+)', key)
-            self.regex_[re.compile(s)] = value
+            s = self.f_string.sub(r'(?P<\1>[a-zA-Z0-9_\-\.\~]+)', path)
+            self.regex_[(re.compile(f'^{s}$'), scheme)] = value
 
-        elif isinstance(key, re.Pattern):
+        elif isinstance(path, re.Pattern):
             self.regex_[key] = value
+        else:
+            logger.error(f'Unexpected type ({key}.)')
 
-    def __getitem__(self, key):
+    def __getitem__(self, key: Tuple[str, Type[Scheme]]):
+        key_path, key_scheme = key
         logger.debug(key)
         if key in self.data:
             logger.debug(self.data[key])
             return self.data[key]
 
-        # @todo Consider to use List class for self.regex_ to improve performance.
+        # @todo Consider to use List or some iterable class for self.regex_ to improve performance.
         # Because self.regex_ is merely used as an array like container in this class.
-        for p, (fn, methods) in self.regex_.items():
-            logger.debug((p, fn, methods))
-            if m := p.match(key):
+        for (p, scheme), (fn, methods) in self.regex_.items():
+            logger.debug((p, scheme, fn, methods))
+
+            if (m := p.match(key_path)) and scheme == key_scheme:
                 if gdict := m.groupdict():
                     fn = partial(fn, **gdict)
                 return (fn, methods)
@@ -121,9 +151,7 @@ class Router(UserDict):
         logger.debug(f'No Entry: {key}, {self}')
         logger.debug(self.data)
         logger.debug(self.regex_)
-        return self[self.NOT_FOUND_KEY]
-        # return self.not_found_fn, ['get']
-        # raise KeyError(f'{key} is not found')
+        return self[(self.NOT_FOUND_KEY, key[-1])]
 
     def __contains__(self, item):
         if item in self.data:
@@ -136,49 +164,56 @@ class Router(UserDict):
 
         return False
 
-    def route(self, methods=['get'], path='/', functions=[]):
-        """ Register a function in the routing table of this server. """
+    def route_fn(self, methods=['get'], path='/', scheme=Scheme.http):
+        logger.debug('Router.route() is called.')
+        if isinstance(methods, str):
+            methods = [methods.lower()]
+        else:  # TODO: should check whether method is iterable or not
+            methods = [method.lower() for method in methods]
+
+        def register(fn):
+            logger.debug(f'Router.route.register() is called. {fn}')
+
+            @wraps(fn)
+            def wrapper(*args, **kwds):
+                logger.debug('Router.route.register.wrapper() is called.')
+                return fn(*args, **kwds)
+
+            logger.debug((path, scheme))
+            self[(path, scheme)] = (wrapper, methods)
+
+            return wrapper
+
+        return register
+
+    def route(self, methods=['get'], path='/', scheme=Scheme.http, functions=[]):
+        """ Register a function or middlewares in the routing table of this server. """
+        if not functions:
+            return self.route_fn(methods, path, scheme)
+
         logger.debug(f'Router.route() is called. {functions}')
         if isinstance(methods, str):
             methods = [methods.lower()]
         else:  # TODO: should check whether method is iterable or not
             methods = [method.lower() for method in methods]
 
-        def register(functions):
-            logger.debug(f'Router.route.register() is called. {functions}')
+        logger.debug(f'{functions}')
+        if len(functions) == 0:
+            logger.warning('There is no function in this routing request.')
 
-            @wraps(functions)
-            def wrapper(*args, **kwds):
-                logger.debug('Router.route.register.wrapper() is called.')
-                # return functions(*args, **kwds, next_=do_nothing)
-                return functions(*args, **kwds)
-
-            # Convert method names to uppercase characters.
-            self[path] = (wrapper, methods)
-
-            return wrapper
-
-        if functions:
-            logger.debug(f'{functions}')
-            if len(functions) == 0:
-                logger.warning('There is no function in this routing request.')
-
-            elif len(functions) == 1:
-                fns = [partial(functions[0], next_=do_nothing)]
-
-            else:
-                fns = []
-                next_ = partial(functions[-1], next_=do_nothing)
-
-                for fn in functions[-2::-1]:
-                    temp = partial(fn, **{'next_': next_})
-                    fns.append(temp)
-                    next_ = temp
-
-            self[path] = (fns[-1], methods)
+        elif len(functions) == 1:
+            fns = [partial(functions[0], inner=do_nothing)]
 
         else:
-            return register
+            fns = []
+            inner = partial(functions[-1], inner=do_nothing)
+
+            for fn in functions[-2::-1]:
+                temp = partial(fn, **{'inner': inner})
+                fns.append(temp)
+                inner = temp
+
+        self[(path, scheme)] = (fns[-1], methods)
 
     def route_404(self):
         """ Register a function for 404. """

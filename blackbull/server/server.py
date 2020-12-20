@@ -139,18 +139,44 @@ class ASGIServer:
         self.app = app
 
         # Create TLS context
-        if ssl_context and certfile:
-            raise TypeError('SSLContext and certfile must not be set at the same time')
+        if ssl_context and (certfile or keyfile):
+            raise TypeError('SSLContext and certfile (or keyfile) must not be set at the same time')
 
-        if ssl_context:
-            self.ssl_context = ssl_context
-        elif certfile:
-            context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
-            context.set_alpn_protocols(['HTTP/1.1', 'h2'])  # to enable HTTP/2, add 'h2'
-            context.load_cert_chain(certfile=certfile, keyfile=keyfile)
-            context.options |= ssl.OP_NO_TLSv1 | ssl.OP_NO_TLSv1_1
-            context.options |= ssl.OP_NO_COMPRESSION
-            self.ssl_context = context
+        self.ssl_context = ssl_context
+        self.keyfile = keyfile
+        self.certfile = certfile
+
+    @property
+    def keyfile(self):
+        return self._keyfile if hasattr(self, '_keyfile') else None
+
+    @keyfile.setter
+    def keyfile(self, value):
+        self._keyfile = value
+        self.make_ssl_context()
+
+    @property
+    def certfile(self):
+        return self._certfile if hasattr(self, '_certfile') else None
+
+    @certfile.setter
+    def certfile(self, value):
+        self._certfile = value
+        self.make_ssl_context()
+
+    def make_ssl_context(self):
+        if not self.certfile or not self.keyfile:
+            return
+
+        context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+        context.set_alpn_protocols(['HTTP/1.1', 'h2'])  # to enable HTTP/2, add 'h2'
+        context.load_cert_chain(certfile=self.certfile, keyfile=self.keyfile)
+        context.options |= ssl.OP_NO_TLSv1 | ssl.OP_NO_TLSv1_1
+        context.options |= ssl.OP_NO_COMPRESSION
+        self.ssl_context = context
+
+        if hasattr(self, 'raw_socket'):
+            self.socket = self.ssl_context.wrap_socket(self.raw_socket, server_side=True)
 
     async def client_connected_cb(self, reader, writer):
         """
@@ -172,24 +198,23 @@ class ASGIServer:
         await handler.run()
         writer.close()
 
-    # def route(self, method='GET', path='/'):
-    #     return self._route.route(method=method, path=path)
-
     def open_socket(self, port=0):
         if not check_port(port=port):
             logger.error(f'Port ({port}) is not available. Try another port.')
             return
 
-        rsock_ = create_socket(('::1', port))
+        self.raw_socket = create_socket(('::1', port))
 
-        if rsock_ is None:
-            logger.error(f'Faield to open port ({port}.) Try another port.')
+        if self.raw_socket is None:
+            logger.error(f'Failed to open port ({port}.) Try another port.')
             return
 
-        self.port = rsock_.getsockname()[1]
+        self.port = self.raw_socket.getsockname()[1]
 
         if self.ssl_context:
-            self.socket = self.ssl_context.wrap_socket(rsock_, server_side=True)
+            self.socket = self.ssl_context.wrap_socket(self.raw_socket, server_side=True)
+        else:
+            self.socket = self.raw_socket
 
     def close_socket(self):
         self.socket.close()

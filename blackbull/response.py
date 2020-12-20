@@ -25,6 +25,20 @@ def make_body(content: bytes):
     return res
 
 
+def make_websocket_body(content: Union[str, bytes]):
+    ret = {
+        'type': 'websocket.send',
+    }
+    if isinstance(content, str):
+        ret['text'] = content
+    elif isinstance(content, bytes):
+        ret['bytes'] = content
+    else:
+        logger.error(f'Type error: expected str or bytes, but {type(content)} is provided.')
+
+    return ret
+
+
 async def Response(send, content: Union[str, bytes], status=HTTPStatus.OK,):
     start = make_start(status=status)
     await send(start)
@@ -43,6 +57,20 @@ async def JSONResponse(send, content, status=HTTPStatus.OK):
 
     try:
         body = make_body(json.dumps(content).encode())
+        logger.debug(body)
+
+    except BaseException as e:
+        logger.error(e)
+
+    await send(body)
+
+
+async def WebSocketResponse(send, content, status=HTTPStatus.OK):
+    # start = make_start(status=status)
+    # await send(accept)
+
+    try:
+        body = make_websocket_body(json.dumps(content))
         logger.debug(body)
 
     except BaseException as e:

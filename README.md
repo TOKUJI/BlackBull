@@ -16,7 +16,7 @@ app = BlackBull()
 
 
 @app.route(path='/')
-async def top(scope, receive, send, next_func, **kwargs):
+async def top(scope, receive, send, inner, **kwargs):
     """
     The top level middleware. This middleware does not call any inner application.
     """
@@ -53,24 +53,24 @@ async def fn(*args, **kwargs):
 In case you use middleware stack, you have to tell it to the framework.
 
 ```python
-async def test_fn1(scope, receive, send, next_):
-    res = await next_(scope, receive, send)
+async def test_fn1(scope, receive, send, inner):
+    res = await inner(scope, receive, send)
     await Response(send, res + 'fn1')
 
 
-async def test_fn2(scope, receive, send, next_):
-    res = await next_(scope, receive, send)
+async def test_fn2(scope, receive, send, inner):
+    res = await inner(scope, receive, send)
     return res + 'fn2'
 
 
-async def test_fn3(scope, receive, send, next_):
-    await next_(scope, receive, send)
+async def test_fn3(scope, receive, send, inner):
+    await inner(scope, receive, send)
     return 'fn3'
 
 app.route(methods='get', path='/home', functions=[test_fn1, test_fn2, test_fn3])
 ```
 
-The first element of functions is the most outer application and the next element is called when the first application calls next_(). Note that the second argument of Response() can be str.
+The first element of functions is the most outer application and the next element is called when the first application calls inner(). Note that the second argument of Response() can be str.
 
 ## URL Parameters
 
@@ -78,7 +78,7 @@ URL parameters are parameters that is located in path part of URL. For example, 
 
 ```python
 @app.route(path=r'^test/(?P<id_>\d+)$', methods=['get'])
-async def fn(scope, receive, send, next_, **kwargs):
+async def fn(scope, receive, send, inner, **kwargs):
     return kwargs.pop('id_', None)
 ```
 
