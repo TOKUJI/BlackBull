@@ -86,7 +86,6 @@ async def app():
 
         await send({'type': 'websocket.close'})
 
-    @app.route(path='/websocket2', scheme=Scheme.websocket)
     async def websocket2(scope, receive, send):
         while msg := (await receive()):
             await WebSocketResponse(send, msg)
@@ -136,7 +135,7 @@ async def test_response_404_fn(app):
 
 @pytest.mark.asyncio
 async def test_routing_middleware(app):
-    logger.info('Registered.')
+
     async with httpx.AsyncClient(http2=True, verify=False) as c:
         res = await c.get(f'https://localhost:{app.port}/test2', headers={'key': 'value'})
 
@@ -154,5 +153,5 @@ async def test_websocket_response(app, ssl_context):
         await client.send(name)
         logger.error('Have sent.')
 
-        greeting = await asyncio.wait_for(client.recv(), timeout=0.1)
-        assert greeting == name
+        response = await asyncio.wait_for(client.recv(), timeout=0.1)
+        assert response == name

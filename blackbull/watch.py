@@ -9,7 +9,7 @@ import os
 from logging import getLogger
 from functools import wraps
 
-_logger = getLogger('watch')
+_logger = getLogger(__name__)
 
 
 def _log(fn):
@@ -159,8 +159,8 @@ class Watcher(object):
         wd = _LIB.inotify_add_watch(self._fd, path.encode(), self.IN_CHANGED)
 
         if wd < 0:
-            _logger.error('fd for inotify: {}, return value for inotify_add_watch: {}'.format(self._fd, wd))
-            raise OSError("Could not add this file / directory in the watch list")
+            _logger.error(f'fd for inotify: {self._fd}, return value for inotify_add_watch: {wd}')
+            raise OSError(f'Could not add this file / directory ({path}) in the watch list')
 
         self.max_path_length = max(self.max_path_length, os.statvfs(path).f_namemax)
 
@@ -176,7 +176,7 @@ class Watcher(object):
     def handle_event(self):
         buf = os.read(self._fd, _InotifyEvent.size() + self.max_path_length + 1)
         header = _InotifyEvent(*unpack("@iIII", buf[:_InotifyEvent.size()]))
-        _logger.debug('inotify header: {} '.format(header))
+        _logger.debug(f'inotify header: {header} ')
 
         pathname = buf[_InotifyEvent.size(): _InotifyEvent.size() + header.len].decode('utf-8').rstrip('\x00')
         _logger.debug('{} is not in {}'.format(pathname, self._watch[header.wd]['except']))

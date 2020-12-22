@@ -185,8 +185,7 @@ class BlackBull:
         if debug:
             from .watch import Watcher, force_reload
             watcher = Watcher(loop=self.loop)
-            # watcher.add_watch(__file__, force_reload(__file__))
-            watcher.add_watch('BlackBull', force_reload(__file__))
+            watcher.add_watch('blackbull', force_reload(sys.argv[0]))
             tasks.append(watcher.watch())
 
         tasks.append(self.server.run(port=port))

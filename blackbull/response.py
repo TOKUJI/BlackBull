@@ -66,9 +66,6 @@ async def JSONResponse(send, content, status=HTTPStatus.OK):
 
 
 async def WebSocketResponse(send, content, status=HTTPStatus.OK):
-    # start = make_start(status=status)
-    # await send(accept)
-
     try:
         body = make_websocket_body(json.dumps(content))
         logger.debug(body)

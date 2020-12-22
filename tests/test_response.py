@@ -9,8 +9,8 @@ import asyncio
 import pytest
 
 # Test targets
-from blackbull import Response, JSONResponse
-from blackbull.response import make_body
+from blackbull import Response, JSONResponse, WebSocketResponse
+from blackbull.response import make_body, make_websocket_body
 
 # Library for tests
 # import httpx
@@ -66,3 +66,14 @@ async def test_JSONResponse(send):
     await JSONResponse(send, obj)
 
     assert send.data == make_body(json.dumps(obj).encode())
+
+
+@pytest.mark.asyncio
+async def test_WebSocketResponse(send):
+    assert send.data != b'text'
+
+    obj = {'x': list(set([str(), int()]))}   # Example of complicated object.
+
+    await WebSocketResponse(send, obj)
+
+    assert send.data == make_websocket_body(json.dumps(obj))

@@ -9,8 +9,9 @@ This is a basic example to run a simple HTTP/2.0 server. Make sure that you are 
 ```Python
 import asyncio
 
-from BlackBull import BlackBull
-from BlackBull.response import Response
+from blackbull import BlackBull
+from blackbull.response import Response
+from blackbull.utils import Scheme, HTTPMethods
 
 app = BlackBull()
 
@@ -37,12 +38,12 @@ async def test_(scope, receive, send):
     await Response(send, 'sample')
 ```
 
-### Regular Expression
+## Regular Expression
 
 Regular expression is available if you specify URL patterns as below.
 
 ```Python
-@router.route(path=r'^/test/\d+$', methods='get')
+@router.route(path=r'^/test/\d+$', methods=[HTTPMethods.get])
 async def fn(*args, **kwargs):
     await Response(send, 'sample')
 ```
@@ -67,27 +68,36 @@ async def test_fn3(scope, receive, send, inner):
     await inner(scope, receive, send)
     return 'fn3'
 
-app.route(methods='get', path='/home', functions=[test_fn1, test_fn2, test_fn3])
+app.route(methods=[HTTPMethods.get], path='/home', functions=[test_fn1, test_fn2, test_fn3])
 ```
 
 The first element of functions is the most outer application and the next element is called when the first application calls inner(). Note that the second argument of Response() can be str.
 
 ## URL Parameters
 
-URL parameters are parameters that is located in path part of URL. For example, if there is a URL, "http://somewhere:port/path1/path_parameter?query+parameters", you can get parameter from path part as below.
+URL parameters are parameters that is located in path part of URL. For example, if there is a URL, "http://somewhere:port/path1/1234567?query+parameters", you can get parameter(s) from path part as below.
 
 ```python
-@app.route(path=r'^test/(?P<id_>\d+)$', methods=['get'])
+@app.route(path=r'^path1/(?P<id_>+)$', methods=[HTTPMethods.get])
 async def fn(scope, receive, send, inner, **kwargs):
     return kwargs.pop('id_', None)
 ```
 
+Or, this specification can be used to get value of URL parameter(s).
+
+```python
+@app.route(path=r'^path1/(?P<id_>+)$', methods=[HTTPMethods.get])
+async def fn(scope, receive, send, inner, id_):
+    return id_
+```
+
 # Testing
-This server uses pytest. Some tests depends on a sample applciation.
+
+This server uses pytest.
 
 # Sample application
 
-main.py runs a web server that provide basic financial ledger service. This depends on peewee, mako
+asgi.py runs a web application that demonstrate basic functionalities.
 
 # Todo
 
