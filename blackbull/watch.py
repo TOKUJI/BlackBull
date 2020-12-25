@@ -4,12 +4,13 @@ from struct import unpack
 from weakref import WeakValueDictionary
 import asyncio
 import os
+from pathlib import Path
 
 # todo: move watch.py to another package.
 from logging import getLogger
 from functools import wraps
 
-_logger = getLogger(__name__)
+_logger = getLogger('watcher')
 
 
 def _log(fn):
@@ -156,6 +157,12 @@ class Watcher(object):
 
     @_log
     def add_watch(self, path, callback=None, except_=[]):
+        # Find child directories if path is a directory.
+        p = Path(path)
+        if p.is_dir():
+            [self.add_watch(str(dir_), callback=callback, except_=except_)
+             for dir_ in p.iterdir() if dir_.is_dir()]
+
         wd = _LIB.inotify_add_watch(self._fd, path.encode(), self.IN_CHANGED)
 
         if wd < 0:

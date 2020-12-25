@@ -4,7 +4,7 @@ from typing import Union
 from http import HTTPStatus
 
 from .logger import get_logger_set
-logger, log = get_logger_set()
+logger, log = get_logger_set('response')
 
 
 def make_start(status, headers=[]):

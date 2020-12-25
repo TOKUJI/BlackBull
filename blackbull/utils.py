@@ -6,7 +6,7 @@ from enum import Enum, auto
 import socket
 from contextlib import closing
 
-logger = getLogger(__name__)
+logger = getLogger('utils')
 
 
 async def do_nothing(*args, **kwargs):
@@ -72,6 +72,7 @@ IMFFixdate = '%a, %d %b %Y %H:%M:%S %Z'
 
 URI = r'/?[0-9a-zA-Z]*?/?'
 HTTP2 = b'PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n'
+WebSocket = b'GET /chat HTTP/1.1\r\n'
 # 0x505249202a20485454502f322e300d0a0d0a534d0d0a0d0a
 
 

@@ -1,13 +1,19 @@
 import logging.config
 import asyncio
+import json
+
 from blackbull import BlackBull, Response, JSONResponse, WebSocketResponse
 from blackbull.utils import do_nothing, Scheme, HTTPMethods
 from blackbull.middlewares import websocket
 from blackbull.logger import get_logger_set, ColoredFormatter
 from render import render_login_page, render_dummy_page, render_table_page
 
+
+with open('logging.json', 'r') as stream:
+    config = json.load(stream)
+
 logger, log = get_logger_set()
-logging.config.fileConfig('logging.cfg')
+logging.config.dictConfig(config)
 
 print('========================================================')
 app = BlackBull()
@@ -61,7 +67,7 @@ if __name__ == "__main__":
         asyncio.run(
             app.run(port=8000,
                     debug=True,
-                    certfile='server.crt',
-                    keyfile='server.key'))
+                    certfile='cert.pem',
+                    keyfile='key.pem'))
     except KeyboardInterrupt:
         logger.info('Caught a keyboard interrupt.')

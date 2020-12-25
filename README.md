@@ -103,7 +103,8 @@ asgi.py runs a web application that demonstrate basic functionalities.
 
 These are todo for the developper.
 
-1. Response (Stream)
+1. Server push
+1. Asynchronous SQL ORM (Asynchronous support of SQL Alchemy ORM seems to be not sufficient.)
 1. Cacheing
 1. Event handling (?)
 1. Server (HTTP2, HTTP1.1, WebSocket)

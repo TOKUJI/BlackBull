@@ -9,7 +9,7 @@ from .utils import do_nothing, Scheme, HTTPMethods
 from .router import Router
 from .response import Response
 from .logger import get_logger_set
-logger, log = get_logger_set()
+logger, log = get_logger_set('BlackBull')
 
 
 def response(headers, body, status=200):
@@ -115,7 +115,10 @@ class BlackBull:
         function, methods = self._router[(path, scheme)]
         logger.debug((self, function))
 
-        await function(scope, receive, send)
+        try:
+            await function(scope, receive, send)
+        except Exception:
+            logger.error(traceback.format_exc())
         # event = await receive()
         """
         -> stack := (func(scope, receive, send), innerfunc(scope, receive, send))
@@ -141,19 +144,12 @@ class BlackBull:
         Set endpoint function here.
         The endpoint function should have 2 input variable
         """
-        wrapper = self._router.route(
+        return self._router.route(
             methods=methods,
             path=path,
             scheme=scheme,
             functions=functions,
             )
-
-        if scheme == Scheme.websocket:
-            logger.info(scheme)
-            logger.info(functions)
-            logger.info(wrapper)
-
-        return wrapper
 
     def route_404(self, fn):
         return self._router.route_404()(fn)
@@ -185,6 +181,7 @@ class BlackBull:
         if debug:
             from .watch import Watcher, force_reload
             watcher = Watcher(loop=self.loop)
+            watcher.add_watch(sys.argv[0], force_reload(sys.argv[0]))
             watcher.add_watch('blackbull', force_reload(sys.argv[0]))
             tasks.append(watcher.watch())
 

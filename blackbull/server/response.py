@@ -5,7 +5,7 @@ from ..stream import Stream
 from ..frame import FrameTypes
 from ..logger import get_logger_set, log
 
-logger, _ = get_logger_set('server.response')
+logger, _ = get_logger_set('server.server')
 
 
 class RespondFactory:

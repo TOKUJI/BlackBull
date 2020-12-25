@@ -1,12 +1,18 @@
 from collections import UserDict
+from collections.abc import Iterable
 from typing import Tuple, Type
 from functools import wraps, partial
 import re
 from logging import getLogger
-
+import inspect
 from .utils import Scheme, HTTPMethods, do_nothing
 
 logger = getLogger(__name__)
+
+
+def has_inner(fn):
+    sig = inspect.signature(fn)
+    return 'inner' in sig.parameters
 
 
 class BaseRouter:
@@ -114,27 +120,30 @@ class Router(UserDict, BaseRouter):
 
     def route(self, methods=[HTTPMethods.get], path='/', scheme=Scheme.http, functions=[]):
         """ Register a function or middlewares in the routing table of this server. """
+        logger.debug(f'Router.route() is called. {functions}')
         if not functions:
             return self.route_fn(methods, path, scheme)
 
-        logger.debug(f'Router.route() is called. {functions}')
-
-        if len(functions) == 0:
-            logger.warning('There is no function in this routing request.')
+        elif not isinstance(functions, Iterable):
+            raise TypeError(f'{functions} is not iterable.')
 
         elif len(functions) == 1:
-            fns = [partial(functions[0], inner=do_nothing)]
+            inner = partial(functions[0], inner=do_nothing)
 
         else:
-            fns = []
-            inner = partial(functions[-1], inner=do_nothing)
+            if has_inner(functions[-1]):
+                inner = partial(functions[-1], inner=do_nothing)
+            else:
+                inner = functions[-1]
 
             for fn in functions[-2::-1]:
-                temp = partial(fn, **{'inner': inner})
-                fns.append(temp)
-                inner = temp
 
-        self[(path, scheme)] = (fns[-1], methods)
+                if not has_inner(fn):
+                    raise ValueError(f'{fn} does not have "inner" in its paramters.')
+
+                inner = partial(fn, **{'inner': inner})
+
+        self[(path, scheme)] = (inner, methods)
 
     def route_404(self):
         """ Register a function for 404. """

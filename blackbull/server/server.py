@@ -14,7 +14,7 @@ logger, log = get_logger_set('server')
 
 
 class HandlerBase:
-    def __init__(self, app, reader, writer):
+    def __init__(self, app, reader, writer, *args, **kwargs):
         """docstring for HandlerBase
         Parameters
         ----------
@@ -30,8 +30,63 @@ class HandlerBase:
         self.reader = reader
         self.writer = writer
 
-    def run(self):
-        raise NotImplementedError()
+    async def run(self):
+        logger.error('Not implemented.')
+        raise NotImplementedError('HTTP1_1')
+
+
+class HTTP1_1Handler(HandlerBase):
+    def __init__(self, app, reader, writer, request, *args, **kwargs):
+        super().__init__(app, reader, writer, *args, **kwargs)
+        self.request = request
+
+    def has_request(self):
+        logger.info(self.request)
+        return self.request is not None
+
+    async def run(self):
+
+        while self.has_request():
+            scope = self.parse()
+            receive = self.make_recepient()
+            send = self.make_sender()
+            await self.app(scope, receive, send)
+
+            self.request = await self.reader.read()
+
+    def parse(self):
+        """
+        Parse received request and make ASGI scope object.
+        """
+        scope = {
+            'type': 'http',
+            'http_version': '1.1',
+            'method': 'GET',
+            'path': '/json',
+            'raw_path': b'/json',
+            'root_path': '',
+            'scheme': 'https',
+            'query_string': b'',
+            'headers': [
+                (b'host', b'localhost:8000'),
+                (b'accept', b'*/*'),
+                (b'accept-encoding', b'gzip, deflate'),
+                (b'connection', b'keep-alive'),
+                (b'user-agent', b'python-httpx/0.16.1'),
+                (b'key', b'value')
+                ],
+            'client': ['127.0.0.1', 37412],
+            'server': ['127.0.0.1', 8000],
+            'asgi': {'version': '3.0'}
+        }
+        lines = self.request.split(b'\r\n')
+        logger.info(lines)
+
+    def make_recepient(self):
+        pass
+
+    def make_sender(self):
+        pass
 
 
 class HTTP2Handler(HandlerBase):
@@ -183,19 +238,27 @@ class ASGIServer:
         This function is called when the server receives an access request from a client.
         Handler must handles every exception in it and not raise any exception.
         """
-        request_data = await reader.read(len(HTTP2))
+        request_data = await reader.readline()
 
-        if request_data == HTTP2:
-            logger.info('HTTP/2 connection is requested.')
-            handler = HTTP2Handler(self.app, reader, writer)
+        if request_data == HTTP2[:-8]:
+            request_data += await reader.read(8)
+
+            if request_data == HTTP2:
+                logger.info('HTTP/2 connection is requested.')
+                handler = HTTP2Handler(self.app, reader, writer)
+            else:
+                raise ValueError(f'Received an invalid request ({request_data}).')
 
         else:
             logger.info('HTTP1.1 connection is requested.')
-            request_data += await reader.read(8000)
-            handler = HTTP1_1Handler(self.app, reader, writer)
-            handler.request_data = request_data
+            request_data += await reader.read()
+            handler = HTTP1_1Handler(self.app, reader, writer, request_data)
 
-        await handler.run()
+        try:
+            await handler.run()
+        except Exception:
+            logger.error(traceback.format_exc())
+
         writer.close()
 
     def open_socket(self, port=0):
@@ -235,8 +298,7 @@ class ASGIServer:
         except asyncio.exceptions.CancelledError as e:
             logger.info(type(e))
 
-        except BaseException as e:
-            logger.error(type(e))
+        except Exception:
             logger.error(traceback.format_exc())
 
         finally:

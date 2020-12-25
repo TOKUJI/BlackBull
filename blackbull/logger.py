@@ -3,12 +3,13 @@ from logging import getLogger, NullHandler, Formatter, DEBUG
 from copy import copy
 from asyncio import iscoroutinefunction
 
+
 def get_logger_set(name=None):
     """ Returns a pair of logger and its decorator. """
     if name:
-        logger = getLogger('BlackBull').getChild(name)
+        logger = getLogger('blackbull').getChild(name)
     else:
-        logger = getLogger('BlackBull')
+        logger = getLogger('blackbull')
 
     def _log(fn):
         if iscoroutinefunction(fn):
