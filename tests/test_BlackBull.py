@@ -11,7 +11,7 @@ import pytest
 
 # Test targets
 from blackbull import BlackBull, Response, WebSocketResponse
-from blackbull.utils import Scheme
+from blackbull.utils import Scheme, HTTPMethods
 from blackbull.middlewares import websocket
 
 # Library for tests
@@ -28,12 +28,13 @@ def run_application(app):
     loop.run_until_complete(task)
 
 
-@pytest.fixture  # (scope="session", autouse=True)
+@pytest.fixture
 async def app():
     # run before the test
     logger.info('At set-up.')
     app = BlackBull()
-    app.create_server(certfile='cert.pem', keyfile='key.pem')
+    cd = pathlib.Path(__file__).parent
+    app.create_server(certfile=cd / 'cert.pem', keyfile=cd / 'key.pem')
 
     # Routing not using middleware.
     @app.route(path='/test')
@@ -93,6 +94,22 @@ async def app():
     app.route(path='/websocket2', scheme=Scheme.websocket,
               functions=[websocket, websocket2])
 
+    @app.route(path='/push', methods=[HTTPMethods.post])
+    async def server_push(scope, receive, send):
+        # await Response(send, 'Any message?', more_body=True)
+        request = await receive()
+
+        while request['type'] != 'http.disconnect' and request['body'] != 'Bye':
+            msg = request['body']
+            await Response(send, msg, more_body=True)
+
+            try:
+                request = await asyncio.wait_for(receive(), timeout=0.5)
+
+            except asyncio.TimeoutError:
+                logger.debug('Have not received any message in this second.')
+                await Response(send, 'Any message?', more_body=True)
+
     p = Process(target=run_application, args=(app,))
     p.start()
 
@@ -109,6 +126,20 @@ async def ssl_context():
     logger.error(pathlib.Path(__file__))
     localhost_pem = pathlib.Path(__file__).with_name("cert.pem")
     ssl_context.load_verify_locations(localhost_pem)
+
+    yield ssl_context
+
+    # At tear down.
+    pass
+
+
+@pytest.fixture
+async def ssl_h2context():
+    ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    logger.error(pathlib.Path(__file__))
+    localhost_pem = pathlib.Path(__file__).with_name("cert.pem")
+    ssl_context.load_verify_locations(localhost_pem)
+    ssl_context.set_alpn_protocols(['h2'])
 
     yield ssl_context
 
@@ -143,15 +174,32 @@ async def test_routing_middleware(app):
         assert res.content == b'fn3fn2fn1'
 
 
-@pytest.mark.asyncio
-async def test_websocket_response(app, ssl_context):
-    uri = f"wss://localhost:{app.port}/websocket"
-    client = await asyncio.wait_for(websockets.connect(uri, ssl=ssl_context), timeout=0.1)
+# @pytest.mark.asyncio
+# async def test_websocket_response(app, ssl_context):
+#     uri = f"wss://localhost:{app.port}/websocket"
+#     client = await asyncio.wait_for(websockets.connect(uri, ssl=ssl_context), timeout=0.1)
 
-    async with client:
-        name = 'Toshio'
-        await client.send(name)
-        logger.error('Have sent.')
+#     async with client:
+#         name = 'Toshio'
+#         await client.send(name)
+#         logger.error('Have sent.')
 
-        response = await asyncio.wait_for(client.recv(), timeout=0.1)
-        assert response == name
+#         response = await asyncio.wait_for(client.recv(), timeout=0.1)
+#         assert response == name
+
+
+# @pytest.mark.asyncio
+# async def test_http2_server_push(app, ssl_context):
+#     uri = f'127.0.0.1:{app.port}'
+#     msg = b'hello'
+#     with HTTPConnection(uri, secure=True, enable_push=True, ssl_context=ssl_context) as conn:
+#         conn.request('post', '/http2', body=msg)
+
+#         for push in conn.get_pushes():  # all pushes promised before response headers
+#             logger.info(push.path)
+
+#         response = conn.get_response()
+#         assert response.read() == msg
+
+#         for push in conn.get_pushes():  # all other pushes
+#             logger.info(push.path)

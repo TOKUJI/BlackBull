@@ -39,14 +39,16 @@ def make_websocket_body(content: Union[str, bytes]):
     return ret
 
 
-async def Response(send, content: Union[str, bytes], status=HTTPStatus.OK,):
+async def Response(send, content: Union[str, bytes], status=HTTPStatus.OK, more_body=False):
     start = make_start(status=status)
     await send(start)
 
     if isinstance(content, str):
         body = make_body(content.encode())
-    else:
+    elif isinstance(content, bytes):
         body = make_body(content)
+    else:
+        raise TypeError(f'Parameter "content" ({type(content)}) is not str nor bytes.')
 
     await send(body)
 

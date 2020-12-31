@@ -32,7 +32,7 @@ class HandlerBase:
 
     async def run(self):
         logger.error('Not implemented.')
-        raise NotImplementedError('HTTP1_1')
+        raise NotImplementedError()
 
 
 class HTTP1_1Handler(HandlerBase):

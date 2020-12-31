@@ -14,7 +14,6 @@ pytest-asyncio = "*"
 daphne = "*"
 httpx = {extras = ["http2"], version = "*"}
 flake8 = "*"
-twisted = {extras = ["http2", "tls"], version = "*"}
 websockets = "*"
 
 [requires]

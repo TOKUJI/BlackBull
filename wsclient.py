@@ -1,9 +1,22 @@
+import logging.config
+import json
+import time
 import asyncio
 import ssl
 import pathlib
 import websockets
-import httpx
 from blackbull.logger import get_logger_set
+# from hyper import HTTPConnection
+
+with open('logging.json', 'r') as stream:
+    config = json.load(stream)
+    config['handlers']['file']['filename'] = 'wsclient.log'
+    config['handlers']['console']['level'] = 'INFO'
+
+logger, log = get_logger_set()
+logging.config.dictConfig(config)
+
+print('====================== Chat Client ======================')
 
 logger, log = get_logger_set()
 
@@ -25,26 +38,30 @@ async def wsclient():
             greeting = await client.recv()
             logger.debug(f"< {greeting}")
 
+        await client.send('Bye')
 
-async def http2client():
-    uri = "https://localhost:8000/http2"
-    async with httpx.AsyncClient(http2=True, verify=False) as client:
 
-        name = 'Toshio'
-        for i in range(10):
-            coro = client.post(uri, data=f'{name}{i}')
-            logger.debug(f"> {name}")
+# async def http2client():
+#     uri = "127.0.0.1:8000"
+#     ssl_context.set_alpn_protocols(['h2'])
 
-            res = await coro
-            logger.debug(f"< {res}")
-            await asyncio.sleep(2)
+#     with HTTPConnection(uri, secure=True, enable_push=True, ssl_context=ssl_context) as conn:
+#         conn.request('post', '/http2', body=b'hello')
+#         time.sleep(1)
 
-        await client.post(uri, data='Bye')
+#         for push in conn.get_pushes():  # all pushes promised before response headers
+#             logger.info(push.path)
+
+#         response = conn.get_response()
+#         logger.info(response.read())
+
+#         for push in conn.get_pushes():  # all other pushes
+#             logger.info(push.path)
 
 
 if __name__ == '__main__':
     asyncio.run(
         # asyncio.wait_for(
-        http2client()
+        wsclient()
         # , timeout=0.5)
     )
