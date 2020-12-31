@@ -9,56 +9,7 @@ from .utils import do_nothing, Scheme, HTTPMethods
 from .router import Router
 from .response import Response
 from .logger import get_logger_set
-logger, log = get_logger_set('BlackBull')
-
-
-def response(headers, body, status=200):
-    ret = {}
-    ret['start'] = {'type': 'http.response.start', 'status': status, 'headers': scope['headers'], }
-    ret['body'] = {'type': 'http.response.body', 'body': ""}
-    ret['disconnect'] = {'type': 'http.disconnect', }
-
-    return ret
-
-
-def make_response_template(scope):
-    ret = {}
-    if scope['type'] == 'http':
-        ret['start'] = {'type': 'http.response.start', 'status': 200, 'headers': scope['headers'], }
-        ret['body'] = {'type': 'http.response.body', 'body': ""}
-        ret['disconnect'] = {'type': 'http.disconnect', }
-
-    return ret
-
-
-@log
-async def scheme(scope, ctx, inner):
-    try:
-        logger.info(scope)
-        ret = make_response_template(scope)
-    except Exception as e:
-        logger.error(e)
-
-    try:
-        response = await inner(scope, ctx)
-        logger.debug(response)
-
-        if type(response) == dict:  # assume the response contains start, body, response.
-            ret = response
-        elif type(response) == bytes:
-            ret['body']['body'] = response
-        elif type(response) == str:
-            ret['body']['body'] = response.encode()
-        else:
-            raise BaseException('Invalid type of response from Application')
-
-    except Exception as e:
-        logger.error(e)
-        logger.error(traceback.extract_tb(sys.exc_info()[2]).format())
-        ret['body']['body'] = str(e)
-        ret['start']['status'] = HTTPStatus.INTERNAL_SERVER_ERROR.value
-
-    return ret
+logger, log = get_logger_set(__name__)
 
 
 class BlackBull:
@@ -69,8 +20,6 @@ class BlackBull:
                  ):
         self._router = router
         self._router.route_404()(self.not_found_fn)
-
-        self.stack = [scheme, ]
 
         self._loop = loop
         self._certfile = None
@@ -93,12 +42,6 @@ class BlackBull:
     def keyfile(self):
         return self._keyfile
 
-    async def use(self, fn):
-        """ fn must require 3 arguments
-        scope, ctx (context) and inner
-        """
-        self.stack.append(fn)
-
     async def __call__(self, scope, receive, send):
         logger.info((scope, receive, send))
 
@@ -119,25 +62,6 @@ class BlackBull:
             await function(scope, receive, send)
         except Exception:
             logger.error(traceback.format_exc())
-        # event = await receive()
-        """
-        -> stack := (func(scope, receive, send), innerfunc(scope, receive, send))
-        stack := (scheme(scope, ctx, inner), funcA(scope, ctx, inner))
-        reduce(lambda a, b: partial(b, inner=a),
-                            reversed(self.stack),
-                            endpoint)
-        <=> partial(scheme, inner=partial(funcA, inner=endpoint)))
-        <=> scheme(scope, ctx, inner=funcA(scope, ctx, inner=endpoint))
-        """
-        # middleware_stack = reduce(lambda a, b: partial(b, inner=a),
-        #                           reversed(self.stack),
-        #                           endpoint)
-
-        # ret = await middleware_stack(scope, receive, send)
-        # logger.debug(f'ASGI app has made the result {ret}')
-        # for k, v in ret.items():
-        #     logger.debug(f'{k}: {v}')
-        #     await send(v)
 
     def route(self, methods=[HTTPMethods.get], path='/', scheme=Scheme.http, functions=[]):
         """
