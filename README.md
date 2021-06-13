@@ -101,11 +101,12 @@ asgi.py runs a web application that demonstrate basic functionalities.
 
 # Todo
 
-These are todo for the developper.
+These are todos for the developper.
 
 1. Client -> Enable Server Push.
 1. Server (HTTP2, HTTP1.1, WebSocket)
 1. Server push -> daphne does not yet support extend features like Server Push.
+1. Static files
 1. Cacheing
 1. Event handling (?)
 1. Asynchronous SQL ORM (Asynchronous support of SQL Alchemy ORM seems to be not sufficient.)

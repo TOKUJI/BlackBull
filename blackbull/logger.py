@@ -1,5 +1,5 @@
 from functools import wraps
-from logging import getLogger, NullHandler, Formatter, DEBUG
+from logging import getLogger, NullHandler, Formatter
 from copy import copy
 from asyncio import iscoroutinefunction
 
@@ -10,6 +10,7 @@ def get_logger_set(name=None):
         logger = getLogger('blackbull').getChild(name)
     else:
         logger = getLogger('blackbull')
+    logger.addHandler(NullHandler())
 
     def _log(fn):
         if iscoroutinefunction(fn):
@@ -28,6 +29,7 @@ def get_logger_set(name=None):
 
     return logger, _log
 
+
 def log(logger):
     def _log(fn):
         if iscoroutinefunction(fn):
@@ -45,17 +47,19 @@ def log(logger):
             return wrapper
     return _log
 
+
 # https://stackoverflow.com/questions/384076/how-can-i-color-python-logging-output
 MAPPING = {
-    'DEBUG'   : 37, # white
-    'INFO'    : 36, # cyan
-    'WARNING' : 33, # yellow
-    'ERROR'   : 31, # red
-    'CRITICAL': 41, # white on red bg
+    'DEBUG'   : 37,  # white
+    'INFO'    : 36,  # cyan
+    'WARNING' : 33,  # yellow
+    'ERROR'   : 31,  # red
+    'CRITICAL': 41,  # white on red bg
 }
 
 PREFIX = '\033['
 SUFFIX = '\033[0m'
+
 
 class ColoredFormatter(Formatter):
 
@@ -65,7 +69,7 @@ class ColoredFormatter(Formatter):
     def format(self, record):
         colored_record = copy(record)
         levelname = colored_record.levelname
-        seq = MAPPING.get(levelname, 37) # default white
+        seq = MAPPING.get(levelname, 37)  # default white
         colored_levelname = ('{0}{1}m{2}{3}').format(PREFIX, seq, levelname, SUFFIX)
 
         colored_record.levelname = colored_levelname
@@ -74,7 +78,7 @@ class ColoredFormatter(Formatter):
 
 if __name__ == '__main__':
     import logging
-    logger = get_logger('test')
+    logger, _log = get_logger_set('test')
     # logging.basicConfig(level=logging.DEBUG)
 
     logger.setLevel(logging.DEBUG)
@@ -91,4 +95,3 @@ if __name__ == '__main__':
     logger.warning('warning')
     logger.error('error')
     logger.critical('critical')
-

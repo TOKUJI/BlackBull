@@ -4,7 +4,7 @@ from urllib.parse import urlparse
 from .utils import pop_safe
 
 
-class Stream(object):
+class Stream:
     def __init__(self, identifier, parent=None, weight=1, window_size=None):
         from collections import deque
         self.parent = parent

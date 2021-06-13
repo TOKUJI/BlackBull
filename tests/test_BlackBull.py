@@ -12,7 +12,7 @@ import pytest
 # Test targets
 from blackbull import BlackBull, Response, WebSocketResponse
 from blackbull.utils import Scheme, HTTPMethods
-from blackbull.middlewares import websocket
+# from blackbull.middlewares import websocket
 
 # Library for tests
 import httpx
@@ -71,7 +71,7 @@ async def app():
     @app.route(path='/websocket1', scheme=Scheme.websocket)
     async def websocket1(scope, receive, send):
         accept = {"type": "websocket.accept", "subprotocol": None}
-        msg = await receive()
+        # msg = await receive()
         await send(accept)
 
         while msg := (await receive()):
@@ -92,7 +92,7 @@ async def app():
             await WebSocketResponse(send, msg)
 
     app.route(path='/websocket2', scheme=Scheme.websocket,
-              functions=[websocket, websocket2])
+              functions=[websocket2])
 
     @app.route(path='/push', methods=[HTTPMethods.post])
     async def server_push(scope, receive, send):
@@ -123,7 +123,7 @@ async def app():
 @pytest.fixture
 async def ssl_context():
     ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-    logger.error(pathlib.Path(__file__))
+    logger.info(pathlib.Path(__file__))
     localhost_pem = pathlib.Path(__file__).with_name("cert.pem")
     ssl_context.load_verify_locations(localhost_pem)
 
@@ -136,7 +136,7 @@ async def ssl_context():
 @pytest.fixture
 async def ssl_h2context():
     ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-    logger.error(pathlib.Path(__file__))
+    logger.info(pathlib.Path(__file__))
     localhost_pem = pathlib.Path(__file__).with_name("cert.pem")
     ssl_context.load_verify_locations(localhost_pem)
     ssl_context.set_alpn_protocols(['h2'])
@@ -147,45 +147,46 @@ async def ssl_h2context():
     pass
 
 
-@pytest.mark.asyncio
-async def test_response_200(app):
-    async with httpx.AsyncClient(http2=True, verify=False) as c:
-        res = await c.get(f'https://localhost:{app.port}/test', headers={'key': 'value'})
-        assert res.status_code == 200
-
-
-@pytest.mark.asyncio
-async def test_response_404_fn(app):
-
-    async with httpx.AsyncClient(http2=True, verify=False) as c:
-        res = await c.get(f'https://localhost:{app.port}/badpath', headers={'key': 'value'})
-
-        assert res.status_code == 404
-        assert res.content == b'not found test.'
-
-
-@pytest.mark.asyncio
-async def test_routing_middleware(app):
-
-    async with httpx.AsyncClient(http2=True, verify=False) as c:
-        res = await c.get(f'https://localhost:{app.port}/test2', headers={'key': 'value'})
-
-        assert res.status_code == 200
-        assert res.content == b'fn3fn2fn1'
+# @pytest.mark.asyncio
+# async def test_response_200(app):
+#     async with httpx.AsyncClient(http2=True, verify=False) as c:
+#         res = await c.get(f'https://localhost:{app.port}/test', headers={'key': 'value'})
+#         assert res.status_code == 200
 
 
 # @pytest.mark.asyncio
-# async def test_websocket_response(app, ssl_context):
-#     uri = f"wss://localhost:{app.port}/websocket"
-#     client = await asyncio.wait_for(websockets.connect(uri, ssl=ssl_context), timeout=0.1)
+# async def test_response_404_fn(app):
 
-#     async with client:
-#         name = 'Toshio'
-#         await client.send(name)
-#         logger.error('Have sent.')
+#     async with httpx.AsyncClient(http2=True, verify=False) as c:
+#         res = await c.get(f'https://localhost:{app.port}/badpath', headers={'key': 'value'})
 
-#         response = await asyncio.wait_for(client.recv(), timeout=0.1)
-#         assert response == name
+#         assert res.status_code == 404
+#         assert res.content == b'not found test.'
+
+
+# @pytest.mark.asyncio
+# async def test_routing_middleware(app):
+
+#     async with httpx.AsyncClient(http2=True, verify=False) as c:
+#         res = await c.get(f'https://localhost:{app.port}/test2', headers={'key': 'value'})
+
+#         assert res.status_code == 200
+#         assert res.content == b'fn3fn2fn1'
+
+
+@pytest.mark.asyncio
+async def test_websocket_response(app, ssl_context):
+    uri = f"wss://localhost:{app.port}/websocket1"
+
+    async with websockets.connect(uri, ssl=ssl_context) as client:
+        logger.debug('Websocket has been connected.')
+
+        name = 'Toshio'
+        await asyncio.wait_for(client.send(name), timeout=0.1)
+        logger.info('Have sent.')
+
+        response = await asyncio.wait_for(client.recv(), timeout=0.1)
+        assert response == name
 
 
 # @pytest.mark.asyncio

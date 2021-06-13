@@ -9,6 +9,7 @@ from .utils import do_nothing, Scheme, HTTPMethods
 from .router import Router
 from .response import Response
 from .logger import get_logger_set
+from .watch import Watcher, force_reload
 logger, log = get_logger_set(__name__)
 
 
@@ -16,7 +17,8 @@ class BlackBull:
     def __init__(self,
                  router=Router(),
                  loop=None,
-
+                 logger=logger,
+                 log=log,
                  ):
         self._router = router
         self._router.route_404()(self.not_found_fn)
@@ -65,8 +67,9 @@ class BlackBull:
 
     def route(self, methods=[HTTPMethods.get], path='/', scheme=Scheme.http, functions=[]):
         """
-        Set endpoint function here.
-        The endpoint function should have 2 input variable
+        Set endpoint functions here.
+        methods: HTTP method of functions.
+        functions: functions that will be registered in the router.
         """
         return self._router.route(
             methods=methods,
@@ -103,10 +106,9 @@ class BlackBull:
                 )
 
         if debug:
-            from .watch import Watcher, force_reload
             watcher = Watcher(loop=self.loop)
-            watcher.add_watch(sys.argv[0], force_reload(sys.argv[0]))
-            watcher.add_watch('blackbull', force_reload(sys.argv[0]))
+            watcher.add_watch(sys.argv[0], self.reload)
+            watcher.add_watch('blackbull', self.reload)
             tasks.append(watcher.watch())
 
         tasks.append(self.server.run(port=port))
@@ -119,6 +121,10 @@ class BlackBull:
 
         except BaseException:
             logger.error(traceback.format_exc())
+
+    def reload(self):
+        self.stop()
+        force_reload(sys.argv[0])
 
     def stop(self):
         self.server.close()

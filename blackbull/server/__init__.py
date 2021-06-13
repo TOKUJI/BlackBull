@@ -1,1 +1,1 @@
-from .server import ASGIServer, HTTP2Handler
+from .server import ASGIServer

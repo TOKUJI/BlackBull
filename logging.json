@@ -11,13 +11,13 @@
         }
     },
     "handlers":{
-           "console": {
-               "class": "logging.StreamHandler",
-               "formatter": "brief",
-               "level": "WARNING"
-           },
+        "console": {
+            "class": "logging.StreamHandler",
+            "formatter": "brief",
+            "level": "WARNING"
+        },
         "file": {
-               "class": "logging.FileHandler",
+            "class": "logging.FileHandler",
             "formatter": "precise",
             "filename": "asgi.log",
             "mode": "w",

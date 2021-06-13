@@ -43,10 +43,12 @@ async def jsonapi(scope, receive, send):
 
 async def websocket_sample(scope, receive, send):
     while msg := (await receive()):
+        logger.debug(msg)
+        logger.debug(scope)
         await WebSocketResponse(send, msg)
 
 app.route(path="/websocket", scheme=Scheme.websocket,
-          functions=[websocket, websocket_sample])
+          functions=[websocket_sample])
 
 
 @app.route(methods=[HTTPMethods.post], path='/login')

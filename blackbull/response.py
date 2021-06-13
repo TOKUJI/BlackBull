@@ -40,8 +40,11 @@ def make_websocket_body(content: Union[str, bytes]):
 
 
 async def Response(send, content: Union[str, bytes], status=HTTPStatus.OK, more_body=False):
+    logger.debug(content)
     start = make_start(status=status)
+    logger.debug(content)
     await send(start)
+    logger.info('Starting packet has been sent.')
 
     if isinstance(content, str):
         body = make_body(content.encode())
@@ -51,6 +54,7 @@ async def Response(send, content: Union[str, bytes], status=HTTPStatus.OK, more_
         raise TypeError(f'Parameter "content" ({type(content)}) is not str nor bytes.')
 
     await send(body)
+    logger.info('Body packet has been sent.')
 
 
 async def JSONResponse(send, content, status=HTTPStatus.OK):

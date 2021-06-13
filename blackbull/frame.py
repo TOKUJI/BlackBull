@@ -24,7 +24,7 @@ class FrameTypes(Enum):
     COTINUATION = b'\x09'
 
 
-class FrameFactory(object):
+class FrameFactory:
     """docstring for FrameFactory"""
     def __init__(self):
         super().__init__()
@@ -34,12 +34,14 @@ class FrameFactory(object):
     def create(self, type_, flags, stream_id, *, data=b'', **kwds):
         logger.info(f'type:{type_}, flags:{flags}, id:{stream_id}')
 
-        frame = self._factory[type_](len(data),
-                                     type_.value,
-                                     flags if type(flags) is int else flags.value,
-                                     stream_id,
-                                     data=data,
-                                     decoder=self.decoder,)
+        frame = self._factory[type_](
+            len(data),
+            type_.value,
+            flags if type(flags) is int else flags.value,
+            stream_id,
+            data=data,
+            decoder=self.decoder,
+            )
         return frame
 
     def load(self, data):
@@ -280,6 +282,12 @@ class Headers(FrameBase, dict):
     @staticmethod
     def FrameType():
         return FrameTypes.HEADERS
+
+    def __repr__(self):
+        head = [super(Headers, self).__repr__(), ]
+        head += [f'{k}: {v}' for k, v in self.items()]
+
+        return ', '.join(head)
 
 
 class GoAway(FrameBase):

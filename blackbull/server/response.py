@@ -5,7 +5,7 @@ from ..stream import Stream
 from ..frame import FrameTypes
 from ..logger import get_logger_set, log
 
-logger, _ = get_logger_set('server.server')
+logger, _ = get_logger_set(__name__)
 
 
 class RespondFactory:
@@ -97,75 +97,6 @@ class Respond2Priority(RespondBase):
     @staticmethod
     def FrameType():
         return FrameTypes.PRIORITY
-
-
-class Respond2Header(RespondBase):
-    async def respond(self, handler):
-        """
-        Opens a stream if the stream_id is not in the dict of stream.
-        Appends the payload of the header to the current scope object.
-        If the header frame indicates the end of stream, run the operating
-        function, get the result and then send it to the client.
-        """
-        stream_id = self.frame.stream_id  # to be shorten the description
-        stream = handler.root_stream.find_child(stream_id)
-
-        if not stream:
-            # If stream is not found, that means a request has a stream that must be added.
-            stream = handler.root_stream.find_child(self.frame.stream_dependency).add_child(stream_id)
-            stream.weight = self.frame.priority_weight
-
-        stream.update_scope(headers=self.frame)
-
-        if self.frame.end_stream:
-            async def receive():
-                return {'type': 'http.request', 'body': b'', 'more_body': False}
-            send = handler.make_sender(stream_id)
-
-            try:
-                await handler.app(stream.scope, receive, send)
-            except BaseException:
-                logger.error(traceback.format_exc())
-                logger.error(stream.scope)
-
-            # await fn(receive, handler.make_sender(stream_id))
-            stream.frame = None
-
-    @staticmethod
-    def FrameType():
-        return FrameTypes.HEADERS
-
-
-class Respond2Data(RespondBase):
-
-    @log(logger)
-    async def respond(self, handler):
-        """
-        To parse the payload of a DATA frame, scope['content-type'] is required.
-        If the frame indicates the end of stream, run the operating
-        function, get the result and respond it to the client.
-        """
-        logger.debug(self.frame)
-        stream_id = self.frame.stream_id  # to be shorten the description
-        stream = handler.find_stream(stream_id)  # to be shorten the description
-
-        stream.update_event(data=self.frame)
-
-        logger.debug(f'is this frame the end of stream? {self.frame.end_stream}')
-
-        if self.frame.end_stream:
-            fn = handler.app(stream.scope)
-            logger.debug(fn)
-
-            async def receive():
-                return stream.event
-
-            await fn(receive, handler.make_sender(stream_id))
-            stream.event = None
-
-    @staticmethod
-    def FrameType():
-        return FrameTypes.DATA
 
 
 class Respond2RstStream(RespondBase):

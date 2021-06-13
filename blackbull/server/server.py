@@ -1,7 +1,11 @@
 import asyncio
 import ssl
-from collections import defaultdict, deque
 import traceback
+import re
+from collections import defaultdict, deque
+from urllib.parse import urlparse
+from hashlib import sha1
+from base64 import b64encode
 
 # private library
 from ..utils import HTTP2, pop_safe, EventEmitter, check_port
@@ -10,12 +14,71 @@ from ..rsock import create_socket
 from ..frame import FrameFactory, FrameTypes, FrameBase, HeadersFlags, DataFlags, SettingFlags
 from ..logger import get_logger_set
 from .response import RespondFactory
-logger, log = get_logger_set('server')
+from .parser import ParserFactory
+logger, log = get_logger_set(__name__)
 
 
-class HandlerBase:
+def parse(request):
+    """
+    Parse received request and make ASGI scope object.
+    """
+    lines = request.decode('utf-8').split('\r\n')
+
+    method, path, version = lines[0].split(' ')
+
+    mapping = {}
+    for line in lines[1:]:
+        if m := re.match(r'(.*?): (.*)', line):
+            mapping[m[1]] = m[2]
+
+    logger.info(mapping)
+
+    scope = {
+        'type': 'http',
+        'http_version': re.sub(r'HTTP/(.*)', r'\1', version),
+        'method': method,
+        'path': path,
+        'scheme': 'http',
+        'headers': [
+            # (b'host', mapping['Host'].encode()),
+            # (b'accept', b'*/*'),
+            # (b'accept-encoding', b'gzip, deflate'),
+            # (b'connection', b'keep-alive'),
+            # (b'user-agent', b'python-httpx/0.16.1'),
+            # (b'key', b'value')
+            ],
+        'asgi': {'version': '3.0'}
+    }
+
+    if 'Host' in mapping:
+        host, port = mapping['Host'].split(':')
+        port = int(port)
+        scope['server'] = [host, port]
+
+    if 'Upgrade' in mapping:
+        scope['type'] = mapping['Upgrade']
+        if scope['type'] == 'websocket':
+            scope['scheme'] = 'ws'
+
+    if 'Connection' in mapping:
+        scope['scheme'] = mapping['Connection']
+
+    for line in lines[1:]:
+        scope['headers'].append(
+            tuple(x.encode() for x in line.split(': '))
+            )
+
+    return scope
+
+
+class HTTPServerBase:
+    """
+    The common roles of HTTPServers are
+    * Parsing received binary
+    * Wrapping sending binary
+    """
     def __init__(self, app, reader, writer, *args, **kwargs):
-        """docstring for HandlerBase
+        """docstring for HTTPServerBase
         Parameters
         ----------
         app:
@@ -30,66 +93,140 @@ class HandlerBase:
         self.reader = reader
         self.writer = writer
 
+    def parse(self, data):
+        """
+        Parse data and make a frame.
+        or
+        Parse received request and make ASGI scope object.
+
+        which is consistent for this application?
+
+        """
+        logger.error('Not implemented.')
+        raise NotImplementedError()
+
     async def run(self):
         logger.error('Not implemented.')
         raise NotImplementedError()
 
 
-class HTTP1_1Handler(HandlerBase):
+class WebsocketHandler(HTTPServerBase):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if len(args) > 3:
+            self.scope = args[-1]
+            logger.debug(self.scope)
+
+    async def run(self):
+        logger.warning('Under construction.')
+        key = [x[1] for x in self.scope['headers'] if x[0] == b'Sec-WebSocket-Key'][0]
+        logger.debug(key)
+        accept = b64encode(sha1(key + b'258EAFA5-E914-47DA-95CA-C5AB0DC85B11').digest())
+        logger.debug(accept)
+
+        reply = '\r\n'.join(['HTTP/1.1 101 Switching Protocols',
+                             'Upgrade: websocket',
+                             'Connection: Upgrade',
+                             f'Sec-WebSocket-Accept: {accept.decode("ascii")}',
+                             ]) \
+                + '\r\n\r\n'
+
+        await self.send(reply.encode())
+        logger.debug(reply.encode())
+        # Shake hands ends
+
+        scope = {'type': 'websocket.connect'}
+        self.app(scope, self.receive, self.send)
+
+    async def receive(self):
+        return self.reader.readuntil(b'\r\n\r\n')
+
+    async def send(self, x):
+        return self.writer.write(x)
+
+
+class HTTP1_1Handler(HTTPServerBase):
     def __init__(self, app, reader, writer, request, *args, **kwargs):
         super().__init__(app, reader, writer, *args, **kwargs)
         self.request = request
+        logger.info(self.request)
 
     def has_request(self):
-        logger.info(self.request)
         return self.request is not None
 
     async def run(self):
+        self.request += await self.reader.readuntil(b'\r\n\r\n')
 
-        while self.has_request():
-            scope = self.parse()
-            receive = self.make_recepient()
-            send = self.make_sender()
-            await self.app(scope, receive, send)
+        scope = self.parse()
+        logger.info(scope)
 
-            self.request = await self.reader.read()
+        receive = self.make_recepient()
+        send = self.make_sender()
+        await self.app(scope, receive, send)
 
     def parse(self):
         """
         Parse received request and make ASGI scope object.
         """
+        lines = self.request.decode('utf-8').split('\r\n')
+
+        method, path, version = lines[0].split(' ')
+
+        mapping = {}
+        for line in lines[1:]:
+            if m := re.match(r'(.*?): (.*)', line):
+                mapping[m[1]] = m[2]
+
+        logger.info(mapping)
+
         scope = {
             'type': 'http',
-            'http_version': '1.1',
-            'method': 'GET',
-            'path': '/json',
-            'raw_path': b'/json',
-            'root_path': '',
-            'scheme': 'https',
-            'query_string': b'',
+            'http_version': re.sub(r'HTTP/(.*)', r'\1', version),
+            'method': method,
+            'path': path,
+            'scheme': 'http',
             'headers': [
-                (b'host', b'localhost:8000'),
-                (b'accept', b'*/*'),
-                (b'accept-encoding', b'gzip, deflate'),
-                (b'connection', b'keep-alive'),
-                (b'user-agent', b'python-httpx/0.16.1'),
-                (b'key', b'value')
+                # (b'host', mapping['Host'].encode()),
+                # (b'accept', b'*/*'),
+                # (b'accept-encoding', b'gzip, deflate'),
+                # (b'connection', b'keep-alive'),
+                # (b'user-agent', b'python-httpx/0.16.1'),
+                # (b'key', b'value')
                 ],
-            'client': ['127.0.0.1', 37412],
-            'server': ['127.0.0.1', 8000],
             'asgi': {'version': '3.0'}
         }
-        lines = self.request.split(b'\r\n')
-        logger.info(lines)
+
+        if 'Host' in mapping:
+            host, port = mapping['Host'].split(':')
+            port = int(port)
+            scope['server'] = [host, port]
+
+        if 'Upgrade' in mapping:
+            scope['type'] = mapping['Upgrade']
+            if scope['type'] == 'websocket':
+                scope['scheme'] = 'ws'
+
+        if 'Connection' in mapping:
+            scope['scheme'] = mapping['Connection']
+
+        return scope
 
     def make_recepient(self):
-        pass
+
+        async def receive():
+            return await self.reader.readuntil(b'\r\n\r\n')
+        return receive
 
     def make_sender(self):
-        pass
+        async def send(x):
+            logger.debug(x)
+            await self.writer.write(x)
+        return send
 
 
-class HTTP2Handler(HandlerBase):
+class HTTP2Server(HTTPServerBase):
+    """An ASGI Server class.
+    """
     def __init__(self, app, reader, writer):
         super().__init__(app, reader, writer)
         self.client_stream_window_size = {}
@@ -102,36 +239,8 @@ class HTTP2Handler(HandlerBase):
         else:
             return self.root_stream.find_child(id_)
 
-    async def send_frame(self, frame: FrameBase):
-        """Send a frame to the recipient."""
-        logger.debug('sending {}'.format(frame))
-        self.writer.write(frame.save())
-        await self.writer.drain()
-
-    async def parse_stream(self):
-        """Read the stream, get some data of the incoming frame, and parse it"""
-
-        # to distinguish the type of incoming frame
-        data = await self.reader.read(9)
-        if len(data) == 0:
-            logger.info('StreamReader got EOF')
-            return
-
-        logger.debug(f'parse_stream(): {data}')
-
-        size = int.from_bytes(data[:3], 'big', signed=False)
-        data += await self.reader.read(size)  # Add error handling for the case of insufficient data
-
-        frame = self.factory.load(data)
-        return frame
-
-    def make_header(self):
-        """ Make or update the header by the scope. """
-        pass
-
     def make_sender(self, stream_identifier):
         async def send(data):
-            nonlocal stream_identifier
             logger.debug(data)
             if data['type'] == 'http.response.start':
                 frame = self.factory.create(FrameTypes.HEADERS,
@@ -149,23 +258,34 @@ class HTTP2Handler(HandlerBase):
 
             else:
                 logger.info(data)
-                return
+
             self.writer.write(frame.save())
 
         return send
 
-    async def handle_frame(self, frame):
-        if frame.FrameType() in (FrameTypes.HEADERS, FrameTypes.DATA):
-            await RespondFactory.create(frame).respond(self)
+    async def send_frame(self, frame: FrameBase):
+        """Send a frame to the recipient."""
+        logger.debug(f'Sending {frame}')
+        self.writer.write(frame.save())
+        await self.writer.drain()
 
-        elif frame.FrameType() in (FrameTypes.PING, FrameTypes.WINDOW_UPDATE, FrameTypes.SETTINGS, FrameTypes.PRIORITY):
-            await RespondFactory.create(frame).respond(self)
+    async def receive(self) -> bytes:
+        """Read the stream, get some data from incoming frames, and parse it"""
+        # to distinguish the type of incoming frame
+        if (data := await self.reader.read(9)) == 0:
+            logger.info('StreamReader got EOF')
+            return
 
-        elif frame.FrameType() in (FrameTypes.RST_STREAM,):
-            await RespondFactory.create(frame).respond(self)
+        size = int.from_bytes(data[:3], 'big', signed=False)
+        data += await self.reader.read(size)  # Add error handling for the case of insufficient data
 
-        else:
-            logger.warn(f'something wrong happend while handling this frame: {frame}')
+        return data
+
+    def parse(self, data):
+        # Todo: should use this function in run() method.
+        pass
+        # frame = self.factory.load(data)
+        # return frame
 
     def is_connect(self, frame):
         if not frame or frame.FrameType() == FrameTypes.GOAWAY:
@@ -175,20 +295,33 @@ class HTTP2Handler(HandlerBase):
     async def run(self):
         # Send the settings at first.
         my_settings = self.factory.create(FrameTypes.SETTINGS, SettingFlags.INIT, 0)
+        await self.send_frame(my_settings)
+        logger.info(my_settings)
 
-        # Then, parse and handle frames in this do-while loop
-        frame = await self.parse_stream()
+        # Then, parse and handle frames in this loop.
+        while data := await self.receive():
 
-        while self.is_connect(frame):
-            await self.handle_frame(frame)
-            frame = await self.parse_stream()
+            frame = self.factory.load(data)
+            self.root_stream.add_child(frame.stream_id)
+            if (stream := self.root_stream.find_child(frame.stream_id)) is None:
+                logger.error(f'Stream {frame.stream_id} is not found.')
+                raise Exception('Unused stream identifier')
+            send = self.make_sender(stream.identifier)
+
+            if frame.FrameType() in (FrameTypes.HEADERS, FrameTypes.DATA):
+                # As HEADERS and DATA frames should be parsed,
+                scope = ParserFactory.Get(frame, stream).parse()
+                await self.app(scope, self.receive, send)
+
+            else:
+                await RespondFactory.create(frame).respond(self)
 
 
 class ASGIServer:
-    """An ASGI Server class. When ssl_context or certfile is set,
-    this server runs as a HTTPS server.
+    """ An asyncio socket server with which reads first several bytes and dispatches
+    transactions to HTTP2/HTTP1.1/WebSocket server.
+    When ssl_context or certfile is set, this server runs as a HTTPS server.
     """
-
     def __init__(self, app, *,
                  ssl_context=None, certfile=None, keyfile=None, password=None, **kwds):
         self.app = app
@@ -224,7 +357,7 @@ class ASGIServer:
             return
 
         context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
-        context.set_alpn_protocols(['HTTP/1.1', 'h2'])  # to enable HTTP/2, add 'h2'
+        context.set_alpn_protocols(['HTTP/1.1', 'h2'])
         context.load_cert_chain(certfile=self.certfile, keyfile=self.keyfile)
         context.options |= ssl.OP_NO_TLSv1 | ssl.OP_NO_TLSv1_1
         context.options |= ssl.OP_NO_COMPRESSION
@@ -240,26 +373,35 @@ class ASGIServer:
         """
         request_data = await reader.readline()
 
-        if request_data == HTTP2[:-8]:
-            request_data += await reader.read(8)
-
-            if request_data == HTTP2:
-                logger.info('HTTP/2 connection is requested.')
-                handler = HTTP2Handler(self.app, reader, writer)
-            else:
-                raise ValueError(f'Received an invalid request ({request_data}).')
-
-        else:
-            logger.info('HTTP1.1 connection is requested.')
-            request_data += await reader.read()
-            handler = HTTP1_1Handler(self.app, reader, writer, request_data)
-
         try:
+            if request_data == HTTP2[:-8]:
+                request_data += await reader.read(8)
+
+                if request_data == HTTP2:
+                    logger.info('HTTP/2 connection is requested.')
+                    handler = HTTP2Server(self.app, reader, writer)
+                else:
+                    raise ValueError(f'Received an invalid request ({request_data}).')
+
+            else:
+                logger.info('HTTP1.1 connection is requested.')
+                request_data += await reader.readuntil(b'\r\n\r\n')
+                scope = parse(request_data)
+
+                # Check if the connection is to use websocket.
+                if scope['type'] == 'websocket':
+                    handler = WebsocketHandler(self.app, reader, writer, scope)
+
+                else:
+                    handler = HTTP1_1Handler(self.app, reader, writer, scope)
+
             await handler.run()
+
         except Exception:
             logger.error(traceback.format_exc())
 
-        writer.close()
+        finally:
+            writer.close()
 
     def open_socket(self, port=0):
         if not check_port(port=port):
@@ -285,12 +427,12 @@ class ASGIServer:
     async def run(self, port=80):
         if self.socket is None:
             self.open_socket(port)
-        """Run an asyncio server with the setting in this object."""
-        self.server = await asyncio.start_server(self.client_connected_cb, sock=self.socket)
-        logger.info(f'Server ({self.server}) has been created.')
+        """Run an asyncio socket server with the setting in this object."""
+        socket_server = await asyncio.start_server(self.client_connected_cb, sock=self.socket)
+        logger.info(f'Server ({socket_server}) has been created.')
 
         try:
-            await self.server.serve_forever()
+            await socket_server.serve_forever()
 
         except KeyboardInterrupt:
             logger.info('KeyboardInterrupt is caught.')
@@ -302,6 +444,7 @@ class ASGIServer:
             logger.error(traceback.format_exc())
 
         finally:
+            self.close()
             logger.info('Server has been stopped.')
 
     def close(self):
