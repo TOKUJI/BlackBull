@@ -2,7 +2,11 @@ import time
 import asyncio
 import pytest
 import concurrent.futures
-
+import sys
+import socket
+import time
+import subprocess
+import pathlib
 from blackbull.frame import FrameFactory, FrameTypes
 from blackbull.logger import get_logger_set
 logger, log = get_logger_set()
@@ -10,13 +14,24 @@ logger, log = get_logger_set()
 # Test targets
 from blackbull.client import Client
 from blackbull.utils import EventEmitter
+cwd = pathlib.Path(__file__).parent
 
-
-@pytest.fixture(scope="session", autouse=False)
+@pytest.fixture(scope="session")
 def server():
-    from subprocess import Popen
-    process = Popen(['python', 'main.py'])
-    time.sleep(2)
+    process = subprocess.Popen(['python3', 'main.py'],
+                               cwd=cwd / '..')
+
+    timeout = 10
+    start = time.time()
+    while True:
+        try:
+            with socket.create_connection(('localhost', 8000), timeout=1):
+                break
+        except (ConnectionRefusedError, OSError):
+            if time.time() - start > timeout:
+                process.terminate()
+                raise RuntimeError("Server did not start within timeout")
+            time.sleep(0.1)
 
     yield process
 

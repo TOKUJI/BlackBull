@@ -7,6 +7,7 @@ from blackbull.logger import get_logger_set
 # from multiprocessing import Process
 import asyncio
 import pytest
+import pytest_asyncio
 
 # Test targets
 from blackbull import Response, JSONResponse, WebSocketResponse
@@ -29,7 +30,7 @@ class Dummy:
         self.data = data
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def send():
     logger.info('At teardown.')
 
