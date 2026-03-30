@@ -7,6 +7,7 @@ from BlackBull import BlackBull
 from BlackBull.BlackBull import make_response_template
 from BlackBull.utils import parse_post_data
 from BlackBull.logger import get_logger_set, ColoredFormatter, log
+
 logger = logging.getLogger()
 
 
@@ -17,7 +18,6 @@ from render import render_login_page, render_dummy_page, render_table_page, rend
 
 
 def logger_config(logger):
-    import logging
     logger.setLevel(logging.DEBUG)
 
     handler = logging.StreamHandler()
