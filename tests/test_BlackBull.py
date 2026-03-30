@@ -8,6 +8,7 @@ from blackbull.logger import get_logger_set
 from multiprocessing import Process
 import asyncio
 import pytest
+import pytest_asyncio
 
 # Test targets
 from blackbull import BlackBull, Response, WebSocketResponse
@@ -28,8 +29,8 @@ def run_application(app):
     loop.run_until_complete(task)
 
 
-@pytest.fixture
-async def app():
+@pytest_asyncio.fixture
+async def app(manage_cert_and_key):
     # run before the test
     logger.info('At set-up.')
     app = BlackBull()
@@ -120,7 +121,7 @@ async def app():
     p.terminate()
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def ssl_context():
     ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     logger.info(pathlib.Path(__file__))
@@ -133,7 +134,7 @@ async def ssl_context():
     pass
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def ssl_h2context():
     ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     logger.info(pathlib.Path(__file__))

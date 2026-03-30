@@ -6,6 +6,7 @@ from collections import defaultdict, deque
 from urllib.parse import urlparse
 from hashlib import sha1
 from base64 import b64encode
+from pathlib import Path
 
 # private library
 from ..utils import HTTP2, pop_safe, EventEmitter, check_port
@@ -334,14 +335,18 @@ class ASGIServer:
         self.keyfile = keyfile
         self.certfile = certfile
 
+
     @property
     def keyfile(self):
         return self._keyfile if hasattr(self, '_keyfile') else None
 
     @keyfile.setter
     def keyfile(self, value):
+        if value and not Path(value).is_file():
+            raise FileNotFoundError(f'keyfile not found: {value}')
         self._keyfile = value
         self.make_ssl_context()
+
 
     @property
     def certfile(self):
@@ -349,12 +354,15 @@ class ASGIServer:
 
     @certfile.setter
     def certfile(self, value):
+        if value and not Path(value).is_file():
+            raise FileNotFoundError(f'certfile not found: {value}')
         self._certfile = value
         self.make_ssl_context()
 
+
     def make_ssl_context(self):
         if not self.certfile or not self.keyfile:
-            return
+            raise ValueError("Both certfile and keyfile must be set to create an SSL context.")
 
         context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
         context.set_alpn_protocols(['HTTP/1.1', 'h2'])
@@ -406,7 +414,7 @@ class ASGIServer:
     def open_socket(self, port=0):
         if not check_port(port=port):
             logger.error(f'Port ({port}) is not available. Try another port.')
-            return
+            raise RuntimeError(f'Port ({port}) is not available. Try another port.')
 
         self.raw_socket = create_socket(('::1', port))
 
