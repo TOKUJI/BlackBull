@@ -70,6 +70,11 @@ def create_dual_stack_sockets(port):
     one — is the most portable way to accept both IPv4 and IPv6 connections
     on all major platforms (Linux, macOS, Windows).
 
+    When *port* is 0 (let the OS pick a free port), the IPv4 socket is bound
+    first to obtain the assigned port number, then the IPv6 socket is bound to
+    that **same** port.  This guarantees both sockets share a single port,
+    which is what callers expect.
+
     Returns a list that contains whichever sockets were successfully bound
     (typically two, but may be one if the platform lacks IPv6 support).
     """
@@ -78,6 +83,9 @@ def create_dual_stack_sockets(port):
     ipv4_sock = _bind_socket(socket.AF_INET, '0.0.0.0', port)
     if ipv4_sock is not None:
         sockets.append(ipv4_sock)
+        if port == 0:
+            # Learn the port the OS assigned so IPv6 uses the same one.
+            port = ipv4_sock.getsockname()[1]
 
     ipv6_sock = _bind_socket(socket.AF_INET6, '::', port)
     if ipv6_sock is not None:

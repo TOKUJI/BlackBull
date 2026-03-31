@@ -73,7 +73,14 @@ async def JSONResponse(send, content, status=HTTPStatus.OK):
 
 async def WebSocketResponse(send, content, status=HTTPStatus.OK):
     try:
-        body = make_websocket_body(json.dumps(content))
+        # If content is already a str or bytes, pass it through directly so it
+        # arrives at the client unmodified.  Only serialize dicts / other objects
+        # to JSON — wrapping a plain string in json.dumps() would add an extra
+        # layer of quoting (e.g. 'Toshio' → '"Toshio"').
+        if isinstance(content, (str, bytes)):
+            body = make_websocket_body(content)
+        else:
+            body = make_websocket_body(json.dumps(content))
         logger.debug(body)
 
     except BaseException as e:

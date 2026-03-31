@@ -30,7 +30,14 @@ class BlackBull:
     @property
     def loop(self):
         if self._loop is None:
-            self._loop = asyncio.get_running_loop()
+            try:
+                self._loop = asyncio.get_running_loop()
+            except RuntimeError:
+                # No event loop is running yet (e.g. called from synchronous
+                # setup code).  Return None so callers that don't need the
+                # loop won't crash; asyncio will provide the loop later when
+                # the coroutines actually run.
+                return None
         return self._loop
 
     async def not_found_fn(self, scope, receive, send, inner=do_nothing):

@@ -114,38 +114,169 @@ class HTTPServerBase:
 
 
 class WebsocketHandler(HTTPServerBase):
+    """Server-side WebSocket handler.
+
+    Responsibilities
+    ----------------
+    1. Complete the HTTP→WebSocket upgrade handshake (RFC 6455 §4.2.2).
+    2. Expose an ASGI-compatible ``receive`` coroutine that reads raw WebSocket
+       frames from the TCP stream and returns ASGI event dicts.
+    3. Expose an ASGI-compatible ``send`` coroutine that accepts ASGI event
+       dicts and writes the corresponding WebSocket frames to the TCP stream.
+    4. Call the application coroutine with the original HTTP-upgrade scope
+       (type='websocket', path=...) so the router can dispatch to the correct
+       handler.
+    """
+
+    # ------------------------------------------------------------------ #
+    # WebSocket frame helpers (RFC 6455 §5)                               #
+    # ------------------------------------------------------------------ #
+
+    @staticmethod
+    def _encode_frame(payload: bytes, opcode: int = 0x1) -> bytes:
+        """Encode *payload* as an unmasked WebSocket data frame.
+
+        ``opcode`` defaults to 0x1 (text); pass 0x2 for binary.
+        The server MUST NOT mask frames it sends to the client (RFC 6455 §5.1).
+        """
+        length = len(payload)
+        # FIN=1, RSV=0, opcode in low nibble of first byte
+        header = bytes([0x80 | opcode])
+        if length < 126:
+            header += bytes([length])
+        elif length < 65536:
+            header += bytes([126]) + length.to_bytes(2, 'big')
+        else:
+            header += bytes([127]) + length.to_bytes(8, 'big')
+        return header + payload
+
+    @staticmethod
+    async def _read_frame(reader) -> tuple[int, bytes]:
+        """Read one WebSocket frame from *reader*.
+
+        Returns ``(opcode, payload)`` where *payload* is already unmasked.
+        Raises ``ConnectionError`` on EOF.
+        """
+        header = await reader.readexactly(2)
+        # byte 0: FIN | RSV | opcode
+        opcode = header[0] & 0x0F
+        # byte 1: MASK | payload-length
+        masked = bool(header[1] & 0x80)
+        length = header[1] & 0x7F
+
+        if length == 126:
+            length = int.from_bytes(await reader.readexactly(2), 'big')
+        elif length == 127:
+            length = int.from_bytes(await reader.readexactly(8), 'big')
+
+        if masked:
+            mask = await reader.readexactly(4)
+            raw = await reader.readexactly(length)
+            payload = bytes(b ^ mask[i % 4] for i, b in enumerate(raw))
+        else:
+            payload = await reader.readexactly(length)
+
+        return opcode, payload
+
+    # ------------------------------------------------------------------ #
+    # Constructor                                                          #
+    # ------------------------------------------------------------------ #
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        # args: (app, reader, writer, scope)
         if len(args) > 3:
             self.scope = args[-1]
             logger.debug(self.scope)
 
-    async def run(self):
-        logger.warning('Under construction.')
-        key = [x[1] for x in self.scope['headers'] if x[0] == b'Sec-WebSocket-Key'][0]
-        logger.debug(key)
-        accept = b64encode(sha1(key + b'258EAFA5-E914-47DA-95CA-C5AB0DC85B11').digest())
-        logger.debug(accept)
-
-        reply = '\r\n'.join(['HTTP/1.1 101 Switching Protocols',
-                             'Upgrade: websocket',
-                             'Connection: Upgrade',
-                             f'Sec-WebSocket-Accept: {accept.decode("ascii")}',
-                             ]) \
-                + '\r\n\r\n'
-
-        await self.send(reply.encode())
-        logger.debug(reply.encode())
-        # Shake hands ends
-
-        scope = {'type': 'websocket.connect'}
-        self.app(scope, self.receive, self.send)
+    # ------------------------------------------------------------------ #
+    # ASGI interface                                                       #
+    # ------------------------------------------------------------------ #
 
     async def receive(self):
-        return self.reader.readuntil(b'\r\n\r\n')
+        """Read one WebSocket frame and return an ASGI ``websocket.receive`` dict.
 
-    async def send(self, x):
-        return self.writer.write(x)
+        Bug 4 fixed: the old implementation returned a *coroutine object*
+        instead of awaiting it, and used HTTP line-delimited reading which
+        is completely wrong for the WebSocket binary framing protocol.
+        """
+        opcode, payload = await self._read_frame(self.reader)
+
+        if opcode in (0x1, 0x9):     # text frame or ping
+            return {'type': 'websocket.receive', 'text': payload.decode('utf-8'), 'bytes': None}
+        elif opcode == 0x2:           # binary frame
+            return {'type': 'websocket.receive', 'text': None, 'bytes': payload}
+        elif opcode == 0x8:           # close frame
+            return {'type': 'websocket.disconnect', 'code': 1000}
+        else:
+            logger.warning('Unsupported WebSocket opcode: 0x%02x', opcode)
+            return {'type': 'websocket.receive', 'text': None, 'bytes': payload}
+
+    async def send(self, event: dict):
+        """Accept an ASGI event dict and write the corresponding WebSocket frame.
+
+        Bug 5 fixed: the old implementation passed the raw dict to
+        ``writer.write()``, which expects *bytes*, not a dict.
+        """
+        event_type = event.get('type', '')
+
+        if event_type == 'websocket.send':
+            if 'text' in event and event['text'] is not None:
+                frame = self._encode_frame(event['text'].encode('utf-8'), opcode=0x1)
+            else:
+                frame = self._encode_frame(event.get('bytes', b''), opcode=0x2)
+            self.writer.write(frame)
+            await self.writer.drain()
+
+        elif event_type == 'websocket.close':
+            # Send a close frame (opcode 0x8) with optional status code 1000
+            frame = self._encode_frame(b'\x03\xe8', opcode=0x8)
+            self.writer.write(frame)
+            await self.writer.drain()
+
+        elif event_type == 'websocket.accept':
+            # The handshake reply is sent in run(); nothing more needed here.
+            pass
+
+        else:
+            logger.warning('WebsocketHandler.send: unknown event type %r', event_type)
+
+    # ------------------------------------------------------------------ #
+    # Lifecycle                                                            #
+    # ------------------------------------------------------------------ #
+
+    async def run(self):
+        """Complete the upgrade handshake then call the ASGI application.
+
+        Bug 3 fixed: the old code called ``self.app(...)`` without ``await``,
+        creating a coroutine object that was immediately discarded.
+
+        Bug 6 fixed: the old code replaced the scope with
+        ``{'type': 'websocket.connect'}`` which lacks ``path``, making the
+        router unable to dispatch to the correct handler.  The original
+        HTTP-upgrade scope (already containing ``type='websocket'`` and
+        ``path``) is passed directly to the application instead.
+        """
+        # --- RFC 6455 §4.2.2: server handshake response ---
+        key = [x[1] for x in self.scope['headers'] if x[0] == b'Sec-WebSocket-Key'][0]
+        logger.debug('WebSocket key: %s', key)
+        accept = b64encode(sha1(key + b'258EAFA5-E914-47DA-95CA-C5AB0DC85B11').digest())
+
+        reply = (
+            'HTTP/1.1 101 Switching Protocols\r\n'
+            'Upgrade: websocket\r\n'
+            'Connection: Upgrade\r\n'
+            f'Sec-WebSocket-Accept: {accept.decode("ascii")}\r\n'
+            '\r\n'
+        )
+        self.writer.write(reply.encode())
+        await self.writer.drain()
+        logger.debug('WebSocket handshake complete.')
+
+        # --- Dispatch to the ASGI application ---
+        # Bug 6: pass the original upgrade scope (type='websocket', path=...)
+        # so the router can find the registered handler.
+        await self.app(self.scope, self.receive, self.send)
 
 
 class HTTP1_1Handler(HTTPServerBase):
@@ -366,7 +497,9 @@ class ASGIServer:
         logger.debug(self.certfile)
         logger.debug(self.keyfile)
         if not self.certfile or not self.keyfile:
-            raise ValueError("Both certfile and keyfile must be set to create an SSL context.")
+            # One or both paths not yet assigned (called during __init__ before
+            # both properties are set).  Silently defer until both are ready.
+            return
 
         context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
         context.set_alpn_protocols(['HTTP/1.1', 'h2'])
@@ -376,10 +509,9 @@ class ASGIServer:
         self.ssl_context = context
 
         if hasattr(self, 'raw_sockets'):
-            self.sockets = [
-                self.ssl_context.wrap_socket(s, server_side=True)
-                for s in self.raw_sockets
-            ]
+            # raw_sockets are already bound; asyncio.start_server will handle
+            # TLS via ssl= so no manual wrapping is needed here.
+            pass
 
     async def client_connected_cb(self, reader, writer):
         """
@@ -435,27 +567,40 @@ class ASGIServer:
         # (matters when port=0 was requested, i.e. the OS picks a free port).
         self.port = self.raw_sockets[0].getsockname()[1]
 
-        if self.ssl_context:
-            self.sockets = [
-                self.ssl_context.wrap_socket(s, server_side=True)
-                for s in self.raw_sockets
-            ]
-        else:
-            self.sockets = self.raw_sockets
+        # Do NOT wrap sockets with ssl_context here.
+        # asyncio.start_server() accepts raw TCP sockets via sockets= and
+        # handles the TLS handshake itself when ssl= is also provided.
+        # Pre-wrapping with ssl_context.wrap_socket() causes a double-TLS
+        # layer and breaks the handshake.
 
     def close_socket(self):
-        for s in getattr(self, 'sockets', []):
+        for s in getattr(self, 'raw_sockets', []):
             s.close()
 
     async def run(self, port=80):
         """Run an asyncio socket server with the setting in this object."""
-        if not hasattr(self, 'sockets') or not self.sockets:
+        if not hasattr(self, 'raw_sockets') or not self.raw_sockets:
             self.open_socket(port)
-        socket_server = await asyncio.start_server(self.client_connected_cb, sockets=self.sockets)
-        logger.info(f'Server ({socket_server}) has been created.')
+
+        # asyncio.start_server() / loop.create_server() only accepts a single
+        # socket via sock=.  To serve on multiple sockets (one IPv4 + one IPv6)
+        # we create one asyncio.Server per raw socket and run them concurrently.
+        # Each server receives the raw TCP socket plus ssl= so asyncio handles
+        # the TLS handshake internally (pre-wrapping with ssl_context.wrap_socket
+        # would cause a double-TLS layer and a broken handshake).
+        servers = []
+        for sock in self.raw_sockets:
+            srv = await asyncio.start_server(
+                self.client_connected_cb,
+                sock=sock,
+                ssl=self.ssl_context,
+            )
+            servers.append(srv)
+
+        logger.info(f'Server(s) created: {servers}')
 
         try:
-            await socket_server.serve_forever()
+            await asyncio.gather(*(srv.serve_forever() for srv in servers))
 
         except KeyboardInterrupt:
             logger.info('KeyboardInterrupt is caught.')
@@ -467,6 +612,8 @@ class ASGIServer:
             logger.error(traceback.format_exc())
 
         finally:
+            for srv in servers:
+                srv.close()
             self.close()
             logger.info('Server has been stopped.')
 
