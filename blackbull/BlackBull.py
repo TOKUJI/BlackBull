@@ -122,6 +122,9 @@ class BlackBull:
         except BaseException:
             logger.error(traceback.format_exc())
 
+    def wait_for_port(self, timeout: float = 10.0, poll_interval: float = 0.1):
+        self.server.wait_for_port(timeout=timeout, poll_interval=poll_interval)
+
     def reload(self):
         self.stop()
         force_reload(sys.argv[0])

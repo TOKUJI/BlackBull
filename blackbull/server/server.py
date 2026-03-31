@@ -7,6 +7,8 @@ from urllib.parse import urlparse
 from hashlib import sha1
 from base64 import b64encode
 from pathlib import Path
+import time
+import socket
 
 # private library
 from ..utils import HTTP2, pop_safe, EventEmitter, check_port
@@ -334,7 +336,9 @@ class ASGIServer:
         self.ssl_context = ssl_context
         self.keyfile = keyfile
         self.certfile = certfile
-
+        self.make_ssl_context()
+        self.socket = None
+        self.port = None
 
     @property
     def keyfile(self):
@@ -345,7 +349,6 @@ class ASGIServer:
         if value and not Path(value).is_file():
             raise FileNotFoundError(f'keyfile not found: {value}')
         self._keyfile = value
-        self.make_ssl_context()
 
 
     @property
@@ -357,10 +360,11 @@ class ASGIServer:
         if value and not Path(value).is_file():
             raise FileNotFoundError(f'certfile not found: {value}')
         self._certfile = value
-        self.make_ssl_context()
 
 
     def make_ssl_context(self):
+        logger.debug(self.certfile)
+        logger.debug(self.keyfile)
         if not self.certfile or not self.keyfile:
             raise ValueError("Both certfile and keyfile must be set to create an SSL context.")
 
@@ -465,6 +469,22 @@ class ASGIServer:
         finally:
             self.close()
             logger.info('Server has been stopped.')
+
+    def wait_for_port(self, timeout: float = 10.0, poll_interval: float = 0.1):
+        if self.port is None:
+            raise RuntimeError("Server port is not set")
+
+        deadline = time.time() + timeout
+        while True:
+            try:
+                with socket.create_connection(('::1', self.port), timeout=1):
+                    return True
+            except OSError:
+                if time.time() >= deadline:
+                    raise TimeoutError(
+                        f"Port {self.port} on ::1 did not open within {timeout} seconds"
+                    )
+                time.sleep(poll_interval)
 
     def close(self):
         logger.info('ASGIServer.close() is called.')

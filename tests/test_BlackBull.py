@@ -31,11 +31,16 @@ def run_application(app):
 
 @pytest_asyncio.fixture
 async def app(manage_cert_and_key):
-    # run before the test
     logger.info('At set-up.')
-    app = BlackBull()
     cd = pathlib.Path(__file__).parent
-    app.create_server(certfile=cd / 'cert.pem', keyfile=cd / 'key.pem')
+    cert_path = cd / 'cert.pem'
+    key_path = cd / 'key.pem'
+
+    app = BlackBull()
+
+    logger.info(f"[app fixture] cert.pem exists: {cert_path.exists()}, key.pem exists: {key_path.exists()}")
+
+    app.create_server(certfile=cert_path, keyfile=key_path, port=8000)
 
     # Routing not using middleware.
     @app.route(path='/test')
@@ -113,6 +118,7 @@ async def app(manage_cert_and_key):
 
     p = Process(target=run_application, args=(app,))
     p.start()
+    app.wait_for_port(timeout=10.0)
 
     yield app
 
@@ -177,7 +183,7 @@ async def ssl_h2context():
 
 @pytest.mark.asyncio
 async def test_websocket_response(app, ssl_context):
-    uri = f"wss://localhost:{app.port}/websocket1"
+    uri = f"wss://[::1]:8000/websocket1"
 
     async with websockets.connect(uri, ssl=ssl_context) as client:
         logger.debug('Websocket has been connected.')
@@ -188,7 +194,6 @@ async def test_websocket_response(app, ssl_context):
 
         response = await asyncio.wait_for(client.recv(), timeout=0.1)
         assert response == name
-
 
 # @pytest.mark.asyncio
 # async def test_http2_server_push(app, ssl_context):
