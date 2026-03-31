@@ -63,7 +63,10 @@ def parse(request):
         if scope['type'] == 'websocket':
             scope['scheme'] = 'ws'
 
-    if 'Connection' in mapping:
+    # Note: 'Connection: Upgrade' must NOT overwrite the scheme; the Upgrade
+    # header block above already set the correct scheme (e.g. 'ws').
+    # Only set scheme from Connection when there is no Upgrade header.
+    if 'Connection' in mapping and 'Upgrade' not in mapping:
         scope['scheme'] = mapping['Connection']
 
     for line in lines[1:]:
