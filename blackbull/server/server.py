@@ -11,7 +11,7 @@ from pathlib import Path
 # private library
 from ..utils import HTTP2, pop_safe, EventEmitter, check_port
 from ..stream import Stream
-from ..rsock import create_socket
+from ..rsock import create_dual_stack_sockets
 from ..frame import FrameFactory, FrameTypes, FrameBase, HeadersFlags, DataFlags, SettingFlags
 from ..logger import get_logger_set
 from .response import RespondFactory
@@ -371,8 +371,11 @@ class ASGIServer:
         context.options |= ssl.OP_NO_COMPRESSION
         self.ssl_context = context
 
-        if hasattr(self, 'raw_socket'):
-            self.socket = self.ssl_context.wrap_socket(self.raw_socket, server_side=True)
+        if hasattr(self, 'raw_sockets'):
+            self.sockets = [
+                self.ssl_context.wrap_socket(s, server_side=True)
+                for s in self.raw_sockets
+            ]
 
     async def client_connected_cb(self, reader, writer):
         """
@@ -416,27 +419,35 @@ class ASGIServer:
             logger.error(f'Port ({port}) is not available. Try another port.')
             raise RuntimeError(f'Port ({port}) is not available. Try another port.')
 
-        self.raw_socket = create_socket(('::1', port))
+        raw_sockets = create_dual_stack_sockets(port)
 
-        if self.raw_socket is None:
-            logger.error(f'Failed to open port ({port}.) Try another port.')
+        if not raw_sockets:
+            logger.error(f'Failed to open port ({port}). Try another port.')
             return
 
-        self.port = self.raw_socket.getsockname()[1]
+        self.raw_sockets = raw_sockets
+
+        # Derive the actual port from the first successfully bound socket
+        # (matters when port=0 was requested, i.e. the OS picks a free port).
+        self.port = self.raw_sockets[0].getsockname()[1]
 
         if self.ssl_context:
-            self.socket = self.ssl_context.wrap_socket(self.raw_socket, server_side=True)
+            self.sockets = [
+                self.ssl_context.wrap_socket(s, server_side=True)
+                for s in self.raw_sockets
+            ]
         else:
-            self.socket = self.raw_socket
+            self.sockets = self.raw_sockets
 
     def close_socket(self):
-        self.socket.close()
+        for s in getattr(self, 'sockets', []):
+            s.close()
 
     async def run(self, port=80):
-        if self.socket is None:
-            self.open_socket(port)
         """Run an asyncio socket server with the setting in this object."""
-        socket_server = await asyncio.start_server(self.client_connected_cb, sock=self.socket)
+        if not hasattr(self, 'sockets') or not self.sockets:
+            self.open_socket(port)
+        socket_server = await asyncio.start_server(self.client_connected_cb, sockets=self.sockets)
         logger.info(f'Server ({socket_server}) has been created.')
 
         try:
