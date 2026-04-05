@@ -77,21 +77,21 @@ async def app(manage_cert_and_key):
 
     # Routing using middleware.
     async def test_fn1(scope, receive, send, inner):
-        logger.info('test_fn1 starts.')
+        logger.debug('test_fn1 starts.')
         res = await inner(scope, receive, send)
-        logger.info(f'test_fn1 ends. res = {res}')
+        logger.debug(f'test_fn1 ends. res = {res}')
         await Response(send, res + 'fn1')
 
     async def test_fn2(scope, receive, send, inner):
-        logger.info('test_fn2 starts.')
+        logger.debug('test_fn2 starts.')
         res = await inner(scope, receive, send)
-        logger.info(f'test_fn2 ends. res = {res}')
+        logger.debug(f'test_fn2 ends. res = {res}')
         return res + 'fn2'
 
     async def test_fn3(scope, receive, send, inner):
-        logger.info('test_fn3 starts.')
+        logger.debug('test_fn3 starts.')
         await inner(scope, receive, send)
-        logger.info('test_fn3 ends.')
+        logger.debug('test_fn3 ends.')
         return 'fn3'
 
     app.route(methods='get', path='/test2', functions=[test_fn1, test_fn2, test_fn3])
@@ -183,31 +183,31 @@ async def ssl_h2context():
     pass
 
 
-# @pytest.mark.asyncio
-# async def test_response_200(app):
-#     async with httpx.AsyncClient(http2=True, verify=False) as c:
-#         res = await c.get(f'https://localhost:{app.port}/test', headers={'key': 'value'})
-#         assert res.status_code == 200
+@pytest.mark.asyncio
+async def test_response_200(app):
+    async with httpx.AsyncClient(http2=True, verify=False) as c:
+        res = await c.get(f'https://localhost:{app.port}/test', headers={'key': 'value'})
+        assert res.status_code == 200
 
 
-# @pytest.mark.asyncio
-# async def test_response_404_fn(app):
+@pytest.mark.asyncio
+async def test_response_404_fn(app):
 
-#     async with httpx.AsyncClient(http2=True, verify=False) as c:
-#         res = await c.get(f'https://localhost:{app.port}/badpath', headers={'key': 'value'})
+    async with httpx.AsyncClient(http2=True, verify=False) as c:
+        res = await c.get(f'https://localhost:{app.port}/badpath', headers={'key': 'value'})
 
-#         assert res.status_code == 404
-#         assert res.content == b'not found test.'
+        assert res.status_code == 404
+        assert res.content == b'not found test.'
 
 
-# @pytest.mark.asyncio
-# async def test_routing_middleware(app):
+@pytest.mark.asyncio
+async def test_routing_middleware(app):
 
-#     async with httpx.AsyncClient(http2=True, verify=False) as c:
-#         res = await c.get(f'https://localhost:{app.port}/test2', headers={'key': 'value'})
+    async with httpx.AsyncClient(http2=True, verify=False) as c:
+        res = await c.get(f'https://127.0.0.1:{app.port}/test2', headers={'key': 'value'})
 
-#         assert res.status_code == 200
-#         assert res.content == b'fn3fn2fn1'
+        assert res.status_code == 200
+        assert res.content == b'fn3fn2fn1'
 
 
 @pytest.mark.asyncio

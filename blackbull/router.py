@@ -72,7 +72,7 @@ class Router(UserDict, BaseRouter):
             logger.debug(self.data[key])
             return self.data[key]
 
-        # @todo Consider to use List or some iterable class for self.regex_ to improve performance.
+        # TODO: Consider to use List or some iterable class for self.regex_ to improve performance.
         # Because self.regex_ is merely used as an array like container in this class.
         for (p, scheme), (fn, methods) in self.regex_.items():
             logger.debug((p, scheme, fn, methods))

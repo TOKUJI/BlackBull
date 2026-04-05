@@ -21,61 +21,6 @@ from .parser import ParserFactory
 logger, log = get_logger_set(__name__)
 
 
-def parse(request):
-    """
-    Parse received request and make ASGI scope object.
-    """
-    lines = request.decode('utf-8').split('\r\n')
-
-    method, path, version = lines[0].split(' ')
-
-    mapping = {}
-    for line in lines[1:]:
-        if m := re.match(r'(.*?): (.*)', line):
-            mapping[m[1]] = m[2]
-
-    logger.info(mapping)
-
-    scope = {
-        'type': 'http',
-        'http_version': re.sub(r'HTTP/(.*)', r'\1', version),
-        'method': method,
-        'path': path,
-        'scheme': 'http',
-        'headers': [
-            # (b'host', mapping['Host'].encode()),
-            # (b'accept', b'*/*'),
-            # (b'accept-encoding', b'gzip, deflate'),
-            # (b'connection', b'keep-alive'),
-            # (b'user-agent', b'python-httpx/0.16.1'),
-            # (b'key', b'value')
-            ],
-        'asgi': {'version': '3.0'}
-    }
-
-    if 'Host' in mapping:
-        host, port = mapping['Host'].split(':')
-        port = int(port)
-        scope['server'] = [host, port]
-
-    if 'Upgrade' in mapping:
-        scope['type'] = mapping['Upgrade']
-        if scope['type'] == 'websocket':
-            scope['scheme'] = 'ws'
-
-    # Note: 'Connection: Upgrade' must NOT overwrite the scheme; the Upgrade
-    # header block above already set the correct scheme (e.g. 'ws').
-    # Only set scheme from Connection when there is no Upgrade header.
-    if 'Connection' in mapping and 'Upgrade' not in mapping:
-        scope['scheme'] = mapping['Connection']
-
-    for line in lines[1:]:
-        scope['headers'].append(
-            tuple(x.encode() for x in line.split(': '))
-            )
-
-    return scope
-
 
 class HTTPServerBase:
     """
@@ -250,15 +195,6 @@ class WebsocketHandler(HTTPServerBase):
 
     async def run(self):
         """Complete the upgrade handshake then call the ASGI application.
-
-        Bug 3 fixed: the old code called ``self.app(...)`` without ``await``,
-        creating a coroutine object that was immediately discarded.
-
-        Bug 6 fixed: the old code replaced the scope with
-        ``{'type': 'websocket.connect'}`` which lacks ``path``, making the
-        router unable to dispatch to the correct handler.  The original
-        HTTP-upgrade scope (already containing ``type='websocket'`` and
-        ``path``) is passed directly to the application instead.
         """
         # --- RFC 6455 §4.2.2: server handshake response ---
         key = [x[1] for x in self.scope['headers'] if x[0] == b'Sec-WebSocket-Key'][0]
@@ -292,66 +228,120 @@ class HTTP1_1Handler(HTTPServerBase):
         return self.request is not None
 
     async def run(self):
+        # self.request holds only the first line; read the remaining headers here.
         self.request += await self.reader.readuntil(b'\r\n\r\n')
 
         scope = self.parse()
-        logger.info(scope)
+        logger.debug(scope)
 
-        receive = self.make_recepient()
+        if scope.get('type') == b'websocket':
+            await WebsocketHandler(self.app, self.reader, self.writer, scope).run()
+            return
+
+        receive = self.make_recepient(scope)
         send = self.make_sender()
         await self.app(scope, receive, send)
 
     def parse(self):
         """
-        Parse received request and make ASGI scope object.
+        Parse header lines of received request and make ASGI scope object.
         """
-        lines = self.request.decode('utf-8').split('\r\n')
+        lines = self.request.split(b'\r\n') # Lines are bytes, not str, because the request is read as bytes from the stream.
 
-        method, path, version = lines[0].split(' ')
+        method, path, version = lines[0].split(b' ')
+        path_parsed = urlparse(path)
 
         mapping = {}
         for line in lines[1:]:
-            if m := re.match(r'(.*?): (.*)', line):
-                mapping[m[1]] = m[2]
-
+            line = line.strip()
+            if b':' in line:
+                key, value = line.split(b':', 1)
+                mapping[key] = value.strip()
         logger.info(mapping)
 
         scope = {
             'type': 'http',
-            'http_version': re.sub(r'HTTP/(.*)', r'\1', version),
-            'method': method,
-            'path': path,
-            'scheme': 'http',
-            'headers': [
-                # (b'host', mapping['Host'].encode()),
+            'asgi': {'version': '3.0', 'spec_version': '2.0'},
+            'http_version': re.sub(r'HTTP/(.*)', r'\1', version.decode('utf-8')),
+            'method': method.decode('utf-8'),
+            'scheme': 'http', # TODO: should be 'https' when SSL is used
+            'path': path.decode('utf-8'),
+            'raw_path': path,
+            'query_string': path_parsed.query,
+            # 'root_path': '',
+            'headers': [(key.lower(), value.lower()) for key, value in mapping.items()],
+                # Below is examples of how headers are represented in ASGI scope['headers'] 
+                # as a list of (key, value) tuples, where both key and value are lowercased bytes.
+                # (b'host', mapping[b'Host']),
                 # (b'accept', b'*/*'),
                 # (b'accept-encoding', b'gzip, deflate'),
                 # (b'connection', b'keep-alive'),
                 # (b'user-agent', b'python-httpx/0.16.1'),
                 # (b'key', b'value')
-                ],
-            'asgi': {'version': '3.0'}
+            'client': None, # TODO: should be set to the client's IP address and port
+            'server': None, # TODO: should be set to the server's IP address and port
+            # A mutable dict that can be used to store arbitrary data during the connection's lifetime. 
+            # The application can read and write to this dict, and it will persist across multiple calls 
+            # to the application for the same connection.
+            'state': {},
         }
 
-        if 'Host' in mapping:
-            host, port = mapping['Host'].split(':')
+        if b'host' in mapping:
+            host, port = mapping[b'host'].split(b':')
             port = int(port)
             scope['server'] = [host, port]
 
-        if 'Upgrade' in mapping:
-            scope['type'] = mapping['Upgrade']
-            if scope['type'] == 'websocket':
+        if b'upgrade' in mapping:
+            scope['type'] = mapping[b'upgrade']
+            if scope['type'] == b'websocket':
                 scope['scheme'] = 'ws'
 
-        if 'Connection' in mapping:
-            scope['scheme'] = mapping['Connection']
+        if b'connection' in mapping:
+            scope['scheme'] = mapping[b'connection']
 
         return scope
 
-    def make_recepient(self):
+    def make_recepient(self, scope):
 
         async def receive():
-            return await self.reader.readuntil(b'\r\n\r\n')
+            """
+            Read the stream, get some data from incoming frames, parse it, and return the ASGI event dict.
+            """
+            # Determine the content length from headers, if present
+            content_length = 0
+            # Check if 'Content-Length' or 'Transfer-Encoding' is in scope['headers']
+            headers = dict(scope['headers'])
+            has_content_length = b'content-length' in headers
+            has_transfer_encoding = b'transfer-encoding' in headers
+
+            if has_content_length:
+                content_length = int(headers[b'content-length'].decode())
+                message_body = await self.reader.read(content_length) if content_length > 0 else b''
+            elif has_transfer_encoding and headers[b'transfer-encoding'].strip().lower() == b'chunked':
+                parts = []
+                while True:
+                    size_line = await self.reader.readuntil(b'\r\n')
+                    chunk_size = int(size_line.strip(), 16)
+                    if chunk_size == 0:
+                        await self.reader.readuntil(b'\r\n')  # consume trailing CRLF
+                        break
+                    parts.append(await self.reader.read(chunk_size))
+                    await self.reader.readuntil(b'\r\n')  # consume CRLF after chunk data
+                message_body = b''.join(parts)
+            elif has_transfer_encoding:
+                raise NotImplementedError(
+                    f'Transfer-Encoding "{headers[b"transfer-encoding"].decode()}" is not supported.'
+                )
+            else:
+                message_body = b''
+
+            logger.debug(f'Message body: {message_body}')
+            return {
+                "type": "http.request",
+                "body": message_body,
+                "more_body": False,  # True if more data is expected
+            }
+
         return receive
 
     def make_sender(self):
@@ -535,15 +525,7 @@ class ASGIServer:
 
             else:
                 logger.info('HTTP1.1 connection is requested.')
-                request_data += await reader.readuntil(b'\r\n\r\n')
-                scope = parse(request_data)
-
-                # Check if the connection is to use websocket.
-                if scope['type'] == 'websocket':
-                    handler = WebsocketHandler(self.app, reader, writer, scope)
-
-                else:
-                    handler = HTTP1_1Handler(self.app, reader, writer, scope)
+                handler = HTTP1_1Handler(self.app, reader, writer, request_data)
 
             await handler.run()
 

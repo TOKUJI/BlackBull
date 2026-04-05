@@ -35,7 +35,7 @@ import ssl
 import pytest
 import pytest_asyncio
 
-from blackbull.server.server import ASGIServer
+from blackbull.server.server import ASGIServer, HTTP1_1Handler
 from blackbull.rsock import create_dual_stack_sockets, _bind_socket
 
 
@@ -56,10 +56,6 @@ def key_path():
 async def _noop_app(scope, receive, send):
     pass
 
-
-# ---------------------------------------------------------------------------
-# Bug 1 – ASGIServer init-order: no ValueError when both cert+key given
-# ---------------------------------------------------------------------------
 
 class TestASGIServerInit:
     """ASGIServer.__init__ must not raise when certfile and keyfile are both provided."""
@@ -98,10 +94,6 @@ class TestASGIServerInit:
             ASGIServer(_noop_app, ssl_context=ctx, certfile=cert_path)
 
 
-# ---------------------------------------------------------------------------
-# Bug 1 – make_ssl_context defers when only one of cert/key is set
-# ---------------------------------------------------------------------------
-
 class TestMakeSSLContext:
     """make_ssl_context() must silently defer (not raise) when called with incomplete state."""
 
@@ -135,10 +127,6 @@ class TestMakeSSLContext:
         # we can verify the context was built without error and is CLIENT_AUTH.
         assert server.ssl_context.verify_mode is not None
 
-
-# ---------------------------------------------------------------------------
-# Bug 7 – open_socket: both sockets share the same port
-# ---------------------------------------------------------------------------
 
 class TestOpenSocket:
     """open_socket() must bind IPv4 and IPv6 to the *same* port."""
@@ -215,10 +203,6 @@ class TestOpenSocket:
             assert sock.fileno() == -1, "Socket was not closed by close_socket()"
 
 
-# ---------------------------------------------------------------------------
-# Bug 8 – run() must use sock= per socket, not sockets= (plural)
-# ---------------------------------------------------------------------------
-
 class TestASGIServerRun:
     """ASGIServer.run() must start without TypeError and accept connections."""
 
@@ -271,3 +255,99 @@ class TestASGIServerRun:
                 await task
             except (asyncio.CancelledError, Exception):
                 pass
+
+
+# ---------------------------------------------------------------------------
+# Helpers for HTTP/1.1 body-decoding unit tests
+# ---------------------------------------------------------------------------
+
+class FakeStreamReader:
+    """Minimal asyncio.StreamReader stand-in backed by an in-memory buffer."""
+
+    def __init__(self, data: bytes):
+        self._buf = bytearray(data)
+
+    async def read(self, n: int) -> bytes:
+        chunk = bytes(self._buf[:n])
+        del self._buf[:n]
+        return chunk
+
+    async def readuntil(self, separator: bytes) -> bytes:
+        idx = self._buf.find(separator)
+        if idx == -1:
+            result = bytes(self._buf)
+            self._buf.clear()
+        else:
+            end = idx + len(separator)
+            result = bytes(self._buf[:end])
+            del self._buf[:end]
+        return result
+
+
+# ---------------------------------------------------------------------------
+# Body-decoding tests
+# ---------------------------------------------------------------------------
+
+class TestHTTP1_1BodyDecoding:
+    """HTTP/1.1 body reading: Content-Length and Transfer-Encoding: chunked."""
+
+    def _make_handler(self, body_bytes: bytes) -> HTTP1_1Handler:
+        """Return a bare HTTP1_1Handler whose reader contains *body_bytes*."""
+        handler = object.__new__(HTTP1_1Handler)
+        handler.reader = FakeStreamReader(body_bytes)
+        handler.writer = None
+        handler.app = None
+        handler.request = None
+        return handler
+
+    @pytest.mark.asyncio
+    async def test_content_length_reads_exact_bytes(self):
+        """receive() must return exactly the bytes declared by Content-Length."""
+        body = b'hello world'
+        scope = {'headers': [(b'content-length', str(len(body)).encode())]}
+        event = await self._make_handler(body).make_recepient(scope)()
+        assert event == {'type': 'http.request', 'body': b'hello world', 'more_body': False}
+
+    @pytest.mark.asyncio
+    async def test_content_length_multi_digit(self):
+        """A multi-digit Content-Length (e.g. 100) must not be truncated to its first digit."""
+        body = b'x' * 100
+        scope = {'headers': [(b'content-length', b'100')]}
+        event = await self._make_handler(body).make_recepient(scope)()
+        assert len(event['body']) == 100
+
+    @pytest.mark.asyncio
+    async def test_no_body_headers_returns_empty(self):
+        """A request with no Content-Length or Transfer-Encoding has an empty body."""
+        scope = {'headers': []}
+        event = await self._make_handler(b'').make_recepient(scope)()
+        assert event == {'type': 'http.request', 'body': b'', 'more_body': False}
+
+    @pytest.mark.asyncio
+    async def test_chunked_decodes_multiple_chunks(self):
+        """Transfer-Encoding: chunked body must be reassembled from all chunks."""
+        chunk1, chunk2 = b'hello', b' world'
+        chunked = (
+            f'{len(chunk1):x}\r\n'.encode() + chunk1 + b'\r\n'
+            + f'{len(chunk2):x}\r\n'.encode() + chunk2 + b'\r\n'
+            + b'0\r\n\r\n'
+        )
+        scope = {'headers': [(b'transfer-encoding', b'chunked')]}
+        event = await self._make_handler(chunked).make_recepient(scope)()
+        assert event == {'type': 'http.request', 'body': b'hello world', 'more_body': False}
+
+    @pytest.mark.asyncio
+    async def test_chunked_single_chunk(self):
+        """A single non-empty chunk followed by the terminal chunk must decode correctly."""
+        body = b'ping'
+        chunked = f'{len(body):x}\r\n'.encode() + body + b'\r\n0\r\n\r\n'
+        scope = {'headers': [(b'transfer-encoding', b'chunked')]}
+        event = await self._make_handler(chunked).make_recepient(scope)()
+        assert event['body'] == body
+
+    @pytest.mark.asyncio
+    async def test_chunked_empty_body(self):
+        """A terminal-only chunked body (0\\r\\n\\r\\n) must produce an empty body."""
+        scope = {'headers': [(b'transfer-encoding', b'chunked')]}
+        event = await self._make_handler(b'0\r\n\r\n').make_recepient(scope)()
+        assert event['body'] == b''
