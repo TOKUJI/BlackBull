@@ -2,15 +2,15 @@
 Tests for server-side HTTP parsing and connection dispatch
 ==========================================================
 
-parse() – top-level function in blackbull/server/server.py
------------------------------------------------------------
-parse() builds an ASGI scope dict from raw HTTP/1.1 request bytes.
-It is the function responsible for detecting WebSocket upgrade requests
-and setting scope['type'] = 'websocket'.  Bug 6 was that *after* parse()
-correctly set scope['type']='websocket', WebsocketHandler.run() replaced
-the scope with {'type': 'websocket.connect'}, dropping the path.  A test
-for parse() is the first line of defence: if parse() itself set the wrong
-type, WebsocketHandler would never get a correct scope.
+HTTP1_1Handler.parse()
+----------------------
+HTTP1_1Handler.parse() builds an ASGI scope dict from raw HTTP/1.1 request
+bytes.  It is responsible for detecting WebSocket upgrade requests and setting
+scope['type'] = 'websocket'.  Bug 6 was that *after* parse() correctly set
+scope['type']='websocket', WebsocketHandler.run() replaced the scope with
+{'type': 'websocket.connect'}, dropping the path.  A test for parse() is the
+first line of defence: if parse() itself sets the wrong type, WebsocketHandler
+would never receive a correct scope.
 
 client_connected_cb dispatch
 -----------------------------
@@ -25,7 +25,7 @@ import asyncio
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from blackbull.server.server import parse, ASGIServer, WebsocketHandler, HTTP1_1Handler
+from blackbull.server.server import ASGIServer, WebsocketHandler, HTTP1_1Handler
 
 
 # ---------------------------------------------------------------------------
@@ -33,8 +33,13 @@ from blackbull.server.server import parse, ASGIServer, WebsocketHandler, HTTP1_1
 # ---------------------------------------------------------------------------
 
 def _get_scope(raw_request: bytes) -> dict:
-    """Call parse() and return the resulting scope dict."""
-    return parse(raw_request)
+    """Parse raw HTTP/1.1 request bytes and return the resulting scope dict.
+
+    Uses HTTP1_1Handler.parse(), which superseded the deleted top-level parse().
+    """
+    handler = object.__new__(HTTP1_1Handler)
+    handler.request = raw_request
+    return handler.parse()
 
 
 def _http_request(method='GET', path='/', version='HTTP/1.1',
@@ -107,7 +112,7 @@ class TestParse:
     # --- WebSocket upgrade detection (upstream of Bug 6) ---
 
     def test_websocket_upgrade_sets_type_websocket(self):
-        """parse() must set scope['type']='websocket' for Upgrade: websocket.
+        """HTTP1_1Handler.parse() must set scope['type']='websocket' for Upgrade: websocket.
 
         If parse() fails to detect the upgrade, the connection would be routed
         to HTTP1_1Handler instead of WebsocketHandler (Bug 6 root-cause).
@@ -183,10 +188,30 @@ class _FakeReader:
         return chunk
 
 
+class _FakeTransport:
+    """Minimal asyncio transport stub for transport.get_extra_info() calls."""
+
+    def __init__(self, peername=None, sockname=None, ssl_object=None):
+        self._extras = {
+            'peername': peername,
+            'sockname': sockname,
+            'ssl_object': ssl_object,
+        }
+
+    def get_extra_info(self, key, default=None):
+        return self._extras.get(key, default)
+
+
 class _FakeWriter:
-    def __init__(self):
+    def __init__(self, peername=('127.0.0.1', 54321),
+                 sockname=('0.0.0.0', 8000), ssl_object=None):
         self.written = bytearray()
         self.closed = False
+        self.transport = _FakeTransport(
+            peername=peername,
+            sockname=sockname,
+            ssl_object=ssl_object,
+        )
 
     def write(self, data: bytes):
         self.written += data
@@ -316,4 +341,149 @@ class TestClientConnectedCbDispatch:
 
         assert writer.closed, (
             "client_connected_cb must close the writer in its finally block."
+        )
+
+
+# ---------------------------------------------------------------------------
+# scope['client'], scope['server'], scope['scheme'] population
+# ---------------------------------------------------------------------------
+
+class TestScopePopulation:
+    """HTTP1_1Handler.run() must fill client, server, and scheme from the transport."""
+
+    def _make_handler(self, raw: bytes, writer: _FakeWriter) -> HTTP1_1Handler:
+        reader = _FakeReader(raw)
+        handler = object.__new__(HTTP1_1Handler)
+        handler.app = None
+        handler.reader = reader
+        handler.writer = writer
+        handler.request = b''
+        return handler
+
+    @pytest.mark.asyncio
+    async def test_client_is_set_from_transport_peername(self):
+        """scope['client'] must reflect the remote address from the transport."""
+        raw = _http_request()
+        writer = _FakeWriter(peername=('192.168.1.10', 54321))
+        handler = self._make_handler(raw, writer)
+
+        captured = {}
+
+        async def capture_app(scope, receive, send):
+            captured.update(scope)
+
+        handler.app = capture_app
+        await handler.run()
+
+        assert captured['client'] == ['192.168.1.10', 54321], (
+            f"Expected client=['192.168.1.10', 54321], got {captured.get('client')!r}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_server_falls_back_to_sockname_when_no_host_header(self):
+        """Without a Host header, scope['server'] must come from transport sockname."""
+        raw = _http_request(headers={})  # no Host header
+        writer = _FakeWriter(sockname=('0.0.0.0', 9000))
+        handler = self._make_handler(raw, writer)
+
+        captured = {}
+
+        async def capture_app(scope, receive, send):
+            captured.update(scope)
+
+        handler.app = capture_app
+        await handler.run()
+
+        assert captured['server'] is not None, "scope['server'] must not be None"
+        assert captured['server'][1] == 9000, (
+            f"Expected port 9000 from sockname, got {captured['server']!r}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_server_from_host_header_takes_priority_over_sockname(self):
+        """scope['server'] from Host: header must not be overwritten by sockname."""
+        raw = _http_request(headers={'Host': 'example.com:8080'})
+        writer = _FakeWriter(sockname=('0.0.0.0', 9999))
+        handler = self._make_handler(raw, writer)
+
+        captured = {}
+
+        async def capture_app(scope, receive, send):
+            captured.update(scope)
+
+        handler.app = capture_app
+        await handler.run()
+
+        assert captured['server'] == ['example.com', 8080], (
+            f"Host header must take priority; got {captured['server']!r}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_scheme_is_http_for_plain_connection(self):
+        """scope['scheme'] must be 'http' when there is no TLS."""
+        raw = _http_request()
+        writer = _FakeWriter(ssl_object=None)
+        handler = self._make_handler(raw, writer)
+
+        captured = {}
+
+        async def capture_app(scope, receive, send):
+            captured.update(scope)
+
+        handler.app = capture_app
+        await handler.run()
+
+        assert captured['scheme'] == 'http', (
+            f"Expected scheme='http' for plain connection, got {captured['scheme']!r}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_scheme_is_https_for_tls_connection(self):
+        """scope['scheme'] must be 'https' when the transport carries TLS."""
+        raw = _http_request()
+        # Any truthy value for ssl_object marks this as a TLS connection.
+        writer = _FakeWriter(ssl_object=object())
+        handler = self._make_handler(raw, writer)
+
+        captured = {}
+
+        async def capture_app(scope, receive, send):
+            captured.update(scope)
+
+        handler.app = capture_app
+        await handler.run()
+
+        assert captured['scheme'] == 'https', (
+            f"Expected scheme='https' for TLS connection, got {captured['scheme']!r}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_scheme_is_wss_for_tls_websocket(self):
+        """scope['scheme'] must be 'wss' for a WebSocket upgrade over TLS."""
+        raw = _ws_request(path='/ws')
+        writer = _FakeWriter(ssl_object=object())
+
+        captured = {}
+
+        async def capture_app(scope, receive, send):
+            captured.update(scope)
+
+        reader = _FakeReader(raw)
+        handler = object.__new__(HTTP1_1Handler)
+        handler.reader = reader
+        handler.writer = writer
+        handler.request = b''
+
+        # Intercept WebsocketHandler.run to capture the scope it receives.
+        from unittest.mock import patch
+
+        async def noop_ws_run(self):
+            captured.update(self.scope)
+
+        with patch.object(WebsocketHandler, 'run', noop_ws_run):
+            handler.app = capture_app
+            await handler.run()
+
+        assert captured.get('scheme') == 'wss', (
+            f"Expected scheme='wss' for TLS WebSocket, got {captured.get('scheme')!r}"
         )

@@ -334,7 +334,7 @@ class TestRunScopeForwarding:
             'headers': [
                 (b'Host', b'localhost:9999'),
                 (b'Upgrade', b'websocket'),
-                (b'Sec-WebSocket-Key', ws_key),
+                (b'sec-websocket-key', ws_key),
             ],
         }
 
@@ -428,7 +428,7 @@ class TestRunHandshake:
             'type': 'websocket',
             'path': '/ws',
             'scheme': 'ws',
-            'headers': [(b'Sec-WebSocket-Key', ws_key)],
+            'headers': [(b'sec-websocket-key', ws_key)],
         }
 
         async def fake_app(s, receive, send):
@@ -455,7 +455,7 @@ class TestRunHandshake:
 
         scope = {
             'type': 'websocket', 'path': '/ws', 'scheme': 'ws',
-            'headers': [(b'Sec-WebSocket-Key', ws_key)],
+            'headers': [(b'sec-websocket-key', ws_key)],
         }
 
         async def fake_app(s, receive, send):

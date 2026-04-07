@@ -1,9 +1,10 @@
 from logging import getLogger
+from http import HTTPStatus, HTTPMethod
 # import asyncio
 import pytest
 
 # Test targets
-from blackbull.utils import Scheme, HTTPMethods
+from blackbull.utils import Scheme
 from blackbull.router import Router
 
 logger = getLogger(__name__)
@@ -17,27 +18,27 @@ def router():
 
 def test_router_add(router):
     path = 'test'
+    method = HTTPMethod.GET
     scheme = Scheme.http
-    key = (path, scheme)
+    key = (path, method, scheme)
 
     logger.info('Before registration.')
 
-    @router.route(path=path, scheme=scheme)
+    @router.route(path=path, methods=method, scheme=scheme)
     def test_fn(*args, **kwargs):
         pass
 
     logger.info('Registered.')
-    f, m = router[key]
+    f = router[key]
 
     assert f == test_fn
-    assert m == [HTTPMethods.get]
+    # assert m == method
 
 
 @pytest.mark.asyncio
 async def test_router_add_middleware_stack1(router):
     path = 'test'
     scheme = Scheme.http
-    key = (path, scheme)
 
     async def test_fn1(scope, receive, send, inner):
         logger.info('test_fn1 starts.')
@@ -45,11 +46,10 @@ async def test_router_add_middleware_stack1(router):
         logger.info('test_fn1 ends.')
         return 'fn1'
 
-    router.route(methods=[HTTPMethods.get], path=path, functions=[test_fn1])
+    router.route(methods=[HTTPMethod.GET], path=path, functions=[test_fn1])
 
     logger.info('Registered.')
-    fn, ms = router[key]
-    assert ms == [HTTPMethods.get]
+    fn = router[(path, HTTPMethod.GET, scheme)]
     logger.info(fn)
 
     res = await fn({}, None, None)
@@ -60,7 +60,6 @@ async def test_router_add_middleware_stack1(router):
 async def test_router_add_middleware_stack2(router):
     path = 'test'
     scheme = Scheme.http
-    key = (path, scheme)
 
     async def test_fn1(scope, receive, send, inner):
         logger.info('test_fn1 starts.')
@@ -80,12 +79,10 @@ async def test_router_add_middleware_stack2(router):
         logger.info('test_fn3 ends.')
         return 'fn3'
 
-    router.route(methods=[HTTPMethods.get], path=path, functions=[test_fn1, test_fn2, test_fn3])
+    router.route(methods=[HTTPMethod.GET], path=path, functions=[test_fn1, test_fn2, test_fn3])
 
     logger.info('Registered.')
-    fn, ms = router[key]
-
-    assert ms == [HTTPMethods.get]
+    fn = router[(path, HTTPMethod.GET, scheme)]
     logger.info(fn)
 
     res = await fn({}, None, None)
@@ -95,45 +92,39 @@ async def test_router_add_middleware_stack2(router):
 def test_router_add_post(router):
     path = 'test'
     scheme = Scheme.http
-    key = (path, scheme)
 
-    @router.route(path=path, methods=[HTTPMethods.post])
+    @router.route(path=path, methods=[HTTPMethod.POST])
     def fn(*args, **kwargs):
         pass
 
-    f, m = router[key]
+    f = router[(path, HTTPMethod.POST, scheme)]
 
     assert f == fn
-    assert m == [HTTPMethods.post]
 
 
 def test_router_regex(router):
     path = r'^test/\d+$'
     scheme = Scheme.http
-    key = (path, scheme)
 
-    @router.route(path=path, methods=[HTTPMethods.get])
+    @router.route(path=path, methods=[HTTPMethod.GET])
     def fn(*args, **kwargs):
         pass
 
-    f, m = router[('test/1234', scheme)]
+    f = router[('test/1234', HTTPMethod.GET, scheme)]
 
     assert f == fn
-    assert m == [HTTPMethods.get]
 
 
 def test_router_regex_with_group_name1(router):
     path = r'^test/(?P<id_>\d+)$'
     scheme = Scheme.http
-    key = (path, scheme)
 
-    @router.route(path=path, methods=[HTTPMethods.get])
+    @router.route(path=path, methods=[HTTPMethod.GET])
     def fn(*args, **kwargs):
         return kwargs.pop('id_', None)
 
-    f, m = router[('test/1234', scheme)]
+    f = router[('test/1234', HTTPMethod.GET, scheme)]
 
-    assert m == [HTTPMethods.get]
     assert f() == '1234'
 
 
@@ -141,13 +132,12 @@ def test_router_regex_with_group_name2(router):
     path = r'^test/(?P<id_>\d+)$'
     scheme = Scheme.http
 
-    @router.route(path=path, methods=[HTTPMethods.get])
+    @router.route(path=path, methods=[HTTPMethod.GET])
     def fn(id_, *args, **kwargs):
         return id_
 
-    f, m = router[('test/1234', scheme)]
+    f = router[('test/1234', HTTPMethod.GET, scheme)]
 
-    assert m == [HTTPMethods.get]
     assert f() == '1234'
 
 
@@ -155,14 +145,13 @@ def test_router_F_string1(router):
     path = 'test/{id_}'
     scheme = Scheme.http
 
-    @router.route(path=path, methods=[HTTPMethods.get])
+    @router.route(path=path, methods=[HTTPMethod.GET])
     def fn(*args, **kwargs):
         return kwargs.pop('id_', None)
 
     id_ = 'a24_12-3.4~'
-    f, m = router[(f'test/{id_}', scheme)]
+    f = router[(f'test/{id_}', HTTPMethod.GET, scheme)]
 
-    assert m == [HTTPMethods.get]
     assert f() == id_
 
 
@@ -170,15 +159,14 @@ def test_router_F_string2(router):
     path = 'test/{id_}/{name}'
     scheme = Scheme.http
 
-    @router.route(path=path, methods=[HTTPMethods.get])
+    @router.route(path=path, methods=[HTTPMethod.GET])
     def fn(id_, name, *args, **kwargs):
         return (id_, name)
 
     id_ = 'a24_12-3.4~'
     name = 'Toshio'
-    f, m = router[(f'test/{id_}/{name}', scheme)]
+    f = router[(f'test/{id_}/{name}', HTTPMethod.GET, scheme)]
 
-    assert m == [HTTPMethods.get]
     assert f() == (id_, name)
 
 
@@ -192,7 +180,6 @@ def test_router_websocket(router):
 
     logger.debug('Registered')
     id_ = 'a24_12-3.4~'
-    f, m = router[(f'test/{id_}', scheme)]
+    f = router[(f'test/{id_}', HTTPMethod.GET, scheme)]
 
-    assert m == [HTTPMethods.get]
     assert f() == id_

@@ -1,4 +1,4 @@
-from http import HTTPStatus
+from http import HTTPStatus, HTTPMethod
 import ssl
 import pathlib
 
@@ -12,7 +12,7 @@ import pytest_asyncio
 
 # Test targets
 from blackbull import BlackBull, Response, WebSocketResponse
-from blackbull.utils import Scheme, HTTPMethods
+from blackbull.utils import Scheme
 # from blackbull.middlewares import websocket
 
 # Library for tests
@@ -62,7 +62,7 @@ async def app(manage_cert_and_key):
 
     logger.info(f"[app fixture] cert.pem exists: {cert_path.exists()}, key.pem exists: {key_path.exists()}")
 
-    app.create_server(certfile=cert_path, keyfile=key_path, port=8000)
+    app.create_server(certfile=cert_path, keyfile=key_path, port=0)
 
     # Routing not using middleware.
     @app.route(path='/test')
@@ -70,7 +70,7 @@ async def app(manage_cert_and_key):
         logger.debug(f'test_({scope}, {receive}, {send})')
         await Response(send, 'sample')
 
-    @app.route_404
+    @app.on_error(HTTPStatus.NOT_FOUND)
     async def test_404(scope, receive, send):
         logger.debug(f'test_404({scope}, {receive}, {send})')
         await Response(send, 'not found test.', status=HTTPStatus.NOT_FOUND)
@@ -124,7 +124,7 @@ async def app(manage_cert_and_key):
     app.route(path='/websocket2', scheme=Scheme.websocket,
               functions=[websocket2])
 
-    @app.route(path='/push', methods=[HTTPMethods.post])
+    @app.route(path='/push', methods=[HTTPMethod.POST])
     async def server_push(scope, receive, send):
         # await Response(send, 'Any message?', more_body=True)
         request = await receive()
@@ -154,6 +154,7 @@ async def app(manage_cert_and_key):
     logger.info('At teardown.')
     app.stop()
     p.terminate()
+    p.join(timeout=5)
 
 
 @pytest_asyncio.fixture

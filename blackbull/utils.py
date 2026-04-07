@@ -2,7 +2,7 @@ from logging import getLogger
 from collections import defaultdict
 import asyncio
 import re
-from enum import Enum, auto
+from enum import Enum, StrEnum, auto
 import socket
 from contextlib import closing
 
@@ -13,17 +13,9 @@ async def do_nothing(*args, **kwargs):
     pass
 
 
-class HTTPMethods(Enum):
-    get = auto()
-    put = auto()
-    post = auto()
-    delete = auto()
-    patch = auto()
-
-
-class Scheme(Enum):
-    http = 'http'
-    websocket = 'websocket'
+class Scheme(StrEnum):
+    http = auto()
+    websocket = auto()
 
 
 def check_port(host='localhost', port=None):

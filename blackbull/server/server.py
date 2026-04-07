@@ -197,7 +197,7 @@ class WebsocketHandler(HTTPServerBase):
         """Complete the upgrade handshake then call the ASGI application.
         """
         # --- RFC 6455 §4.2.2: server handshake response ---
-        key = [x[1] for x in self.scope['headers'] if x[0] == b'Sec-WebSocket-Key'][0]
+        key = [x[1] for x in self.scope['headers'] if x[0] == b'sec-websocket-key'][0]
         logger.debug('WebSocket key: %s', key)
         accept = b64encode(sha1(key + b'258EAFA5-E914-47DA-95CA-C5AB0DC85B11').digest())
 
@@ -232,9 +232,24 @@ class HTTP1_1Handler(HTTPServerBase):
         self.request += await self.reader.readuntil(b'\r\n\r\n')
 
         scope = self.parse()
+
+        # Fill client / server / scheme from the transport now that we have it.
+        transport = self.writer.transport
+        peername = transport.get_extra_info('peername')
+        if peername:
+            scope['client'] = list(peername[:2])  # (host, port)
+
+        sockname = transport.get_extra_info('sockname')
+        if sockname and scope['server'] is None:
+            scope['server'] = list(sockname[:2])
+
+        is_tls = transport.get_extra_info('ssl_object') is not None
+        if is_tls:
+            scope['scheme'] = 'wss' if scope.get('type') == 'websocket' else 'https'
+
         logger.debug(scope)
 
-        if scope.get('type') == b'websocket':
+        if scope.get('type') == 'websocket':
             await WebsocketHandler(self.app, self.reader, self.writer, scope).run()
             return
 
@@ -256,20 +271,20 @@ class HTTP1_1Handler(HTTPServerBase):
             line = line.strip()
             if b':' in line:
                 key, value = line.split(b':', 1)
-                mapping[key] = value.strip()
-        logger.info(mapping)
+                mapping[key.lower()] = value.strip()
+        logger.debug(mapping)
 
         scope = {
             'type': 'http',
             'asgi': {'version': '3.0', 'spec_version': '2.0'},
             'http_version': re.sub(r'HTTP/(.*)', r'\1', version.decode('utf-8')),
             'method': method.decode('utf-8'),
-            'scheme': 'http', # TODO: should be 'https' when SSL is used
+            'scheme': 'http',  # upgraded to 'https'/'wss' in run() when TLS
             'path': path.decode('utf-8'),
             'raw_path': path,
             'query_string': path_parsed.query,
             # 'root_path': '',
-            'headers': [(key.lower(), value.lower()) for key, value in mapping.items()],
+            'headers': [(key.lower(), value) for key, value in mapping.items()],
                 # Below is examples of how headers are represented in ASGI scope['headers'] 
                 # as a list of (key, value) tuples, where both key and value are lowercased bytes.
                 # (b'host', mapping[b'Host']),
@@ -278,8 +293,8 @@ class HTTP1_1Handler(HTTPServerBase):
                 # (b'connection', b'keep-alive'),
                 # (b'user-agent', b'python-httpx/0.16.1'),
                 # (b'key', b'value')
-            'client': None, # TODO: should be set to the client's IP address and port
-            'server': None, # TODO: should be set to the server's IP address and port
+            'client': None,  # set in run() from transport peername
+            'server': None,  # set from Host header; fallback to sockname in run()
             # A mutable dict that can be used to store arbitrary data during the connection's lifetime. 
             # The application can read and write to this dict, and it will persist across multiple calls 
             # to the application for the same connection.
@@ -288,16 +303,14 @@ class HTTP1_1Handler(HTTPServerBase):
 
         if b'host' in mapping:
             host, port = mapping[b'host'].split(b':')
-            port = int(port)
-            scope['server'] = [host, port]
+            scope['server'] = [host.decode('utf-8'), int(port)]
 
         if b'upgrade' in mapping:
-            scope['type'] = mapping[b'upgrade']
-            if scope['type'] == b'websocket':
+            scope['type'] = mapping[b'upgrade'].decode('utf-8').lower()
+            if scope['type'] == 'websocket':
                 scope['scheme'] = 'ws'
-
-        if b'connection' in mapping:
-            scope['scheme'] = mapping[b'connection']
+        elif b'connection' in mapping:
+            scope['scheme'] = mapping[b'connection'].decode('utf-8').lower()
 
         return scope
 

@@ -1,16 +1,45 @@
 # from functools import partial, reduce
-from http import HTTPStatus
+from http import HTTPStatus, HTTPMethod
 import asyncio
 import sys
 import traceback
 
 # import from this package
-from .utils import do_nothing, Scheme, HTTPMethods
-from .router import Router
-from .response import Response
+from .utils import Scheme
+from .router import Router, ErrorRouter, MethodNotApplicable, PathNotRegistered
+from .response import make_start, make_body
 from .logger import get_logger_set
 from .watch import Watcher, force_reload
 logger, log = get_logger_set(__name__)
+
+
+async def _default_error_handler(scope, receive, send):  # noqa: ARG001
+    """Comprehensive fallback error handler registered at BlackBull construction.
+
+    Reads from scope['state']:
+      - 'error_status'    : HTTPStatus  (default: INTERNAL_SERVER_ERROR)
+      - 'error_exception' : exception instance (optional)
+      - 'allowed_methods' : iterable of method names (for 405 Allow header)
+
+    Returns a plain-text response with the status code, status phrase,
+    and — when an exception is present — its class name and message.
+    """
+    state = scope.get('state', {})
+    status = state.get('error_status', HTTPStatus.INTERNAL_SERVER_ERROR)
+    exc = state.get('error_exception')
+    allowed = state.get('allowed_methods', ())
+
+    headers = []
+    if allowed:
+        headers.append((b'allow', ', '.join(m.upper() for m in allowed).encode()))
+
+    lines = [f"{status.value} {status.phrase}"]
+    if exc is not None:
+        lines.append(f"{type(exc).__name__}: {exc}")
+    body = '\n'.join(lines).encode()
+
+    await send(make_start(status, headers=headers))
+    await send(make_body(body))
 
 
 class BlackBull:
@@ -21,7 +50,16 @@ class BlackBull:
                  log=log,
                  ):
         self._router = router
-        self._router.route_404()(self.not_found_fn)
+        self._logger = logger
+        self._log = log
+        self._error_router = ErrorRouter()
+
+        # Register the comprehensive default handler for every HTTPStatus error
+        # and the Exception base class so all unhandled errors are covered.
+        for status in HTTPStatus:
+            if status.is_client_error or status.is_server_error:
+                self._error_router[status] = _default_error_handler
+        self._error_router[Exception] = _default_error_handler
 
         self._loop = loop
         self._certfile = None
@@ -40,9 +78,6 @@ class BlackBull:
                 return None
         return self._loop
 
-    async def not_found_fn(self, scope, receive, send, inner=do_nothing):
-        await Response(send, b'NOT FOUND', status=HTTPStatus.NOT_FOUND)
-
     @property
     def certfile(self):
         return self._certfile
@@ -52,27 +87,56 @@ class BlackBull:
         return self._keyfile
 
     async def __call__(self, scope, receive, send):
-        logger.info((scope, receive, send))
-
-        if scope['type'] == 'http':
-            scheme = Scheme.http
-        elif scope['type'] == 'websocket':
-            scheme = Scheme.websocket
-        else:
-            logger.error(f'Invalid scheme ({scope["type"]}) is requested.')
-            raise Exception('Invalid scheme is requested.')
-
-        path = scope['path']
-        logger.debug((path, scheme))
-        function, methods = self._router[(path, scheme)]
-        logger.debug((self, function))
+        self._logger.debug((scope, receive, send))
 
         try:
-            await function(scope, receive, send)
-        except Exception:
-            logger.error(traceback.format_exc())
+            scheme = Scheme(scope['type'])
+        except ValueError:
+            self._logger.error(f'Invalid scheme ({scope["type"]}) is requested.')
+            raise Exception('Invalid scheme is requested.')
 
-    def route(self, methods=[HTTPMethods.get], path='/', scheme=Scheme.http, functions=[]):
+        try:
+            method = HTTPMethod(scope['method'].upper())
+        except ValueError:
+            self._logger.debug("Unknown HTTP method: %r", scope['method'])
+            scope.setdefault('state', {})['error_status'] = HTTPStatus.METHOD_NOT_ALLOWED
+            await self._error_router[HTTPStatus.METHOD_NOT_ALLOWED](scope, receive, send)
+            return
+
+        path = scope['path']
+        self._logger.debug((path, scheme))
+
+        try:
+            function = self._router[(path, method, scheme)]
+        except MethodNotApplicable as e:
+            self._logger.debug("405 Method Not Allowed: path=%r method=%r allowed=%r",
+                         path, method, e.allowed_methods)
+            scope.setdefault('state', {}).update({
+                'error_status': HTTPStatus.METHOD_NOT_ALLOWED,
+                'allowed_methods': e.allowed_methods,
+            })
+            await self._error_router[HTTPStatus.METHOD_NOT_ALLOWED](scope, receive, send)
+            return
+        except PathNotRegistered:
+            self._logger.debug("404 Not Found: path=%r", path)
+            scope.setdefault('state', {})['error_status'] = HTTPStatus.NOT_FOUND
+            await self._error_router[HTTPStatus.NOT_FOUND](scope, receive, send)
+            return
+
+        self._logger.debug((self, function))
+        try:
+            await function(scope, receive, send)
+        except Exception as e:
+            self._logger.error(traceback.format_exc())
+            scope.setdefault('state', {}).update({
+                'error_status': HTTPStatus.INTERNAL_SERVER_ERROR,
+                'error_exception': e,
+            })
+            handler = self._error_router[e]
+            if handler is not None:
+                await handler(scope, receive, send)
+
+    def route(self, methods=[HTTPMethod.GET], path='/', scheme=Scheme.http, functions=[]):
         """
         Set endpoint functions here.
         methods: HTTP method of functions.
@@ -85,8 +149,26 @@ class BlackBull:
             functions=functions,
             )
 
-    def route_404(self, fn):
-        return self._router.route_404()(fn)
+    def on_error(self, key):
+        """Register a custom error handler for an HTTPStatus or exception class.
+
+        Usage::
+
+            @app.on_error(HTTPStatus.FORBIDDEN)
+            async def handle_403(scope, receive, send):
+                ...
+
+            @app.on_error(ValueError)
+            async def handle_value_error(scope, receive, send):
+                ...
+
+        The handler receives (scope, receive, send).
+        scope['state'] contains:
+          - 'error_status'    : HTTPStatus
+          - 'error_exception' : exception instance (when triggered by an exception)
+          - 'allowed_methods' : allowed method names (for 405)
+        """
+        return self._error_router(key)
 
     def has_server(self):
         return hasattr(self, 'server')
@@ -99,10 +181,10 @@ class BlackBull:
             keyfile=keyfile,
             loop=self.loop)
         self.server.open_socket(port)
-        logger.info(self.server)
+        self._logger.info(self.server)
 
     async def run(self, certfile=None, keyfile=None, port=0, debug=False):
-        logger.info('Run is called.')
+        self._logger.info('Run is called.')
         tasks = []
 
         if not self.has_server():
@@ -124,10 +206,10 @@ class BlackBull:
             await asyncio.gather(*tasks, return_exceptions=True)
 
         except asyncio.exceptions.CancelledError:
-            logger.info('The tasks have been cancelled.')
+            self._logger.info('The tasks have been cancelled.')
 
         except BaseException:
-            logger.error(traceback.format_exc())
+            self._logger.error(traceback.format_exc())
 
     def wait_for_port(self, timeout: float = 10.0, poll_interval: float = 0.1):
         self.server.wait_for_port(timeout=timeout, poll_interval=poll_interval)
