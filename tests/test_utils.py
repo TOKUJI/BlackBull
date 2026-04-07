@@ -4,7 +4,7 @@ from blackbull.logger import get_logger_set  # , ColoredFormatter
 
 # Test targets
 # from blackbull import EventEmitter, Response
-from blackbull.utils import Scheme, HTTPMethods
+from blackbull.utils import Scheme
 from blackbull.router import Router
 
 logger, _ = get_logger_set('test_util')

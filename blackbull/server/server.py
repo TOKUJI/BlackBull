@@ -358,9 +358,9 @@ class HTTP1_1Handler(HTTPServerBase):
         return receive
 
     def make_sender(self):
+        @log
         async def send(x):
-            logger.debug(x)
-            await self.writer.write(x)
+            self.writer.write(x)
         return send
 
 

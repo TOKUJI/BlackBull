@@ -1,7 +1,7 @@
 from functools import wraps
 from logging import getLogger, NullHandler, Formatter
 from copy import copy
-from asyncio import iscoroutinefunction
+from inspect import iscoroutinefunction
 
 
 def get_logger_set(name=None):

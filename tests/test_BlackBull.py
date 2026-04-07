@@ -94,7 +94,7 @@ async def app(manage_cert_and_key):
         logger.debug('test_fn3 ends.')
         return 'fn3'
 
-    app.route(methods='get', path='/test2', functions=[test_fn1, test_fn2, test_fn3])
+    app.route(methods=HTTPMethod.GET, path='/test2', functions=[test_fn1, test_fn2, test_fn3])
 
     @app.route(path='/websocket1', scheme=Scheme.websocket)
     async def websocket1(scope, receive, send):
@@ -203,6 +203,7 @@ async def test_response_404_fn(app):
 
 @pytest.mark.asyncio
 async def test_routing_middleware(app):
+    logger.debug('test_routing_middleware is called.')
 
     async with httpx.AsyncClient(http2=True, verify=False) as c:
         res = await c.get(f'https://127.0.0.1:{app.port}/test2', headers={'key': 'value'})
