@@ -101,14 +101,51 @@ asgi.py runs a web application that demonstrate basic functionalities.
 
 # Todo
 
-These are todos for the developper.
+## P1 — Spec violations / breaks conformant ASGI apps
 
-1. Client -> Enable Server Push.
-1. Server (HTTP2, HTTP1.1, WebSocket)
-1. Server push -> daphne does not yet support extend features like Server Push.
-1. Static files
-1. Cacheing
-1. Event handling (?)
-1. Asynchronous SQL ORM (Asynchronous support of SQL Alchemy ORM seems to be not sufficient.)
-1. Model
-1. Template
+- [ ] `make_sender` (HTTP/1.1): serialize ASGI event dict → HTTP/1.1 wire bytes (currently writes raw dict to socket)
+- [ ] `WebsocketHandler.receive()`: emit `{"type": "websocket.connect"}` on the first call before reading any frame
+- [ ] `middlewares.py` `websocket()`: check `msg.get('type') != 'websocket.connect'` instead of exact dict equality
+- [ ] WebSocket Ping (opcode `0x9`): immediately reply with Pong (opcode `0xA`)
+- [ ] WebSocket: reject unmasked client frames (MUST per RFC 6455 §5.1)
+- [ ] HTTP/2 `CONTINUATION` frame: concatenate header blocks until `END_HEADERS` flag is set on `HEADERS`
+- [ ] HTTP/2: normalize header names to lowercase after HPACK decode (RFC 7540 §8.1.2)
+
+## P2 — Important protocol features
+
+- [ ] HTTP/1.1 Keep-Alive: loop over multiple requests on a single connection
+- [ ] HTTP/1.1: handle duplicate header names as a list (multi-value headers, RFC 7230 §3.2.2)
+- [ ] HTTP/2 flow control: check window size before sending `DATA`; issue `WINDOW_UPDATE` after consuming received data
+- [ ] HTTP/2 `MAX_CONCURRENT_STREAMS`: send `RST_STREAM(REFUSED_STREAM)` when the limit is exceeded
+- [ ] ASGI lifespan scope: dispatch `lifespan.startup` / `lifespan.shutdown` events on server start/stop
+- [ ] ASGI `http.disconnect` receive event: detect client disconnect and return `{"type": "http.disconnect"}`
+- [ ] Timeout handling: wrap header and body reads with `asyncio.wait_for`
+- [ ] HTTP/1.1 `100 Continue`: send interim response when request includes `Expect: 100-continue`
+- [ ] HTTP/2 `GOAWAY`: send on graceful shutdown (with last processed stream ID) and on protocol errors
+
+## P3 — Features and enhancements
+
+- [ ] HTTP/1.1 responses: automatically add `Content-Length` and `Date` headers
+- [ ] `scope['root_path']`: populate from server mount path (currently commented out)
+- [ ] WebSocket `Sec-WebSocket-Version: 13` validation
+- [ ] WebSocket subprotocol negotiation (`Sec-WebSocket-Protocol` header)
+- [ ] HTTP response compression: gzip / br based on `Accept-Encoding`
+- [ ] Static file serving middleware: stream files with `Range` / `206 Partial Content` support (RFC 7233)
+- [ ] mTLS: `ssl.CERT_REQUIRED` + `load_verify_locations` for client certificate authentication
+- [ ] HTTP/2 server push (`PUSH_PROMISE` frame)
+- [ ] HTTP/2 stream state machine: idle → open → half-closed → closed (RFC 7540 §5.1)
+- [ ] HTTP/2 priority scheduling by stream weight
+- [ ] WebSocket per-message deflate compression (RFC 7692)
+- [ ] WebSocket fragmentation: merge continuation frames (FIN=0) into a single message
+- [ ] Streaming request body: support `more_body=True` in `http.request` receive events
+- [ ] ASGI `http.response.trailers` send event
+- [ ] Worker processes / multiprocessing support
+- [ ] Access logging
+
+## P4 — Application framework
+
+- [ ] Caching
+- [ ] Event handling
+- [ ] Asynchronous SQL ORM (asyncio support in SQLAlchemy ORM was insufficient at time of writing)
+- [ ] Model layer
+- [ ] Template engine
