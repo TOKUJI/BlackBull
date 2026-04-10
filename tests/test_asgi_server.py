@@ -35,7 +35,7 @@ import ssl
 import pytest
 import pytest_asyncio
 
-from blackbull.server.server import ASGIServer, HTTP1_1Handler
+from blackbull.server.server import ASGIServer, HTTP11Handler
 from blackbull.rsock import create_dual_stack_sockets, _bind_socket
 
 
@@ -291,9 +291,9 @@ class FakeStreamReader:
 class TestHTTP1_1BodyDecoding:
     """HTTP/1.1 body reading: Content-Length and Transfer-Encoding: chunked."""
 
-    def _make_handler(self, body_bytes: bytes) -> HTTP1_1Handler:
-        """Return a bare HTTP1_1Handler whose reader contains *body_bytes*."""
-        handler = object.__new__(HTTP1_1Handler)
+    def _make_handler(self, body_bytes: bytes) -> HTTP11Handler:
+        """Return a bare HTTP11Handler whose reader contains *body_bytes*."""
+        handler = object.__new__(HTTP11Handler)
         handler.reader = FakeStreamReader(body_bytes)
         handler.writer = None
         handler.app = None

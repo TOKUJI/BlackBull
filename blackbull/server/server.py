@@ -3,6 +3,8 @@ import ssl
 import traceback
 import re
 from collections import defaultdict, deque
+from unittest import case
+from unittest import case
 from urllib.parse import urlparse
 from hashlib import sha1
 from base64 import b64encode
@@ -14,22 +16,23 @@ import socket
 from ..utils import HTTP2, pop_safe, EventEmitter, check_port
 from ..stream import Stream
 from ..rsock import create_dual_stack_sockets
-from ..frame import FrameFactory, FrameTypes, FrameBase, HeadersFlags, DataFlags, SettingFlags
+from ..frame import FrameFactory, FrameTypes, FrameBase, SettingFlags
 from ..logger import get_logger_set
 from .response import RespondFactory
 from .parser import ParserFactory
+from .sender import SenderFactory, WebSocketSender
 logger, log = get_logger_set(__name__)
 
 
 
-class HTTPServerBase:
+class BaseHandler:
     """
     The common roles of HTTPServers are
     * Parsing received binary
     * Wrapping sending binary
     """
     def __init__(self, app, reader, writer, *args, **kwargs):
-        """docstring for HTTPServerBase
+        """docstring for BaseHandler
         Parameters
         ----------
         app:
@@ -61,7 +64,7 @@ class HTTPServerBase:
         raise NotImplementedError()
 
 
-class WebsocketHandler(HTTPServerBase):
+class WebSocketHandler(BaseHandler):
     """Server-side WebSocket handler.
 
     Responsibilities
@@ -69,66 +72,9 @@ class WebsocketHandler(HTTPServerBase):
     1. Complete the HTTP→WebSocket upgrade handshake (RFC 6455 §4.2.2).
     2. Expose an ASGI-compatible ``receive`` coroutine that reads raw WebSocket
        frames from the TCP stream and returns ASGI event dicts.
-    3. Expose an ASGI-compatible ``send`` coroutine that accepts ASGI event
-       dicts and writes the corresponding WebSocket frames to the TCP stream.
-    4. Call the application coroutine with the original HTTP-upgrade scope
-       (type='websocket', path=...) so the router can dispatch to the correct
-       handler.
+    3. Delegate all frame encoding/writing to ``WebSocketSender``.
+    4. Call the application coroutine with the original HTTP-upgrade scope.
     """
-
-    # ------------------------------------------------------------------ #
-    # WebSocket frame helpers (RFC 6455 §5)                               #
-    # ------------------------------------------------------------------ #
-
-    @staticmethod
-    def _encode_frame(payload: bytes, opcode: int = 0x1) -> bytes:
-        """Encode *payload* as an unmasked WebSocket data frame.
-
-        ``opcode`` defaults to 0x1 (text); pass 0x2 for binary.
-        The server MUST NOT mask frames it sends to the client (RFC 6455 §5.1).
-        """
-        length = len(payload)
-        # FIN=1, RSV=0, opcode in low nibble of first byte
-        header = bytes([0x80 | opcode])
-        if length < 126:
-            header += bytes([length])
-        elif length < 65536:
-            header += bytes([126]) + length.to_bytes(2, 'big')
-        else:
-            header += bytes([127]) + length.to_bytes(8, 'big')
-        return header + payload
-
-    @staticmethod
-    async def _read_frame(reader) -> tuple[int, bytes]:
-        """Read one WebSocket frame from *reader*.
-
-        Returns ``(opcode, payload)`` where *payload* is already unmasked.
-        Raises ``ConnectionError`` on EOF.
-        """
-        header = await reader.readexactly(2)
-        # byte 0: FIN | RSV | opcode
-        opcode = header[0] & 0x0F
-        # byte 1: MASK | payload-length
-        masked = bool(header[1] & 0x80)
-        length = header[1] & 0x7F
-
-        if length == 126:
-            length = int.from_bytes(await reader.readexactly(2), 'big')
-        elif length == 127:
-            length = int.from_bytes(await reader.readexactly(8), 'big')
-
-        if masked:
-            mask = await reader.readexactly(4)
-            raw = await reader.readexactly(length)
-            payload = bytes(b ^ mask[i % 4] for i, b in enumerate(raw))
-        else:
-            payload = await reader.readexactly(length)
-
-        return opcode, payload
-
-    # ------------------------------------------------------------------ #
-    # Constructor                                                          #
-    # ------------------------------------------------------------------ #
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -136,66 +82,40 @@ class WebsocketHandler(HTTPServerBase):
         if len(args) > 3:
             self.scope = args[-1]
             logger.debug(self.scope)
-
-    # ------------------------------------------------------------------ #
-    # ASGI interface                                                       #
-    # ------------------------------------------------------------------ #
+        
+        self._connect_sent = False
 
     async def receive(self):
         """Read one WebSocket frame and return an ASGI ``websocket.receive`` dict.
-
-        Bug 4 fixed: the old implementation returned a *coroutine object*
-        instead of awaiting it, and used HTTP line-delimited reading which
-        is completely wrong for the WebSocket binary framing protocol.
+        If the frame is a close frame, return an ASGI ``websocket.disconnect`` dict instead.
         """
-        opcode, payload = await self._read_frame(self.reader)
+        if not self._connect_sent:
+            self._connect_sent = True
+            return {'type': 'websocket.connect'}
 
-        if opcode in (0x1, 0x9):     # text frame or ping
-            return {'type': 'websocket.receive', 'text': payload.decode('utf-8'), 'bytes': None}
-        elif opcode == 0x2:           # binary frame
-            return {'type': 'websocket.receive', 'text': None, 'bytes': payload}
-        elif opcode == 0x8:           # close frame
-            return {'type': 'websocket.disconnect', 'code': 1000}
-        else:
-            logger.warning('Unsupported WebSocket opcode: 0x%02x', opcode)
-            return {'type': 'websocket.receive', 'text': None, 'bytes': payload}
+        opcode, masked, length = await WebSocketSender._read_opcode(self.reader)
+        payload = await WebSocketSender._read_payload(self.reader, masked, length)
 
-    async def send(self, event: dict):
-        """Accept an ASGI event dict and write the corresponding WebSocket frame.
+        match opcode:
+            case 0x1:
+                return {'type': 'websocket.receive', 'text': payload.decode('utf-8'), 'bytes': None}
 
-        Bug 5 fixed: the old implementation passed the raw dict to
-        ``writer.write()``, which expects *bytes*, not a dict.
-        """
-        event_type = event.get('type', '')
+            case 0x2:           # binary frame
+                return {'type': 'websocket.receive', 'text': None, 'bytes': payload}
+    
+            case 0x8:           # close frame
+                return {'type': 'websocket.disconnect', 'code': 1000}
 
-        if event_type == 'websocket.send':
-            if 'text' in event and event['text'] is not None:
-                frame = self._encode_frame(event['text'].encode('utf-8'), opcode=0x1)
-            else:
-                frame = self._encode_frame(event.get('bytes', b''), opcode=0x2)
-            self.writer.write(frame)
-            await self.writer.drain()
-
-        elif event_type == 'websocket.close':
-            # Send a close frame (opcode 0x8) with optional status code 1000
-            frame = self._encode_frame(b'\x03\xe8', opcode=0x8)
-            self.writer.write(frame)
-            await self.writer.drain()
-
-        elif event_type == 'websocket.accept':
-            # The handshake reply is sent in run(); nothing more needed here.
-            pass
-
-        else:
-            logger.warning('WebsocketHandler.send: unknown event type %r', event_type)
-
-    # ------------------------------------------------------------------ #
-    # Lifecycle                                                            #
-    # ------------------------------------------------------------------ #
+            case 0x9: # text frame or ping
+                return {'type': 'websocket.receive', 'text': payload.decode('utf-8'), 'bytes': None}
+    
+    
+            case _:
+                logger.warning('Unsupported WebSocket opcode: 0x%02x', opcode)
+                return {'type': 'websocket.receive', 'text': None, 'bytes': payload}
 
     async def run(self):
-        """Complete the upgrade handshake then call the ASGI application.
-        """
+        """Complete the upgrade handshake then call the ASGI application."""
         # --- RFC 6455 §4.2.2: server handshake response ---
         key = [x[1] for x in self.scope['headers'] if x[0] == b'sec-websocket-key'][0]
         logger.debug('WebSocket key: %s', key)
@@ -212,13 +132,11 @@ class WebsocketHandler(HTTPServerBase):
         await self.writer.drain()
         logger.debug('WebSocket handshake complete.')
 
-        # --- Dispatch to the ASGI application ---
-        # Bug 6: pass the original upgrade scope (type='websocket', path=...)
-        # so the router can find the registered handler.
-        await self.app(self.scope, self.receive, self.send)
+        send = SenderFactory.websocket(self.writer)
+        await self.app(self.scope, self.receive, send)
 
 
-class HTTP1_1Handler(HTTPServerBase):
+class HTTP11Handler(BaseHandler):
     def __init__(self, app, reader, writer, request, *args, **kwargs):
         super().__init__(app, reader, writer, *args, **kwargs)
         self.request = request
@@ -250,7 +168,7 @@ class HTTP1_1Handler(HTTPServerBase):
         logger.debug(scope)
 
         if scope.get('type') == 'websocket':
-            await WebsocketHandler(self.app, self.reader, self.writer, scope).run()
+            await WebSocketHandler(self.app, self.reader, self.writer, scope).run()
             return
 
         receive = self.make_recepient(scope)
@@ -358,13 +276,10 @@ class HTTP1_1Handler(HTTPServerBase):
         return receive
 
     def make_sender(self):
-        @log
-        async def send(x):
-            self.writer.write(x)
-        return send
+        return SenderFactory.http1(self.writer)
 
 
-class HTTP2Server(HTTPServerBase):
+class HTTP2Handler(BaseHandler):
     """An ASGI Server class.
     """
     def __init__(self, app, reader, writer):
@@ -372,6 +287,8 @@ class HTTP2Server(HTTPServerBase):
         self.client_stream_window_size = {}
         self.root_stream = Stream(0, None, 1)
         self.factory = FrameFactory()
+        # Stream 0: connection-level control-plane sender (SETTINGS, PING, …)
+        self._control_sender = SenderFactory.http2(self.writer, self.factory, 0)
 
     def find_stream(self, id_):
         if id_ == 0:
@@ -380,34 +297,11 @@ class HTTP2Server(HTTPServerBase):
             return self.root_stream.find_child(id_)
 
     def make_sender(self, stream_identifier):
-        async def send(data):
-            logger.debug(data)
-            if data['type'] == 'http.response.start':
-                frame = self.factory.create(FrameTypes.HEADERS,
-                                            HeadersFlags.END_HEADERS.value,
-                                            stream_identifier)
-                frame[':status'] = data['status']
-                for k, v in data['headers']:
-                    frame[k] = v
-
-            elif data['type'] == 'http.response.body':
-                frame = self.factory.create(FrameTypes.DATA,
-                                            DataFlags.END_STREAM.value,
-                                            stream_identifier,
-                                            data=data['body'])
-
-            else:
-                logger.info(data)
-
-            self.writer.write(frame.save())
-
-        return send
+        return SenderFactory.http2(self.writer, self.factory, stream_identifier)
 
     async def send_frame(self, frame: FrameBase):
-        """Send a frame to the recipient."""
-        logger.debug(f'Sending {frame}')
-        self.writer.write(frame.save())
-        await self.writer.drain()
+        """Send a raw HTTP/2 frame via the control-plane sender."""
+        await self._control_sender(frame)
 
     async def receive(self) -> bytes:
         """Read the stream, get some data from incoming frames, and parse it"""
@@ -532,13 +426,13 @@ class ASGIServer:
 
                 if request_data == HTTP2:
                     logger.info('HTTP/2 connection is requested.')
-                    handler = HTTP2Server(self.app, reader, writer)
+                    handler = HTTP2Handler(self.app, reader, writer)
                 else:
                     raise ValueError(f'Received an invalid request ({request_data}).')
 
             else:
                 logger.info('HTTP1.1 connection is requested.')
-                handler = HTTP1_1Handler(self.app, reader, writer, request_data)
+                handler = HTTP11Handler(self.app, reader, writer, request_data)
 
             await handler.run()
 

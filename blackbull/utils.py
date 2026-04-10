@@ -61,7 +61,7 @@ class serializable(object):
 # RFC 5322 Date and Time specification
 IMFFixdate = '%a, %d %b %Y %H:%M:%S %Z'
 
-
+CRLF = '\r\n'
 URI = r'/?[0-9a-zA-Z]*?/?'
 HTTP2 = b'PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n'
 WebSocket = b'GET /chat HTTP/1.1\r\n'

@@ -1,4 +1,3 @@
-import asyncio
 import json
 from typing import Union
 from http import HTTPStatus
@@ -7,83 +6,43 @@ from .logger import get_logger_set
 logger, log = get_logger_set('response')
 
 
-def make_start(status, headers=[]):
-    res = {
-        'type': 'http.response.start',
-        'status': status.value,
-        'headers': headers
-    }
-    return res
+def Response(content: Union[str, bytes]) -> bytes:
+    """Encode *content* to bytes for use as an HTTP response body.
 
+    Pass the result directly to the ASGI ``send`` callable::
 
-def make_body(content: bytes):
-    res = {
-        'type': 'http.response.body',
-        'body': content,
-        'more_body': False
-    }
-    return res
-
-
-def make_websocket_body(content: Union[str, bytes]):
-    ret = {
-        'type': 'websocket.send',
-    }
+        await send(Response('Hello'), HTTPStatus.OK)
+    """
     if isinstance(content, str):
-        ret['text'] = content
-    elif isinstance(content, bytes):
-        ret['bytes'] = content
-    else:
-        logger.error(f'Type error: expected str or bytes, but {type(content)} is provided.')
-
-    return ret
+        return content.encode()
+    if isinstance(content, bytes):
+        return content
+    raise TypeError(f'Response expects str or bytes, got {type(content)}')
 
 
-async def Response(send, content: Union[str, bytes], status=HTTPStatus.OK, more_body=False):
-    logger.debug(content)
-    start = make_start(status=status)
-    logger.debug(content)
-    await send(start)
-    logger.info('Starting packet has been sent.')
+def JSONResponse(content) -> bytes:
+    """Serialize *content* to JSON bytes for use as an HTTP response body.
 
+    Pass the result directly to the ASGI ``send`` callable::
+
+        await send(JSONResponse({'key': 'value'}), HTTPStatus.OK)
+    """
+    return json.dumps(content).encode()
+
+
+def WebSocketResponse(content) -> dict:
+    """Build an ASGI ``websocket.send`` event dict from *content*.
+
+    - ``str``  → ``{'type': 'websocket.send', 'text': content}``
+    - ``bytes`` → ``{'type': 'websocket.send', 'bytes': content}``
+    - anything else → JSON-serialised into the ``text`` field
+
+    Pass the result directly to the ASGI ``send`` callable::
+
+        await send(WebSocketResponse('hello'))
+    """
     if isinstance(content, str):
-        body = make_body(content.encode())
-    elif isinstance(content, bytes):
-        body = make_body(content)
-    else:
-        raise TypeError(f'Parameter "content" ({type(content)}) is not str nor bytes.')
-
-    await send(body)
-    logger.info('Body packet has been sent.')
-
-
-async def JSONResponse(send, content, status=HTTPStatus.OK):
-    start = make_start(status=status)
-    await send(start)
-
-    try:
-        body = make_body(json.dumps(content).encode())
-        logger.debug(body)
-
-    except BaseException as e:
-        logger.error(e)
-
-    await send(body)
-
-
-async def WebSocketResponse(send, content, status=HTTPStatus.OK):
-    try:
-        # If content is already a str or bytes, pass it through directly so it
-        # arrives at the client unmodified.  Only serialize dicts / other objects
-        # to JSON — wrapping a plain string in json.dumps() would add an extra
-        # layer of quoting (e.g. 'Toshio' → '"Toshio"').
-        if isinstance(content, (str, bytes)):
-            body = make_websocket_body(content)
-        else:
-            body = make_websocket_body(json.dumps(content))
-        logger.debug(body)
-
-    except BaseException as e:
-        logger.error(e)
-
-    await send(body)
+        return {'type': 'websocket.send', 'text': content}
+    if isinstance(content, bytes):
+        return {'type': 'websocket.send', 'bytes': content}
+    return {'type': 'websocket.send', 'text': json.dumps(content)}

@@ -2,6 +2,7 @@ import logging.config
 import asyncio
 import json
 
+from http import HTTPStatus
 from blackbull import BlackBull, Response, JSONResponse, WebSocketResponse
 from blackbull.utils import do_nothing, Scheme, HTTPMethods
 from blackbull.middlewares import websocket
@@ -26,26 +27,26 @@ async def top(scope, receive, send):
     """
     request = await receive()
     logger.info(request)
-    await Response(send, render_login_page())
+    await send(Response(render_login_page()), HTTPStatus.OK)
 
 
 @app.route(path='/favicon.ico')
 async def favicon(scope, receive, send):
-    await Response(send, b'login is called.')
+    await send(Response(b'login is called.'), HTTPStatus.OK)
 
 
 @app.route(path='/json')
 async def jsonapi(scope, receive, send):
     request = await receive()
     logger.info(request)
-    await JSONResponse(send, {'a': 'b'})
+    await send(JSONResponse({'a': 'b'}), HTTPStatus.OK)
 
 
 async def websocket_sample(scope, receive, send):
     while msg := (await receive()):
         logger.debug(msg)
         logger.debug(scope)
-        await WebSocketResponse(send, msg)
+        await send(WebSocketResponse(msg))
 
 app.route(path="/websocket", scheme=Scheme.websocket,
           functions=[websocket_sample])
@@ -56,12 +57,12 @@ async def login(scope, receive, send):
     logger.info('login()')
     request = await receive()
     logger.info(request)
-    await Response(send, b'login is called.')
+    await send(Response(b'login is called.'), HTTPStatus.OK)
 
 
 @app.route_404
 async def not_found(scope, receive, send):
-    await Response(send, b'Not found in asgi.py.')
+    await send(Response(b'Not found in asgi.py.'), HTTPStatus.NOT_FOUND)
 
 
 if __name__ == "__main__":

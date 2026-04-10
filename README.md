@@ -103,8 +103,8 @@ asgi.py runs a web application that demonstrate basic functionalities.
 
 ## P1 — Spec violations / breaks conformant ASGI apps
 
-- [ ] `make_sender` (HTTP/1.1): serialize ASGI event dict → HTTP/1.1 wire bytes (currently writes raw dict to socket)
-- [ ] `WebsocketHandler.receive()`: emit `{"type": "websocket.connect"}` on the first call before reading any frame
+- [x] `make_sender` (HTTP/1.1): serialize ASGI event dict → HTTP/1.1 wire bytes — replaced by `HTTP1Sender` in `sender.py`
+- [x] `WebsocketHandler.receive()`: emit `{"type": "websocket.connect"}` on the first call before reading any frame
 - [ ] `middlewares.py` `websocket()`: check `msg.get('type') != 'websocket.connect'` instead of exact dict equality
 - [ ] WebSocket Ping (opcode `0x9`): immediately reply with Pong (opcode `0xA`)
 - [ ] WebSocket: reject unmasked client frames (MUST per RFC 6455 §5.1)

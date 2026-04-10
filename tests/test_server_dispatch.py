@@ -2,30 +2,31 @@
 Tests for server-side HTTP parsing and connection dispatch
 ==========================================================
 
-HTTP1_1Handler.parse()
+HTTP11Handler.parse()
 ----------------------
-HTTP1_1Handler.parse() builds an ASGI scope dict from raw HTTP/1.1 request
+HTTP11Handler.parse() builds an ASGI scope dict from raw HTTP/1.1 request
 bytes.  It is responsible for detecting WebSocket upgrade requests and setting
 scope['type'] = 'websocket'.  Bug 6 was that *after* parse() correctly set
-scope['type']='websocket', WebsocketHandler.run() replaced the scope with
+scope['type']='websocket', WebSocketHandler.run() replaced the scope with
 {'type': 'websocket.connect'}, dropping the path.  A test for parse() is the
-first line of defence: if parse() itself sets the wrong type, WebsocketHandler
+first line of defence: if parse() itself sets the wrong type, WebSocketHandler
 would never receive a correct scope.
 
 client_connected_cb dispatch
 -----------------------------
 ASGIServer.client_connected_cb() reads the first line of the incoming stream
-and decides which handler to instantiate (HTTP2Server, HTTP1_1Handler,
-WebsocketHandler).  Testing this dispatch logic catches regressions where the
+and decides which handler to instantiate (HTTP2Handler, HTTP11Handler,
+WebSocketHandler).  Testing this dispatch logic catches regressions where the
 wrong handler is chosen, e.g. sending a WebSocket-upgrade HTTP request to
-HTTP1_1Handler instead of WebsocketHandler.
+HTTP11Handler instead of WebSocketHandler.
 """
 
 import asyncio
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+from http import HTTPStatus
 
-from blackbull.server.server import ASGIServer, WebsocketHandler, HTTP1_1Handler
+from blackbull.server.server import ASGIServer, WebSocketHandler, HTTP11Handler
 
 
 # ---------------------------------------------------------------------------
@@ -35,9 +36,9 @@ from blackbull.server.server import ASGIServer, WebsocketHandler, HTTP1_1Handler
 def _get_scope(raw_request: bytes) -> dict:
     """Parse raw HTTP/1.1 request bytes and return the resulting scope dict.
 
-    Uses HTTP1_1Handler.parse(), which superseded the deleted top-level parse().
+    Uses HTTP11Handler.parse(), which superseded the deleted top-level parse().
     """
-    handler = object.__new__(HTTP1_1Handler)
+    handler = object.__new__(HTTP11Handler)
     handler.request = raw_request
     return handler.parse()
 
@@ -112,10 +113,10 @@ class TestParse:
     # --- WebSocket upgrade detection (upstream of Bug 6) ---
 
     def test_websocket_upgrade_sets_type_websocket(self):
-        """HTTP1_1Handler.parse() must set scope['type']='websocket' for Upgrade: websocket.
+        """HTTP11Handler.parse() must set scope['type']='websocket' for Upgrade: websocket.
 
         If parse() fails to detect the upgrade, the connection would be routed
-        to HTTP1_1Handler instead of WebsocketHandler (Bug 6 root-cause).
+        to HTTP11Handler instead of WebSocketHandler (Bug 6 root-cause).
         """
         scope = _get_scope(_ws_request())
         assert scope['type'] == 'websocket', (
@@ -235,7 +236,7 @@ class TestClientConnectedCbDispatch:
 
     @pytest.mark.asyncio
     async def test_websocket_request_dispatches_to_websocket_handler(self):
-        """A WS-upgrade request must create a WebsocketHandler, not HTTP1_1Handler.
+        """A WS-upgrade request must create a WebSocketHandler, not HTTP11Handler.
 
         This is the key regression test for Bug 6: the wrong handler type would
         either crash or fail to dispatch to the router's websocket endpoint.
@@ -247,23 +248,23 @@ class TestClientConnectedCbDispatch:
         server = ASGIServer(_noop_app)
         dispatched_type = {}
 
-        original_ws_init = WebsocketHandler.__init__
+        original_ws_init = WebSocketHandler.__init__
 
         def capturing_ws_init(self, *args, **kwargs):
-            dispatched_type['handler'] = 'WebsocketHandler'
+            dispatched_type['handler'] = 'WebSocketHandler'
             original_ws_init(self, *args, **kwargs)
 
-        with patch.object(WebsocketHandler, '__init__', capturing_ws_init):
-            with patch.object(WebsocketHandler, 'run', new_callable=lambda: lambda self: asyncio.sleep(0)):
+        with patch.object(WebSocketHandler, '__init__', capturing_ws_init):
+            with patch.object(WebSocketHandler, 'run', new_callable=lambda: lambda self: asyncio.sleep(0)):
                 await server.client_connected_cb(reader, writer)
 
-        assert dispatched_type.get('handler') == 'WebsocketHandler', (
-            "An HTTP Upgrade: websocket request must be routed to WebsocketHandler."
+        assert dispatched_type.get('handler') == 'WebSocketHandler', (
+            "An HTTP Upgrade: websocket request must be routed to WebSocketHandler."
         )
 
     @pytest.mark.asyncio
     async def test_plain_http_request_dispatches_to_http11_handler(self):
-        """A plain HTTP GET must create an HTTP1_1Handler."""
+        """A plain HTTP GET must create an HTTP11Handler."""
         raw = _http_request(method='GET', path='/hello')
         reader = _FakeReader(raw)
         writer = _FakeWriter()
@@ -271,28 +272,28 @@ class TestClientConnectedCbDispatch:
         server = ASGIServer(_noop_app)
         dispatched_type = {}
 
-        original_http_init = HTTP1_1Handler.__init__
+        original_http_init = HTTP11Handler.__init__
 
         def capturing_http_init(self, *args, **kwargs):
-            dispatched_type['handler'] = 'HTTP1_1Handler'
+            dispatched_type['handler'] = 'HTTP11Handler'
             original_http_init(self, *args, **kwargs)
 
         async def noop_run(self):
             pass
 
-        with patch.object(HTTP1_1Handler, '__init__', capturing_http_init):
-            with patch.object(HTTP1_1Handler, 'run', noop_run):
+        with patch.object(HTTP11Handler, '__init__', capturing_http_init):
+            with patch.object(HTTP11Handler, 'run', noop_run):
                 await server.client_connected_cb(reader, writer)
 
-        assert dispatched_type.get('handler') == 'HTTP1_1Handler', (
-            "A plain HTTP GET must be routed to HTTP1_1Handler, not WebsocketHandler."
+        assert dispatched_type.get('handler') == 'HTTP11Handler', (
+            "A plain HTTP GET must be routed to HTTP11Handler, not WebSocketHandler."
         )
 
     @pytest.mark.asyncio
     async def test_websocket_handler_receives_path_in_scope(self):
-        """The scope forwarded to WebsocketHandler must contain the request path.
+        """The scope forwarded to WebSocketHandler must contain the request path.
 
-        Bug 6 upstream: if parse() strips the path, WebsocketHandler never
+        Bug 6 upstream: if parse() strips the path, WebSocketHandler never
         sees it regardless of what run() does with the scope.
         """
         path = '/chat/room1'
@@ -308,16 +309,17 @@ class TestClientConnectedCbDispatch:
 
         server.app = capturing_app
 
-        original_ws_init = WebsocketHandler.__init__
+        original_ws_init = WebSocketHandler.__init__
 
         def spy_init(self, *args, **kwargs):
             original_ws_init(self, *args, **kwargs)
 
         async def noop_run(self):
             # Simulate forwarding scope to app (as the fixed code does)
-            await self.app(self.scope, self.receive, self.send)
+            async def _noop_send(event, *args, **kwargs): pass
+            await self.app(self.scope, self.receive, _noop_send)
 
-        with patch.object(WebsocketHandler, 'run', noop_run):
+        with patch.object(WebSocketHandler, 'run', noop_run):
             await server.client_connected_cb(reader, writer)
 
         assert captured_scope.get('path') == path, (
@@ -336,7 +338,7 @@ class TestClientConnectedCbDispatch:
         async def noop_run(self):
             pass
 
-        with patch.object(HTTP1_1Handler, 'run', noop_run):
+        with patch.object(HTTP11Handler, 'run', noop_run):
             await server.client_connected_cb(reader, writer)
 
         assert writer.closed, (
@@ -349,11 +351,11 @@ class TestClientConnectedCbDispatch:
 # ---------------------------------------------------------------------------
 
 class TestScopePopulation:
-    """HTTP1_1Handler.run() must fill client, server, and scheme from the transport."""
+    """HTTP11Handler.run() must fill client, server, and scheme from the transport."""
 
-    def _make_handler(self, raw: bytes, writer: _FakeWriter) -> HTTP1_1Handler:
+    def _make_handler(self, raw: bytes, writer) -> HTTP11Handler:
         reader = _FakeReader(raw)
-        handler = object.__new__(HTTP1_1Handler)
+        handler = object.__new__(HTTP11Handler)
         handler.app = None
         handler.reader = reader
         handler.writer = writer
@@ -364,7 +366,7 @@ class TestScopePopulation:
     async def test_client_is_set_from_transport_peername(self):
         """scope['client'] must reflect the remote address from the transport."""
         raw = _http_request()
-        writer = _FakeWriter(peername=('192.168.1.10', 54321))
+        writer = _make_stream_writer_mock(peername=('192.168.1.10', 54321))
         handler = self._make_handler(raw, writer)
 
         captured = {}
@@ -383,7 +385,7 @@ class TestScopePopulation:
     async def test_server_falls_back_to_sockname_when_no_host_header(self):
         """Without a Host header, scope['server'] must come from transport sockname."""
         raw = _http_request(headers={})  # no Host header
-        writer = _FakeWriter(sockname=('0.0.0.0', 9000))
+        writer = _make_stream_writer_mock(sockname=('0.0.0.0', 9000))
         handler = self._make_handler(raw, writer)
 
         captured = {}
@@ -403,7 +405,7 @@ class TestScopePopulation:
     async def test_server_from_host_header_takes_priority_over_sockname(self):
         """scope['server'] from Host: header must not be overwritten by sockname."""
         raw = _http_request(headers={'Host': 'example.com:8080'})
-        writer = _FakeWriter(sockname=('0.0.0.0', 9999))
+        writer = _make_stream_writer_mock(sockname=('0.0.0.0', 9999))
         handler = self._make_handler(raw, writer)
 
         captured = {}
@@ -422,7 +424,7 @@ class TestScopePopulation:
     async def test_scheme_is_http_for_plain_connection(self):
         """scope['scheme'] must be 'http' when there is no TLS."""
         raw = _http_request()
-        writer = _FakeWriter(ssl_object=None)
+        writer = _make_stream_writer_mock(ssl_object=None)
         handler = self._make_handler(raw, writer)
 
         captured = {}
@@ -441,8 +443,7 @@ class TestScopePopulation:
     async def test_scheme_is_https_for_tls_connection(self):
         """scope['scheme'] must be 'https' when the transport carries TLS."""
         raw = _http_request()
-        # Any truthy value for ssl_object marks this as a TLS connection.
-        writer = _FakeWriter(ssl_object=object())
+        writer = _make_stream_writer_mock(ssl_object=object())
         handler = self._make_handler(raw, writer)
 
         captured = {}
@@ -458,10 +459,10 @@ class TestScopePopulation:
         )
 
     @pytest.mark.asyncio
-    async def test_scheme_is_wss_for_tls_websocket(self):
+    async def test_scheme_is_wss_for_tls_websocket(self):  # noqa: E303
         """scope['scheme'] must be 'wss' for a WebSocket upgrade over TLS."""
         raw = _ws_request(path='/ws')
-        writer = _FakeWriter(ssl_object=object())
+        writer = _make_stream_writer_mock(ssl_object=object())
 
         captured = {}
 
@@ -469,21 +470,181 @@ class TestScopePopulation:
             captured.update(scope)
 
         reader = _FakeReader(raw)
-        handler = object.__new__(HTTP1_1Handler)
+        handler = object.__new__(HTTP11Handler)
         handler.reader = reader
         handler.writer = writer
         handler.request = b''
 
-        # Intercept WebsocketHandler.run to capture the scope it receives.
-        from unittest.mock import patch
-
         async def noop_ws_run(self):
             captured.update(self.scope)
 
-        with patch.object(WebsocketHandler, 'run', noop_ws_run):
+        with patch.object(WebSocketHandler, 'run', noop_ws_run):
             handler.app = capture_app
             await handler.run()
 
         assert captured.get('scheme') == 'wss', (
             f"Expected scheme='wss' for TLS WebSocket, got {captured.get('scheme')!r}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# make_sender – ASGI event dict → HTTP/1.1 wire bytes
+# ---------------------------------------------------------------------------
+
+def _make_stream_writer_mock(peername=('127.0.0.1', 54321),
+                              sockname=('0.0.0.0', 8000),
+                              ssl_object=None):
+    """Return a MagicMock that satisfies the AsyncioWriter duck-type contract.
+
+    AsyncioWriter only requires write() and drain(), so a MagicMock with those
+    attrs configured is sufficient — no asyncio internals needed.
+    The ``transport`` attribute mirrors the _FakeTransport API so that
+    HTTP11Handler.run() can call transport.get_extra_info('peername') etc.
+    """
+    sw = MagicMock()
+    sw.transport = _FakeTransport(peername=peername, sockname=sockname, ssl_object=ssl_object)
+    sw.written = bytearray()
+    sw.write = MagicMock(side_effect=lambda data: sw.written.extend(data))
+    sw.drain = AsyncMock()
+    return sw
+
+
+class TestMakeSender:
+    """HTTP11Handler.make_sender() must serialize ASGI event dicts to HTTP/1.1
+    wire-format bytes, not Python dict repr.
+
+    The ASGI HTTP send interface uses two event types:
+      * 'http.response.start' → status line + headers, terminated by CRLF CRLF
+      * 'http.response.body'  → raw body bytes
+
+    Current bug: make_sender() falls through to ``str(x).encode()`` for any
+    non-bytes value, writing Python dict repr to the socket instead of valid HTTP.
+    """
+
+    def _make_handler(self):
+        sw = _make_stream_writer_mock()
+        handler = object.__new__(HTTP11Handler)
+        handler.app = None
+        handler.reader = None
+        handler.writer = sw
+        handler.request = b''
+        return handler, sw
+
+    @pytest.mark.asyncio
+    async def test_response_start_writes_status_line(self):
+        """'http.response.start' must produce a valid HTTP/1.1 status line."""
+        handler, sw = self._make_handler()
+        send = handler.make_sender()
+
+        await send({'type': 'http.response.start', 'status': 200, 'headers': []})
+
+        written = bytes(sw.written)
+        assert written.startswith(b'HTTP/1.1 200'), (
+            f"Expected status line starting with b'HTTP/1.1 200', got {written[:40]!r}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_response_start_writes_reason_phrase(self):
+        """'http.response.start' must include the standard reason phrase."""
+        handler, sw = self._make_handler()
+        send = handler.make_sender()
+
+        await send({'type': 'http.response.start', 'status': 404, 'headers': []})
+
+        written = bytes(sw.written)
+        assert b'Not Found' in written, (
+            f"Expected '404 Not Found' in status line, got {written[:60]!r}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_response_start_writes_headers(self):
+        """'http.response.start' must write each header as 'Name: Value\\r\\n'."""
+        handler, sw = self._make_handler()
+        send = handler.make_sender()
+
+        await send({
+            'type': 'http.response.start',
+            'status': 200,
+            'headers': [
+                (b'content-type', b'text/plain'),
+                (b'content-length', b'5'),
+            ],
+        })
+
+        written = bytes(sw.written)
+        assert b'content-type: text/plain\r\n' in written, (
+            f"Expected 'content-type: text/plain\\r\\n' in response, got {written!r}"
+        )
+        assert b'content-length: 5\r\n' in written, (
+            f"Expected 'content-length: 5\\r\\n' in response, got {written!r}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_response_start_ends_with_blank_line(self):
+        """'http.response.start' must terminate the header section with CRLFCRLF."""
+        handler, sw = self._make_handler()
+        send = handler.make_sender()
+
+        await send({'type': 'http.response.start', 'status': 200, 'headers': []})
+
+        written = bytes(sw.written)
+        assert written.endswith(b'\r\n\r\n'), (
+            f"Header block must end with \\r\\n\\r\\n, got {written!r}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_response_body_writes_bytes(self):
+        """'http.response.body' must write body bytes verbatim to the socket."""
+        handler, sw = self._make_handler()
+        send = handler.make_sender()
+
+        body = b'Hello, world!'
+        await send({'type': 'http.response.body', 'body': body, 'more_body': False})
+
+        written = bytes(sw.written)
+        assert body in written, (
+            f"Expected body bytes {body!r} to appear in output, got {written!r}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_full_response_is_valid_http11(self):
+        """Sending start then body must produce a complete, parseable HTTP/1.1 response."""
+        handler, sw = self._make_handler()
+        send = handler.make_sender()
+
+        await send({
+            'type': 'http.response.start',
+            'status': 200,
+            'headers': [(b'content-length', b'2')],
+        })
+        await send({
+            'type': 'http.response.body',
+            'body': b'OK',
+            'more_body': False,
+        })
+
+        wire = bytes(sw.written)
+        assert wire.startswith(b'HTTP/1.1 200'), wire[:60]
+        assert b'\r\n\r\n' in wire, f"Missing header/body separator in {wire!r}"
+        header_part, body_part = wire.split(b'\r\n\r\n', 1)
+        assert body_part == b'OK', (
+            f"Expected body b'OK', got {body_part!r}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_response_start_is_not_dict_repr(self):
+        """make_sender must NOT write Python dict repr to the socket.
+
+        This is the concrete regression check for the bug: the old fallback
+        ``str(x).encode()`` produced b\"{'type': 'http.response.start', ...}\"
+        which is not valid HTTP.
+        """
+        handler, sw = self._make_handler()
+        send = handler.make_sender()
+
+        await send({'type': 'http.response.start', 'status': 200, 'headers': []})
+
+        written = bytes(sw.written)
+        assert not written.startswith(b'{'), (
+            f"make_sender wrote Python dict repr instead of HTTP wire format: {written[:80]!r}"
         )

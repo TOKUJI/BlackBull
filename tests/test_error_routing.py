@@ -128,12 +128,27 @@ def _make_scope(path='/', method='GET', type_='http'):
 
 
 class _CaptureSend:
-    """Collects all ASGI send() calls."""
+    """Collects all ASGI send() calls.
+
+    Accepts both forms:
+    - ASGI event dict: ``await send({'type': 'http.response.start', ...})``
+    - High-level bytes: ``await send(body_bytes, status, headers)``
+    """
     def __init__(self):
         self.events = []
 
-    async def __call__(self, event):
-        self.events.append(event)
+    async def __call__(self, body_or_event, status=None, headers=None):
+        if isinstance(body_or_event, dict):
+            self.events.append(body_or_event)
+        elif isinstance(body_or_event, bytes):
+            if status is not None:
+                self.events.append({
+                    'type': 'http.response.start',
+                    'status': status.value,
+                    'headers': headers or [],
+                })
+            if body_or_event:
+                self.events.append({'type': 'http.response.body', 'body': body_or_event})
 
     @property
     def status(self):
@@ -204,15 +219,11 @@ class TestBlackBullErrorDispatch:
 
         @app.route(path='/hello', methods=[HTTPMethod.GET])
         async def hello(scope, receive, send):
-            from blackbull.response import make_start, make_body
-            await send(make_start(HTTPStatus.OK))
-            await send(make_body(b'hello'))
+            await send(b'hello', HTTPStatus.OK)
 
         @app.route(path='/post-only', methods=[HTTPMethod.POST])
         async def post_only(scope, receive, send):
-            from blackbull.response import make_start, make_body
-            await send(make_start(HTTPStatus.OK))
-            await send(make_body(b'posted'))
+            await send(b'posted', HTTPStatus.OK)
 
         return app
 
@@ -232,9 +243,7 @@ class TestBlackBullErrorDispatch:
         @app.on_error(HTTPStatus.NOT_FOUND)
         async def custom_404(scope, receive, send):
             called.append(True)
-            from blackbull.response import make_start, make_body
-            await send(make_start(HTTPStatus.NOT_FOUND))
-            await send(make_body(b'custom not found'))
+            await send(b'custom not found', HTTPStatus.NOT_FOUND)
 
         scope = _make_scope('/nonexistent')
         send = _CaptureSend()
@@ -271,9 +280,7 @@ class TestBlackBullErrorDispatch:
         @app.on_error(HTTPStatus.METHOD_NOT_ALLOWED)
         async def custom_405(scope, receive, send):
             called.append(scope['state'].get('allowed_methods'))
-            from blackbull.response import make_start, make_body
-            await send(make_start(HTTPStatus.METHOD_NOT_ALLOWED))
-            await send(make_body(b'custom 405'))
+            await send(b'custom 405', HTTPStatus.METHOD_NOT_ALLOWED)
 
         scope = _make_scope('/post-only', method='GET')
         send = _CaptureSend()
@@ -289,9 +296,7 @@ class TestBlackBullErrorDispatch:
         @app.on_error(RuntimeError)
         async def handle_runtime(scope, receive, send):
             caught.append(scope['state'].get('error_exception'))
-            from blackbull.response import make_start, make_body
-            await send(make_start(HTTPStatus.INTERNAL_SERVER_ERROR))
-            await send(make_body(b'runtime error caught'))
+            await send(b'runtime error caught', HTTPStatus.INTERNAL_SERVER_ERROR)
 
         @app.route(path='/boom')
         async def boom(scope, receive, send):
@@ -311,9 +316,7 @@ class TestBlackBullErrorDispatch:
         @app.on_error(Exception)
         async def catch_all(scope, receive, send):
             caught.append(type(scope['state'].get('error_exception')).__name__)
-            from blackbull.response import make_start, make_body
-            await send(make_start(HTTPStatus.INTERNAL_SERVER_ERROR))
-            await send(make_body(b'caught'))
+            await send(b'caught', HTTPStatus.INTERNAL_SERVER_ERROR)
 
         @app.route(path='/key-err')
         async def key_err(scope, receive, send):

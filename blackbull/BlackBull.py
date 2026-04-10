@@ -7,7 +7,6 @@ import traceback
 # import from this package
 from .utils import Scheme
 from .router import Router, ErrorRouter, MethodNotApplicable, PathNotRegistered
-from .response import make_start, make_body
 from .logger import get_logger_set
 from .watch import Watcher, force_reload
 logger, log = get_logger_set(__name__)
@@ -38,8 +37,7 @@ async def _default_error_handler(scope, receive, send):  # noqa: ARG001
         lines.append(f"{type(exc).__name__}: {exc}")
     body = '\n'.join(lines).encode()
 
-    await send(make_start(status, headers=headers))
-    await send(make_body(body))
+    await send(body, status, headers)
 
 
 class BlackBull:

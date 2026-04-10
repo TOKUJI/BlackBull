@@ -1,5 +1,5 @@
 """
-Tests for WebsocketHandler (blackbull/server/server.py)
+Tests for WebSocketHandler (blackbull/server/server.py)
 ========================================================
 
 Each test is tied directly to a bug that was found during development and
@@ -33,7 +33,8 @@ import struct
 from unittest.mock import AsyncMock, MagicMock, call, patch
 import pytest
 
-from blackbull.server.server import WebsocketHandler
+from blackbull.server.server import WebSocketHandler
+from blackbull.server.sender import WebSocketSender, AsyncioWriter
 
 
 # ---------------------------------------------------------------------------
@@ -110,7 +111,7 @@ class TestEncodeFrame:
     def test_small_text_frame(self):
         """Payload < 126 bytes → 2-byte header."""
         payload = b'hello'
-        frame = WebsocketHandler._encode_frame(payload, opcode=0x1)
+        frame = WebSocketSender._encode_frame(payload, opcode=0x1)
         assert frame[0] == 0x80 | 0x1          # FIN + text opcode
         assert frame[1] == len(payload)          # no mask bit, length 5
         assert frame[2:] == payload
@@ -118,7 +119,7 @@ class TestEncodeFrame:
     def test_medium_frame_126(self):
         """Payload == 126 bytes → 126-length indicator + 2-byte extended length."""
         payload = b'x' * 126
-        frame = WebsocketHandler._encode_frame(payload, opcode=0x2)
+        frame = WebSocketSender._encode_frame(payload, opcode=0x2)
         assert frame[0] == 0x80 | 0x2
         assert frame[1] == 126
         assert int.from_bytes(frame[2:4], 'big') == 126
@@ -127,18 +128,18 @@ class TestEncodeFrame:
     def test_large_frame(self):
         """Payload == 65536 bytes → 127-length indicator + 8-byte extended length."""
         payload = b'y' * 65536
-        frame = WebsocketHandler._encode_frame(payload, opcode=0x2)
+        frame = WebSocketSender._encode_frame(payload, opcode=0x2)
         assert frame[0] == 0x80 | 0x2
         assert frame[1] == 127
         assert int.from_bytes(frame[2:10], 'big') == 65536
         assert frame[10:] == payload
 
     def test_binary_opcode(self):
-        frame = WebsocketHandler._encode_frame(b'\x00\x01', opcode=0x2)
+        frame = WebSocketSender._encode_frame(b'\x00\x01', opcode=0x2)
         assert frame[0] & 0x0F == 0x2
 
     def test_close_frame_opcode(self):
-        frame = WebsocketHandler._encode_frame(b'\x03\xe8', opcode=0x8)
+        frame = WebSocketSender._encode_frame(b'\x03\xe8', opcode=0x8)
         assert frame[0] & 0x0F == 0x8
 
 
@@ -155,7 +156,7 @@ class TestReadFrame:
         payload = b'Toshio'
         data = _make_client_frame(payload, opcode=0x1)
         reader = _FakeReader(data)
-        opcode, got = await WebsocketHandler._read_frame(reader)
+        opcode, got = await WebSocketSender._read_frame(reader)
         assert opcode == 0x1
         assert got == payload
 
@@ -164,7 +165,7 @@ class TestReadFrame:
         payload = bytes(range(16))
         data = _make_client_frame(payload, opcode=0x2)
         reader = _FakeReader(data)
-        opcode, got = await WebsocketHandler._read_frame(reader)
+        opcode, got = await WebSocketSender._read_frame(reader)
         assert opcode == 0x2
         assert got == payload
 
@@ -173,7 +174,7 @@ class TestReadFrame:
         payload = b'\x03\xe8'
         data = _make_client_frame(payload, opcode=0x8)
         reader = _FakeReader(data)
-        opcode, got = await WebsocketHandler._read_frame(reader)
+        opcode, got = await WebSocketSender._read_frame(reader)
         assert opcode == 0x8
         assert got == payload
 
@@ -183,7 +184,7 @@ class TestReadFrame:
         raw_payload = b'ABCD'
         data = _make_client_frame(raw_payload, opcode=0x1)
         reader = _FakeReader(data)
-        _, got = await WebsocketHandler._read_frame(reader)
+        _, got = await WebSocketSender._read_frame(reader)
         assert got == raw_payload
 
     @pytest.mark.asyncio
@@ -192,7 +193,7 @@ class TestReadFrame:
         payload = b'z' * 126
         data = _make_client_frame(payload, opcode=0x1)
         reader = _FakeReader(data)
-        opcode, got = await WebsocketHandler._read_frame(reader)
+        opcode, got = await WebSocketSender._read_frame(reader)
         assert got == payload
 
     @pytest.mark.asyncio
@@ -200,7 +201,7 @@ class TestReadFrame:
         """Truncated stream must raise IncompleteReadError, not return partial data."""
         reader = _FakeReader(b'\x81')   # only 1 byte – header requires 2
         with pytest.raises(asyncio.IncompleteReadError):
-            await WebsocketHandler._read_frame(reader)
+            await WebSocketSender._read_frame(reader)
 
 
 # ---------------------------------------------------------------------------
@@ -208,18 +209,23 @@ class TestReadFrame:
 # ---------------------------------------------------------------------------
 
 class TestReceive:
-    """WebsocketHandler.receive() must return ASGI event dicts, not coroutines."""
+    """WebSocketHandler.receive() must return ASGI event dicts, not coroutines."""
 
     def _make_handler(self, raw_frame: bytes):
         reader = _FakeReader(raw_frame)
         writer = _FakeWriter()
         scope = {'type': 'websocket', 'path': '/ws', 'headers': []}
-        return WebsocketHandler(AsyncMock(), reader, writer, scope)
+        return WebSocketHandler(AsyncMock(), reader, writer, scope)
 
     @pytest.mark.asyncio
     async def test_receive_text_returns_dict(self):
-        """Bug 4 regression: receive() must return an awaited dict, not a coroutine."""
+        """Bug 4 regression: receive() must return an awaited dict, not a coroutine.
+
+        The first call returns websocket.connect (ASGI spec); the second call
+        reads the actual frame from the wire.
+        """
         handler = self._make_handler(_make_client_frame(b'hello', opcode=0x1))
+        await handler.receive()      # websocket.connect — skip
         event = await handler.receive()
         # Must be a plain dict – never a coroutine
         assert isinstance(event, dict), "receive() returned a coroutine instead of a dict"
@@ -230,6 +236,7 @@ class TestReceive:
     @pytest.mark.asyncio
     async def test_receive_binary_returns_dict(self):
         handler = self._make_handler(_make_client_frame(b'\xde\xad', opcode=0x2))
+        await handler.receive()      # websocket.connect — skip
         event = await handler.receive()
         assert event['type'] == 'websocket.receive'
         assert event['text'] is None
@@ -238,6 +245,7 @@ class TestReceive:
     @pytest.mark.asyncio
     async def test_receive_close_returns_disconnect(self):
         handler = self._make_handler(_make_client_frame(b'\x03\xe8', opcode=0x8))
+        await handler.receive()      # websocket.connect — skip
         event = await handler.receive()
         assert event['type'] == 'websocket.disconnect'
 
@@ -250,39 +258,127 @@ class TestReceive:
 
 
 # ---------------------------------------------------------------------------
+# receive() — websocket.connect on first call (P1 spec requirement)
+# ---------------------------------------------------------------------------
+#
+# ASGI WebSocket spec §4.2:
+#   The first event sent to the application on a WebSocket connection MUST be
+#   ``{"type": "websocket.connect"}``.  Only *after* that may the handler
+#   read actual WebSocket frames from the wire.
+#
+# The current implementation skips this and goes straight to frame reading,
+# which breaks any ASGI middleware that guards on the connect event (e.g.
+# ``middlewares.websocket()`` which raises ValueError when the first message
+# is not ``websocket.connect``).
+
+class TestReceiveConnect:
+    """receive() must return websocket.connect on the first call."""
+
+    def _make_handler(self, raw_frame: bytes = b''):
+        reader = _FakeReader(raw_frame)
+        writer = _FakeWriter()
+        scope = {'type': 'websocket', 'path': '/ws', 'headers': []}
+        return WebSocketHandler(AsyncMock(), reader, writer, scope)
+
+    @pytest.mark.asyncio
+    async def test_first_call_returns_connect(self):
+        """First receive() must return websocket.connect without reading a frame."""
+        # The reader has a valid text frame, but the first call must NOT consume it.
+        handler = self._make_handler(_make_client_frame(b'hello', opcode=0x1))
+        event = await handler.receive()
+        assert event == {'type': 'websocket.connect'}, (
+            f"First receive() must return websocket.connect, got {event!r}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_first_call_does_not_read_from_wire(self):
+        """First receive() must not consume any bytes from the reader."""
+        # Supply an empty reader — if the handler tries to read, it will raise
+        # IncompleteReadError, causing the test to fail.
+        handler = self._make_handler(b'')
+        event = await handler.receive()
+        assert event['type'] == 'websocket.connect'
+
+    @pytest.mark.asyncio
+    async def test_second_call_reads_first_frame(self):
+        """Second receive() must read the first actual WebSocket frame."""
+        handler = self._make_handler(_make_client_frame(b'hello', opcode=0x1))
+        await handler.receive()          # consume the connect event
+        event = await handler.receive()  # now reads the wire frame
+        assert event['type'] == 'websocket.receive'
+        assert event['text'] == 'hello'
+
+    @pytest.mark.asyncio
+    async def test_connect_emitted_only_once(self):
+        """websocket.connect must appear exactly once across multiple receive() calls."""
+        frames = (
+            _make_client_frame(b'first', opcode=0x1)
+            + _make_client_frame(b'second', opcode=0x1)
+        )
+        handler = self._make_handler(frames)
+
+        events = [await handler.receive() for _ in range(3)]
+        connect_events = [e for e in events if e.get('type') == 'websocket.connect']
+        assert len(connect_events) == 1, (
+            f"websocket.connect appeared {len(connect_events)} times; expected exactly 1"
+        )
+
+    @pytest.mark.asyncio
+    async def test_third_call_reads_second_frame(self):
+        """Calls after the connect event continue to read frames in order."""
+        frames = (
+            _make_client_frame(b'alpha', opcode=0x1)
+            + _make_client_frame(b'beta', opcode=0x1)
+        )
+        handler = self._make_handler(frames)
+        await handler.receive()              # websocket.connect
+        first = await handler.receive()      # reads 'alpha'
+        second = await handler.receive()     # reads 'beta'
+        assert first['text'] == 'alpha'
+        assert second['text'] == 'beta'
+
+    @pytest.mark.asyncio
+    async def test_connect_then_close_frame_returns_disconnect(self):
+        """After the connect event, a close frame must return websocket.disconnect."""
+        handler = self._make_handler(_make_client_frame(b'\x03\xe8', opcode=0x8))
+        connect = await handler.receive()
+        assert connect['type'] == 'websocket.connect'
+        disconnect = await handler.receive()
+        assert disconnect['type'] == 'websocket.disconnect'
+
+
+# ---------------------------------------------------------------------------
 # send() (Bug 5)
 # ---------------------------------------------------------------------------
 
 class TestSend:
-    """WebsocketHandler.send() must encode ASGI event dicts into wire bytes."""
+    """WebSocketSender must encode ASGI event dicts into wire bytes."""
 
-    def _make_handler(self):
-        reader = _FakeReader(b'')
+    def _make_sender(self):
         writer = _FakeWriter()
-        scope = {'type': 'websocket', 'path': '/ws', 'headers': []}
-        handler = WebsocketHandler(AsyncMock(), reader, writer, scope)
-        return handler, writer
+        sender = WebSocketSender(AsyncioWriter(writer))
+        return sender, writer
 
     @pytest.mark.asyncio
     async def test_send_text_writes_bytes(self):
         """Bug 5 regression: send() must write bytes to the wire, not a raw dict."""
-        handler, writer = self._make_handler()
-        await handler.send({'type': 'websocket.send', 'text': 'hello'})
+        sender, writer = self._make_sender()
+        await sender({'type': 'websocket.send', 'text': 'hello'})
         assert len(writer.written) > 0, "send() wrote nothing to the wire"
         assert isinstance(writer.written, (bytes, bytearray))
 
     @pytest.mark.asyncio
     async def test_send_text_produces_text_opcode(self):
         """Text payload must use opcode 0x1 (RFC 6455 §5.2)."""
-        handler, writer = self._make_handler()
-        await handler.send({'type': 'websocket.send', 'text': 'hi'})
+        sender, writer = self._make_sender()
+        await sender({'type': 'websocket.send', 'text': 'hi'})
         assert writer.written[0] & 0x0F == 0x1
 
     @pytest.mark.asyncio
     async def test_send_text_payload_is_utf8(self):
-        handler, writer = self._make_handler()
+        sender, writer = self._make_sender()
         msg = 'Toshio'
-        await handler.send({'type': 'websocket.send', 'text': msg})
+        await sender({'type': 'websocket.send', 'text': msg})
         # Parse back: 2-byte header (FIN+opcode, length), then payload
         length = writer.written[1] & 0x7F
         payload = bytes(writer.written[2:2 + length])
@@ -291,23 +387,23 @@ class TestSend:
     @pytest.mark.asyncio
     async def test_send_bytes_writes_binary_opcode(self):
         """Binary payload must use opcode 0x2."""
-        handler, writer = self._make_handler()
-        await handler.send({'type': 'websocket.send', 'bytes': b'\xca\xfe'})
+        sender, writer = self._make_sender()
+        await sender({'type': 'websocket.send', 'bytes': b'\xca\xfe'})
         assert writer.written[0] & 0x0F == 0x2
 
     @pytest.mark.asyncio
     async def test_send_close_writes_close_opcode(self):
         """websocket.close event must produce a close frame (opcode 0x8)."""
-        handler, writer = self._make_handler()
-        await handler.send({'type': 'websocket.close'})
+        sender, writer = self._make_sender()
+        await sender({'type': 'websocket.close'})
         assert len(writer.written) > 0
         assert writer.written[0] & 0x0F == 0x8
 
     @pytest.mark.asyncio
     async def test_send_accept_writes_nothing(self):
         """websocket.accept is handled in run(); send() should be a no-op for it."""
-        handler, writer = self._make_handler()
-        await handler.send({'type': 'websocket.accept', 'subprotocol': None})
+        sender, writer = self._make_sender()
+        await sender({'type': 'websocket.accept', 'subprotocol': None})
         assert len(writer.written) == 0
 
 
@@ -316,7 +412,7 @@ class TestSend:
 # ---------------------------------------------------------------------------
 
 class TestRunScopeForwarding:
-    """WebsocketHandler.run() must forward the original HTTP-upgrade scope to app.
+    """WebSocketHandler.run() must forward the original HTTP-upgrade scope to app.
 
     Bug 6: the old code replaced the scope with ``{'type': 'websocket.connect'}``
     (no 'path' key), which broke router dispatch.
@@ -350,7 +446,7 @@ class TestRunScopeForwarding:
 
         reader = _FakeReader(b'')   # nothing to read after handshake
         writer = _FakeWriter()
-        handler = WebsocketHandler(fake_app, reader, writer, scope)
+        handler = WebSocketHandler(fake_app, reader, writer, scope)
 
         await handler.run()
 
@@ -367,7 +463,7 @@ class TestRunScopeForwarding:
 
         reader = _FakeReader(b'')
         writer = _FakeWriter()
-        handler = WebsocketHandler(fake_app, reader, writer, scope)
+        handler = WebSocketHandler(fake_app, reader, writer, scope)
         await handler.run()
 
         fwd = captured['scope']
@@ -387,7 +483,7 @@ class TestRunScopeForwarding:
 
         reader = _FakeReader(b'')
         writer = _FakeWriter()
-        handler = WebsocketHandler(fake_app, reader, writer, scope)
+        handler = WebSocketHandler(fake_app, reader, writer, scope)
         await handler.run()
 
         assert 'path' in captured['scope'], (
@@ -406,7 +502,7 @@ class TestRunScopeForwarding:
 
         reader = _FakeReader(b'')
         writer = _FakeWriter()
-        handler = WebsocketHandler(fake_app, reader, writer, scope)
+        handler = WebSocketHandler(fake_app, reader, writer, scope)
         await handler.run()
 
         assert captured['scope'].get('type') != 'websocket.connect', (
@@ -435,7 +531,7 @@ class TestRunHandshake:
             pass
 
         writer = _FakeWriter()
-        handler = WebsocketHandler(fake_app, _FakeReader(b''), writer, scope)
+        handler = WebSocketHandler(fake_app, _FakeReader(b''), writer, scope)
         await handler.run()
 
         response_text = writer.written.decode('latin-1')
@@ -462,7 +558,7 @@ class TestRunHandshake:
             pass
 
         writer = _FakeWriter()
-        handler = WebsocketHandler(fake_app, _FakeReader(b''), writer, scope)
+        handler = WebSocketHandler(fake_app, _FakeReader(b''), writer, scope)
         await handler.run()
 
         assert expected in writer.written.decode('latin-1')

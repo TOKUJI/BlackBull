@@ -68,19 +68,19 @@ async def app(manage_cert_and_key):
     @app.route(path='/test')
     async def test_(scope, receive, send):
         logger.debug(f'test_({scope}, {receive}, {send})')
-        await Response(send, 'sample')
+        await send(Response('sample'), HTTPStatus.OK)
 
     @app.on_error(HTTPStatus.NOT_FOUND)
     async def test_404(scope, receive, send):
         logger.debug(f'test_404({scope}, {receive}, {send})')
-        await Response(send, 'not found test.', status=HTTPStatus.NOT_FOUND)
+        await send(Response('not found test.'), HTTPStatus.NOT_FOUND)
 
     # Routing using middleware.
     async def test_fn1(scope, receive, send, inner):
         logger.debug('test_fn1 starts.')
         res = await inner(scope, receive, send)
         logger.debug(f'test_fn1 ends. res = {res}')
-        await Response(send, res + 'fn1')
+        await send(Response(res + 'fn1'), HTTPStatus.OK)
 
     async def test_fn2(scope, receive, send, inner):
         logger.debug('test_fn2 starts.')
@@ -99,7 +99,7 @@ async def app(manage_cert_and_key):
     @app.route(path='/websocket1', scheme=Scheme.websocket)
     async def websocket1(scope, receive, send):
         accept = {"type": "websocket.accept", "subprotocol": None}
-        # msg = await receive()
+        msg = await receive()  # consume websocket.connect
         await send(accept)
 
         while msg := (await receive()):
@@ -107,10 +107,10 @@ async def app(manage_cert_and_key):
                 break
             if 'text' in msg and msg['text'] is not None:
                 logger.debug(f'Got a text massage ({msg}.)')
-                await WebSocketResponse(send, msg['text'])
+                await send(WebSocketResponse(msg['text']))
             elif 'bytes' in msg and msg['bytes'] is not None:
                 logger.debug(f'Got a byte-string massage ({msg}.)')
-                await WebSocketResponse(send, msg['bytes'])
+                await send(WebSocketResponse(msg['bytes']))
             else:
                 logger.info('The received message does not contain any message.')
                 break
@@ -119,7 +119,7 @@ async def app(manage_cert_and_key):
 
     async def websocket2(scope, receive, send):
         while msg := (await receive()):
-            await WebSocketResponse(send, msg)
+            await send(WebSocketResponse(msg))
 
     app.route(path='/websocket2', scheme=Scheme.websocket,
               functions=[websocket2])
@@ -131,14 +131,14 @@ async def app(manage_cert_and_key):
 
         while request['type'] != 'http.disconnect' and request['body'] != 'Bye':
             msg = request['body']
-            await Response(send, msg, more_body=True)
+            await send(Response(msg), HTTPStatus.OK)
 
             try:
                 request = await asyncio.wait_for(receive(), timeout=0.5)
 
             except asyncio.TimeoutError:
                 logger.debug('Have not received any message in this second.')
-                await Response(send, 'Any message?', more_body=True)
+                await send(Response('Any message?'), HTTPStatus.OK)
 
     p = Process(target=run_application, args=(app,))
     p.start()

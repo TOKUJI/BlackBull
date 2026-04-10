@@ -7,6 +7,7 @@ import logging.config
 import asyncio
 import json
 
+from http import HTTPStatus
 from blackbull import BlackBull, Response, WebSocketResponse
 from blackbull.utils import HTTPMethods, Scheme
 from blackbull.middlewares import websocket
@@ -28,7 +29,7 @@ async def chat_websocket(scope, receive, send):
     msg = ''
     while (msg := await receive()) and msg['text'] != 'Bye':
         messages.append(msg['text'])
-        await WebSocketResponse(send, msg)
+        await send(WebSocketResponse(msg))
 
     logger.info(messages)
 
@@ -39,14 +40,14 @@ app.route(path="/websocket", scheme=Scheme.websocket,
 
 @app.route(path='/http2', methods=[HTTPMethods.post])
 async def chat_http2(scope, receive, send):
-    await Response(send, 'Any message?', more_body=True)
+    await send(Response('Any message?'), HTTPStatus.OK)
     request = await receive()
     logger.warning(request)
 
     while request['type'] != 'http.disconnect' and request['body'] != 'Bye':
         msg = request['body']
         messages.append(msg)
-        await Response(send, msg, more_body=True)
+        await send(Response(msg), HTTPStatus.OK)
 
         try:
             request = await asyncio.wait_for(receive(), timeout=0.5)
@@ -54,7 +55,7 @@ async def chat_http2(scope, receive, send):
 
         except asyncio.TimeoutError:
             logger.debug('Have not received any message in this second.')
-            await Response(send, 'Any message?', more_body=True)
+            await send(Response('Any message?'), HTTPStatus.OK)
 
 if __name__ == '__main__':
     try:

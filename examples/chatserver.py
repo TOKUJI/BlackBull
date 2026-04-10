@@ -5,6 +5,7 @@ Examples of chat server that uses http2 or websocket.
 import logging
 import asyncio
 
+from http import HTTPStatus
 from blackbull import BlackBull, Response
 from blackbull.utils import HTTPMethods
 from blackbull.logger import get_logger_set, ColoredFormatter
@@ -32,7 +33,7 @@ logger.addHandler(fh)
 @app.route(path='/http2', methods=[HTTPMethods.post])
 async def chat_http2(scope, receive, send):
     while msg := (await receive()):
-        await Response(send, msg)
+        await send(Response(msg), HTTPStatus.OK)
 
 if __name__ == '__main__':
     try:
