@@ -348,6 +348,89 @@ class TestReceiveConnect:
 
 
 # ---------------------------------------------------------------------------
+# Ping / Pong (P1 item 4)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+class TestPingPong:
+    """WebSocketHandler.receive() must reply to ping frames with a pong frame
+    (RFC 6455 §5.5.1) and silently drop unsolicited pong frames (§5.5.3),
+    in both cases without surfacing the control frame to the ASGI application.
+    """
+
+    def _make_handler(self, raw_bytes: bytes):
+        reader = _FakeReader(raw_bytes)
+        writer = _FakeWriter()
+        scope = {'type': 'websocket', 'path': '/ws', 'headers': []}
+        return WebSocketHandler(AsyncMock(), reader, writer, scope)
+
+    async def test_ping_causes_pong_written_to_wire(self):
+        """Ping frame must cause a pong frame to appear on the wire."""
+        ping_payload = b'ping-data'
+        frames = (_make_client_frame(ping_payload, opcode=0x9)
+                  + _make_client_frame(b'hello', opcode=0x1))
+        handler = self._make_handler(frames)
+        await handler.receive()       # consume connect event
+        await handler.receive()       # process ping, return next data frame
+        expected_pong = WebSocketSender._encode_frame(ping_payload, opcode=0xA)
+        assert handler.writer.written == expected_pong
+
+    async def test_pong_payload_matches_ping_payload(self):
+        """Pong payload must be identical to ping payload (RFC 6455 §5.5.2)."""
+        ping_payload = b'\x01\x02\x03\x04'
+        frames = (_make_client_frame(ping_payload, opcode=0x9)
+                  + _make_client_frame(b'', opcode=0x8))  # close to end loop
+        handler = self._make_handler(frames)
+        await handler.receive()       # connect
+        await handler.receive()       # ping → pong, then close → disconnect
+        pong = WebSocketSender._encode_frame(ping_payload, opcode=0xA)
+        assert handler.writer.written == pong
+
+    async def test_empty_ping_causes_empty_pong(self):
+        """Ping with empty payload must produce a pong with empty payload."""
+        frames = (_make_client_frame(b'', opcode=0x9)
+                  + _make_client_frame(b'hi', opcode=0x1))
+        handler = self._make_handler(frames)
+        await handler.receive()       # connect
+        await handler.receive()       # empty ping → empty pong, then text
+        expected_pong = WebSocketSender._encode_frame(b'', opcode=0xA)
+        assert handler.writer.written == expected_pong
+
+    async def test_ping_is_transparent_to_app(self):
+        """receive() must return the data frame that follows the ping, not the ping itself."""
+        frames = (_make_client_frame(b'ignored', opcode=0x9)
+                  + _make_client_frame(b'hello', opcode=0x1))
+        handler = self._make_handler(frames)
+        await handler.receive()       # connect
+        event = await handler.receive()
+        assert event == {'type': 'websocket.receive', 'text': 'hello', 'bytes': None}
+
+    async def test_consecutive_pings_all_replied(self):
+        """Two consecutive ping frames must each produce a pong in order."""
+        p1 = b'first'
+        p2 = b'second'
+        frames = (_make_client_frame(p1, opcode=0x9)
+                  + _make_client_frame(p2, opcode=0x9)
+                  + _make_client_frame(b'end', opcode=0x1))
+        handler = self._make_handler(frames)
+        await handler.receive()       # connect
+        await handler.receive()       # two pings handled, text returned
+        pong1 = WebSocketSender._encode_frame(p1, opcode=0xA)
+        pong2 = WebSocketSender._encode_frame(p2, opcode=0xA)
+        assert handler.writer.written == pong1 + pong2
+
+    async def test_unsolicited_pong_is_silently_dropped(self):
+        """Unsolicited pong frame (0xA) must be silently ignored — nothing written."""
+        frames = (_make_client_frame(b'data', opcode=0xA)
+                  + _make_client_frame(b'hello', opcode=0x1))
+        handler = self._make_handler(frames)
+        await handler.receive()       # connect
+        event = await handler.receive()
+        assert event == {'type': 'websocket.receive', 'text': 'hello', 'bytes': None}
+        assert handler.writer.written == b''
+
+
+# ---------------------------------------------------------------------------
 # send() (Bug 5)
 # ---------------------------------------------------------------------------
 

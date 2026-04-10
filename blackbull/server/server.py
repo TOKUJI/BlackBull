@@ -93,26 +93,31 @@ class WebSocketHandler(BaseHandler):
             self._connect_sent = True
             return {'type': 'websocket.connect'}
 
-        opcode, masked, length = await WebSocketSender._read_opcode(self.reader)
-        payload = await WebSocketSender._read_payload(self.reader, masked, length)
+        while True:
+            opcode, masked, length = await WebSocketSender._read_opcode(self.reader)
+            payload = await WebSocketSender._read_payload(self.reader, masked, length)
 
-        match opcode:
-            case 0x1:
-                return {'type': 'websocket.receive', 'text': payload.decode('utf-8'), 'bytes': None}
+            match opcode:
+                case 0x1:
+                    return {'type': 'websocket.receive', 'text': payload.decode('utf-8'), 'bytes': None}
 
-            case 0x2:           # binary frame
-                return {'type': 'websocket.receive', 'text': None, 'bytes': payload}
-    
-            case 0x8:           # close frame
-                return {'type': 'websocket.disconnect', 'code': 1000}
+                case 0x2:           # binary frame
+                    return {'type': 'websocket.receive', 'text': None, 'bytes': payload}
 
-            case 0x9: # text frame or ping
-                return {'type': 'websocket.receive', 'text': payload.decode('utf-8'), 'bytes': None}
-    
-    
-            case _:
-                logger.warning('Unsupported WebSocket opcode: 0x%02x', opcode)
-                return {'type': 'websocket.receive', 'text': None, 'bytes': payload}
+                case 0x8:           # close frame
+                    return {'type': 'websocket.disconnect', 'code': 1000}
+
+                case 0x9:           # ping — reply immediately, then read next frame
+                    pong = WebSocketSender._encode_frame(payload, opcode=0xA)
+                    self.writer.write(pong)
+                    await self.writer.drain()
+
+                case 0xA:           # unsolicited pong — silently drop
+                    pass
+
+                case _:
+                    logger.warning('Unsupported WebSocket opcode: 0x%02x', opcode)
+                    return {'type': 'websocket.receive', 'text': None, 'bytes': payload}
 
     async def run(self):
         """Complete the upgrade handshake then call the ASGI application."""
