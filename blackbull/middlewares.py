@@ -10,7 +10,7 @@ websocket_close = {'type': 'websocket.close'}
 async def websocket(scope, receive, send, inner):
     msg = await receive()
 
-    if msg != websocket_connect:
+    if msg.get('type') != 'websocket.connect':
         raise ValueError(f'Received Message ({msg})does not request to open a websocket connection.')
 
     await send(websocket_accept)
