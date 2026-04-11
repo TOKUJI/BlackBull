@@ -1,7 +1,7 @@
 import asyncio
 from urllib.parse import urlparse
 
-from .utils import pop_safe
+from .frame import PseudoHeaders
 
 
 class Stream:
@@ -72,9 +72,10 @@ class Stream:
         if not headers:
             return self.scope
 
-        pop_safe(':method', headers, self.scope, new_key='method')
-        pop_safe(':scheme', headers, self.scope, new_key='scheme')
-        pop_safe(':path', headers, self.scope, new_key='path')
+        pseudo = headers.pseudo_headers
+        self.scope['method'] = pseudo.get(PseudoHeaders.METHOD, self.scope.get('method', 'GET'))
+        self.scope['scheme'] = pseudo.get(PseudoHeaders.SCHEME, self.scope.get('scheme', 'https'))
+        self.scope['path']   = pseudo.get(PseudoHeaders.PATH,   self.scope.get('path', '/'))
 
         if 'path' in self.scope:
             parsed = urlparse(self.scope['path'])
@@ -82,10 +83,10 @@ class Stream:
             self.scope['root_path'] = ''
             self.scope['client'] = None
 
-        if ':authority' in headers:
-            self.scope['headers'].append(headers.pop(':authority').split(':'))
+        if PseudoHeaders.AUTHORITY in pseudo:
+            self.scope['headers'].append(pseudo[PseudoHeaders.AUTHORITY].split(':'))
 
-        self.scope.update(headers)
+        self.scope['headers'].extend(headers.headers)
 
         return self.scope
 
@@ -121,6 +122,6 @@ class Stream:
 def eos(frame):  # eos: end of stream
     logger.debug(f'{frame}, {frame.FrameType()}, {frame.flags}')
     if frame.FrameType() == FrameTypes.DATA and frame.flags & DataFlags.END_STREAM.value > 0 or\
-       frame.FrameType() == FrameTypes.HEADERS and frame.flags & HeadersFlags.END_STREAM.value > 0:
+       frame.FrameType() == FrameTypes.HEADERS and frame.flags & HeadersFlags.END_STREAM > 0:
         return True
     return False

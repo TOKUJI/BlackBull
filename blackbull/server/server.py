@@ -97,6 +97,10 @@ class WebSocketHandler(BaseHandler):
             opcode, masked, length = await WebSocketSender._read_opcode(self.reader)
             payload = await WebSocketSender._read_payload(self.reader, masked, length)
 
+            if not masked:
+                raise ValueError('Received unmasked frame from client, which is a protocol violation.') 
+                
+
             match opcode:
                 case 0x1:
                     return {'type': 'websocket.receive', 'text': payload.decode('utf-8'), 'bytes': None}
@@ -321,10 +325,18 @@ class HTTP2Handler(BaseHandler):
         return data
 
     def parse(self, data):
-        # Todo: should use this function in run() method.
-        pass
-        # frame = self.factory.load(data)
-        # return frame
+        frame = self.factory.load(data)
+
+        self.root_stream.add_child(frame.stream_id)
+        if (stream := self.root_stream.find_child(frame.stream_id)) is None:
+            logger.error(f'Stream {frame.stream_id} is not found.')
+            raise Exception('Unused stream identifier')
+
+        scope = None
+        if frame.FrameType() in (FrameTypes.HEADERS, FrameTypes.DATA):
+            scope = ParserFactory.Get(frame, stream).parse()
+
+        return frame, stream, scope
 
     def is_connect(self, frame):
         if not frame or frame.FrameType() == FrameTypes.GOAWAY:
@@ -337,19 +349,55 @@ class HTTP2Handler(BaseHandler):
         await self.send_frame(my_settings)
         logger.info(my_settings)
 
+        waiting_continuation = True
+
         # Then, parse and handle frames in this loop.
+        header_frame = None
         while data := await self.receive():
 
+            # Get a frame object by parsing the received data.
             frame = self.factory.load(data)
+
+            # Add the stream identifier of the frame to the root stream's children if it's not already there.
             self.root_stream.add_child(frame.stream_id)
             if (stream := self.root_stream.find_child(frame.stream_id)) is None:
                 logger.error(f'Stream {frame.stream_id} is not found.')
                 raise Exception('Unused stream identifier')
+
+            scope = None
+
             send = self.make_sender(stream.identifier)
 
-            if frame.FrameType() in (FrameTypes.HEADERS, FrameTypes.DATA):
-                # As HEADERS and DATA frames should be parsed,
-                scope = ParserFactory.Get(frame, stream).parse()
+            match frame.FrameType():
+                case FrameTypes.HEADERS:
+                    if frame.end_headers:
+                        waiting_continuation = False
+                        scope = ParserFactory.Get(frame, stream).parse()
+                    else:
+                        waiting_continuation = True
+                        header_frame = frame
+                        continue
+
+                case FrameTypes.CONTINUATION:
+                    if not waiting_continuation:
+                        logger.error('Received unexpected CONTINUATION frame without preceding HEADERS frame.')
+                        raise Exception('Unexpected CONTINUATION frame')
+
+                    header_frame.raw_block  += frame.payload
+
+                    if frame.end_headers:
+                        logger.debug('Received complete HEADERS block after CONTINUATION frames.')
+                        waiting_continuation = False
+                        header_frame.parse_payload()
+                        scope = ParserFactory.Get(header_frame, stream).parse()
+                        header_frame = None
+                    else:
+                        continue  # more CONTINUATION frames expected
+
+                case _:
+                    logger.warning(f'Unsupported frame type: {frame.FrameType()}')
+
+            if scope:
                 await self.app(scope, self.receive, send)
 
             else:

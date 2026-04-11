@@ -41,6 +41,19 @@ from blackbull.server.sender import WebSocketSender, AsyncioWriter
 # Helpers – minimal stream fakes
 # ---------------------------------------------------------------------------
 
+def _make_unmasked_frame(payload: bytes, opcode: int = 0x1) -> bytes:
+    """Build an *unmasked* WebSocket frame (violates RFC 6455 §5.1 for client frames)."""
+    length = len(payload)
+    header = bytes([0x80 | opcode])
+    if length < 126:
+        header += bytes([length])                          # mask bit NOT set
+    elif length < 65536:
+        header += bytes([126]) + length.to_bytes(2, 'big')
+    else:
+        header += bytes([127]) + length.to_bytes(8, 'big')
+    return header + payload                                # no mask bytes, raw payload
+
+
 def _make_client_frame(payload: bytes, opcode: int = 0x1) -> bytes:
     """Build a *masked* WebSocket frame (clients MUST mask, RFC 6455 §5.1)."""
     mask = b'\xde\xad\xbe\xef'
@@ -428,6 +441,73 @@ class TestPingPong:
         event = await handler.receive()
         assert event == {'type': 'websocket.receive', 'text': 'hello', 'bytes': None}
         assert handler.writer.written == b''
+
+
+# ---------------------------------------------------------------------------
+# Unmasked client frames (P1 item 5)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+class TestUnmaskedFrames:
+    """WebSocketHandler.receive() must reject unmasked client frames.
+
+    RFC 6455 §5.1:
+        A server MUST close the connection upon receiving a frame that is not
+        masked.  In this case, a server MAY send a Close frame with a status
+        code of 1002 (protocol error) as defined in Section 7.4.1.
+
+    Clients MUST mask every frame they send to the server (mask bit = 1 in the
+    second byte of the frame header).  Receiving an unmasked frame is a
+    protocol violation that must not be silently ignored.
+    """
+
+    def _make_handler(self, raw_bytes: bytes):
+        reader = _FakeReader(raw_bytes)
+        writer = _FakeWriter()
+        scope = {'type': 'websocket', 'path': '/ws', 'headers': []}
+        return WebSocketHandler(AsyncMock(), reader, writer, scope)
+
+    async def test_unmasked_text_frame_raises(self):
+        """Unmasked text frame (opcode 0x1) must be rejected."""
+        handler = self._make_handler(_make_unmasked_frame(b'hello', opcode=0x1))
+        await handler.receive()       # consume websocket.connect
+        with pytest.raises(Exception):
+            await handler.receive()
+
+    async def test_unmasked_binary_frame_raises(self):
+        """Unmasked binary frame (opcode 0x2) must be rejected."""
+        handler = self._make_handler(_make_unmasked_frame(b'\x00\x01', opcode=0x2))
+        await handler.receive()
+        with pytest.raises(Exception):
+            await handler.receive()
+
+    async def test_unmasked_ping_frame_raises(self):
+        """Unmasked ping frame (opcode 0x9) must be rejected before replying."""
+        handler = self._make_handler(_make_unmasked_frame(b'', opcode=0x9))
+        await handler.receive()
+        with pytest.raises(Exception):
+            await handler.receive()
+
+    async def test_unmasked_close_frame_raises(self):
+        """Unmasked close frame (opcode 0x8) must be rejected."""
+        handler = self._make_handler(_make_unmasked_frame(b'\x03\xe8', opcode=0x8))
+        await handler.receive()
+        with pytest.raises(Exception):
+            await handler.receive()
+
+    async def test_unmasked_empty_payload_raises(self):
+        """Unmasked frame with empty payload must still be rejected."""
+        handler = self._make_handler(_make_unmasked_frame(b'', opcode=0x1))
+        await handler.receive()
+        with pytest.raises(Exception):
+            await handler.receive()
+
+    async def test_masked_frame_still_accepted(self):
+        """Properly masked frame must continue to be accepted (regression)."""
+        handler = self._make_handler(_make_client_frame(b'hello', opcode=0x1))
+        await handler.receive()       # connect
+        event = await handler.receive()
+        assert event == {'type': 'websocket.receive', 'text': 'hello', 'bytes': None}
 
 
 # ---------------------------------------------------------------------------

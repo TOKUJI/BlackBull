@@ -107,8 +107,8 @@ asgi.py runs a web application that demonstrate basic functionalities.
 - [x] `WebsocketHandler.receive()`: emit `{"type": "websocket.connect"}` on the first call before reading any frame
 - [x] `middlewares.py` `websocket()`: check `msg.get('type') != 'websocket.connect'` instead of exact dict equality
 - [x] WebSocket Ping (opcode `0x9`): immediately reply with Pong (opcode `0xA`)
-- [ ] WebSocket: reject unmasked client frames (MUST per RFC 6455 §5.1)
-- [ ] HTTP/2 `CONTINUATION` frame: concatenate header blocks until `END_HEADERS` flag is set on `HEADERS`
+- [x] WebSocket: reject unmasked client frames (MUST per RFC 6455 §5.1)
+- [x] HTTP/2 `CONTINUATION` frame: concatenate header blocks until `END_HEADERS` flag is set on `HEADERS`
 - [ ] HTTP/2: normalize header names to lowercase after HPACK decode (RFC 7540 §8.1.2)
 
 ## P2 — Important protocol features

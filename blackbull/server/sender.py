@@ -3,6 +3,8 @@ from http import HTTPStatus
 import logging
 from unittest import case
 
+from ..frame import FrameTypes, HeadersFlags, DataFlags, FrameBase, PseudoHeaders
+
 logger = logging.getLogger(__name__)
 
 _CRLF = b'\r\n'
@@ -158,8 +160,6 @@ class HTTP2Sender(BaseSender):
         self._stream_identifier = stream_identifier
 
     async def __call__(self, body, status: HTTPStatus = HTTPStatus.OK, headers: list = []):
-        from ..frame import FrameTypes, HeadersFlags, DataFlags, FrameBase
-
         # Control-plane: raw frame object (SETTINGS, PING ACK, WINDOW_UPDATE, …)
         if isinstance(body, FrameBase):
             logger.debug('HTTP2Sender raw frame: %r', body)
@@ -170,12 +170,12 @@ class HTTP2Sender(BaseSender):
             # High-level: build HEADERS + DATA frames from bytes + status
             h_frame = self._factory.create(
                 FrameTypes.HEADERS,
-                HeadersFlags.END_HEADERS.value,
+                HeadersFlags.END_HEADERS,
                 self._stream_identifier,
             )
-            h_frame[':status'] = status.value
+            h_frame.pseudo_headers[PseudoHeaders.STATUS] = str(status.value)
             for k, v in headers:
-                h_frame[k] = v
+                h_frame.headers.append((k, v))
             await self._write(h_frame.save())
 
             d_frame = self._factory.create(
@@ -193,12 +193,12 @@ class HTTP2Sender(BaseSender):
             if event_type == 'http.response.start':
                 frame = self._factory.create(
                     FrameTypes.HEADERS,
-                    HeadersFlags.END_HEADERS.value,
+                    HeadersFlags.END_HEADERS,
                     self._stream_identifier,
                 )
-                frame[':status'] = body.get('status', 200)
+                frame.pseudo_headers[PseudoHeaders.STATUS] = str(body.get('status', 200))
                 for k, v in body.get('headers', []):
-                    frame[k] = v
+                    frame.headers.append((k, v))
                 await self._write(frame.save())
 
             elif event_type == 'http.response.body':

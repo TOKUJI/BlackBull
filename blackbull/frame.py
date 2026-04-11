@@ -1,6 +1,6 @@
 import asyncio
 import typing
-from enum import Enum, auto
+from enum import Enum, IntEnum, StrEnum
 from io import BytesIO
 from hpack import Encoder, Decoder
 
@@ -21,7 +21,7 @@ class FrameTypes(Enum):
     PING = b'\x06'
     GOAWAY = b'\x07'
     WINDOW_UPDATE = b'\x08'
-    COTINUATION = b'\x09'
+    CONTINUATION = b'\x09'
 
 
 class FrameFactory:
@@ -201,23 +201,33 @@ class WindowUpdate(FrameBase):
         return FrameTypes.WINDOW_UPDATE
 
 
-class HeadersFlags(Enum):
+class HeadersFlags(IntEnum):
     END_STREAM = 0x1
     END_HEADERS = 0x4
     PADDED = 0x8
     PRIORITY = 0x20
 
 
-class Headers(FrameBase, dict):
+class PseudoHeaders(StrEnum):
+    """RFC 7540 §8.1.2 pseudo-header field names."""
+    METHOD    = ':method'
+    PATH      = ':path'
+    SCHEME    = ':scheme'
+    STATUS    = ':status'
+    AUTHORITY = ':authority'
+    PROTOCOL  = ':protocol'
+
+
+class Headers(FrameBase):
 
     def __init__(self, length: int, type_, flags: bytes, stream_id: int, *, data=None, decoder=None):
         super(Headers, self).__init__(length, type_, flags, stream_id)
         logger.debug('Headers is called.')
         # Read flags
-        self.end_stream = HeadersFlags.END_STREAM.value & self.flags
-        self.end_headers = HeadersFlags.END_HEADERS.value & self.flags
-        self.padded = HeadersFlags.PADDED.value & self.flags
-        self.priority = HeadersFlags.PRIORITY.value & self.flags
+        self.end_stream = HeadersFlags.END_STREAM & self.flags
+        self.end_headers = HeadersFlags.END_HEADERS & self.flags
+        self.padded = HeadersFlags.PADDED & self.flags
+        self.priority = HeadersFlags.PRIORITY & self.flags
         logger.debug(f'stream_id = {stream_id}, '
                      f'end_stream = {self.end_stream > 0}, '
                      f'end_header = {self.end_headers > 0}, '
@@ -227,35 +237,51 @@ class Headers(FrameBase, dict):
         # set decoder
         self.decoder = decoder
 
+        # Pseudo-headers (RFC 7540 §8.1.2): :method, :path, :scheme, :status, etc.
+        self.pseudo_headers: dict[PseudoHeaders, str] = {}
+        # Regular headers as an ordered list of (name, value) tuples
+        self.headers: list[tuple[str, str]] = []
+
         if self.length <= 0:
             return
         # handle payload
 
-        payload = BytesIO(data)
+        self.raw_block = data
 
+        if self.end_headers:
+            self.parse_payload()
+
+    def set_table_size(self, size):
+        self.table_size = size
+
+    def parse_payload(self):
+        payload = BytesIO(self.raw_block)
         if self.padded:
             payload.read(1)
 
         if self.priority:  # TODO: handle priority properly
             self.stream_dependency = int.from_bytes(payload.read(4), 'big', signed=False)
             self.priority_weight = int.from_bytes(payload.read(1), 'big', signed=False)
-            logger.debug(f'stream_id = {stream_id}, '
+            logger.debug(f'stream_id = {self.stream_id}, '
                          f'stream_dependency: {self.stream_dependency}, '
                          f'priority_weight: {self.priority_weight}')
 
         fields = self.decoder.decode(payload.read())
         for k, v in fields:
-            self[k] = v
-            logger.debug('{}: {}'.format(k, v))
-
-    def set_table_size(self, size):
-        self.table_size = size
+            k_str = k.decode() if isinstance(k, bytes) else k
+            v_str = v.decode() if isinstance(v, bytes) else v
+            if k_str in PseudoHeaders._value2member_map_:
+                self.pseudo_headers[PseudoHeaders(k_str)] = v_str
+            else:
+                self.headers.append((k_str, v_str))
+            logger.debug('{}: {}'.format(k_str, v_str))
 
     @log
     def save(self):
         encoder = Encoder()
-        payload = encoder.encode(self)
-        # self.payload = payload
+        # Pseudo-headers MUST come before regular headers (RFC 7540 §8.1.2.1)
+        all_headers = list(self.pseudo_headers.items()) + self.headers
+        payload = encoder.encode(all_headers)
         self.length = len(payload)
 
         base = super().save()
@@ -284,9 +310,9 @@ class Headers(FrameBase, dict):
         return FrameTypes.HEADERS
 
     def __repr__(self):
-        head = [super(Headers, self).__repr__(), ]
-        head += [f'{k}: {v}' for k, v in self.items()]
-
+        head = [super(Headers, self).__repr__()]
+        head += [f'{k}: {v}' for k, v in self.pseudo_headers.items()]
+        head += [f'{k}: {v}' for k, v in self.headers]
         return ', '.join(head)
 
 
@@ -436,3 +462,24 @@ class Ping(FrameBase):
 
     def __eq__(self, other):
         return super().__eq__(other) and (self.payload == other.payload)
+
+class Continuation(FrameBase):
+    """docstring for Continuation"""
+    def __init__(self, length: int, type_, flags: int, stream_id: int, *, data=None, **kwds):
+        super().__init__(length, type_, flags, stream_id)
+        logger.debug('Continuation is called.')
+
+        self.payload = data
+        logger.debug('payload is %r', self.payload)
+        self.end_headers = HeadersFlags.END_HEADERS & self.flags
+        logger.debug('end_headers = %r', self.end_headers > 0)  
+
+    def save(self):
+        base = super().save()
+        res = base + self.payload
+        logger.debug('Continuation is saving: %r', res)
+        return res
+
+    @staticmethod
+    def FrameType():
+        return FrameTypes.CONTINUATION

@@ -2,7 +2,7 @@ from functools import partial
 import traceback
 
 from ..stream import Stream
-from ..frame import FrameTypes
+from ..frame import FrameTypes, PseudoHeaders
 from ..logger import get_logger_set, log
 
 logger, _ = get_logger_set(__name__)
@@ -43,7 +43,7 @@ class HTTP2ParserBase:
         self.stream = stream
         self.stream_id = frame.stream_id
 
-    def parse(self):
+    def parse(self, payload=None):
         raise NotImplementedError()
 
     @staticmethod
@@ -62,9 +62,16 @@ class HTTP2HEADParser(HTTP2ParserBase):
 
     def parse(self):
         scope = _make_scope()
-        scope['method'] = self.frame[':method']
-        scope['path'] = self.frame[':path']
-        scope['scheme'] = self.frame[':scheme']
+
+        if method := self.frame.pseudo_headers.get(PseudoHeaders.METHOD):
+            scope['method'] = method
+
+        if path := self.frame.pseudo_headers.get(PseudoHeaders.PATH):
+            scope['path'] = path
+
+        if scheme := self.frame.pseudo_headers.get(PseudoHeaders.SCHEME):
+            scope['scheme'] = scheme
+
         return scope
 
 
