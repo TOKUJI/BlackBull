@@ -32,7 +32,7 @@ async def _default_error_handler(scope, receive, send):  # noqa: ARG001
     if allowed:
         headers.append((b'allow', ', '.join(m.upper() for m in allowed).encode()))
 
-    lines = [f"{status.value} {status.phrase}"]
+    lines = [f"{status} {status.phrase}"]
     if exc is not None:
         lines.append(f"{type(exc).__name__}: {exc}")
     body = '\n'.join(lines).encode()

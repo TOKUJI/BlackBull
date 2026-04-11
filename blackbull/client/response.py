@@ -1,4 +1,4 @@
-from ..frame import FrameTypes
+from ..frame import FrameTypes, SettingFlags
 from ..logger import get_logger_set, log
 logger, _ = get_logger_set('client.response')
 
@@ -25,7 +25,7 @@ class RespondBase:
 class Respond2Ping(RespondBase):
     async def respond(self, handler):
         res = handler.factory.create(FrameTypes.PING,
-                                     0x1,
+                                     SettingFlags.ACK,
                                      self.frame.stream_identifier,
                                      self.frame.payload)
         await handler.send_frame(res)
@@ -51,22 +51,22 @@ class Respond2WindowUpdate(RespondBase):
 class Respond2Settings(RespondBase):
     async def respond(self, handler):
         res = handler.factory.create(FrameTypes.SETTINGS,
-                                     0x1,
+                                     SettingFlags.ACK,
                                      self.frame.stream_identifier,
                                      )
         await handler.send_frame(res)
-        if self.frame.flags == 0x0:
+        if self.frame.flags == SettingFlags.INIT:
             if hasattr(self.frame, 'initial_window_size'):
                 handler.initial_window_size = self.frame.initial_window_size
             if hasattr(self.frame, 'header_table_size'):
                 # TODO: update header_table_size
                 pass
             res = handler.factory.create(FrameTypes.SETTINGS,
-                                         0x1,
+                                         SettingFlags.ACK,
                                          self.frame.stream_identifier)
             await handler.send_frame(res)
 
-        elif self.frame.flags == 0x1:
+        elif self.frame.flags == SettingFlags.ACK:
             logger.debug('Got ACK. Do nothing.')
 
     @staticmethod

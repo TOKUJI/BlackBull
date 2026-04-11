@@ -1,7 +1,7 @@
 import asyncio
 from urllib.parse import urlparse
 
-from .frame import PseudoHeaders
+from .frame import PseudoHeaders, DataFrameFlags, HeaderFrameFlags, FrameTypes
 
 
 class Stream:
@@ -121,7 +121,7 @@ class Stream:
 
 def eos(frame):  # eos: end of stream
     logger.debug(f'{frame}, {frame.FrameType()}, {frame.flags}')
-    if frame.FrameType() == FrameTypes.DATA and frame.flags & DataFlags.END_STREAM.value > 0 or\
-       frame.FrameType() == FrameTypes.HEADERS and frame.flags & HeadersFlags.END_STREAM > 0:
+    if frame.FrameType() == FrameTypes.DATA and frame.flags & DataFrameFlags.END_STREAM > 0 or\
+       frame.FrameType() == FrameTypes.HEADERS and frame.flags & HeaderFrameFlags.END_STREAM > 0:
         return True
     return False

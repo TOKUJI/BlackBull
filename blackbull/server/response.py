@@ -2,16 +2,20 @@ from functools import partial
 import traceback
 
 from ..stream import Stream
-from ..frame import FrameTypes
+from ..frame import FrameTypes, SettingFlags
 from ..logger import get_logger_set, log
 
 logger, _ = get_logger_set(__name__)
 
 
 class RespondFactory:
-    @staticmethod
-    def create(frame):
+    @classmethod
+    def create(cls, frame):
         factory = {klass.FrameType(): klass for klass in RespondBase.__subclasses__()}
+        logger.debug(f'Factory mapping: {factory}')
+        if frame.FrameType() not in factory:
+            logger.warning(f'Unsupported frame type: {frame.FrameType()}')
+            return None
         return factory[frame.FrameType()](frame)
 
 
@@ -26,8 +30,8 @@ class RespondBase:
     async def respond(self, handler):
         raise NotImplementedError()
 
-    @staticmethod
-    def FrameType():
+    @classmethod
+    def FrameType(cls):
         raise NotImplementedError()
 
 
@@ -35,14 +39,14 @@ class Respond2Ping(RespondBase):
     async def respond(self, handler):
         res = handler.factory.create(
             FrameTypes.PING,
-            0x1,
+            SettingFlags.ACK,
             self.frame.stream_id,
             data=self.frame.payload,
             )
         await handler.send_frame(res)
 
-    @staticmethod
-    def FrameType():
+    @classmethod
+    def FrameType(cls):
         return FrameTypes.PING
 
 
@@ -53,29 +57,29 @@ class Respond2WindowUpdate(RespondBase):
         else:
             handler.client_stream_window_size[self.frame.stream_id] = self.frame.window_size
 
-    @staticmethod
-    def FrameType():
+    @classmethod
+    def FrameType(cls):
         return FrameTypes.WINDOW_UPDATE
 
 
 class Respond2Settings(RespondBase):
     async def respond(self, handler):
-        if self.frame.flags == 0x0:
+        if self.frame.flags == SettingFlags.INIT:
             if hasattr(self.frame, 'initial_window_size'):
                 handler.initial_window_size = self.frame.initial_window_size
             if hasattr(self.frame, 'header_table_size'):
                 # TODO: update header_table_size
                 pass
             res = handler.factory.create(FrameTypes.SETTINGS,
-                                         0x1,
+                                         SettingFlags.ACK,
                                          self.frame.stream_id)
             await handler.send_frame(res)
 
-        elif self.frame.flags == 0x1:
+        elif self.frame.flags == SettingFlags.ACK:
             logger.debug('Got ACK. Do nothing.')
 
-    @staticmethod
-    def FrameType():
+    @classmethod
+    def FrameType(cls):
         return FrameTypes.SETTINGS
 
 
@@ -94,8 +98,8 @@ class Respond2Priority(RespondBase):
 
         stream.weight = self.frame.weight
 
-    @staticmethod
-    def FrameType():
+    @classmethod
+    def FrameType(cls):
         return FrameTypes.PRIORITY
 
 
@@ -113,6 +117,7 @@ class Respond2RstStream(RespondBase):
         logger.warning(f'stream_id = {stream_id}, {self.frame.error_code}')
         stream.close()
 
-    @staticmethod
-    def FrameType():
+    @classmethod
+    def FrameType(cls):
         return FrameTypes.RST_STREAM
+

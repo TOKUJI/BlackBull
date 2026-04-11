@@ -20,7 +20,7 @@ from ..frame import FrameFactory, FrameTypes, FrameBase, SettingFlags
 from ..logger import get_logger_set
 from .response import RespondFactory
 from .parser import ParserFactory
-from .sender import SenderFactory, WebSocketSender
+from .sender import SenderFactory, WebSocketSender, WSOpcode, WSFrameBits
 logger, log = get_logger_set(__name__)
 
 
@@ -102,21 +102,21 @@ class WebSocketHandler(BaseHandler):
                 
 
             match opcode:
-                case 0x1:
+                case WSOpcode.TEXT:  # text frame
                     return {'type': 'websocket.receive', 'text': payload.decode('utf-8'), 'bytes': None}
 
-                case 0x2:           # binary frame
+                case WSOpcode.BINARY:# binary frame
                     return {'type': 'websocket.receive', 'text': None, 'bytes': payload}
 
-                case 0x8:           # close frame
+                case WSOpcode.CLOSE:           # close frame
                     return {'type': 'websocket.disconnect', 'code': 1000}
 
-                case 0x9:           # ping — reply immediately, then read next frame
-                    pong = WebSocketSender._encode_frame(payload, opcode=0xA)
+                case WSOpcode.PING:           # ping — reply immediately, then read next frame
+                    pong = WebSocketSender._encode_frame(payload, opcode=WSOpcode.PONG)
                     self.writer.write(pong)
                     await self.writer.drain()
 
-                case 0xA:           # unsolicited pong — silently drop
+                case WSOpcode.PONG:           # unsolicited pong — silently drop
                     pass
 
                 case _:
@@ -372,7 +372,11 @@ class HTTP2Handler(BaseHandler):
                 case FrameTypes.HEADERS:
                     if frame.end_headers:
                         waiting_continuation = False
-                        scope = ParserFactory.Get(frame, stream).parse()
+                        if frame.end_stream:
+                            scope = ParserFactory.Get(frame, stream).parse()
+                        else:
+                            header_frame = frame
+                            continue
                     else:
                         waiting_continuation = True
                         header_frame = frame
@@ -394,14 +398,23 @@ class HTTP2Handler(BaseHandler):
                     else:
                         continue  # more CONTINUATION frames expected
 
+                case FrameTypes.DATA:
+                    if frame.end_stream:
+                        scope1 = ParserFactory.Get(header_frame, stream).parse()
+                        scope2 = ParserFactory.Get(frame, stream).parse()
+                        scope = {**scope1, **scope2}  # Merge the scopes from HEADERS and DATA frames
+
+                case FrameTypes.GOAWAY:
+                    await self.send_frame(self.factory.create(FrameTypes.GOAWAY, SettingFlags.INIT, 0))
+                    self.writer.close()
+                    break
+
                 case _:
-                    logger.warning(f'Unsupported frame type: {frame.FrameType()}')
+                    await RespondFactory.create(frame).respond(self)
 
             if scope:
                 await self.app(scope, self.receive, send)
-
-            else:
-                await RespondFactory.create(frame).respond(self)
+                
 
 
 class ASGIServer:

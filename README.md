@@ -109,7 +109,9 @@ asgi.py runs a web application that demonstrate basic functionalities.
 - [x] WebSocket Ping (opcode `0x9`): immediately reply with Pong (opcode `0xA`)
 - [x] WebSocket: reject unmasked client frames (MUST per RFC 6455 §5.1)
 - [x] HTTP/2 `CONTINUATION` frame: concatenate header blocks until `END_HEADERS` flag is set on `HEADERS`
-- [ ] HTTP/2: normalize header names to lowercase after HPACK decode (RFC 7540 §8.1.2)
+- [x] HTTP/2: normalize header names to lowercase after HPACK decode (RFC 7540 §8.1.2)
+- [x] HTTP/2 `DATA` frame: `HTTP2Handler.run()` dropped the `DATA` case during CONTINUATION refactoring — restore so DATA frames call the ASGI app (regression)
+- [x] HTTP/2 `GOAWAY` frame: `RespondFactory` has no `Respond2GoAway` handler — receiving GOAWAY raises `KeyError` (server-side); sending GOAWAY on graceful shutdown is also missing
 
 ## P2 — Important protocol features
 

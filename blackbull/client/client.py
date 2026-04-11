@@ -7,7 +7,7 @@ import concurrent.futures
 # private library
 from ..utils import HTTP2, EventEmitter
 from ..rsock import create_socket
-from ..frame import FrameFactory, FrameTypes, DataFlags, HeadersFlags, SettingFlags
+from ..frame import FrameFactory, FrameTypes, DataFlags, HeadersFlags, SettingFlags, PingFrameFlags
 from ..stream import Stream
 from ..logger import get_logger_set, log
 logger, _ = get_logger_set('client')
@@ -20,18 +20,6 @@ def connect(fn):
     async def _fn(*args, **kwds):
         # open streams, send user_name, user_password and get authentification
         await args[0].connect()
-
-        # if 'root' not in args[0].streams:
-        #     args[0].streams['root'] = Stream(0, None)
-        #     # post a request,
-        #     header = args[0].factory.create(FrameTypes.HEADERS,
-        #                                  HeadersFlags.END_HEADERS,
-        #                                  args[0].streams['root'].identifier)
-        #     data = args[0].factory.create(FrameTypes.DATA,
-        #                                DataFlags.END_STREAM,
-        #                                args[0].streams['root'].identifier,
-        #                                data=b'') # user_name, user_password,
-
         return await fn(*args, **kwds)
     return _fn
 
@@ -244,20 +232,13 @@ class Client:
             logger.debug(f'handle_response() got a frame: {frame}')
             await RespondFactory.create(frame).respond(self)
 
-            # for handler in self._handlers.values():
-            #     logger.debug(handler)
-            #     await handler(frame)
-
             self.emit_event(frame)
-
-            # if frame.stream_identifier in self.events:
-            #     self.events[frame.stream_identifier].set()
 
             frame = await self.receive_frame()
 
 
     async def ping(self):
-        ping = self.factory.create(FrameTypes.PING, 0x0, 0, data=b'\x00\x00\x00\x00\x00\x00\x00\x00')
+        ping = self.factory.create(FrameTypes.PING, PingFrameFlags.ACK, 0, data=b'\x00\x00\x00\x00\x00\x00\x00\x00')
         await self.send_frame(ping)
 
 

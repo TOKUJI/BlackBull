@@ -11,7 +11,7 @@ from .utils import pop_safe
 logger, log = get_logger_set('frame')
 
 
-class FrameTypes(Enum):
+class FrameTypes(bytes, Enum):
     DATA = b'\x00'
     HEADERS = b'\x01'
     PRIORITY = b'\x02'
@@ -24,6 +24,16 @@ class FrameTypes(Enum):
     CONTINUATION = b'\x09'
 
 
+class FrameFlags(IntEnum):
+    """Common base for all HTTP/2 frame flag enums.
+
+    Inheriting from this empty base allows type annotations to reference
+    ``FrameFlags`` instead of listing every concrete flag enum.  Because
+    ``FrameFlags`` itself has no members, Python's restriction on subclassing
+    a non-empty ``IntEnum`` does not apply.
+    """
+
+
 class FrameFactory:
     """docstring for FrameFactory"""
     def __init__(self):
@@ -31,12 +41,12 @@ class FrameFactory:
         self.decoder = Decoder()
         self._factory = {klass.FrameType(): klass for klass in FrameBase.__subclasses__()}
 
-    def create(self, type_, flags, stream_id, *, data=b'', **kwds):
+    def create(self, type_: FrameTypes, flags: FrameFlags, stream_id: int, *, data: bytes = b'', **kwds):
         logger.info(f'type:{type_}, flags:{flags}, id:{stream_id}')
 
         frame = self._factory[type_](
             len(data),
-            type_.value,
+            type_,
             flags if type(flags) is int else flags.value,
             stream_id,
             data=data,
@@ -108,8 +118,12 @@ class FrameBase:
         return f'{self.FrameType().name}: stream_id={self.stream_id}'
 
 
-class SettingFlags(Enum):
+class SettingFlags(FrameFlags):
     INIT = 0x0
+    ACK = 0x1
+
+
+class PingFrameFlags(FrameFlags):
     ACK = 0x1
 
 
@@ -201,7 +215,7 @@ class WindowUpdate(FrameBase):
         return FrameTypes.WINDOW_UPDATE
 
 
-class HeadersFlags(IntEnum):
+class HeaderFrameFlags(FrameFlags):
     END_STREAM = 0x1
     END_HEADERS = 0x4
     PADDED = 0x8
@@ -224,10 +238,10 @@ class Headers(FrameBase):
         super(Headers, self).__init__(length, type_, flags, stream_id)
         logger.debug('Headers is called.')
         # Read flags
-        self.end_stream = HeadersFlags.END_STREAM & self.flags
-        self.end_headers = HeadersFlags.END_HEADERS & self.flags
-        self.padded = HeadersFlags.PADDED & self.flags
-        self.priority = HeadersFlags.PRIORITY & self.flags
+        self.end_stream = HeaderFrameFlags.END_STREAM & self.flags
+        self.end_headers = HeaderFrameFlags.END_HEADERS & self.flags
+        self.padded = HeaderFrameFlags.PADDED & self.flags
+        self.priority = HeaderFrameFlags.PRIORITY & self.flags
         logger.debug(f'stream_id = {stream_id}, '
                      f'end_stream = {self.end_stream > 0}, '
                      f'end_header = {self.end_headers > 0}, '
@@ -268,13 +282,13 @@ class Headers(FrameBase):
 
         fields = self.decoder.decode(payload.read())
         for k, v in fields:
-            k_str = k.decode() if isinstance(k, bytes) else k
+            k_str = k.decode().lower() if isinstance(k, bytes) else k.lower()
             v_str = v.decode() if isinstance(v, bytes) else v
             if k_str in PseudoHeaders._value2member_map_:
                 self.pseudo_headers[PseudoHeaders(k_str)] = v_str
             else:
                 self.headers.append((k_str, v_str))
-            logger.debug('{}: {}'.format(k_str, v_str))
+            logger.debug('%r: %r', k_str, v_str)
 
     @log
     def save(self):
@@ -366,7 +380,7 @@ class ErrorCodes(Enum):
     HTTP_1_1_REQUIRED = 0xd
 
 
-class DataFlags(Enum):
+class DataFrameFlags(FrameFlags):
     END_STREAM = 0x1
     PADDED = 0x8
 
@@ -376,8 +390,8 @@ class Data(FrameBase):
     def __init__(self, length: int, type_, flags: int, stream_id: int, *, data=None, **kwds):
         super().__init__(length, type_, flags, stream_id)
         logger.debug('Data is called.')
-        self.end_stream = DataFlags.END_STREAM.value & self.flags
-        self.padded = DataFlags.PADDED.value & self.flags
+        self.end_stream = DataFrameFlags.END_STREAM & self.flags
+        self.padded = DataFrameFlags.PADDED & self.flags
 
         if isinstance(data, str):
             payload = BytesIO(data.encode())
@@ -471,7 +485,7 @@ class Continuation(FrameBase):
 
         self.payload = data
         logger.debug('payload is %r', self.payload)
-        self.end_headers = HeadersFlags.END_HEADERS & self.flags
+        self.end_headers = HeaderFrameFlags.END_HEADERS & self.flags
         logger.debug('end_headers = %r', self.end_headers > 0)  
 
     def save(self):

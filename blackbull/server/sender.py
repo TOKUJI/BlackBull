@@ -1,9 +1,26 @@
 from abc import ABC, abstractmethod
+from enum import IntEnum
 from http import HTTPStatus
 import logging
 from unittest import case
 
-from ..frame import FrameTypes, HeadersFlags, DataFlags, FrameBase, PseudoHeaders
+from ..frame import FrameTypes, HeaderFrameFlags, DataFrameFlags, SettingFlags, FrameBase, PseudoHeaders
+
+
+class WSOpcode(IntEnum):
+    CONTINUATION = 0x0
+    TEXT         = 0x1
+    BINARY       = 0x2
+    CLOSE        = 0x8
+    PING         = 0x9
+    PONG         = 0xA
+
+
+class WSFrameBits(IntEnum):
+    FIN         = 0x80  # FIN bit in byte 0
+    OPCODE_MASK = 0x0F  # opcode bits in byte 0
+    MASK_BIT    = 0x80  # mask bit in byte 1
+    LENGTH_MASK = 0x7F  # payload length bits in byte 1
 
 logger = logging.getLogger(__name__)
 
@@ -125,7 +142,7 @@ class HTTP1Sender(BaseSender):
 
     async def _write_start(self, status: HTTPStatus, headers: list):
         chunks: list[bytes] = []
-        chunks.append(f'HTTP/1.1 {status.value} {status.phrase}'.encode() + _CRLF)
+        chunks.append(f'HTTP/1.1 {status} {status.phrase}'.encode() + _CRLF)
         for k, v in headers:
             k = k.encode() if isinstance(k, str) else k
             v = v.encode() if isinstance(v, str) else v
@@ -170,17 +187,17 @@ class HTTP2Sender(BaseSender):
             # High-level: build HEADERS + DATA frames from bytes + status
             h_frame = self._factory.create(
                 FrameTypes.HEADERS,
-                HeadersFlags.END_HEADERS,
+                HeaderFrameFlags.END_HEADERS,
                 self._stream_identifier,
             )
-            h_frame.pseudo_headers[PseudoHeaders.STATUS] = str(status.value)
+            h_frame.pseudo_headers[PseudoHeaders.STATUS] = str(status)
             for k, v in headers:
                 h_frame.headers.append((k, v))
             await self._write(h_frame.save())
 
             d_frame = self._factory.create(
                 FrameTypes.DATA,
-                DataFlags.END_STREAM.value,
+                DataFrameFlags.END_STREAM,
                 self._stream_identifier,
                 data=body,
             )
@@ -193,7 +210,7 @@ class HTTP2Sender(BaseSender):
             if event_type == 'http.response.start':
                 frame = self._factory.create(
                     FrameTypes.HEADERS,
-                    HeadersFlags.END_HEADERS,
+                    HeaderFrameFlags.END_HEADERS,
                     self._stream_identifier,
                 )
                 frame.pseudo_headers[PseudoHeaders.STATUS] = str(body.get('status', 200))
@@ -204,7 +221,7 @@ class HTTP2Sender(BaseSender):
             elif event_type == 'http.response.body':
                 frame = self._factory.create(
                     FrameTypes.DATA,
-                    DataFlags.END_STREAM.value,
+                    DataFrameFlags.END_STREAM,
                     self._stream_identifier,
                     data=body.get('body', b''),
                 )
@@ -243,13 +260,13 @@ class WebSocketSender(BaseSender):
                 
             case 'websocket.send':
                 if 'text' in body and body['text'] is not None:
-                    frame = self._encode_frame(body['text'].encode('utf-8'), opcode=0x1)
+                    frame = self._encode_frame(body['text'].encode('utf-8'), opcode=WSOpcode.TEXT)
                 else:
-                    frame = self._encode_frame(body.get('bytes', b''), opcode=0x2)
+                    frame = self._encode_frame(body.get('bytes', b''), opcode=WSOpcode.BINARY)
                 await self._write(frame)
 
             case 'websocket.close':
-                frame = self._encode_frame(b'\x03\xe8', opcode=0x8)
+                frame = self._encode_frame(b'\x03\xe8', opcode=WSOpcode.CLOSE)
                 await self._write(frame)
 
             case 'websocket.accept':
@@ -258,14 +275,15 @@ class WebSocketSender(BaseSender):
                 logger.warning('WebSocketSender: unknown event type %r', event_type)
 
     @staticmethod
-    def _encode_frame(payload: bytes, opcode: int = 0x1) -> bytes:
+    def _encode_frame(payload: bytes, opcode: WSOpcode = WSOpcode.TEXT) -> bytes:
         """Encode *payload* as an unmasked WebSocket data frame (RFC 6455 §5).
 
-        ``opcode`` defaults to 0x1 (text); pass 0x2 for binary, 0x8 for close.
+        ``opcode`` defaults to ``WSOpcode.TEXT``; pass ``WSOpcode.BINARY`` for
+        binary frames, ``WSOpcode.CLOSE`` for close frames, etc.
         The server MUST NOT mask frames it sends to the client (RFC 6455 §5.1).
         """
         length = len(payload)
-        header = bytes([0x80 | opcode])
+        header = bytes([WSFrameBits.FIN | opcode])
         if length < 126:
             header += bytes([length])
         elif length < 65536:
@@ -281,9 +299,9 @@ class WebSocketSender(BaseSender):
         Raises ``asyncio.IncompleteReadError`` on EOF.
         """
         header = await reader.readexactly(2)
-        opcode = header[0] & 0x0F
-        masked = bool(header[1] & 0x80)
-        length = header[1] & 0x7F
+        opcode = header[0] & WSFrameBits.OPCODE_MASK
+        masked = bool(header[1] & WSFrameBits.MASK_BIT)
+        length = header[1] & WSFrameBits.LENGTH_MASK
         return opcode, masked, length
     
     @staticmethod

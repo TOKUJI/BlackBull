@@ -137,14 +137,14 @@ class _CaptureSend:
     def __init__(self):
         self.events = []
 
-    async def __call__(self, body_or_event, status=None, headers=None):
+    async def __call__(self, body_or_event, status: HTTPStatus=None, headers=None):
         if isinstance(body_or_event, dict):
             self.events.append(body_or_event)
         elif isinstance(body_or_event, bytes):
             if status is not None:
                 self.events.append({
                     'type': 'http.response.start',
-                    'status': status.value,
+                    'status': status,
                     'headers': headers or [],
                 })
             if body_or_event:

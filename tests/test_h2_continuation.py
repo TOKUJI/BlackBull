@@ -115,7 +115,7 @@ class TestContinuationFrameParsing:
 
     def test_continuation_type_is_defined_in_enum(self):
         """``FrameTypes.CONTINUATION`` must exist and equal ``b'\\x09'``."""
-        assert FrameTypes.CONTINUATION.value == b'\x09'
+        assert FrameTypes.CONTINUATION == b'\x09'
 
     def test_factory_load_continuation_without_end_headers_does_not_raise(self):
         """``FrameFactory.load()`` must parse a CONTINUATION frame (no END_HEADERS).
