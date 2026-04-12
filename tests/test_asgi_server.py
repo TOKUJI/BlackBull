@@ -31,6 +31,7 @@ import asyncio
 import pathlib
 import socket
 import ssl
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 import pytest_asyncio
@@ -351,3 +352,157 @@ class TestHTTP1_1BodyDecoding:
         scope = {'headers': [(b'transfer-encoding', b'chunked')]}
         event = await self._make_handler(b'0\r\n\r\n').make_recepient(scope)()
         assert event['body'] == b''
+
+
+# ---------------------------------------------------------------------------
+# Helpers for lifespan / timeout tests
+# ---------------------------------------------------------------------------
+
+def _make_fake_writer():
+    """Return a MagicMock writer with transport and written-bytes tracking."""
+    sw = MagicMock()
+    sw.written = bytearray()
+    sw.write = MagicMock(side_effect=lambda d: sw.written.extend(d))
+    sw.drain = AsyncMock()
+    sw.closed = False
+    sw.close = MagicMock(side_effect=lambda: setattr(sw, 'closed', True))
+    sw.wait_closed = AsyncMock()
+
+    class _FakeTransport:
+        def get_extra_info(self, key, default=None):
+            extras = {'peername': ('127.0.0.1', 54321),
+                      'sockname': ('0.0.0.0', 8000),
+                      'ssl_object': None}
+            return extras.get(key, default)
+
+    sw.transport = _FakeTransport()
+    return sw
+
+
+# ---------------------------------------------------------------------------
+# P2 — ASGI lifespan
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+class TestASGILifespan:
+    """ASGIServer must dispatch lifespan.startup and lifespan.shutdown.
+
+    P2 item: the server must call the ASGI app with scope={'type': 'lifespan'}
+    before accepting requests and with lifespan.shutdown after the server stops.
+
+    ASGI lifespan spec:
+      scope = {'type': 'lifespan', 'asgi': {'version': '3.0'}}
+      receive → {'type': 'lifespan.startup'}  / {'type': 'lifespan.shutdown'}
+      send   ← {'type': 'lifespan.startup.complete'} / {'type': 'lifespan.shutdown.complete'}
+    """
+
+    async def test_startup_event_dispatched(self):
+        """App must receive {'type': 'lifespan.startup'} before serving requests."""
+        received_events = []
+
+        async def app(scope, receive, send):
+            if scope.get('type') == 'lifespan':
+                event = await receive()
+                received_events.append(event.get('type'))
+                await send({'type': 'lifespan.startup.complete'})
+
+        server = ASGIServer(app)
+        await server.startup()
+
+        assert 'lifespan.startup' in received_events, (
+            f'Expected lifespan.startup event; got {received_events}'
+        )
+
+    async def test_shutdown_event_dispatched(self):
+        """App must receive {'type': 'lifespan.shutdown'} on server shutdown."""
+        received_events = []
+
+        async def app(scope, receive, send):
+            if scope.get('type') == 'lifespan':
+                while True:
+                    event = await receive()
+                    received_events.append(event.get('type'))
+                    if event['type'] == 'lifespan.startup':
+                        await send({'type': 'lifespan.startup.complete'})
+                    elif event['type'] == 'lifespan.shutdown':
+                        await send({'type': 'lifespan.shutdown.complete'})
+                        break
+
+        server = ASGIServer(app)
+        await server.startup()
+        await server.shutdown()
+
+        assert 'lifespan.shutdown' in received_events, (
+            f'Expected lifespan.shutdown event; got {received_events}'
+        )
+
+    async def test_startup_failure_raises(self):
+        """If the app sends lifespan.startup.failed, ASGIServer.startup() must raise."""
+        async def app(scope, receive, send):
+            if scope.get('type') == 'lifespan':
+                await receive()  # lifespan.startup
+                await send({'type': 'lifespan.startup.failed',
+                            'message': 'DB connection refused'})
+
+        server = ASGIServer(app)
+        with pytest.raises(Exception, match='DB connection refused'):
+            await server.startup()
+
+
+# ---------------------------------------------------------------------------
+# P2 — Timeout handling
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+class TestTimeoutHandling:
+    """Header and body reads must be wrapped with asyncio.wait_for.
+
+    P2 item: a slow or stalled client keeps the connection open indefinitely.
+    Wrapping reads in asyncio.wait_for(coro, timeout=N) lets the server
+    reclaim resources by aborting the connection after N seconds.
+    """
+
+    async def test_slow_header_read_times_out(self):
+        """A reader that never yields headers must trigger a timeout."""
+        async def slow_read(*args, **kwargs):
+            await asyncio.sleep(10)
+            return b''
+
+        sw = _make_fake_writer()
+        reader = MagicMock()
+        reader.readuntil = AsyncMock(side_effect=slow_read)
+
+        async def noop_app(scope, receive, send):
+            pass
+
+        server = ASGIServer(noop_app, read_timeout=0.05)
+
+        with pytest.raises((asyncio.TimeoutError, TimeoutError,
+                            ConnectionResetError, OSError)):
+            await asyncio.wait_for(
+                server.client_connected_cb(reader, sw),
+                timeout=1.0,
+            )
+
+    async def test_slow_body_read_times_out(self):
+        """A reader that hangs during body read must also time out."""
+        async def slow_body(*args, **kwargs):
+            await asyncio.sleep(10)
+            return b''
+
+        sw = _make_fake_writer()
+        reader = MagicMock()
+        reader.readuntil = AsyncMock(return_value=b'\r\n\r\n')
+        reader.read = AsyncMock(side_effect=slow_body)
+
+        async def noop_app(scope, receive, send):
+            await receive()  # triggers body read
+
+        server = ASGIServer(noop_app, read_timeout=0.05)
+
+        with pytest.raises((asyncio.TimeoutError, TimeoutError,
+                            ConnectionResetError, OSError)):
+            await asyncio.wait_for(
+                server.client_connected_cb(reader, sw),
+                timeout=1.0,
+            )

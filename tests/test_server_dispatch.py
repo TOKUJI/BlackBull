@@ -648,3 +648,314 @@ class TestMakeSender:
         assert not written.startswith(b'{'), (
             f"make_sender wrote Python dict repr instead of HTTP wire format: {written[:80]!r}"
         )
+
+
+# ---------------------------------------------------------------------------
+# P2 — HTTP/1.1 Keep-Alive
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+class TestHTTP11KeepAlive:
+    """HTTP11Handler must loop and process multiple requests on one connection.
+
+    P2 bug: run() calls the app once then returns, closing the connection.
+    Keep-Alive requires re-reading request headers and calling the app again
+    until the client sends Connection: close or the connection drops.
+    """
+
+    async def test_two_requests_on_one_connection_calls_app_twice(self):
+        """Two back-to-back pipelined requests must each reach the app."""
+        req1 = _http_request(method='GET', path='/one',
+                             headers={'Host': 'localhost:8000',
+                                      'Connection': 'keep-alive'})
+        req2 = _http_request(method='GET', path='/two',
+                             headers={'Host': 'localhost:8000',
+                                      'Connection': 'close'})
+        reader = _FakeReader(req1 + req2)
+        writer = _FakeWriter()
+
+        call_count = 0
+
+        async def counting_app(scope, receive, send):
+            nonlocal call_count
+            call_count += 1
+
+        handler = HTTP11Handler(counting_app, reader, writer,
+                                b'GET / HTTP/1.1\r\n')
+        await handler.run()
+
+        assert call_count == 2, (
+            f'Expected app called twice (once per request), got {call_count}. '
+            'HTTP/1.1 Keep-Alive requires looping over requests on one connection.'
+        )
+
+    async def test_connection_close_ends_loop(self):
+        """Connection: close on first request — app called exactly once."""
+        req = _http_request(method='GET', path='/',
+                            headers={'Host': 'localhost:8000',
+                                     'Connection': 'close'})
+        reader = _FakeReader(req)
+        writer = _FakeWriter()
+
+        call_count = 0
+
+        async def counting_app(scope, receive, send):
+            nonlocal call_count
+            call_count += 1
+
+        handler = HTTP11Handler(counting_app, reader, writer,
+                                b'GET / HTTP/1.1\r\n')
+        await handler.run()
+
+        assert call_count == 1
+
+    async def test_keep_alive_paths_differ_between_requests(self):
+        """Each request in a Keep-Alive connection must have its own scope path."""
+        req1 = _http_request(method='GET', path='/alpha',
+                             headers={'Host': 'localhost:8000',
+                                      'Connection': 'keep-alive'})
+        req2 = _http_request(method='GET', path='/beta',
+                             headers={'Host': 'localhost:8000',
+                                      'Connection': 'close'})
+        reader = _FakeReader(req1 + req2)
+        writer = _FakeWriter()
+
+        paths = []
+
+        async def capturing_app(scope, receive, send):
+            paths.append(scope['path'])
+
+        handler = HTTP11Handler(capturing_app, reader, writer,
+                                b'GET / HTTP/1.1\r\n')
+        await handler.run()
+
+        assert '/alpha' in paths and '/beta' in paths, (
+            f'Expected both paths in scope; got {paths}'
+        )
+
+
+# ---------------------------------------------------------------------------
+# P2 — HTTP/1.1 duplicate headers (RFC 7230 §3.2.2)
+# ---------------------------------------------------------------------------
+
+class TestHTTP11DuplicateHeaders:
+    """HTTP11Handler.parse() must preserve every occurrence of a repeated header.
+
+    P2 bug: parse() accumulates headers into a plain dict with ``mapping[key]
+    = value``, so the second occurrence silently overwrites the first.
+    RFC 7230 §3.2.2 allows multiple fields with the same name; they must all
+    appear in scope['headers'] as separate tuples.
+    """
+
+    def _raw_with_duplicate(self, name: str, values: list[str]) -> bytes:
+        lines = ['GET / HTTP/1.1', 'Host: localhost:8000']
+        for v in values:
+            lines.append(f'{name}: {v}')
+        lines += ['', '']
+        return '\r\n'.join(lines).encode()
+
+    def test_single_header_preserved(self):
+        """Baseline: a single header appears in scope['headers']."""
+        scope = _get_scope(_http_request(headers={'Host': 'localhost:8000',
+                                                  'Accept': 'text/html'}))
+        keys = [k for k, _ in scope['headers']]
+        assert b'accept' in keys
+
+    def test_two_set_cookie_both_in_headers(self):
+        """Two Set-Cookie headers must both appear in scope['headers'].
+
+        P2 bug: only the last value is kept when a dict is used.
+        """
+        raw = self._raw_with_duplicate('Set-Cookie', ['a=1', 'b=2'])
+        scope = _get_scope(raw)
+        cookie_values = [v for k, v in scope['headers'] if k == b'set-cookie']
+        assert len(cookie_values) == 2, (
+            f'Expected 2 Set-Cookie entries, got {cookie_values!r}. '
+            'Duplicate headers must not be silently overwritten.'
+        )
+
+    def test_duplicate_accept_both_preserved(self):
+        """Two Accept headers must both appear — not merged or dropped."""
+        raw = self._raw_with_duplicate('Accept', ['text/html', 'application/json'])
+        scope = _get_scope(raw)
+        accept_values = [v for k, v in scope['headers'] if k == b'accept']
+        assert len(accept_values) == 2, (
+            f'Expected 2 Accept entries, got {accept_values!r}.'
+        )
+
+    def test_first_value_not_overwritten(self):
+        """The first value of a duplicate header must survive in scope['headers']."""
+        raw = self._raw_with_duplicate('X-Custom', ['first', 'second'])
+        scope = _get_scope(raw)
+        values = [v for k, v in scope['headers'] if k == b'x-custom']
+        assert b'first' in values, (
+            f'First header value lost: {values!r}. dict assignment silently overwrites it.'
+        )
+
+
+# ---------------------------------------------------------------------------
+# P2 — ASGI http.disconnect
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+class TestHTTPDisconnect:
+    """HTTP11Handler.receive() must return {'type': 'http.disconnect'} on EOF.
+
+    P2 item: ASGI spec §2.3 requires the receive() callable to return an
+    http.disconnect event when the client closes the connection.  Currently
+    ``reader.read()`` raises IncompleteReadError or returns b'', which
+    propagates as an unhandled exception rather than a clean ASGI event.
+    """
+
+    async def test_receive_returns_disconnect_on_eof(self):
+        """IncompleteReadError from the reader must become http.disconnect."""
+        raw = _http_request()
+        writer = _FakeWriter()
+        disconnect_received = []
+
+        async def app(scope, receive, send):
+            event = await receive()
+            disconnect_received.append(event)
+
+        reader = MagicMock()
+        reader.readuntil = AsyncMock(return_value=b'\r\n\r\n')
+        reader.read = AsyncMock(
+            side_effect=asyncio.IncompleteReadError(b'', 10)
+        )
+
+        handler = HTTP11Handler(app, reader, writer, b'GET / HTTP/1.1\r\n')
+        handler.request = raw
+        await handler.run()
+
+        assert any(e.get('type') == 'http.disconnect'
+                   for e in disconnect_received), (
+            f'Expected http.disconnect event; got {disconnect_received}'
+        )
+
+    async def test_disconnect_event_has_correct_type(self):
+        """The disconnect event dict must have type == 'http.disconnect'."""
+        raw = _http_request(headers={'Host': 'localhost:8000',
+                                     'Content-Length': '5'})
+        writer = _FakeWriter()
+        events = []
+
+        async def app(scope, receive, send):
+            event = await receive()
+            events.append(event)
+
+        reader = MagicMock()
+        reader.readuntil = AsyncMock(return_value=b'\r\n\r\n')
+        reader.read = AsyncMock(
+            side_effect=asyncio.IncompleteReadError(b'hel', 5)
+        )
+
+        handler = HTTP11Handler(app, reader, writer, b'GET / HTTP/1.1\r\n')
+        handler.request = raw
+        await handler.run()
+
+        types = [e.get('type') for e in events]
+        assert 'http.disconnect' in types, (
+            f'Received events: {types}'
+        )
+
+
+# ---------------------------------------------------------------------------
+# P2 — HTTP/1.1 100 Continue
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+class TestHTTP11Expect100Continue:
+    """When Expect: 100-continue is present the server must send 100 first.
+
+    P2 item: RFC 7231 §5.1.1 — a server that receives Expect: 100-continue
+    on a request with a body SHOULD send ``HTTP/1.1 100 Continue\r\n\r\n``
+    before reading the request body.  This lets the client know it should
+    proceed with sending the (potentially large) body.
+
+    Current bug: no interim response is sent; the server reads the body
+    immediately without signalling the client.
+    """
+
+    def _make_expect_request(self, body: bytes = b'hello') -> bytes:
+        lines = [
+            'POST /upload HTTP/1.1',
+            'Host: localhost:8000',
+            f'Content-Length: {len(body)}',
+            'Expect: 100-continue',
+            '', '',
+        ]
+        return '\r\n'.join(lines).encode() + body
+
+    async def test_100_continue_sent_before_body(self):
+        """'100 Continue' must appear in writer output before the body is read."""
+        body = b'hello'
+        raw = self._make_expect_request(body)
+        writer = _FakeWriter()
+        body_read_position = None
+
+        async def app(scope, receive, send):
+            nonlocal body_read_position
+            body_read_position = bytes(writer.written)
+            await receive()
+
+        reader = MagicMock()
+        reader.readuntil = AsyncMock(return_value=b'\r\n\r\n')
+        reader.read = AsyncMock(return_value=body)
+
+        handler = HTTP11Handler(app, reader, writer, b'POST /upload HTTP/1.1\r\n')
+        handler.request = raw
+        await handler.run()
+
+        assert body_read_position is not None
+        assert b'100' in body_read_position, (
+            f'Expected "100 Continue" to be written before body is read; '
+            f'wire bytes at receive() time: {body_read_position!r}'
+        )
+
+    async def test_body_is_read_after_100(self):
+        """The actual request body must still be returned from receive()."""
+        body = b'payload'
+        raw = self._make_expect_request(body)
+        writer = _FakeWriter()
+        received_body = None
+
+        async def app(scope, receive, send):
+            nonlocal received_body
+            event = await receive()
+            received_body = event.get('body')
+
+        reader = MagicMock()
+        reader.readuntil = AsyncMock(return_value=b'\r\n\r\n')
+        reader.read = AsyncMock(return_value=body)
+
+        handler = HTTP11Handler(app, reader, writer, b'POST /upload HTTP/1.1\r\n')
+        handler.request = raw
+        await handler.run()
+
+        assert received_body == body, (
+            f'Expected body={body!r}; got {received_body!r}'
+        )
+
+    async def test_no_100_without_expect_header(self):
+        """A normal POST must not receive a spurious 100 Continue."""
+        body = b'data'
+        lines = ['POST / HTTP/1.1', 'Host: localhost:8000',
+                 f'Content-Length: {len(body)}', '', '']
+        raw = '\r\n'.join(lines).encode() + body
+        writer = _FakeWriter()
+
+        async def noop_app(scope, receive, send):
+            await receive()
+
+        reader = MagicMock()
+        reader.readuntil = AsyncMock(return_value=b'\r\n\r\n')
+        reader.read = AsyncMock(return_value=body)
+
+        handler = HTTP11Handler(noop_app, reader, writer, b'POST / HTTP/1.1\r\n')
+        handler.request = raw
+        await handler.run()
+
+        written = bytes(writer.written)
+        assert b'100' not in written, (
+            f'Spurious 100 Continue sent without Expect header: {written!r}'
+        )

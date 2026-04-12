@@ -24,6 +24,7 @@ class RespondBase:
     Abstract base class of responsing classes. You can find every subclass
     (i.e. responsing classes) by accessing __subclasses__().
     """
+    FRAME_TYPE = None
     def __init__(self, frame):
         self.frame = frame
 
@@ -32,7 +33,9 @@ class RespondBase:
 
     @classmethod
     def FrameType(cls):
-        raise NotImplementedError()
+        if cls.FRAME_TYPE is None:
+            raise NotImplementedError()
+        return cls.FRAME_TYPE
 
 
 class Respond2Ping(RespondBase):
@@ -45,9 +48,7 @@ class Respond2Ping(RespondBase):
             )
         await handler.send_frame(res)
 
-    @classmethod
-    def FrameType(cls):
-        return FrameTypes.PING
+    FRAME_TYPE = FrameTypes.PING
 
 
 class Respond2WindowUpdate(RespondBase):
@@ -57,9 +58,7 @@ class Respond2WindowUpdate(RespondBase):
         else:
             handler.client_stream_window_size[self.frame.stream_id] = self.frame.window_size
 
-    @classmethod
-    def FrameType(cls):
-        return FrameTypes.WINDOW_UPDATE
+    FRAME_TYPE = FrameTypes.WINDOW_UPDATE
 
 
 class Respond2Settings(RespondBase):
@@ -78,9 +77,7 @@ class Respond2Settings(RespondBase):
         elif self.frame.flags == SettingFlags.ACK:
             logger.debug('Got ACK. Do nothing.')
 
-    @classmethod
-    def FrameType(cls):
-        return FrameTypes.SETTINGS
+    FRAME_TYPE = FrameTypes.SETTINGS
 
 
 class Respond2Priority(RespondBase):
@@ -98,9 +95,7 @@ class Respond2Priority(RespondBase):
 
         stream.weight = self.frame.weight
 
-    @classmethod
-    def FrameType(cls):
-        return FrameTypes.PRIORITY
+    FRAME_TYPE = FrameTypes.PRIORITY
 
 
 class Respond2RstStream(RespondBase):
@@ -117,7 +112,5 @@ class Respond2RstStream(RespondBase):
         logger.warning(f'stream_id = {stream_id}, {self.frame.error_code}')
         stream.close()
 
-    @classmethod
-    def FrameType(cls):
-        return FrameTypes.RST_STREAM
+    FRAME_TYPE = FrameTypes.RST_STREAM
 
