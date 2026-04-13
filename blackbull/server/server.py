@@ -16,7 +16,7 @@ import socket
 from ..utils import HTTP2, pop_safe, EventEmitter, check_port
 from ..stream import Stream
 from ..rsock import create_dual_stack_sockets
-from ..frame import FrameFactory, FrameTypes, FrameBase, SettingFrameFlags
+from ..frame import ErrorCodes, FrameFactory, FrameTypes, FrameBase
 from ..logger import get_logger_set
 from .response import RespondFactory
 from .parser import ParserFactory
@@ -220,6 +220,8 @@ class HTTP2Handler(BaseHandler):
         # Keeping one sender per stream ensures WINDOW_UPDATE frames can reach
         # the same sender instance that the ASGI app task is holding.
         self._senders: dict = {}
+        # RFC 7540 §6.5.2: default is unlimited; updated by client SETTINGS.
+        self.max_concurrent_streams = float('inf')
 
     def find_stream(self, id_):
         if id_ == 0:
@@ -270,7 +272,7 @@ class HTTP2Handler(BaseHandler):
 
     async def run(self):
         # Send the settings at first.
-        my_settings = self.factory.create(FrameTypes.SETTINGS, SettingFrameFlags.INIT, 0)
+        my_settings = self.factory.settings()
         await self.send_frame(my_settings)
         logger.info(my_settings)
 
@@ -298,6 +300,9 @@ class HTTP2Handler(BaseHandler):
 
             match frame.FrameType():
                 case FrameTypes.HEADERS:
+                    if len(self.root_stream.get_children()) >= self.max_concurrent_streams:
+                        await self.send_frame(self.factory.rst_stream(stream.identifier, ErrorCodes.REFUSED_STREAM))
+
                     if frame.end_headers:
                         waiting_continuation = False
                         scope = ParserFactory.Get(frame, stream).parse()
@@ -326,15 +331,11 @@ class HTTP2Handler(BaseHandler):
 
                 case FrameTypes.DATA:
                     # Send WINDOW_UPDATE for every DATA frame (RFC 7540 §6.9).
-                    wu_frame = self.factory.create(FrameTypes.WINDOW_UPDATE,
-                                                   SettingFrameFlags.INIT,
-                                                   stream.identifier,
-                                                   data=frame.length.to_bytes(4, 'big', signed=False))
-                    await self.send_frame(wu_frame)
+                    await self.send_frame(self.factory.window_update(stream.identifier, frame.length))
                     recipient.put_DATAFrame(frame)
 
                 case FrameTypes.GOAWAY:
-                    await self.send_frame(self.factory.create(FrameTypes.GOAWAY, SettingFrameFlags.INIT, 0))
+                    await self.send_frame(self.factory.goaway())
                     self.writer.close()
                     break
 

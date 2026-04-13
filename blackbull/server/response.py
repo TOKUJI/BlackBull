@@ -92,10 +92,7 @@ class Respond2Settings(RespondBase):
             if hasattr(self.frame, 'header_table_size'):
                 # TODO: update header_table_size
                 pass
-            res = handler.factory.create(FrameTypes.SETTINGS,
-                                         SettingFrameFlags.ACK,
-                                         self.frame.stream_id)
-            await handler.send_frame(res)
+            await handler.send_frame(handler.factory.settings(ack=True))
 
         elif self.frame.flags == SettingFrameFlags.ACK:
             logger.debug('Got ACK. Do nothing.')

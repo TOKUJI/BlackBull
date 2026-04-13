@@ -54,7 +54,7 @@ class DataFrameFlags(FrameFlags):
     PADDED = 0x8
 
 
-class ErrorCodes(Enum):
+class ErrorCodes(IntEnum):
     NO_ERROR = 0x0
     PROTOCOL_ERROR = 0x1
     INTERNAL_ERROR = 0x2
@@ -89,6 +89,27 @@ class FrameFactory:
             decoder=self.decoder,
             )
         return frame
+
+    def window_update(self, stream_id: int, increment: int):
+        """Create a WINDOW_UPDATE frame with the given increment."""
+        return self.create(FrameTypes.WINDOW_UPDATE, SettingFrameFlags.INIT, stream_id,
+                           data=increment.to_bytes(4, 'big', signed=False))
+
+    def rst_stream(self, stream_id: int, error_code: 'ErrorCodes'):
+        """Create a RST_STREAM frame with the given error code."""
+        return self.create(FrameTypes.RST_STREAM, SettingFrameFlags.INIT, stream_id,
+                           data=int(error_code).to_bytes(4, 'big', signed=False))
+
+    def goaway(self, last_stream_id: int = 0, error_code: 'ErrorCodes | int' = 0):
+        """Create a GOAWAY frame (always on stream 0)."""
+        payload = (last_stream_id.to_bytes(4, 'big', signed=False)
+                   + int(error_code).to_bytes(4, 'big', signed=False))
+        return self.create(FrameTypes.GOAWAY, SettingFrameFlags.INIT, 0, data=payload)
+
+    def settings(self, *, ack: bool = False):
+        """Create a SETTINGS frame (INIT or ACK)."""
+        flags = SettingFrameFlags.ACK if ack else SettingFrameFlags.INIT
+        return self.create(FrameTypes.SETTINGS, flags, 0)
 
     def load(self, data):
         if len(data) < 9:
