@@ -2,21 +2,21 @@ from functools import partial
 import traceback
 
 from ..stream import Stream
-from ..frame import FrameTypes, SettingFlags
+from ..frame import FrameTypes, SettingFrameFlags
 from ..logger import get_logger_set, log
 
 logger, _ = get_logger_set(__name__)
 
 
 class RespondFactory:
-    @classmethod
-    def create(cls, frame):
-        factory = {klass.FrameType(): klass for klass in RespondBase.__subclasses__()}
-        logger.debug(f'Factory mapping: {factory}')
-        if frame.FrameType() not in factory:
-            logger.warning(f'Unsupported frame type: {frame.FrameType()}')
-            return None
-        return factory[frame.FrameType()](frame)
+
+    @staticmethod
+    def create(frame):
+        try:
+            klass = RespondBase._registry[frame.FrameType()]
+        except KeyError:
+            raise ValueError(f"Unsupported FrameType: {frame.FrameType()}")
+        return klass(frame)
 
 
 class RespondBase:
@@ -25,8 +25,25 @@ class RespondBase:
     (i.e. responsing classes) by accessing __subclasses__().
     """
     FRAME_TYPE = None
+    _registry = {}
+
     def __init__(self, frame):
         self.frame = frame
+
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+
+        # If FRAME_TYPE is None, we won't register it, as it's meant to be an abstract base class
+        if cls.FRAME_TYPE is None:
+            return
+
+        # Check for duplicate FRAME_TYPE to avoid overwriting existing entries in the registry
+        if cls.FRAME_TYPE in cls._registry:
+            raise ValueError(f"Duplicate FRAME_TYPE: {cls.FRAME_TYPE}")
+
+        # Register the subclass in the registry based on its FRAME_TYPE
+        # This allows us to create instances of the correct subclass based on the frame type
+        cls._registry[cls.FRAME_TYPE] = cls
 
     async def respond(self, handler):
         raise NotImplementedError()
@@ -42,7 +59,7 @@ class Respond2Ping(RespondBase):
     async def respond(self, handler):
         res = handler.factory.create(
             FrameTypes.PING,
-            SettingFlags.ACK,
+            SettingFrameFlags.ACK,
             self.frame.stream_id,
             data=self.frame.payload,
             )
@@ -53,28 +70,34 @@ class Respond2Ping(RespondBase):
 
 class Respond2WindowUpdate(RespondBase):
     async def respond(self, handler):
+        increment = self.frame.window_size
         if self.frame.stream_id == 0:
-            handler.client_window_size = self.frame.window_size
+            # Connection-level: credit all cached stream senders.
+            for sender in handler._senders.values():
+                sender.connection_window_size += increment
+                sender._window_open.set()
         else:
-            handler.client_stream_window_size[self.frame.stream_id] = self.frame.window_size
+            sender = handler.make_sender(self.frame.stream_id)
+            sender.window_update(increment)
 
     FRAME_TYPE = FrameTypes.WINDOW_UPDATE
 
 
 class Respond2Settings(RespondBase):
     async def respond(self, handler):
-        if self.frame.flags == SettingFlags.INIT:
+        if self.frame.flags == SettingFrameFlags.INIT:
             if hasattr(self.frame, 'initial_window_size'):
-                handler.initial_window_size = self.frame.initial_window_size
+                for sender in handler._senders.values():
+                    sender.apply_settings(self.frame.initial_window_size)
             if hasattr(self.frame, 'header_table_size'):
                 # TODO: update header_table_size
                 pass
             res = handler.factory.create(FrameTypes.SETTINGS,
-                                         SettingFlags.ACK,
+                                         SettingFrameFlags.ACK,
                                          self.frame.stream_id)
             await handler.send_frame(res)
 
-        elif self.frame.flags == SettingFlags.ACK:
+        elif self.frame.flags == SettingFrameFlags.ACK:
             logger.debug('Got ACK. Do nothing.')
 
     FRAME_TYPE = FrameTypes.SETTINGS

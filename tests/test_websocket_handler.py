@@ -35,6 +35,7 @@ import pytest
 
 from blackbull.server.server import WebSocketHandler
 from blackbull.server.sender import WebSocketSender, AsyncioWriter
+from blackbull.server.recipient import WebSocketRecipient, AsyncioReader
 
 
 # ---------------------------------------------------------------------------
@@ -93,6 +94,11 @@ class _FakeReader:
     async def readline(self) -> bytes:
         return await self.readuntil(b'\n')
 
+    async def read(self, n: int) -> bytes:
+        chunk = bytes(self._buf[:n])
+        del self._buf[:n]
+        return chunk
+
 
 class _FakeWriter:
     """Capture everything written to the fake transport."""
@@ -112,6 +118,24 @@ class _FakeWriter:
 
     async def wait_closed(self):
         pass
+
+
+# ---------------------------------------------------------------------------
+# Compatibility wrapper — lets existing tests call handler.receive() against
+# WebSocketRecipient without touching every call site.
+# ---------------------------------------------------------------------------
+
+class _RecipientWrapper:
+    """Thin wrapper around WebSocketRecipient that exposes a .receive() method
+    and a .writer attribute so tests written against WebSocketHandler.receive()
+    continue to work unchanged."""
+
+    def __init__(self, raw_bytes: bytes):
+        self.writer = _FakeWriter()
+        self._recipient = WebSocketRecipient(AsyncioReader(_FakeReader(raw_bytes)), self.writer)
+
+    async def receive(self):
+        return await self._recipient()
 
 
 # ---------------------------------------------------------------------------
@@ -222,13 +246,10 @@ class TestReadFrame:
 # ---------------------------------------------------------------------------
 
 class TestReceive:
-    """WebSocketHandler.receive() must return ASGI event dicts, not coroutines."""
+    """WebSocketRecipient must return ASGI event dicts, not coroutines."""
 
     def _make_handler(self, raw_frame: bytes):
-        reader = _FakeReader(raw_frame)
-        writer = _FakeWriter()
-        scope = {'type': 'websocket', 'path': '/ws', 'headers': []}
-        return WebSocketHandler(AsyncMock(), reader, writer, scope)
+        return _RecipientWrapper(raw_frame)
 
     @pytest.mark.asyncio
     async def test_receive_text_returns_dict(self):
@@ -267,7 +288,7 @@ class TestReceive:
         """Verify receive() is a coroutine function so callers can await it."""
         handler = self._make_handler(_make_client_frame(b'x', opcode=0x1))
         import inspect
-        assert inspect.iscoroutinefunction(handler.receive)
+        assert inspect.iscoroutinefunction(handler.receive) or inspect.iscoroutinefunction(handler._recipient.__call__)
 
 
 # ---------------------------------------------------------------------------
@@ -288,10 +309,7 @@ class TestReceiveConnect:
     """receive() must return websocket.connect on the first call."""
 
     def _make_handler(self, raw_frame: bytes = b''):
-        reader = _FakeReader(raw_frame)
-        writer = _FakeWriter()
-        scope = {'type': 'websocket', 'path': '/ws', 'headers': []}
-        return WebSocketHandler(AsyncMock(), reader, writer, scope)
+        return _RecipientWrapper(raw_frame)
 
     @pytest.mark.asyncio
     async def test_first_call_returns_connect(self):
@@ -372,10 +390,7 @@ class TestPingPong:
     """
 
     def _make_handler(self, raw_bytes: bytes):
-        reader = _FakeReader(raw_bytes)
-        writer = _FakeWriter()
-        scope = {'type': 'websocket', 'path': '/ws', 'headers': []}
-        return WebSocketHandler(AsyncMock(), reader, writer, scope)
+        return _RecipientWrapper(raw_bytes)
 
     async def test_ping_causes_pong_written_to_wire(self):
         """Ping frame must cause a pong frame to appear on the wire."""
@@ -462,10 +477,7 @@ class TestUnmaskedFrames:
     """
 
     def _make_handler(self, raw_bytes: bytes):
-        reader = _FakeReader(raw_bytes)
-        writer = _FakeWriter()
-        scope = {'type': 'websocket', 'path': '/ws', 'headers': []}
-        return WebSocketHandler(AsyncMock(), reader, writer, scope)
+        return _RecipientWrapper(raw_bytes)
 
     async def test_unmasked_text_frame_raises(self):
         """Unmasked text frame (opcode 0x1) must be rejected."""

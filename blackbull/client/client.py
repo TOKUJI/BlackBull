@@ -7,7 +7,7 @@ import concurrent.futures
 # private library
 from ..utils import HTTP2, EventEmitter
 from ..rsock import create_socket
-from ..frame import FrameFactory, FrameTypes, DataFlags, HeadersFlags, SettingFlags, PingFrameFlags
+from ..frame import FrameFactory, FrameTypes, DataFrameFlags, HeaderFrameFlags, SettingFrameFlags, PingFrameFlags
 from ..stream import Stream
 from ..logger import get_logger_set, log
 logger, _ = get_logger_set('client')
@@ -171,7 +171,7 @@ class Client:
             logger.debug('connection is open')
 
             self.writer.write(HTTP2)
-            setting = self.factory.create(FrameTypes.SETTINGS, SettingFlags.INIT, 0)
+            setting = self.factory.create(FrameTypes.SETTINGS, SettingFrameFlags.INIT, 0)
             await self.send_frame(setting)
             self.create_stream(1, 0, 1)
 

@@ -34,17 +34,53 @@ class FrameFlags(IntEnum):
     """
 
 
+class HeaderFrameFlags(FrameFlags):
+    END_STREAM = 0x1
+    END_HEADERS = 0x4
+    PADDED = 0x8
+    PRIORITY = 0x20
+
+class SettingFrameFlags(FrameFlags):
+    INIT = 0x0
+    ACK = 0x1
+
+
+class PingFrameFlags(FrameFlags):
+    ACK = 0x1
+
+
+class DataFrameFlags(FrameFlags):
+    END_STREAM = 0x1
+    PADDED = 0x8
+
+
+class ErrorCodes(Enum):
+    NO_ERROR = 0x0
+    PROTOCOL_ERROR = 0x1
+    INTERNAL_ERROR = 0x2
+    FLOW_CONTROL_ERROR = 0x3
+    SETTINGS_TIMEOUT = 0x4
+    STREAM_CLOSED = 0x5
+    FRAME_SIZE_ERROR = 0x6
+    REFUSED_STREAM = 0x7
+    CANCEL = 0x8
+    COMPRESSION_ERROR = 0x9
+    CONNECT_ERROR = 0xa
+    ENHANCE_YOUR_CALM = 0xb
+    INADEQUATE_SECURITY = 0xc
+    HTTP_1_1_REQUIRED = 0xd
+
+
 class FrameFactory:
     """docstring for FrameFactory"""
     def __init__(self):
         super().__init__()
         self.decoder = Decoder()
-        self._factory = {klass.FrameType(): klass for klass in FrameBase.__subclasses__()}
 
     def create(self, type_: FrameTypes, flags: FrameFlags, stream_id: int, *, data: bytes = b'', **kwds):
         logger.info(f'type:{type_}, flags:{flags}, id:{stream_id}')
 
-        frame = self._factory[type_](
+        frame = FrameBase._registry[type_](
             len(data),
             type_,
             flags if type(flags) is int else flags.value,
@@ -79,7 +115,8 @@ class FrameFactory:
 
 class FrameBase:
     """docstring for FrameBase"""
-    factory = None
+    FRAME_TYPE = None
+    _registry = {}
 
     def __init__(self, length: int, type_, flags: int, stream_id: int):
         self.length = length
@@ -90,6 +127,27 @@ class FrameBase:
                      f'flag={self.flags}, '
                      f'stream_id={self.stream_id} '
                      f'and payload size={self.length}')
+
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+
+        # If FRAME_TYPE is None, we won't register it, as it's meant to be an abstract base class
+        if cls.FRAME_TYPE is None:
+            return
+
+        # Check for duplicate FRAME_TYPE to avoid overwriting existing entries in the registry
+        if cls.FRAME_TYPE in cls._registry:
+            raise ValueError(f"Duplicate FRAME_TYPE: {cls.FRAME_TYPE}")
+
+        # Register the subclass in the registry based on its FRAME_TYPE
+        # This allows us to create instances of the correct subclass based on the frame type
+        cls._registry[cls.FRAME_TYPE] = cls
+
+    @classmethod
+    def FrameType(cls):
+        if cls.FRAME_TYPE is None:
+            raise NotImplementedError()
+        return cls.FRAME_TYPE
 
     @log
     def save(self):
@@ -110,29 +168,17 @@ class FrameBase:
                self.flags == other.flags and\
                self.stream_id == other.stream_id
 
-    @staticmethod
-    def FrameType():
-        raise NotImplementedError('A subclass of FrameBase should implement FrameType() method')
-
     def __repr__(self):
-        return f'{self.FrameType().name}: stream_id={self.stream_id}'
-
-
-class SettingFlags(FrameFlags):
-    INIT = 0x0
-    ACK = 0x1
-
-
-class PingFrameFlags(FrameFlags):
-    ACK = 0x1
+        return f'{self.FRAME_TYPE.name}: stream_id={self.stream_id}'
 
 
 class SettingFrame(FrameBase):
     """docstring for SettingFrame"""
     initial_window_size = None
+    FRAME_TYPE = FrameTypes.SETTINGS
 
     def __init__(self, length: int, type_, flags: int, stream_id: int, *, data=None, **kwds):
-        super(SettingFrame, self).__init__(length, type_, flags, stream_id)
+        super().__init__(length, type_, flags, stream_id)
         logger.debug('SettingFrame is called.')
 
         self.params = {b'\x00\x01': self.set_header_table_size,
@@ -187,39 +233,21 @@ class SettingFrame(FrameBase):
         # TODO: enable to alter settings parameters
         return base
 
-    @staticmethod
-    def FrameType():
-        return FrameTypes.SETTINGS
-
 
 class WindowUpdate(FrameBase):
     """docstring for WindowUpdate"""
+    FRAME_TYPE = FrameTypes.WINDOW_UPDATE
     def __init__(self, length: int, type_, flags: bytes, stream_id: int, *, data=None, **kwds):
         super(WindowUpdate, self).__init__(length, type_, flags, stream_id)
         logger.debug('WindowUpdate is called.')
 
-        payload = BytesIO(data)
-        self.set_window_size(data)
-
-    def set_window_size(self, value):
-        self.window_size = int.from_bytes(value, 'big', signed=False)
-        logger.debug('window_size: {}'.format(self.window_size))
+        self.payload = data
+        self.window_size = int.from_bytes(data, 'big', signed=False)
 
     def save(self):
-        base = super(WindowUpdate, self).save()
+        base = super().save()
         # TODO: enable to alter settings parameters
         return base
-
-    @staticmethod
-    def FrameType():
-        return FrameTypes.WINDOW_UPDATE
-
-
-class HeaderFrameFlags(FrameFlags):
-    END_STREAM = 0x1
-    END_HEADERS = 0x4
-    PADDED = 0x8
-    PRIORITY = 0x20
 
 
 class PseudoHeaders(StrEnum):
@@ -233,9 +261,10 @@ class PseudoHeaders(StrEnum):
 
 
 class Headers(FrameBase):
+    FRAME_TYPE = FrameTypes.HEADERS
 
     def __init__(self, length: int, type_, flags: bytes, stream_id: int, *, data=None, decoder=None):
-        super(Headers, self).__init__(length, type_, flags, stream_id)
+        super().__init__(length, type_, flags, stream_id)
         logger.debug('Headers is called.')
         # Read flags
         self.end_stream = HeaderFrameFlags.END_STREAM & self.flags
@@ -319,10 +348,6 @@ class Headers(FrameBase):
         else:
             raise AttributeError(key)
 
-    @staticmethod
-    def FrameType():
-        return FrameTypes.HEADERS
-
     def __repr__(self):
         head = [super(Headers, self).__repr__()]
         head += [f'{k}: {v}' for k, v in self.pseudo_headers.items()]
@@ -331,6 +356,7 @@ class Headers(FrameBase):
 
 
 class GoAway(FrameBase):
+    FRAME_TYPE = FrameTypes.GOAWAY
     def __init__(self, length: int, type_, flags: int, stream_id: int, *, data=None, **kwds):
         super().__init__(length, type_, flags, stream_id)
         logger.debug('GoAway is called.')
@@ -343,12 +369,9 @@ class GoAway(FrameBase):
         logger.debug('error_code: {}'.format(self.error_code))
         logger.debug('append_data: {}'.format(self.append_data))
 
-    @staticmethod
-    def FrameType():
-        return FrameTypes.GOAWAY
-
 
 class RstStream(FrameBase):
+    FRAME_TYPE = FrameTypes.RST_STREAM
     def __init__(self, length: int, type_, flags: int, stream_id: int, *, data=None, **kwds):
         super().__init__(length, type_, flags, stream_id)
         logger.debug('RstStream is called.')
@@ -358,35 +381,11 @@ class RstStream(FrameBase):
         self.error_code = ErrorCodes(int.from_bytes(data, 'big', signed=False))
         logger.debug(f'error_code: {self.error_code}')
 
-    @staticmethod
-    def FrameType():
-        return FrameTypes.RST_STREAM
-
-
-class ErrorCodes(Enum):
-    NO_ERROR = 0x0
-    PROTOCOL_ERROR = 0x1
-    INTERNAL_ERROR = 0x2
-    FLOW_CONTROL_ERROR = 0x3
-    SETTINGS_TIMEOUT = 0x4
-    STREAM_CLOSED = 0x5
-    FRAME_SIZE_ERROR = 0x6
-    REFUSED_STREAM = 0x7
-    CANCEL = 0x8
-    COMPRESSION_ERROR = 0x9
-    CONNECT_ERROR = 0xa
-    ENHANCE_YOUR_CALM = 0xb
-    INADEQUATE_SECURITY = 0xc
-    HTTP_1_1_REQUIRED = 0xd
-
-
-class DataFrameFlags(FrameFlags):
-    END_STREAM = 0x1
-    PADDED = 0x8
-
 
 class Data(FrameBase):
     """docstring for Data"""
+    FRAME_TYPE = FrameTypes.DATA
+
     def __init__(self, length: int, type_, flags: int, stream_id: int, *, data=None, **kwds):
         super().__init__(length, type_, flags, stream_id)
         logger.debug('Data is called.')
@@ -414,16 +413,13 @@ class Data(FrameBase):
         logger.info('payload is {}'.format(self.payload))
         return base + self.payload
 
-    @staticmethod
-    def FrameType():
-        return FrameTypes.DATA
-
     def __repr__(self):
         s = super().__repr__()
         return f'{s}: end_stream={True if self.end_stream else False}: {self.payload}'
 
 
 class Priority(FrameBase):
+    FRAME_TYPE = FrameTypes.PRIORITY
     def __init__(self, length: int, type_, flags: int, stream_id: int, *, data=None, **kwds):
         super().__init__(length, type_, flags, stream_id)
         logger.debug('Priority is called.')
@@ -447,13 +443,10 @@ class Priority(FrameBase):
 
         return base + payload
 
-    @staticmethod
-    def FrameType():
-        return FrameTypes.PRIORITY
-
 
 class Ping(FrameBase):
     """docstring for Ping"""
+    FRAME_TYPE = FrameTypes.PING
     def __init__(self, length: int, type_, flags: int, stream_id: int, *, data, **kwds):
         super().__init__(length, type_, flags, stream_id)
         logger.debug('Ping is called.')
@@ -470,15 +463,12 @@ class Ping(FrameBase):
         logger.debug('Ping is saving: {}'.format(res))
         return res
 
-    @staticmethod
-    def FrameType():
-        return FrameTypes.PING
-
     def __eq__(self, other):
         return super().__eq__(other) and (self.payload == other.payload)
 
 class Continuation(FrameBase):
     """docstring for Continuation"""
+    FRAME_TYPE = FrameTypes.CONTINUATION
     def __init__(self, length: int, type_, flags: int, stream_id: int, *, data=None, **kwds):
         super().__init__(length, type_, flags, stream_id)
         logger.debug('Continuation is called.')
@@ -493,7 +483,3 @@ class Continuation(FrameBase):
         res = base + self.payload
         logger.debug('Continuation is saving: %r', res)
         return res
-
-    @staticmethod
-    def FrameType():
-        return FrameTypes.CONTINUATION

@@ -1,11 +1,11 @@
+import asyncio
 from abc import ABC, abstractmethod
 from enum import IntEnum
 from http import HTTPStatus
 import logging
 from unittest import case
 
-from ..frame import FrameTypes, HeaderFrameFlags, DataFrameFlags, SettingFlags, FrameBase, PseudoHeaders
-
+from ..frame import FrameTypes, HeaderFrameFlags, DataFrameFlags, SettingFrameFlags, FrameBase, PseudoHeaders
 
 class WSOpcode(IntEnum):
     CONTINUATION = 0x0
@@ -14,7 +14,6 @@ class WSOpcode(IntEnum):
     CLOSE        = 0x8
     PING         = 0x9
     PONG         = 0xA
-
 
 class WSFrameBits(IntEnum):
     FIN         = 0x80  # FIN bit in byte 0
@@ -175,6 +174,29 @@ class HTTP2Sender(BaseSender):
         super().__init__(writer)
         self._factory = factory
         self._stream_identifier = stream_identifier
+        self.connection_window_size = 65535  # initial connection-level window (RFC 7540 §6.9.2)
+        self.stream_window_size = {stream_identifier: 65535}  # initial stream window
+        self._window_open = asyncio.Event()
+        self._window_open.set()  # window starts open
+
+    async def _write(self, data: bytes):
+        while (len(data) > self.connection_window_size or
+               len(data) > self.stream_window_size[self._stream_identifier]):
+            await self._window_open.wait()
+            self._window_open.clear()
+        await super()._write(data)
+        self.connection_window_size -= len(data)
+        self.stream_window_size[self._stream_identifier] -= len(data)
+
+    def window_update(self, increment: int) -> None:
+        self.connection_window_size += increment
+        self.stream_window_size[self._stream_identifier] += increment
+        self._window_open.set()  # wake any blocked _write()
+
+    def apply_settings(self, initial_window_size: int) -> None:
+        """Apply SETTINGS INITIAL_WINDOW_SIZE to the stream window."""
+        self.stream_window_size[self._stream_identifier] = initial_window_size
+        self._window_open.set()
 
     async def __call__(self, body, status: HTTPStatus = HTTPStatus.OK, headers: list = []):
         # Control-plane: raw frame object (SETTINGS, PING ACK, WINDOW_UPDATE, …)

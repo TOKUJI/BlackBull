@@ -317,7 +317,8 @@ class TestClientConnectedCbDispatch:
         async def noop_run(self):
             # Simulate forwarding scope to app (as the fixed code does)
             async def _noop_send(event, *args, **kwargs): pass
-            await self.app(self.scope, self.receive, _noop_send)
+            async def _noop_receive(): return {}
+            await self.app(self.scope, _noop_receive, _noop_send)
 
         with patch.object(WebSocketHandler, 'run', noop_run):
             await server.client_connected_cb(reader, writer)

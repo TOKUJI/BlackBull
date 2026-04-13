@@ -38,7 +38,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 from hpack import Encoder
 
-from blackbull.frame import FrameFactory, FrameTypes, HeadersFlags
+from blackbull.frame import (FrameFactory, FrameTypes, FrameFlags,
+                              HeaderFrameFlags, SettingFrameFlags)
 from blackbull.server.server import HTTP2Handler
 
 
@@ -46,14 +47,9 @@ from blackbull.server.server import HTTP2Handler
 # Wire-format helper
 # ---------------------------------------------------------------------------
 
-def _make_h2_frame(type_byte: bytes, flags: int, stream_id: int, payload: bytes) -> bytes:
-    """Build a raw 9-byte HTTP/2 frame header followed by *payload*.
-
-    *type_byte*  — 1-byte frame type, e.g. ``b'\\x01'`` (HEADERS), ``b'\\x09'`` (CONTINUATION)
-    *flags*      — 1-byte flags, e.g. ``0x04`` for END_HEADERS
-    *stream_id*  — 31-bit stream identifier (reserved bit is always 0 here)
-    *payload*    — frame payload bytes
-    """
+def _make_h2_frame(type_byte: FrameTypes, flags: FrameFlags | int,
+                   stream_id: int, payload: bytes) -> bytes:
+    """Build a raw 9-byte HTTP/2 frame header followed by *payload*."""
     length = len(payload)
     return (length.to_bytes(3, 'big')
             + type_byte
@@ -72,14 +68,14 @@ class TestHeadersFrameFlags:
     def test_headers_with_end_headers_flag_reports_nonzero(self):
         """HEADERS frame with END_HEADERS (0x04) must have ``end_headers != 0``."""
         factory = FrameFactory()
-        raw = _make_h2_frame(b'\x01', 0x04, 1, b'')  # empty payload → no HPACK decode
+        raw = _make_h2_frame(FrameTypes.HEADERS, HeaderFrameFlags.END_HEADERS, 1, b'')
         frame = factory.load(raw)
         assert frame.end_headers != 0
 
     def test_headers_without_end_headers_flag_reports_zero(self):
         """HEADERS frame without END_HEADERS must have ``end_headers == 0``."""
         factory = FrameFactory()
-        raw = _make_h2_frame(b'\x01', 0x00, 1, b'')
+        raw = _make_h2_frame(FrameTypes.HEADERS, SettingFrameFlags.INIT, 1, b'')
         frame = factory.load(raw)
         assert frame.end_headers == 0
 
@@ -87,7 +83,8 @@ class TestHeadersFrameFlags:
         """END_STREAM (0x01) and END_HEADERS (0x04) are independent bits."""
         factory = FrameFactory()
         # Both flags set
-        raw = _make_h2_frame(b'\x01', 0x05, 1, b'')  # 0x01 | 0x04
+        raw = _make_h2_frame(FrameTypes.HEADERS,
+                             HeaderFrameFlags.END_STREAM | HeaderFrameFlags.END_HEADERS, 1, b'')
         frame = factory.load(raw)
         assert frame.end_stream != 0
         assert frame.end_headers != 0
@@ -95,7 +92,7 @@ class TestHeadersFrameFlags:
     def test_end_stream_set_without_end_headers(self):
         """END_STREAM without END_HEADERS is legal (HEADERS without all headers yet)."""
         factory = FrameFactory()
-        raw = _make_h2_frame(b'\x01', 0x01, 1, b'')  # only END_STREAM
+        raw = _make_h2_frame(FrameTypes.HEADERS, HeaderFrameFlags.END_STREAM, 1, b'')
         frame = factory.load(raw)
         assert frame.end_stream != 0
         assert frame.end_headers == 0
@@ -123,35 +120,35 @@ class TestContinuationFrameParsing:
         Currently raises ``KeyError`` because no handler class is registered for type 0x09.
         """
         factory = FrameFactory()
-        raw = _make_h2_frame(b'\x09', 0x00, 1, b'\x00')  # intermediate CONTINUATION
+        raw = _make_h2_frame(FrameTypes.CONTINUATION, SettingFrameFlags.INIT, 1, b'\x00')
         frame = factory.load(raw)              # P1 bug: KeyError here
         assert frame.FrameType() == FrameTypes.CONTINUATION
 
     def test_factory_load_continuation_with_end_headers_does_not_raise(self):
         """``FrameFactory.load()`` must parse a CONTINUATION frame with END_HEADERS."""
         factory = FrameFactory()
-        raw = _make_h2_frame(b'\x09', 0x04, 1, b'\x00')  # final CONTINUATION
+        raw = _make_h2_frame(FrameTypes.CONTINUATION, HeaderFrameFlags.END_HEADERS, 1, b'\x00')
         frame = factory.load(raw)              # P1 bug: KeyError here
         assert frame.FrameType() == FrameTypes.CONTINUATION
 
     def test_continuation_frame_exposes_end_headers_flag(self):
         """A parsed CONTINUATION frame must expose its END_HEADERS flag."""
         factory = FrameFactory()
-        raw = _make_h2_frame(b'\x09', 0x04, 1, b'')
+        raw = _make_h2_frame(FrameTypes.CONTINUATION, HeaderFrameFlags.END_HEADERS, 1, b'')
         frame = factory.load(raw)
         assert frame.end_headers != 0
 
     def test_intermediate_continuation_frame_has_end_headers_zero(self):
         """Intermediate CONTINUATION frame (no END_HEADERS) must have ``end_headers == 0``."""
         factory = FrameFactory()
-        raw = _make_h2_frame(b'\x09', 0x00, 1, b'')
+        raw = _make_h2_frame(FrameTypes.CONTINUATION, SettingFrameFlags.INIT, 1, b'')
         frame = factory.load(raw)
         assert frame.end_headers == 0
 
     def test_continuation_frame_carries_stream_id(self):
         """CONTINUATION frame must be associated with the same stream as HEADERS."""
         factory = FrameFactory()
-        raw = _make_h2_frame(b'\x09', 0x04, 3, b'')  # stream 3
+        raw = _make_h2_frame(FrameTypes.CONTINUATION, HeaderFrameFlags.END_HEADERS, 3, b'')
         frame = factory.load(raw)
         assert frame.stream_id == 3
 
@@ -187,7 +184,8 @@ class TestContinuationHandling:
             (b':path', b'/'),
             (b':scheme', b'https'),
         ])
-        h_frame = _make_h2_frame(b'\x01', 0x04, 1, block)  # HEADERS + END_HEADERS
+        h_frame = _make_h2_frame(FrameTypes.HEADERS,
+                                 HeaderFrameFlags.END_HEADERS | HeaderFrameFlags.END_STREAM, 1, block)
 
         app = AsyncMock()
         handler = _make_handler(app)
@@ -215,8 +213,8 @@ class TestContinuationHandling:
         split = len(full_block) // 2 + 1
         part1, part2 = full_block[:split], full_block[split:]
 
-        h_frame = _make_h2_frame(b'\x01', 0x00, 1, part1)   # HEADERS, no END_HEADERS
-        c_frame = _make_h2_frame(b'\x09', 0x00 | HeadersFlags.END_HEADERS, 1, part2)   # CONTINUATION + END_HEADERS
+        h_frame = _make_h2_frame(FrameTypes.HEADERS, SettingFrameFlags.INIT, 1, part1)
+        c_frame = _make_h2_frame(FrameTypes.CONTINUATION, HeaderFrameFlags.END_HEADERS, 1, part2)
 
         app = AsyncMock()
         handler = _make_handler(app)
@@ -244,8 +242,8 @@ class TestContinuationHandling:
         split = len(full_block) // 2 + 1
         part1, part2 = full_block[:split], full_block[split:]
 
-        h_frame = _make_h2_frame(b'\x01', 0x00, 1, part1)
-        c_frame = _make_h2_frame(b'\x09', 0x04, 1, part2)
+        h_frame = _make_h2_frame(FrameTypes.HEADERS, SettingFrameFlags.INIT, 1, part1)
+        c_frame = _make_h2_frame(FrameTypes.CONTINUATION, HeaderFrameFlags.END_HEADERS, 1, part2)
 
         app = AsyncMock()
         handler = _make_handler(app)
@@ -288,9 +286,9 @@ class TestContinuationHandling:
         p2 = full_block[n // 3: 2 * n // 3]
         p3 = full_block[2 * n // 3:]
 
-        h_frame  = _make_h2_frame(b'\x01', 0x00, 1, p1)   # HEADERS
-        c1_frame = _make_h2_frame(b'\x09', 0x00, 1, p2)   # intermediate CONTINUATION
-        c2_frame = _make_h2_frame(b'\x09', 0x04, 1, p3)   # final CONTINUATION + END_HEADERS
+        h_frame  = _make_h2_frame(FrameTypes.HEADERS,       SettingFrameFlags.INIT,          1, p1)
+        c1_frame = _make_h2_frame(FrameTypes.CONTINUATION, SettingFrameFlags.INIT,          1, p2)
+        c2_frame = _make_h2_frame(FrameTypes.CONTINUATION, HeaderFrameFlags.END_HEADERS,    1, p3)
 
         app = AsyncMock()
         handler = _make_handler(app)
@@ -324,11 +322,11 @@ class TestContinuationHandling:
         mid2 = len(block2) // 2 + 1
 
         # Stream 1 frames
-        h1 = _make_h2_frame(b'\x01', 0x00, 1, block1[:mid1])
-        c1 = _make_h2_frame(b'\x09', 0x04, 1, block1[mid1:])
+        h1 = _make_h2_frame(FrameTypes.HEADERS,       SettingFrameFlags.INIT,       1, block1[:mid1])
+        c1 = _make_h2_frame(FrameTypes.CONTINUATION,  HeaderFrameFlags.END_HEADERS, 1, block1[mid1:])
         # Stream 3 frames (HTTP/2 client streams are odd-numbered)
-        h3 = _make_h2_frame(b'\x01', 0x00, 3, block2[:mid2])
-        c3 = _make_h2_frame(b'\x09', 0x04, 3, block2[mid2:])
+        h3 = _make_h2_frame(FrameTypes.HEADERS,       SettingFrameFlags.INIT,       3, block2[:mid2])
+        c3 = _make_h2_frame(FrameTypes.CONTINUATION,  HeaderFrameFlags.END_HEADERS, 3, block2[mid2:])
 
         app = AsyncMock()
         handler = _make_handler(app)

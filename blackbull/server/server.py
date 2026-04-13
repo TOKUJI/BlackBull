@@ -16,11 +16,12 @@ import socket
 from ..utils import HTTP2, pop_safe, EventEmitter, check_port
 from ..stream import Stream
 from ..rsock import create_dual_stack_sockets
-from ..frame import FrameFactory, FrameTypes, FrameBase, SettingFlags
+from ..frame import FrameFactory, FrameTypes, FrameBase, SettingFrameFlags
 from ..logger import get_logger_set
 from .response import RespondFactory
 from .parser import ParserFactory
-from .sender import SenderFactory, WebSocketSender, WSOpcode, WSFrameBits
+from .sender import SenderFactory
+from .recipient import RecipientFactory
 logger, log = get_logger_set(__name__)
 
 
@@ -82,46 +83,6 @@ class WebSocketHandler(BaseHandler):
         if len(args) > 3:
             self.scope = args[-1]
             logger.debug(self.scope)
-        
-        self._connect_sent = False
-
-    async def receive(self):
-        """Read one WebSocket frame and return an ASGI ``websocket.receive`` dict.
-        If the frame is a close frame, return an ASGI ``websocket.disconnect`` dict instead.
-        """
-        if not self._connect_sent:
-            self._connect_sent = True
-            return {'type': 'websocket.connect'}
-
-        while True:
-            opcode, masked, length = await WebSocketSender._read_opcode(self.reader)
-            payload = await WebSocketSender._read_payload(self.reader, masked, length)
-
-            if not masked:
-                raise ValueError('Received unmasked frame from client, which is a protocol violation.') 
-                
-
-            match opcode:
-                case WSOpcode.TEXT:  # text frame
-                    return {'type': 'websocket.receive', 'text': payload.decode('utf-8'), 'bytes': None}
-
-                case WSOpcode.BINARY:# binary frame
-                    return {'type': 'websocket.receive', 'text': None, 'bytes': payload}
-
-                case WSOpcode.CLOSE:           # close frame
-                    return {'type': 'websocket.disconnect', 'code': 1000}
-
-                case WSOpcode.PING:           # ping — reply immediately, then read next frame
-                    pong = WebSocketSender._encode_frame(payload, opcode=WSOpcode.PONG)
-                    self.writer.write(pong)
-                    await self.writer.drain()
-
-                case WSOpcode.PONG:           # unsolicited pong — silently drop
-                    pass
-
-                case _:
-                    logger.warning('Unsupported WebSocket opcode: 0x%02x', opcode)
-                    return {'type': 'websocket.receive', 'text': None, 'bytes': payload}
 
     async def run(self):
         """Complete the upgrade handshake then call the ASGI application."""
@@ -142,7 +103,8 @@ class WebSocketHandler(BaseHandler):
         logger.debug('WebSocket handshake complete.')
 
         send = SenderFactory.websocket(self.writer)
-        await self.app(self.scope, self.receive, send)
+        receive = RecipientFactory.websocket(self.reader, self.writer)
+        await self.app(self.scope, receive, send)
 
 
 class HTTP11Handler(BaseHandler):
@@ -180,7 +142,7 @@ class HTTP11Handler(BaseHandler):
             await WebSocketHandler(self.app, self.reader, self.writer, scope).run()
             return
 
-        receive = self.make_recepient(scope)
+        receive = RecipientFactory.http1(self.reader, scope)
         send = self.make_sender()
         await self.app(scope, receive, send)
 
@@ -241,49 +203,6 @@ class HTTP11Handler(BaseHandler):
 
         return scope
 
-    def make_recepient(self, scope):
-
-        async def receive():
-            """
-            Read the stream, get some data from incoming frames, parse it, and return the ASGI event dict.
-            """
-            # Determine the content length from headers, if present
-            content_length = 0
-            # Check if 'Content-Length' or 'Transfer-Encoding' is in scope['headers']
-            headers = dict(scope['headers'])
-            has_content_length = b'content-length' in headers
-            has_transfer_encoding = b'transfer-encoding' in headers
-
-            if has_content_length:
-                content_length = int(headers[b'content-length'].decode())
-                message_body = await self.reader.read(content_length) if content_length > 0 else b''
-            elif has_transfer_encoding and headers[b'transfer-encoding'].strip().lower() == b'chunked':
-                parts = []
-                while True:
-                    size_line = await self.reader.readuntil(b'\r\n')
-                    chunk_size = int(size_line.strip(), 16)
-                    if chunk_size == 0:
-                        await self.reader.readuntil(b'\r\n')  # consume trailing CRLF
-                        break
-                    parts.append(await self.reader.read(chunk_size))
-                    await self.reader.readuntil(b'\r\n')  # consume CRLF after chunk data
-                message_body = b''.join(parts)
-            elif has_transfer_encoding:
-                raise NotImplementedError(
-                    f'Transfer-Encoding "{headers[b"transfer-encoding"].decode()}" is not supported.'
-                )
-            else:
-                message_body = b''
-
-            logger.debug(f'Message body: {message_body}')
-            return {
-                "type": "http.request",
-                "body": message_body,
-                "more_body": False,  # True if more data is expected
-            }
-
-        return receive
-
     def make_sender(self):
         return SenderFactory.http1(self.writer)
 
@@ -293,11 +212,14 @@ class HTTP2Handler(BaseHandler):
     """
     def __init__(self, app, reader, writer):
         super().__init__(app, reader, writer)
-        self.client_stream_window_size = {}
         self.root_stream = Stream(0, None, 1)
         self.factory = FrameFactory()
         # Stream 0: connection-level control-plane sender (SETTINGS, PING, …)
         self._control_sender = SenderFactory.http2(self.writer, self.factory, 0)
+        # Cache of per-stream senders keyed by stream ID.
+        # Keeping one sender per stream ensures WINDOW_UPDATE frames can reach
+        # the same sender instance that the ASGI app task is holding.
+        self._senders: dict = {}
 
     def find_stream(self, id_):
         if id_ == 0:
@@ -305,8 +227,11 @@ class HTTP2Handler(BaseHandler):
         else:
             return self.root_stream.find_child(id_)
 
-    def make_sender(self, stream_identifier):
-        return SenderFactory.http2(self.writer, self.factory, stream_identifier)
+    def make_sender(self, stream_identifier: int):
+        if stream_identifier not in self._senders:
+            self._senders[stream_identifier] = SenderFactory.http2(
+                self.writer, self.factory, stream_identifier)
+        return self._senders[stream_identifier]
 
     async def send_frame(self, frame: FrameBase):
         """Send a raw HTTP/2 frame via the control-plane sender."""
@@ -345,7 +270,7 @@ class HTTP2Handler(BaseHandler):
 
     async def run(self):
         # Send the settings at first.
-        my_settings = self.factory.create(FrameTypes.SETTINGS, SettingFlags.INIT, 0)
+        my_settings = self.factory.create(FrameTypes.SETTINGS, SettingFrameFlags.INIT, 0)
         await self.send_frame(my_settings)
         logger.info(my_settings)
 
@@ -353,6 +278,9 @@ class HTTP2Handler(BaseHandler):
 
         # Then, parse and handle frames in this loop.
         header_frame = None
+        accumulated_body: bytes = b''
+        recipient = RecipientFactory.http2()
+
         while data := await self.receive():
 
             # Get a frame object by parsing the received data.
@@ -372,11 +300,10 @@ class HTTP2Handler(BaseHandler):
                 case FrameTypes.HEADERS:
                     if frame.end_headers:
                         waiting_continuation = False
+                        scope = ParserFactory.Get(frame, stream).parse()
                         if frame.end_stream:
-                            scope = ParserFactory.Get(frame, stream).parse()
-                        else:
-                            header_frame = frame
-                            continue
+                            # No body will follow — enqueue an empty request event now.
+                            recipient.put_event({'type': 'http.request', 'body': b'', 'more_body': False})
                     else:
                         waiting_continuation = True
                         header_frame = frame
@@ -387,25 +314,27 @@ class HTTP2Handler(BaseHandler):
                         logger.error('Received unexpected CONTINUATION frame without preceding HEADERS frame.')
                         raise Exception('Unexpected CONTINUATION frame')
 
-                    header_frame.raw_block  += frame.payload
+                    header_frame.raw_block += frame.payload
 
                     if frame.end_headers:
                         logger.debug('Received complete HEADERS block after CONTINUATION frames.')
                         waiting_continuation = False
                         header_frame.parse_payload()
                         scope = ParserFactory.Get(header_frame, stream).parse()
-                        header_frame = None
                     else:
                         continue  # more CONTINUATION frames expected
 
                 case FrameTypes.DATA:
-                    if frame.end_stream:
-                        scope1 = ParserFactory.Get(header_frame, stream).parse()
-                        scope2 = ParserFactory.Get(frame, stream).parse()
-                        scope = {**scope1, **scope2}  # Merge the scopes from HEADERS and DATA frames
+                    # Send WINDOW_UPDATE for every DATA frame (RFC 7540 §6.9).
+                    wu_frame = self.factory.create(FrameTypes.WINDOW_UPDATE,
+                                                   SettingFrameFlags.INIT,
+                                                   stream.identifier,
+                                                   data=frame.length.to_bytes(4, 'big', signed=False))
+                    await self.send_frame(wu_frame)
+                    recipient.put_DATAFrame(frame)
 
                 case FrameTypes.GOAWAY:
-                    await self.send_frame(self.factory.create(FrameTypes.GOAWAY, SettingFlags.INIT, 0))
+                    await self.send_frame(self.factory.create(FrameTypes.GOAWAY, SettingFrameFlags.INIT, 0))
                     self.writer.close()
                     break
 
@@ -413,7 +342,8 @@ class HTTP2Handler(BaseHandler):
                     await RespondFactory.create(frame).respond(self)
 
             if scope:
-                await self.app(scope, self.receive, send)
+                asyncio.create_task(self.app(scope, recipient, send))
+                scope = None
                 
 
 

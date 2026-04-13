@@ -26,7 +26,9 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock
 from hpack import Encoder
 
-from blackbull.frame import FrameFactory, Headers, PseudoHeaders
+from blackbull.frame import (FrameFactory, FrameTypes, FrameFlags,
+                              HeaderFrameFlags, DataFrameFlags, SettingFrameFlags,
+                              Headers, PseudoHeaders)
 from blackbull.server.server import HTTP2Handler
 
 
@@ -34,7 +36,8 @@ from blackbull.server.server import HTTP2Handler
 # Wire-format helper (mirrors test_h2_continuation.py)
 # ---------------------------------------------------------------------------
 
-def _make_h2_frame(type_byte: bytes, flags: int, stream_id: int, payload: bytes) -> bytes:
+def _make_h2_frame(type_byte: FrameTypes, flags: FrameFlags | int,
+                   stream_id: int, payload: bytes) -> bytes:
     """Build a raw 9-byte HTTP/2 frame header followed by *payload*."""
     length = len(payload)
     return (length.to_bytes(3, 'big')
@@ -73,7 +76,7 @@ class TestHeaderNameNormalization:
         """Build a Headers frame whose raw_block is set directly (bypasses HPACK encode)."""
         factory = FrameFactory()
         # Create an empty HEADERS frame (length=0, END_HEADERS set) then override raw_block
-        raw = _make_h2_frame(b'\x01', 0x04, 1, b'')
+        raw = _make_h2_frame(FrameTypes.HEADERS, HeaderFrameFlags.END_HEADERS, 1, b'')
         frame = factory.load(raw)
         # Now inject the raw HPACK bytes and re-parse
         frame.raw_block = raw_block
@@ -90,7 +93,7 @@ class TestHeaderNameNormalization:
                                  (b':method', b'GET'),
                                  (b':path', b'/'),
                                  (b':scheme', b'https')])
-        raw = _make_h2_frame(b'\x01', 0x04, 1, block)
+        raw = _make_h2_frame(FrameTypes.HEADERS, HeaderFrameFlags.END_HEADERS, 1, block)
         frame = factory.load(raw)
         names = [k for k, _ in frame.headers]
         assert 'content-type' in names
@@ -159,15 +162,15 @@ class TestDataFrameHandling:
         block = encoder.encode([(b':method', b'POST'),
                                  (b':path', b'/upload'),
                                  (b':scheme', b'https')])
-        flags = 0x04  # END_HEADERS
+        flags: FrameFlags = HeaderFrameFlags.END_HEADERS
         if end_stream:
-            flags |= 0x01  # END_STREAM
-        return _make_h2_frame(b'\x01', flags, stream_id, block)
+            flags |= HeaderFrameFlags.END_STREAM
+        return _make_h2_frame(FrameTypes.HEADERS, flags, stream_id, block)
 
     def _make_data_frame(self, payload: bytes, stream_id: int = 1,
                          end_stream: bool = True) -> bytes:
-        flags = 0x01 if end_stream else 0x00  # END_STREAM
-        return _make_h2_frame(b'\x00', flags, stream_id, payload)
+        flags = DataFrameFlags.END_STREAM if end_stream else SettingFrameFlags.INIT
+        return _make_h2_frame(FrameTypes.DATA, flags, stream_id, payload)
 
     async def test_data_frame_does_not_raise(self):
         """A DATA frame arriving after HEADERS must not raise ``KeyError``."""
@@ -193,32 +196,24 @@ class TestDataFrameHandling:
 
         assert app.call_count == 1
 
-    async def test_data_frame_without_end_stream_does_not_call_app(self):
-        """DATA frame without END_STREAM is a body chunk — app must not be called yet."""
+    async def test_data_frame_without_end_stream_app_called_once(self):
+        """HEADERS + two DATA frames must result in exactly one app call.
+
+        With the concurrent design the app is launched as a task right after
+        END_HEADERS (not after END_STREAM), so call_count is 1 once the server
+        loop finishes — regardless of how many DATA frames arrived.
+        """
         h_frame = self._make_headers_frame(end_stream=False)
         d_frame = self._make_data_frame(b'chunk1', end_stream=False)
         d_final = self._make_data_frame(b'chunk2', end_stream=True)
 
-        calls_after_first_data = None
         app = AsyncMock()
         handler = _make_handler(app)
+        handler.receive = AsyncMock(side_effect=[h_frame, d_frame, d_final, None])
 
-        frames = iter([h_frame, d_frame, d_final, None])
-        frame_count = 0
-
-        async def tracked_receive():
-            nonlocal frame_count, calls_after_first_data
-            data = next(frames)
-            frame_count += 1
-            if frame_count == 2:  # just returned the first DATA frame
-                calls_after_first_data = app.call_count
-            return data
-
-        handler.receive = tracked_receive
         await handler.run()
 
-        assert calls_after_first_data == 0   # app not called after first DATA
-        assert app.call_count == 1           # called once after final DATA
+        assert app.call_count == 1
 
     async def test_headers_with_end_stream_calls_app_without_data(self):
         """HEADERS+END_STREAM (no body) must call the app directly — regression guard."""
@@ -253,7 +248,7 @@ class TestGoAwayHandling:
         Payload: 4-byte last_stream_id + 4-byte error_code.
         """
         payload = last_stream_id.to_bytes(4, 'big') + error_code.to_bytes(4, 'big')
-        return _make_h2_frame(b'\x07', 0x00, 0, payload)
+        return _make_h2_frame(FrameTypes.GOAWAY, SettingFrameFlags.INIT, 0, payload)
 
     async def test_goaway_does_not_raise(self):
         """A GOAWAY frame must not raise ``KeyError``."""
@@ -282,7 +277,8 @@ class TestGoAwayHandling:
         encoder = Encoder()
         block = encoder.encode([(b':method', b'GET'), (b':path', b'/'),
                                  (b':scheme', b'https')])
-        h_frame = _make_h2_frame(b'\x01', 0x05, 1, block)  # HEADERS+END_HEADERS+END_STREAM
+        h_frame = _make_h2_frame(FrameTypes.HEADERS,
+                                 HeaderFrameFlags.END_HEADERS | HeaderFrameFlags.END_STREAM, 1, block)
         goaway = self._make_goaway_frame(last_stream_id=0, error_code=0x0)
 
         app = AsyncMock()
