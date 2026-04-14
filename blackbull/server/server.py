@@ -276,7 +276,7 @@ class HTTP2Handler(BaseHandler):
         await self.send_frame(my_settings)
         logger.info(my_settings)
 
-        waiting_continuation = True
+        waiting_continuation = False
 
         # Then, parse and handle frames in this loop.
         header_frame = None
@@ -297,6 +297,7 @@ class HTTP2Handler(BaseHandler):
             scope = None
 
             send = self.make_sender(stream.identifier)
+            last_stream_id = self.root_stream.max_stream_id()
 
             match frame.FrameType():
                 case FrameTypes.HEADERS:
@@ -317,7 +318,7 @@ class HTTP2Handler(BaseHandler):
                 case FrameTypes.CONTINUATION:
                     if not waiting_continuation:
                         logger.error('Received unexpected CONTINUATION frame without preceding HEADERS frame.')
-                        raise Exception('Unexpected CONTINUATION frame')
+                        await self.send_frame(self.factory.goaway(last_stream_id))
 
                     header_frame.raw_block += frame.payload
 
@@ -335,7 +336,7 @@ class HTTP2Handler(BaseHandler):
                     recipient.put_DATAFrame(frame)
 
                 case FrameTypes.GOAWAY:
-                    await self.send_frame(self.factory.goaway())
+                    await self.send_frame(self.factory.goaway(last_stream_id))
                     self.writer.close()
                     break
 

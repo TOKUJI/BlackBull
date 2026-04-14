@@ -123,7 +123,7 @@ asgi.py runs a web application that demonstrate basic functionalities.
 - [ ] ASGI `http.disconnect` receive event: detect client disconnect and return `{"type": "http.disconnect"}`
 - [ ] Timeout handling: wrap header and body reads with `asyncio.wait_for`
 - [ ] HTTP/1.1 `100 Continue`: send interim response when request includes `Expect: 100-continue`
-- [ ] HTTP/2 `GOAWAY`: send on graceful shutdown (with last processed stream ID) and on protocol errors
+- [x] HTTP/2 `GOAWAY`: send on graceful shutdown (with last processed stream ID) and on protocol errors
 
 ## P3 — Features and enhancements
 

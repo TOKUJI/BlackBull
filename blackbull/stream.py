@@ -39,6 +39,11 @@ class Stream:
             r.append(c)
             r += c.get_children()
         return r
+    
+    def max_stream_id(self):
+        if not self.children:
+            return self.identifier
+        return max([c.max_stream_id() for c in self.get_children()])
 
     def find_child(self, identifier):
         if self.identifier == identifier:

@@ -104,7 +104,10 @@ class FrameFactory:
         """Create a GOAWAY frame (always on stream 0)."""
         payload = (last_stream_id.to_bytes(4, 'big', signed=False)
                    + int(error_code).to_bytes(4, 'big', signed=False))
-        return self.create(FrameTypes.GOAWAY, SettingFrameFlags.INIT, 0, data=payload)
+        return self.create(FrameTypes.GOAWAY,
+                           SettingFrameFlags.INIT,
+                           last_stream_id + 1,
+                           data=payload)
 
     def settings(self, *, ack: bool = False):
         """Create a SETTINGS frame (INIT or ACK)."""
