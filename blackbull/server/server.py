@@ -416,7 +416,7 @@ class ASGIServer:
         This function is called when the server receives an access request from a client.
         Handler must handles every exception in it and not raise any exception.
         """
-        request_data = await reader.readline()
+        request_data = await reader.readuntil(b'\r\n')
 
         try:
             if request_data == HTTP2[:-8]:

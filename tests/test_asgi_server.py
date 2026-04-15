@@ -488,7 +488,8 @@ class TestTimeoutHandling:
 
         sw = _make_fake_writer()
         reader = MagicMock()
-        reader.readuntil = AsyncMock(return_value=b'\r\n\r\n')
+        reader.readuntil = AsyncMock(side_effect=[b'POST / HTTP/1.1\r\n',
+                                                  b'Content-Length: 5\r\n\r\n'])
         reader.read = AsyncMock(side_effect=slow_body)
 
         async def noop_app(scope, receive, send):

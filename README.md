@@ -121,7 +121,7 @@ asgi.py runs a web application that demonstrate basic functionalities.
 - [x] HTTP/2 `MAX_CONCURRENT_STREAMS`: send `RST_STREAM(REFUSED_STREAM)` when the limit is exceeded
 - [ ] ASGI lifespan scope: dispatch `lifespan.startup` / `lifespan.shutdown` events on server start/stop
 - [ ] ASGI `http.disconnect` receive event: detect client disconnect and return `{"type": "http.disconnect"}`
-- [ ] Timeout handling: wrap header and body reads with `asyncio.wait_for`
+- [x] Timeout handling: wrap header and body reads with `asyncio.wait_for`
 - [ ] HTTP/1.1 `100 Continue`: send interim response when request includes `Expect: 100-continue`
 - [x] HTTP/2 `GOAWAY`: send on graceful shutdown (with last processed stream ID) and on protocol errors
 
