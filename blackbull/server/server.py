@@ -3,6 +3,7 @@ import ssl
 import traceback
 import re
 from collections import defaultdict, deque
+from contextlib import asynccontextmanager
 from unittest import case
 from unittest import case
 from urllib.parse import urlparse
@@ -349,6 +350,59 @@ class HTTP2Handler(BaseHandler):
                 
 
 
+class LifespanManager:
+    """Async context manager that drives the ASGI lifespan protocol.
+
+    On enter: launches the app's lifespan task and delivers 'lifespan.startup'.
+    Raises RuntimeError if the app responds with 'lifespan.startup.failed'.
+    On exit: delivers 'lifespan.shutdown' and waits for 'lifespan.shutdown.complete'.
+
+    Implemented as a class (not asynccontextmanager) so that __aenter__ and
+    __aexit__ can be called independently — e.g. startup() / shutdown() — without
+    leaving a zombie async-generator that asyncio tries to finalize on loop close.
+    """
+
+    def __init__(self, app):
+        self._app = app
+        self._receive_q: asyncio.Queue = asyncio.Queue()
+        self._send_q:    asyncio.Queue = asyncio.Queue()
+        self._task = None
+
+    async def __aenter__(self):
+        scope = {'type': 'lifespan', 'asgi': {'version': '3.0'}}
+        self._task = asyncio.create_task(
+            self._app(scope, self._receive_q.get, self._send_q.put))
+        await self._receive_q.put({'type': 'lifespan.startup'})
+        event = await self._send_q.get()
+        if event.get('type') == 'lifespan.startup.failed':
+            raise RuntimeError(event.get('message', 'Lifespan startup failed'))
+        return self
+
+    async def __aexit__(self, *_):
+        await self._receive_q.put({'type': 'lifespan.shutdown'})
+        await self._send_q.get()   # lifespan.shutdown.complete
+        self._task.cancel()
+        return False
+
+
+@asynccontextmanager
+async def SocketManager(cb, raw_sockets, ssl_context):
+    """Async context manager that creates asyncio servers from already-bound sockets.
+
+    On enter: wraps each raw socket in asyncio.start_server and yields the list.
+    On exit: closes all asyncio servers.
+    """
+    servers = []
+    for sock in raw_sockets:
+        srv = await asyncio.start_server(cb, sock=sock, ssl=ssl_context)
+        servers.append(srv)
+    try:
+        yield servers
+    finally:
+        for srv in servers:
+            srv.close()
+
+
 class ASGIServer:
     """ An asyncio socket server with which reads first several bytes and dispatches
     transactions to HTTP2/HTTP1.1/WebSocket server.
@@ -467,45 +521,48 @@ class ASGIServer:
         for s in getattr(self, 'raw_sockets', []):
             s.close()
 
+    async def startup(self):
+        """Drive the ASGI lifespan startup handshake.
+
+        Launches the app's lifespan task, delivers 'lifespan.startup', and
+        waits for 'lifespan.startup.complete'.  Raises RuntimeError on
+        'lifespan.startup.failed'.  Stores the context manager so that
+        shutdown() can deliver 'lifespan.shutdown' to the same task.
+        """
+        self._lifespan_cm = LifespanManager(self.app)
+        await self._lifespan_cm.__aenter__()
+
+    async def shutdown(self):
+        """Drive the ASGI lifespan shutdown handshake."""
+        await self._lifespan_cm.__aexit__(None, None, None)
+
     async def run(self, port=80):
         """Run an asyncio socket server with the setting in this object."""
         if not hasattr(self, 'raw_sockets') or not self.raw_sockets:
             self.open_socket(port)
 
-        # asyncio.start_server() / loop.create_server() only accepts a single
-        # socket via sock=.  To serve on multiple sockets (one IPv4 + one IPv6)
-        # we create one asyncio.Server per raw socket and run them concurrently.
-        # Each server receives the raw TCP socket plus ssl= so asyncio handles
-        # the TLS handshake internally (pre-wrapping with ssl_context.wrap_socket
-        # would cause a double-TLS layer and a broken handshake).
-        servers = []
-        for sock in self.raw_sockets:
-            srv = await asyncio.start_server(
-                self.client_connected_cb,
-                sock=sock,
-                ssl=self.ssl_context,
-            )
-            servers.append(srv)
+        # SocketManager wraps each raw socket in asyncio.start_server and
+        # closes all servers on exit.  LifespanManager drives the ASGI
+        # lifespan protocol; nesting it inside SocketManager guarantees:
+        #   startup completes before serve_forever() is called, and
+        #   shutdown completes before sockets are closed.
+        async with SocketManager(self.client_connected_cb,
+                                 self.raw_sockets, self.ssl_context) as servers:
+            async with LifespanManager(self.app):
+                logger.info(f'Server(s) created: {servers}')
+                try:
+                    await asyncio.gather(*(srv.serve_forever() for srv in servers))
 
-        logger.info(f'Server(s) created: {servers}')
+                except KeyboardInterrupt:
+                    logger.info('KeyboardInterrupt is caught.')
 
-        try:
-            await asyncio.gather(*(srv.serve_forever() for srv in servers))
+                except asyncio.exceptions.CancelledError as e:
+                    logger.info(type(e))
 
-        except KeyboardInterrupt:
-            logger.info('KeyboardInterrupt is caught.')
+                except Exception:
+                    logger.error(traceback.format_exc())
 
-        except asyncio.exceptions.CancelledError as e:
-            logger.info(type(e))
-
-        except Exception:
-            logger.error(traceback.format_exc())
-
-        finally:
-            for srv in servers:
-                srv.close()
-            self.close()
-            logger.info('Server has been stopped.')
+        logger.info('Server has been stopped.')
 
     def wait_for_port(self, timeout: float = 10.0, poll_interval: float = 0.1):
         if self.port is None:

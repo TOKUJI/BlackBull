@@ -119,7 +119,7 @@ asgi.py runs a web application that demonstrate basic functionalities.
 - [ ] HTTP/1.1: handle duplicate header names as a list (multi-value headers, RFC 7230 §3.2.2)
 - [x] HTTP/2 flow control: check window size before sending `DATA`; issue `WINDOW_UPDATE` after consuming received data
 - [x] HTTP/2 `MAX_CONCURRENT_STREAMS`: send `RST_STREAM(REFUSED_STREAM)` when the limit is exceeded
-- [ ] ASGI lifespan scope: dispatch `lifespan.startup` / `lifespan.shutdown` events on server start/stop
+- [x] ASGI lifespan scope: dispatch `lifespan.startup` / `lifespan.shutdown` events on server start/stop
 - [ ] ASGI `http.disconnect` receive event: detect client disconnect and return `{"type": "http.disconnect"}`
 - [x] Timeout handling: wrap header and body reads with `asyncio.wait_for`
 - [ ] HTTP/1.1 `100 Continue`: send interim response when request includes `Expect: 100-continue`
