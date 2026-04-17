@@ -12,6 +12,14 @@ logger = logging.getLogger(__name__)
 # Reader abstraction — swap asyncio for trio/curio by implementing this ABC
 # ---------------------------------------------------------------------------
 
+class IncompleteReadError(EOFError):
+    """Raised by AbstractReader when the peer closes the connection mid-read.
+
+    Mirrors asyncio.IncompleteReadError but is not tied to asyncio, so
+    handlers that depend on AbstractReader remain runtime-agnostic.
+    """
+
+
 class AbstractReader(ABC):
     """Protocol-agnostic async byte-source.
 
@@ -46,10 +54,16 @@ class AsyncioReader(AbstractReader):
         self._sr = stream_reader
 
     async def read(self, n: int) -> bytes:
-        return await self._sr.read(n)
+        try:
+            return await self._sr.read(n)
+        except asyncio.IncompleteReadError as exc:
+            raise IncompleteReadError(exc.partial) from exc
 
     async def readuntil(self, sep: bytes) -> bytes:
-        return await self._sr.readuntil(sep)
+        try:
+            return await self._sr.readuntil(sep)
+        except asyncio.IncompleteReadError as exc:
+            raise IncompleteReadError(exc.partial) from exc
 
     async def readexactly(self, n: int) -> bytes:
         return await self._sr.readexactly(n)
@@ -101,28 +115,32 @@ class HTTP1Recipient(BaseRecipient):
         has_content_length = b'content-length' in headers
         has_transfer_encoding = b'transfer-encoding' in headers
 
-        if has_content_length:
-            content_length = int(headers[b'content-length'].decode())
-            message_body = await self._reader.read(content_length) if content_length > 0 else b''
+        try:
+            if has_content_length:
+                content_length = int(headers[b'content-length'].decode())
+                message_body = await self._reader.read(content_length) if content_length > 0 else b''
 
-        elif has_transfer_encoding and headers[b'transfer-encoding'].strip().lower() == b'chunked':
-            parts = []
-            while True:
-                size_line = await self._reader.readuntil(b'\r\n')
-                chunk_size = int(size_line.strip(), 16)
-                if chunk_size == 0:
-                    await self._reader.readuntil(b'\r\n')  # consume trailing CRLF
-                    break
-                parts.append(await self._reader.read(chunk_size))
-                await self._reader.readuntil(b'\r\n')      # consume CRLF after chunk data
-            message_body = b''.join(parts)
+            elif has_transfer_encoding and headers[b'transfer-encoding'].strip().lower() == b'chunked':
+                parts = []
+                while True:
+                    size_line = await self._reader.readuntil(b'\r\n')
+                    chunk_size = int(size_line.strip(), 16)
+                    if chunk_size == 0:
+                        await self._reader.readuntil(b'\r\n')  # consume trailing CRLF
+                        break
+                    parts.append(await self._reader.read(chunk_size))
+                    await self._reader.readuntil(b'\r\n')      # consume CRLF after chunk data
+                message_body = b''.join(parts)
 
-        elif has_transfer_encoding:
-            raise NotImplementedError(
-                f'Transfer-Encoding "{headers[b"transfer-encoding"].decode()}" is not supported.'
-            )
-        else:
-            message_body = b''
+            elif has_transfer_encoding:
+                raise NotImplementedError(
+                    f'Transfer-Encoding "{headers[b"transfer-encoding"].decode()}" is not supported.'
+                )
+            else:
+                message_body = b''
+
+        except IncompleteReadError:
+            return {'type': 'http.disconnect'}
 
         logger.debug('HTTP1Recipient body: %r', message_body)
         return {
@@ -234,13 +252,17 @@ class RecipientFactory:
     """
 
     @staticmethod
-    def http1(stream_reader, scope: dict) -> HTTP1Recipient:
-        return HTTP1Recipient(AsyncioReader(stream_reader), scope)
+    def http1(reader, scope: dict) -> HTTP1Recipient:
+        if not isinstance(reader, AbstractReader):
+            reader = AsyncioReader(reader)
+        return HTTP1Recipient(reader, scope)
 
     @staticmethod
     def http2(frame: FrameBase = None) -> HTTP2Recipient:
         return HTTP2Recipient(frame)
 
     @staticmethod
-    def websocket(stream_reader, writer) -> WebSocketRecipient:
-        return WebSocketRecipient(AsyncioReader(stream_reader), writer)
+    def websocket(reader, writer) -> WebSocketRecipient:
+        if not isinstance(reader, AbstractReader):
+            reader = AsyncioReader(reader)
+        return WebSocketRecipient(reader, writer)

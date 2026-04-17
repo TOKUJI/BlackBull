@@ -1,4 +1,6 @@
 import asyncio
+from http import HTTPStatus
+from http import HTTPStatus
 import ssl
 import traceback
 import re
@@ -22,7 +24,8 @@ from ..logger import get_logger_set
 from .response import RespondFactory
 from .parser import ParserFactory
 from .sender import SenderFactory
-from .recipient import RecipientFactory
+from .recipient import RecipientFactory, AbstractReader, AsyncioReader, IncompleteReadError
+from .headers import Headers
 logger, log = get_logger_set(__name__)
 
 
@@ -109,43 +112,62 @@ class WebSocketHandler(BaseHandler):
 
 
 class HTTP11Handler(BaseHandler):
-    def __init__(self, app, reader, writer, request, *args, **kwargs):
+    @log
+    def __init__(self, app, reader, writer, request: bytes, *args, **kwargs):
+        if not isinstance(reader, AbstractReader):
+            reader = AsyncioReader(reader)
         super().__init__(app, reader, writer, *args, **kwargs)
         self.request = request
-        logger.info(self.request)
 
     def has_request(self):
         return self.request is not None
 
     async def run(self):
-        # self.request holds only the first line; read the remaining headers here.
-        self.request += await self.reader.readuntil(b'\r\n\r\n')
-
-        scope = self.parse()
-
-        # Fill client / server / scheme from the transport now that we have it.
-        transport = self.writer.transport
-        peername = transport.get_extra_info('peername')
-        if peername:
-            scope['client'] = list(peername[:2])  # (host, port)
-
-        sockname = transport.get_extra_info('sockname')
-        if sockname and scope['server'] is None:
-            scope['server'] = list(sockname[:2])
-
-        is_tls = transport.get_extra_info('ssl_object') is not None
-        if is_tls:
-            scope['scheme'] = 'wss' if scope.get('type') == 'websocket' else 'https'
-
-        logger.debug(scope)
-
-        if scope.get('type') == 'websocket':
-            await WebSocketHandler(self.app, self.reader, self.writer, scope).run()
-            return
-
-        receive = RecipientFactory.http1(self.reader, scope)
+        # self.request holds only the first line on entry; accumulate header
+        # bytes until we have a complete block, then serve the request.  Loop
+        # for HTTP/1.1 Keep-Alive: after each response, read the next request.
+        REQ_END = b'\r\n\r\n'
         send = self.make_sender()
-        await self.app(scope, receive, send)
+        try:
+            while True:
+                # Accumulate until we have complete headers.  self.request may
+                # already end with REQ_END (e.g. when set directly in tests).
+                while not self.request.endswith(REQ_END):
+                    self.request += await self.reader.readuntil(REQ_END)
+
+                scope = self.parse()
+                self._fill_connection_info(scope)
+                logger.debug(scope)
+
+                if scope.get('type') == 'websocket':
+                    await WebSocketHandler(self.app, self.reader, self.writer, scope).run()
+                    return
+                if scope['headers'].get_value(b'expect').lower() == b'100-continue':
+                    await send(b'', HTTPStatus.CONTINUE)
+                await self.app(scope, RecipientFactory.http1(self.reader, scope), send)
+                self.request = b''
+
+                # Keep-alive: read the start of the next request.
+                # _FakeReader (and asyncio on clean close) returns REQ_END when
+                # the connection has no more data — treat that as the sentinel.
+                next_chunk = await self.reader.readuntil(REQ_END)
+                if next_chunk == REQ_END:
+                    break  # connection closing cleanly
+                self.request = next_chunk
+
+        except IncompleteReadError:
+            # Client closed the connection mid-headers (or mid-keep-alive gap).
+            await send({'type': 'http.disconnect'})
+
+    def _fill_connection_info(self, scope: dict) -> None:
+        """Populate scope['client'], scope['server'], and scope['scheme'] from the transport."""
+        transport = self.writer.transport
+        if peername := transport.get_extra_info('peername'):
+            scope['client'] = list(peername[:2])
+        if (sockname := transport.get_extra_info('sockname')) and scope['server'] is None:
+            scope['server'] = list(sockname[:2])
+        if transport.get_extra_info('ssl_object') is not None:
+            scope['scheme'] = 'wss' if scope.get('type') == 'websocket' else 'https'
 
     def parse(self):
         """
@@ -156,13 +178,14 @@ class HTTP11Handler(BaseHandler):
         method, path, version = lines[0].split(b' ')
         path_parsed = urlparse(path)
 
-        mapping = {}
+        raw: list[tuple[bytes, bytes]] = []
         for line in lines[1:]:
             line = line.strip()
             if b':' in line:
                 key, value = line.split(b':', 1)
-                mapping[key.lower()] = value.strip()
-        logger.debug(mapping)
+                raw.append((key.lower(), value.strip()))
+        headers = Headers(raw)
+        logger.debug(headers)
 
         scope = {
             'type': 'http',
@@ -174,33 +197,22 @@ class HTTP11Handler(BaseHandler):
             'raw_path': path,
             'query_string': path_parsed.query,
             # 'root_path': '',
-            'headers': [(key.lower(), value) for key, value in mapping.items()],
-                # Below is examples of how headers are represented in ASGI scope['headers'] 
-                # as a list of (key, value) tuples, where both key and value are lowercased bytes.
-                # (b'host', mapping[b'Host']),
-                # (b'accept', b'*/*'),
-                # (b'accept-encoding', b'gzip, deflate'),
-                # (b'connection', b'keep-alive'),
-                # (b'user-agent', b'python-httpx/0.16.1'),
-                # (b'key', b'value')
+            'headers': headers,
             'client': None,  # set in run() from transport peername
             'server': None,  # set from Host header; fallback to sockname in run()
-            # A mutable dict that can be used to store arbitrary data during the connection's lifetime. 
-            # The application can read and write to this dict, and it will persist across multiple calls 
-            # to the application for the same connection.
             'state': {},
         }
 
-        if b'host' in mapping:
-            host, port = mapping[b'host'].split(b':')
+        if headers.get(b'host'):
+            host, port = headers.get_value(b'host').split(b':')
             scope['server'] = [host.decode('utf-8'), int(port)]
 
-        if b'upgrade' in mapping:
-            scope['type'] = mapping[b'upgrade'].decode('utf-8').lower()
+        if headers.get(b'upgrade'):
+            scope['type'] = headers.get_value(b'upgrade').decode('utf-8').lower()
             if scope['type'] == 'websocket':
                 scope['scheme'] = 'ws'
-        elif b'connection' in mapping:
-            scope['scheme'] = mapping[b'connection'].decode('utf-8').lower()
+        elif headers.get(b'connection'):
+            scope['scheme'] = headers.get_value(b'connection').decode('utf-8').lower()
 
         return scope
 

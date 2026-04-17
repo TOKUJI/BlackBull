@@ -139,10 +139,14 @@ class TestParse:
             "parse() must preserve 'path' for WebSocket upgrade requests."
         )
 
-    def test_headers_list_is_present(self):
-        """scope['headers'] must be a list."""
+    def test_headers_is_iterable_of_pairs(self):
+        """scope['headers'] must be an ASGI-compliant iterable of (bytes, bytes) pairs."""
+        from blackbull.server.headers import Headers
         scope = _get_scope(_http_request())
-        assert isinstance(scope['headers'], list)
+        assert isinstance(scope['headers'], Headers)
+        for name, value in scope['headers']:
+            assert isinstance(name, bytes)
+            assert isinstance(value, bytes)
 
 
 # ---------------------------------------------------------------------------
@@ -672,7 +676,10 @@ class TestHTTP11KeepAlive:
         req2 = _http_request(method='GET', path='/two',
                              headers={'Host': 'localhost:8000',
                                       'Connection': 'close'})
-        reader = _FakeReader(req1 + req2)
+        # Simulate client_connected_cb: the first line of req1 is pre-consumed
+        # and passed to the handler; the reader holds only the remaining bytes.
+        req1_first_line, req1_rest = req1.split(b'\r\n', 1)
+        reader = _FakeReader(req1_rest + req2)
         writer = _FakeWriter()
 
         call_count = 0
@@ -682,7 +689,7 @@ class TestHTTP11KeepAlive:
             call_count += 1
 
         handler = HTTP11Handler(counting_app, reader, writer,
-                                b'GET / HTTP/1.1\r\n')
+                                req1_first_line + b'\r\n')
         await handler.run()
 
         assert call_count == 2, (
@@ -695,7 +702,8 @@ class TestHTTP11KeepAlive:
         req = _http_request(method='GET', path='/',
                             headers={'Host': 'localhost:8000',
                                      'Connection': 'close'})
-        reader = _FakeReader(req)
+        first_line, rest = req.split(b'\r\n', 1)
+        reader = _FakeReader(rest)
         writer = _FakeWriter()
 
         call_count = 0
@@ -705,7 +713,7 @@ class TestHTTP11KeepAlive:
             call_count += 1
 
         handler = HTTP11Handler(counting_app, reader, writer,
-                                b'GET / HTTP/1.1\r\n')
+                                first_line + b'\r\n')
         await handler.run()
 
         assert call_count == 1
@@ -718,7 +726,8 @@ class TestHTTP11KeepAlive:
         req2 = _http_request(method='GET', path='/beta',
                              headers={'Host': 'localhost:8000',
                                       'Connection': 'close'})
-        reader = _FakeReader(req1 + req2)
+        req1_first_line, req1_rest = req1.split(b'\r\n', 1)
+        reader = _FakeReader(req1_rest + req2)
         writer = _FakeWriter()
 
         paths = []
@@ -727,11 +736,66 @@ class TestHTTP11KeepAlive:
             paths.append(scope['path'])
 
         handler = HTTP11Handler(capturing_app, reader, writer,
-                                b'GET / HTTP/1.1\r\n')
+                                req1_first_line + b'\r\n')
         await handler.run()
 
         assert '/alpha' in paths and '/beta' in paths, (
             f'Expected both paths in scope; got {paths}'
+        )
+
+    async def test_incomplete_read_on_first_request_closes_silently(self):
+        """IncompleteReadError during the first request's headers must close silently.
+
+        A real asyncio.StreamReader raises IncompleteReadError when the client
+        closes the connection before the full header block arrives.  This is a
+        normal network event — run() must catch it and return without raising,
+        so client_connected_cb does not log a spurious error.
+        """
+        req = _http_request(method='GET', path='/',
+                            headers={'Host': 'localhost:8000'})
+        first_line, _ = req.split(b'\r\n', 1)
+        writer = _FakeWriter()
+
+        reader = MagicMock()
+        reader.readuntil = AsyncMock(
+            side_effect=asyncio.IncompleteReadError(b'Host: localh', None))
+
+        handler = HTTP11Handler(_noop_app, reader, writer, first_line + b'\r\n')
+
+        await handler.run()  # must return normally, not raise
+
+    async def test_incomplete_read_after_first_request_app_called_once(self):
+        """IncompleteReadError on second request must not affect the first.
+
+        The client completes one full request then drops the connection mid-way
+        through sending the second request's headers.  The app must have been
+        called exactly once, and run() must return normally.
+        """
+        req = _http_request(method='GET', path='/one',
+                            headers={'Host': 'localhost:8000',
+                                     'Connection': 'keep-alive'})
+        first_line, rest = req.split(b'\r\n', 1)
+        writer = _FakeWriter()
+
+        call_count = 0
+
+        async def counting_app(scope, receive, send):
+            nonlocal call_count
+            call_count += 1
+
+        reader = MagicMock()
+        reader.readuntil = AsyncMock(side_effect=[
+            rest,                                                      # first request headers
+            asyncio.IncompleteReadError(b'GET /two HTTP', None),       # disconnect mid-second request
+        ])
+        reader.read = AsyncMock(return_value=b'')
+
+        handler = HTTP11Handler(counting_app, reader, writer, first_line + b'\r\n')
+
+        await handler.run()  # must return normally, not raise
+
+        assert call_count == 1, (
+            f'Expected app called once before disconnect; got {call_count}'
         )
 
 
@@ -810,7 +874,9 @@ class TestHTTPDisconnect:
 
     async def test_receive_returns_disconnect_on_eof(self):
         """IncompleteReadError from the reader must become http.disconnect."""
-        raw = _http_request()
+        # Content-Length: 10 ensures the recipient calls reader.read(10),
+        # which raises IncompleteReadError — the disconnect scenario under test.
+        raw = _http_request(headers={'Host': 'localhost:8000', 'Content-Length': '10'})
         writer = _FakeWriter()
         disconnect_received = []
 
@@ -960,3 +1026,55 @@ class TestHTTP11Expect100Continue:
         assert b'100' not in written, (
             f'Spurious 100 Continue sent without Expect header: {written!r}'
         )
+
+    async def test_case_insensitive_expect(self):
+        """Expect: 100-Continue (mixed case) must still trigger 100 Continue."""
+        lines = ['POST /upload HTTP/1.1', 'Host: localhost:8000',
+                 'Content-Length: 5', 'Expect: 100-Continue', '', '']
+        raw = '\r\n'.join(lines).encode()
+        writer = _FakeWriter()
+
+        async def app(scope, receive, send):
+            await receive()
+
+        reader = MagicMock()
+        reader.readuntil = AsyncMock(return_value=b'\r\n\r\n')
+        reader.read = AsyncMock(return_value=b'hello')
+
+        handler = HTTP11Handler(app, reader, writer, b'POST /upload HTTP/1.1\r\n')
+        handler.request = raw
+        await handler.run()
+
+        assert b'100' in bytes(writer.written), (
+            f'Expected 100 Continue for mixed-case Expect header; '
+            f'got {bytes(writer.written)!r}'
+        )
+
+    async def test_final_response_after_100(self):
+        """After 100 Continue the app must be able to send a final 200 response.
+
+        The wire output must contain exactly two HTTP/1.1 status lines:
+        the interim 100 and the final 200.
+        """
+        body = b'data'
+        raw = self._make_expect_request(body)
+        writer = _FakeWriter()
+
+        async def app(scope, receive, send):  # pyright: ignore[reportUnusedVariable]
+            await receive()
+            await send({'type': 'http.response.start', 'status': 200, 'headers': []})
+            await send({'type': 'http.response.body', 'body': b'ok'})
+
+        reader = MagicMock()
+        reader.readuntil = AsyncMock(return_value=b'\r\n\r\n')
+        reader.read = AsyncMock(return_value=body)
+
+        handler = HTTP11Handler(app, reader, writer, b'POST /upload HTTP/1.1\r\n')
+        handler.request = raw
+        await handler.run()
+
+        wire = bytes(writer.written)
+        assert wire.count(b'HTTP/1.1') == 2, (
+            f'Expected exactly 2 HTTP/1.1 lines (100 + 200); got: {wire!r}'
+        )
+        assert b'HTTP/1.1 200' in wire, f'No final 200 found: {wire!r}'
