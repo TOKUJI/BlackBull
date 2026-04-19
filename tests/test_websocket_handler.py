@@ -737,3 +737,275 @@ class TestRunHandshake:
         await handler.run()
 
         assert expected in writer.written.decode('latin-1')
+
+
+# ---------------------------------------------------------------------------
+# P3 — WebSocket Sec-WebSocket-Version: 13 validation
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+class TestWebSocketVersionValidation:
+    """WebSocketHandler.run() must validate Sec-WebSocket-Version before
+    completing the handshake (RFC 6455 §4.2.1, §4.4).
+
+    The server MUST check that the version is '13'.  Any other value (or a
+    missing header) must result in a 400 Bad Request response that includes
+    Sec-WebSocket-Version: 13 so the client knows which version to retry with.
+    """
+
+    def _make_handler(self, version: bytes | None = b'13'):
+        headers = [(b'sec-websocket-key', b'dGhlIHNhbXBsZSBub25jZQ==')]
+        if version is not None:
+            headers.append((b'sec-websocket-version', version))
+        scope = {'type': 'websocket', 'path': '/ws', 'headers': headers}
+        writer = _FakeWriter()
+
+        async def app(scope, receive, send):
+            pass
+
+        handler = WebSocketHandler(app, _FakeReader(b''), writer, scope)
+        return handler, writer
+
+    async def test_version_13_completes_101_handshake(self):
+        """Version 13 must result in a 101 Switching Protocols response."""
+        handler, writer = self._make_handler(version=b'13')
+        await handler.run()
+        assert b'101' in bytes(writer.written), (
+            f'Expected 101 for Sec-WebSocket-Version: 13; got {bytes(writer.written)!r}'
+        )
+
+    async def test_missing_version_returns_400(self):
+        """Missing Sec-WebSocket-Version must produce HTTP 400 Bad Request."""
+        handler, writer = self._make_handler(version=None)
+        await handler.run()
+        assert b'400' in bytes(writer.written), (
+            f'Expected 400 for missing version header; got {bytes(writer.written)!r}'
+        )
+
+    async def test_wrong_version_returns_400(self):
+        """Sec-WebSocket-Version: 8 (or any value != 13) must produce HTTP 400."""
+        handler, writer = self._make_handler(version=b'8')
+        await handler.run()
+        assert b'400' in bytes(writer.written), (
+            f'Expected 400 for version 8; got {bytes(writer.written)!r}'
+        )
+
+    async def test_wrong_version_response_advertises_version_13(self):
+        """400 response must include Sec-WebSocket-Version: 13 (RFC 6455 §4.4)."""
+        handler, writer = self._make_handler(version=b'8')
+        await handler.run()
+        wire = bytes(writer.written).lower()
+        assert b'sec-websocket-version: 13' in wire, (
+            f'400 response must advertise version 13; got {wire!r}'
+        )
+
+
+# ---------------------------------------------------------------------------
+# P3 — WebSocket subprotocol negotiation
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+class TestWebSocketSubprotocol:
+    """WebSocketHandler must negotiate Sec-WebSocket-Protocol when the client
+    requests one and the app accepts it (RFC 6455 §4.2.2, §11.3.4).
+
+    The app signals acceptance via the 'websocket.accept' event:
+        {'type': 'websocket.accept', 'subprotocol': 'chat'}
+    The 101 response must then include:
+        Sec-WebSocket-Protocol: chat
+    """
+
+    def _make_handler(self, client_protocols: bytes | None, accepted: str | None):
+        headers = [
+            (b'sec-websocket-key', b'dGhlIHNhbXBsZSBub25jZQ=='),
+            (b'sec-websocket-version', b'13'),
+        ]
+        if client_protocols is not None:
+            headers.append((b'sec-websocket-protocol', client_protocols))
+        scope = {'type': 'websocket', 'path': '/ws', 'headers': headers}
+        writer = _FakeWriter()
+
+        async def app(scope, receive, send):
+            await send({'type': 'websocket.accept', 'subprotocol': accepted})
+
+        handler = WebSocketHandler(app, _FakeReader(b''), writer, scope)
+        return handler, writer
+
+    async def test_accepted_subprotocol_in_101_response(self):
+        """Accepted subprotocol must appear in the 101 handshake response."""
+        handler, writer = self._make_handler(b'chat, superchat', accepted='chat')
+        await handler.run()
+        wire = bytes(writer.written).lower()
+        assert b'sec-websocket-protocol' in wire, (
+            f'Expected Sec-WebSocket-Protocol in 101 response; got {wire!r}'
+        )
+
+    async def test_accepted_subprotocol_value_is_correct(self):
+        """The echoed subprotocol must be the exact string the app accepted."""
+        handler, writer = self._make_handler(b'chat, superchat', accepted='chat')
+        await handler.run()
+        wire = bytes(writer.written)
+        assert b'chat' in wire, (
+            f'Expected "chat" in handshake response; got {wire!r}'
+        )
+
+    async def test_no_subprotocol_header_when_app_accepts_none(self):
+        """When the app accepts no subprotocol, 101 must not include the header."""
+        handler, writer = self._make_handler(b'chat', accepted=None)
+        await handler.run()
+        wire = bytes(writer.written).lower()
+        assert b'sec-websocket-protocol' not in wire, (
+            f'Unexpected Sec-WebSocket-Protocol in response; got {wire!r}'
+        )
+
+    async def test_no_subprotocol_when_client_did_not_request(self):
+        """Without a client Sec-WebSocket-Protocol header, none must appear in 101."""
+        handler, writer = self._make_handler(client_protocols=None, accepted=None)
+        await handler.run()
+        wire = bytes(writer.written).lower()
+        assert b'sec-websocket-protocol' not in wire, (
+            f'Unexpected Sec-WebSocket-Protocol without client request; got {wire!r}'
+        )
+
+
+# ---------------------------------------------------------------------------
+# P3 — WebSocket fragmentation
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+class TestWebSocketFragmentation:
+    """WebSocketRecipient must reassemble fragmented messages (RFC 6455 §5.4).
+
+    A fragmented message consists of:
+      - An initial frame with FIN=0 and opcode = TEXT or BINARY
+      - Zero or more continuation frames with FIN=0 and opcode=0 (CONTINUATION)
+      - A final continuation frame with FIN=1 and opcode=0
+
+    The recipient must deliver a single 'websocket.receive' event with the
+    concatenated payload — the app must never see raw fragments.
+    """
+
+    @staticmethod
+    def _nonfin_text_frame(payload: bytes) -> bytes:
+        """Masked text frame with FIN=0 (start of a fragmented message)."""
+        mask = b'\xde\xad\xbe\xef'
+        masked = bytes(b ^ mask[i % 4] for i, b in enumerate(payload))
+        header = bytes([0x01, 0x80 | len(payload)])  # FIN=0 opcode=1, mask bit
+        return header + mask + masked
+
+    @staticmethod
+    def _continuation_frame(payload: bytes, fin: bool = True) -> bytes:
+        """Masked continuation frame (opcode=0x0), FIN controlled by caller."""
+        mask = b'\xde\xad\xbe\xef'
+        masked = bytes(b ^ mask[i % 4] for i, b in enumerate(payload))
+        fin_bit = 0x80 if fin else 0x00
+        header = bytes([fin_bit | 0x00, 0x80 | len(payload)])  # opcode=0, mask bit
+        return header + mask + masked
+
+    async def test_two_fragments_reassembled_into_one_event(self):
+        """FIN=0 text frame + FIN=1 continuation must yield one websocket.receive."""
+        frames = self._nonfin_text_frame(b'hel') + self._continuation_frame(b'lo')
+        handler = _RecipientWrapper(frames)
+        await handler.receive()  # websocket.connect
+        event = await handler.receive()
+
+        assert event['type'] == 'websocket.receive', event
+        assert event.get('text') == 'hello', (
+            f"Expected text='hello' from reassembled fragments; got {event!r}"
+        )
+
+    async def test_three_fragments_reassembled(self):
+        """Three consecutive fragments must merge into a single event."""
+        frames = (self._nonfin_text_frame(b'foo')
+                  + self._continuation_frame(b'bar', fin=False)
+                  + self._continuation_frame(b'baz', fin=True))
+        handler = _RecipientWrapper(frames)
+        await handler.receive()  # websocket.connect
+        event = await handler.receive()
+
+        assert event.get('text') == 'foobarbaz', (
+            f"Expected text='foobarbaz' from 3 fragments; got {event!r}"
+        )
+
+    async def test_unfragmented_frame_still_works(self):
+        """A normal FIN=1 frame must not be broken by fragmentation support."""
+        handler = _RecipientWrapper(_make_client_frame(b'hello', opcode=0x1))
+        await handler.receive()  # websocket.connect
+        event = await handler.receive()
+        assert event == {'type': 'websocket.receive', 'text': 'hello', 'bytes': None}
+
+    async def test_fragmented_message_followed_by_normal_message(self):
+        """After a reassembled fragmented message, subsequent frames must work."""
+        frames = (self._nonfin_text_frame(b'frag')
+                  + self._continuation_frame(b'ment', fin=True)
+                  + _make_client_frame(b'normal', opcode=0x1))
+        handler = _RecipientWrapper(frames)
+        await handler.receive()  # websocket.connect
+        first = await handler.receive()
+        second = await handler.receive()
+
+        assert first.get('text') == 'fragment', (
+            f"Expected first='fragment'; got {first!r}"
+        )
+        assert second.get('text') == 'normal', (
+            f"Expected second='normal'; got {second!r}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# P3 — WebSocket per-message deflate (RFC 7692)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+class TestWebSocketDeflate:
+    """WebSocketRecipient must decompress per-message deflate payloads.
+
+    The permessage-deflate extension (RFC 7692 §7) sets RSV1=1 in the first
+    frame of a compressed message.  The payload uses raw DEFLATE (no zlib
+    header/trailer) and is terminated by the synthetic tail bytes 0x00 0x00
+    0xFF 0xFF before stripping.
+
+    The extension must be negotiated in the WebSocket handshake, but
+    recipient-level tests inject frames directly to keep tests focused.
+    """
+
+    @staticmethod
+    def _deflate_frame(payload: bytes) -> bytes:
+        """Masked text frame with RSV1=1 and DEFLATE-compressed payload."""
+        import zlib
+        compressed = zlib.compress(payload, level=6)
+        # Strip the 2-byte zlib header and 4-byte checksum; add RFC 7692 tail
+        raw_deflate = compressed[2:-4]
+        mask = b'\xde\xad\xbe\xef'
+        masked = bytes(b ^ mask[i % 4] for i, b in enumerate(raw_deflate))
+        length = len(raw_deflate)
+        # FIN=1 RSV1=1 opcode=0x1: byte 0 = 0b11000001 = 0xC1
+        header = bytes([0xC1])
+        if length < 126:
+            header += bytes([0x80 | length])
+        elif length < 65536:
+            header += bytes([0x80 | 126]) + length.to_bytes(2, 'big')
+        else:
+            header += bytes([0x80 | 127]) + length.to_bytes(8, 'big')
+        return header + mask + masked
+
+    async def test_deflate_frame_decompressed(self):
+        """RSV1=1 text frame must be decompressed before the app sees it."""
+        payload = b'Hello, compressed world!'
+        handler = _RecipientWrapper(self._deflate_frame(payload))
+        await handler.receive()  # websocket.connect
+        event = await handler.receive()
+
+        assert event['type'] == 'websocket.receive'
+        assert event.get('text') == payload.decode(), (
+            f"Expected decompressed text={payload!r}; got {event!r}"
+        )
+
+    async def test_uncompressed_frame_unaffected_by_deflate_support(self):
+        """A normal (RSV1=0) frame must pass through unchanged."""
+        handler = _RecipientWrapper(_make_client_frame(b'plain', opcode=0x1))
+        await handler.receive()  # websocket.connect
+        event = await handler.receive()
+        assert event.get('text') == 'plain', (
+            f"Uncompressed frame must not be decompressed; got {event!r}"
+        )

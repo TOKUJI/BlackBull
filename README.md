@@ -127,8 +127,8 @@ asgi.py runs a web application that demonstrate basic functionalities.
 
 ## P3 — Features and enhancements
 
-- [ ] HTTP/1.1 responses: automatically add `Content-Length` and `Date` headers
-- [ ] `scope['root_path']`: populate from server mount path (currently commented out)
+- [x] HTTP/1.1 responses: automatically add `Content-Length` and `Date` headers
+- [ ] `scope['root_path']`: read the mount-path prefix from a reverse proxy (e.g. via `X-Forwarded-Prefix`) and surface it in `scope['root_path']` so the ASGI app can construct correct absolute URLs (defaults to `''` for direct access)
 - [ ] WebSocket `Sec-WebSocket-Version: 13` validation
 - [ ] WebSocket subprotocol negotiation (`Sec-WebSocket-Protocol` header)
 - [ ] HTTP response compression: gzip / br based on `Accept-Encoding`

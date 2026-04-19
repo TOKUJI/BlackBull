@@ -3,9 +3,11 @@ from abc import ABC, abstractmethod
 from enum import IntEnum
 from http import HTTPStatus
 import logging
-from unittest import case
+from typing import Iterable
+from email.utils import formatdate
 
 from ..frame import FrameTypes, HeaderFrameFlags, DataFrameFlags, SettingFrameFlags, FrameBase, PseudoHeaders
+from .headers import Headers
 
 class WSOpcode(IntEnum):
     CONTINUATION = 0x0
@@ -111,33 +113,56 @@ class HTTP1Sender(BaseSender):
     **Low-level** (ASGI event dict, for internal/error-handler use):
       ``await sender({'type': 'http.response.start', ...})``
       ``await sender({'type': 'http.response.body', ...})``
+
+    ``http.response.start`` is buffered until ``http.response.body`` arrives so
+    that Content-Length can be injected when the app omits it.
     """
 
-    async def __call__(self, body, status: HTTPStatus = HTTPStatus.OK, headers: list = []):
-        if isinstance(body, bytes):
-            await self._write_start(status, headers)
-            if body:
-                logger.debug('HTTP1Sender body: %r', body)
-                await self._write(body)
+    def __init__(self, writer: AbstractWriter):
+        super().__init__(writer)
+        self._buffered_status: HTTPStatus | None = None
+        self._buffered_headers: Headers | None = None
 
-        elif isinstance(body, dict):
-            event_type = body.get('type', '')
+    async def __call__(self, body,
+                       status: HTTPStatus = HTTPStatus.OK,
+                       headers: Iterable[tuple[bytes, bytes]] | Headers = []):
+        match body:
+            case bytes():
+                h = headers if isinstance(headers, Headers) else Headers(headers)
+                await self._flush(status, h, body)
 
-            if event_type == 'http.response.start':
-                s = HTTPStatus(body.get('status', 200))
-                await self._write_start(s, body.get('headers', []))
+            case {'type': 'http.response.start'}:
+                self._buffered_status = HTTPStatus(body.get('status', HTTPStatus.OK))
+                self._buffered_headers = Headers(list(body.get('headers', [])))
 
-            elif event_type == 'http.response.body':
+            case {'type': 'http.response.body'}:
                 content = body.get('body', b'')
-                if content:
+                more_body = body.get('more_body', False)
+                if self._buffered_status is not None:
+                    await self._flush(self._buffered_status, self._buffered_headers, content, more_body)
+                    self._buffered_status = None
+                    self._buffered_headers = None
+                elif content:
                     logger.debug('HTTP1Sender body: %r', content)
                     await self._write(content)
 
-            else:
+            case {'type': str() as event_type}:
                 logger.warning('HTTP1Sender: unknown event type %r', event_type)
 
-        else:
-            raise TypeError(f'HTTP1Sender expected bytes or dict, got {type(body)!r}')
+            case _:
+                raise TypeError(f'HTTP1Sender expected bytes or dict, got {type(body)!r}')
+
+    async def _flush(self, status: HTTPStatus, headers: Headers, body: bytes, more_body: bool = False) -> None:
+        if not more_body and b'content-length' not in headers:
+            headers.append(b'content-length', str(len(body)).encode())
+
+        if b'Date' not in headers:
+            headers.append(b'Date', formatdate(timeval=None, localtime=False, usegmt=True).encode())
+
+        await self._write_start(status, headers)
+        if body:
+            logger.debug('HTTP1Sender body: %r', body)
+            await self._write(body)
 
     async def _write_start(self, status: HTTPStatus, headers: list):
         chunks: list[bytes] = []
@@ -241,9 +266,10 @@ class HTTP2Sender(BaseSender):
                 await self._write(frame.save())
 
             elif event_type == 'http.response.body':
+                flags = 0 if body.get('more_body', False) else DataFrameFlags.END_STREAM
                 frame = self._factory.create(
                     FrameTypes.DATA,
-                    DataFrameFlags.END_STREAM,
+                    flags,
                     self._stream_identifier,
                     data=body.get('body', b''),
                 )

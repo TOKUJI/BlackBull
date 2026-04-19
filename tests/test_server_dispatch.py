@@ -148,6 +148,49 @@ class TestParse:
             assert isinstance(name, bytes)
             assert isinstance(value, bytes)
 
+    # P3 — scope['root_path']
+    def test_root_path_is_present_in_scope(self):
+        """scope must include 'root_path' (ASGI spec §3.2 HTTP connection scope)."""
+        scope = _get_scope(_http_request())
+        assert 'root_path' in scope, (
+            "ASGI spec §3.2 requires scope['root_path']; it is currently commented out "
+            "in parse() — uncomment or add it."
+        )
+
+    def test_root_path_default_is_empty_string(self):
+        """scope['root_path'] must default to '' when the server is not mounted."""
+        scope = _get_scope(_http_request())
+        assert scope.get('root_path') == '', (
+            f"Expected root_path=''; got {scope.get('root_path')!r}"
+        )
+
+    def test_root_path_from_x_forwarded_prefix(self):
+        """X-Forwarded-Prefix: /api must set scope['root_path'] to '/api'."""
+        scope = _get_scope(_http_request(
+            headers={'Host': 'localhost:8000', 'X-Forwarded-Prefix': '/api'}
+        ))
+        assert scope.get('root_path') == '/api', (
+            f"Expected root_path='/api' from X-Forwarded-Prefix; got {scope.get('root_path')!r}"
+        )
+
+    def test_root_path_nested_prefix(self):
+        """X-Forwarded-Prefix: /api/v1 must set scope['root_path'] to '/api/v1'."""
+        scope = _get_scope(_http_request(
+            headers={'Host': 'localhost:8000', 'X-Forwarded-Prefix': '/api/v1'}
+        ))
+        assert scope.get('root_path') == '/api/v1', (
+            f"Expected root_path='/api/v1' from X-Forwarded-Prefix; got {scope.get('root_path')!r}"
+        )
+
+    def test_root_path_not_set_when_prefix_absent(self):
+        """When X-Forwarded-Prefix is absent, scope['root_path'] must remain ''."""
+        scope = _get_scope(_http_request(
+            headers={'Host': 'localhost:8000'}
+        ))
+        assert scope.get('root_path') == '', (
+            f"Expected root_path='' when no X-Forwarded-Prefix; got {scope.get('root_path')!r}"
+        )
+
 
 # ---------------------------------------------------------------------------
 # client_connected_cb dispatch
@@ -537,11 +580,12 @@ class TestMakeSender:
 
     @pytest.mark.asyncio
     async def test_response_start_writes_status_line(self):
-        """'http.response.start' must produce a valid HTTP/1.1 status line."""
+        """'http.response.start' + 'http.response.body' must produce a valid HTTP/1.1 status line."""
         handler, sw = self._make_handler()
         send = handler.make_sender()
 
         await send({'type': 'http.response.start', 'status': 200, 'headers': []})
+        await send({'type': 'http.response.body', 'body': b''})
 
         written = bytes(sw.written)
         assert written.startswith(b'HTTP/1.1 200'), (
@@ -550,11 +594,12 @@ class TestMakeSender:
 
     @pytest.mark.asyncio
     async def test_response_start_writes_reason_phrase(self):
-        """'http.response.start' must include the standard reason phrase."""
+        """'http.response.start' + 'http.response.body' must include the standard reason phrase."""
         handler, sw = self._make_handler()
         send = handler.make_sender()
 
         await send({'type': 'http.response.start', 'status': 404, 'headers': []})
+        await send({'type': 'http.response.body', 'body': b''})
 
         written = bytes(sw.written)
         assert b'Not Found' in written, (
@@ -563,7 +608,7 @@ class TestMakeSender:
 
     @pytest.mark.asyncio
     async def test_response_start_writes_headers(self):
-        """'http.response.start' must write each header as 'Name: Value\\r\\n'."""
+        """'http.response.start' + body must write each header as 'Name: Value\\r\\n'."""
         handler, sw = self._make_handler()
         send = handler.make_sender()
 
@@ -575,6 +620,7 @@ class TestMakeSender:
                 (b'content-length', b'5'),
             ],
         })
+        await send({'type': 'http.response.body', 'body': b''})
 
         written = bytes(sw.written)
         assert b'content-type: text/plain\r\n' in written, (
@@ -586,15 +632,16 @@ class TestMakeSender:
 
     @pytest.mark.asyncio
     async def test_response_start_ends_with_blank_line(self):
-        """'http.response.start' must terminate the header section with CRLFCRLF."""
+        """After start+body, the header section must be terminated with CRLFCRLF."""
         handler, sw = self._make_handler()
         send = handler.make_sender()
 
         await send({'type': 'http.response.start', 'status': 200, 'headers': []})
+        await send({'type': 'http.response.body', 'body': b''})
 
         written = bytes(sw.written)
-        assert written.endswith(b'\r\n\r\n'), (
-            f"Header block must end with \\r\\n\\r\\n, got {written!r}"
+        assert b'\r\n\r\n' in written, (
+            f"Header block must contain \\r\\n\\r\\n, got {written!r}"
         )
 
     @pytest.mark.asyncio
@@ -648,6 +695,7 @@ class TestMakeSender:
         send = handler.make_sender()
 
         await send({'type': 'http.response.start', 'status': 200, 'headers': []})
+        await send({'type': 'http.response.body', 'body': b''})
 
         written = bytes(sw.written)
         assert not written.startswith(b'{'), (
@@ -1078,3 +1126,433 @@ class TestHTTP11Expect100Continue:
             f'Expected exactly 2 HTTP/1.1 lines (100 + 200); got: {wire!r}'
         )
         assert b'HTTP/1.1 200' in wire, f'No final 200 found: {wire!r}'
+
+
+# ---------------------------------------------------------------------------
+# P3 — HTTP/1.1 auto Content-Length and Date headers
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+class TestHTTP11AutoHeaders:
+    """HTTP1Sender must automatically inject Content-Length and Date when the
+    app does not supply them (RFC 7230 §3.3.2, RFC 7231 §7.1.1.2).
+
+    Rationale: client parsers rely on Content-Length to delimit the response
+    body, and Date lets caches and clients compute freshness.  The server is
+    the only party that knows the final body length (after possible buffering)
+    and the current time at send time.
+    """
+
+    def _make_handler(self):
+        sw = _make_stream_writer_mock()
+        handler = object.__new__(HTTP11Handler)
+        handler.app = None
+        handler.reader = None
+        handler.writer = sw
+        handler.request = b''
+        return handler, sw
+
+    async def test_content_length_injected_when_absent(self):
+        """When the app sends no Content-Length, the response must include one."""
+        handler, sw = self._make_handler()
+        send = handler.make_sender()
+
+        await send({'type': 'http.response.start', 'status': 200, 'headers': []})
+        await send({'type': 'http.response.body', 'body': b'hello', 'more_body': False})
+
+        wire = bytes(sw.written).lower()
+        assert b'content-length:' in wire, (
+            f'Expected auto-injected Content-Length header; got {wire!r}'
+        )
+
+    async def test_content_length_value_matches_body(self):
+        """The injected Content-Length value must equal the actual body length."""
+        handler, sw = self._make_handler()
+        send = handler.make_sender()
+        body = b'hello world'
+
+        await send({'type': 'http.response.start', 'status': 200, 'headers': []})
+        await send({'type': 'http.response.body', 'body': body, 'more_body': False})
+
+        wire = bytes(sw.written).lower()
+        assert f'content-length: {len(body)}'.encode() in wire, (
+            f'Expected content-length: {len(body)}; got {wire!r}'
+        )
+
+    async def test_date_header_injected(self):
+        """Every response must include a Date header (RFC 7231 §7.1.1.2)."""
+        handler, sw = self._make_handler()
+        send = handler.make_sender()
+
+        await send({'type': 'http.response.start', 'status': 200, 'headers': []})
+        await send({'type': 'http.response.body', 'body': b'hi', 'more_body': False})
+
+        wire = bytes(sw.written).lower()
+        assert b'date:' in wire, (
+            f'Expected auto-injected Date header; got {wire!r}'
+        )
+
+    async def test_app_supplied_content_length_not_duplicated(self):
+        """If the app already provides Content-Length, it must not appear twice."""
+        handler, sw = self._make_handler()
+        send = handler.make_sender()
+        body = b'hello'
+
+        await send({
+            'type': 'http.response.start',
+            'status': 200,
+            'headers': [(b'content-length', str(len(body)).encode())],
+        })
+        await send({'type': 'http.response.body', 'body': body, 'more_body': False})
+
+        wire = bytes(sw.written).lower()
+        assert wire.count(b'content-length:') == 1, (
+            f'Content-Length must appear exactly once; got {wire!r}'
+        )
+
+    @pytest.mark.asyncio
+    async def test_bytes_path_content_length_not_duplicated(self):
+        """Bytes high-level call: lowercase content-length in headers must not be doubled."""
+        handler, sw = self._make_handler()
+        send = handler.make_sender()
+        body = b'hello'
+        await send(body, HTTPStatus.OK, [(b'content-length', str(len(body)).encode())])
+        wire = bytes(sw.written).lower()
+        assert wire.count(b'content-length:') == 1, (
+            f'content-length must appear exactly once; got {wire!r}'
+        )
+
+    @pytest.mark.asyncio
+    async def test_bytes_path_uppercase_content_length_not_duplicated(self):
+        """Bytes high-level call: mixed-case Content-Length must also not be doubled."""
+        handler, sw = self._make_handler()
+        send = handler.make_sender()
+        body = b'hello'
+        await send(body, HTTPStatus.OK, [(b'Content-Length', str(len(body)).encode())])
+        wire = bytes(sw.written).lower()
+        assert wire.count(b'content-length:') == 1, (
+            f'content-length must appear exactly once; got {wire!r}'
+        )
+
+
+# ---------------------------------------------------------------------------
+# P3 — Streaming request body (more_body=True)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+class TestStreamingRequestBody:
+    """HTTP1Recipient must yield one http.request event per chunk for
+    Transfer-Encoding: chunked requests, each with more_body=True until the
+    final chunk (ASGI spec §2.3, HTTP/1.1 RFC 7230 §4.1).
+
+    Currently the recipient reads the *entire* body in one call and returns
+    a single event with more_body=False.  Streaming allows the app to process
+    large uploads incrementally without buffering the full body.
+    """
+
+    def _make_recipient(self, chunked_wire: bytes):
+        from blackbull.server.recipient import HTTP1Recipient, AsyncioReader
+        from blackbull.server.headers import Headers
+        scope = {
+            'headers': Headers([(b'transfer-encoding', b'chunked')]),
+        }
+        reader = AsyncioReader(_FakeReader(chunked_wire))
+        return HTTP1Recipient(reader, scope)
+
+    async def test_first_chunk_has_more_body_true(self):
+        """The first chunk event of a multi-chunk body must have more_body=True."""
+        # chunk 1: "hello" (5 bytes), chunk 2: "world" (5 bytes), terminator
+        wire = b'5\r\nhello\r\n5\r\nworld\r\n0\r\n\r\n'
+        recipient = self._make_recipient(wire)
+
+        event = await recipient()
+        assert event['type'] == 'http.request'
+        assert event.get('more_body') is True, (
+            f'First chunk must have more_body=True; got {event!r}'
+        )
+        assert event['body'] == b'hello', (
+            f'Expected first chunk body=b"hello"; got {event["body"]!r}'
+        )
+
+    async def test_last_chunk_has_more_body_false(self):
+        """The event for the final (zero-length terminator) chunk must have
+        more_body=False to signal end of stream."""
+        wire = b'5\r\nhello\r\n0\r\n\r\n'
+        recipient = self._make_recipient(wire)
+
+        events = []
+        while True:
+            event = await recipient()
+            events.append(event)
+            if not event.get('more_body', False):
+                break
+
+        assert events[-1].get('more_body') is False, (
+            f'Final event must have more_body=False; got {events[-1]!r}'
+        )
+
+    async def test_chunks_are_not_concatenated(self):
+        """Each chunk must be its own http.request event, not merged into one."""
+        wire = b'3\r\nfoo\r\n3\r\nbar\r\n0\r\n\r\n'
+        recipient = self._make_recipient(wire)
+
+        events = []
+        while True:
+            event = await recipient()
+            events.append(event)
+            if not event.get('more_body', False):
+                break
+
+        bodies = [e['body'] for e in events if e.get('body')]
+        assert len(bodies) >= 2, (
+            f'Expected at least 2 separate chunk events; got bodies={bodies}'
+        )
+        assert b'foo' in bodies and b'bar' in bodies, (
+            f'Expected both chunks as separate events; got {bodies}'
+        )
+
+
+# ---------------------------------------------------------------------------
+# P3 — ASGI http.response.trailers
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+class TestHTTPResponseTrailers:
+    """HTTP1Sender must handle the http.response.trailers ASGI send event.
+
+    Trailers are headers appended after a chunked response body (RFC 7230
+    §4.1.2).  The ASGI spec defines the event:
+        {'type': 'http.response.trailers',
+         'headers': [(b'x-checksum', b'abc')], 'more_trailers': False}
+    The response must use Transfer-Encoding: chunked to accommodate trailers.
+    """
+
+    def _make_handler(self):
+        sw = _make_stream_writer_mock()
+        handler = object.__new__(HTTP11Handler)
+        handler.app = None
+        handler.reader = None
+        handler.writer = sw
+        handler.request = b''
+        return handler, sw
+
+    async def test_trailers_event_does_not_raise(self):
+        """HTTP1Sender must accept http.response.trailers without raising."""
+        handler = self._make_handler()[0]
+        send = handler.make_sender()
+
+        await send({'type': 'http.response.start', 'status': 200,
+                    'headers': [(b'transfer-encoding', b'chunked')]})
+        await send({'type': 'http.response.body', 'body': b'hello', 'more_body': True})
+        # Must not raise:
+        await send({'type': 'http.response.trailers',
+                    'headers': [(b'x-checksum', b'abc123')], 'more_trailers': False})
+
+    async def test_trailer_header_appears_in_wire_output(self):
+        """Trailer headers must be written to the socket after the body."""
+        handler, sw = self._make_handler()
+        send = handler.make_sender()
+
+        await send({'type': 'http.response.start', 'status': 200,
+                    'headers': [(b'transfer-encoding', b'chunked')]})
+        await send({'type': 'http.response.body', 'body': b'hello', 'more_body': True})
+        await send({'type': 'http.response.trailers',
+                    'headers': [(b'x-checksum', b'abc123')], 'more_trailers': False})
+
+        wire = bytes(sw.written).lower()
+        assert b'x-checksum: abc123' in wire, (
+            f'Trailer header must appear in wire output; got {wire!r}'
+        )
+
+    async def test_trailer_comes_after_body(self):
+        """The trailer header must appear after the body bytes in the wire output."""
+        handler, sw = self._make_handler()
+        send = handler.make_sender()
+        body = b'response-body'
+
+        await send({'type': 'http.response.start', 'status': 200,
+                    'headers': [(b'transfer-encoding', b'chunked')]})
+        await send({'type': 'http.response.body', 'body': body, 'more_body': True})
+        await send({'type': 'http.response.trailers',
+                    'headers': [(b'x-trailer', b'value')], 'more_trailers': False})
+
+        wire = bytes(sw.written)
+        body_pos = wire.find(body)
+        trailer_pos = wire.lower().find(b'x-trailer')
+        assert body_pos != -1, f'Body not found in wire: {wire!r}'
+        assert trailer_pos != -1, f'Trailer not found in wire: {wire!r}'
+        assert trailer_pos > body_pos, (
+            f'Trailer (pos {trailer_pos}) must come after body (pos {body_pos})'
+        )
+
+
+# ---------------------------------------------------------------------------
+# P3 — HTTP response compression
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+class TestHTTPCompression:
+    """A CompressionMiddleware must compress response bodies based on the
+    client's Accept-Encoding header (gzip / br).
+
+    Expected location: blackbull.middleware.compression.CompressionMiddleware
+    """
+
+    async def test_gzip_body_compressed_when_accept_encoding_gzip(self):
+        """When Accept-Encoding: gzip, response body must be gzip-compressed."""
+        import gzip
+        from blackbull.server.headers import Headers
+        from blackbull.middleware.compression import CompressionMiddleware
+
+        body = b'Hello, world!' * 50  # repetitive data compresses well
+
+        async def app(scope, receive, send):
+            await send({'type': 'http.response.start', 'status': 200, 'headers': []})
+            await send({'type': 'http.response.body', 'body': body, 'more_body': False})
+
+        compressed_app = CompressionMiddleware(app)
+        scope = {
+            'type': 'http',
+            'headers': Headers([(b'accept-encoding', b'gzip')]),
+        }
+        events = []
+        await compressed_app(scope, AsyncMock(return_value={'type': 'http.disconnect'}),
+                              lambda e: events.append(e) or __import__('asyncio').sleep(0))
+
+        body_event = next(e for e in events if e.get('type') == 'http.response.body')
+        decompressed = gzip.decompress(body_event['body'])
+        assert decompressed == body, (
+            f'Decompressed body must match original; got {decompressed!r}'
+        )
+
+    async def test_content_encoding_header_added_when_gzip(self):
+        """Gzip-compressed response must include Content-Encoding: gzip."""
+        from blackbull.server.headers import Headers
+        from blackbull.middleware.compression import CompressionMiddleware
+
+        async def app(scope, receive, send):
+            await send({'type': 'http.response.start', 'status': 200, 'headers': []})
+            await send({'type': 'http.response.body', 'body': b'data', 'more_body': False})
+
+        compressed_app = CompressionMiddleware(app)
+        scope = {
+            'type': 'http',
+            'headers': Headers([(b'accept-encoding', b'gzip')]),
+        }
+        events = []
+        await compressed_app(scope, AsyncMock(return_value={'type': 'http.disconnect'}),
+                              lambda e: events.append(e) or __import__('asyncio').sleep(0))
+
+        start = next(e for e in events if e.get('type') == 'http.response.start')
+        header_dict = {k.lower(): v.lower() for k, v in start.get('headers', [])}
+        assert b'content-encoding' in header_dict, (
+            f'Expected Content-Encoding header; got {header_dict}'
+        )
+        assert header_dict[b'content-encoding'] == b'gzip', (
+            f'Expected content-encoding: gzip; got {header_dict[b"content-encoding"]!r}'
+        )
+
+    async def test_no_compression_without_accept_encoding(self):
+        """Without Accept-Encoding, the body must be sent as-is."""
+        from blackbull.server.headers import Headers
+        from blackbull.middleware.compression import CompressionMiddleware
+
+        body = b'plain response'
+
+        async def app(scope, receive, send):
+            await send({'type': 'http.response.start', 'status': 200, 'headers': []})
+            await send({'type': 'http.response.body', 'body': body, 'more_body': False})
+
+        compressed_app = CompressionMiddleware(app)
+        scope = {'type': 'http', 'headers': Headers([])}
+        events = []
+        await compressed_app(scope, AsyncMock(return_value={'type': 'http.disconnect'}),
+                              lambda e: events.append(e) or __import__('asyncio').sleep(0))
+
+        body_event = next(e for e in events if e.get('type') == 'http.response.body')
+        assert body_event['body'] == body, (
+            f'Body must be unmodified without Accept-Encoding; got {body_event["body"]!r}'
+        )
+
+    async def test_small_body_not_compressed(self):
+        """Bodies below a minimum size threshold must not be compressed
+        (compression overhead exceeds savings for tiny payloads)."""
+        from blackbull.server.headers import Headers
+        from blackbull.middleware.compression import CompressionMiddleware
+
+        body = b'hi'
+
+        async def app(scope, receive, send):
+            await send({'type': 'http.response.start', 'status': 200, 'headers': []})
+            await send({'type': 'http.response.body', 'body': body, 'more_body': False})
+
+        compressed_app = CompressionMiddleware(app)
+        scope = {
+            'type': 'http',
+            'headers': Headers([(b'accept-encoding', b'gzip')]),
+        }
+        events = []
+        await compressed_app(scope, AsyncMock(return_value={'type': 'http.disconnect'}),
+                              lambda e: events.append(e) or __import__('asyncio').sleep(0))
+
+        body_event = next(e for e in events if e.get('type') == 'http.response.body')
+        assert body_event['body'] == body, (
+            f'Tiny body must not be compressed; got {body_event["body"]!r}'
+        )
+
+
+# ---------------------------------------------------------------------------
+# P3 — Access logging
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+class TestAccessLogging:
+    """HTTP11Handler must emit one access log entry per completed request.
+
+    The entry must include the HTTP method, request path, and response status
+    code — the minimum fields needed for traffic analysis and debugging.
+    Expected logger name: 'blackbull.access' (or 'blackbull.server.server').
+    """
+
+    async def test_access_log_emitted_per_request(self, caplog):
+        import logging
+        raw = _http_request(method='GET', path='/status')
+        writer = _FakeWriter()
+
+        async def app(scope, receive, send):
+            await send({'type': 'http.response.start', 'status': 200, 'headers': []})
+            await send({'type': 'http.response.body', 'body': b'', 'more_body': False})
+
+        handler = HTTP11Handler(app, _FakeReader(raw), writer, b'GET /status HTTP/1.1\r\n')
+        handler.request = raw
+
+        with caplog.at_level(logging.INFO):
+            await handler.run()
+
+        assert caplog.records, 'Expected at least one log record per request'
+        messages = ' '.join(r.message for r in caplog.records)
+        assert 'GET' in messages and '/status' in messages, (
+            f'Access log must include method and path; records: '
+            f'{[r.message for r in caplog.records]}'
+        )
+
+    async def test_access_log_includes_status_code(self, caplog):
+        import logging
+        raw = _http_request(method='GET', path='/')
+        writer = _FakeWriter()
+
+        async def app(scope, receive, send):
+            await send({'type': 'http.response.start', 'status': 404, 'headers': []})
+            await send({'type': 'http.response.body', 'body': b'', 'more_body': False})
+
+        handler = HTTP11Handler(app, _FakeReader(raw), writer, b'GET / HTTP/1.1\r\n')
+        handler.request = raw
+
+        with caplog.at_level(logging.INFO):
+            await handler.run()
+
+        messages = ' '.join(r.message for r in caplog.records)
+        assert '404' in messages, (
+            f'Access log must include response status; records: '
+            f'{[r.message for r in caplog.records]}'
+        )

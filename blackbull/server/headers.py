@@ -29,7 +29,7 @@ class Headers:
         self._list = pairs
         self._index: dict[bytes, list[tuple[bytes, bytes]]] = {}
         for pair in pairs:
-            self._index.setdefault(pair[0], []).append(pair)
+            self._index.setdefault(pair[0].lower(), []).append(pair)
 
     # ---- ASGI-compliant iterable ----------------------------------------
 
@@ -42,15 +42,15 @@ class Headers:
     # ---- dict-like lookup (returns list of pairs) -----------------------
 
     def __contains__(self, name: bytes) -> bool:
-        return name in self._index
+        return name.lower() in self._index
 
     def __getitem__(self, name: bytes) -> list[tuple[bytes, bytes]]:
         """Return all pairs for *name*.  Raises ``KeyError`` if absent."""
-        return self._index[name]
+        return self._index[name.lower()]
 
     def get(self, name: bytes) -> list[tuple[bytes, bytes]]:
         """Return all pairs for *name*, or ``[]`` if the header is absent."""
-        return self._index.get(name, [])
+        return self._index.get(name.lower(), [])
 
     def get_value(self, name: bytes, default: bytes = b'') -> bytes:
         """Return the first value for *name*, or *default* if absent.
@@ -58,5 +58,11 @@ class Headers:
         Convenience helper for headers that are not expected to repeat
         (e.g. ``Host``, ``Expect``, ``Content-Length``).
         """
-        pairs = self._index.get(name)
+        pairs = self._index.get(name.lower())
         return pairs[0][1] if pairs else default
+
+    def append(self, name: bytes, value: bytes) -> None:
+        """Append a header pair to the end of the list."""
+        pair = (name, value)
+        self._list.append(pair)
+        self._index.setdefault(name.lower(), []).append(pair)

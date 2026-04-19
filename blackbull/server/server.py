@@ -196,7 +196,7 @@ class HTTP11Handler(BaseHandler):
             'path': path.decode('utf-8'),
             'raw_path': path,
             'query_string': path_parsed.query,
-            # 'root_path': '',
+            'root_path': '',
             'headers': headers,
             'client': None,  # set in run() from transport peername
             'server': None,  # set from Host header; fallback to sockname in run()

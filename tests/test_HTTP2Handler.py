@@ -371,3 +371,259 @@ class TestHTTP2GoAwayLastStreamId:
         assert app.call_count == 0, (
             f'App must not be called after GOAWAY; got call_count={app.call_count}'
         )
+
+
+# ---------------------------------------------------------------------------
+# P3 — HTTP/2 server push (PUSH_PROMISE)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+class TestHTTP2ServerPush:
+    """HTTP2Handler must support server push via the ASGI 'http.response.push'
+    event (HTTP/2 PUSH_PROMISE frame, RFC 7540 §8.2).
+
+    When the ASGI app sends:
+        {'type': 'http.response.push', 'path': '/style.css', 'headers': [...]}
+    the server must emit a PUSH_PROMISE frame that references an even-numbered
+    promised stream ID (server-initiated streams are always even per RFC 7540 §5.1.1).
+    """
+
+    async def test_push_promise_frame_emitted(self):
+        """'http.response.push' must cause a PUSH_PROMISE frame to be sent."""
+        h_frame = _make_headers_frame(stream_id=1, end_stream=True)
+
+        async def app(scope, receive, send):
+            await send({
+                'type': 'http.response.push',
+                'path': '/style.css',
+                'headers': [(b':method', b'GET'), (b':path', b'/style.css'),
+                            (b':scheme', b'https')],
+            })
+            await send({'type': 'http.response.start', 'status': 200, 'headers': []})
+            await send({'type': 'http.response.body', 'body': b''})
+
+        handler, _ = _make_h2_handler(app=app)
+        handler.receive = AsyncMock(side_effect=[h_frame, None])
+        await handler.run()
+
+        sent_types = [
+            call.args[0].FrameType()
+            for call in handler.send_frame.call_args_list
+            if hasattr(call.args[0], 'FrameType')
+        ]
+        assert FrameTypes.PUSH_PROMISE in sent_types, (
+            f'Expected PUSH_PROMISE frame among sent frames; got {sent_types}'
+        )
+
+    async def test_push_promise_has_even_stream_id(self):
+        """The promised stream ID in PUSH_PROMISE must be even (RFC 7540 §5.1.1)."""
+        h_frame = _make_headers_frame(stream_id=1, end_stream=True)
+
+        async def app(scope, receive, send):
+            await send({
+                'type': 'http.response.push',
+                'path': '/favicon.ico',
+                'headers': [(b':method', b'GET'), (b':path', b'/favicon.ico'),
+                            (b':scheme', b'https')],
+            })
+            await send({'type': 'http.response.start', 'status': 200, 'headers': []})
+            await send({'type': 'http.response.body', 'body': b''})
+
+        handler, _ = _make_h2_handler(app=app)
+        handler.receive = AsyncMock(side_effect=[h_frame, None])
+        await handler.run()
+
+        for call in handler.send_frame.call_args_list:
+            frame = call.args[0]
+            if hasattr(frame, 'FrameType') and frame.FrameType() == FrameTypes.PUSH_PROMISE:
+                assert hasattr(frame, 'promised_stream_id'), (
+                    'PUSH_PROMISE frame must have a promised_stream_id attribute'
+                )
+                assert frame.promised_stream_id % 2 == 0, (
+                    f'Promised stream ID must be even; got {frame.promised_stream_id}'
+                )
+                return
+        pytest.fail('No PUSH_PROMISE frame found among sent frames')
+
+    async def test_unknown_push_event_does_not_crash_handler(self):
+        """An unrecognised send event type must be logged and ignored, not crash."""
+        h_frame = _make_headers_frame(stream_id=1, end_stream=True)
+
+        async def app(scope, receive, send):
+            # This should be gracefully ignored (not crash the handler)
+            await send({'type': 'http.response.push', 'path': '/x', 'headers': []})
+            await send({'type': 'http.response.start', 'status': 200, 'headers': []})
+            await send({'type': 'http.response.body', 'body': b''})
+
+        handler, _ = _make_h2_handler(app=app)
+        handler.receive = AsyncMock(side_effect=[h_frame, None])
+        # Must not raise
+        await handler.run()
+
+
+# ---------------------------------------------------------------------------
+# P3 — HTTP/2 stream state machine
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+class TestHTTP2StreamStateMachine:
+    """HTTP/2 stream state machine: idle → open → half-closed → closed
+    (RFC 7540 §5.1).
+
+    Expected API: blackbull.stream.Stream exposes a ``state`` attribute
+    (a ``StreamState`` enum) and methods that transition it on protocol events.
+    """
+
+    def _import_state(self):
+        from blackbull.stream import StreamState
+        return StreamState
+
+    async def test_new_stream_is_idle(self):
+        """A freshly created stream must be in the IDLE state."""
+        StreamState = self._import_state()
+        from blackbull.stream import Stream
+        stream = Stream(identifier=1, parent=None)
+        assert stream.state == StreamState.IDLE, (
+            f'New stream must be IDLE; got {stream.state}'
+        )
+
+    async def test_headers_received_opens_stream(self):
+        """Receiving a HEADERS frame must transition the stream to OPEN."""
+        StreamState = self._import_state()
+        from blackbull.stream import Stream
+        stream = Stream(identifier=1, parent=None)
+        stream.on_headers_received(end_stream=False)
+        assert stream.state == StreamState.OPEN, (
+            f'Stream must be OPEN after HEADERS; got {stream.state}'
+        )
+
+    async def test_headers_with_end_stream_half_closes(self):
+        """HEADERS + END_STREAM must transition to HALF_CLOSED_REMOTE."""
+        StreamState = self._import_state()
+        from blackbull.stream import Stream
+        stream = Stream(identifier=1, parent=None)
+        stream.on_headers_received(end_stream=True)
+        assert stream.state == StreamState.HALF_CLOSED_REMOTE, (
+            f'Expected HALF_CLOSED_REMOTE after HEADERS+END_STREAM; got {stream.state}'
+        )
+
+    async def test_data_end_stream_closes_stream(self):
+        """DATA + END_STREAM on an open stream must transition to CLOSED."""
+        StreamState = self._import_state()
+        from blackbull.stream import Stream
+        stream = Stream(identifier=1, parent=None)
+        stream.on_headers_received(end_stream=False)
+        stream.on_data_received(end_stream=True)
+        assert stream.state == StreamState.CLOSED, (
+            f'Expected CLOSED after DATA+END_STREAM; got {stream.state}'
+        )
+
+    async def test_data_on_closed_stream_triggers_rst_stream(self):
+        """Receiving DATA on a closed stream must cause RST_STREAM(STREAM_CLOSED).
+
+        RFC 7540 §6.1: if a DATA frame is received whose stream is in the
+        'closed' state, the endpoint MUST respond with a stream error of type
+        STREAM_CLOSED.
+        """
+        from blackbull.frame import ErrorCodes
+        # Send HEADERS+END_STREAM (closes remote side), then another DATA
+        h_frame = _make_headers_frame(stream_id=1, end_stream=True)
+        d_frame = _make_h2_frame(FrameTypes.DATA, DataFrameFlags.END_STREAM, 1, b'late')
+
+        handler, _ = _make_h2_handler()
+        handler.receive = AsyncMock(side_effect=[h_frame, d_frame, None])
+        await handler.run()
+
+        rst_calls = [
+            call for call in handler.send_frame.call_args_list
+            if hasattr(call.args[0], 'FrameType')
+            and call.args[0].FrameType() == FrameTypes.RST_STREAM
+        ]
+        assert rst_calls, (
+            'Must send RST_STREAM(STREAM_CLOSED) for DATA received on a closed stream'
+        )
+
+
+# ---------------------------------------------------------------------------
+# P3 — HTTP/2 priority scheduling
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+class TestHTTP2Priority:
+    """HTTP2Handler must honour PRIORITY frames (RFC 7540 §5.3, §6.3).
+
+    A PRIORITY frame sets the stream's dependency and weight.  When multiple
+    streams are ready, the handler must allocate resources proportional to each
+    stream's weight.  Higher-weight streams must be processed before lower-weight
+    ones when both are ready simultaneously.
+    """
+
+    @staticmethod
+    def _priority_frame(stream_id: int, depends_on: int = 0,
+                        weight: int = 16) -> bytes:
+        """Build a raw PRIORITY frame (type=0x02, RFC 7540 §6.3)."""
+        dep = depends_on.to_bytes(4, 'big')
+        payload = dep + bytes([weight - 1])   # wire weight = weight - 1
+        return _make_h2_frame(FrameTypes.PRIORITY, 0, stream_id, payload)
+
+    async def test_priority_frame_accepted_without_connection_error(self):
+        """A PRIORITY frame must not produce a GOAWAY or exception."""
+        priority = self._priority_frame(stream_id=3, weight=32)
+
+        handler, _ = _make_h2_handler()
+        handler.receive = AsyncMock(side_effect=[priority, None])
+        await handler.run()   # must not raise
+
+        goaway_calls = [
+            call for call in handler.send_frame.call_args_list
+            if hasattr(call.args[0], 'FrameType')
+            and call.args[0].FrameType() == FrameTypes.GOAWAY
+        ]
+        assert not goaway_calls, (
+            f'PRIORITY frame must not trigger GOAWAY; got {goaway_calls}'
+        )
+
+    async def test_stream_weight_stored_after_priority_frame(self):
+        """A PRIORITY frame must update the stream's weight in the tree."""
+        priority = self._priority_frame(stream_id=3, weight=32)
+
+        handler, _ = _make_h2_handler()
+        handler.receive = AsyncMock(side_effect=[priority, None])
+        await handler.run()
+
+        stream = handler.root_stream.find_child(3)
+        assert stream is not None, 'Stream 3 must exist after PRIORITY frame'
+        assert stream.weight == 32, (
+            f'Expected weight=32 after PRIORITY; got {stream.weight}'
+        )
+
+    async def test_higher_weight_stream_served_before_lower(self):
+        """Given two concurrent streams, the higher-weight one must be
+        dispatched to the app first (RFC 7540 §5.3.2).
+
+        Stream 3 gets weight=32; stream 1 uses the default weight=16.
+        Both HEADERS arrive simultaneously; stream 3 must be called first.
+        """
+        priority = self._priority_frame(stream_id=3, weight=32)
+        h1 = _make_headers_frame(stream_id=1, end_stream=True)
+        h3 = _make_headers_frame(stream_id=3, end_stream=True)
+
+        call_order = []
+
+        async def app(scope, receive, send):
+            # Record which stream_id reached the app and when
+            call_order.append(scope.get('stream_id') or scope.get('path'))
+
+        handler, _ = _make_h2_handler(app=app)
+        handler.receive = AsyncMock(side_effect=[priority, h1, h3, None])
+        await handler.run()
+
+        assert len(call_order) == 2, f'Expected 2 app calls; got {call_order}'
+        assert call_order[0] != call_order[1], 'Both streams must reach the app'
+        # Stream 3 (weight 32) should precede stream 1 (weight 16)
+        idx_stream3 = next(
+            (i for i, v in enumerate(call_order) if v in (3, '/') ), None
+        )
+        assert idx_stream3 == 0, (
+            f'Higher-weight stream 3 must be served first; call order: {call_order}'
+        )

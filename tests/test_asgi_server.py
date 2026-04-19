@@ -503,3 +503,53 @@ class TestTimeoutHandling:
                 server.client_connected_cb(reader, sw),
                 timeout=1.0,
             )
+
+
+# ---------------------------------------------------------------------------
+# P3 — mTLS (mutual TLS)
+# ---------------------------------------------------------------------------
+
+class TestMTLS:
+    """ASGIServer must support mutual TLS (mTLS) via ssl.CERT_REQUIRED +
+    load_verify_locations (RFC 8446 §4.3.2).
+
+    Expected API: ASGIServer exposes a ``configure_mtls(ca_cert: str)`` method
+    that sets CERT_REQUIRED on the existing ssl_context and loads the CA cert
+    so the server can verify client certificates.
+    """
+
+    def test_configure_mtls_sets_cert_required(self, cert_path, key_path,
+                                                manage_cert_and_key):
+        """After configure_mtls(), ssl_context.verify_mode must be CERT_REQUIRED."""
+        server = ASGIServer(_noop_app, certfile=str(cert_path),
+                            keyfile=str(key_path))
+        server.configure_mtls(ca_cert=str(cert_path))
+        assert server.ssl_context.verify_mode == ssl.CERT_REQUIRED, (
+            f'mTLS requires CERT_REQUIRED; got {server.ssl_context.verify_mode}'
+        )
+
+    def test_configure_mtls_calls_load_verify_locations(self, cert_path, key_path,
+                                                         manage_cert_and_key):
+        """configure_mtls() must call load_verify_locations with cafile=<ca_cert>."""
+        from unittest.mock import patch
+        server = ASGIServer(_noop_app, certfile=str(cert_path),
+                            keyfile=str(key_path))
+        with patch.object(server.ssl_context, 'load_verify_locations') as mock_lvl:
+            server.configure_mtls(ca_cert=str(cert_path))
+            mock_lvl.assert_called_once_with(cafile=str(cert_path))
+
+    def test_standard_tls_does_not_require_client_cert(self, cert_path, key_path,
+                                                        manage_cert_and_key):
+        """Without calling configure_mtls(), client certs must not be required."""
+        server = ASGIServer(_noop_app, certfile=str(cert_path),
+                            keyfile=str(key_path))
+        assert server.ssl_context.verify_mode != ssl.CERT_REQUIRED, (
+            f'Standard TLS must not require client cert; '
+            f'got {server.ssl_context.verify_mode}'
+        )
+
+    def test_configure_mtls_without_ssl_context_raises(self):
+        """Calling configure_mtls() on a plain (non-TLS) server must raise."""
+        server = ASGIServer(_noop_app)   # no certfile/keyfile → ssl_context is None
+        with pytest.raises((AttributeError, RuntimeError, TypeError)):
+            server.configure_mtls(ca_cert='/some/ca.pem')
