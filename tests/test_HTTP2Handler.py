@@ -627,3 +627,288 @@ class TestHTTP2Priority:
         assert idx_stream3 == 0, (
             f'Higher-weight stream 3 must be served first; call order: {call_order}'
         )
+
+
+# ---------------------------------------------------------------------------
+# Bug: scope['headers'] is always [] for HTTP/2 requests
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+class TestHTTP2ScopeHeaders:
+    """HTTP/2 request headers must appear in scope['headers'] as a Headers object.
+
+    Bug: HTTP2HEADParser.parse() only copies pseudo-headers (:method, :path,
+    :scheme) into the scope; regular headers (Cookie, Content-Type, …) are
+    discarded.  scope['headers'] stays as the default [] (empty list), so any
+    handler that calls scope['headers'].get_value(…) crashes with AttributeError.
+    """
+
+    @staticmethod
+    def _make_headers_frame_with_cookie(
+        stream_id: int = 1,
+        method: bytes = b'GET',
+        path: bytes = b'/',
+        cookie: bytes = b'session_id=abc123',
+        end_stream: bool = True,
+    ) -> bytes:
+        encoder = Encoder()
+        block = encoder.encode([
+            (b':method', method),
+            (b':path', path),
+            (b':scheme', b'https'),
+            (b'cookie', cookie),
+        ])
+        flags: FrameFlags = HeaderFrameFlags.END_HEADERS
+        if end_stream:
+            flags |= HeaderFrameFlags.END_STREAM
+        return _make_h2_frame(FrameTypes.HEADERS, flags, stream_id, block)
+
+    async def test_scope_headers_is_not_plain_empty_list(self):
+        """scope['headers'] must not be an empty plain list for HTTP/2 requests."""
+        h_frame = self._make_headers_frame_with_cookie()
+
+        scopes = []
+
+        async def app(scope, receive, send):
+            scopes.append(scope)
+
+        handler, _ = _make_h2_handler(app=app)
+        handler.receive = AsyncMock(side_effect=[h_frame, None])
+        await handler.run()
+        for _ in range(3):
+            await asyncio.sleep(0)
+
+        assert scopes, 'app must have been called'
+        assert scopes[0]['headers'] != [], (
+            "scope['headers'] is an empty list — Cookie and other request headers "
+            "are missing from the HTTP/2 scope"
+        )
+
+    async def test_scope_headers_contains_cookie(self):
+        """Cookie header sent by the client must be accessible via scope['headers']."""
+        from blackbull.server.headers import Headers
+
+        h_frame = self._make_headers_frame_with_cookie(cookie=b'session_id=abc123')
+
+        scopes = []
+
+        async def app(scope, receive, send):
+            scopes.append(scope)
+
+        handler, _ = _make_h2_handler(app=app)
+        handler.receive = AsyncMock(side_effect=[h_frame, None])
+        await handler.run()
+        for _ in range(3):
+            await asyncio.sleep(0)
+
+        assert scopes, 'app must have been called'
+        scope = scopes[0]
+
+        assert isinstance(scope['headers'], Headers), (
+            f"scope['headers'] must be a Headers instance; got {type(scope['headers'])!r}"
+        )
+        cookie_val = scope['headers'].get_value(b'cookie')
+        assert cookie_val == b'session_id=abc123', (
+            f"Expected cookie b'session_id=abc123' in scope['headers']; got {cookie_val!r}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Bug: shared HTTP2Recipient across all streams causes cross-stream body leakage
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+class TestHTTP2PerStreamRecipient:
+    """Each HTTP/2 stream must have its own isolated receive queue.
+
+    Bug: HTTP2Handler.run() creates one HTTP2Recipient for the whole connection.
+    A GET handler that never calls receive() leaves an empty 'http.request' event
+    (body=b'', more_body=False) in the shared queue.  The next POST handler's
+    _read_body() consumes that stale event and gets b'' instead of the real POST
+    body, causing json.loads(b'') → "Invalid JSON".
+    """
+
+    @staticmethod
+    def _make_post_headers_frame(stream_id: int, path: bytes = b'/login') -> bytes:
+        encoder = Encoder()
+        block = encoder.encode([
+            (b':method', b'POST'),
+            (b':path', path),
+            (b':scheme', b'https'),
+        ])
+        return _make_h2_frame(FrameTypes.HEADERS,
+                              HeaderFrameFlags.END_HEADERS,  # no END_STREAM
+                              stream_id, block)
+
+    async def test_post_body_not_contaminated_by_prior_get(self):
+        """POST handler must receive the DATA frame body, not GET's empty event.
+
+        Sequence: GET / (end_stream=True, handler never calls receive()) →
+        POST /login (DATA frame with JSON body).
+        With a shared recipient the POST handler gets b'' (GET's leftover).
+        With per-stream recipients it correctly gets the JSON bytes.
+        """
+        json_body = b'{"username":"alice","method":"sse"}'
+
+        h_get  = _make_headers_frame(stream_id=1, end_stream=True,
+                                     method=b'GET', path=b'/')
+        h_post = self._make_post_headers_frame(stream_id=3, path=b'/login')
+        d_post = _make_h2_frame(FrameTypes.DATA, DataFrameFlags.END_STREAM,
+                                3, json_body)
+
+        received_bodies: dict[str, bytes] = {}
+
+        async def app(scope, receive, send):
+            if scope.get('method') == 'POST':
+                event = await receive()
+                received_bodies[scope.get('path', '?')] = event.get('body', b'<none>')
+            # GET handler intentionally never calls receive()
+
+        handler, _ = _make_h2_handler(app=app)
+        handler.receive = AsyncMock(side_effect=[h_get, h_post, d_post, None])
+        await handler.run()
+        for _ in range(3):
+            await asyncio.sleep(0)
+
+        assert '/login' in received_bodies, (
+            'POST /login handler did not call receive() — was it reached?'
+        )
+        assert received_bodies['/login'] == json_body, (
+            f"POST /login received the wrong body.\n"
+            f"  Expected : {json_body!r}\n"
+            f"  Got      : {received_bodies['/login']!r}\n"
+            "Shared-recipient bug: GET's empty http.request event was consumed "
+            "by the POST handler instead of its DATA frame."
+        )
+
+
+# ---------------------------------------------------------------------------
+# Bug: WindowUpdate / RstStream / GoAway save() omits the payload
+# ---------------------------------------------------------------------------
+
+class TestFrameSavePayload:
+    """Frame.save() must include the payload bytes, not just the 9-byte header.
+
+    Bug: WindowUpdate.save(), RstStream.save(), and GoAway.save() all call
+    super().save() (which encodes the 9-byte frame header, including the
+    length field) but return without appending the actual payload bytes.
+    The receiver reads past the frame header expecting `length` more bytes,
+    gets the beginning of the NEXT frame instead, and the entire HTTP/2
+    stream parser desynchronises.  For POST /login this manifests as
+    NS_ERROR_NET_RESET → JavaScript TypeError: NetworkError.
+    """
+
+    def test_window_update_save_includes_increment(self):
+        """WindowUpdate.save() must produce a 13-byte frame (9 header + 4 payload).
+
+        The 4-byte payload carries the flow-control increment.  Without it the
+        browser reads the next frame's bytes as the increment value and loses
+        sync with the frame stream.
+        """
+        frame = FrameFactory().window_update(stream_id=3, increment=35)
+        wire = frame.save()
+        assert len(wire) == 13, (
+            f'WindowUpdate wire frame must be 13 bytes (9-byte header + '
+            f'4-byte increment); got {len(wire)} bytes: {wire.hex()}'
+        )
+        assert wire[:3] == b'\x00\x00\x04', (
+            f'Length field must be 4; got {wire[:3].hex()}'
+        )
+        assert int.from_bytes(wire[9:13], 'big') == 35, (
+            f'Increment in wire payload must be 35; '
+            f'got {int.from_bytes(wire[9:13], "big")}'
+        )
+
+    def test_rst_stream_save_includes_error_code(self):
+        """RstStream.save() must produce a 13-byte frame (9 header + 4 error code)."""
+        from blackbull.frame import ErrorCodes
+        frame = FrameFactory().rst_stream(stream_id=3,
+                                          error_code=ErrorCodes.REFUSED_STREAM)
+        wire = frame.save()
+        assert len(wire) == 13, (
+            f'RstStream wire frame must be 13 bytes; got {len(wire)}: {wire.hex()}'
+        )
+        assert int.from_bytes(wire[9:13], 'big') == int(ErrorCodes.REFUSED_STREAM), (
+            f'Error code in wire payload must be REFUSED_STREAM '
+            f'({int(ErrorCodes.REFUSED_STREAM)}); '
+            f'got {int.from_bytes(wire[9:13], "big")}'
+        )
+
+    def test_goaway_save_includes_last_stream_id_and_error_code(self):
+        """GoAway.save() must produce a 17-byte frame (9 header + 8 payload)."""
+        frame = FrameFactory().goaway(last_stream_id=3, error_code=0)
+        wire = frame.save()
+        assert len(wire) == 17, (
+            f'GoAway wire frame must be 17 bytes (9 header + 4 last-stream-id '
+            f'+ 4 error-code); got {len(wire)}: {wire.hex()}'
+        )
+        assert int.from_bytes(wire[9:13], 'big') == 3, (
+            f'Last-stream-id in GoAway payload must be 3; '
+            f'got {int.from_bytes(wire[9:13], "big")}'
+        )
+        assert int.from_bytes(wire[13:17], 'big') == 0, (
+            f'Error code in GoAway payload must be 0; '
+            f'got {int.from_bytes(wire[13:17], "big")}'
+        )
+
+
+# ---------------------------------------------------------------------------
+# Bug: SETTINGS_MAX_HEADER_LIST_SIZE crashes when MAX_FRAME_SIZE not preceded
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+class TestSettingsMaxHeaderListSize:
+    """SETTINGS_MAX_HEADER_LIST_SIZE must be parsed without AttributeError.
+
+    Bug: SettingFrame.set_max_header_list_size() logs self.max_frame_size
+    (a typo) instead of self.max_header_list_size.  When the peer sends
+    SETTINGS_MAX_HEADER_LIST_SIZE (0x6) without first sending
+    SETTINGS_MAX_FRAME_SIZE (0x5), self.max_frame_size doesn't exist and
+    AttributeError propagates out of HTTP2Handler.run(), closing the connection.
+    The second browser (e.g. Chrome) typically sends MAX_HEADER_LIST_SIZE
+    without MAX_FRAME_SIZE, causing 'connection closed' for every second client.
+    """
+
+    @staticmethod
+    def _make_settings_frame(params: dict[int, int]) -> bytes:
+        """Build a raw SETTINGS frame with the given parameter dict."""
+        payload = b''
+        for identifier, value in params.items():
+            payload += identifier.to_bytes(2, 'big') + value.to_bytes(4, 'big')
+        return _make_h2_frame(FrameTypes.SETTINGS, SettingFrameFlags.INIT, 0, payload)
+
+    async def test_settings_with_only_max_header_list_size_does_not_crash(self):
+        """A SETTINGS frame containing only MAX_HEADER_LIST_SIZE must not crash.
+
+        Bug: set_max_header_list_size() referenced self.max_frame_size (typo),
+        which doesn't exist when MAX_FRAME_SIZE was not sent in the same frame.
+        The AttributeError crashed run() and closed the connection.
+        """
+        # SETTINGS with only MAX_HEADER_LIST_SIZE (0x6), no MAX_FRAME_SIZE (0x5)
+        settings_frame = self._make_settings_frame({0x6: 16384})
+        h_frame = _make_headers_frame(stream_id=1, end_stream=True)
+
+        handler, app = _make_h2_handler()
+        handler.receive = AsyncMock(side_effect=[settings_frame, h_frame, None])
+
+        # Must not raise — before the fix this crashed with AttributeError
+        await handler.run()
+
+        assert app.call_count == 1, (
+            f'App must be called once (connection must stay open after SETTINGS); '
+            f'got call_count={app.call_count}'
+        )
+
+    async def test_settings_max_header_list_size_value_is_stored(self):
+        """MAX_HEADER_LIST_SIZE value must be stored in the SettingFrame object."""
+        from blackbull.frame import FrameFactory
+        factory = FrameFactory()
+        payload = (0x6).to_bytes(2, 'big') + (262144).to_bytes(4, 'big')
+        wire = _make_h2_frame(FrameTypes.SETTINGS, SettingFrameFlags.INIT, 0, payload)
+        frame = factory.load(wire)
+        assert hasattr(frame, 'max_header_list_size'), (
+            'SettingFrame must store max_header_list_size after parsing 0x6 setting'
+        )
+        assert frame.max_header_list_size == 262144, (
+            f'max_header_list_size must be 262144; got {frame.max_header_list_size}'
+        )

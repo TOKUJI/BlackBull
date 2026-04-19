@@ -250,7 +250,7 @@ class SettingFrame(FrameBase):
 
     def set_max_header_list_size(self, value):
         self.max_header_list_size = int.from_bytes(value, 'big', signed=False)
-        logger.debug('max_frame_size: {}'.format(self.max_frame_size))
+        logger.debug('max_header_list_size: {}'.format(self.max_header_list_size))
 
     def save(self):
         base = super().save()
@@ -259,6 +259,7 @@ class SettingFrame(FrameBase):
 
 
 class WindowUpdate(FrameBase):
+
     """docstring for WindowUpdate"""
     FRAME_TYPE = FrameTypes.WINDOW_UPDATE
     def __init__(self, length: int, type_, flags: bytes, stream_id: int, *, data=None, **kwds):
@@ -270,8 +271,7 @@ class WindowUpdate(FrameBase):
 
     def save(self):
         base = super().save()
-        # TODO: enable to alter settings parameters
-        return base
+        return base + self.payload
 
 
 class PseudoHeaders(StrEnum):
@@ -393,6 +393,13 @@ class GoAway(FrameBase):
         logger.debug('error_code: {}'.format(self.error_code))
         logger.debug('append_data: {}'.format(self.append_data))
 
+    def save(self):
+        base = super().save()
+        return (base
+                + self.stream_id.to_bytes(4, 'big')
+                + self.error_code.to_bytes(4, 'big')
+                + self.append_data)
+
 
 class RstStream(FrameBase):
     FRAME_TYPE = FrameTypes.RST_STREAM
@@ -404,6 +411,10 @@ class RstStream(FrameBase):
 
         self.error_code = ErrorCodes(int.from_bytes(data, 'big', signed=False))
         logger.debug(f'error_code: {self.error_code}')
+
+    def save(self):
+        base = super().save()
+        return base + int(self.error_code).to_bytes(4, 'big')
 
 
 class Data(FrameBase):

@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Chat &mdash; Login</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      margin: 0;
+      background: #f0f2f5;
+    }
+    .card {
+      background: #fff;
+      padding: 2rem;
+      border-radius: 8px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, .15);
+      width: 320px;
+    }
+    h1 {
+      margin: 0 0 1.5rem;
+      font-size: 1.5rem;
+      text-align: center;
+    }
+    label {
+      display: block;
+      margin-bottom: .25rem;
+      font-size: .875rem;
+      font-weight: 600;
+    }
+    input, select {
+      width: 100%;
+      box-sizing: border-box;
+      padding: .5rem;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      margin-bottom: 1rem;
+      font-size: 1rem;
+    }
+    button {
+      width: 100%;
+      padding: .6rem;
+      background: #4f46e5;
+      color: #fff;
+      border: none;
+      border-radius: 4px;
+      font-size: 1rem;
+      cursor: pointer;
+    }
+    button:hover { background: #4338ca; }
+    .error {
+      color: #dc2626;
+      font-size: .875rem;
+      margin-bottom: .75rem;
+      display: none;
+    }
+    .note {
+      font-size: .75rem;
+      color: #6b7280;
+      margin-top: -.5rem;
+      margin-bottom: .75rem;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Chat Login</h1>
+    <div id="err" class="error"></div>
+    <form onsubmit="login(event)">
+      <label for="username">Username</label>
+      <input id="username" type="text" required minlength="1"
+             placeholder="Your name" autocomplete="off">
+
+      <label for="method">Communication method</label>
+      <select id="method">
+        <option value="websocket">WebSocket (HTTP/1.1)</option>
+        <option value="sse">Server-Sent Events (HTTP/2)</option>
+        <option value="poll">Long Polling (HTTP/1.1)</option>
+      </select>
+      <p class="note" id="method-note"></p>
+
+      <button type="submit">Enter Chat</button>
+    </form>
+  </div>
+
+  <script>
+    const notes = {
+      websocket: 'Real-time bidirectional; requires HTTP/1.1.',
+      sse:       'Server-push stream; requires HTTP/2 (TLS).',
+      poll:      'Compatible with plain HTTP/1.1; polls every ~25 s.',
+    };
+    const sel  = document.getElementById('method');
+    const note = document.getElementById('method-note');
+
+    sel.addEventListener('change', () => { note.textContent = notes[sel.value] || ''; });
+    note.textContent = notes[sel.value] || '';
+
+    async function login(e) {
+      e.preventDefault();
+      const username = document.getElementById('username').value.trim();
+      const method   = sel.value;
+      if (!username) return;
+
+      const r = await fetch('/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, method }),
+      });
+
+      if (!r.ok) {
+        const d   = await r.json().catch(() => ({}));
+        const err = document.getElementById('err');
+        err.textContent  = d.error || 'Login failed';
+        err.style.display = 'block';
+        return;
+      }
+      window.location.href = '/chat';
+    }
+  </script>
+</body>
+</html>

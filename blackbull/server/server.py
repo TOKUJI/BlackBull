@@ -294,7 +294,10 @@ class HTTP2Handler(BaseHandler):
         # Then, parse and handle frames in this loop.
         header_frame = None
         accumulated_body: bytes = b''
-        recipient = RecipientFactory.http2()
+        # Per-stream recipients: keyed by stream ID so each stream's receive
+        # queue is isolated. A shared queue would let one stream's events leak
+        # into another stream's handler (e.g. GET's empty event consumed by POST).
+        recipients: dict[int, RecipientFactory.http2.__class__] = {}
 
         while data := await self.receive():
 
@@ -307,8 +310,6 @@ class HTTP2Handler(BaseHandler):
                 logger.error(f'Stream {frame.stream_id} is not found.')
                 raise Exception('Unused stream identifier')
 
-            scope = None
-
             send = self.make_sender(stream.identifier)
             last_stream_id = self.root_stream.max_stream_id()
 
@@ -320,9 +321,12 @@ class HTTP2Handler(BaseHandler):
                     if frame.end_headers:
                         waiting_continuation = False
                         scope = ParserFactory.Get(frame, stream).parse()
+                        stream_recipient = RecipientFactory.http2()
+                        recipients[stream.identifier] = stream_recipient
                         if frame.end_stream:
                             # No body will follow — enqueue an empty request event now.
-                            recipient.put_event({'type': 'http.request', 'body': b'', 'more_body': False})
+                            stream_recipient.put_event({'type': 'http.request', 'body': b'', 'more_body': False})
+                        asyncio.create_task(self.app(scope, stream_recipient, send))
                     else:
                         waiting_continuation = True
                         header_frame = frame
@@ -340,13 +344,19 @@ class HTTP2Handler(BaseHandler):
                         waiting_continuation = False
                         header_frame.parse_payload()
                         scope = ParserFactory.Get(header_frame, stream).parse()
+                        stream_recipient = RecipientFactory.http2()
+                        recipients[stream.identifier] = stream_recipient
+                        asyncio.create_task(self.app(scope, stream_recipient, send))
                     else:
                         continue  # more CONTINUATION frames expected
 
                 case FrameTypes.DATA:
                     # Send WINDOW_UPDATE for every DATA frame (RFC 7540 §6.9).
                     await self.send_frame(self.factory.window_update(stream.identifier, frame.length))
-                    recipient.put_DATAFrame(frame)
+                    if stream.identifier in recipients:
+                        recipients[stream.identifier].put_DATAFrame(frame)
+                    else:
+                        logger.warning('DATA for stream %d but no recipient found', stream.identifier)
 
                 case FrameTypes.GOAWAY:
                     await self.send_frame(self.factory.goaway(last_stream_id))
@@ -355,10 +365,6 @@ class HTTP2Handler(BaseHandler):
 
                 case _:
                     await RespondFactory.create(frame).respond(self)
-
-            if scope:
-                asyncio.create_task(self.app(scope, recipient, send))
-                scope = None
                 
 
 
@@ -466,7 +472,7 @@ class ASGIServer:
             return
 
         context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
-        context.set_alpn_protocols(['HTTP/1.1', 'h2'])
+        context.set_alpn_protocols(['h2', 'http/1.1'])
         context.load_cert_chain(certfile=self.certfile, keyfile=self.keyfile)
         context.options |= ssl.OP_NO_TLSv1 | ssl.OP_NO_TLSv1_1
         context.options |= ssl.OP_NO_COMPRESSION

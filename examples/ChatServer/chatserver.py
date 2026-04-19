@@ -23,6 +23,7 @@ import argparse
 import asyncio
 import json
 import logging
+import pathlib
 import secrets
 import time
 import uuid
@@ -30,6 +31,12 @@ from http import HTTPStatus
 
 from blackbull import WebSocketResponse
 from blackbull.server.server import ASGIServer
+
+_TEMPLATES = pathlib.Path(__file__).parent / 'templates'
+
+
+def _load(name: str) -> bytes:
+    return (_TEMPLATES / name).read_bytes()
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format='%(levelname)s %(name)s: %(message)s')
@@ -121,215 +128,6 @@ class ChatState:
 state = ChatState()
 
 # ---------------------------------------------------------------------------
-# HTML pages (inlined)
-# ---------------------------------------------------------------------------
-
-LOGIN_HTML = b'''<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <title>Chat &mdash; Login</title>
-  <style>
-    body{font-family:sans-serif;display:flex;justify-content:center;align-items:center;
-         height:100vh;margin:0;background:#f0f2f5}
-    .card{background:#fff;padding:2rem;border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,.15);width:320px}
-    h1{margin:0 0 1.5rem;font-size:1.5rem;text-align:center}
-    label{display:block;margin-bottom:.25rem;font-size:.875rem;font-weight:600}
-    input,select{width:100%;box-sizing:border-box;padding:.5rem;border:1px solid #ccc;
-                 border-radius:4px;margin-bottom:1rem;font-size:1rem}
-    button{width:100%;padding:.6rem;background:#4f46e5;color:#fff;border:none;
-           border-radius:4px;font-size:1rem;cursor:pointer}
-    button:hover{background:#4338ca}
-    .error{color:#dc2626;font-size:.875rem;margin-bottom:.75rem;display:none}
-    .note{font-size:.75rem;color:#6b7280;margin-top:-.5rem;margin-bottom:.75rem}
-  </style>
-</head>
-<body>
-  <div class="card">
-    <h1>Chat Login</h1>
-    <div id="err" class="error"></div>
-    <form onsubmit="login(event)">
-      <label for="username">Username</label>
-      <input id="username" type="text" required minlength="1" placeholder="Your name" autocomplete="off">
-      <label for="method">Communication method</label>
-      <select id="method">
-        <option value="websocket">WebSocket (HTTP/1.1)</option>
-        <option value="sse">Server-Sent Events (HTTP/2)</option>
-        <option value="poll">Long Polling (HTTP/1.1)</option>
-      </select>
-      <p class="note" id="method-note"></p>
-      <button type="submit">Enter Chat</button>
-    </form>
-  </div>
-  <script>
-    const notes={
-      websocket:'Real-time bidirectional; requires HTTP/1.1.',
-      sse:'Server-push stream; requires HTTP/2 (TLS).',
-      poll:'Compatible with plain HTTP/1.1; polls every ~25 s.'
-    };
-    const sel=document.getElementById('method');
-    const note=document.getElementById('method-note');
-    sel.addEventListener('change',()=>{note.textContent=notes[sel.value]||'';});
-    note.textContent=notes[sel.value]||'';
-
-    async function login(e){
-      e.preventDefault();
-      const username=document.getElementById('username').value.trim();
-      const method=sel.value;
-      if(!username)return;
-      const r=await fetch('/login',{method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({username,method})});
-      if(!r.ok){
-        const d=await r.json().catch(()=>({}));
-        const err=document.getElementById('err');
-        err.textContent=d.error||'Login failed';
-        err.style.display='block';
-        return;
-      }
-      window.location.href='/chat';
-    }
-  </script>
-</body>
-</html>'''
-
-CHAT_HTML = b'''<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <title>Chat</title>
-  <style>
-    *{box-sizing:border-box;margin:0;padding:0}
-    body{font-family:sans-serif;display:flex;flex-direction:column;height:100vh;background:#f0f2f5}
-    header{background:#4f46e5;color:#fff;padding:.75rem 1rem;
-           display:flex;justify-content:space-between;align-items:center}
-    header h1{font-size:1.25rem}
-    #status{font-size:.75rem;opacity:.8}
-    .main{display:flex;flex:1;overflow:hidden;padding:.75rem;gap:.75rem}
-    #msg-pane{flex:1;display:flex;flex-direction:column;background:#fff;border-radius:8px;overflow:hidden}
-    #messages{flex:1;overflow-y:auto;padding:1rem}
-    .msg{margin-bottom:.75rem}
-    .meta{font-size:.75rem;color:#6b7280;margin-bottom:.125rem}
-    .meta strong{color:#1f2937}
-    .text{background:#f3f4f6;padding:.5rem .75rem;border-radius:6px;display:inline-block;max-width:80%}
-    .msg.sys .text{background:#ede9fe;color:#5b21b6;font-style:italic}
-    #send-area{display:flex;gap:.5rem;padding:.75rem;border-top:1px solid #e5e7eb}
-    #inp{flex:1;padding:.5rem;border:1px solid #d1d5db;border-radius:6px;font-size:1rem}
-    #send-btn{padding:.5rem 1rem;background:#4f46e5;color:#fff;border:none;
-              border-radius:6px;cursor:pointer;font-size:1rem}
-    #send-btn:hover{background:#4338ca}
-    #part-pane{width:200px;background:#fff;border-radius:8px;padding:1rem;overflow-y:auto}
-    #part-pane h2{font-size:.875rem;font-weight:700;color:#374151;margin-bottom:.75rem;
-                  text-transform:uppercase;letter-spacing:.05em}
-    .participant{padding:.375rem 0;font-size:.9rem;display:flex;align-items:center;gap:.5rem}
-    .participant::before{content:'';width:8px;height:8px;background:#10b981;
-                         border-radius:50%;flex-shrink:0}
-  </style>
-</head>
-<body>
-  <header>
-    <h1>Chat</h1>
-    <span id="status">Connecting&hellip;</span>
-  </header>
-  <div class="main">
-    <div id="msg-pane">
-      <div id="messages"></div>
-      <div id="send-area">
-        <input id="inp" type="text" placeholder="Type a message&hellip;" autocomplete="off">
-        <button id="send-btn" onclick="sendMsg()">Send</button>
-      </div>
-    </div>
-    <div id="part-pane">
-      <h2>Participants</h2>
-      <div id="participants"></div>
-    </div>
-  </div>
-  <script>
-    const msgsEl=document.getElementById('messages');
-    const partEl=document.getElementById('participants');
-    const statusEl=document.getElementById('status');
-    const inp=document.getElementById('inp');
-    inp.addEventListener('keydown',e=>{if(e.key==='Enter')sendMsg();});
-
-    function getCookie(name){
-      const m=document.cookie.match('(?:^|;)\\s*'+name+'=([^;]*)');
-      return m?decodeURIComponent(m[1]):null;
-    }
-    function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
-
-    function addMsg(msg,sys){
-      const d=document.createElement('div');
-      d.className='msg'+(sys?' sys':'');
-      if(!sys){
-        const ts=new Date(msg.timestamp).toLocaleTimeString();
-        d.innerHTML='<div class="meta"><strong>'+esc(msg.username)+'</strong> '+ts+'</div>'+
-                    '<div class="text">'+esc(msg.message)+'</div>';
-      } else {
-        d.innerHTML='<div class="text">'+esc(msg.message)+'</div>';
-      }
-      msgsEl.appendChild(d);
-      msgsEl.scrollTop=msgsEl.scrollHeight;
-    }
-
-    function setParts(list){
-      partEl.innerHTML=list.map(p=>'<div class="participant">'+esc(p.username)+'</div>').join('');
-    }
-
-    function handle(evt){
-      if(evt.type==='message')         addMsg(evt.payload);
-      else if(evt.type==='history')    evt.payload.forEach(m=>addMsg(m));
-      else if(evt.type==='user_join')  {setParts(evt.payload.participants);addMsg({message:esc(evt.payload.username)+' joined',timestamp:new Date().toISOString()},true);}
-      else if(evt.type==='user_leave') {setParts(evt.payload.participants);addMsg({message:esc(evt.payload.username)+' left', timestamp:new Date().toISOString()},true);}
-    }
-
-    async function sendMsg(){
-      const text=inp.value.trim();if(!text)return;inp.value='';
-      await fetch('/send',{method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({message:text})});
-    }
-
-    const method=getCookie('chat_method')||'poll';
-
-    // WebSocket
-    function connectWS(){
-      const proto=location.protocol==='https:'?'wss':'ws';
-      const ws=new WebSocket(proto+'://'+location.host+'/ws');
-      ws.onopen=()=>{statusEl.textContent='Connected (WebSocket)';};
-      ws.onmessage=e=>{handle(JSON.parse(e.data));};
-      ws.onerror=()=>{statusEl.textContent='WebSocket error - retrying...';};
-      ws.onclose=()=>{statusEl.textContent='Disconnected';setTimeout(connectWS,3000);};
-    }
-
-    // SSE
-    function connectSSE(){
-      if(!window.EventSource){statusEl.textContent='SSE not supported';return;}
-      const es=new EventSource('/sse');
-      es.onopen=()=>{statusEl.textContent='Connected (SSE)';};
-      es.onmessage=e=>{handle(JSON.parse(e.data));};
-      es.onerror=()=>{statusEl.textContent='SSE error - check HTTP/2 is available';};
-    }
-
-    // Long Polling
-    let _polling=true;
-    async function poll(){
-      while(_polling){
-        try{
-          const r=await fetch('/poll');
-          if(r.ok){const evts=await r.json();evts.forEach(handle);}
-        }catch(e){await new Promise(r=>setTimeout(r,2000));}
-      }
-    }
-    function connectPoll(){statusEl.textContent='Connected (Long Polling)';poll();}
-
-    if(method==='websocket') connectWS();
-    else if(method==='sse')  connectSSE();
-    else                     connectPoll();
-  </script>
-</body>
-</html>'''
-
-# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
@@ -360,8 +158,10 @@ async def _read_body(receive) -> bytes:
     return body
 
 
-def _set_cookie_header(name: str, value: str, path: str = '/') -> tuple[bytes, bytes]:
-    return (b'set-cookie', f'{name}={value}; Path={path}; HttpOnly; SameSite=Lax'.encode())
+def _set_cookie_header(name: str, value: str, path: str = '/',
+                       http_only: bool = True) -> tuple[bytes, bytes]:
+    flags = '; HttpOnly' if http_only else ''
+    return (b'set-cookie', f'{name}={value}; Path={path}{flags}; SameSite=Lax'.encode())
 
 
 async def _send_html(send, html: bytes, status: HTTPStatus = HTTPStatus.OK,
@@ -399,7 +199,7 @@ def _sse_encode(event: dict) -> bytes:
 # ---------------------------------------------------------------------------
 
 async def handle_login_page(scope, receive, send):  # noqa: ARG001
-    await _send_html(send, LOGIN_HTML)
+    await _send_html(send, _load('login.html'))
 
 
 async def handle_do_login(scope, receive, send):
@@ -431,8 +231,8 @@ async def handle_do_login(scope, receive, send):
         session.comm_type = comm_type
 
     extra = [
-        _set_cookie_header('session_id', session.session_id),
-        _set_cookie_header('chat_method', comm_type),
+        _set_cookie_header('session_id', session.session_id, http_only=True),
+        _set_cookie_header('chat_method', comm_type, http_only=False),
     ]
     await _send_json(send, {'ok': True}, extra_headers=extra)
 
@@ -444,7 +244,7 @@ async def handle_chat_page(scope, receive, send):
         await send({'type': 'http.response.start', 'status': 302, 'headers': headers})
         await send({'type': 'http.response.body', 'body': b'', 'more_body': False})
         return
-    await _send_html(send, CHAT_HTML)
+    await _send_html(send, _load('chat.html'))
 
 
 async def handle_send(scope, receive, send):
@@ -623,17 +423,37 @@ async def handle_poll(scope, receive, send):
     session.last_seen = time.monotonic()
     await _send_json(send, events)
 
+async def handle_logout(scope, receive, send):  # noqa: ARG001
+    cookies = _parse_cookie(scope)
+    sid = cookies.get('session_id', '')
+    if sid:
+        session = await state.remove(sid)
+        if session:
+            leave_event = {
+                'type': 'user_leave',
+                'payload': {'username': session.username, 'participants': state.participants()},
+            }
+            await state.broadcast(leave_event)
+
+    expire = 'Thu, 01 Jan 1970 00:00:00 GMT'
+    await _send_json(send, {'ok': True}, extra_headers=[
+        (b'set-cookie', f'session_id=; Path=/; Expires={expire}; HttpOnly; SameSite=Lax'.encode()),
+        (b'set-cookie', f'chat_method=; Path=/; Expires={expire}; SameSite=Lax'.encode()),
+    ])
+
+
 # ---------------------------------------------------------------------------
 # ASGI application
 # ---------------------------------------------------------------------------
 
 ROUTES: dict[tuple[str, str], object] = {
-    ('GET',  '/'):      handle_login_page,
-    ('POST', '/login'): handle_do_login,
-    ('GET',  '/chat'):  handle_chat_page,
-    ('POST', '/send'):  handle_send,
-    ('GET',  '/sse'):   handle_sse,
-    ('GET',  '/poll'):  handle_poll,
+    ('GET',  '/'):        handle_login_page,
+    ('POST', '/login'):   handle_do_login,
+    ('GET',  '/chat'):    handle_chat_page,
+    ('POST', '/send'):    handle_send,
+    ('POST', '/logout'):  handle_logout,
+    ('GET',  '/sse'):     handle_sse,
+    ('GET',  '/poll'):    handle_poll,
 }
 
 

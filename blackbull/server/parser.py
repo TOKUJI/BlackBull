@@ -4,6 +4,7 @@ import traceback
 from ..stream import Stream
 from ..frame import FrameTypes, PseudoHeaders
 from ..logger import get_logger_set, log
+from .headers import Headers
 
 logger, _ = get_logger_set(__name__)
 
@@ -15,7 +16,7 @@ def _make_scope():
             'version': '3.0',
             'spec_version': '2.2',
         },
-        'http_version': '2.0',
+        'http_version': '2',
         'method': 'HEAD',
         'scheme': 'https',
         'path': '',
@@ -81,6 +82,10 @@ class HTTP2HEADParser(HTTP2ParserBase):
 
         if scheme := self.frame.pseudo_headers.get(PseudoHeaders.SCHEME):
             scope['scheme'] = scheme
+
+        scope['headers'] = Headers(
+            [(k.encode(), v.encode()) for k, v in self.frame.headers]
+        )
 
         return scope
 

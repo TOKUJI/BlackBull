@@ -27,6 +27,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from http import HTTPStatus
 
 from blackbull.server.server import ASGIServer, WebSocketHandler, HTTP11Handler
+from blackbull.server.parser import _make_scope as _make_http2_scope
 
 
 # ---------------------------------------------------------------------------
@@ -97,6 +98,15 @@ class TestParse:
     def test_http_version_is_extracted(self):
         scope = _get_scope(_http_request(version='HTTP/1.1'))
         assert scope['http_version'] == '1.1'
+
+    def test_http_version_is_extracted_10(self):
+        scope = _get_scope(_http_request(version='HTTP/1.0'))
+        assert scope['http_version'] == '1.0'
+
+    def test_http2_version_string_is_spec_compliant(self):
+        """ASGI spec: http_version must be '2' for HTTP/2, not '2.0'."""
+        scope = _make_http2_scope()
+        assert scope['http_version'] == '2'
 
     def test_type_is_http_by_default(self):
         scope = _get_scope(_http_request())
