@@ -68,19 +68,19 @@ async def app(manage_cert_and_key):
     @app.route(path='/test')
     async def test_(scope, receive, send):
         logger.debug(f'test_({scope}, {receive}, {send})')
-        await send(Response('sample'), HTTPStatus.OK)
+        await send(Response('sample'))
 
     @app.on_error(HTTPStatus.NOT_FOUND)
     async def test_404(scope, receive, send):
         logger.debug(f'test_404({scope}, {receive}, {send})')
-        await send(Response('not found test.'), HTTPStatus.NOT_FOUND)
+        await send(Response('not found test.', status=HTTPStatus.NOT_FOUND))
 
     # Routing using middleware.
     async def test_fn1(scope, receive, send, inner):
         logger.debug('test_fn1 starts.')
         res = await inner(scope, receive, send)
         logger.debug(f'test_fn1 ends. res = {res}')
-        await send(Response(res + 'fn1'), HTTPStatus.OK)
+        await send(Response(res + 'fn1'))
 
     async def test_fn2(scope, receive, send, inner):
         logger.debug('test_fn2 starts.')
@@ -131,14 +131,14 @@ async def app(manage_cert_and_key):
 
         while request['type'] != 'http.disconnect' and request['body'] != 'Bye':
             msg = request['body']
-            await send(Response(msg), HTTPStatus.OK)
+            await send(Response(msg))
 
             try:
                 request = await asyncio.wait_for(receive(), timeout=0.5)
 
             except asyncio.TimeoutError:
                 logger.debug('Have not received any message in this second.')
-                await send(Response('Any message?'), HTTPStatus.OK)
+                await send(Response('Any message?'))
 
     p = Process(target=run_application, args=(app,))
     p.start()
@@ -247,3 +247,64 @@ async def test_websocket_response(app, ssl_context):
 
 #         for push in conn.get_pushes():  # all other pushes
 #             logger.info(push.path)
+
+
+# ---------------------------------------------------------------------------
+# Lifespan startup / shutdown hook tests (unit — no running server)
+# ---------------------------------------------------------------------------
+
+def _make_lifespan_receive(*event_types):
+    """Return an async callable that yields lifespan events in order."""
+    queue = list(reversed([{'type': t} for t in event_types]))
+    async def receive():
+        return queue.pop()
+    return receive
+
+
+@pytest.mark.asyncio
+async def test_on_startup_hook_called_at_lifespan_startup():
+    app_ = BlackBull()
+    called = []
+
+    @app_.on_startup
+    async def hook():
+        called.append('startup')
+
+    async def noop_send(_): pass
+    receive = _make_lifespan_receive('lifespan.startup', 'lifespan.shutdown')
+    await app_({'type': 'lifespan'}, receive, noop_send)
+    assert called == ['startup']
+
+
+@pytest.mark.asyncio
+async def test_on_shutdown_hook_called_at_lifespan_shutdown():
+    app_ = BlackBull()
+    called = []
+
+    @app_.on_shutdown
+    async def hook():
+        called.append('shutdown')
+
+    async def noop_send2(_): pass
+    receive = _make_lifespan_receive('lifespan.startup', 'lifespan.shutdown')
+    await app_({'type': 'lifespan'}, receive, noop_send2)
+    assert called == ['shutdown']
+
+
+@pytest.mark.asyncio
+async def test_multiple_startup_hooks_run_in_order():
+    app_ = BlackBull()
+    log = []
+
+    @app_.on_startup
+    async def hook_a():
+        log.append('a')
+
+    @app_.on_startup
+    async def hook_b():
+        log.append('b')
+
+    async def noop_send3(_): pass
+    receive = _make_lifespan_receive('lifespan.startup', 'lifespan.shutdown')
+    await app_({'type': 'lifespan'}, receive, noop_send3)
+    assert log == ['a', 'b']

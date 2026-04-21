@@ -12,6 +12,24 @@ from .watch import Watcher, force_reload
 logger, log = get_logger_set(__name__)
 
 
+def _wrap_send(raw_send):
+    """Wrap an ASGI send callable to also accept Response objects.
+
+    When a Response (or JSONResponse) is passed, unpacks it to
+    (body, status, headers) for the underlying sender.  All other arguments
+    (dicts, bytes) are forwarded unchanged.
+    """
+    from .response import Response as _Response
+
+    async def _send(event, status=HTTPStatus.OK, headers=[]):
+        if isinstance(event, _Response):
+            await raw_send(event.body, event.status, event.headers)
+        else:
+            await raw_send(event, status, headers)
+
+    return _send
+
+
 async def _default_error_handler(scope, receive, send):  # noqa: ARG001
     """Comprehensive fallback error handler registered at BlackBull construction.
 
@@ -40,6 +58,27 @@ async def _default_error_handler(scope, receive, send):  # noqa: ARG001
     await send(body, status, headers)
 
 
+class RouteGroup:
+    """A subset of routes that share a common middleware prefix.
+
+    Obtain via ``app.group(middlewares=[...])``.  Every route registered
+    through the group automatically prepends the group middlewares before
+    any per-route middlewares.
+    """
+    def __init__(self, app: 'BlackBull', middlewares):
+        self._app = app
+        self._group_mw = list(middlewares)
+
+    def route(self, methods=[HTTPMethod.GET], path='/', scheme=Scheme.http,
+              middlewares=[]):
+        return self._app.route(
+            methods=methods,
+            path=path,
+            scheme=scheme,
+            middlewares=self._group_mw + list(middlewares),
+        )
+
+
 class BlackBull:
     def __init__(self,
                  router=Router(),
@@ -62,6 +101,8 @@ class BlackBull:
         self._loop = loop
         self._certfile = None
         self._keyfile = None
+        self._startup_hooks: list = []
+        self._shutdown_hooks: list = []
 
     @property
     def loop(self):
@@ -84,8 +125,37 @@ class BlackBull:
     def keyfile(self):
         return self._keyfile
 
+    def on_startup(self, fn):
+        """Decorator: register an async callable invoked at lifespan startup."""
+        self._startup_hooks.append(fn)
+        return fn
+
+    def on_shutdown(self, fn):
+        """Decorator: register an async callable invoked at lifespan shutdown."""
+        self._shutdown_hooks.append(fn)
+        return fn
+
+    async def _handle_lifespan(self, scope, receive, send):  # noqa: ARG001
+        while True:
+            event = await receive()
+            if event['type'] == 'lifespan.startup':
+                self._logger.debug('lifespan startup')
+                for hook in self._startup_hooks:
+                    await hook()
+                await send({'type': 'lifespan.startup.complete'})
+            elif event['type'] == 'lifespan.shutdown':
+                self._logger.debug('lifespan shutdown')
+                for hook in self._shutdown_hooks:
+                    await hook()
+                await send({'type': 'lifespan.shutdown.complete'})
+                return
+
     async def __call__(self, scope, receive, send):
         self._logger.debug((scope, receive, send))
+
+        if scope.get('type') == 'lifespan':
+            await self._handle_lifespan(scope, receive, send)
+            return
 
         try:
             scheme = Scheme(scope['type'])
@@ -93,12 +163,24 @@ class BlackBull:
             self._logger.error(f'Invalid scheme ({scope["type"]}) is requested.')
             raise Exception('Invalid scheme is requested.')
 
+        wrapped = _wrap_send(send)
+
+        if scheme == Scheme.websocket:
+            path = scope['path']
+            try:
+                function = self._router[(path, HTTPMethod.GET, scheme)]
+            except (MethodNotApplicable, PathNotRegistered):
+                self._logger.warning('No websocket handler registered for %s', path)
+                return
+            await function(scope, receive, wrapped)
+            return
+
         try:
             method = HTTPMethod(scope['method'].upper())
         except ValueError:
             self._logger.debug("Unknown HTTP method: %r", scope['method'])
             scope.setdefault('state', {})['error_status'] = HTTPStatus.METHOD_NOT_ALLOWED
-            await self._error_router[HTTPStatus.METHOD_NOT_ALLOWED](scope, receive, send)
+            await self._error_router[HTTPStatus.METHOD_NOT_ALLOWED](scope, receive, wrapped)
             return
 
         path = scope['path']
@@ -113,17 +195,17 @@ class BlackBull:
                 'error_status': HTTPStatus.METHOD_NOT_ALLOWED,
                 'allowed_methods': e.allowed_methods,
             })
-            await self._error_router[HTTPStatus.METHOD_NOT_ALLOWED](scope, receive, send)
+            await self._error_router[HTTPStatus.METHOD_NOT_ALLOWED](scope, receive, wrapped)
             return
         except PathNotRegistered:
             self._logger.debug("404 Not Found: path=%r", path)
             scope.setdefault('state', {})['error_status'] = HTTPStatus.NOT_FOUND
-            await self._error_router[HTTPStatus.NOT_FOUND](scope, receive, send)
+            await self._error_router[HTTPStatus.NOT_FOUND](scope, receive, wrapped)
             return
 
         self._logger.debug((self, function))
         try:
-            await function(scope, receive, send)
+            await function(scope, receive, wrapped)
         except Exception as e:
             self._logger.error(traceback.format_exc())
             scope.setdefault('state', {}).update({
@@ -132,20 +214,22 @@ class BlackBull:
             })
             handler = self._error_router[e]
             if handler is not None:
-                await handler(scope, receive, send)
+                await handler(scope, receive, wrapped)
 
-    def route(self, methods=[HTTPMethod.GET], path='/', scheme=Scheme.http, functions=[]):
-        """
-        Set endpoint functions here.
-        methods: HTTP method of functions.
-        functions: functions that will be registered in the router.
-        """
+    def route(self, methods=[HTTPMethod.GET], path='/', scheme=Scheme.http,
+              functions=[], middlewares=[]):
+        """Register a route handler, optionally wrapping it in middlewares."""
         return self._router.route(
             methods=methods,
             path=path,
             scheme=scheme,
             functions=functions,
+            middlewares=middlewares,
             )
+
+    def group(self, middlewares=[]) -> 'RouteGroup':
+        """Return a RouteGroup that prepends *middlewares* to every route."""
+        return RouteGroup(self, middlewares)
 
     def on_error(self, key):
         """Register a custom error handler for an HTTPStatus or exception class.

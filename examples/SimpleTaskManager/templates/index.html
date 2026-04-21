@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Simple Task Manager</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, sans-serif; background: #f0f2f5; padding: 2rem 1rem; }
+
+    header {
+      max-width: 640px;
+      margin: 0 auto 1.5rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    header h1 { font-size: 1.4rem; color: #333; }
+    #logoutBtn {
+      background: none;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      padding: .35rem .75rem;
+      cursor: pointer;
+      font-size: .875rem;
+      color: #555;
+    }
+    #logoutBtn:hover { background: #eee; }
+
+    .card {
+      background: #fff;
+      border-radius: 8px;
+      box-shadow: 0 2px 12px rgba(0,0,0,.10);
+      max-width: 640px;
+      margin: 0 auto;
+      padding: 1.5rem;
+    }
+
+    /* Add-task form */
+    #addForm { display: flex; gap: .5rem; margin-bottom: 1.25rem; }
+    #newTitle {
+      flex: 1;
+      padding: .55rem .75rem;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      font-size: 1rem;
+    }
+    #newTitle:focus { outline: none; border-color: #4a90e2; }
+    #addBtn {
+      padding: .55rem 1.1rem;
+      background: #4a90e2;
+      color: #fff;
+      border: none;
+      border-radius: 4px;
+      font-size: 1rem;
+      cursor: pointer;
+    }
+    #addBtn:hover { background: #357abd; }
+
+    /* Task list */
+    #taskList { list-style: none; }
+    #taskList li {
+      display: flex;
+      align-items: center;
+      gap: .75rem;
+      padding: .65rem 0;
+      border-bottom: 1px solid #f0f0f0;
+    }
+    #taskList li:last-child { border-bottom: none; }
+
+    input[type=checkbox] { width: 1.1rem; height: 1.1rem; cursor: pointer; flex-shrink: 0; }
+
+    .task-title {
+      flex: 1;
+      font-size: 1rem;
+      color: #222;
+      word-break: break-word;
+    }
+    .task-title.done { text-decoration: line-through; color: #aaa; }
+
+    .edit-input {
+      flex: 1;
+      font-size: 1rem;
+      padding: .2rem .4rem;
+      border: 1px solid #4a90e2;
+      border-radius: 4px;
+    }
+
+    .icon-btn {
+      background: none;
+      border: none;
+      cursor: pointer;
+      font-size: 1rem;
+      padding: .2rem .3rem;
+      border-radius: 4px;
+      color: #777;
+      flex-shrink: 0;
+    }
+    .icon-btn:hover { background: #f0f0f0; color: #333; }
+    .icon-btn.danger:hover { background: #fdecea; color: #c62828; }
+
+    #emptyMsg { text-align: center; color: #aaa; padding: 2rem 0; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Task Manager</h1>
+    <button id="logoutBtn">ログアウト</button>
+  </header>
+
+  <div class="card">
+    <form id="addForm">
+      <input type="text" id="newTitle" placeholder="新しいタスクを入力…" required>
+      <button type="submit" id="addBtn">追加</button>
+    </form>
+    <ul id="taskList">
+      <li id="emptyMsg">タスクはありません</li>
+    </ul>
+  </div>
+
+  <script>
+    // ── Auth ─────────────────────────────────────────────────────────────────
+
+    const token = sessionStorage.getItem('token');
+    if (!token) { location.replace('/'); }
+
+    function authHeaders(extra = {}) {
+      return { 'Authorization': `Bearer ${token}`, ...extra };
+    }
+
+    function handleUnauth() {
+      sessionStorage.removeItem('token');
+      location.replace('/');
+    }
+
+    // ── API helpers ──────────────────────────────────────────────────────────
+
+    async function apiGet(path) {
+      const res = await fetch(path, { headers: authHeaders() });
+      if (res.status === 401) { handleUnauth(); return null; }
+      return res.json();
+    }
+
+    async function apiPost(path, body) {
+      const res = await fetch(path, {
+        method: 'POST',
+        headers: authHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify(body),
+      });
+      if (res.status === 401) { handleUnauth(); return null; }
+      return res.json();
+    }
+
+    async function apiPut(path, body) {
+      const res = await fetch(path, {
+        method: 'PUT',
+        headers: authHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify(body),
+      });
+      if (res.status === 401) { handleUnauth(); return null; }
+      return res.json();
+    }
+
+    async function apiDelete(path) {
+      const res = await fetch(path, {
+        method: 'DELETE',
+        headers: authHeaders(),
+      });
+      if (res.status === 401) { handleUnauth(); return null; }
+      return res.json();
+    }
+
+    // ── Render ───────────────────────────────────────────────────────────────
+
+    function renderTasks(tasks) {
+      const list = document.getElementById('taskList');
+      list.innerHTML = '';
+
+      if (!tasks || tasks.length === 0) {
+        list.innerHTML = '<li id="emptyMsg">タスクはありません</li>';
+        return;
+      }
+
+      for (const task of tasks) {
+        const li = document.createElement('li');
+        li.dataset.id = task.id;
+
+        // Checkbox (toggle complete)
+        const chk = document.createElement('input');
+        chk.type = 'checkbox';
+        chk.checked = task.completed;
+        chk.addEventListener('change', async () => {
+          await apiPut(`/tasks/${task.id}`, { completed: chk.checked });
+          loadTasks();
+        });
+
+        // Title span
+        const span = document.createElement('span');
+        span.className = 'task-title' + (task.completed ? ' done' : '');
+        span.textContent = task.title;
+
+        // Edit button
+        const editBtn = document.createElement('button');
+        editBtn.className = 'icon-btn';
+        editBtn.title = '編集';
+        editBtn.textContent = '✏️';
+        editBtn.addEventListener('click', () => startEdit(li, task));
+
+        // Delete button
+        const delBtn = document.createElement('button');
+        delBtn.className = 'icon-btn danger';
+        delBtn.title = '削除';
+        delBtn.textContent = '🗑️';
+        delBtn.addEventListener('click', async () => {
+          if (confirm(`「${task.title}」を削除しますか？`)) {
+            await apiDelete(`/tasks/${task.id}`);
+            loadTasks();
+          }
+        });
+
+        li.append(chk, span, editBtn, delBtn);
+        list.appendChild(li);
+      }
+    }
+
+    function startEdit(li, task) {
+      const span = li.querySelector('.task-title');
+      const editBtn = li.querySelector('.icon-btn:not(.danger)');
+      const delBtn  = li.querySelector('.icon-btn.danger');
+
+      const input = document.createElement('input');
+      input.className = 'edit-input';
+      input.value = task.title;
+
+      const saveBtn = document.createElement('button');
+      saveBtn.className = 'icon-btn';
+      saveBtn.textContent = '✅';
+      saveBtn.title = '保存';
+
+      const cancelBtn = document.createElement('button');
+      cancelBtn.className = 'icon-btn';
+      cancelBtn.textContent = '❌';
+      cancelBtn.title = 'キャンセル';
+
+      span.replaceWith(input);
+      editBtn.replaceWith(saveBtn);
+      delBtn.replaceWith(cancelBtn);
+      input.focus();
+
+      async function save() {
+        const newTitle = input.value.trim();
+        if (!newTitle) return;
+        await apiPut(`/tasks/${task.id}`, { title: newTitle });
+        loadTasks();
+      }
+
+      saveBtn.addEventListener('click', save);
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') save();
+        if (e.key === 'Escape') loadTasks();
+      });
+      cancelBtn.addEventListener('click', loadTasks);
+    }
+
+    // ── Actions ──────────────────────────────────────────────────────────────
+
+    async function loadTasks() {
+      const tasks = await apiGet('/tasks');
+      if (tasks !== null) renderTasks(tasks);
+    }
+
+    document.getElementById('addForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const input = document.getElementById('newTitle');
+      const title = input.value.trim();
+      if (!title) return;
+      await apiPost('/tasks', { title });
+      input.value = '';
+      loadTasks();
+    });
+
+    document.getElementById('logoutBtn').addEventListener('click', async () => {
+      await apiPost('/logout', {});
+      sessionStorage.removeItem('token');
+      location.replace('/');
+    });
+
+    // ── Init ─────────────────────────────────────────────────────────────────
+
+    loadTasks();
+  </script>
+</body>
+</html>

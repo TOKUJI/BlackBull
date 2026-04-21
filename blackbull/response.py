@@ -1,33 +1,56 @@
 import json
-from typing import Union
 from http import HTTPStatus
+from typing import Union
 
 from .logger import get_logger_set
 logger, log = get_logger_set('response')
 
 
-def Response(content: Union[str, bytes]) -> bytes:
-    """Encode *content* to bytes for use as an HTTP response body.
+class Response:
+    """HTTP response object carrying body, status, and headers.
 
-    Pass the result directly to the ASGI ``send`` callable::
+    Pass directly to the ASGI ``send`` callable when using BlackBull::
 
-        await send(Response('Hello'), HTTPStatus.OK)
+        await send(Response('<h1>Hello</h1>'))
+        await send(Response(b'data', status=HTTPStatus.NOT_FOUND))
     """
-    if isinstance(content, str):
-        return content.encode()
-    if isinstance(content, bytes):
-        return content
-    raise TypeError(f'Response expects str or bytes, got {type(content)}')
+
+    def __init__(self, content: Union[str, bytes],
+                 status: HTTPStatus = HTTPStatus.OK,
+                 content_type: str = 'text/html; charset=utf-8',
+                 headers: list | None = None):
+        if isinstance(content, str):
+            self.body = content.encode()
+        elif isinstance(content, bytes):
+            self.body = content
+        else:
+            raise TypeError(f'Response expects str or bytes, got {type(content)}')
+        self.status = status
+        self.headers = [(b'content-type', content_type.encode())]
+        if headers:
+            self.headers.extend(headers)
 
 
-def JSONResponse(content) -> bytes:
-    """Serialize *content* to JSON bytes for use as an HTTP response body.
+class JSONResponse(Response):
+    """HTTP response with JSON-serialised body and ``application/json`` content-type.
 
-    Pass the result directly to the ASGI ``send`` callable::
+    Pass directly to the ASGI ``send`` callable when using BlackBull::
 
-        await send(JSONResponse({'key': 'value'}), HTTPStatus.OK)
+        await send(JSONResponse({'ok': True}))
+        await send(JSONResponse({'error': 'Not found'}, status=HTTPStatus.NOT_FOUND))
     """
-    return json.dumps(content).encode()
+
+    def __init__(self, content,
+                 status: HTTPStatus = HTTPStatus.OK,
+                 headers: list | None = None):
+        super().__init__(json.dumps(content).encode(), status, 'application/json', headers)
+
+
+def cookie_header(name: str, value: str, path: str = '/',
+                  http_only: bool = True) -> tuple[bytes, bytes]:
+    """Build a ``set-cookie`` header tuple suitable for inclusion in response headers."""
+    flags = '; HttpOnly' if http_only else ''
+    return (b'set-cookie', f'{name}={value}; Path={path}{flags}; SameSite=Lax'.encode())
 
 
 def WebSocketResponse(content) -> dict:

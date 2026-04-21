@@ -8,6 +8,14 @@ import logging
 import inspect
 from .utils import Scheme, do_nothing
 
+# RouteGroup is defined in BlackBull.py to avoid a circular import;
+# re-export here so tests can import it from either location.
+def __getattr__(name):
+    if name == 'RouteGroup':
+        from .BlackBull import RouteGroup
+        return RouteGroup
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 
 logger = logging.getLogger(__name__)
@@ -26,9 +34,25 @@ class MethodNotApplicable(Exception):
         self.allowed_methods = tuple(allowed_methods)
         super().__init__(f"Method not allowed. Allowed: {self.allowed_methods}")
 
-def has_inner(fn):
-    sig = inspect.signature(fn)
-    return 'inner' in sig.parameters
+def _middleware_param(fn) -> str | None:
+    """Return the middleware-chaining parameter name for *fn*, or None.
+
+    Checks for 'call_next' first (Starlette/FastAPI convention), then falls
+    back to 'inner' (legacy BlackBull convention) for backwards compatibility.
+    """
+    params = inspect.signature(fn).parameters
+    if 'call_next' in params:
+        return 'call_next'
+    if 'inner' in params:
+        return 'inner'
+    return None
+
+
+def has_middleware_param(fn) -> bool:
+    return _middleware_param(fn) is not None
+
+
+has_inner = has_middleware_param  # backward-compat alias
 
 
 def _to_tuple(value) -> tuple:
@@ -171,6 +195,16 @@ class Router(UserDict, BaseRouter):
             if self._method_matches(key_method, ms):
                 logger.debug("regex_ hit: pattern=%r fn=%r", pattern, fn)
                 if gdict := m.groupdict():
+                    if getattr(fn, '_is_middleware_chain', False):
+                        # Middleware chain: inject params into scope at call
+                        # time rather than passing as kwargs (which would
+                        # raise TypeError for middlewares that don't accept **kwargs).
+                        _fn, _params = fn, gdict
+                        async def _inject(scope, receive, send,
+                                          _fn=_fn, _params=_params):
+                            scope.setdefault('path_params', {}).update(_params)
+                            return await _fn(scope, receive, send)
+                        return _inject
                     fn = partial(fn, **gdict)
                 return fn
 
@@ -257,32 +291,59 @@ class Router(UserDict, BaseRouter):
 
         return register
 
-    def route(self, methods=[HTTPMethod.GET], path='/', scheme=Scheme.http, functions=[]):
-        """ Register a function or middlewares in the routing table of this server. """
-        logger.debug(f'Router.route() is called. %r', functions)
-        if not functions:
-            return self.route_fn(methods, path, scheme)
-
+    def _register_chain(self, functions, path, methods, scheme):
+        """Build a middleware chain from *functions* and register it."""
         if not isinstance(functions, Iterable):
             raise TypeError(f'{functions} is not iterable.')
 
-        if len(functions) == 1:
-            inner = partial(functions[0], inner=do_nothing)
-
+        param = _middleware_param(functions[-1])
+        if param is not None:
+            inner_chain = partial(functions[-1], **{param: do_nothing})
         else:
-            if has_inner(functions[-1]):
-                inner = partial(functions[-1], inner=do_nothing)
-            else:
-                inner = functions[-1]
+            inner_chain = functions[-1]
 
-            for fn in functions[-2::-1]:
+        for fn in functions[-2::-1]:
+            param = _middleware_param(fn)
+            if param is None:
+                raise ValueError(f'{fn} does not have "inner" or "call_next" in its parameters.')
+            inner_chain = partial(fn, **{param: inner_chain})
 
-                if not has_inner(fn):
-                    raise ValueError(f'{fn} does not have "inner" in its paramters.')
+        # Wrap in a named coroutine so it is recognisable at lookup time.
+        # Path parameters will be injected into scope['path_params'] by
+        # __getitem__ rather than forwarded as kwargs to the outermost
+        # middleware (which would raise TypeError for unknown keyword args).
+        _ic = inner_chain
+        async def _chain_wrapper(scope, receive, send):
+            return await _ic(scope, receive, send)
+        _chain_wrapper._is_middleware_chain = True
 
-                inner = partial(fn, **{'inner': inner})
+        self[(path, methods, scheme)] = _chain_wrapper
 
-        self[(path, methods, scheme)] = inner
+    def route(self, methods=[HTTPMethod.GET], path='/', scheme=Scheme.http,
+              functions=[], middlewares=[]):
+        """Register a function or middleware chain in the routing table.
+
+        Three calling conventions:
+        1. Decorator with no extra middlewares (``functions`` and ``middlewares``
+           both empty) — returns a decorator via ``route_fn``.
+        2. ``functions=[...]`` — registers a pre-built chain immediately;
+           returns None (same as before).
+        3. ``middlewares=[...]`` — returns a decorator; the decorated handler is
+           appended to the middleware list before the chain is registered.
+        """
+        logger.debug('Router.route() is called. functions=%r middlewares=%r', functions, middlewares)
+
+        if functions:
+            self._register_chain(list(functions), path, methods, scheme)
+            return
+
+        if middlewares:
+            def decorator(fn):
+                self._register_chain(list(middlewares) + [fn], path, methods, scheme)
+                return fn
+            return decorator
+
+        return self.route_fn(methods, path, scheme)
 
 
 class ErrorRouter:
