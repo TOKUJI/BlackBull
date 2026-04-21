@@ -117,74 +117,85 @@ def test_router_regex(router):
     assert f == fn
 
 
-def test_router_regex_with_group_name1(router):
+@pytest.mark.asyncio
+async def test_router_regex_with_group_name1(router):
     path = r'^test/(?P<id_>\d+)$'
     scheme = Scheme.http
 
     @router.route(path=path, methods=[HTTPMethod.GET])
-    def fn(*args, **kwargs):
-        return kwargs.pop('id_', None)
+    async def fn(scope, receive, send):
+        pass
 
     f = router[('test/1234', HTTPMethod.GET, scheme)]
+    scope = {}
+    await f(scope, None, None)
+    assert scope['path_params']['id_'] == '1234'
 
-    assert f() == '1234'
 
-
-def test_router_regex_with_group_name2(router):
+@pytest.mark.asyncio
+async def test_router_regex_with_group_name2(router):
     path = r'^test/(?P<id_>\d+)$'
     scheme = Scheme.http
 
     @router.route(path=path, methods=[HTTPMethod.GET])
-    def fn(id_, *args, **kwargs):
-        return id_
+    async def fn(scope, receive, send):
+        pass
 
     f = router[('test/1234', HTTPMethod.GET, scheme)]
+    scope = {}
+    await f(scope, None, None)
+    assert scope['path_params']['id_'] == '1234'
 
-    assert f() == '1234'
 
-
-def test_router_F_string1(router):
+@pytest.mark.asyncio
+async def test_router_F_string1(router):
     path = 'test/{id_}'
     scheme = Scheme.http
 
     @router.route(path=path, methods=[HTTPMethod.GET])
-    def fn(*args, **kwargs):
-        return kwargs.pop('id_', None)
+    async def fn(scope, receive, send):
+        pass
 
     id_ = 'a24_12-3.4~'
     f = router[(f'test/{id_}', HTTPMethod.GET, scheme)]
+    scope = {}
+    await f(scope, None, None)
+    assert scope['path_params']['id_'] == id_
 
-    assert f() == id_
 
-
-def test_router_F_string2(router):
+@pytest.mark.asyncio
+async def test_router_F_string2(router):
     path = 'test/{id_}/{name}'
     scheme = Scheme.http
 
     @router.route(path=path, methods=[HTTPMethod.GET])
-    def fn(id_, name, *args, **kwargs):
-        return (id_, name)
+    async def fn(scope, receive, send):
+        pass
 
     id_ = 'a24_12-3.4~'
     name = 'Toshio'
     f = router[(f'test/{id_}/{name}', HTTPMethod.GET, scheme)]
+    scope = {}
+    await f(scope, None, None)
+    assert scope['path_params']['id_'] == id_
+    assert scope['path_params']['name'] == name
 
-    assert f() == (id_, name)
 
-
-def test_router_websocket(router):
+@pytest.mark.asyncio
+async def test_router_websocket(router):
     path = 'test/{id_}'
     scheme = Scheme.websocket
 
     @router.route(path=path, scheme=scheme)
-    def fn(*args, **kwargs):
-        return kwargs.pop('id_', None)
+    async def fn(scope, receive, send):
+        pass
 
     logger.debug('Registered')
     id_ = 'a24_12-3.4~'
     f = router[(f'test/{id_}', HTTPMethod.GET, scheme)]
-
-    assert f() == id_
+    scope = {}
+    await f(scope, None, None)
+    assert scope['path_params']['id_'] == id_
 
 
 # ---------------------------------------------------------------------------
@@ -490,12 +501,15 @@ async def test_middleware_chain_path_param_injected_into_scope(router):
     assert seen.get('item_id') == '42'
 
 
-def test_plain_route_path_param_still_kwarg(router):
+@pytest.mark.asyncio
+async def test_plain_route_path_param_in_scope(router):
     path = 'plain/{value}'
 
     @router.route(path=path, methods=[HTTPMethod.GET])
-    def fn(*args, **kwargs):
-        return kwargs.get('value')
+    async def fn(scope, receive, send):
+        pass
 
     f = router[('plain/hello', HTTPMethod.GET, Scheme.http)]
-    assert f() == 'hello'
+    scope = {}
+    await f(scope, None, None)
+    assert scope['path_params']['value'] == 'hello'

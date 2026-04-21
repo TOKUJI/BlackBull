@@ -195,17 +195,12 @@ class Router(UserDict, BaseRouter):
             if self._method_matches(key_method, ms):
                 logger.debug("regex_ hit: pattern=%r fn=%r", pattern, fn)
                 if gdict := m.groupdict():
-                    if getattr(fn, '_is_middleware_chain', False):
-                        # Middleware chain: inject params into scope at call
-                        # time rather than passing as kwargs (which would
-                        # raise TypeError for middlewares that don't accept **kwargs).
-                        _fn, _params = fn, gdict
-                        async def _inject(scope, receive, send,
-                                          _fn=_fn, _params=_params):
-                            scope.setdefault('path_params', {}).update(_params)
-                            return await _fn(scope, receive, send)
-                        return _inject
-                    fn = partial(fn, **gdict)
+                    _fn, _params = fn, gdict
+                    async def _inject(scope, receive, send,
+                                      _fn=_fn, _params=_params):
+                        scope.setdefault('path_params', {}).update(_params)
+                        return await _fn(scope, receive, send)
+                    return _inject
                 return fn
 
         # --- 3. Raise appropriate exception -------------------------------
@@ -315,7 +310,6 @@ class Router(UserDict, BaseRouter):
         _ic = inner_chain
         async def _chain_wrapper(scope, receive, send):
             return await _ic(scope, receive, send)
-        _chain_wrapper._is_middleware_chain = True
 
         self[(path, methods, scheme)] = _chain_wrapper
 

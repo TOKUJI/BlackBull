@@ -115,15 +115,16 @@ async def get_task(scope, receive, send):
 ```
 
 `{name}` matches `[a-zA-Z0-9_\-\.\~]+`.  For other patterns supply a compiled
-regex with a named group; the group value is passed as a **kwarg** to the handler
-(only when no `middlewares=` list is used — see §4.3 for the middleware-chain case):
+regex with named groups; the captured values are always injected into
+`scope['path_params']` — the same place as `{name}` parameters:
 
 ```python
 import re
 
 @app.route(path=re.compile(r'^/items/(?P<id>\d+)$'))
-async def get_item(scope, receive, send, id):
-    await send(Response(id.encode()))
+async def get_item(scope, receive, send):
+    item_id = scope['path_params']['id']    # same interface as {name} style
+    await send(Response(item_id.encode()))
 ```
 
 ### 3.3  WebSocket routes
@@ -232,14 +233,13 @@ or delegates to `logging_mw`, which then delegates to `handler`.  Post-handler c
 (after `await call_next(...)`) runs in reverse order: `logging_mw` post → `auth_mw`
 post.
 
-### 4.3  Path parameters inside middleware chains
+### 4.3  Path parameters
 
-> **⚠️ Gotcha** — When a route uses `middlewares=[...]` (or belongs to a route
-> group), path parameters are injected into `scope['path_params']`, **not** passed
-> as kwargs to the handler.  A bare `@app.route(path='/tasks/{id}')` with no
-> middleware list does pass the value as a kwarg — but the moment you add
-> `middlewares=[...]`, kwargs are disabled for the whole chain.  Always use
-> `scope['path_params']` to be consistent:
+> **Note** — Path parameters — whether from `{name}` string patterns or
+> `re.compile(...)` named groups — are always injected into `scope['path_params']`,
+> regardless of whether `middlewares=[...]` is present.  The handler signature is
+> always `(scope, receive, send)`:
+>
 
 ```python
 @app.route(path='/tasks/{task_id}', methods=[HTTPMethod.DELETE])
