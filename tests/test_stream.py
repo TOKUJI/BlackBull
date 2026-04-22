@@ -9,7 +9,7 @@ logger, _ = get_logger_set('test_stream')
 
 # Test targets
 # from plugin import Plugin, LedgerInfo
-from blackbull.stream import Stream
+from blackbull.protocol.stream import Stream
 
 
 def test_create():

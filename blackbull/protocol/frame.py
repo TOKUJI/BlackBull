@@ -6,8 +6,8 @@ from hpack import Encoder, Decoder
 
 # private programs
 # from . import message
-from .logger import get_logger_set
-from .utils import pop_safe
+from ..logger import get_logger_set
+from ..utils import pop_safe
 logger, log = get_logger_set('frame')
 
 
@@ -511,7 +511,7 @@ class Continuation(FrameBase):
         self.payload = data
         logger.debug('payload is %r', self.payload)
         self.end_headers = HeaderFrameFlags.END_HEADERS & self.flags
-        logger.debug('end_headers = %r', self.end_headers > 0)  
+        logger.debug('end_headers = %r', self.end_headers > 0)
 
     def save(self):
         base = super().save()

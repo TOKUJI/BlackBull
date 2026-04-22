@@ -8,7 +8,7 @@ import traceback
 from .utils import Scheme
 from .router import Router, ErrorRouter, MethodNotApplicable, PathNotRegistered
 from .logger import get_logger_set
-from .watch import Watcher, force_reload
+from .server.watch import Watcher, force_reload
 logger, log = get_logger_set(__name__)
 
 

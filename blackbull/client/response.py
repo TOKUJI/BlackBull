@@ -1,4 +1,4 @@
-from ..frame import FrameTypes, SettingFrameFlags
+from ..protocol.frame import FrameTypes, SettingFrameFlags
 from ..logger import get_logger_set, log
 logger, _ = get_logger_set('client.response')
 

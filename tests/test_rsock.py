@@ -18,7 +18,7 @@ Dual-stack support – original ``create_socket`` bound only to ``'::1'``
 import socket
 import pytest
 
-from blackbull.rsock import _bind_socket, create_socket, create_dual_stack_sockets
+from blackbull.protocol.rsock import _bind_socket, create_socket, create_dual_stack_sockets
 
 
 # ---------------------------------------------------------------------------

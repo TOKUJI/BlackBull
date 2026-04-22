@@ -17,9 +17,9 @@ import socket
 
 # private library
 from ..utils import HTTP2, pop_safe, EventEmitter, check_port
-from ..stream import Stream
-from ..rsock import create_dual_stack_sockets
-from ..frame import ErrorCodes, FrameFactory, FrameTypes, FrameBase
+from ..protocol.stream import Stream
+from ..protocol.rsock import create_dual_stack_sockets
+from ..protocol.frame import ErrorCodes, FrameFactory, FrameTypes, FrameBase
 from ..logger import get_logger_set
 from .response import RespondFactory
 from .parser import ParserFactory

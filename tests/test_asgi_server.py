@@ -38,7 +38,7 @@ import pytest_asyncio
 
 from blackbull.server.server import ASGIServer, HTTP11Handler
 from blackbull.server.recipient import RecipientFactory
-from blackbull.rsock import create_dual_stack_sockets, _bind_socket
+from blackbull.protocol.rsock import create_dual_stack_sockets, _bind_socket
 
 
 # ---------------------------------------------------------------------------

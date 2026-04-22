@@ -4,7 +4,7 @@ import logging
 
 from .sender import WebSocketSender, WSOpcode
 from .headers import Headers
-from ..frame import FrameBase, Data
+from ..protocol.frame import FrameBase, Data
 
 logger = logging.getLogger(__name__)
 

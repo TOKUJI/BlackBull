@@ -6,9 +6,9 @@ import concurrent.futures
 
 # private library
 from ..utils import HTTP2, EventEmitter
-from ..rsock import create_socket
-from ..frame import FrameFactory, FrameTypes, DataFrameFlags, HeaderFrameFlags, SettingFrameFlags, PingFrameFlags
-from ..stream import Stream
+from ..protocol.rsock import create_socket
+from ..protocol.frame import FrameFactory, FrameTypes, DataFrameFlags, HeaderFrameFlags, SettingFrameFlags, PingFrameFlags
+from ..protocol.stream import Stream
 from ..logger import get_logger_set, log
 logger, _ = get_logger_set('client')
 

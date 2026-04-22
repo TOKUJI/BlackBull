@@ -14,7 +14,7 @@ from unittest.mock import AsyncMock, MagicMock
 from hpack import Encoder
 
 from blackbull.server.server import HTTP2Handler
-from blackbull.frame import (FrameFactory, FrameTypes, FrameFlags,
+from blackbull.protocol.frame import (FrameFactory, FrameTypes, FrameFlags,
                               HeaderFrameFlags, DataFrameFlags,
                               SettingFrameFlags)
 
@@ -475,13 +475,13 @@ class TestHTTP2StreamStateMachine:
     """
 
     def _import_state(self):
-        from blackbull.stream import StreamState
+        from blackbull.protocol.stream import StreamState
         return StreamState
 
     async def test_new_stream_is_idle(self):
         """A freshly created stream must be in the IDLE state."""
         StreamState = self._import_state()
-        from blackbull.stream import Stream
+        from blackbull.protocol.stream import Stream
         stream = Stream(identifier=1, parent=None)
         assert stream.state == StreamState.IDLE, (
             f'New stream must be IDLE; got {stream.state}'
@@ -490,7 +490,7 @@ class TestHTTP2StreamStateMachine:
     async def test_headers_received_opens_stream(self):
         """Receiving a HEADERS frame must transition the stream to OPEN."""
         StreamState = self._import_state()
-        from blackbull.stream import Stream
+        from blackbull.protocol.stream import Stream
         stream = Stream(identifier=1, parent=None)
         stream.on_headers_received(end_stream=False)
         assert stream.state == StreamState.OPEN, (
@@ -500,7 +500,7 @@ class TestHTTP2StreamStateMachine:
     async def test_headers_with_end_stream_half_closes(self):
         """HEADERS + END_STREAM must transition to HALF_CLOSED_REMOTE."""
         StreamState = self._import_state()
-        from blackbull.stream import Stream
+        from blackbull.protocol.stream import Stream
         stream = Stream(identifier=1, parent=None)
         stream.on_headers_received(end_stream=True)
         assert stream.state == StreamState.HALF_CLOSED_REMOTE, (
@@ -510,7 +510,7 @@ class TestHTTP2StreamStateMachine:
     async def test_data_end_stream_closes_stream(self):
         """DATA + END_STREAM on an open stream must transition to CLOSED."""
         StreamState = self._import_state()
-        from blackbull.stream import Stream
+        from blackbull.protocol.stream import Stream
         stream = Stream(identifier=1, parent=None)
         stream.on_headers_received(end_stream=False)
         stream.on_data_received(end_stream=True)
@@ -525,7 +525,7 @@ class TestHTTP2StreamStateMachine:
         'closed' state, the endpoint MUST respond with a stream error of type
         STREAM_CLOSED.
         """
-        from blackbull.frame import ErrorCodes
+        from blackbull.protocol.frame import ErrorCodes
         # Send HEADERS+END_STREAM (closes remote side), then another DATA
         h_frame = _make_headers_frame(stream_id=1, end_stream=True)
         d_frame = _make_h2_frame(FrameTypes.DATA, DataFrameFlags.END_STREAM, 1, b'late')
@@ -821,7 +821,7 @@ class TestFrameSavePayload:
 
     def test_rst_stream_save_includes_error_code(self):
         """RstStream.save() must produce a 13-byte frame (9 header + 4 error code)."""
-        from blackbull.frame import ErrorCodes
+        from blackbull.protocol.frame import ErrorCodes
         frame = FrameFactory().rst_stream(stream_id=3,
                                           error_code=ErrorCodes.REFUSED_STREAM)
         wire = frame.save()
@@ -901,7 +901,7 @@ class TestSettingsMaxHeaderListSize:
 
     async def test_settings_max_header_list_size_value_is_stored(self):
         """MAX_HEADER_LIST_SIZE value must be stored in the SettingFrame object."""
-        from blackbull.frame import FrameFactory
+        from blackbull.protocol.frame import FrameFactory
         factory = FrameFactory()
         payload = (0x6).to_bytes(2, 'big') + (262144).to_bytes(4, 'big')
         wire = _make_h2_frame(FrameTypes.SETTINGS, SettingFrameFlags.INIT, 0, payload)

@@ -2,7 +2,7 @@ import asyncio
 from urllib.parse import urlparse
 
 from .frame import PseudoHeaders, DataFrameFlags, HeaderFrameFlags, FrameTypes
-from .logger import get_logger_set
+from ..logger import get_logger_set
 logger, log = get_logger_set(__name__)
 
 class Stream:
@@ -39,7 +39,7 @@ class Stream:
             r.append(c)
             r += c.get_children()
         return r
-    
+
     def max_stream_id(self):
         if not self.children:
             return self.identifier

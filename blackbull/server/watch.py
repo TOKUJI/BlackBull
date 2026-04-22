@@ -6,7 +6,6 @@ import asyncio
 import os
 from pathlib import Path
 
-# todo: move watch.py to another package.
 from logging import getLogger
 from functools import wraps
 

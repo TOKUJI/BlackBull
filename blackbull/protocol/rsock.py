@@ -1,7 +1,6 @@
 import socket
 
-# private programs
-from .logger import get_logger_set
+from ..logger import get_logger_set
 logger, log = get_logger_set('socket')
 
 

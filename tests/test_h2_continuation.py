@@ -38,7 +38,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 from hpack import Encoder
 
-from blackbull.frame import (FrameFactory, FrameTypes, FrameFlags,
+from blackbull.protocol.frame import (FrameFactory, FrameTypes, FrameFlags,
                               HeaderFrameFlags, SettingFrameFlags)
 from blackbull.server.server import HTTP2Handler
 

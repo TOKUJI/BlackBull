@@ -6,7 +6,7 @@ import logging
 from typing import Iterable
 from email.utils import formatdate
 
-from ..frame import FrameTypes, HeaderFrameFlags, DataFrameFlags, SettingFrameFlags, FrameBase, PseudoHeaders
+from ..protocol.frame import FrameTypes, HeaderFrameFlags, DataFrameFlags, SettingFrameFlags, FrameBase, PseudoHeaders
 from .headers import Headers
 
 class WSOpcode(IntEnum):

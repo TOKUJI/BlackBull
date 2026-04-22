@@ -240,7 +240,7 @@ def _make_h2_headers_frame(extra_headers: list | None = None) -> object:
     populated by HPACK decode) ready to pass to HTTP2HEADParser.
     """
     from hpack import Encoder
-    from blackbull.frame import FrameFactory, FrameTypes, HeaderFrameFlags
+    from blackbull.protocol.frame import FrameFactory, FrameTypes, HeaderFrameFlags
 
     encoder = Encoder()
     header_list = [

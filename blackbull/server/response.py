@@ -1,8 +1,8 @@
 from functools import partial
 import traceback
 
-from ..stream import Stream
-from ..frame import FrameTypes, SettingFrameFlags
+from ..protocol.stream import Stream
+from ..protocol.frame import FrameTypes, SettingFrameFlags
 from ..logger import get_logger_set, log
 
 logger, _ = get_logger_set(__name__)

@@ -1,8 +1,8 @@
 from functools import partial
 import traceback
 
-from ..stream import Stream
-from ..frame import FrameTypes, PseudoHeaders
+from ..protocol.stream import Stream
+from ..protocol.frame import FrameTypes, PseudoHeaders
 from ..logger import get_logger_set, log
 from .headers import Headers
 
