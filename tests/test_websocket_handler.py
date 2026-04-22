@@ -606,6 +606,7 @@ class TestRunScopeForwarding:
                 (b'Host', b'localhost:9999'),
                 (b'Upgrade', b'websocket'),
                 (b'sec-websocket-key', ws_key),
+                (b'sec-websocket-version', b'13'),
             ],
         }
 
@@ -699,7 +700,7 @@ class TestRunHandshake:
             'type': 'websocket',
             'path': '/ws',
             'scheme': 'ws',
-            'headers': [(b'sec-websocket-key', ws_key)],
+            'headers': [(b'sec-websocket-key', ws_key), (b'sec-websocket-version', b'13')],
         }
 
         async def fake_app(s, receive, send):
@@ -709,10 +710,10 @@ class TestRunHandshake:
         handler = WebSocketHandler(fake_app, _FakeReader(b''), writer, scope)
         await handler.run()
 
-        response_text = writer.written.decode('latin-1')
-        assert '101 Switching Protocols' in response_text
-        assert 'Upgrade: websocket' in response_text
-        assert 'Sec-WebSocket-Accept:' in response_text
+        response_text = writer.written.decode('latin-1').lower()
+        assert '101 Switching Protocols'.lower() in response_text
+        assert 'Upgrade: websocket'.lower() in response_text
+        assert 'Sec-WebSocket-Accept:'.lower() in response_text
 
     @pytest.mark.asyncio
     async def test_accept_key_is_correct(self):
@@ -726,7 +727,7 @@ class TestRunHandshake:
 
         scope = {
             'type': 'websocket', 'path': '/ws', 'scheme': 'ws',
-            'headers': [(b'sec-websocket-key', ws_key)],
+            'headers': [(b'sec-websocket-key', ws_key), (b'sec-websocket-version', b'13')],
         }
 
         async def fake_app(s, receive, send):
@@ -767,28 +768,81 @@ class TestWebSocketVersionValidation:
         return handler, writer
 
     async def test_version_13_completes_101_handshake(self):
-        """Version 13 must result in a 101 Switching Protocols response."""
+        """Version 13 must result in a 101 Switching Protocols response with no error."""
         handler, writer = self._make_handler(version=b'13')
         await handler.run()
-        assert b'101' in bytes(writer.written), (
-            f'Expected 101 for Sec-WebSocket-Version: 13; got {bytes(writer.written)!r}'
+        wire = bytes(writer.written)
+        assert b'101' in wire, (
+            f'Expected 101 for Sec-WebSocket-Version: 13; got {wire!r}'
         )
+        assert b'400' not in wire, (
+            f'Valid version 13 must not produce a 400 error; got {wire!r}'
+        )
+
+    async def test_version_13_calls_app(self):
+        """Version 13 must call the ASGI app (RFC 6455 §4.2.2)."""
+        called = []
+
+        async def app(scope, receive, send):
+            called.append(True)
+
+        headers = [(b'sec-websocket-key', b'dGhlIHNhbXBsZSBub25jZQ=='),
+                   (b'sec-websocket-version', b'13')]
+        scope = {'type': 'websocket', 'path': '/ws', 'headers': headers}
+        handler = WebSocketHandler(app, _FakeReader(b''), _FakeWriter(), scope)
+        await handler.run()
+        assert called, 'ASGI app must be called for a valid WebSocket handshake'
 
     async def test_missing_version_returns_400(self):
-        """Missing Sec-WebSocket-Version must produce HTTP 400 Bad Request."""
+        """Missing Sec-WebSocket-Version must produce HTTP 400 and abort (RFC 6455 §4.4)."""
         handler, writer = self._make_handler(version=None)
         await handler.run()
-        assert b'400' in bytes(writer.written), (
-            f'Expected 400 for missing version header; got {bytes(writer.written)!r}'
+        wire = bytes(writer.written)
+        assert b'400' in wire, (
+            f'Expected 400 for missing version header; got {wire!r}'
+        )
+        assert b'101' not in wire, (
+            f'Missing version must abort the handshake — 101 must not be sent; got {wire!r}'
         )
 
+    async def test_missing_version_does_not_call_app(self):
+        """Missing Sec-WebSocket-Version must not invoke the ASGI app (RFC 6455 §4.2.2)."""
+        called = []
+
+        async def app(scope, receive, send):
+            called.append(True)
+
+        scope = {'type': 'websocket', 'path': '/ws',
+                 'headers': [(b'sec-websocket-key', b'dGhlIHNhbXBsZSBub25jZQ==')]}
+        handler = WebSocketHandler(app, _FakeReader(b''), _FakeWriter(), scope)
+        await handler.run()
+        assert not called, 'ASGI app must NOT be called when version header is missing'
+
     async def test_wrong_version_returns_400(self):
-        """Sec-WebSocket-Version: 8 (or any value != 13) must produce HTTP 400."""
+        """Sec-WebSocket-Version: 8 (or any value != 13) must produce HTTP 400 and abort."""
         handler, writer = self._make_handler(version=b'8')
         await handler.run()
-        assert b'400' in bytes(writer.written), (
-            f'Expected 400 for version 8; got {bytes(writer.written)!r}'
+        wire = bytes(writer.written)
+        assert b'400' in wire, (
+            f'Expected 400 for version 8; got {wire!r}'
         )
+        assert b'101' not in wire, (
+            f'Wrong version must abort the handshake — 101 must not be sent; got {wire!r}'
+        )
+
+    async def test_wrong_version_does_not_call_app(self):
+        """Wrong Sec-WebSocket-Version must not invoke the ASGI app (RFC 6455 §4.2.2)."""
+        called = []
+
+        async def app(scope, receive, send):
+            called.append(True)
+
+        headers = [(b'sec-websocket-key', b'dGhlIHNhbXBsZSBub25jZQ=='),
+                   (b'sec-websocket-version', b'8')]
+        scope = {'type': 'websocket', 'path': '/ws', 'headers': headers}
+        handler = WebSocketHandler(app, _FakeReader(b''), _FakeWriter(), scope)
+        await handler.run()
+        assert not called, 'ASGI app must NOT be called when version is not 13'
 
     async def test_wrong_version_response_advertises_version_13(self):
         """400 response must include Sec-WebSocket-Version: 13 (RFC 6455 §4.4)."""

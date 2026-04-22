@@ -1,9 +1,19 @@
 import asyncio
+from enum import Enum
 from urllib.parse import urlparse
 
 from .frame import PseudoHeaders, DataFrameFlags, HeaderFrameFlags, FrameTypes
 from ..logger import get_logger_set
 logger, log = get_logger_set(__name__)
+
+
+class StreamState(Enum):
+    """HTTP/2 stream states per RFC 7540 §5.1."""
+    IDLE             = 'idle'
+    OPEN             = 'open'
+    HALF_CLOSED_LOCAL  = 'half-closed (local)'
+    HALF_CLOSED_REMOTE = 'half-closed (remote)'
+    CLOSED           = 'closed'
 
 class Stream:
     def __init__(self, identifier, parent=None, weight=1, window_size=None):

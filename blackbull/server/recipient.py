@@ -152,7 +152,7 @@ class HTTP2Recipient(BaseRecipient):
     hiding the concurrency from both sides.
     """
 
-    def __init__(self, frame: FrameBase = None):
+    def __init__(self, frame: FrameBase | None = None):
         super().__init__(None)
         self._queue: asyncio.Queue = asyncio.Queue()
         if frame:
@@ -252,7 +252,7 @@ class RecipientFactory:
         return HTTP1Recipient(reader, scope)
 
     @staticmethod
-    def http2(frame: FrameBase = None) -> HTTP2Recipient:
+    def http2(frame: FrameBase | None = None) -> HTTP2Recipient:
         return HTTP2Recipient(frame)
 
     @staticmethod

@@ -86,7 +86,7 @@ class Respond2WindowUpdate(RespondBase):
 class Respond2Settings(RespondBase):
     async def respond(self, handler):
         if self.frame.flags == SettingFrameFlags.INIT:
-            if hasattr(self.frame, 'initial_window_size'):
+            if hasattr(self.frame, 'initial_window_size') and self.frame.initial_window_size is not None:
                 for sender in handler._senders.values():
                     sender.apply_settings(self.frame.initial_window_size)
             if hasattr(self.frame, 'header_table_size'):

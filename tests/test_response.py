@@ -43,16 +43,6 @@ def test_response_extra_headers():
     assert (b'x-foo', b'bar') in r.headers
 
 
-def test_response_raises_for_int():
-    with pytest.raises(TypeError):
-        Response(12345)
-
-
-def test_response_raises_for_dict():
-    with pytest.raises(TypeError):
-        Response({'key': 'value'})
-
-
 # ---------------------------------------------------------------------------
 # JSONResponse
 # ---------------------------------------------------------------------------

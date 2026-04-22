@@ -77,7 +77,7 @@ class FrameFactory:
         super().__init__()
         self.decoder = Decoder()
 
-    def create(self, type_: FrameTypes, flags: FrameFlags, stream_id: int, *, data: bytes = b'', **kwds):
+    def create(self, type_: FrameTypes, flags: FrameFlags | int, stream_id: int, *, data: bytes = b'', **kwds):
         logger.info(f'type:{type_}, flags:{flags}, id:{stream_id}')
 
         frame = FrameBase._registry[type_](
@@ -262,7 +262,7 @@ class WindowUpdate(FrameBase):
 
     """docstring for WindowUpdate"""
     FRAME_TYPE = FrameTypes.WINDOW_UPDATE
-    def __init__(self, length: int, type_, flags: bytes, stream_id: int, *, data=None, **kwds):
+    def __init__(self, length: int, type_, flags: int, stream_id: int, *, data=None, **kwds):
         super(WindowUpdate, self).__init__(length, type_, flags, stream_id)
         logger.debug('WindowUpdate is called.')
 
@@ -287,7 +287,7 @@ class PseudoHeaders(StrEnum):
 class Headers(FrameBase):
     FRAME_TYPE = FrameTypes.HEADERS
 
-    def __init__(self, length: int, type_, flags: bytes, stream_id: int, *, data=None, decoder=None):
+    def __init__(self, length: int, type_, flags: int, stream_id: int, *, data=None, decoder=None):
         super().__init__(length, type_, flags, stream_id)
         logger.debug('Headers is called.')
         # Read flags

@@ -1,3 +1,9 @@
+from collections.abc import Iterable
+from typing import TypeAlias
+
+HeaderList: TypeAlias = Iterable[tuple[bytes, bytes]]
+
+
 class Headers:
     """Ordered multi-valued HTTP header store.
 

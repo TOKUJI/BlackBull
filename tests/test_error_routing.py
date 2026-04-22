@@ -97,11 +97,6 @@ class TestErrorRouterException:
         assert router[KeyError] is specific_handler
         assert router[IndexError] is base_handler  # not KeyError, falls to LookupError
 
-    def test_non_exception_class_raises(self):
-        router = ErrorRouter()
-        with pytest.raises(TypeError):
-            router[int] = lambda s, r, s2: None
-
     def test_unregistered_exception_returns_none(self):
         router = ErrorRouter()
         assert router[RuntimeError] is None

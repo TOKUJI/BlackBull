@@ -96,9 +96,9 @@ class Router(UserDict, BaseRouter):
 
     def __setitem__(
         self,
-        key: Tuple[str| re.Pattern,
-                   HTTPMethod|List[HTTPMethod],
-                   Optional[Scheme|List[Scheme]]],
+        key: Tuple[str | re.Pattern,
+                   HTTPMethod | Iterable[HTTPMethod],
+                   Optional[Scheme | Iterable[Scheme]]],
         value: Any,
     ):
         """
@@ -261,9 +261,9 @@ class Router(UserDict, BaseRouter):
         return key_scheme in registered_scheme
 
     def route_fn(self,
-                 methods: HTTPMethod|List[HTTPMethod]=[HTTPMethod.GET],
-                 path: str='/',
-                 scheme: Scheme|List[Scheme]=Scheme.http):
+                 methods: HTTPMethod | Iterable[HTTPMethod] = [HTTPMethod.GET],
+                 path: str = '/',
+                 scheme: Scheme | Iterable[Scheme] = Scheme.http):
 
         logger.debug('Router.route_fn() is called.')
         methods = _to_tuple(methods)

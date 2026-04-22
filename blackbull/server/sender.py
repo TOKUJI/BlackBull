@@ -3,11 +3,10 @@ from abc import ABC, abstractmethod
 from enum import IntEnum
 from http import HTTPStatus
 import logging
-from typing import Iterable
 from email.utils import formatdate
 
 from ..protocol.frame import FrameTypes, HeaderFrameFlags, DataFrameFlags, SettingFrameFlags, FrameBase, PseudoHeaders
-from .headers import Headers
+from .headers import Headers, HeaderList
 
 class WSOpcode(IntEnum):
     CONTINUATION = 0x0
@@ -125,7 +124,7 @@ class HTTP1Sender(BaseSender):
 
     async def __call__(self, body,
                        status: HTTPStatus = HTTPStatus.OK,
-                       headers: Iterable[tuple[bytes, bytes]] | Headers = []):
+                       headers: HeaderList = []):
         match body:
             case bytes():
                 h = headers if isinstance(headers, Headers) else Headers(headers)
@@ -170,7 +169,7 @@ class HTTP1Sender(BaseSender):
             logger.debug('HTTP1Sender body: %r', body)
             await self._write(body)
 
-    async def _write_start(self, status: HTTPStatus, headers: list):
+    async def _write_start(self, status: HTTPStatus, headers: HeaderList):
         chunks: list[bytes] = []
         chunks.append(f'HTTP/1.1 {status} {status.phrase}'.encode() + _CRLF)
         for k, v in headers:
@@ -304,7 +303,7 @@ class WebSocketSender(BaseSender):
     def __hash__(self):
         self.has_received_closed = False
 
-    async def __call__(self, body, _status: HTTPStatus = None, _headers: list = []):
+    async def __call__(self, body, _status: HTTPStatus | None = None, _headers: HeaderList = []):
         if not isinstance(body, dict):
             raise TypeError(f'WebSocketSender expected a dict, got {type(body)!r}')
 
@@ -329,7 +328,7 @@ class WebSocketSender(BaseSender):
                 logger.warning('WebSocketSender: unknown event type %r', event_type)
 
     @staticmethod
-    def _encode_frame(payload: bytes, opcode: WSOpcode = WSOpcode.TEXT) -> bytes:
+    def _encode_frame(payload: bytes, opcode: WSOpcode | int = WSOpcode.TEXT) -> bytes:
         """Encode *payload* as an unmasked WebSocket data frame (RFC 6455 §5).
 
         ``opcode`` defaults to ``WSOpcode.TEXT``; pass ``WSOpcode.BINARY`` for
@@ -347,7 +346,7 @@ class WebSocketSender(BaseSender):
         return header + payload
     
     @staticmethod
-    async def _read_opcode(reader) -> int:
+    async def _read_opcode(reader) -> tuple[int, bool, int]:
         """Read one WebSocket frame from *reader* and return its opcode.
 
         Raises ``asyncio.IncompleteReadError`` on EOF.

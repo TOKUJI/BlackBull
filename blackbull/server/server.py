@@ -81,29 +81,38 @@ class WebSocketHandler(BaseHandler):
     4. Call the application coroutine with the original HTTP-upgrade scope.
     """
 
+    ACCEPT_VERSION = b'13'
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         # args: (app, reader, writer, scope)
         if len(args) > 3:
             self.scope = args[-1]
             logger.debug(self.scope)
+            if not isinstance(self.scope['headers'], Headers):
+                self.scope['headers'] = Headers(self.scope['headers'])
+            logger.debug(self.scope)
 
     async def run(self):
         """Complete the upgrade handshake then call the ASGI application."""
+        # The protocol is HTTP/1.1 before the handshake is complete.
+        send = SenderFactory.http1(self.writer)
+
         # --- RFC 6455 §4.2.2: server handshake response ---
         key = [x[1] for x in self.scope['headers'] if x[0] == b'sec-websocket-key'][0]
         logger.debug('WebSocket key: %s', key)
         accept = b64encode(sha1(key + b'258EAFA5-E914-47DA-95CA-C5AB0DC85B11').digest())
 
-        reply = (
-            'HTTP/1.1 101 Switching Protocols\r\n'
-            'Upgrade: websocket\r\n'
-            'Connection: Upgrade\r\n'
-            f'Sec-WebSocket-Accept: {accept.decode("ascii")}\r\n'
-            '\r\n'
-        )
-        self.writer.write(reply.encode())
-        await self.writer.drain()
+        version = self.scope['headers'].get(b'sec-websocket-version')
+        if version != self.ACCEPT_VERSION:
+            await send(b'', HTTPStatus.BAD_REQUEST, [(b'sec-websocket-version', self.ACCEPT_VERSION)])
+            return
+
+        await send(b'', HTTPStatus.SWITCHING_PROTOCOLS, [
+            (b'upgrade', b'websocket'),
+            (b'connection', b'upgrade'),
+            (b'sec-websocket-accept', accept.decode("ascii")),
+        ])
         logger.debug('WebSocket handshake complete.')
 
         send = SenderFactory.websocket(self.writer)
