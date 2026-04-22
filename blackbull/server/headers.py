@@ -15,13 +15,13 @@ class Headers:
         list(headers)
         # [(b'set-cookie', b'a=1'), (b'set-cookie', b'b=2')]   # ASGI iteration
 
-        headers.get(b'set-cookie')
+        headers.getlist(b'set-cookie')
         # [(b'set-cookie', b'a=1'), (b'set-cookie', b'b=2')]
 
-        headers.get(b'missing')
+        headers.getlist(b'missing')
         # []
 
-        headers.get_value(b'host')          # first value, or default
+        headers.get(b'host')          # first value, or default
         # b'localhost:8000'
     """
 
@@ -48,21 +48,35 @@ class Headers:
         """Return all pairs for *name*.  Raises ``KeyError`` if absent."""
         return self._index[name.lower()]
 
-    def get(self, name: bytes) -> list[tuple[bytes, bytes]]:
+    def getlist(self, name: bytes) -> list[tuple[bytes, bytes]]:
         """Return all pairs for *name*, or ``[]`` if the header is absent."""
         return self._index.get(name.lower(), [])
 
-    def get_value(self, name: bytes, default: bytes = b'') -> bytes:
+    def get(self, name: bytes, default: bytes = b'') -> bytes:
         """Return the first value for *name*, or *default* if absent.
 
-        Convenience helper for headers that are not expected to repeat
-        (e.g. ``Host``, ``Expect``, ``Content-Length``).
+        Mirrors ``dict.get(key, default)``: single value, optional default.
+        For headers that may repeat use ``getlist(name)``.
         """
         pairs = self._index.get(name.lower())
         return pairs[0][1] if pairs else default
 
-    def append(self, name: bytes, value: bytes) -> None:
-        """Append a header pair to the end of the list."""
-        pair = (name, value)
-        self._list.append(pair)
-        self._index.setdefault(name.lower(), []).append(pair)
+    def append(self, name_or_pairs, value: bytes = None) -> None:
+        """Append header(s) to the end of the list.
+
+        Two-argument form: ``append(name, value)`` — adds a single pair.
+        One-argument form: ``append(pairs)`` — adds every pair in the iterable.
+        """
+        if value is not None:
+            pair = (name_or_pairs, value)
+            self._list.append(pair)
+            self._index.setdefault(name_or_pairs.lower(), []).append(pair)
+        else:
+            for name, val in name_or_pairs:
+                pair = (name, val)
+                self._list.append(pair)
+                self._index.setdefault(name.lower(), []).append(pair)
+
+    def __add__(self, other: 'Headers') -> 'Headers':
+        """Return a new Headers containing all pairs from *self* then *other*."""
+        return Headers(list(self._list) + list(other._list))

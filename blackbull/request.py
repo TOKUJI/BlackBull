@@ -11,7 +11,7 @@ async def read_body(receive) -> bytes:
 
 def parse_cookies(scope) -> dict[str, str]:
     """Parse the ``Cookie`` request header from an ASGI scope into a dict."""
-    raw = scope['headers'].get_value(b'cookie')
+    raw = scope['headers'].get(b'cookie')
     result = {}
     if not raw:
         return result

@@ -201,6 +201,112 @@ class TestParse:
             f"Expected root_path='' when no X-Forwarded-Prefix; got {scope.get('root_path')!r}"
         )
 
+    def test_path_excludes_query_string(self):
+        """scope['path'] must be the path component only, without '?' or query string.
+
+        Bug: HTTP11Handler.parse() sets scope['path'] = path.decode() where
+        path is the raw URI from the request line.  For /tasks?done=true the
+        raw URI includes the query string, so the router gets '/tasks?done=true'
+        and fails to match the registered '/tasks' route.
+        """
+        scope = _get_scope(_http_request(path='/tasks?done=true'))
+        assert scope['path'] == '/tasks', (
+            f"scope['path'] must not include query string; got {scope['path']!r}"
+        )
+
+    def test_query_string_populated_when_present(self):
+        """scope['query_string'] must contain the bytes after '?'."""
+        scope = _get_scope(_http_request(path='/tasks?done=true&page=2'))
+        assert scope['query_string'] == b'done=true&page=2', (
+            f"Expected query_string=b'done=true&page=2'; got {scope['query_string']!r}"
+        )
+
+    def test_query_string_empty_bytes_when_absent(self):
+        """scope['query_string'] must be b'' when there is no query string."""
+        scope = _get_scope(_http_request(path='/tasks'))
+        assert scope['query_string'] == b'', (
+            f"Expected empty query_string; got {scope['query_string']!r}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# HTTP/2 scope fields
+# ---------------------------------------------------------------------------
+
+def _make_h2_headers_frame(extra_headers: list | None = None) -> object:
+    """Build and load an HTTP/2 HEADERS frame through FrameFactory.
+
+    Returns the decoded frame object (with .pseudo_headers and .headers
+    populated by HPACK decode) ready to pass to HTTP2HEADParser.
+    """
+    from hpack import Encoder
+    from blackbull.frame import FrameFactory, FrameTypes, HeaderFrameFlags
+
+    encoder = Encoder()
+    header_list = [
+        (b':method', b'GET'),
+        (b':path',   b'/'),
+        (b':scheme', b'https'),
+    ]
+    if extra_headers:
+        header_list.extend(extra_headers)
+
+    block = encoder.encode(header_list)
+    flags = HeaderFrameFlags.END_HEADERS | HeaderFrameFlags.END_STREAM
+    stream_id = 1
+    raw = (len(block).to_bytes(3, 'big')
+           + FrameTypes.HEADERS          # bytes enum value
+           + bytes([flags])
+           + stream_id.to_bytes(4, 'big')
+           + block)
+
+    return FrameFactory().load(raw)
+
+
+class _FakeStream:
+    identifier = 1
+
+
+class TestHTTP2ScopeFields:
+    """HTTP2HEADParser.parse() must populate scope fields correctly."""
+
+    def test_root_path_default_empty_string(self):
+        """scope['root_path'] must be '' when no X-Forwarded-Prefix header is present."""
+        from blackbull.server.parser import ParserFactory
+        frame = _make_h2_headers_frame()
+        scope = ParserFactory.Get(frame, _FakeStream()).parse()
+        assert scope.get('root_path') == '', (
+            f"Expected root_path=''; got {scope.get('root_path')!r}"
+        )
+
+    def test_root_path_from_x_forwarded_prefix(self):
+        """x-forwarded-prefix: /api must set scope['root_path'] to '/api'.
+
+        Bug: HTTP2HEADParser.parse() calls _make_scope() which hard-codes
+        root_path='' and never reads any header — so a reverse-proxy prefix
+        is silently ignored for HTTP/2 connections.
+        """
+        from blackbull.server.parser import ParserFactory
+        frame = _make_h2_headers_frame(
+            extra_headers=[(b'x-forwarded-prefix', b'/api')]
+        )
+        scope = ParserFactory.Get(frame, _FakeStream()).parse()
+        assert scope.get('root_path') == '/api', (
+            f"Expected root_path='/api' from x-forwarded-prefix; "
+            f"got {scope.get('root_path')!r}"
+        )
+
+    def test_root_path_nested_prefix(self):
+        """x-forwarded-prefix: /api/v2 must set scope['root_path'] to '/api/v2'."""
+        from blackbull.server.parser import ParserFactory
+        frame = _make_h2_headers_frame(
+            extra_headers=[(b'x-forwarded-prefix', b'/api/v2')]
+        )
+        scope = ParserFactory.Get(frame, _FakeStream()).parse()
+        assert scope.get('root_path') == '/api/v2', (
+            f"Expected root_path='/api/v2'; got {scope.get('root_path')!r}"
+        )
+
 
 # ---------------------------------------------------------------------------
 # client_connected_cb dispatch

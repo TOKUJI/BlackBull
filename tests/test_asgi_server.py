@@ -322,7 +322,7 @@ class TestHTTP1_1BodyDecoding:
 
     @pytest.mark.asyncio
     async def test_chunked_decodes_multiple_chunks(self):
-        """Transfer-Encoding: chunked body must be reassembled from all chunks."""
+        """Each chunk must arrive as a separate event with more_body=True; terminal chunk ends stream."""
         chunk1, chunk2 = b'hello', b' world'
         chunked = (
             f'{len(chunk1):x}\r\n'.encode() + chunk1 + b'\r\n'
@@ -330,8 +330,13 @@ class TestHTTP1_1BodyDecoding:
             + b'0\r\n\r\n'
         )
         scope = {'headers': [(b'transfer-encoding', b'chunked')]}
-        event = await self._make_recipient(chunked, scope)()
-        assert event == {'type': 'http.request', 'body': b'hello world', 'more_body': False}
+        recipient = self._make_recipient(chunked, scope)
+        e1 = await recipient()
+        e2 = await recipient()
+        e3 = await recipient()
+        assert e1 == {'type': 'http.request', 'body': b'hello', 'more_body': True}
+        assert e2 == {'type': 'http.request', 'body': b' world', 'more_body': True}
+        assert e3 == {'type': 'http.request', 'body': b'', 'more_body': False}
 
     @pytest.mark.asyncio
     async def test_chunked_single_chunk(self):

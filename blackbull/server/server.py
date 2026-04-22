@@ -142,7 +142,7 @@ class HTTP11Handler(BaseHandler):
                 if scope.get('type') == 'websocket':
                     await WebSocketHandler(self.app, self.reader, self.writer, scope).run()
                     return
-                if scope['headers'].get_value(b'expect').lower() == b'100-continue':
+                if scope['headers'].get(b'expect').lower() == b'100-continue':
                     await send(b'', HTTPStatus.CONTINUE)
                 await self.app(scope, RecipientFactory.http1(self.reader, scope), send)
                 self.request = b''
@@ -193,26 +193,26 @@ class HTTP11Handler(BaseHandler):
             'http_version': re.sub(r'HTTP/(.*)', r'\1', version.decode('utf-8')),
             'method': method.decode('utf-8'),
             'scheme': 'http',  # upgraded to 'https'/'wss' in run() when TLS
-            'path': path.decode('utf-8'),
+            'path': path_parsed.path.decode('utf-8'),
             'raw_path': path,
             'query_string': path_parsed.query,
-            'root_path': '',
+            'root_path': headers.get(b'X-Forwarded-Prefix', b'').decode('utf-8'),
             'headers': headers,
             'client': None,  # set in run() from transport peername
             'server': None,  # set from Host header; fallback to sockname in run()
             'state': {},
         }
 
-        if headers.get(b'host'):
-            host, port = headers.get_value(b'host').split(b':')
+        if headers.getlist(b'host'):
+            host, port = headers.get(b'host').split(b':')
             scope['server'] = [host.decode('utf-8'), int(port)]
 
-        if headers.get(b'upgrade'):
-            scope['type'] = headers.get_value(b'upgrade').decode('utf-8').lower()
+        if headers.getlist(b'upgrade'):
+            scope['type'] = headers.get(b'upgrade').decode('utf-8').lower()
             if scope['type'] == 'websocket':
                 scope['scheme'] = 'ws'
-        elif headers.get(b'connection'):
-            scope['scheme'] = headers.get_value(b'connection').decode('utf-8').lower()
+        elif headers.getlist(b'connection'):
+            scope['scheme'] = headers.get(b'connection').decode('utf-8').lower()
 
         return scope
 

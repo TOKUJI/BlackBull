@@ -87,6 +87,10 @@ class HTTP2HEADParser(HTTP2ParserBase):
             [(k.encode(), v.encode()) for k, v in self.frame.headers]
         )
 
+        scope['root_path'] = scope['headers'].get(
+            b'x-forwarded-prefix', b''
+        ).decode('utf-8')
+
         return scope
 
 

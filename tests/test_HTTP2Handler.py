@@ -640,7 +640,7 @@ class TestHTTP2ScopeHeaders:
     Bug: HTTP2HEADParser.parse() only copies pseudo-headers (:method, :path,
     :scheme) into the scope; regular headers (Cookie, Content-Type, …) are
     discarded.  scope['headers'] stays as the default [] (empty list), so any
-    handler that calls scope['headers'].get_value(…) crashes with AttributeError.
+    handler that calls scope['headers'].get(…) crashes with AttributeError.
     """
 
     @staticmethod
@@ -707,7 +707,7 @@ class TestHTTP2ScopeHeaders:
         assert isinstance(scope['headers'], Headers), (
             f"scope['headers'] must be a Headers instance; got {type(scope['headers'])!r}"
         )
-        cookie_val = scope['headers'].get_value(b'cookie')
+        cookie_val = scope['headers'].get(b'cookie')
         assert cookie_val == b'session_id=abc123', (
             f"Expected cookie b'session_id=abc123' in scope['headers']; got {cookie_val!r}"
         )

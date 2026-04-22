@@ -74,7 +74,7 @@ async def logging_mw(scope, receive, send, call_next):
 
 async def auth_mw(scope, receive, send, call_next):
     """Validate Bearer token from Authorization header; inject scope['user']."""
-    auth = scope['headers'].get_value(b'authorization', b'')
+    auth = scope['headers'].get(b'authorization', b'')
     token = auth[7:].decode() if auth.startswith(b'Bearer ') else ''
     username = SESSIONS.get(token)
     if not username:

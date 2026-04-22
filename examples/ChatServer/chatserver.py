@@ -132,7 +132,7 @@ state = ChatState()
 # ---------------------------------------------------------------------------
 
 def _parse_cookie(scope) -> dict[str, str]:
-    raw = scope['headers'].get_value(b'cookie')
+    raw = scope['headers'].get(b'cookie')
     result = {}
     if not raw:
         return result

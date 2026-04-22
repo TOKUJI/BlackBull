@@ -146,6 +146,12 @@ class HTTP1Sender(BaseSender):
                     logger.debug('HTTP1Sender body: %r', content)
                     await self._write(content)
 
+            case {'type': 'http.response.trailers'}:
+                await self._write(b'0\r\n')
+                for name, value in body.get('headers', []):
+                    await self._write(name + b': ' + value + b'\r\n')
+                await self._write(b'\r\n')
+
             case {'type': str() as event_type}:
                 logger.warning('HTTP1Sender: unknown event type %r', event_type)
 

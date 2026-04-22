@@ -3,6 +3,7 @@ from abc import ABC, abstractmethod
 import logging
 
 from .sender import WebSocketSender, WSOpcode
+from .headers import Headers
 from ..frame import FrameBase, Data
 
 logger = logging.getLogger(__name__)
@@ -104,50 +105,43 @@ class HTTP1Recipient(BaseRecipient):
     def __init__(self, reader: AbstractReader, scope: dict):
         super().__init__(reader)
         self._scope = scope
-        self._body_sent = False
+        headers = scope['headers']
+        if not isinstance(headers, Headers):
+            headers = Headers(headers)
+        te = headers.get(b'transfer-encoding', b'').strip().lower()
+        cl = headers.get(b'content-length', b'')
+        if te and te != b'chunked':
+            raise NotImplementedError(
+                f'Transfer-Encoding "{te.decode()}" is not supported.'
+            )
+        self._chunked = (te == b'chunked')
+        self._content_length = int(cl) if cl else None
+        self._done = False
 
     async def __call__(self) -> dict:
-        if self._body_sent:
+        if self._done:
             return {'type': 'http.disconnect'}
-
-        self._body_sent = True
-        headers = dict(self._scope['headers'])
-        has_content_length = b'content-length' in headers
-        has_transfer_encoding = b'transfer-encoding' in headers
 
         try:
-            if has_content_length:
-                content_length = int(headers[b'content-length'].decode())
-                message_body = await self._reader.read(content_length) if content_length > 0 else b''
-
-            elif has_transfer_encoding and headers[b'transfer-encoding'].strip().lower() == b'chunked':
-                parts = []
-                while True:
-                    size_line = await self._reader.readuntil(b'\r\n')
-                    chunk_size = int(size_line.strip(), 16)
-                    if chunk_size == 0:
-                        await self._reader.readuntil(b'\r\n')  # consume trailing CRLF
-                        break
-                    parts.append(await self._reader.read(chunk_size))
-                    await self._reader.readuntil(b'\r\n')      # consume CRLF after chunk data
-                message_body = b''.join(parts)
-
-            elif has_transfer_encoding:
-                raise NotImplementedError(
-                    f'Transfer-Encoding "{headers[b"transfer-encoding"].decode()}" is not supported.'
-                )
+            if self._chunked:
+                size_line = await self._reader.readuntil(b'\r\n')
+                chunk_size = int(size_line.strip(), 16)
+                if chunk_size == 0:
+                    await self._reader.readuntil(b'\r\n')   # consume trailing CRLF
+                    self._done = True
+                    return {'type': 'http.request', 'body': b'', 'more_body': False}
+                data = await self._reader.read(chunk_size)
+                await self._reader.readuntil(b'\r\n')        # consume CRLF after chunk data
+                return {'type': 'http.request', 'body': data, 'more_body': True}
             else:
-                message_body = b''
+                self._done = True
+                body = await self._reader.read(self._content_length) if self._content_length else b''
+                logger.debug('HTTP1Recipient body: %r', body)
+                return {'type': 'http.request', 'body': body, 'more_body': False}
 
         except IncompleteReadError:
+            self._done = True
             return {'type': 'http.disconnect'}
-
-        logger.debug('HTTP1Recipient body: %r', message_body)
-        return {
-            'type': 'http.request',
-            'body': message_body,
-            'more_body': False,
-        }
 
 
 class HTTP2Recipient(BaseRecipient):

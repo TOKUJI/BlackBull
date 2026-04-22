@@ -254,7 +254,7 @@ Middleware may add any key to `scope` for inner layers to consume:
 
 ```python
 async def auth_mw(scope, receive, send, call_next):
-    auth = scope['headers'].get_value(b'authorization', b'')
+    auth = scope['headers'].get(b'authorization', b'')
     token = auth[7:].decode() if auth.startswith(b'Bearer ') else ''
     user = SESSIONS.get(token)
     if not user:
@@ -339,11 +339,11 @@ The handler then reads `scope['json']` without touching `receive`.
 
 ```python
 # First value for a header; returns b'' when absent
-ct   = scope['headers'].get_value(b'content-type')
-auth = scope['headers'].get_value(b'authorization', b'')
+ct   = scope['headers'].get(b'content-type')
+auth = scope['headers'].get(b'authorization', b'')
 
 # All (name, value) pairs for a header (multi-value support)
-pairs = scope['headers'].get(b'accept')   # list[tuple[bytes, bytes]]
+pairs = scope['headers'].getlist(b'accept')   # list[tuple[bytes, bytes]]
 
 # ASGI-compliant iteration
 for name, value in scope['headers']:
@@ -683,7 +683,7 @@ async def logging_mw(scope, receive, send, call_next):
 
 async def auth_mw(scope, receive, send, call_next):
     """Validate Bearer token; inject scope['user'] and scope['token']."""
-    auth = scope['headers'].get_value(b'authorization', b'')
+    auth = scope['headers'].get(b'authorization', b'')
     token = auth[7:].decode() if auth.startswith(b'Bearer ') else ''
     user = SESSIONS.get(token)
     if not user:
@@ -959,7 +959,7 @@ ALLOWED_ORIGINS = {
 }
 
 async def cors_mw(scope, receive, send, call_next):
-    origin = scope['headers'].get_value(b'origin', b'').decode()
+    origin = scope['headers'].get(b'origin', b'').decode()
     allowed = origin in ALLOWED_ORIGINS
 
     # Pre-flight request
@@ -999,7 +999,7 @@ Attach a unique ID to every request for distributed tracing:
 import uuid
 
 async def request_id_mw(scope, receive, send, call_next):
-    req_id = (scope['headers'].get_value(b'x-request-id', b'')
+    req_id = (scope['headers'].get(b'x-request-id', b'')
               or uuid.uuid4().hex.encode())
     scope['request_id'] = req_id.decode() if isinstance(req_id, bytes) else req_id
 

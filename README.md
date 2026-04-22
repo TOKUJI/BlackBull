@@ -77,7 +77,7 @@ pytest
 - [x] Middleware `call_next` convention: Starlette/FastAPI compatible; `inner` still accepted
 - [x] `middlewares` parameter on `@app.route()` for per-route middleware
 - [x] Route groups: `app.group(middlewares=[...])` (Axum `Router::layer()` equivalent)
-- [ ] `scope['root_path']`: reverse-proxy mount-path prefix
+- [x] `scope['root_path']`: reverse-proxy mount-path prefix
 - [ ] WebSocket `Sec-WebSocket-Version: 13` validation
 - [ ] WebSocket subprotocol negotiation (`Sec-WebSocket-Protocol`)
 - [ ] HTTP response compression: gzip / br based on `Accept-Encoding`
@@ -88,7 +88,7 @@ pytest
 - [ ] HTTP/2 priority scheduling
 - [ ] WebSocket per-message deflate (RFC 7692)
 - [ ] WebSocket fragmentation: merge continuation frames
-- [ ] Streaming request body (`more_body=True`)
+- [x] Streaming request body (`more_body=True`)
 - [ ] Streaming response (`StreamingResponse` / chunked transfer)
 - [ ] ASGI `http.response.trailers`
 - [ ] Worker processes / multiprocessing
