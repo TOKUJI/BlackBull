@@ -91,12 +91,15 @@ pytest
 - [x] Streaming request body (`more_body=True`)
 - [ ] Streaming response (`StreamingResponse` / chunked transfer)
 - [x] ASGI `http.response.trailers`
+- [x] HTTP/1.1 access logging: one `blackbull.access` INFO entry per request (client IP, method, path, status, bytes, duration) via `AccessLogRecord`; stored in `scope['state']['access_log']` for middleware extension
+- [ ] HTTP/2 access logging: per-stream entry using `_make_capturing_send` on the per-stream sender in `HTTP2Handler`
+- [ ] WebSocket access logging: connection-level entry (client IP, path, close code, duration) via a `_make_capturing_receive` counterpart
 - [ ] Worker processes / multiprocessing
 - [ ] Global middleware: `app.use(mw)`
 - [ ] URL reverse lookup (`url_for(name, **params)`)
 - [ ] Path parameter type converters (`int`, `uuid`, `path`, …)
 - [ ] Built-in CORS middleware
-- [ ] Built-in request-logging middleware
+- [x] Built-in request-logging: covered by server-level `AccessLogRecord` (unconditional, extensible from middleware via `scope['state']['access_log']`)
 
 ### P4 — Application framework
 

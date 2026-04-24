@@ -160,6 +160,8 @@ class HTTP1Recipient(BaseRecipient):
     ``{'type': 'http.disconnect'}``.
     """
 
+    _reader: AbstractReader  # narrows BaseRecipient._reader from AbstractReader | None
+
     def __init__(self, reader: AbstractReader, scope: dict):
         super().__init__(reader)
         self._scope = scope
@@ -216,7 +218,7 @@ class HTTP2Recipient(BaseRecipient):
         if frame:
             self.put_DATAFrame(frame)
 
-    def make_event(self, frame: FrameBase) -> dict:
+    def make_event(self, frame: Data) -> dict:
         return {
             'type': 'http.request',
             'body': frame.payload,
