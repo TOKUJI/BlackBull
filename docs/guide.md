@@ -175,6 +175,39 @@ The list accepts `str` or `bytes` values.  Typical protocol names:
 | `wamp` | Web Application Messaging Protocol |
 | `ocpp1.6` / `ocpp2.0` | EV charging stations |
 
+#### Fragmented messages
+
+WebSocket clients may split a single logical message across multiple frames
+(RFC 6455 §5.4).  BlackBull reassembles fragments transparently — the app
+always receives one `websocket.receive` event containing the full payload,
+regardless of how many frames the client used.
+
+A fragmented sequence looks like this on the wire:
+
+```
+FIN=0, opcode=TEXT,  payload=b'hel'   ← opener
+FIN=0, opcode=0x0,   payload=b'lo'    ← continuation
+FIN=1, opcode=0x0,   payload=b''      ← final continuation
+```
+
+The app sees a single event:
+
+```python
+{'type': 'websocket.receive', 'text': 'hello', 'bytes': None}
+```
+
+Control frames (ping, pong, close) may legally appear between data fragments;
+BlackBull handles them immediately (responding to pings with pong) and then
+continues reassembling the fragmented message.
+
+The following are protocol violations and raise `ProtocolError`:
+
+| Violation | RFC reference |
+|---|---|
+| CONTINUATION frame with no fragmentation in progress | §5.4 |
+| New TEXT or BINARY frame while a fragment sequence is open | §5.4 |
+| Control frame (ping/pong/close) with FIN=0 | §5.5 |
+
 ### 3.4  Detecting client disconnection
 
 When the remote side closes the connection, `receive()` returns

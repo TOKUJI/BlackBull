@@ -22,6 +22,10 @@ class IncompleteReadError(EOFError):
     """
 
 
+class ProtocolError(Exception):
+    """Raised when a WebSocket protocol violation is detected (RFC 6455)."""
+
+
 class AbstractReader(ABC):
     """Protocol-agnostic async byte-source.
 
@@ -69,6 +73,59 @@ class AsyncioReader(AbstractReader):
 
     async def readexactly(self, n: int) -> bytes:
         return await self._sr.readexactly(n)
+
+
+# ---------------------------------------------------------------------------
+# Fragment reassembly (RFC 6455 §5.4)
+# ---------------------------------------------------------------------------
+
+class FragmentAssembler:
+    """Accumulates RFC 6455 fragmented frames and signals message completion.
+
+    Feed each data/continuation frame via ``feed()``.  Returns
+    ``(message_opcode, full_payload)`` when the final FIN=1 continuation
+    arrives; returns ``None`` while still accumulating.
+
+    Raises ``ProtocolError`` on violations:
+    - CONTINUATION frame with no fragmentation in progress (§5.4)
+    - New TEXT/BINARY opener while a fragmented message is open (§5.4)
+    """
+
+    def __init__(self) -> None:
+        self._opcode: int | None = None
+        self._buf: bytearray | None = None
+
+    @property
+    def in_progress(self) -> bool:
+        return self._opcode is not None
+
+    def feed(self, opcode: int, payload: bytes, fin: bool) -> tuple[int, bytes] | None:
+        """Feed one frame; return ``(message_opcode, full_payload)`` on completion, else ``None``."""
+        if opcode == WSOpcode.CONTINUATION:
+            if not self.in_progress:
+                raise ProtocolError(
+                    'CONTINUATION frame received with no fragmentation in progress'
+                )
+            assert self._buf is not None
+            assert self._opcode is not None
+            self._buf += payload
+            if fin:
+                result = (self._opcode, bytes(self._buf))
+                self._opcode = None
+                self._buf = None
+                return result
+            return None
+        else:
+            # TEXT or BINARY opener
+            if self.in_progress:
+                raise ProtocolError(
+                    'New data frame received while a fragmented message is in progress'
+                )
+            if fin:
+                return (opcode, payload)  # unfragmented — pass through immediately
+            self._opcode = opcode
+            self._buf = bytearray(payload)
+            return None
 
 
 # ---------------------------------------------------------------------------
@@ -196,6 +253,7 @@ class WebSocketRecipient(BaseRecipient):
         super().__init__(reader)
         self._writer = writer
         self._connect_sent = False
+        self._assembler = FragmentAssembler()
 
     async def __call__(self) -> dict:
         if not self._connect_sent:
@@ -203,26 +261,34 @@ class WebSocketRecipient(BaseRecipient):
             return {'type': 'websocket.connect'}
 
         while True:
-            opcode, masked, length, rsv1, _, _ = await WebSocketSender._read_opcode(self._reader)
-            payload = await WebSocketSender._read_payload(self._reader, masked, length)
+            h = await WebSocketSender._read_frame_header(self._reader)
+            payload = await WebSocketSender._read_payload(self._reader, h.masked, h.length)
 
-            if not masked:
+            if not h.masked:
                 raise ValueError(
                     'Received unmasked frame from client, which is a protocol violation.'
                 )
 
-            if rsv1:
+            # Control frames MUST NOT be fragmented (RFC 6455 §5.5)
+            if h.opcode in (WSOpcode.CLOSE, WSOpcode.PING, WSOpcode.PONG) and not h.fin:
+                raise ProtocolError('Control frame with FIN=0 is a protocol violation')
+
+            if h.rsv1:
                 # Per-message deflate (RFC 7692 §7): re-append the SYNC_FLUSH
                 # tail bytes that the sender stripped, then raw-inflate.
                 payload = zlib.decompress(payload + b'\x00\x00\xff\xff', wbits=-15)
 
-            match opcode:
-                case WSOpcode.TEXT:
-                    return {'type': 'websocket.receive',
-                            'text': payload.decode('utf-8'), 'bytes': None}
-
-                case WSOpcode.BINARY:
-                    return {'type': 'websocket.receive', 'text': None, 'bytes': payload}
+            match h.opcode:
+                case WSOpcode.TEXT | WSOpcode.BINARY | WSOpcode.CONTINUATION:
+                    result = self._assembler.feed(h.opcode, payload, h.fin)
+                    if result is None:
+                        continue
+                    msg_opcode, full_payload = result
+                    if msg_opcode == WSOpcode.TEXT:
+                        return {'type': 'websocket.receive',
+                                'text': full_payload.decode('utf-8'), 'bytes': None}
+                    else:
+                        return {'type': 'websocket.receive', 'text': None, 'bytes': full_payload}
 
                 case WSOpcode.CLOSE:
                     return {'type': 'websocket.disconnect', 'code': 1000}
@@ -236,7 +302,7 @@ class WebSocketRecipient(BaseRecipient):
                     pass  # unsolicited pong — silently drop
 
                 case _:
-                    logger.warning('WebSocketRecipient: unsupported opcode 0x%02x', opcode)
+                    logger.warning('WebSocketRecipient: unsupported opcode 0x%02x', h.opcode)
                     return {'type': 'websocket.receive', 'text': None, 'bytes': payload}
 
 

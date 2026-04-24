@@ -1039,6 +1039,83 @@ class TestWebSocketFragmentation:
             f"Expected second='normal'; got {second!r}"
         )
 
+    # --- Error cases (RFC 6455 §5.4, §5.5) ---
+
+    @staticmethod
+    def _nonfin_control_frame(payload: bytes, opcode: int) -> bytes:
+        """Masked control frame with FIN=0 — a protocol violation per RFC 6455 §5.5."""
+        mask = b'\xde\xad\xbe\xef'
+        masked = bytes(b ^ mask[i % 4] for i, b in enumerate(payload))
+        # byte 0: FIN=0, opcode; byte 1: MASK=1, length
+        header = bytes([opcode, 0x80 | len(payload)])
+        return header + mask + masked
+
+    async def test_orphan_continuation_raises(self):
+        """Continuation frame with no fragmentation in progress must raise.
+
+        RFC 6455 §5.4: a CONTINUATION frame is only valid after a FIN=0
+        data frame.  Receiving one without a preceding opener is a protocol
+        error that the server must not silently swallow.
+        """
+        handler = _RecipientWrapper(self._continuation_frame(b'orphan', fin=True))
+        await handler.receive()  # websocket.connect
+        with pytest.raises(Exception):
+            await handler.receive()
+
+    async def test_new_data_frame_during_fragmentation_raises(self):
+        """Starting a new data frame while a fragmented message is open must raise.
+
+        RFC 6455 §5.4: once a FIN=0 opener has been received, the sender
+        MUST send only CONTINUATION frames (or control frames) until the
+        final FIN=1 continuation closes the message.  A new TEXT or BINARY
+        opener mid-sequence is a protocol error.
+        """
+        frames = (self._nonfin_text_frame(b'start')
+                  + _make_client_frame(b'interloper', opcode=0x1))
+        handler = _RecipientWrapper(frames)
+        await handler.receive()  # websocket.connect
+        with pytest.raises(Exception):
+            await handler.receive()
+
+    async def test_fragmented_control_frame_raises(self):
+        """A control frame with FIN=0 must be rejected.
+
+        RFC 6455 §5.5: "All control frames MUST have a payload length of 125
+        bytes or less and MUST NOT be fragmented."  A ping/pong/close frame
+        with FIN=0 is a protocol error regardless of whether a data
+        fragmentation is in progress.
+        """
+        handler = _RecipientWrapper(self._nonfin_control_frame(b'', opcode=0x9))
+        await handler.receive()  # websocket.connect
+        with pytest.raises(Exception):
+            await handler.receive()
+
+    async def test_ping_interleaved_during_fragmentation(self):
+        """A ping received between data fragments must be replied to immediately
+        and the fragmented message must still be reassembled correctly.
+
+        RFC 6455 §5.5: control frames MAY be injected between fragments of a
+        data message.  The server must handle them transparently — the pong
+        goes out and the app sees a single reassembled websocket.receive event.
+        """
+        ping_payload = b'keepalive'
+        frames = (
+            self._nonfin_text_frame(b'hel')
+            + _make_client_frame(ping_payload, opcode=0x9)  # FIN=1 ping (legal)
+            + self._continuation_frame(b'lo', fin=True)
+        )
+        handler = _RecipientWrapper(frames)
+        await handler.receive()  # websocket.connect
+        event = await handler.receive()
+
+        assert event.get('text') == 'hello', (
+            f"Expected reassembled text='hello' after interleaved ping; got {event!r}"
+        )
+        expected_pong = WebSocketSender._encode_frame(ping_payload, opcode=0xA)
+        assert handler.writer.written == expected_pong, (
+            f"Expected pong on wire after interleaved ping; got {handler.writer.written!r}"
+        )
+
 
 # ---------------------------------------------------------------------------
 # P3 — WebSocket per-message deflate (RFC 7692)

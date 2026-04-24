@@ -117,13 +117,13 @@ class WebSocketHandler(BaseHandler):
             available = set(getattr(self.app, 'available_ws_protocols', []))
             subprotocol = next((p for p in client_protos if p in available), None)
 
-        handshake_headers: list[tuple[bytes, bytes]] = [
+        handshake_headers = Headers([
             (b'upgrade', b'websocket'),
             (b'connection', b'upgrade'),
             (b'sec-websocket-accept', accept),
-        ]
+        ])
         if subprotocol:
-            handshake_headers.append((b'sec-websocket-protocol', subprotocol))
+            handshake_headers.append(b'sec-websocket-protocol', subprotocol)
 
         await send(b'', HTTPStatus.SWITCHING_PROTOCOLS, handshake_headers)
         logger.debug('WebSocket handshake complete.')

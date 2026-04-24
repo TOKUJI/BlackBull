@@ -4,6 +4,7 @@ from enum import IntEnum
 from http import HTTPStatus
 import logging
 from email.utils import formatdate
+from typing import NamedTuple
 
 from ..protocol.frame import FrameTypes, HeaderFrameFlags, DataFrameFlags, SettingFrameFlags, FrameBase, PseudoHeaders
 from .headers import Headers, HeaderList
@@ -24,6 +25,17 @@ class WSFrameBits(IntEnum):
     OPCODE_MASK = 0x0F  # opcode bits in byte 0
     MASK_BIT    = 0x80  # mask bit in byte 1
     LENGTH_MASK = 0x7F  # payload length bits in byte 1
+
+
+class WSFrameHeader(NamedTuple):
+    """Decoded fields from the two-byte WebSocket frame header (RFC 6455 §5.2)."""
+    opcode: int
+    masked: bool
+    length: int
+    fin:    bool
+    rsv1:   bool
+    rsv2:   bool
+    rsv3:   bool
 
 logger = logging.getLogger(__name__)
 
@@ -349,22 +361,24 @@ class WebSocketSender(BaseSender):
         return header + payload
     
     @staticmethod
-    async def _read_opcode(reader) -> tuple[int, bool, int, bool, bool, bool]:
-        """Read the first two bytes of a WebSocket frame header.
+    async def _read_frame_header(reader) -> WSFrameHeader:
+        """Read the two-byte WebSocket frame header (RFC 6455 §5.2).
 
-        Returns ``(opcode, masked, length, rsv1, rsv2, rsv3)``.
+        Returns a ``WSFrameHeader`` with all decoded flag and length fields.
         RSV1 signals per-message deflate (RFC 7692 §7); RSV2 and RSV3 are
-        reserved for future extensions (RFC 6455 §5.2).
+        reserved for future extensions.
         Raises ``asyncio.IncompleteReadError`` on EOF.
         """
         header = await reader.readexactly(2)
-        opcode = header[0] & WSFrameBits.OPCODE_MASK
-        rsv1   = bool(header[0] & WSFrameBits.RSV1)
-        rsv2   = bool(header[0] & WSFrameBits.RSV2)
-        rsv3   = bool(header[0] & WSFrameBits.RSV3)
-        masked = bool(header[1] & WSFrameBits.MASK_BIT)
-        length = header[1] & WSFrameBits.LENGTH_MASK
-        return opcode, masked, length, rsv1, rsv2, rsv3
+        return WSFrameHeader(
+            opcode = header[0] & WSFrameBits.OPCODE_MASK,
+            masked = bool(header[1] & WSFrameBits.MASK_BIT),
+            length = header[1] & WSFrameBits.LENGTH_MASK,
+            fin    = bool(header[0] & WSFrameBits.FIN),
+            rsv1   = bool(header[0] & WSFrameBits.RSV1),
+            rsv2   = bool(header[0] & WSFrameBits.RSV2),
+            rsv3   = bool(header[0] & WSFrameBits.RSV3),
+        )
     
     @staticmethod
     async def _read_payload(reader, masked: bool, length: int) -> bytes:
@@ -392,10 +406,9 @@ class WebSocketSender(BaseSender):
         Returns ``(opcode, payload)`` where *payload* is already unmasked.
         Raises ``asyncio.IncompleteReadError`` on EOF.
         """
-        opcode, masked, length, _, _, _ = await WebSocketSender._read_opcode(reader)
-        payload = await WebSocketSender._read_payload(reader, masked, length)
-
-        return opcode, payload
+        h = await WebSocketSender._read_frame_header(reader)
+        payload = await WebSocketSender._read_payload(reader, h.masked, h.length)
+        return h.opcode, payload
 
 
 # ---------------------------------------------------------------------------

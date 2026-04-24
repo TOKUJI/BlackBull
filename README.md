@@ -87,7 +87,7 @@ pytest
 - [ ] HTTP/2 stream state machine (RFC 7540 §5.1)
 - [ ] HTTP/2 priority scheduling
 - [x] WebSocket per-message deflate (RFC 7692)
-- [ ] WebSocket fragmentation: merge continuation frames
+- [x] WebSocket fragmentation: merge continuation frames; detect protocol violations (orphan CONTINUATION, nested opener, fragmented control frame) via `FragmentAssembler`
 - [x] Streaming request body (`more_body=True`)
 - [ ] Streaming response (`StreamingResponse` / chunked transfer)
 - [x] ASGI `http.response.trailers`
