@@ -107,11 +107,25 @@ class WebSocketHandler(BaseHandler):
             await send(b'', HTTPStatus.BAD_REQUEST, [(b'sec-websocket-version', self.ACCEPT_VERSION)])
             return
 
-        await send(b'', HTTPStatus.SWITCHING_PROTOCOLS, [
+        # Subprotocol negotiation: pick the first client-offered protocol that
+        # the server supports.  Falls back to None (no protocol) when the app
+        # exposes no registry or when none of the client's offers match.
+        subprotocol: bytes | None = None
+        raw = self.scope['headers'].get(b'sec-websocket-protocol', b'')
+        if raw:
+            client_protos = [p.strip() for p in raw.split(b',')]
+            available = set(getattr(self.app, 'available_ws_protocols', []))
+            subprotocol = next((p for p in client_protos if p in available), None)
+
+        handshake_headers: list[tuple[bytes, bytes]] = [
             (b'upgrade', b'websocket'),
             (b'connection', b'upgrade'),
             (b'sec-websocket-accept', accept),
-        ])
+        ]
+        if subprotocol:
+            handshake_headers.append((b'sec-websocket-protocol', subprotocol))
+
+        await send(b'', HTTPStatus.SWITCHING_PROTOCOLS, handshake_headers)
         logger.debug('WebSocket handshake complete.')
 
         send = SenderFactory.websocket(self.writer)
@@ -150,8 +164,10 @@ class HTTP11Handler(BaseHandler):
                 if scope.get('type') == 'websocket':
                     await WebSocketHandler(self.app, self.reader, self.writer, scope).run()
                     return
+
                 if scope['headers'].get(b'expect').lower() == b'100-continue':
                     await send(b'', HTTPStatus.CONTINUE)
+
                 await self.app(scope, RecipientFactory.http1(self.reader, scope), send)
                 self.request = b''
 

@@ -79,7 +79,7 @@ pytest
 - [x] Route groups: `app.group(middlewares=[...])` (Axum `Router::layer()` equivalent)
 - [x] `scope['root_path']`: reverse-proxy mount-path prefix
 - [x] WebSocket `Sec-WebSocket-Version: 13` validation
-- [ ] WebSocket subprotocol negotiation (`Sec-WebSocket-Protocol`)
+- [x] WebSocket subprotocol negotiation (`Sec-WebSocket-Protocol`): `app.available_ws_protocols` registry; server picks the first client-offered match and includes it in the 101 response
 - [x] HTTP response compression: gzip / br / zstd based on `Accept-Encoding`
 - [ ] Static file serving middleware with `Range` / `206 Partial Content`
 - [x] mTLS: client certificate authentication

@@ -105,6 +105,7 @@ class BlackBull:
         self._keyfile = None
         self._startup_hooks: list = []
         self._shutdown_hooks: list = []
+        self._wsprotocols = None
 
     @property
     def loop(self):
@@ -126,6 +127,16 @@ class BlackBull:
     @property
     def keyfile(self):
         return self._keyfile
+    
+    @property
+    def available_ws_protocols(self) -> list[bytes]:
+        return self._wsprotocols or []
+
+    @available_ws_protocols.setter
+    def available_ws_protocols(self, value: list) -> None:
+        self._wsprotocols = [
+            v.encode() if isinstance(v, str) else v for v in value
+        ]
 
     def on_startup(self, fn):
         """Decorator: register an async callable invoked at lifespan startup."""

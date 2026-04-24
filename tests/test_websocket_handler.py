@@ -860,16 +860,16 @@ class TestWebSocketVersionValidation:
 
 @pytest.mark.asyncio
 class TestWebSocketSubprotocol:
-    """WebSocketHandler must negotiate Sec-WebSocket-Protocol when the client
-    requests one and the app accepts it (RFC 6455 §4.2.2, §11.3.4).
+    """WebSocketHandler must negotiate Sec-WebSocket-Protocol automatically.
 
-    The app signals acceptance via the 'websocket.accept' event:
-        {'type': 'websocket.accept', 'subprotocol': 'chat'}
-    The 101 response must then include:
-        Sec-WebSocket-Protocol: chat
+    The server picks the first client-offered protocol that appears in the
+    app's ``available_ws_protocols`` registry and includes it in the 101
+    response (RFC 6455 §4.2.2, §11.3.4).  The app handler does not need to
+    inspect or echo the protocol — negotiation is done before the app is called.
     """
 
-    def _make_handler(self, client_protocols: bytes | None, accepted: str | None):
+    def _make_handler(self, client_protocols: bytes | None,
+                      available: list[bytes]):
         headers = [
             (b'sec-websocket-key', b'dGhlIHNhbXBsZSBub25jZQ=='),
             (b'sec-websocket-version', b'13'),
@@ -879,46 +879,80 @@ class TestWebSocketSubprotocol:
         scope = {'type': 'websocket', 'path': '/ws', 'headers': headers}
         writer = _FakeWriter()
 
-        async def app(scope, receive, send):
-            await send({'type': 'websocket.accept', 'subprotocol': accepted})
+        async def app(*_):
+            pass
+        app.available_ws_protocols = available
 
         handler = WebSocketHandler(app, _FakeReader(b''), writer, scope)
         return handler, writer
 
-    async def test_accepted_subprotocol_in_101_response(self):
-        """Accepted subprotocol must appear in the 101 handshake response."""
-        handler, writer = self._make_handler(b'chat, superchat', accepted='chat')
+    async def test_matched_protocol_in_101_response(self):
+        """Server registry contains 'chat': 101 must include Sec-WebSocket-Protocol."""
+        handler, writer = self._make_handler(b'chat, superchat',
+                                             available=[b'chat', b'superchat'])
         await handler.run()
         wire = bytes(writer.written).lower()
         assert b'sec-websocket-protocol' in wire, (
             f'Expected Sec-WebSocket-Protocol in 101 response; got {wire!r}'
         )
 
-    async def test_accepted_subprotocol_value_is_correct(self):
-        """The echoed subprotocol must be the exact string the app accepted."""
-        handler, writer = self._make_handler(b'chat, superchat', accepted='chat')
+    async def test_matched_protocol_value_is_first_client_match(self):
+        """Server picks the first client-offered protocol present in its registry."""
+        handler, writer = self._make_handler(b'chat, superchat',
+                                             available=[b'chat', b'superchat'])
         await handler.run()
         wire = bytes(writer.written)
         assert b'chat' in wire, (
             f'Expected "chat" in handshake response; got {wire!r}'
         )
 
-    async def test_no_subprotocol_header_when_app_accepts_none(self):
-        """When the app accepts no subprotocol, 101 must not include the header."""
-        handler, writer = self._make_handler(b'chat', accepted=None)
+    async def test_no_match_omits_subprotocol_header(self):
+        """When no client protocol is in the registry, 101 must omit the header."""
+        handler, writer = self._make_handler(b'graphql-ws',
+                                             available=[b'chat'])
         await handler.run()
         wire = bytes(writer.written).lower()
         assert b'sec-websocket-protocol' not in wire, (
-            f'Unexpected Sec-WebSocket-Protocol in response; got {wire!r}'
+            f'Unexpected Sec-WebSocket-Protocol when no match; got {wire!r}'
         )
 
-    async def test_no_subprotocol_when_client_did_not_request(self):
+    async def test_empty_registry_omits_subprotocol_header(self):
+        """App with no registered protocols must not produce Sec-WebSocket-Protocol."""
+        handler, writer = self._make_handler(b'chat', available=[])
+        await handler.run()
+        wire = bytes(writer.written).lower()
+        assert b'sec-websocket-protocol' not in wire, (
+            f'Unexpected Sec-WebSocket-Protocol with empty registry; got {wire!r}'
+        )
+
+    async def test_no_client_request_omits_subprotocol_header(self):
         """Without a client Sec-WebSocket-Protocol header, none must appear in 101."""
-        handler, writer = self._make_handler(client_protocols=None, accepted=None)
+        handler, writer = self._make_handler(client_protocols=None,
+                                             available=[b'chat'])
         await handler.run()
         wire = bytes(writer.written).lower()
         assert b'sec-websocket-protocol' not in wire, (
             f'Unexpected Sec-WebSocket-Protocol without client request; got {wire!r}'
+        )
+
+    async def test_no_available_ws_protocols_attr_omits_header(self):
+        """Generic ASGI app without available_ws_protocols must not crash or add header."""
+        headers = [
+            (b'sec-websocket-key', b'dGhlIHNhbXBsZSBub25jZQ=='),
+            (b'sec-websocket-version', b'13'),
+            (b'sec-websocket-protocol', b'chat'),
+        ]
+        scope = {'type': 'websocket', 'path': '/ws', 'headers': headers}
+        writer = _FakeWriter()
+
+        async def plain_asgi_app(*_):
+            pass  # no available_ws_protocols attribute
+
+        handler = WebSocketHandler(plain_asgi_app, _FakeReader(b''), writer, scope)
+        await handler.run()
+        wire = bytes(writer.written).lower()
+        assert b'sec-websocket-protocol' not in wire, (
+            f'Generic ASGI app must not produce Sec-WebSocket-Protocol; got {wire!r}'
         )
 
 

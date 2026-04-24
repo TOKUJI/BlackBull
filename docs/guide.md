@@ -151,6 +151,30 @@ automatically; include it in `middlewares=[websocket, ...]` on the route.
 BlackBull validates `Sec-WebSocket-Version: 13` and supports per-message deflate
 (RFC 7692) automatically when the client negotiates it.
 
+#### Subprotocol negotiation
+
+Register the protocols the server supports before starting:
+
+```python
+app.available_ws_protocols = ['chat', 'superchat']
+```
+
+BlackBull picks the first protocol from the client's `Sec-WebSocket-Protocol` offer
+that appears in this list and returns it in the 101 handshake response.  If there is
+no match, or if the client did not offer any protocol, no `Sec-WebSocket-Protocol`
+header is sent and the connection proceeds without a subprotocol.
+
+The list accepts `str` or `bytes` values.  Typical protocol names:
+
+| Protocol | Use case |
+|---|---|
+| `graphql-ws` | Legacy GraphQL subscriptions (Apollo) |
+| `graphql-transport-ws` | Modern GraphQL subscriptions |
+| `stomp` / `v12.stomp` | STOMP messaging (RabbitMQ, ActiveMQ) |
+| `mqtt` | MQTT over WebSocket (IoT) |
+| `wamp` | Web Application Messaging Protocol |
+| `ocpp1.6` / `ocpp2.0` | EV charging stations |
+
 ### 3.4  Detecting client disconnection
 
 When the remote side closes the connection, `receive()` returns
