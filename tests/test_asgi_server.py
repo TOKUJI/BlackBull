@@ -127,6 +127,7 @@ class TestMakeSSLContext:
         server = ASGIServer(_noop_app, certfile=cert_path, keyfile=key_path)
         # ssl module does not expose the configured ALPN list directly, but
         # we can verify the context was built without error and is CLIENT_AUTH.
+        assert server.ssl_context is not None
         assert server.ssl_context.verify_mode is not None
 
 
@@ -529,6 +530,7 @@ class TestMTLS:
         server = ASGIServer(_noop_app, certfile=str(cert_path),
                             keyfile=str(key_path))
         server.configure_mtls(ca_cert=str(cert_path))
+        assert server.ssl_context is not None
         assert server.ssl_context.verify_mode == ssl.CERT_REQUIRED, (
             f'mTLS requires CERT_REQUIRED; got {server.ssl_context.verify_mode}'
         )
@@ -539,6 +541,7 @@ class TestMTLS:
         from unittest.mock import patch
         server = ASGIServer(_noop_app, certfile=str(cert_path),
                             keyfile=str(key_path))
+        assert server.ssl_context is not None
         with patch.object(server.ssl_context, 'load_verify_locations') as mock_lvl:
             server.configure_mtls(ca_cert=str(cert_path))
             mock_lvl.assert_called_once_with(cafile=str(cert_path))
@@ -548,6 +551,7 @@ class TestMTLS:
         """Without calling configure_mtls(), client certs must not be required."""
         server = ASGIServer(_noop_app, certfile=str(cert_path),
                             keyfile=str(key_path))
+        assert server.ssl_context is not None
         assert server.ssl_context.verify_mode != ssl.CERT_REQUIRED, (
             f'Standard TLS must not require client cert; '
             f'got {server.ssl_context.verify_mode}'

@@ -232,22 +232,6 @@ async def test_websocket_response(app, ssl_context):
         response = await asyncio.wait_for(client.recv(), timeout=5.0)
         assert response == name
 
-# @pytest.mark.asyncio
-# async def test_http2_server_push(app, ssl_context):
-#     uri = f'127.0.0.1:{app.port}'
-#     msg = b'hello'
-#     with HTTPConnection(uri, secure=True, enable_push=True, ssl_context=ssl_context) as conn:
-#         conn.request('post', '/http2', body=msg)
-
-#         for push in conn.get_pushes():  # all pushes promised before response headers
-#             logger.info(push.path)
-
-#         response = conn.get_response()
-#         assert response.read() == msg
-
-#         for push in conn.get_pushes():  # all other pushes
-#             logger.info(push.path)
-
 
 # ---------------------------------------------------------------------------
 # Lifespan startup / shutdown hook tests (unit — no running server)

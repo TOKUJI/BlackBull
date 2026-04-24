@@ -95,7 +95,6 @@ class WebSocketHandler(BaseHandler):
 
     async def run(self):
         """Complete the upgrade handshake then call the ASGI application."""
-        # The protocol is HTTP/1.1 before the handshake is complete.
         send = SenderFactory.http1(self.writer)
 
         # --- RFC 6455 §4.2.2: server handshake response ---
@@ -111,7 +110,7 @@ class WebSocketHandler(BaseHandler):
         await send(b'', HTTPStatus.SWITCHING_PROTOCOLS, [
             (b'upgrade', b'websocket'),
             (b'connection', b'upgrade'),
-            (b'sec-websocket-accept', accept.decode("ascii")),
+            (b'sec-websocket-accept', accept),
         ])
         logger.debug('WebSocket handshake complete.')
 
@@ -491,6 +490,12 @@ class ASGIServer:
             # raw_sockets are already bound; asyncio.start_server will handle
             # TLS via ssl= so no manual wrapping is needed here.
             pass
+
+    def configure_mtls(self, ca_cert: str) -> None:
+        if self.ssl_context is None:
+            raise RuntimeError('configure_mtls() requires TLS to be configured first.')
+        self.ssl_context.verify_mode = ssl.CERT_REQUIRED
+        self.ssl_context.load_verify_locations(cafile=ca_cert)
 
     async def client_connected_cb(self, reader, writer):
         """

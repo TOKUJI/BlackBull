@@ -76,7 +76,9 @@ class BaseRouter:
     def __contains__(self, item):
         raise NotImplementedError()
 
-    def route(self, methods=[HTTPMethod.GET], path='/', scheme=Scheme.http, functions=[]):
+    def route(self, methods: HTTPMethod | Iterable[HTTPMethod] = [HTTPMethod.GET],
+              path: str = '/', scheme: Scheme | Iterable[Scheme] = Scheme.http,
+              functions: list = []):
         raise NotImplementedError()
 
 
@@ -313,8 +315,9 @@ class Router(UserDict, BaseRouter):
 
         self[(path, methods, scheme)] = _chain_wrapper
 
-    def route(self, methods=[HTTPMethod.GET], path='/', scheme=Scheme.http,
-              functions=[], middlewares=[]):
+    def route(self, methods: HTTPMethod | Iterable[HTTPMethod] = [HTTPMethod.GET],
+              path: str = '/', scheme: Scheme | Iterable[Scheme] = Scheme.http,
+              functions: list = [], middlewares: list = []):
         """Register a function or middleware chain in the routing table.
 
         Three calling conventions:
@@ -329,7 +332,7 @@ class Router(UserDict, BaseRouter):
 
         if functions:
             self._register_chain(list(functions), path, methods, scheme)
-            return
+            return lambda fn: fn
 
         if middlewares:
             def decorator(fn):

@@ -1,4 +1,5 @@
 import asyncio
+import zlib
 from abc import ABC, abstractmethod
 import logging
 
@@ -202,13 +203,18 @@ class WebSocketRecipient(BaseRecipient):
             return {'type': 'websocket.connect'}
 
         while True:
-            opcode, masked, length = await WebSocketSender._read_opcode(self._reader)
+            opcode, masked, length, rsv1, _, _ = await WebSocketSender._read_opcode(self._reader)
             payload = await WebSocketSender._read_payload(self._reader, masked, length)
 
             if not masked:
                 raise ValueError(
                     'Received unmasked frame from client, which is a protocol violation.'
                 )
+
+            if rsv1:
+                # Per-message deflate (RFC 7692 §7): re-append the SYNC_FLUSH
+                # tail bytes that the sender stripped, then raw-inflate.
+                payload = zlib.decompress(payload + b'\x00\x00\xff\xff', wbits=-15)
 
             match opcode:
                 case WSOpcode.TEXT:

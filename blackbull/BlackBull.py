@@ -1,4 +1,5 @@
 # from functools import partial, reduce
+from collections.abc import Iterable
 from http import HTTPStatus, HTTPMethod
 import asyncio
 import sys
@@ -69,8 +70,9 @@ class RouteGroup:
         self._app = app
         self._group_mw = list(middlewares)
 
-    def route(self, methods=[HTTPMethod.GET], path='/', scheme=Scheme.http,
-              middlewares=[]):
+    def route(self, methods: HTTPMethod | Iterable[HTTPMethod] = [HTTPMethod.GET],
+              path: str = '/', scheme: Scheme | Iterable[Scheme] = Scheme.http,
+              middlewares: list = []):
         return self._app.route(
             methods=methods,
             path=path,
@@ -180,7 +182,9 @@ class BlackBull:
         except ValueError:
             self._logger.debug("Unknown HTTP method: %r", scope['method'])
             scope.setdefault('state', {})['error_status'] = HTTPStatus.METHOD_NOT_ALLOWED
-            await self._error_router[HTTPStatus.METHOD_NOT_ALLOWED](scope, receive, wrapped)
+            handler = self._error_router[HTTPStatus.METHOD_NOT_ALLOWED]
+            if handler is not None:
+                await handler(scope, receive, wrapped)
             return
 
         path = scope['path']
@@ -195,12 +199,16 @@ class BlackBull:
                 'error_status': HTTPStatus.METHOD_NOT_ALLOWED,
                 'allowed_methods': e.allowed_methods,
             })
-            await self._error_router[HTTPStatus.METHOD_NOT_ALLOWED](scope, receive, wrapped)
+            handler = self._error_router[HTTPStatus.METHOD_NOT_ALLOWED]
+            if handler is not None:
+                await handler(scope, receive, wrapped)
             return
         except PathNotRegistered:
             self._logger.debug("404 Not Found: path=%r", path)
             scope.setdefault('state', {})['error_status'] = HTTPStatus.NOT_FOUND
-            await self._error_router[HTTPStatus.NOT_FOUND](scope, receive, wrapped)
+            handler = self._error_router[HTTPStatus.NOT_FOUND]
+            if handler is not None:
+                await handler(scope, receive, wrapped)
             return
 
         self._logger.debug((self, function))
@@ -216,8 +224,9 @@ class BlackBull:
             if handler is not None:
                 await handler(scope, receive, wrapped)
 
-    def route(self, methods=[HTTPMethod.GET], path='/', scheme=Scheme.http,
-              functions=[], middlewares=[]):
+    def route(self, methods: HTTPMethod | Iterable[HTTPMethod] = [HTTPMethod.GET],
+              path: str = '/', scheme: Scheme | Iterable[Scheme] = Scheme.http,
+              functions: list = [], middlewares: list = []):
         """Register a route handler, optionally wrapping it in middlewares."""
         return self._router.route(
             methods=methods,

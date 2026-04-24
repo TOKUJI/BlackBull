@@ -145,8 +145,11 @@ async def ws_handler(scope, receive, send):
         await send({'type': 'websocket.send', 'text': text})
 ```
 
-The built-in `blackbull.middlewares.websocket` handles the connect/accept handshake
+The built-in `blackbull.middleware.websocket` handles the connect/accept handshake
 automatically; include it in `middlewares=[websocket, ...]` on the route.
+
+BlackBull validates `Sec-WebSocket-Version: 13` and supports per-message deflate
+(RFC 7692) automatically when the client negotiates it.
 
 ### 3.4  Detecting client disconnection
 
@@ -248,7 +251,60 @@ async def delete_task(scope, receive, send):
     ...
 ```
 
-### 4.4  Injecting values into scope
+### 4.4  Built-in middleware
+
+#### websocket
+
+Consumes the initial `websocket.connect` event and sends `websocket.accept` so
+the inner handler can skip that boilerplate:
+
+```python
+from blackbull.middleware import websocket
+from blackbull.utils import Scheme
+
+@app.route(path='/chat', scheme=Scheme.websocket, middlewares=[websocket])
+async def chat(scope, receive, send):
+    # Connection already accepted; go straight to reading messages
+    while True:
+        event = await receive()
+        if event['type'] == 'websocket.disconnect':
+            break
+        await send({'type': 'websocket.send', 'text': event.get('text', '')})
+```
+
+#### compress
+
+Compresses HTTP response bodies using the codec the client prefers (brotli > zstd >
+gzip, based on `Accept-Encoding`):
+
+```python
+from blackbull.middleware import compress
+
+@app.route(path='/data', middlewares=[compress])
+async def data_handler(scope, receive, send):
+    await send(Response(large_payload))
+```
+
+Brotli and zstandard are optional extras:
+
+```bash
+pip install 'blackbull[compression]'   # installs brotli + zstandard
+```
+
+`compress` skips compression when the response body is smaller than 100 bytes.
+To change the threshold, construct `CompressionMiddleware` directly:
+
+```python
+from blackbull.middleware.compression import CompressionMiddleware
+
+compress_big = CompressionMiddleware(min_size=4096)
+
+@app.route(path='/large', middlewares=[compress_big])
+async def large(scope, receive, send):
+    ...
+```
+
+### 4.5  Injecting values into scope
 
 Middleware may add any key to `scope` for inner layers to consume:
 
@@ -311,9 +367,10 @@ raw: bytes = await read_body(receive)
 Reads all body chunks until `more_body=False`.  The stream is consumed — call at
 most once per request (typically inside a middleware, not the handler).
 
-> **Note — streaming request body**: Incremental access to `more_body=True`
-> chunks (streaming upload) is **not yet supported**.  `read_body` always buffers
-> the entire body before returning.
+For streaming uploads, call `receive()` directly — each call returns one chunk
+with `more_body=True` until the final chunk arrives with `more_body=False`.
+`read_body` is a convenience wrapper that buffers all chunks into a single `bytes`
+object before returning.
 
 ### 6.2  JSON body — recommended middleware pattern
 
@@ -485,9 +542,37 @@ Signature: `cookie_header(name, value, path='/', http_only=True)`.
 > **Note for browser clients over plain HTTP**: browsers may not reliably forward
 > `HttpOnly` cookies set by a `fetch()` response on the next page navigation.
 > For single-page apps, store the session token in `sessionStorage` and send it
-> as `Authorization: Bearer <token>` instead (see §4.4 example).
+> as `Authorization: Bearer <token>` instead (see §4.5 example).
 
-### 7.5  WebSocket frames
+### 7.5  HTTP trailers
+
+HTTP/1.1 chunked responses can carry trailing headers after the body.  Use the
+`http.response.trailers` event after the last `http.response.body` chunk:
+
+```python
+@app.route(path='/chunked')
+async def chunked(scope, receive, send):
+    await send({
+        'type': 'http.response.start',
+        'status': 200,
+        'headers': [
+            (b'content-type',     b'text/plain'),
+            (b'transfer-encoding', b'chunked'),
+            (b'trailer',          b'x-checksum'),
+        ],
+    })
+    await send({
+        'type': 'http.response.body',
+        'body': b'chunk data here',
+        'more_body': True,
+    })
+    await send({
+        'type': 'http.response.trailers',
+        'headers': [(b'x-checksum', b'abc123')],
+    })
+```
+
+### 7.6  WebSocket frames
 
 ```python
 from blackbull import WebSocketResponse
@@ -496,6 +581,11 @@ await send(WebSocketResponse('hello'))           # str  → text frame
 await send(WebSocketResponse(b'\x00\x01'))       # bytes → binary frame
 await send(WebSocketResponse({'type': 'msg'}))   # other → JSON-serialised text frame
 ```
+
+(See also §3.3 and §4.4 for WebSocket routing and the built-in `websocket` middleware.)
+
+
+
 
 ---
 
@@ -642,6 +732,48 @@ import os
 DB_URL  = os.environ['DATABASE_URL']
 SECRET  = os.environ['SECRET_KEY']
 PORT    = int(os.environ.get('PORT', 8000))
+```
+
+### §10.3  Mutual TLS (mTLS)
+
+mTLS requires clients to present a certificate signed by a trusted CA.  Set it up
+before starting the server:
+
+```python
+import asyncio
+from blackbull import BlackBull
+
+app = BlackBull()
+
+# ... define routes ...
+
+# Create the server manually so we can configure mTLS before accepting connections
+app.create_server(certfile='cert.pem', keyfile='key.pem', port=8443)
+app.server.configure_mtls(ca_cert='ca.pem')   # enables CERT_REQUIRED
+asyncio.run(app.run())
+```
+
+`configure_mtls` raises `RuntimeError` if called before TLS is configured (i.e.
+before `certfile` and `keyfile` are provided).
+
+Generate a test CA and client certificate:
+
+```bash
+# CA
+openssl req -x509 -newkey rsa:4096 -keyout ca.key -out ca.pem \
+  -days 365 -nodes -subj '/CN=Test CA'
+
+# Server cert signed by the CA
+openssl req -newkey rsa:4096 -keyout key.pem -out server.csr \
+  -nodes -subj '/CN=localhost'
+openssl x509 -req -in server.csr -CA ca.pem -CAkey ca.key \
+  -CAcreateserial -out cert.pem -days 365
+
+# Client cert signed by the CA
+openssl req -newkey rsa:4096 -keyout client.key -out client.csr \
+  -nodes -subj '/CN=client'
+openssl x509 -req -in client.csr -CA ca.pem -CAkey ca.key \
+  -CAcreateserial -out client.pem -days 365
 ```
 
 ---

@@ -31,10 +31,10 @@ class Headers:
         # b'localhost:8000'
     """
 
-    def __init__(self, pairs: list[tuple[bytes, bytes]]):
-        self._list = pairs
+    def __init__(self, pairs: Iterable[tuple[bytes, bytes]]):
+        self._list: list[tuple[bytes, bytes]] = list(pairs)
         self._index: dict[bytes, list[tuple[bytes, bytes]]] = {}
-        for pair in pairs:
+        for pair in self._list:
             self._index.setdefault(pair[0].lower(), []).append(pair)
 
     # ---- ASGI-compliant iterable ----------------------------------------
@@ -67,7 +67,7 @@ class Headers:
         pairs = self._index.get(name.lower())
         return pairs[0][1] if pairs else default
 
-    def append(self, name_or_pairs, value: bytes = None) -> None:
+    def append(self, name_or_pairs, value: bytes | None = None) -> None:
         """Append header(s) to the end of the list.
 
         Two-argument form: ``append(name, value)`` — adds a single pair.

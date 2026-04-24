@@ -18,6 +18,9 @@ class WSOpcode(IntEnum):
 
 class WSFrameBits(IntEnum):
     FIN         = 0x80  # FIN bit in byte 0
+    RSV1        = 0x40  # RSV1 bit in byte 0 (per-message deflate, RFC 7692)
+    RSV2        = 0x20  # RSV2 bit in byte 0 (reserved)
+    RSV3        = 0x10  # RSV3 bit in byte 0 (reserved)
     OPCODE_MASK = 0x0F  # opcode bits in byte 0
     MASK_BIT    = 0x80  # mask bit in byte 1
     LENGTH_MASK = 0x7F  # payload length bits in byte 1
@@ -93,7 +96,7 @@ class BaseSender(ABC):
         self._writer = writer
 
     @abstractmethod
-    async def __call__(self, body, status: HTTPStatus = HTTPStatus.OK, headers: list = []): ...
+    async def __call__(self, body, status: HTTPStatus = HTTPStatus.OK, headers: HeaderList = []): ...
 
     async def _write(self, data: bytes):
         """Flush *data* through the writer."""
@@ -138,6 +141,7 @@ class HTTP1Sender(BaseSender):
                 content = body.get('body', b'')
                 more_body = body.get('more_body', False)
                 if self._buffered_status is not None:
+                    assert self._buffered_headers is not None
                     await self._flush(self._buffered_status, self._buffered_headers, content, more_body)
                     self._buffered_status = None
                     self._buffered_headers = None
@@ -173,8 +177,6 @@ class HTTP1Sender(BaseSender):
         chunks: list[bytes] = []
         chunks.append(f'HTTP/1.1 {status} {status.phrase}'.encode() + _CRLF)
         for k, v in headers:
-            k = k.encode() if isinstance(k, str) else k
-            v = v.encode() if isinstance(v, str) else v
             chunks.append(k + b': ' + v + _CRLF)
         chunks.append(_CRLF)
         for chunk in chunks:
@@ -228,7 +230,7 @@ class HTTP2Sender(BaseSender):
         self.stream_window_size[self._stream_identifier] = initial_window_size
         self._window_open.set()
 
-    async def __call__(self, body, status: HTTPStatus = HTTPStatus.OK, headers: list = []):
+    async def __call__(self, body, status: HTTPStatus = HTTPStatus.OK, headers: HeaderList = []):
         # Control-plane: raw frame object (SETTINGS, PING ACK, WINDOW_UPDATE, …)
         if isinstance(body, FrameBase):
             logger.debug('HTTP2Sender raw frame: %r', body)
@@ -300,7 +302,8 @@ class WebSocketSender(BaseSender):
     The ``status`` and ``headers`` parameters are accepted for interface
     consistency but are unused for WebSocket connections.
     """
-    def __hash__(self):
+    def __init__(self, writer: AbstractWriter):
+        super().__init__(writer)
         self.has_received_closed = False
 
     async def __call__(self, body, _status: HTTPStatus | None = None, _headers: HeaderList = []):
@@ -346,16 +349,22 @@ class WebSocketSender(BaseSender):
         return header + payload
     
     @staticmethod
-    async def _read_opcode(reader) -> tuple[int, bool, int]:
-        """Read one WebSocket frame from *reader* and return its opcode.
+    async def _read_opcode(reader) -> tuple[int, bool, int, bool, bool, bool]:
+        """Read the first two bytes of a WebSocket frame header.
 
+        Returns ``(opcode, masked, length, rsv1, rsv2, rsv3)``.
+        RSV1 signals per-message deflate (RFC 7692 §7); RSV2 and RSV3 are
+        reserved for future extensions (RFC 6455 §5.2).
         Raises ``asyncio.IncompleteReadError`` on EOF.
         """
         header = await reader.readexactly(2)
         opcode = header[0] & WSFrameBits.OPCODE_MASK
+        rsv1   = bool(header[0] & WSFrameBits.RSV1)
+        rsv2   = bool(header[0] & WSFrameBits.RSV2)
+        rsv3   = bool(header[0] & WSFrameBits.RSV3)
         masked = bool(header[1] & WSFrameBits.MASK_BIT)
         length = header[1] & WSFrameBits.LENGTH_MASK
-        return opcode, masked, length
+        return opcode, masked, length, rsv1, rsv2, rsv3
     
     @staticmethod
     async def _read_payload(reader, masked: bool, length: int) -> bytes:
@@ -383,7 +392,7 @@ class WebSocketSender(BaseSender):
         Returns ``(opcode, payload)`` where *payload* is already unmasked.
         Raises ``asyncio.IncompleteReadError`` on EOF.
         """
-        opcode, masked, length = await WebSocketSender._read_opcode(reader)
+        opcode, masked, length, _, _, _ = await WebSocketSender._read_opcode(reader)
         payload = await WebSocketSender._read_payload(reader, masked, length)
 
         return opcode, payload

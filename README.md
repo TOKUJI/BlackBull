@@ -78,19 +78,19 @@ pytest
 - [x] `middlewares` parameter on `@app.route()` for per-route middleware
 - [x] Route groups: `app.group(middlewares=[...])` (Axum `Router::layer()` equivalent)
 - [x] `scope['root_path']`: reverse-proxy mount-path prefix
-- [ ] WebSocket `Sec-WebSocket-Version: 13` validation
+- [x] WebSocket `Sec-WebSocket-Version: 13` validation
 - [ ] WebSocket subprotocol negotiation (`Sec-WebSocket-Protocol`)
-- [ ] HTTP response compression: gzip / br based on `Accept-Encoding`
+- [x] HTTP response compression: gzip / br / zstd based on `Accept-Encoding`
 - [ ] Static file serving middleware with `Range` / `206 Partial Content`
-- [ ] mTLS: client certificate authentication
+- [x] mTLS: client certificate authentication
 - [ ] HTTP/2 server push (`PUSH_PROMISE`)
 - [ ] HTTP/2 stream state machine (RFC 7540 §5.1)
 - [ ] HTTP/2 priority scheduling
-- [ ] WebSocket per-message deflate (RFC 7692)
+- [x] WebSocket per-message deflate (RFC 7692)
 - [ ] WebSocket fragmentation: merge continuation frames
 - [x] Streaming request body (`more_body=True`)
 - [ ] Streaming response (`StreamingResponse` / chunked transfer)
-- [ ] ASGI `http.response.trailers`
+- [x] ASGI `http.response.trailers`
 - [ ] Worker processes / multiprocessing
 - [ ] Global middleware: `app.use(mw)`
 - [ ] URL reverse lookup (`url_for(name, **params)`)
