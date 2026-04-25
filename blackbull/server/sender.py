@@ -214,10 +214,12 @@ class HTTP2Sender(BaseSender):
       Serialises and writes the frame directly.
     """
 
-    def __init__(self, writer: AbstractWriter, factory, stream_identifier: int):
+    def __init__(self, writer: AbstractWriter, factory, stream_identifier: int,
+                 push_callback=None):
         super().__init__(writer)
         self._factory = factory
         self._stream_identifier = stream_identifier
+        self._push_callback = push_callback
         self.connection_window_size = 65535  # initial connection-level window (RFC 7540 §6.9.2)
         self.stream_window_size = {stream_identifier: 65535}  # initial stream window
         self._window_open = asyncio.Event()
@@ -293,6 +295,12 @@ class HTTP2Sender(BaseSender):
                     data=body.get('body', b''),
                 )
                 await self._write(frame.save())
+
+            elif event_type == 'http.response.push':
+                if self._push_callback is not None:
+                    await self._push_callback(body, self._stream_identifier)
+                else:
+                    logger.warning('http.response.push received but no push handler registered')
 
             else:
                 logger.info('HTTP2Sender: unhandled event type %r', event_type)
@@ -429,8 +437,10 @@ class SenderFactory:
         return HTTP1Sender(AsyncioWriter(stream_writer))
 
     @staticmethod
-    def http2(stream_writer, factory, stream_identifier: int) -> HTTP2Sender:
-        return HTTP2Sender(AsyncioWriter(stream_writer), factory, stream_identifier)
+    def http2(stream_writer, factory, stream_identifier: int,
+              push_callback=None) -> HTTP2Sender:
+        return HTTP2Sender(AsyncioWriter(stream_writer), factory,
+                           stream_identifier, push_callback)
 
     @staticmethod
     def websocket(stream_writer) -> WebSocketSender:

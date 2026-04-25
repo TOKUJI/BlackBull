@@ -30,10 +30,25 @@ class Stream:
         self._lock = None
 
         self.end_stream = False
+        self.state = StreamState.IDLE
+        self.priority_hint: dict[str, int | bool] | None = None
+
+    def on_headers_received(self, end_stream: bool) -> None:
+        """Transition state on HEADERS frame (RFC 7540 §5.1)."""
+        if end_stream:
+            self.state = StreamState.HALF_CLOSED_REMOTE
+        else:
+            self.state = StreamState.OPEN
+
+    def on_data_received(self, end_stream: bool) -> None:
+        """Transition state on DATA frame (RFC 7540 §5.1)."""
+        if end_stream:
+            self.state = StreamState.CLOSED
 
     def add_child(self, id_):
-        if id_ in self.get_children():
-            return
+        existing = self.find_child(id_)
+        if existing is not None:
+            return existing
 
         child = Stream(id_, self, )
         self.children[child.identifier] = child

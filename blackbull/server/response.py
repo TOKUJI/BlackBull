@@ -118,6 +118,30 @@ class Respond2Priority(RespondBase):
     FRAME_TYPE = FrameTypes.PRIORITY
 
 
+class Respond2PriorityUpdate(RespondBase):
+    """RFC 9218 §7.1 — receive PRIORITY_UPDATE, log the hint, do not schedule."""
+    FRAME_TYPE = FrameTypes.PRIORITY_UPDATE
+
+    async def respond(self, handler) -> None:
+        hint = self.frame.parsed_priority
+        logger.debug(
+            'PRIORITY_UPDATE stream=%d priority=%r parsed=%r',
+            self.frame.prioritized_stream_id,
+            self.frame.priority_field,
+            hint,
+        )
+        stream = handler.find_stream(self.frame.prioritized_stream_id)
+        if stream is None:
+            # PRIORITY_UPDATE arrived before HEADERS — pre-create the stream
+            # so the hint is available when HEADERS arrives later.
+            handler.root_stream.add_child(self.frame.prioritized_stream_id)
+            stream = handler.find_stream(self.frame.prioritized_stream_id)
+        if stream is not None:
+            stream.priority_hint = hint
+            if stream.scope is not None:
+                stream.scope['http2_priority'] = hint
+
+
 class Respond2RstStream(RespondBase):
 
     @log(logger)

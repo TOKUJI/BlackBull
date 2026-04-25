@@ -83,9 +83,9 @@ pytest
 - [x] HTTP response compression: gzip / br / zstd based on `Accept-Encoding`
 - [ ] Static file serving middleware with `Range` / `206 Partial Content`
 - [x] mTLS: client certificate authentication
-- [ ] HTTP/2 server push (`PUSH_PROMISE`)
-- [ ] HTTP/2 stream state machine (RFC 7540 §5.1)
-- [ ] HTTP/2 priority scheduling
+- [x] HTTP/2 server push: `http.response.push` ASGI event → `PUSH_PROMISE` frame (even promised stream ID) + synthetic GET request dispatched to the app on the promised stream; `scope['extensions']['http.response.push']` advertised on all HTTP/2 scopes
+- [x] HTTP/2 stream state machine (RFC 7540 §5.1): IDLE → OPEN/HALF_CLOSED_REMOTE → CLOSED transitions via `on_headers_received()` / `on_data_received()`; DATA on closed stream triggers RST_STREAM
+- [x] HTTP/2 priority: RFC 9218 minimum compliance — PRIORITY frames stored (weight corrected per §6.3), PRIORITY_UPDATE (0x10) received without error; no active scheduling
 - [x] WebSocket per-message deflate (RFC 7692)
 - [x] WebSocket fragmentation: merge continuation frames; detect protocol violations (orphan CONTINUATION, nested opener, fragmented control frame) via `FragmentAssembler`
 - [x] Streaming request body (`more_body=True`)

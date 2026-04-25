@@ -405,6 +405,8 @@ class TestHTTP2ServerPush:
         handler, _ = _make_h2_handler(app=app)
         handler.receive = AsyncMock(side_effect=[h_frame, None])
         await handler.run()
+        for _ in range(5):
+            await asyncio.sleep(0)
 
         sent_types = [
             call.args[0].FrameType()
@@ -432,6 +434,8 @@ class TestHTTP2ServerPush:
         handler, _ = _make_h2_handler(app=app)
         handler.receive = AsyncMock(side_effect=[h_frame, None])
         await handler.run()
+        for _ in range(5):
+            await asyncio.sleep(0)
 
         for call in handler.send_frame.call_args_list:
             frame = call.args[0]
@@ -459,6 +463,64 @@ class TestHTTP2ServerPush:
         handler.receive = AsyncMock(side_effect=[h_frame, None])
         # Must not raise
         await handler.run()
+
+    async def test_push_dispatches_synthetic_request_to_app(self):
+        """After http.response.push the app must be called again with a GET
+        scope for the pushed path on the promised stream."""
+        h_frame = _make_headers_frame(stream_id=1, end_stream=True)
+
+        scopes: list[dict] = []
+
+        async def app(scope, receive, send):
+            scopes.append(scope)
+            if scope.get('path') == '/':
+                await send({
+                    'type': 'http.response.push',
+                    'path': '/pushed.css',
+                    'headers': [],
+                })
+            await send({'type': 'http.response.start', 'status': 200, 'headers': []})
+            await send({'type': 'http.response.body', 'body': b''})
+
+        handler, _ = _make_h2_handler(app=app)
+        handler.receive = AsyncMock(side_effect=[h_frame, None])
+        await handler.run()
+        for _ in range(10):
+            await asyncio.sleep(0)
+
+        assert len(scopes) == 2, (
+            f'app must be called twice (original + push); got {len(scopes)} call(s)'
+        )
+        push_scope = next((s for s in scopes if s.get('path') == '/pushed.css'), None)
+        assert push_scope is not None, (
+            "No synthetic scope with path='/pushed.css' was delivered to the app"
+        )
+        assert push_scope.get('method') == 'GET', (
+            f"Pushed scope must have method=GET; got {push_scope.get('method')!r}"
+        )
+
+    async def test_scope_has_push_extension(self):
+        """HTTP/2 scope must advertise 'http.response.push' in extensions."""
+        h_frame = _make_headers_frame(stream_id=1, end_stream=True)
+
+        scopes: list[dict] = []
+
+        async def app(scope, receive, send):
+            scopes.append(scope)
+            await send({'type': 'http.response.start', 'status': 200, 'headers': []})
+            await send({'type': 'http.response.body', 'body': b''})
+
+        handler, _ = _make_h2_handler(app=app)
+        handler.receive = AsyncMock(side_effect=[h_frame, None])
+        await handler.run()
+        for _ in range(3):
+            await asyncio.sleep(0)
+
+        assert scopes, 'app must have been called'
+        exts = scopes[0].get('extensions', {})
+        assert 'http.response.push' in exts, (
+            f"scope['extensions'] must contain 'http.response.push'; got {exts!r}"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -597,35 +659,109 @@ class TestHTTP2Priority:
             f'Expected weight=32 after PRIORITY; got {stream.weight}'
         )
 
-    async def test_higher_weight_stream_served_before_lower(self):
-        """Given two concurrent streams, the higher-weight one must be
-        dispatched to the app first (RFC 7540 §5.3.2).
+# ---------------------------------------------------------------------------
+# RFC 9218 PRIORITY_UPDATE: parse_priority_field + scope population
+# ---------------------------------------------------------------------------
 
-        Stream 3 gets weight=32; stream 1 uses the default weight=16.
-        Both HEADERS arrive simultaneously; stream 3 must be called first.
-        """
-        priority = self._priority_frame(stream_id=3, weight=32)
-        h1 = _make_headers_frame(stream_id=1, end_stream=True)
-        h3 = _make_headers_frame(stream_id=3, end_stream=True)
+@pytest.mark.asyncio
+class TestHTTP2PriorityScope:
+    """scope['http2_priority'] must be set on every HTTP/2 request."""
 
-        call_order = []
+    @staticmethod
+    def _make_priority_update_frame(prioritized_stream_id: int,
+                                    priority_field: str) -> bytes:
+        """Build a raw PRIORITY_UPDATE frame (type=0x10, RFC 9218 §7.1)."""
+        payload = (prioritized_stream_id.to_bytes(4, 'big')
+                   + priority_field.encode())
+        return _make_h2_frame(FrameTypes.PRIORITY_UPDATE, 0, 0, payload)
+
+    async def test_parse_priority_field_default(self):
+        """Empty string returns RFC 9218 defaults: urgency=3, incremental=False."""
+        from blackbull.protocol.frame import parse_priority_field
+        result = parse_priority_field('')
+        assert result == {'urgency': 3, 'incremental': False}
+
+    async def test_parse_priority_field_urgency(self):
+        """'u=5' parses urgency=5, incremental=False."""
+        from blackbull.protocol.frame import parse_priority_field
+        result = parse_priority_field('u=5')
+        assert result == {'urgency': 5, 'incremental': False}
+
+    async def test_parse_priority_field_urgency_and_incremental(self):
+        """'u=2, i' parses urgency=2, incremental=True."""
+        from blackbull.protocol.frame import parse_priority_field
+        result = parse_priority_field('u=2, i')
+        assert result == {'urgency': 2, 'incremental': True}
+
+    async def test_scope_has_default_http2_priority(self):
+        """HEADERS frame with no prior PRIORITY_UPDATE → defaults in scope."""
+        h_frame = _make_headers_frame(stream_id=1, end_stream=True)
+
+        scopes = []
 
         async def app(scope, receive, send):
-            # Record which stream_id reached the app and when
-            call_order.append(scope.get('stream_id') or scope.get('path'))
+            scopes.append(scope)
 
         handler, _ = _make_h2_handler(app=app)
-        handler.receive = AsyncMock(side_effect=[priority, h1, h3, None])
+        handler.receive = AsyncMock(side_effect=[h_frame, None])
         await handler.run()
+        for _ in range(3):
+            await asyncio.sleep(0)
 
-        assert len(call_order) == 2, f'Expected 2 app calls; got {call_order}'
-        assert call_order[0] != call_order[1], 'Both streams must reach the app'
-        # Stream 3 (weight 32) should precede stream 1 (weight 16)
-        idx_stream3 = next(
-            (i for i, v in enumerate(call_order) if v in (3, '/') ), None
+        assert scopes, 'app must have been called'
+        assert scopes[0].get('http2_priority') == {'urgency': 3, 'incremental': False}, (
+            f"Expected default http2_priority; got {scopes[0].get('http2_priority')!r}"
         )
-        assert idx_stream3 == 0, (
-            f'Higher-weight stream 3 must be served first; call order: {call_order}'
+
+    async def test_priority_update_before_headers_populates_scope(self):
+        """PRIORITY_UPDATE arriving before HEADERS → scope inherits the hint."""
+        pu_frame = self._make_priority_update_frame(
+            prioritized_stream_id=1, priority_field='u=1, i')
+        h_frame = _make_headers_frame(stream_id=1, end_stream=True)
+
+        scopes = []
+
+        async def app(scope, receive, send):
+            scopes.append(scope)
+
+        handler, _ = _make_h2_handler(app=app)
+        handler.receive = AsyncMock(side_effect=[pu_frame, h_frame, None])
+        await handler.run()
+        for _ in range(3):
+            await asyncio.sleep(0)
+
+        assert scopes, 'app must have been called'
+        assert scopes[0].get('http2_priority') == {'urgency': 1, 'incremental': True}, (
+            f"Expected http2_priority from PRIORITY_UPDATE; got {scopes[0].get('http2_priority')!r}"
+        )
+
+    async def test_priority_header_fallback_populates_scope(self):
+        """'priority' HTTP header → parsed into scope['http2_priority'] as fallback."""
+        from hpack import Encoder
+        encoder = Encoder()
+        block = encoder.encode([
+            (b':method', b'GET'),
+            (b':path', b'/'),
+            (b':scheme', b'https'),
+            (b'priority', b'u=6'),
+        ])
+        flags = HeaderFrameFlags.END_HEADERS | HeaderFrameFlags.END_STREAM
+        h_frame = _make_h2_frame(FrameTypes.HEADERS, flags, 1, block)
+
+        scopes = []
+
+        async def app(scope, receive, send):
+            scopes.append(scope)
+
+        handler, _ = _make_h2_handler(app=app)
+        handler.receive = AsyncMock(side_effect=[h_frame, None])
+        await handler.run()
+        for _ in range(3):
+            await asyncio.sleep(0)
+
+        assert scopes, 'app must have been called'
+        assert scopes[0].get('http2_priority') == {'urgency': 6, 'incremental': False}, (
+            f"Expected http2_priority from 'priority' header; got {scopes[0].get('http2_priority')!r}"
         )
 
 

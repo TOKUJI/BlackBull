@@ -1442,3 +1442,231 @@ Call `_listener.stop()` on shutdown to flush the queue and join the thread.
   and `_make_capturing_send` helper in `HTTP2Handler`.
 - WebSocket access logging: connection-level entry (client IP, path, close
   code, duration).
+
+---
+
+## §15  HTTP/2 Protocol Internals
+
+### 15.1  Stream state machine (RFC 7540 §5.1)
+
+Every HTTP/2 request lives on a numbered stream.  BlackBull tracks each
+stream's lifecycle with a minimal state machine:
+
+```
+IDLE ──HEADERS──► OPEN ──DATA+END_STREAM──► CLOSED
+                 │
+                 └─HEADERS+END_STREAM──► HALF_CLOSED_REMOTE ──DATA+END_STREAM──► CLOSED
+```
+
+| State | Meaning |
+|---|---|
+| `IDLE` | Stream allocated but no frames seen yet |
+| `OPEN` | HEADERS received, body may follow |
+| `HALF_CLOSED_REMOTE` | HEADERS+END_STREAM received; client will send no more frames on this stream |
+| `CLOSED` | Full request received |
+
+State transitions happen in `server.py`'s `HTTP2Handler.run()` loop:
+
+```python
+# HEADERS frame
+stream.on_headers_received(end_stream=bool(frame.end_stream))
+
+# DATA frame — reject if stream is already done
+if stream.state in (StreamState.HALF_CLOSED_REMOTE, StreamState.CLOSED):
+    await self.send_frame(
+        self.factory.rst_stream(stream.identifier, ErrorCodes.STREAM_CLOSED))
+else:
+    stream.on_data_received(end_stream=bool(frame.end_stream))
+    ...
+```
+
+### 15.2  Priority: RFC 7540 vs RFC 9218
+
+**RFC 7540 §5.3 (legacy PRIORITY frames)** defined a dependency tree with
+weights 1–256.  Very few clients ever sent these frames, and the overhead
+was considered not worth it — RFC 9218 supersedes the mechanism.
+
+**RFC 9218 (Extensible Prioritization Scheme)** replaces the dependency tree
+with two simpler fields sent in a `PRIORITY_UPDATE` frame (type `0x10`):
+
+| Field | Values | Meaning |
+|---|---|---|
+| `urgency` | 0 (highest) – 7 (lowest) | relative importance |
+| `incremental` | `?0` / `?1` | whether the server may interleave responses |
+
+BlackBull's stance: **receive but do not schedule**.  Priority signals are
+accepted, logged at DEBUG, and discarded.  This is valid per RFC 9218 §2:
+"A server that does not implement prioritization MUST ignore this frame."
+
+Implementation details:
+
+- `FrameTypes.PRIORITY_UPDATE = b'\x10'` — frame type registered in the
+  `FrameTypes` enum so the parser does not raise `ValueError`.
+- `PriorityUpdate` frame class — parses `prioritized_stream_id` (4 bytes)
+  and `priority_field` (ASCII string, e.g. `"u=3, i"`).
+- `Respond2PriorityUpdate` — no-op responder that logs the hint at DEBUG
+  level via `response.py`'s `RespondFactory`.
+
+**Weight off-by-one (RFC 7540 §6.3)**: the wire format stores `weight − 1`
+(range 0–255 → logical weight 1–256).  BlackBull adds 1 on parse so
+`stream.weight` always holds the logical value.
+
+### 15.3  Flow control
+
+HTTP/2 has two independent flow-control windows:
+
+- **Connection-level**: shared across all streams on one connection.
+- **Stream-level**: per-stream budget.
+
+`HTTP2Sender._write()` blocks on `asyncio.Event` when the window is
+exhausted.  `Respond2WindowUpdate.respond()` credits the relevant sender(s)
+and sets the event to unblock waiting writes.  No user code needs to interact
+with flow control directly.
+
+### 15.4  Reading priority hints in handlers
+
+Every HTTP/2 request scope contains an `http2_priority` key populated by
+BlackBull before your handler is called:
+
+```python
+scope['http2_priority']  # → {'urgency': int, 'incremental': bool}
+```
+
+| Key | Type | Default | Meaning |
+|---|---|---|---|
+| `urgency` | `int` 0–7 | `3` | 0 = most urgent, 7 = least urgent |
+| `incremental` | `bool` | `False` | Client accepts interleaved partial responses |
+
+BlackBull resolves the value in this order (first wins):
+
+1. `PRIORITY_UPDATE` frame (type `0x10`) received from the client — either
+   before or after the HEADERS frame.
+2. `priority` HTTP header in the request (e.g. `priority: u=1, i`).
+3. RFC 9218 §4.1 defaults: `urgency=3`, `incremental=False`.
+
+For HTTP/1.1 requests the key is absent.  Always use `.get()` or supply
+a default so your code works across both protocols.
+
+#### Minimal handler example
+
+```python
+_DEFAULT_PRIORITY = {'urgency': 3, 'incremental': False}
+
+@app.route(path='/search')
+async def search(scope, receive, send):
+    hint = scope.get('http2_priority', _DEFAULT_PRIORITY)
+    if hint['urgency'] <= 2:
+        # High-urgency: return cached / pre-computed result immediately.
+        result = get_cached_result()
+    else:
+        # Normal / background: run the full search.
+        result = await run_full_search()
+    await send(JSONResponse(result))
+```
+
+#### Middleware example
+
+The pattern scales cleanly to middleware so every route in a group benefits
+without repeating the check:
+
+```python
+async def priority_mw(scope, receive, send, call_next):
+    hint = scope.get('http2_priority', {'urgency': 3, 'incremental': False})
+    urgency = hint['urgency']
+    scope['_priority_urgency'] = urgency   # pass downstream
+
+    if urgency <= 1:
+        logger.warning('HIGH-PRIORITY %s %s u=%d',
+                       scope.get('method'), scope.get('path'), urgency)
+    elif urgency >= 6:
+        scope['_background'] = True        # suppress verbose logging
+
+    await call_next(scope, receive, send)
+
+api = app.group(middlewares=[priority_mw, auth_mw])
+```
+
+See `examples/SimpleTaskManager/app.py` for a complete integration and
+`examples/PriorityExample/` for a dedicated server + client pair that
+demonstrates all three endpoints and the `priority` header fallback.
+
+#### Testing the feature with curl
+
+```bash
+# Default priority (urgency=3)
+curl --http2 -k https://localhost:8443/priority-echo
+
+# High urgency
+curl --http2 -k -H 'priority: u=1' https://localhost:8443/priority-echo
+
+# Background prefetch, incremental
+curl --http2 -k -H 'priority: u=6, i' https://localhost:8443/priority-echo
+```
+
+> **Note** — curl converts the `priority` header to a `PRIORITY_UPDATE`
+> frame when talking HTTP/2 over TLS.  httpx (Python) sends it as a plain
+> header; BlackBull parses both forms.
+
+### 15.5  HTTP/2 server push
+
+Server push lets the server proactively send a resource to the client before
+the client asks for it.  A typical use case is pushing a CSS file alongside
+the HTML page that references it, saving one round-trip.
+
+#### ASGI event
+
+The app signals a push by calling `send` with an `http.response.push` event
+before the final `http.response.body`:
+
+```python
+@app.route(path='/')
+async def index(scope, receive, send):
+    # Push a stylesheet before sending the HTML.
+    await send({
+        'type': 'http.response.push',
+        'path': '/static/style.css',
+        'headers': [],               # regular headers only; pseudo-headers are added automatically
+    })
+    await send({'type': 'http.response.start', 'status': 200,
+                'headers': [(b'content-type', b'text/html')]})
+    await send({'type': 'http.response.body',
+                'body': b'<html>...</html>'})
+```
+
+`path` must be a plain string (percent-encoding decoded).  Pseudo-headers
+(`:method`, `:scheme`, `:authority`) are filled in automatically by the
+server; do not include them in `headers`.
+
+#### What BlackBull does
+
+1. Allocates the next even stream ID for the pushed resource (RFC 7540 §5.1.1
+   — server-initiated streams are always even: 2, 4, 6, …).
+2. Sends a `PUSH_PROMISE` frame on the **parent stream** (the one that
+   triggered the push).  The frame contains the synthetic request headers
+   (`GET /static/style.css`) the client can use to match its cache.
+3. Creates a synthetic scope (`type='http'`, `method='GET'`,
+   `path='/static/style.css'`) and dispatches it to your app as a new
+   `asyncio.Task` on the promised stream.  Your app handles the pushed
+   request exactly like a normal GET — the same route, same middleware,
+   same response cycle.
+
+#### Checking for support
+
+The server advertises push support in `scope['extensions']`:
+
+```python
+if 'http.response.push' in scope.get('extensions', {}):
+    await send({'type': 'http.response.push', 'path': '/logo.png', 'headers': []})
+```
+
+For HTTP/1.1 requests `scope['extensions']` does not contain
+`'http.response.push'`, so the guard above makes the same handler work on
+both protocols.
+
+#### Limitations
+
+- Clients can disable server push by sending `SETTINGS_ENABLE_PUSH=0`.
+  BlackBull does not currently check this setting; if the client rejects the
+  push it will send a `RST_STREAM` which BlackBull logs and ignores.
+- Pushed resources should be cacheable.  Pushing non-cacheable content wastes
+  bandwidth and may confuse browsers.

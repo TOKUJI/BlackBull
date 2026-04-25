@@ -22,6 +22,7 @@ class FrameTypes(bytes, Enum):
     GOAWAY = b'\x07'
     WINDOW_UPDATE = b'\x08'
     CONTINUATION = b'\x09'
+    PRIORITY_UPDATE = b'\x10'  # RFC 9218 §7.1
 
 
 class FrameFlags(IntEnum):
@@ -113,6 +114,21 @@ class FrameFactory:
         """Create a SETTINGS frame (INIT or ACK)."""
         flags = SettingFrameFlags.ACK if ack else SettingFrameFlags.INIT
         return self.create(FrameTypes.SETTINGS, flags, 0)
+
+    def push_promise(self, parent_stream_id: int, promised_stream_id: int,
+                     pseudo_headers: dict, headers: list) -> 'PushPromise':
+        """Create a PUSH_PROMISE frame sent on parent_stream_id.
+
+        promised_stream_id must be an even server-allocated ID (RFC 7540 §5.1.1).
+        pseudo_headers: dict mapping PseudoHeaders → str value.
+        headers: list of (name, value) regular-header tuples.
+        """
+        frame = self.create(FrameTypes.PUSH_PROMISE, HeaderFrameFlags.END_HEADERS,
+                            parent_stream_id, data=b'')
+        frame.promised_stream_id = promised_stream_id
+        frame.pseudo_headers = pseudo_headers
+        frame.headers = headers
+        return frame
 
     def load(self, data):
         if len(data) < 9:
@@ -379,6 +395,31 @@ class Headers(FrameBase):
         return ', '.join(head)
 
 
+class PushPromise(FrameBase):
+    """RFC 7540 §6.6 — PUSH_PROMISE frame (type 0x05).
+
+    Sent on the initiating (parent) stream; carries the promised stream ID
+    and the HPACK-encoded synthetic request headers for the pushed resource.
+    """
+    FRAME_TYPE = FrameTypes.PUSH_PROMISE
+
+    def __init__(self, length: int, type_, flags: int, stream_id: int,
+                 *, data: bytes = b'', **kwds):
+        super().__init__(length, type_, flags, stream_id)
+        buf = BytesIO(data)
+        self.promised_stream_id = int.from_bytes(buf.read(4), 'big') & 0x7FFFFFFF
+        self.pseudo_headers: dict[PseudoHeaders, str] = {}
+        self.headers: list[tuple[str, str]] = []
+
+    def save(self) -> bytes:
+        encoder = Encoder()
+        block = encoder.encode(list(self.pseudo_headers.items()) + self.headers)
+        payload = (self.promised_stream_id & 0x7FFFFFFF).to_bytes(4, 'big') + block
+        self.length = len(payload)
+        self.flags = HeaderFrameFlags.END_HEADERS
+        return super().save() + payload
+
+
 class GoAway(FrameBase):
     FRAME_TYPE = FrameTypes.GOAWAY
     def __init__(self, length: int, type_, flags: int, stream_id: int, *, data=None, **kwds):
@@ -466,7 +507,8 @@ class Priority(FrameBase):
 
         self.exclusion = 0x80000000 & _t
         self.dependent_stream = _t & 0x7fffffff
-        self.weight = int.from_bytes(payload.read(1), 'big', signed=False)
+        # RFC 7540 §6.3: wire value is weight − 1; add 1 to get true weight (1–256).
+        self.weight = int.from_bytes(payload.read(1), 'big', signed=False) + 1
         logger.info(f'exclusion: {self.exclusion}, dependent_stream: {self.dependent_stream}, weight: {self.weight}')
 
     def save(self):
@@ -518,3 +560,54 @@ class Continuation(FrameBase):
         res = base + self.payload
         logger.debug('Continuation is saving: %r', res)
         return res
+
+
+def parse_priority_field(s: str) -> dict[str, int | bool]:
+    """Parse an RFC 9218 Priority field value string.
+
+    ``"u=5, i"`` → ``{'urgency': 5, 'incremental': True}``
+
+    Defaults per RFC 9218 §4.1: urgency=3, incremental=False.
+    """
+    urgency: int = 3
+    incremental: bool = False
+    for part in s.split(','):
+        part = part.strip()
+        if part.startswith('u='):
+            try:
+                urgency = max(0, min(7, int(part[2:])))
+            except ValueError:
+                pass
+        elif part == 'i':
+            incremental = True
+    return {'urgency': urgency, 'incremental': incremental}
+
+
+class PriorityUpdate(FrameBase):
+    """RFC 9218 §7.1 — PRIORITY_UPDATE frame (type 0x10).
+
+    Payload: 4-byte Prioritized Stream ID + ASCII Priority field value
+    (e.g. ``u=3`` or ``u=0, i``).  The server receives and logs the hint
+    but does not reorder stream processing.
+    """
+    FRAME_TYPE = FrameTypes.PRIORITY_UPDATE
+
+    def __init__(self, length: int, type_, flags: int, stream_id: int,
+                 *, data: bytes = b'', **kwds):
+        super().__init__(length, type_, flags, stream_id)
+        buf = BytesIO(data)
+        raw_id = int.from_bytes(buf.read(4), 'big') & 0x7FFFFFFF
+        self.prioritized_stream_id = raw_id
+        self.priority_field = buf.read().decode('ascii', errors='replace')
+        logger.debug('PriorityUpdate: stream=%d priority=%r',
+                     self.prioritized_stream_id, self.priority_field)
+
+    @property
+    def parsed_priority(self) -> dict[str, int | bool]:
+        return parse_priority_field(self.priority_field)
+
+    def save(self) -> bytes:
+        payload = (self.prioritized_stream_id.to_bytes(4, 'big')
+                   + self.priority_field.encode())
+        self.length = len(payload)
+        return super().save() + payload

@@ -65,11 +65,16 @@ async def error_mw(scope, receive, send, call_next):
 
 
 async def logging_mw(scope, receive, send, call_next):
-    """Log the request method, path, and elapsed time."""
+    """Log the request method, path, and elapsed time.
+
+    Skips timing output for background-priority requests (urgency >= 6)
+    because those are low-value and would flood the log.
+    """
     t0 = time.monotonic()
     logger.info('%s %s', scope.get('method', '?'), scope.get('path', '?'))
     await call_next(scope, receive, send)
-    logger.info('  → %.1f ms', (time.monotonic() - t0) * 1000)
+    if not scope.get('_skip_timing'):
+        logger.info('  → %.1f ms', (time.monotonic() - t0) * 1000)
 
 
 async def auth_mw(scope, receive, send, call_next):
@@ -83,6 +88,30 @@ async def auth_mw(scope, receive, send, call_next):
         return
     scope['user'] = username
     scope['token'] = token
+    await call_next(scope, receive, send)
+
+
+async def priority_mw(scope, receive, send, call_next):
+    """Read HTTP/2 priority hint and adjust downstream behaviour.
+
+    scope['http2_priority'] is populated by BlackBull for HTTP/2 requests.
+    For HTTP/1.1 it is absent; this middleware defaults gracefully.
+
+    urgency 0-1  → high-priority: log the request prominently.
+    urgency 6-7  → background:    skip the per-request timing log so the
+                   event loop stays uncluttered for more urgent work.
+    urgency 2-5  → normal:        no change.
+    """
+    hint = scope.get('http2_priority', {'urgency': 3, 'incremental': False})
+    urgency = hint['urgency']
+    scope['_priority_urgency'] = urgency
+
+    if urgency <= 1:
+        logger.info('HIGH-PRIORITY request u=%d: %s %s',
+                    urgency, scope.get('method', '?'), scope.get('path', '?'))
+    elif urgency >= 6:
+        scope['_skip_timing'] = True   # signal to logging_mw
+
     await call_next(scope, receive, send)
 
 
@@ -104,7 +133,7 @@ async def json_body_mw(scope, receive, send, call_next):
 app = BlackBull()
 
 public = app.group(middlewares=[error_mw, logging_mw])
-api    = app.group(middlewares=[error_mw, logging_mw, auth_mw])
+api    = app.group(middlewares=[error_mw, logging_mw, priority_mw, auth_mw])
 
 
 @app.on_startup

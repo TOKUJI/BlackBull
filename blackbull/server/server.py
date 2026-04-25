@@ -16,9 +16,9 @@ import socket
 
 # private library
 from ..utils import HTTP2, pop_safe, EventEmitter, check_port
-from ..protocol.stream import Stream
+from ..protocol.stream import Stream, StreamState
 from ..protocol.rsock import create_dual_stack_sockets
-from ..protocol.frame import ErrorCodes, FrameFactory, FrameTypes, FrameBase
+from ..protocol.frame import ErrorCodes, FrameFactory, FrameTypes, FrameBase, parse_priority_field, PseudoHeaders
 from ..logger import get_logger_set
 from .response import RespondFactory
 from .parser import ParserFactory
@@ -27,6 +27,24 @@ from .recipient import RecipientFactory, AbstractReader, AsyncioReader, Incomple
 from .headers import Headers
 logger, log = get_logger_set(__name__)
 _access_logger = logging.getLogger('blackbull.access')
+
+_DEFAULT_PRIORITY: dict[str, int | bool] = {'urgency': 3, 'incremental': False}
+
+
+def _resolve_priority(stream: 'Stream', scope: dict) -> dict[str, int | bool]:
+    """Return the HTTP/2 priority hint for a newly-built scope.
+
+    Precedence (highest first):
+    1. A PRIORITY_UPDATE frame received before HEADERS (stored on stream).
+    2. The ``priority`` HTTP header sent in the request.
+    3. RFC 9218 §4.1 defaults (urgency=3, incremental=False).
+    """
+    if stream.priority_hint is not None:
+        return stream.priority_hint
+    raw = scope.get('headers', Headers([])).get(b'priority', b'')
+    if raw:
+        return parse_priority_field(raw.decode('ascii', errors='replace'))
+    return dict(_DEFAULT_PRIORITY)
 
 
 # ---------------------------------------------------------------------------
@@ -328,6 +346,8 @@ class HTTP2Handler(BaseHandler):
         self._senders: dict = {}
         # RFC 7540 §6.5.2: default is unlimited; updated by client SETTINGS.
         self.max_concurrent_streams = float('inf')
+        # Server-initiated (pushed) streams use even IDs (RFC 7540 §5.1.1).
+        self._next_push_stream_id = 2
 
     def find_stream(self, id_):
         if id_ == 0:
@@ -335,15 +355,86 @@ class HTTP2Handler(BaseHandler):
         else:
             return self.root_stream.find_child(id_)
 
+    def _allocate_push_stream_id(self) -> int:
+        sid = self._next_push_stream_id
+        self._next_push_stream_id += 2
+        return sid
+
     def make_sender(self, stream_identifier: int):
         if stream_identifier not in self._senders:
             self._senders[stream_identifier] = SenderFactory.http2(
-                self.writer, self.factory, stream_identifier)
+                self.writer, self.factory, stream_identifier,
+                push_callback=self._handle_push)
         return self._senders[stream_identifier]
 
     async def send_frame(self, frame: FrameBase):
         """Send a raw HTTP/2 frame via the control-plane sender."""
         await self._control_sender(frame)
+
+    async def _handle_push(self, event: dict, parent_stream_id: int) -> None:
+        """Handle an 'http.response.push' ASGI event (RFC 7540 §8.2).
+
+        Allocates an even promised stream ID, sends a PUSH_PROMISE frame on
+        the parent stream, then dispatches a synthetic GET request to the app
+        on the promised stream so the pushed resource is fully delivered.
+        """
+        push_stream_id = self._allocate_push_stream_id()
+        path = event.get('path', '/')
+
+        # Derive :authority from the parent stream's scope if available.
+        parent_stream = self.root_stream.find_child(parent_stream_id)
+        parent_scope = (parent_stream.scope if (parent_stream and parent_stream.scope is not None)
+                        else {})
+        raw_authority = (parent_scope.get('headers', Headers([]))
+                                     .get(b':authority') or
+                         parent_scope.get('headers', Headers([]))
+                                     .get(b'host') or b'localhost')
+        authority = raw_authority.decode() if isinstance(raw_authority, bytes) else raw_authority
+
+        pseudo = {
+            PseudoHeaders.METHOD:    'GET',
+            PseudoHeaders.PATH:      path,
+            PseudoHeaders.SCHEME:    parent_scope.get('scheme', 'https'),
+            PseudoHeaders.AUTHORITY: authority,
+        }
+        # Strip pseudo-headers from the app-supplied list; keep regular headers.
+        regular = [
+            (k.decode() if isinstance(k, bytes) else k,
+             v.decode() if isinstance(v, bytes) else v)
+            for k, v in event.get('headers', [])
+            if not (k.decode() if isinstance(k, bytes) else k).startswith(':')
+        ]
+
+        pp = self.factory.push_promise(parent_stream_id, push_stream_id, pseudo, regular)
+        await self.send_frame(pp)
+
+        # Build a synthetic scope for the pushed resource.
+        query = urlparse(path).query
+        pushed_scope: dict = {
+            'type': 'http',
+            'http_version': '2',
+            'method': 'GET',
+            'path': path,
+            'scheme': parent_scope.get('scheme', 'https'),
+            'query_string': query.encode() if query else b'',
+            'root_path': '',
+            'client': parent_scope.get('client'),
+            'headers': Headers([(k.encode() if isinstance(k, str) else k,
+                                  v.encode() if isinstance(v, str) else v)
+                                 for k, v in regular]),
+            'extensions': {'http.response.push': {}},
+            'http2_priority': {'urgency': 3, 'incremental': False},
+        }
+
+        # The pushed request is already complete (GET has no body).
+        push_recipient = RecipientFactory.http2()
+        push_recipient.put_event({'type': 'http.request', 'body': b'', 'more_body': False})
+
+        push_sender = SenderFactory.http2(
+            self.writer, self.factory, push_stream_id,
+            push_callback=self._handle_push)  # nested pushes allowed by RFC 7540
+
+        asyncio.create_task(self.app(pushed_scope, push_recipient, push_sender))
 
     async def receive(self) -> bytes:
         """Read the stream, get some data from incoming frames, and parse it"""
@@ -414,8 +505,12 @@ class HTTP2Handler(BaseHandler):
                     if frame.end_headers:
                         waiting_continuation = False
                         scope = ParserFactory.Get(frame, stream).parse()
+                        scope['http2_priority'] = _resolve_priority(stream, scope)
+                        scope['extensions'] = {'http.response.push': {}}
+                        stream.scope = scope   # store so _handle_push can read it
                         stream_recipient = RecipientFactory.http2()
                         recipients[stream.identifier] = stream_recipient
+                        stream.on_headers_received(end_stream=bool(frame.end_stream))
                         if frame.end_stream:
                             # No body will follow — enqueue an empty request event now.
                             stream_recipient.put_event({'type': 'http.request', 'body': b'', 'more_body': False})
@@ -437,6 +532,9 @@ class HTTP2Handler(BaseHandler):
                         waiting_continuation = False
                         header_frame.parse_payload()
                         scope = ParserFactory.Get(header_frame, stream).parse()
+                        scope['http2_priority'] = _resolve_priority(stream, scope)
+                        scope['extensions'] = {'http.response.push': {}}
+                        stream.scope = scope   # store so _handle_push can read it
                         stream_recipient = RecipientFactory.http2()
                         recipients[stream.identifier] = stream_recipient
                         asyncio.create_task(self.app(scope, stream_recipient, send))
@@ -446,10 +544,15 @@ class HTTP2Handler(BaseHandler):
                 case FrameTypes.DATA:
                     # Send WINDOW_UPDATE for every DATA frame (RFC 7540 §6.9).
                     await self.send_frame(self.factory.window_update(stream.identifier, frame.length))
-                    if stream.identifier in recipients:
-                        recipients[stream.identifier].put_DATAFrame(frame)
+                    if stream.state in (StreamState.HALF_CLOSED_REMOTE, StreamState.CLOSED):
+                        # RFC 7540 §6.1: DATA on a closed stream is a stream error.
+                        await self.send_frame(self.factory.rst_stream(stream.identifier, ErrorCodes.STREAM_CLOSED))
                     else:
-                        logger.warning('DATA for stream %d but no recipient found', stream.identifier)
+                        stream.on_data_received(end_stream=bool(frame.end_stream))
+                        if stream.identifier in recipients:
+                            recipients[stream.identifier].put_DATAFrame(frame)
+                        else:
+                            logger.warning('DATA for stream %d but no recipient found', stream.identifier)
 
                 case FrameTypes.GOAWAY:
                     await self.send_frame(self.factory.goaway(last_stream_id))
