@@ -89,7 +89,7 @@ pytest
 - [x] WebSocket per-message deflate (RFC 7692)
 - [x] WebSocket fragmentation: merge continuation frames; detect protocol violations (orphan CONTINUATION, nested opener, fragmented control frame) via `FragmentAssembler`
 - [x] Streaming request body (`more_body=True`)
-- [ ] Streaming response (`StreamingResponse` / chunked transfer)
+- [x] Streaming response (`StreamingResponse` / chunked transfer)
 - [x] ASGI `http.response.trailers`
 - [x] HTTP/1.1 access logging: one `blackbull.access` INFO entry per request (client IP, method, path, status, bytes, duration) via `AccessLogRecord`; stored in `scope['state']['access_log']` for middleware extension
 - [ ] HTTP/2 access logging: per-stream entry using `_make_capturing_send` on the per-stream sender in `HTTP2Handler`

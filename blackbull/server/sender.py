@@ -136,6 +136,8 @@ class HTTP1Sender(BaseSender):
         super().__init__(writer)
         self._buffered_status: HTTPStatus | None = None
         self._buffered_headers: Headers | None = None
+        self._chunked: bool = False
+        self._expect_trailers: bool = False
 
     async def __call__(self, body,
                        status: HTTPStatus = HTTPStatus.OK,
@@ -148,6 +150,7 @@ class HTTP1Sender(BaseSender):
             case {'type': 'http.response.start'}:
                 self._buffered_status = HTTPStatus(body.get('status', HTTPStatus.OK))
                 self._buffered_headers = Headers(list(body.get('headers', [])))
+                self._expect_trailers = bool(body.get('trailers', False))
 
             case {'type': 'http.response.body'}:
                 content = body.get('body', b'')
@@ -157,9 +160,15 @@ class HTTP1Sender(BaseSender):
                     await self._flush(self._buffered_status, self._buffered_headers, content, more_body)
                     self._buffered_status = None
                     self._buffered_headers = None
-                elif content:
-                    logger.debug('HTTP1Sender body: %r', content)
-                    await self._write(content)
+                else:
+                    if self._chunked:
+                        if content:
+                            await self._write(f'{len(content):x}\r\n'.encode() + content + b'\r\n')
+                        if not more_body and not self._expect_trailers:
+                            await self._write(b'0\r\n\r\n')
+                    elif content:
+                        logger.debug('HTTP1Sender body: %r', content)
+                        await self._write(content)
 
             case {'type': 'http.response.trailers'}:
                 await self._write(b'0\r\n')
@@ -174,14 +183,24 @@ class HTTP1Sender(BaseSender):
                 raise TypeError(f'HTTP1Sender expected bytes or dict, got {type(body)!r}')
 
     async def _flush(self, status: HTTPStatus, headers: Headers, body: bytes, more_body: bool = False) -> None:
-        if not more_body and b'content-length' not in headers:
+        if more_body:
+            if b'transfer-encoding' not in headers:
+                headers.append(b'transfer-encoding', b'chunked')
+            self._chunked = True
+        elif b'content-length' not in headers:
             headers.append(b'content-length', str(len(body)).encode())
 
         if b'Date' not in headers:
             headers.append(b'Date', formatdate(timeval=None, localtime=False, usegmt=True).encode())
 
         await self._write_start(status, headers)
-        if body:
+
+        if self._chunked:
+            if body:
+                await self._write(f'{len(body):x}\r\n'.encode() + body + b'\r\n')
+            if not more_body and not self._expect_trailers:
+                await self._write(b'0\r\n\r\n')
+        elif body:
             logger.debug('HTTP1Sender body: %r', body)
             await self._write(body)
 

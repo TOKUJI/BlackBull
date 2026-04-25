@@ -1783,3 +1783,107 @@ app.static('/b', 'public/b')
 print(app._static_roots)
 # [('/a', PosixPath('/abs/public/a')), ('/b', PosixPath('/abs/public/b'))]
 ```
+
+---
+
+## §17  Streaming Responses
+
+### `StreamingResponse`
+
+Use `StreamingResponse` to push an async generator to the client without
+buffering the whole body in memory.  The class calls `send` directly, so it
+works as a nested ASGI app:
+
+```python
+import asyncio
+from blackbull import BlackBull, StreamingResponse
+
+app = BlackBull()
+
+async def countdown():
+    for i in range(5, 0, -1):
+        yield f'{i}\n'.encode()
+        await asyncio.sleep(1)
+    yield b'done\n'
+
+@app.route(path='/stream')
+async def handler(scope, receive, send):
+    await StreamingResponse(countdown())(scope, receive, send)
+```
+
+`StreamingResponse.__init__` accepts:
+
+| parameter | default | description |
+|---|---|---|
+| `content` | — | `AsyncIterator` of `bytes` or `str` chunks |
+| `status` | `200` | HTTP status code |
+| `headers` | `[]` | extra header tuples `(bytes, bytes)` |
+| `media_type` | `'text/plain'` | `Content-Type` value (injected if absent from `headers`) |
+
+`str` chunks are encoded to UTF-8 automatically.
+
+### How HTTP/1.1 delivers streaming responses
+
+When `more_body=True` appears on the first `http.response.body` event,
+`HTTP1Sender` adds `Transfer-Encoding: chunked` to the response headers and
+formats each body event as a hex-length chunk:
+
+```
+5\r\n
+hello\r\n
+5\r\n
+world\r\n
+0\r\n
+\r\n
+```
+
+The terminal `0\r\n\r\n` is written automatically when `more_body=False` arrives
+(unless `trailers=True` was set in `http.response.start`, in which case the
+`http.response.trailers` handler writes it).
+
+HTTP/2 is unaffected — DATA frames carry explicit length and `END_STREAM` maps
+to `more_body=False`.
+
+### Writing streaming-safe middleware with `StreamingAwareMiddleware`
+
+Any middleware that wraps the `send` callable and collects body parts will
+silently buffer a streaming response, defeating `more_body=True`.
+
+`StreamingAwareMiddleware` solves this once.  Subclasses override two hooks and
+never deal with `more_body` directly:
+
+```python
+from blackbull.middleware import StreamingAwareMiddleware
+
+class PrefixMiddleware(StreamingAwareMiddleware):
+    async def on_response_body(self, start: dict, body: bytes) -> tuple[dict, bytes]:
+        """Called with the complete body — only for non-streaming responses."""
+        return start, b'[prefix] ' + body
+
+    async def on_response_start(self, start: dict) -> dict:
+        """Called when streaming is detected (more_body=True on first chunk)."""
+        return start  # modify or pass through
+```
+
+| Hook | When called | What to return |
+|---|---|---|
+| `on_response_body(start, body)` | non-streaming response; `body` is the full bytes | `(start, body)` after any transformation |
+| `on_response_start(start)` | streaming detected; `start` is the `http.response.start` event | modified start event |
+
+For streaming responses the base class passes all subsequent chunks directly to
+`send` without buffering — `on_response_body` is **never** called.
+
+### Warning for non-conforming class middlewares
+
+When `app.use(mw)` is called with a class instance that does not inherit from
+`StreamingAwareMiddleware`, BlackBull emits a `UserWarning` at registration time:
+
+```
+UserWarning: Class-based middleware 'MyMiddleware' does not inherit from
+StreamingAwareMiddleware.  If its __call__ wraps the 'send' callable, it will
+silently buffer streaming responses.
+```
+
+The warning is advisory — the middleware is still registered and works.
+Function-based middlewares (`async def mw(scope, receive, send, call_next): ...`)
+and `functools.partial` wrappers do not trigger the warning.

@@ -1,4 +1,5 @@
 import json
+from collections.abc import AsyncIterator
 from http import HTTPStatus
 from typing import Union
 
@@ -51,6 +52,44 @@ def cookie_header(name: str, value: str, path: str = '/',
     """Build a ``set-cookie`` header tuple suitable for inclusion in response headers."""
     flags = '; HttpOnly' if http_only else ''
     return (b'set-cookie', f'{name}={value}; Path={path}{flags}; SameSite=Lax'.encode())
+
+
+class StreamingResponse:
+    """Stream a response body from an async generator.
+
+    Usage::
+
+        async def lines():
+            for i in range(10):
+                yield f'line {i}\\n'.encode()
+                await asyncio.sleep(0.1)
+
+        @app.route(path='/stream')
+        async def handler(scope, receive, send):
+            await StreamingResponse(lines())(scope, receive, send)
+    """
+
+    def __init__(self, content: AsyncIterator,
+                 *,
+                 status: int = 200,
+                 headers: list | None = None,
+                 media_type: str = 'text/plain'):
+        self._content = content
+        self._status = status
+        self._headers = list(headers or [])
+        self._media_type = media_type
+
+    async def __call__(self, scope, receive, send) -> None:
+        h = list(self._headers)
+        if not any(k.lower() == b'content-type' for k, _ in h):
+            h.insert(0, (b'content-type', self._media_type.encode()))
+        await send({'type': 'http.response.start', 'status': self._status, 'headers': h})
+        async for chunk in self._content:
+            if isinstance(chunk, str):
+                chunk = chunk.encode()
+            if chunk:
+                await send({'type': 'http.response.body', 'body': chunk, 'more_body': True})
+        await send({'type': 'http.response.body', 'body': b'', 'more_body': False})
 
 
 def WebSocketResponse(content) -> dict:

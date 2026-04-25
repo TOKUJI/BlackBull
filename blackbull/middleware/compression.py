@@ -1,6 +1,7 @@
 import gzip as _gzip
 from collections.abc import Callable
 from ..server.headers import Headers
+from .base import StreamingAwareMiddleware
 
 _MIN_SIZE = 100  # default minimum body size to bother compressing
 _SERVER_PREFERENCE = ['br', 'zstd', 'gzip']  # server-side priority order
@@ -24,7 +25,7 @@ def _detect_codecs() -> dict[str, Callable[[bytes], bytes]]:
     return available
 
 
-class CompressionMiddleware:
+class CompressionMiddleware(StreamingAwareMiddleware):
     """ASGI middleware: compress the response body using the best codec the
     client accepts (br > zstd > gzip, in server-preference order).
 
@@ -85,39 +86,21 @@ class CompressionMiddleware:
         headers = scope.get('headers', [])
         if not isinstance(headers, Headers):
             headers = Headers(headers)
-
         accept = headers.get(b'accept-encoding', b'')
         selection = self._select_codec(accept)
-
         if selection is None:
             await call_next(scope, receive, send)
             return
+        self._codec_name, self._compressor = selection
+        await super().__call__(scope, receive, send, call_next)
 
-        codec_name, compressor = selection
-
-        # Buffer the response so we can compress the body and update headers.
-        start_event: dict = {}
-        body_parts: list[bytes] = []
-
-        async def buffering_send(event: dict) -> None:
-            if event.get('type') == 'http.response.start':
-                start_event.update(event)
-            elif event.get('type') == 'http.response.body':
-                body_parts.append(event.get('body', b''))
-
-        await call_next(scope, receive, buffering_send)
-
-        body = b''.join(body_parts)
+    async def on_response_body(self, start: dict, body: bytes) -> tuple[dict, bytes]:
         if len(body) < self._min_size:
-            await send(start_event)
-            await send({'type': 'http.response.body', 'body': body, 'more_body': False})
-            return
-
-        compressed = compressor(body)
-        existing = list(start_event.get('headers', []))
-        existing.append((b'content-encoding', codec_name.encode()))
-        await send({**start_event, 'headers': existing})
-        await send({'type': 'http.response.body', 'body': compressed, 'more_body': False})
+            return start, body
+        compressed = self._compressor(body)
+        existing = list(start.get('headers', []))
+        existing.append((b'content-encoding', self._codec_name.encode()))
+        return {**start, 'headers': existing}, compressed
 
 
 # Default instance — used as a plain middleware function
