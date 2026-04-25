@@ -55,7 +55,7 @@ pytest
 - [x] HTTP/2 `CONTINUATION` frame: concatenate header blocks until `END_HEADERS` flag is set on `HEADERS`
 - [x] HTTP/2: normalize header names to lowercase after HPACK decode (RFC 7540 §8.1.2)
 - [x] HTTP/2 `DATA` frame: `HTTP2Handler.run()` dropped the `DATA` case during CONTINUATION refactoring — restore so DATA frames call the ASGI app (regression)
-- [x] HTTP/2 `GOAWAY` frame: `RespondFactory` has no `Respond2GoAway` handler — receiving GOAWAY raises `KeyError` (server-side); sending GOAWAY on graceful shutdown is also missing
+- [x] HTTP/2 `GOAWAY` frame: `ResponderFactory` has no `GoAwayResponder` handler — receiving GOAWAY raises `KeyError` (server-side); sending GOAWAY on graceful shutdown is also missing
 
 ### P2 — Important protocol features
 

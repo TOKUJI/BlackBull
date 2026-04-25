@@ -1,24 +1,35 @@
+"""URL routing for BlackBull.
+
+``Router`` maps ``(path, method, scheme)`` triples to handler chains.  Paths
+support exact strings, regex patterns, and ``{name}`` parameter syntax;
+``ErrorRouter`` does the same for HTTPStatus codes and exception classes.
+``_register_chain`` composes per-route middlewares with ``functools.partial``
+so each middleware receives ``call_next`` bound to the next link.
+
+``RouteGroup`` is defined in :mod:`blackbull.app` to avoid a circular
+import; this module re-exports it lazily through ``__getattr__``.
+"""
 from collections import UserDict
 from collections.abc import Iterable
 from typing import Any, Callable, List, Tuple, Type, Optional
 from functools import wraps, partial
 from http import HTTPStatus, HTTPMethod
 import re
-import logging
 import inspect
 from .utils import Scheme, do_nothing
+from .logger import get_logger_set
 
-# RouteGroup is defined in BlackBull.py to avoid a circular import;
+# RouteGroup is defined in app.py to avoid a circular import;
 # re-export here so tests can import it from either location.
 def __getattr__(name):
     if name == 'RouteGroup':
-        from .BlackBull import RouteGroup
+        from .app import RouteGroup
         return RouteGroup
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 
-logger = logging.getLogger(__name__)
+logger, _ = get_logger_set(__name__)
 
 # Sentinel used when scheme is omitted, matching any scheme at lookup time
 class _AnyScheme:
@@ -58,7 +69,7 @@ def has_middleware_param(fn) -> bool:
 has_inner = has_middleware_param  # backward-compat alias
 
 
-def _to_tuple(value) -> tuple:
+def _to_tuple(value: Any) -> tuple:
     """
     Normalise a value into a tuple.
     Strings and other non-iterables are wrapped in a single-element tuple.

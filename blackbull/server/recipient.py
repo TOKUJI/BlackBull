@@ -1,13 +1,13 @@
 import asyncio
 import zlib
 from abc import ABC, abstractmethod
-import logging
 
 from .sender import WebSocketSender, WSOpcode
 from .headers import Headers
 from ..protocol.frame import FrameBase, Data
+from ..logger import get_logger_set
 
-logger = logging.getLogger(__name__)
+logger, _ = get_logger_set(__name__)
 
 
 # ---------------------------------------------------------------------------

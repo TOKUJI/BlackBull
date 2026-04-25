@@ -1,3 +1,21 @@
+"""BlackBull application object — the user-facing ASGI 3.0 entry point.
+
+Exposes the ``BlackBull`` class which wraps a ``Router``, an ``ErrorRouter``,
+lifespan hooks, per-route and global middleware chains, and (via
+``app.static``) static-file serving.  ``BlackBull.__call__`` is the ASGI
+callable: it dispatches lifespan events to ``_handle_lifespan`` and routes
+HTTP / WebSocket scopes through the global-middleware chain ending in
+``_dispatch``.
+
+Companion definitions live in this module to avoid circular imports:
+
+- ``RouteGroup`` — returned by ``app.group(middlewares=[...])`` to share a
+  middleware prefix across routes.
+- ``_default_error_handler`` — registered on every ``HTTPStatus`` error and
+  on ``Exception`` so unhandled errors produce a sensible plain-text reply.
+- ``_wrap_send`` — adapts the ASGI ``send`` callable so handlers may pass
+  ``Response`` objects directly.
+"""
 import functools
 import inspect
 import warnings

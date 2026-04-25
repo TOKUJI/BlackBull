@@ -1,3 +1,14 @@
+"""HTTP/2 stream state and the priority tree (RFC 7540 §5).
+
+Each ``Stream`` node owns the ASGI ``scope`` and ``event`` for one in-flight
+request as well as its position in the dependency tree (parent + weight) used
+by the priority machinery.  ``StreamState`` enumerates the lifecycle states
+defined in RFC 7540 §5.1; ``on_headers_received`` / ``on_data_received``
+perform the corresponding transitions.
+
+Stream identifier ``0`` is reserved for connection-level frames and is the
+root of every priority tree.
+"""
 import asyncio
 from enum import Enum
 from urllib.parse import urlparse
@@ -16,11 +27,26 @@ class StreamState(Enum):
     CLOSED           = 'closed'
 
 class Stream:
-    def __init__(self, identifier, parent=None, weight=1, window_size=None):
-        from collections import deque
+    """One node in the HTTP/2 stream-priority tree (RFC 7540 §5.1, §5.3).
+
+    A ``Stream`` carries the ASGI ``scope`` and ``event`` for one in-flight
+    request, plus its position in the priority tree (parent + weight).
+
+    ``identifier == 0`` is the connection-level pseudo-stream
+    (RFC 7540 §5.1.1) and acts as the root of the tree; SETTINGS, PING,
+    GOAWAY, and connection-level WINDOW_UPDATE frames target it.
+    Client-initiated request streams use odd identifiers, server-pushed
+    streams use even identifiers (RFC 7540 §5.1.1).
+
+    ``window_size`` defaults to the connection's initial flow-control window
+    when omitted (the value lives on the sender, not the stream).
+    """
+
+    def __init__(self, stream_id: int, parent: 'Stream | None' = None,
+                 weight: int = 1, window_size: int | None = None):
         self.parent = parent
         self.weight = weight
-        self.identifier = identifier
+        self.stream_id = stream_id
         if window_size:
             self.window_size = window_size
 
@@ -45,18 +71,18 @@ class Stream:
         if end_stream:
             self.state = StreamState.CLOSED
 
-    def add_child(self, id_):
-        existing = self.find_child(id_)
+    def add_child(self, stream_id):
+        existing = self.find_child(stream_id)
         if existing is not None:
             return existing
 
-        child = Stream(id_, self, )
-        self.children[child.identifier] = child
+        child = Stream(stream_id, self)
+        self.children[child.stream_id] = child
 
         return child
 
-    def drop_child(self, id_):
-        del self.children[id_]
+    def drop_child(self, stream_id):
+        del self.children[stream_id]
 
     def get_children(self):
         r = []
@@ -67,18 +93,18 @@ class Stream:
 
     def max_stream_id(self):
         if not self.children:
-            return self.identifier
+            return self.stream_id
         return max([c.max_stream_id() for c in self.get_children()])
 
-    def find_child(self, identifier):
-        if self.identifier == identifier:
+    def find_child(self, stream_id):
+        if self.stream_id == stream_id:
             return self
 
-        if identifier in self.children:
-            return self.children[identifier]
+        if stream_id in self.children:
+            return self.children[stream_id]
 
         for k, v in self.children.items():
-            r = v.find_child(identifier)
+            r = v.find_child(stream_id)
             if r:
                 return r
 
@@ -122,7 +148,7 @@ class Stream:
         return self.scope
 
     def get_lock(self):
-        if not self.is_locked():
+        if not self.is_locked:
             self._lock = asyncio.Condition()
         return self._lock
 
@@ -130,12 +156,14 @@ class Stream:
         if self._lock is not None:
             self._lock.release()
 
-    def is_locked(self):
+    @property
+    def is_locked(self) -> bool:
         if not self._lock:
             return False
         return self._lock.locked()
 
-    def is_eos(self):
+    @property
+    def is_eos(self) -> bool:
         return self.end_stream
 
     def flip_eos(self):
@@ -145,11 +173,11 @@ class Stream:
     def close(self):
         [child.close() for child in self.children.values()]
         if self.parent is not None:
-            self.parent.drop_child(self.identifier)
+            self.parent.drop_child(self.stream_id)
         del self
 
     def __repr__(self):
-        return f'Stream(ID: {self.identifier}, scope={self.scope}, end_stream={self.end_stream})'
+        return f'Stream(ID: {self.stream_id}, scope={self.scope}, end_stream={self.end_stream})'
 
 
 def eos(frame):  # eos: end of stream

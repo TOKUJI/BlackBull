@@ -13,8 +13,11 @@ from ..protocol.stream import Stream
 from ..logger import get_logger_set, log
 logger, _ = get_logger_set('client')
 
+# Largest single read off the underlying transport per receive_frame() call.
+_READ_BUFFER_SIZE = 16384
 
-from .response import RespondFactory
+
+from .response import ResponderFactory
 
 def connect(fn):
     @wraps(fn)
@@ -23,36 +26,6 @@ def connect(fn):
         await args[0].connect()
         return await fn(*args, **kwds)
     return _fn
-
-
-# class Listener:
-#     def __init__(self, condition, *, event=None, callback=None):
-#         """ A simple listener that can dispatch an event and accept to call a callback function.
-#         Parameters
-#         condition:
-#             A function that requires a frame
-#         event:
-#             An event that is called when the condition is satisfied.
-#         callback:
-#             A callback function which is called just after the condition is satisfied.
-#         """
-#         # TODO check prototype
-#         self.event = event
-#         self.condition = condition
-#         self.callback = callback
-
-#     def __call__(self, frame):
-#         if self.condition(frame):
-#             logger.debug('This listener got the frame that matches the condition.')
-#             try:
-#                 if self.event:
-#                     self.event.set()
-#                     logger.debug('The event has been set')
-#                 if self.callback:
-#                     self.callback(frame)
-#             finally:
-#                 return True
-#         return False
 
 
 def create_ssl_context(debug=True):
@@ -91,15 +64,6 @@ class Client:
 
         self.event_emitter = EventEmitter()
 
-    # def add_handler(self, key, handler):
-    #     self._handlers[key] = handler
-
-
-    # def remove_handler(self, key):
-    #     if self._handlers.has_key(key):
-    #         self._handlers.pop(key)
-
-
     @log(logger)
     def register_event(self, event_id, condition=lambda x: True):
         """
@@ -113,30 +77,21 @@ class Client:
     def emit_event(self, frame):
         self.event_emitter.emit(self.receiver_frame_event, frame)
 
-        # if frame.stream_identifier not in self.events:
-        #     return
 
-        # event, condition = self.events[frame.stream_identifier]
-        # logger.debug(f'{event}, {condition}')
-        # if condition(frame):
-        #     logger.debug(f'{frame} raises an event.')
-        #     event.set()
-
-
-    def create_stream(self, identifier, parent, weight):
-        if identifier in [c.identifier for c in self.root_stream.get_children()]:
+    def create_stream(self, stream_id, parent, weight):
+        if stream_id in [c.stream_id for c in self.root_stream.get_children()]:
             # TODO: raise some exception.
-            logger.error(f'Stream {identifier} is already used.')
+            logger.error(f'Stream {stream_id} is already used.')
 
-        stream = self.root_stream.add_child(identifier)
+        stream = self.root_stream.add_child(stream_id)
         return stream
 
 
-    def find_stream(self, id_):
-        if id_ == 0:
+    def find_stream(self, stream_id):
+        if stream_id == 0:
             return self.root_stream
         else:
-            return self.root_stream.find_child(id_)
+            return self.root_stream.find_child(stream_id)
 
 
     def get_stream(self):
@@ -149,10 +104,10 @@ class Client:
         children = self.root_stream.get_children() # get_children returns a list of streams
 
         for stream in children:
-            if stream.identifier % 2 == 1:
-                if not stream.is_locked():
+            if stream.stream_id % 2 == 1:
+                if not stream.is_locked:
                     return stream
-                if stream.identifier > eos:
+                if stream.stream_id > eos:
                     eos += 2
 
         logger.debug(f'Maximum identifier of the stream is {eos - 2}')
@@ -163,7 +118,7 @@ class Client:
         """
         Open the connection, but does not log in.
         """
-        if self.is_connected():
+        if self.is_connected:
             return
 
         try:
@@ -193,7 +148,8 @@ class Client:
             self.writer.close()
 
 
-    def is_connected(self):
+    @property
+    def is_connected(self) -> bool:
         return self.connected
 
     @log(logger)
@@ -204,7 +160,7 @@ class Client:
         assert self.reader is not None
         try:
             # @TODO Absorbs data as many as possible. Adds an except section below.
-            read_task = asyncio.create_task(self.reader.read(16384))
+            read_task = asyncio.create_task(self.reader.read(_READ_BUFFER_SIZE))
             disconnect_task = asyncio.create_task(self.disconnect_event.wait())
 
             done, pending = await asyncio.wait([read_task, disconnect_task],
@@ -236,7 +192,7 @@ class Client:
 
         while frame:
             logger.debug(f'handle_response() got a frame: {frame}')
-            await RespondFactory.create(frame).respond(self)
+            await ResponderFactory.create(frame).respond(self)
 
             self.emit_event(frame)
 

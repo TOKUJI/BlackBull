@@ -8,18 +8,18 @@ from ..logger import get_logger_set, log
 logger, _ = get_logger_set(__name__)
 
 
-class RespondFactory:
+class ResponderFactory:
 
     @staticmethod
     def create(frame):
         try:
-            klass = RespondBase._registry[frame.FrameType()]
+            klass = Responder._registry[frame.FrameType()]
         except KeyError:
             raise ValueError(f"Unsupported FrameType: {frame.FrameType()}")
         return klass(frame)
 
 
-class RespondBase:
+class Responder:
     """
     Abstract base class of responsing classes. You can find every subclass
     (i.e. responsing classes) by accessing __subclasses__().
@@ -55,7 +55,7 @@ class RespondBase:
         return cls.FRAME_TYPE
 
 
-class Respond2Ping(RespondBase):
+class PingResponder(Responder):
     async def respond(self, handler):
         res = handler.factory.create(
             FrameTypes.PING,
@@ -68,7 +68,7 @@ class Respond2Ping(RespondBase):
     FRAME_TYPE = FrameTypes.PING
 
 
-class Respond2WindowUpdate(RespondBase):
+class WindowUpdateResponder(Responder):
     async def respond(self, handler):
         increment = self.frame.window_size
         if self.frame.stream_id == 0:
@@ -83,7 +83,7 @@ class Respond2WindowUpdate(RespondBase):
     FRAME_TYPE = FrameTypes.WINDOW_UPDATE
 
 
-class Respond2Settings(RespondBase):
+class SettingsResponder(Responder):
     async def respond(self, handler):
         if self.frame.flags == SettingFrameFlags.INIT:
             if hasattr(self.frame, 'initial_window_size') and self.frame.initial_window_size is not None:
@@ -100,7 +100,7 @@ class Respond2Settings(RespondBase):
     FRAME_TYPE = FrameTypes.SETTINGS
 
 
-class Respond2Priority(RespondBase):
+class PriorityResponder(Responder):
     async def respond(self, handler):
         if self.frame.exclusion:
             for x in handler.root_stream.get_children():
@@ -118,7 +118,7 @@ class Respond2Priority(RespondBase):
     FRAME_TYPE = FrameTypes.PRIORITY
 
 
-class Respond2PriorityUpdate(RespondBase):
+class PriorityUpdateResponder(Responder):
     """RFC 9218 §7.1 — receive PRIORITY_UPDATE, log the hint, do not schedule."""
     FRAME_TYPE = FrameTypes.PRIORITY_UPDATE
 
@@ -142,7 +142,7 @@ class Respond2PriorityUpdate(RespondBase):
                 stream.scope['http2_priority'] = hint
 
 
-class Respond2RstStream(RespondBase):
+class RstStreamResponder(Responder):
 
     @log(logger)
     async def respond(self, handler):

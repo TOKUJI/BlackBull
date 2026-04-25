@@ -1,4 +1,3 @@
-from logging import getLogger
 from collections import defaultdict
 import asyncio
 import re
@@ -6,7 +5,9 @@ from enum import Enum, StrEnum, auto
 import socket
 from contextlib import closing
 
-logger = getLogger('utils')
+from .logger import get_logger_set
+
+logger, _ = get_logger_set('utils')
 
 
 async def do_nothing(*args, **kwargs):
@@ -30,8 +31,11 @@ def check_port(host='localhost', port=None):
             return True
 
 
-def pop_safe(key, source, target, *, new_key=None):
+def pop_safe(key, source: dict, target: dict, *, new_key=None) -> dict:
+    """Move ``source[key]`` into *target* (under *new_key* if given), if present.
 
+    Returns *target* unchanged when *key* is absent from *source*.
+    """
     if key in source:
         if new_key:
             target[new_key] = source.pop(key)

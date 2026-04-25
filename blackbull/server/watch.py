@@ -6,19 +6,10 @@ import asyncio
 import os
 from pathlib import Path
 
-from logging import getLogger
-from functools import wraps
+from ..logger import get_logger_set, log
 
-_logger = getLogger('watcher')
-
-
-def _log(fn):
-    @wraps(fn)
-    def wrapper(*args, **kwds):
-        _logger.debug(f'{fn.__name__}({args}, {kwds})')
-        res = fn(*args, **kwds)
-        return res
-    return wrapper
+_logger, _ = get_logger_set('watcher')
+_log = log(_logger)
 
 
 _lib_name = find_library('c')
@@ -232,6 +223,5 @@ if __name__ == '__main__':
 
     try:
         asyncio.run(watcher.watch())
-        print("could it be possible?")
     except KeyboardInterrupt:
         os._exit(0)

@@ -30,14 +30,28 @@ def _make_scope():
 
 
 class ParserFactory:
-    """docstring for ParserFactory"""
+    """Dispatches an incoming HTTP/2 frame to the parser registered for its type.
+
+    Each ``HTTP2ParserBase`` subclass registers itself in
+    ``HTTP2ParserBase._registry`` keyed on its ``FRAME_TYPE``;
+    ``Get(frame, stream)`` looks up that registry and instantiates the matching
+    parser bound to the given stream.
+    """
+
     @staticmethod
-    def Get(frame, stream):
+    def Get(frame, stream) -> 'HTTP2ParserBase':
         return HTTP2ParserBase._registry[frame.FrameType()](frame, stream)
 
 
 class HTTP2ParserBase:
-    """docstring for HTTP2ParserBase"""
+    """Abstract base for HTTP/2 frame parsers that build an ASGI scope.
+
+    Subclasses set ``FRAME_TYPE`` to the ``FrameTypes`` value they handle and
+    implement ``parse()``.  ``__init_subclass__`` auto-registers each concrete
+    subclass in ``_registry`` so ``ParserFactory.Get`` can dispatch by frame type.
+    Setting ``FRAME_TYPE = None`` keeps a class abstract (skipped at registration).
+    """
+
     FRAME_TYPE = None
     _registry = {}
 
@@ -66,7 +80,13 @@ class HTTP2ParserBase:
 
 
 class HTTP2HEADParser(HTTP2ParserBase):
-    """docstring for HTTP2HEADParser"""
+    """Parses an HTTP/2 HEADERS frame into an ASGI ``http`` scope dict.
+
+    Pulls ``:method`` / ``:path`` / ``:scheme`` from the frame's pseudo-headers,
+    encodes the regular headers as ``bytes`` pairs into a ``Headers`` object,
+    and resolves ``root_path`` from the ``X-Forwarded-Prefix`` header.
+    """
+
     FRAME_TYPE = FrameTypes.HEADERS
     def __init__(self, frame, stream):
         super().__init__(frame, stream)
@@ -95,7 +115,10 @@ class HTTP2HEADParser(HTTP2ParserBase):
 
 
 class HTTP2DATAParser(HTTP2ParserBase):
-    """docstring for HTTP2DATAParser"""
+    """Parses an HTTP/2 DATA frame.  Currently returns a fresh empty ASGI scope;
+    body bytes are delivered via ``HTTP2Recipient`` rather than this parser.
+    """
+
     FRAME_TYPE = FrameTypes.DATA
     def __init__(self, frame, stream):
         super().__init__(frame, stream)

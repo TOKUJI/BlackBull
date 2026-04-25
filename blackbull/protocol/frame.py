@@ -1,14 +1,29 @@
+"""HTTP/2 frame encoding and decoding (RFC 7540 §6, RFC 9113).
+
+Defines the on-the-wire frame types — DATA, HEADERS, PRIORITY, RST_STREAM,
+SETTINGS, PUSH_PROMISE, PING, GOAWAY, WINDOW_UPDATE, CONTINUATION,
+PRIORITY_UPDATE — as ``FrameBase`` subclasses with ``save()`` and ``load()``
+methods that serialise to and from raw bytes.  HPACK header
+compression/decompression is delegated to the ``hpack`` library.
+
+``FrameFactory`` produces a frame of the requested type, while ``FrameBase``'s
+``__init_subclass__`` auto-registers each concrete subclass keyed on its
+``FRAME_TYPE`` so the factory can dispatch by type code.
+"""
 import asyncio
 import typing
 from enum import Enum, IntEnum, StrEnum
 from io import BytesIO
 from hpack import Encoder, Decoder
 
-# private programs
-# from . import message
 from ..logger import get_logger_set
 from ..utils import pop_safe
 logger, log = get_logger_set('frame')
+
+
+# RFC 7540 §6.9.2 — connection and stream flow-control windows both start
+# at this value before any SETTINGS frame is exchanged.
+DEFAULT_INITIAL_WINDOW_SIZE = 65535
 
 
 class FrameTypes(bytes, Enum):

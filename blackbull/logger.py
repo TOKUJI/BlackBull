@@ -41,6 +41,7 @@ def log(logger):
                 return res
             return async_wrapper
         else:
+            @wraps(fn)
             def wrapper(*args, **kwds):
                 logger.debug(f'{fn.__name__}({args}, {kwds})')
                 res = fn(*args, **kwds)

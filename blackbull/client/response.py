@@ -3,14 +3,14 @@ from ..logger import get_logger_set, log
 logger, _ = get_logger_set('client.response')
 
 
-class RespondFactory:
+class ResponderFactory:
     @staticmethod
     def create(frame):
-        factory = {klass.FrameType(): klass for klass in RespondBase.__subclasses__()}
+        factory = {klass.FrameType(): klass for klass in Responder.__subclasses__()}
         return factory[frame.FrameType()](frame)
 
 
-class RespondBase:
+class Responder:
     def __init__(self, frame):
         self.frame = frame
 
@@ -22,11 +22,11 @@ class RespondBase:
         raise NotImplementedError()
 
 
-class Respond2Ping(RespondBase):
+class PingResponder(Responder):
     async def respond(self, handler):
         res = handler.factory.create(FrameTypes.PING,
                                      SettingFrameFlags.ACK,
-                                     self.frame.stream_identifier,
+                                     self.frame.stream_id,
                                      self.frame.payload)
         await handler.send_frame(res)
         return handler
@@ -36,23 +36,23 @@ class Respond2Ping(RespondBase):
         return FrameTypes.PING
 
 
-class Respond2WindowUpdate(RespondBase):
+class WindowUpdateResponder(Responder):
     async def respond(self, handler):
-        if self.frame.stream_identifier == 0:
-            handler.client_window_size = self.frame.window_size
+        if self.frame.stream_id == 0:
+            handler.connection_window_size = self.frame.window_size
         else:
-            handler.client_stream_window_size[self.frame.stream_identifier] = self.frame.window_size
+            handler.stream_window_size[self.frame.stream_id] = self.frame.window_size
 
     @staticmethod
     def FrameType():
         return FrameTypes.WINDOW_UPDATE
 
 
-class Respond2Settings(RespondBase):
+class SettingsResponder(Responder):
     async def respond(self, handler):
         res = handler.factory.create(FrameTypes.SETTINGS,
                                      SettingFrameFlags.ACK,
-                                     self.frame.stream_identifier,
+                                     self.frame.stream_id,
                                      )
         await handler.send_frame(res)
         if self.frame.flags == SettingFrameFlags.INIT:
@@ -63,7 +63,7 @@ class Respond2Settings(RespondBase):
                 pass
             res = handler.factory.create(FrameTypes.SETTINGS,
                                          SettingFrameFlags.ACK,
-                                         self.frame.stream_identifier)
+                                         self.frame.stream_id)
             await handler.send_frame(res)
 
         elif self.frame.flags == SettingFrameFlags.ACK:
@@ -74,7 +74,7 @@ class Respond2Settings(RespondBase):
         return FrameTypes.SETTINGS
 
 
-class Respond2Data(RespondBase):
+class DataResponder(Responder):
     @log(logger)
     async def respond(self, handler):
         """
@@ -83,7 +83,7 @@ class Respond2Data(RespondBase):
         function, get the result and respond it to the client.
         """
         logger.debug(self.frame)
-        stream_id = self.frame.stream_identifier  # to be shorten the description
+        stream_id = self.frame.stream_id  # to be shorten the description
 
         if stream := handler.find_stream(stream_id):
             pass
@@ -100,15 +100,15 @@ class Respond2Data(RespondBase):
         return FrameTypes.DATA
 
 
-class Respond2Header(RespondBase):
+class HeaderResponder(Responder):
     async def respond(self, handler):
         """
-        Open a stream if the stream_identifier is not in the dict of stream.
+        Open a stream if the stream_id is not in the dict of stream.
         Append the payload of the header to the current scope object.
         If the header frame indicates the end of stream, run the operating
         function, get the result and respond it to the client.
         """
-        stream_id = self.frame.stream_identifier  # to be shorten the description
+        stream_id = self.frame.stream_id  # to be shorten the description
         stream = handler.find_stream(stream_id)
         if not stream:
             stream = handler.create_stream(stream_id)

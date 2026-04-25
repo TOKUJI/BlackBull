@@ -20,7 +20,7 @@ from ..protocol.stream import Stream, StreamState
 from ..protocol.rsock import create_dual_stack_sockets
 from ..protocol.frame import ErrorCodes, FrameFactory, FrameTypes, FrameBase, parse_priority_field, PseudoHeaders
 from ..logger import get_logger_set
-from .response import RespondFactory
+from .response import ResponderFactory
 from .parser import ParserFactory
 from .sender import SenderFactory
 from .recipient import RecipientFactory, HTTP2Recipient, AbstractReader, AsyncioReader, IncompleteReadError
@@ -349,23 +349,23 @@ class HTTP2Handler(BaseHandler):
         # Server-initiated (pushed) streams use even IDs (RFC 7540 §5.1.1).
         self._next_push_stream_id = 2
 
-    def find_stream(self, id_):
-        if id_ == 0:
+    def find_stream(self, stream_id):
+        if stream_id == 0:
             return self.root_stream
         else:
-            return self.root_stream.find_child(id_)
+            return self.root_stream.find_child(stream_id)
 
     def _allocate_push_stream_id(self) -> int:
         sid = self._next_push_stream_id
         self._next_push_stream_id += 2
         return sid
 
-    def make_sender(self, stream_identifier: int):
-        if stream_identifier not in self._senders:
-            self._senders[stream_identifier] = SenderFactory.http2(
-                self.writer, self.factory, stream_identifier,
+    def make_sender(self, stream_id: int):
+        if stream_id not in self._senders:
+            self._senders[stream_id] = SenderFactory.http2(
+                self.writer, self.factory, stream_id,
                 push_callback=self._handle_push)
-        return self._senders[stream_identifier]
+        return self._senders[stream_id]
 
     async def send_frame(self, frame: FrameBase):
         """Send a raw HTTP/2 frame via the control-plane sender."""
@@ -494,13 +494,13 @@ class HTTP2Handler(BaseHandler):
                 logger.error(f'Stream {frame.stream_id} is not found.')
                 raise Exception('Unused stream identifier')
 
-            send = self.make_sender(stream.identifier)
+            send = self.make_sender(stream.stream_id)
             last_stream_id = self.root_stream.max_stream_id()
 
             match frame.FrameType():
                 case FrameTypes.HEADERS:
                     if len(self.root_stream.get_children()) >= self.max_concurrent_streams:
-                        await self.send_frame(self.factory.rst_stream(stream.identifier, ErrorCodes.REFUSED_STREAM))
+                        await self.send_frame(self.factory.rst_stream(stream.stream_id, ErrorCodes.REFUSED_STREAM))
 
                     if frame.end_headers:
                         waiting_continuation = False
@@ -509,7 +509,7 @@ class HTTP2Handler(BaseHandler):
                         scope['extensions'] = {'http.response.push': {}}
                         stream.scope = scope   # store so _handle_push can read it
                         stream_recipient = RecipientFactory.http2()
-                        recipients[stream.identifier] = stream_recipient
+                        recipients[stream.stream_id] = stream_recipient
                         stream.on_headers_received(end_stream=bool(frame.end_stream))
                         if frame.end_stream:
                             # No body will follow — enqueue an empty request event now.
@@ -537,23 +537,23 @@ class HTTP2Handler(BaseHandler):
                         scope['extensions'] = {'http.response.push': {}}
                         stream.scope = scope   # store so _handle_push can read it
                         stream_recipient = RecipientFactory.http2()
-                        recipients[stream.identifier] = stream_recipient
+                        recipients[stream.stream_id] = stream_recipient
                         asyncio.create_task(self.app(scope, stream_recipient, send))
                     else:
                         continue  # more CONTINUATION frames expected
 
                 case FrameTypes.DATA:
                     # Send WINDOW_UPDATE for every DATA frame (RFC 7540 §6.9).
-                    await self.send_frame(self.factory.window_update(stream.identifier, frame.length))
+                    await self.send_frame(self.factory.window_update(stream.stream_id, frame.length))
                     if stream.state in (StreamState.HALF_CLOSED_REMOTE, StreamState.CLOSED):
                         # RFC 7540 §6.1: DATA on a closed stream is a stream error.
-                        await self.send_frame(self.factory.rst_stream(stream.identifier, ErrorCodes.STREAM_CLOSED))
+                        await self.send_frame(self.factory.rst_stream(stream.stream_id, ErrorCodes.STREAM_CLOSED))
                     else:
                         stream.on_data_received(end_stream=bool(frame.end_stream))
-                        if stream.identifier in recipients:
-                            recipients[stream.identifier].put_DATAFrame(frame)
+                        if stream.stream_id in recipients:
+                            recipients[stream.stream_id].put_DATAFrame(frame)
                         else:
-                            logger.warning('DATA for stream %d but no recipient found', stream.identifier)
+                            logger.warning('DATA for stream %d but no recipient found', stream.stream_id)
 
                 case FrameTypes.GOAWAY:
                     await self.send_frame(self.factory.goaway(last_stream_id))
@@ -561,7 +561,7 @@ class HTTP2Handler(BaseHandler):
                     break
 
                 case _:
-                    await RespondFactory.create(frame).respond(self)
+                    await ResponderFactory.create(frame).respond(self)
                 
 
 

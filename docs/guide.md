@@ -214,11 +214,12 @@ When the remote side closes the connection, `receive()` returns
 `{'type': 'http.disconnect'}`.  This is useful for long-polling and
 server-sent events (SSE) to avoid writing to a closed socket.
 
-> **Note — streaming responses**: A `StreamingResponse` helper is **not yet
-> implemented**.  To push multiple body chunks (e.g. SSE), use the raw ASGI
-> event-dict API with `more_body=True`.  Passing `Response(b'')` to `send` ends
-> the connection immediately with `Content-Length: 0` and cannot be followed by
-> additional chunks.
+> **Note — streaming responses**: For most cases use `StreamingResponse` (see
+> §17), which wraps an async generator and emits `more_body=True` on every
+> chunk.  The example below uses the raw ASGI event-dict API directly, which
+> is convenient when each chunk needs custom shaping (e.g. SSE event framing).
+> Either form works; passing `Response(b'')` to `send` ends the connection
+> immediately with `Content-Length: 0` and cannot be followed by additional chunks.
 
 ```python
 @app.route(path='/events')
@@ -1504,8 +1505,8 @@ Implementation details:
   `FrameTypes` enum so the parser does not raise `ValueError`.
 - `PriorityUpdate` frame class — parses `prioritized_stream_id` (4 bytes)
   and `priority_field` (ASCII string, e.g. `"u=3, i"`).
-- `Respond2PriorityUpdate` — no-op responder that logs the hint at DEBUG
-  level via `response.py`'s `RespondFactory`.
+- `PriorityUpdateResponder` — no-op responder that logs the hint at DEBUG
+  level via `response.py`'s `ResponderFactory`.
 
 **Weight off-by-one (RFC 7540 §6.3)**: the wire format stores `weight − 1`
 (range 0–255 → logical weight 1–256).  BlackBull adds 1 on parse so
@@ -1519,7 +1520,7 @@ HTTP/2 has two independent flow-control windows:
 - **Stream-level**: per-stream budget.
 
 `HTTP2Sender._write()` blocks on `asyncio.Event` when the window is
-exhausted.  `Respond2WindowUpdate.respond()` credits the relevant sender(s)
+exhausted.  `WindowUpdateResponder.respond()` credits the relevant sender(s)
 and sets the event to unblock waiting writes.  No user code needs to interact
 with flow control directly.
 

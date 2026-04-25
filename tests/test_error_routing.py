@@ -17,7 +17,7 @@ import pytest
 from http import HTTPStatus, HTTPMethod
 
 from blackbull.router import ErrorRouter
-from blackbull.BlackBull import BlackBull, _default_error_handler
+from blackbull.app import BlackBull, _default_error_handler
 from blackbull.utils import Scheme
 
 

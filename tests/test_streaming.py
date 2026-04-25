@@ -12,7 +12,7 @@ from blackbull.server.sender import HTTP1Sender, AbstractWriter
 from blackbull.response import StreamingResponse
 from blackbull.middleware.base import StreamingAwareMiddleware
 from blackbull.middleware.compression import CompressionMiddleware
-from blackbull.BlackBull import BlackBull
+from blackbull.app import BlackBull
 
 
 # ---------------------------------------------------------------------------

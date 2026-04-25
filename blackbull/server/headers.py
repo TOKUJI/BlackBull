@@ -10,9 +10,14 @@ class Headers:
     Satisfies the ASGI ``Iterable[[byte string, byte string]]`` contract
     while also providing O(1) dict-like lookup.
 
-    Lookup returns the list of matching ``(name, value)`` pairs in insertion
-    order, preserving all duplicate header names as required by RFC 7230 §3.2.2
-    and the ASGI spec.
+    **Invariants**:
+
+    - Header names and values are always ``bytes`` (per ASGI spec).
+    - Lookups are case-insensitive: the internal index is keyed on
+      ``name.lower()`` (RFC 7230 §3.2 — header field names are case-insensitive).
+      ``__contains__``, ``__getitem__``, ``getlist``, and ``get`` all lowercase
+      the requested name; iteration preserves the original casing of the input.
+    - Insertion order of duplicate names is preserved (RFC 7230 §3.2.2).
 
     Examples::
 

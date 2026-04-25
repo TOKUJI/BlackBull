@@ -2,11 +2,13 @@ import asyncio
 from abc import ABC, abstractmethod
 from enum import IntEnum
 from http import HTTPStatus
-import logging
 from email.utils import formatdate
 from typing import NamedTuple
 
-from ..protocol.frame import FrameTypes, HeaderFrameFlags, DataFrameFlags, SettingFrameFlags, FrameBase, PseudoHeaders
+from ..protocol.frame import (FrameTypes, HeaderFrameFlags, DataFrameFlags,
+                               SettingFrameFlags, FrameBase, PseudoHeaders,
+                               DEFAULT_INITIAL_WINDOW_SIZE)
+from ..logger import get_logger_set
 from .headers import Headers, HeaderList
 
 class WSOpcode(IntEnum):
@@ -28,7 +30,14 @@ class WSFrameBits(IntEnum):
 
 
 class WSFrameHeader(NamedTuple):
-    """Decoded fields from the two-byte WebSocket frame header (RFC 6455 §5.2)."""
+    """Decoded fields from the two-byte WebSocket frame header (RFC 6455 §5.2).
+
+    Note on masking (RFC 6455 §5.1):
+    - Client → server frames MUST be masked (``masked`` is True);
+      ``WebSocketRecipient`` raises ``ValueError`` on an unmasked client frame.
+    - Server → client frames MUST NOT be masked; ``WebSocketSender`` never sets
+      the mask bit.
+    """
     opcode: int
     masked: bool
     length: int
@@ -37,7 +46,7 @@ class WSFrameHeader(NamedTuple):
     rsv2:   bool
     rsv3:   bool
 
-logger = logging.getLogger(__name__)
+logger, _ = get_logger_set(__name__)
 
 _CRLF = b'\r\n'
 
@@ -142,6 +151,25 @@ class HTTP1Sender(BaseSender):
     async def __call__(self, body,
                        status: HTTPStatus = HTTPStatus.OK,
                        headers: HeaderList = []):
+        """Dispatch on *body* and write the resulting HTTP/1.1 bytes.
+
+        Accepted forms:
+
+        - ``bytes`` — emit a complete response: status line, headers
+          (with ``Content-Length`` injected if absent), blank line, body.
+        - ``{'type': 'http.response.start', ...}`` — buffer the status,
+          headers, and ``trailers`` flag; nothing is written yet.
+        - ``{'type': 'http.response.body', ...}`` — on the first call after a
+          buffered start, flush the start (adding ``Content-Length`` for
+          single-body responses or ``Transfer-Encoding: chunked`` when
+          ``more_body=True``); subsequent calls write chunk-framed body bytes
+          and the terminal ``0\\r\\n\\r\\n`` when streaming completes.
+        - ``{'type': 'http.response.trailers', ...}`` — write the terminal
+          ``0\\r\\n`` followed by the trailer headers (chunked encoding).
+
+        Unknown event types are logged and dropped; non-dict / non-bytes
+        bodies raise ``TypeError``.
+        """
         match body:
             case bytes():
                 h = headers if isinstance(headers, Headers) else Headers(headers)
@@ -233,34 +261,41 @@ class HTTP2Sender(BaseSender):
       Serialises and writes the frame directly.
     """
 
-    def __init__(self, writer: AbstractWriter, factory, stream_identifier: int,
+    def __init__(self, writer: AbstractWriter, factory, stream_id: int,
                  push_callback=None):
         super().__init__(writer)
         self._factory = factory
-        self._stream_identifier = stream_identifier
+        self._stream_id = stream_id
         self._push_callback = push_callback
-        self.connection_window_size = 65535  # initial connection-level window (RFC 7540 §6.9.2)
-        self.stream_window_size = {stream_identifier: 65535}  # initial stream window
+        self.connection_window_size = DEFAULT_INITIAL_WINDOW_SIZE
+        self.stream_window_size = {stream_id: DEFAULT_INITIAL_WINDOW_SIZE}
         self._window_open = asyncio.Event()
         self._window_open.set()  # window starts open
 
     async def _write(self, data: bytes):
+        """Send *data* respecting HTTP/2 flow control (RFC 7540 §6.9).
+
+        Blocks on ``self._window_open`` until both the connection-level and
+        the stream-level windows have enough space; ``window_update()`` sets
+        the event to wake any blocked writer.  Both windows are decremented
+        by ``len(data)`` after the underlying transport write succeeds.
+        """
         while (len(data) > self.connection_window_size or
-               len(data) > self.stream_window_size[self._stream_identifier]):
+               len(data) > self.stream_window_size[self._stream_id]):
             await self._window_open.wait()
             self._window_open.clear()
         await super()._write(data)
         self.connection_window_size -= len(data)
-        self.stream_window_size[self._stream_identifier] -= len(data)
+        self.stream_window_size[self._stream_id] -= len(data)
 
     def window_update(self, increment: int) -> None:
         self.connection_window_size += increment
-        self.stream_window_size[self._stream_identifier] += increment
+        self.stream_window_size[self._stream_id] += increment
         self._window_open.set()  # wake any blocked _write()
 
     def apply_settings(self, initial_window_size: int) -> None:
         """Apply SETTINGS INITIAL_WINDOW_SIZE to the stream window."""
-        self.stream_window_size[self._stream_identifier] = initial_window_size
+        self.stream_window_size[self._stream_id] = initial_window_size
         self._window_open.set()
 
     async def __call__(self, body, status: HTTPStatus = HTTPStatus.OK, headers: HeaderList = []):
@@ -275,7 +310,7 @@ class HTTP2Sender(BaseSender):
             h_frame = self._factory.create(
                 FrameTypes.HEADERS,
                 HeaderFrameFlags.END_HEADERS,
-                self._stream_identifier,
+                self._stream_id,
             )
             h_frame.pseudo_headers[PseudoHeaders.STATUS] = str(status)
             for k, v in headers:
@@ -285,7 +320,7 @@ class HTTP2Sender(BaseSender):
             d_frame = self._factory.create(
                 FrameTypes.DATA,
                 DataFrameFlags.END_STREAM,
-                self._stream_identifier,
+                self._stream_id,
                 data=body,
             )
             await self._write(d_frame.save())
@@ -298,7 +333,7 @@ class HTTP2Sender(BaseSender):
                 frame = self._factory.create(
                     FrameTypes.HEADERS,
                     HeaderFrameFlags.END_HEADERS,
-                    self._stream_identifier,
+                    self._stream_id,
                 )
                 frame.pseudo_headers[PseudoHeaders.STATUS] = str(body.get('status', 200))
                 for k, v in body.get('headers', []):
@@ -310,14 +345,14 @@ class HTTP2Sender(BaseSender):
                 frame = self._factory.create(
                     FrameTypes.DATA,
                     flags,
-                    self._stream_identifier,
+                    self._stream_id,
                     data=body.get('body', b''),
                 )
                 await self._write(frame.save())
 
             elif event_type == 'http.response.push':
                 if self._push_callback is not None:
-                    await self._push_callback(body, self._stream_identifier)
+                    await self._push_callback(body, self._stream_id)
                 else:
                     logger.warning('http.response.push received but no push handler registered')
 
@@ -456,10 +491,10 @@ class SenderFactory:
         return HTTP1Sender(AsyncioWriter(stream_writer))
 
     @staticmethod
-    def http2(stream_writer, factory, stream_identifier: int,
+    def http2(stream_writer, factory, stream_id: int,
               push_callback=None) -> HTTP2Sender:
         return HTTP2Sender(AsyncioWriter(stream_writer), factory,
-                           stream_identifier, push_callback)
+                           stream_id, push_callback)
 
     @staticmethod
     def websocket(stream_writer) -> WebSocketSender:

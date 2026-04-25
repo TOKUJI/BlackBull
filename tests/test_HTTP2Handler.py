@@ -181,7 +181,7 @@ class TestHTTP2FlowControl:
         mock_writer.drain = AsyncMock()
 
         factory = FrameFactory()
-        sender = HTTP2Sender(AsyncioWriter(mock_writer), factory, stream_identifier=1)
+        sender = HTTP2Sender(AsyncioWriter(mock_writer), factory, stream_id=1)
 
         # Drain the window to zero.
         sender.connection_window_size = 0
@@ -544,7 +544,7 @@ class TestHTTP2StreamStateMachine:
         """A freshly created stream must be in the IDLE state."""
         StreamState = self._import_state()
         from blackbull.protocol.stream import Stream
-        stream = Stream(identifier=1, parent=None)
+        stream = Stream(stream_id=1, parent=None)
         assert stream.state == StreamState.IDLE, (
             f'New stream must be IDLE; got {stream.state}'
         )
@@ -553,7 +553,7 @@ class TestHTTP2StreamStateMachine:
         """Receiving a HEADERS frame must transition the stream to OPEN."""
         StreamState = self._import_state()
         from blackbull.protocol.stream import Stream
-        stream = Stream(identifier=1, parent=None)
+        stream = Stream(stream_id=1, parent=None)
         stream.on_headers_received(end_stream=False)
         assert stream.state == StreamState.OPEN, (
             f'Stream must be OPEN after HEADERS; got {stream.state}'
@@ -563,7 +563,7 @@ class TestHTTP2StreamStateMachine:
         """HEADERS + END_STREAM must transition to HALF_CLOSED_REMOTE."""
         StreamState = self._import_state()
         from blackbull.protocol.stream import Stream
-        stream = Stream(identifier=1, parent=None)
+        stream = Stream(stream_id=1, parent=None)
         stream.on_headers_received(end_stream=True)
         assert stream.state == StreamState.HALF_CLOSED_REMOTE, (
             f'Expected HALF_CLOSED_REMOTE after HEADERS+END_STREAM; got {stream.state}'
@@ -573,7 +573,7 @@ class TestHTTP2StreamStateMachine:
         """DATA + END_STREAM on an open stream must transition to CLOSED."""
         StreamState = self._import_state()
         from blackbull.protocol.stream import Stream
-        stream = Stream(identifier=1, parent=None)
+        stream = Stream(stream_id=1, parent=None)
         stream.on_headers_received(end_stream=False)
         stream.on_data_received(end_stream=True)
         assert stream.state == StreamState.CLOSED, (

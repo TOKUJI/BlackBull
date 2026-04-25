@@ -13,12 +13,12 @@ P1 — DATA frame regression
 ---------------------------
 ``HTTP2Handler.run()`` lost its ``case FrameTypes.DATA:`` branch during the
 CONTINUATION refactoring.  DATA frames now fall through to ``case _:`` and
-then into ``RespondFactory.create()``, which raises ``KeyError`` because there
-is no ``Respond2Data`` handler.
+then into ``ResponderFactory.create()``, which raises ``KeyError`` because there
+is no ``DataResponder`` handler.
 
 P1 — GOAWAY frame
 -----------------
-``RespondFactory`` has no ``Respond2GoAway`` handler.  Receiving a client
+``ResponderFactory`` has no ``GoAwayResponder`` handler.  Receiving a client
 GOAWAY (e.g. during connection teardown) raises ``KeyError``.
 """
 
@@ -153,8 +153,8 @@ class TestDataFrameHandling:
 
     P1 regression: the ``case FrameTypes.DATA:`` branch was removed during
     the CONTINUATION refactoring.  DATA frames now fall to ``case _:`` and
-    then ``RespondFactory.create(frame)`` raises ``KeyError`` because there
-    is no ``Respond2Data`` class.
+    then ``ResponderFactory.create(frame)`` raises ``KeyError`` because there
+    is no ``DataResponder`` class.
     """
 
     def _make_headers_frame(self, stream_id: int = 1, end_stream: bool = False) -> bytes:
@@ -236,8 +236,8 @@ class TestDataFrameHandling:
 class TestGoAwayHandling:
     """``HTTP2Handler.run()`` must handle GOAWAY frames without raising.
 
-    P1 bug: ``RespondFactory`` has no ``Respond2GoAway`` handler, so receiving
-    a GOAWAY from the client causes ``RespondFactory.create(frame)`` to raise
+    P1 bug: ``ResponderFactory`` has no ``GoAwayResponder`` handler, so receiving
+    a GOAWAY from the client causes ``ResponderFactory.create(frame)`` to raise
     ``KeyError``.
     """
 

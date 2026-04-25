@@ -5,7 +5,7 @@ import pytest
 
 from blackbull import Response, JSONResponse, WebSocketResponse
 from blackbull.response import cookie_header
-from blackbull.BlackBull import _wrap_send
+from blackbull.app import _wrap_send
 
 
 # ---------------------------------------------------------------------------
