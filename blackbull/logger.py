@@ -2,6 +2,7 @@ from functools import wraps
 from logging import getLogger, NullHandler, Formatter
 from copy import copy
 from inspect import iscoroutinefunction
+from typing import Literal
 
 
 def get_logger_set(name=None):
@@ -63,7 +64,8 @@ SUFFIX = '\033[0m'
 
 class ColoredFormatter(Formatter):
 
-    def __init__(self, fmt=None, datefmt=None, style='%'):
+    def __init__(self, fmt=None, datefmt=None,
+                 style: Literal['%', '{', '$'] = '%'):
         Formatter.__init__(self, fmt=fmt, datefmt=datefmt, style=style)
 
     def format(self, record):

@@ -21,7 +21,10 @@ def __getattr__(name):
 logger = logging.getLogger(__name__)
 
 # Sentinel used when scheme is omitted, matching any scheme at lookup time
-_ANY_SCHEME = object()
+class _AnyScheme:
+    """Typed sentinel — enables isinstance() narrowing in pyright."""
+
+_ANY_SCHEME = _AnyScheme()
 
 
 class PathNotRegistered(KeyError):
@@ -128,26 +131,26 @@ class Router(UserDict, BaseRouter):
  
         # Normalise methods / scheme to tuples
         methods = _to_tuple(methods)
-        scheme  = _ANY_SCHEME if scheme is None or scheme is _ANY_SCHEME \
+        scheme  = _ANY_SCHEME if scheme is None or isinstance(scheme, _AnyScheme) \
                   else _to_tuple(scheme)
- 
+
         logger.debug("setitem key=%r", key)
- 
+
         # Dispatch on path type
         if isinstance(path, str):
             # Store under the normalised 3-element key in self.data
-            normalized_key = (path, tuple(methods), _ANY_SCHEME if scheme is _ANY_SCHEME else tuple(scheme))
+            normalized_key = (path, tuple(methods), _ANY_SCHEME if isinstance(scheme, _AnyScheme) else tuple(scheme))
             self.data[normalized_key] = value
- 
+
             # Expand {param} placeholders into named capture groups
             pattern_str = self.f_string.sub(
                 r'(?P<\1>[a-zA-Z0-9_\-\.\~]+)', path
             )
             compiled = re.compile(f'^{pattern_str}$')
-            self.regex_[(compiled, tuple(methods), _ANY_SCHEME if scheme is _ANY_SCHEME else tuple(scheme))] = value
- 
+            self.regex_[(compiled, tuple(methods), _ANY_SCHEME if isinstance(scheme, _AnyScheme) else tuple(scheme))] = value
+
         elif isinstance(path, re.Pattern):
-            self.regex_[(path, tuple(methods), _ANY_SCHEME if scheme is _ANY_SCHEME else tuple(scheme))] = value
+            self.regex_[(path, tuple(methods), _ANY_SCHEME if isinstance(scheme, _AnyScheme) else tuple(scheme))] = value
  
         else:
             logger.error(f"Unexpected type for path: {key!r}")
@@ -258,7 +261,7 @@ class Router(UserDict, BaseRouter):
         Return True if key_scheme is found in the registered scheme tuple,
         or if registered_scheme is _ANY_SCHEME (omitted at registration time).
         """
-        if registered_scheme is _ANY_SCHEME:
+        if isinstance(registered_scheme, _AnyScheme):
             return True
         return key_scheme in registered_scheme
 
@@ -293,13 +296,14 @@ class Router(UserDict, BaseRouter):
         if not isinstance(functions, Iterable):
             raise TypeError(f'{functions} is not iterable.')
 
-        param = _middleware_param(functions[-1])
+        fns = list(functions)
+        param = _middleware_param(fns[-1])
         if param is not None:
-            inner_chain = partial(functions[-1], **{param: do_nothing})
+            inner_chain = partial(fns[-1], **{param: do_nothing})
         else:
-            inner_chain = functions[-1]
+            inner_chain = fns[-1]
 
-        for fn in functions[-2::-1]:
+        for fn in fns[-2::-1]:
             param = _middleware_param(fn)
             if param is None:
                 raise ValueError(f'{fn} does not have "inner" or "call_next" in its parameters.')

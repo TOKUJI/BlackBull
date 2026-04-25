@@ -3,6 +3,7 @@ import ssl
 from functools import wraps
 from collections import defaultdict
 import concurrent.futures
+from typing import Any
 
 # private library
 from ..utils import HTTP2, EventEmitter
@@ -70,8 +71,8 @@ class Client:
         self.name = name
         self.port = port
         self.ssl = create_ssl_context(debug)
-        self.reader = None
-        self.writer = None
+        self.reader: asyncio.StreamReader | None = None
+        self.writer: asyncio.StreamWriter | None = None
 
         self.factory = FrameFactory()
         self.root_stream = Stream(0, None, 1)
@@ -84,9 +85,9 @@ class Client:
 
         # self._handlers = {}
 
-        self.events = {'disconnect': self.disconnect_event,
-                       'connect': self.connect_event
-                       }
+        self.events: dict[str, Any] = {'disconnect': self.disconnect_event,
+                                        'connect': self.connect_event
+                                        }
 
         self.event_emitter = EventEmitter()
 
@@ -110,7 +111,7 @@ class Client:
 
     @log(logger)
     def emit_event(self, frame):
-        self.event_emitter.emit(self.receive_frame_event, frame)
+        self.event_emitter.emit(self.receiver_frame_event, frame)
 
         # if frame.stream_identifier not in self.events:
         #     return
@@ -198,6 +199,9 @@ class Client:
     @log(logger)
     async def receive_frame(self):
         """ Receives data from the reader, creates a frame."""
+        read_task: asyncio.Task | None = None
+        disconnect_task: asyncio.Task | None = None
+        assert self.reader is not None
         try:
             # @TODO Absorbs data as many as possible. Adds an except section below.
             read_task = asyncio.create_task(self.reader.read(16384))
@@ -215,8 +219,10 @@ class Client:
             frame = self.factory.load(data)
 
         finally:
-            read_task.cancel()
-            disconnect_task.cancel()
+            if read_task:
+                read_task.cancel()
+            if disconnect_task:
+                disconnect_task.cancel()
 
         return frame
 
@@ -246,12 +252,9 @@ class Client:
         data = frame.save()
         logger.debug(f'sending {frame}, {data}')
 
+        assert self.writer is not None
         self.writer.write(data)
         await self.writer.drain()
-
-
-    def lock(self):
-        return self._lock.lock()
 
 
     def __del__(self):

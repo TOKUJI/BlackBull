@@ -21,8 +21,9 @@ def _log(fn):
     return wrapper
 
 
-if find_library('c'):
-    _LIB = cdll.LoadLibrary(find_library('c'))
+_lib_name = find_library('c')
+if _lib_name is not None:
+    _LIB = cdll.LoadLibrary(_lib_name)
 else:
     _LIB = cdll.LoadLibrary('libc.so.6')
 
@@ -127,12 +128,12 @@ class Watcher(object):
                | INOTIFY_EVENT_NAME["IN_MOVE_SELF"] \
 
     _instances = WeakValueDictionary()
-    _fd = None
+    _fd: int
 
     def __init__(self, loop=None):
         self._instances[id(self)] = self
 
-        self._fd = _LIB.inotify_init()
+        self._fd = int(_LIB.inotify_init())
         if self._fd < 0:
             raise OSError("could not initialize inotify")
         _logger.debug(self._fd)

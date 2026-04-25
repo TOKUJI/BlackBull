@@ -118,11 +118,14 @@ class Respond2Header(RespondBase):
         logger.debug(stream.scope)
 
         if self.frame.end_stream:
+            async def receive():  # TODO: implement properly
+                return {}
+
+            async def send(event):  # TODO: implement properly
+                pass
+
             await handler.app(stream.scope, receive, send)
 
-            # async def receive():
-            #     return empty_event
-            # await fn(receive, handler.make_sender(stream_id))
             handler.streams[stream_id].frame = None
 
     @staticmethod

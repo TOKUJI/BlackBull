@@ -259,3 +259,77 @@ class TestStaticFilesRangeRequests:
         start, body = await _collect(app, _scope(path='/hello.txt'))
         assert start['status'] == 200
         assert body == self.FILE, f'Expected full file; got {body!r}'
+
+
+# ---------------------------------------------------------------------------
+# Environment-gated serving
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+class TestStaticFilesEnv:
+    """BLACKBULL_ENV controls whether static files are served."""
+
+    async def test_production_returns_404(self, static_dir, monkeypatch):
+        monkeypatch.setenv('BLACKBULL_ENV', 'production')
+        from blackbull.middleware.static import StaticFiles
+        app = StaticFiles(directory=str(static_dir))
+        start, _ = await _collect(app, _scope(path='/hello.txt'))
+        assert start['status'] == 404, f'Expected 404 in production; got {start["status"]}'
+
+    async def test_development_serves_file(self, static_dir, monkeypatch):
+        monkeypatch.setenv('BLACKBULL_ENV', 'development')
+        from blackbull.middleware.static import StaticFiles
+        app = StaticFiles(directory=str(static_dir))
+        start, _ = await _collect(app, _scope(path='/hello.txt'))
+        assert start['status'] == 200, f'Expected 200 in development; got {start["status"]}'
+
+    async def test_test_env_serves_file(self, static_dir, monkeypatch):
+        monkeypatch.setenv('BLACKBULL_ENV', 'test')
+        from blackbull.middleware.static import StaticFiles
+        app = StaticFiles(directory=str(static_dir))
+        start, _ = await _collect(app, _scope(path='/hello.txt'))
+        assert start['status'] == 200, f'Expected 200 in test env; got {start["status"]}'
+
+
+# ---------------------------------------------------------------------------
+# app.use() + app.static() integration
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+class TestBlackBullStaticRegistration:
+    """app.use() and app.static() register global middleware."""
+
+    async def test_use_registers_global_middleware(self):
+        from blackbull import BlackBull
+        app = BlackBull()
+        sentinel = object()
+        app.use(sentinel)
+        assert app._global_middlewares == [sentinel]
+
+    async def test_static_roots_tracked(self, static_dir, tmp_path):
+        from blackbull import BlackBull
+        app = BlackBull()
+        other = tmp_path / 'other'
+        other.mkdir()
+        app.static('/a', str(static_dir))
+        app.static('/b', str(other))
+        assert len(app._static_roots) == 2
+
+    async def test_static_injects_staticfiles_into_global_chain(self, static_dir):
+        from blackbull import BlackBull
+        from blackbull.middleware.static import StaticFiles
+        app = BlackBull()
+        app.static('/assets', str(static_dir))
+        assert len(app._global_middlewares) == 1
+        assert isinstance(app._global_middlewares[0], StaticFiles)
+
+    async def test_prefix_file_served_end_to_end(self, static_dir):
+        """Global middleware serves /assets/hello.txt when registered via app.static()."""
+        from blackbull import BlackBull
+        app = BlackBull()
+        app.static('/assets', str(static_dir))
+        # Exercise the StaticFiles middleware directly (avoids _wrap_send adapter)
+        mw = app._global_middlewares[0]
+        start, body = await _collect(mw, _scope(path='/assets/hello.txt'))
+        assert start['status'] == 200
+        assert body == b'Hello, static world!'

@@ -1,6 +1,7 @@
-# from functools import partial, reduce
+import functools
 from collections.abc import Iterable
 from http import HTTPStatus, HTTPMethod
+from pathlib import Path
 import asyncio
 import sys
 import traceback
@@ -106,6 +107,8 @@ class BlackBull:
         self._startup_hooks: list = []
         self._shutdown_hooks: list = []
         self._wsprotocols = None
+        self._global_middlewares: list = []
+        self._static_roots: list[tuple[str, Path]] = []
 
     @property
     def loop(self):
@@ -163,20 +166,15 @@ class BlackBull:
                 await send({'type': 'lifespan.shutdown.complete'})
                 return
 
-    async def __call__(self, scope, receive, send):
+    async def _dispatch(self, scope, receive, send):
+        """Route and dispatch a single non-lifespan request."""
         self._logger.debug((scope, receive, send))
-
-        if scope.get('type') == 'lifespan':
-            await self._handle_lifespan(scope, receive, send)
-            return
 
         try:
             scheme = Scheme(scope['type'])
         except ValueError:
             self._logger.error(f'Invalid scheme ({scope["type"]}) is requested.')
             raise Exception('Invalid scheme is requested.')
-
-        wrapped = _wrap_send(send)
 
         if scheme == Scheme.websocket:
             path = scope['path']
@@ -185,7 +183,7 @@ class BlackBull:
             except (MethodNotApplicable, PathNotRegistered):
                 self._logger.warning('No websocket handler registered for %s', path)
                 return
-            await function(scope, receive, wrapped)
+            await function(scope, receive, send)
             return
 
         try:
@@ -195,7 +193,7 @@ class BlackBull:
             scope.setdefault('state', {})['error_status'] = HTTPStatus.METHOD_NOT_ALLOWED
             handler = self._error_router[HTTPStatus.METHOD_NOT_ALLOWED]
             if handler is not None:
-                await handler(scope, receive, wrapped)
+                await handler(scope, receive, send)
             return
 
         path = scope['path']
@@ -212,19 +210,19 @@ class BlackBull:
             })
             handler = self._error_router[HTTPStatus.METHOD_NOT_ALLOWED]
             if handler is not None:
-                await handler(scope, receive, wrapped)
+                await handler(scope, receive, send)
             return
         except PathNotRegistered:
             self._logger.debug("404 Not Found: path=%r", path)
             scope.setdefault('state', {})['error_status'] = HTTPStatus.NOT_FOUND
             handler = self._error_router[HTTPStatus.NOT_FOUND]
             if handler is not None:
-                await handler(scope, receive, wrapped)
+                await handler(scope, receive, send)
             return
 
         self._logger.debug((self, function))
         try:
-            await function(scope, receive, wrapped)
+            await function(scope, receive, send)
         except Exception as e:
             self._logger.error(traceback.format_exc())
             scope.setdefault('state', {}).update({
@@ -233,7 +231,20 @@ class BlackBull:
             })
             handler = self._error_router[e]
             if handler is not None:
-                await handler(scope, receive, wrapped)
+                await handler(scope, receive, send)
+
+    async def __call__(self, scope, receive, send):
+        if scope.get('type') == 'lifespan':
+            await self._handle_lifespan(scope, receive, send)
+            return
+
+        wrapped = _wrap_send(send)
+
+        endpoint = self._dispatch
+        for mw in reversed(self._global_middlewares):
+            endpoint = functools.partial(mw, call_next=endpoint)
+
+        await endpoint(scope, receive, wrapped)
 
     def route(self, methods: HTTPMethod | Iterable[HTTPMethod] = [HTTPMethod.GET],
               path: str = '/', scheme: Scheme | Iterable[Scheme] = Scheme.http,
@@ -250,6 +261,17 @@ class BlackBull:
     def group(self, middlewares=[]) -> 'RouteGroup':
         """Return a RouteGroup that prepends *middlewares* to every route."""
         return RouteGroup(self, middlewares)
+
+    def use(self, mw) -> None:
+        """Register a global middleware applied to every non-lifespan request."""
+        self._global_middlewares.append(mw)
+
+    def static(self, url_prefix: str, root_dir: str | Path) -> None:
+        """Serve static files from *root_dir* under *url_prefix* via global middleware."""
+        from blackbull.middleware.static import StaticFiles
+        root = Path(root_dir).resolve()
+        self._static_roots.append((url_prefix, root))
+        self.use(StaticFiles(url_prefix=url_prefix, root_dir=root))
 
     def on_error(self, key):
         """Register a custom error handler for an HTTPStatus or exception class.

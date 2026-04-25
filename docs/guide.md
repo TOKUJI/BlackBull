@@ -1670,3 +1670,116 @@ both protocols.
   push it will send a `RST_STREAM` which BlackBull logs and ignores.
 - Pushed resources should be cacheable.  Pushing non-cacheable content wastes
   bandwidth and may confuse browsers.
+
+---
+
+## §16  Global Middleware and Static File Serving
+
+### §16.1  Global middleware — `app.use()`
+
+Global middlewares run before routing for every non-lifespan request.
+
+```python
+app.use(my_middleware)
+```
+
+The middleware signature is the same as route middleware:
+
+```python
+async def my_middleware(scope, receive, send, call_next):
+    # pre-processing
+    await call_next(scope, receive, send)
+    # post-processing
+```
+
+Multiple `use()` calls build a chain: the first registered middleware is the
+outermost (runs first).  A middleware that does not call `call_next`
+short-circuits the chain — no route handler is invoked.
+
+Lifespan events (`scope['type'] == 'lifespan'`) bypass the global middleware
+chain entirely.
+
+### §16.2  Static file serving — `app.static()`
+
+`app.static(url_prefix, root_dir)` registers a `StaticFiles` global
+middleware that serves files from `root_dir` for paths that start with
+`url_prefix`.
+
+```python
+from blackbull import BlackBull
+
+app = BlackBull()
+app.static('/assets', 'public/assets')
+app.static('/images', 'public/images')
+
+@app.route(path='/')
+async def index(scope, receive, send):
+    ...
+```
+
+A request to `/assets/style.css` is intercepted by the global middleware
+before routing and served from `public/assets/style.css`.  Requests that do
+not match the prefix fall through to the route handlers normally.
+
+#### Standalone usage
+
+`StaticFiles` can also be used as a standalone ASGI app (useful in tests or
+when mounting without BlackBull):
+
+```python
+from blackbull.middleware.static import StaticFiles
+
+app = StaticFiles(directory='public')
+# app(scope, receive, send)  — 3-argument ASGI
+```
+
+#### Environment gate — `BLACKBULL_ENV`
+
+Set the `BLACKBULL_ENV` environment variable to control serving behaviour:
+
+| Value | Effect |
+|---|---|
+| `production` | Always return 404; static files are never served |
+| `development` (default) | Serve files normally |
+| `test` | Serve files normally |
+
+```bash
+BLACKBULL_ENV=production python app.py   # static routes return 404
+BLACKBULL_ENV=development python app.py  # static files served
+```
+
+#### Range requests — RFC 7233
+
+`StaticFiles` supports `Range` requests out of the box:
+
+```
+GET /assets/video.mp4 HTTP/1.1
+Range: bytes=0-1023
+```
+
+Response:
+
+```
+HTTP/1.1 206 Partial Content
+Content-Range: bytes 0-1023/4096000
+Content-Length: 1024
+```
+
+Unsatisfiable ranges return `416 Range Not Satisfiable`.
+
+#### Security
+
+- **Path traversal**: URL-encoded paths are decoded with `urllib.parse.unquote`
+  before resolution.  Any resolved path that escapes the configured root
+  directory returns `400 Bad Request`.
+- **Directory listing**: Requests for bare directories return `404`; no
+  directory listing is ever served.
+
+#### Inspecting registered roots
+
+```python
+app.static('/a', 'public/a')
+app.static('/b', 'public/b')
+print(app._static_roots)
+# [('/a', PosixPath('/abs/public/a')), ('/b', PosixPath('/abs/public/b'))]
+```

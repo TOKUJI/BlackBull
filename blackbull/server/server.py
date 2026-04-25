@@ -23,7 +23,7 @@ from ..logger import get_logger_set
 from .response import RespondFactory
 from .parser import ParserFactory
 from .sender import SenderFactory
-from .recipient import RecipientFactory, AbstractReader, AsyncioReader, IncompleteReadError
+from .recipient import RecipientFactory, HTTP2Recipient, AbstractReader, AsyncioReader, IncompleteReadError
 from .headers import Headers
 logger, log = get_logger_set(__name__)
 _access_logger = logging.getLogger('blackbull.access')
@@ -280,7 +280,7 @@ class HTTP11Handler(BaseHandler):
         if transport.get_extra_info('ssl_object') is not None:
             scope['scheme'] = 'wss' if scope.get('type') == 'websocket' else 'https'
 
-    def parse(self):
+    def parse(self, data=None):
         """
         Parse header lines of received request and make ASGI scope object.
         """
@@ -436,12 +436,12 @@ class HTTP2Handler(BaseHandler):
 
         asyncio.create_task(self.app(pushed_scope, push_recipient, push_sender))
 
-    async def receive(self) -> bytes:
+    async def receive(self) -> bytes | None:
         """Read the stream, get some data from incoming frames, and parse it"""
         # to distinguish the type of incoming frame
         if (data := await self.reader.read(9)) == 0:
             logger.info('StreamReader got EOF')
-            return
+            return None
 
         size = int.from_bytes(data[:3], 'big', signed=False)
         data += await self.reader.read(size)  # Add error handling for the case of insufficient data
@@ -481,7 +481,7 @@ class HTTP2Handler(BaseHandler):
         # Per-stream recipients: keyed by stream ID so each stream's receive
         # queue is isolated. A shared queue would let one stream's events leak
         # into another stream's handler (e.g. GET's empty event consumed by POST).
-        recipients: dict[int, RecipientFactory.http2.__class__] = {}
+        recipients: dict[int, HTTP2Recipient] = {}
 
         while data := await self.receive():
 
@@ -525,6 +525,7 @@ class HTTP2Handler(BaseHandler):
                         logger.error('Received unexpected CONTINUATION frame without preceding HEADERS frame.')
                         await self.send_frame(self.factory.goaway(last_stream_id))
 
+                    assert header_frame is not None
                     header_frame.raw_block += frame.payload
 
                     if frame.end_headers:
@@ -595,7 +596,8 @@ class LifespanManager:
     async def __aexit__(self, *_):
         await self._receive_q.put({'type': 'lifespan.shutdown'})
         await self._send_q.get()   # lifespan.shutdown.complete
-        self._task.cancel()
+        if self._task is not None:
+            self._task.cancel()
         return False
 
 

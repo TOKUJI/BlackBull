@@ -215,7 +215,7 @@ class HTTP2Recipient(BaseRecipient):
     def __init__(self, frame: FrameBase | None = None):
         super().__init__(None)
         self._queue: asyncio.Queue = asyncio.Queue()
-        if frame:
+        if isinstance(frame, Data):
             self.put_DATAFrame(frame)
 
     def make_event(self, frame: Data) -> dict:

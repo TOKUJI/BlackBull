@@ -81,7 +81,7 @@ pytest
 - [x] WebSocket `Sec-WebSocket-Version: 13` validation
 - [x] WebSocket subprotocol negotiation (`Sec-WebSocket-Protocol`): `app.available_ws_protocols` registry; server picks the first client-offered match and includes it in the 101 response
 - [x] HTTP response compression: gzip / br / zstd based on `Accept-Encoding`
-- [ ] Static file serving middleware with `Range` / `206 Partial Content`
+- [x] Static file serving middleware with `Range` / `206 Partial Content`
 - [x] mTLS: client certificate authentication
 - [x] HTTP/2 server push: `http.response.push` ASGI event → `PUSH_PROMISE` frame (even promised stream ID) + synthetic GET request dispatched to the app on the promised stream; `scope['extensions']['http.response.push']` advertised on all HTTP/2 scopes
 - [x] HTTP/2 stream state machine (RFC 7540 §5.1): IDLE → OPEN/HALF_CLOSED_REMOTE → CLOSED transitions via `on_headers_received()` / `on_data_received()`; DATA on closed stream triggers RST_STREAM
@@ -95,7 +95,7 @@ pytest
 - [ ] HTTP/2 access logging: per-stream entry using `_make_capturing_send` on the per-stream sender in `HTTP2Handler`
 - [ ] WebSocket access logging: connection-level entry (client IP, path, close code, duration) via a `_make_capturing_receive` counterpart
 - [ ] Worker processes / multiprocessing
-- [ ] Global middleware: `app.use(mw)`
+- [x] Global middleware: `app.use(mw)`
 - [ ] URL reverse lookup (`url_for(name, **params)`)
 - [ ] Path parameter type converters (`int`, `uuid`, `path`, …)
 - [ ] Built-in CORS middleware

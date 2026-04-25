@@ -127,7 +127,8 @@ class Stream:
         return self._lock
 
     def release(self):
-        self._lock.release()
+        if self._lock is not None:
+            self._lock.release()
 
     def is_locked(self):
         if not self._lock:
@@ -143,7 +144,8 @@ class Stream:
 
     def close(self):
         [child.close() for child in self.children.values()]
-        self.parent.drop_child(self.identifier)
+        if self.parent is not None:
+            self.parent.drop_child(self.identifier)
         del self
 
     def __repr__(self):

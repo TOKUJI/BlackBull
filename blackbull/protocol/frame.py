@@ -84,7 +84,7 @@ class FrameFactory:
         frame = FrameBase._registry[type_](
             len(data),
             type_,
-            flags if type(flags) is int else flags.value,
+            flags if isinstance(flags, int) else flags.value,
             stream_id,
             data=data,
             decoder=self.decoder,
@@ -200,7 +200,7 @@ class FrameBase:
         logger.debug(f'FrameBase is saving a frame {res}')
         return res
 
-    def has_continuation(self):
+    def has_continuation(self) -> bool:
         return False
 
     def __eq__(self, other):
@@ -209,7 +209,9 @@ class FrameBase:
                self.stream_id == other.stream_id
 
     def __repr__(self):
-        return f'{self.FRAME_TYPE.name}: stream_id={self.stream_id}'
+        ft = self.FRAME_TYPE
+        name = ft.name if ft is not None else 'Unknown'
+        return f'{name}: stream_id={self.stream_id}'
 
 
 class SettingFrame(FrameBase):
@@ -229,7 +231,7 @@ class SettingFrame(FrameBase):
                        b'\x00\x06': self.set_max_header_list_size,
                        }
 
-        payload = BytesIO(data)
+        payload = BytesIO(data or b'')
         while True:
             identifier = payload.read(2)
             if len(identifier) != 2:
@@ -282,8 +284,8 @@ class WindowUpdate(FrameBase):
         super(WindowUpdate, self).__init__(length, type_, flags, stream_id)
         logger.debug('WindowUpdate is called.')
 
-        self.payload = data
-        self.window_size = int.from_bytes(data, 'big', signed=False)
+        self.payload = data or b'\x00\x00\x00\x00'
+        self.window_size = int.from_bytes(self.payload, 'big', signed=False)
 
     def save(self):
         base = super().save()
@@ -325,11 +327,13 @@ class Headers(FrameBase):
         # Regular headers as an ordered list of (name, value) tuples
         self.headers: list[tuple[str, str]] = []
 
+        self.raw_block: bytes = b''
+
         if self.length <= 0:
             return
         # handle payload
 
-        self.raw_block = data
+        self.raw_block = data or b''
 
         if self.end_headers:
             self.parse_payload()
@@ -338,6 +342,7 @@ class Headers(FrameBase):
         self.table_size = size
 
     def parse_payload(self):
+        assert self.decoder is not None
         payload = BytesIO(self.raw_block)
         if self.padded:
             payload.read(1)
@@ -371,10 +376,8 @@ class Headers(FrameBase):
         logger.debug(base + payload)
         return base + payload
 
-    def has_continuation(self):
-        if not self.end_stream:
-            return True
-        return False
+    def has_continuation(self) -> bool:
+        return not bool(self.end_stream)
 
     def __getattr__(self, key):
         if key == 'stream_dependency':
@@ -426,7 +429,7 @@ class GoAway(FrameBase):
         super().__init__(length, type_, flags, stream_id)
         logger.debug('GoAway is called.')
 
-        payload = BytesIO(data)
+        payload = BytesIO(data or b'')
         self.stream_id = int.from_bytes(payload.read(4), 'big', signed=False)
         self.error_code = int.from_bytes(payload.read(4), 'big', signed=False)
         self.append_data = payload.read()
@@ -447,6 +450,7 @@ class RstStream(FrameBase):
     def __init__(self, length: int, type_, flags: int, stream_id: int, *, data=None, **kwds):
         super().__init__(length, type_, flags, stream_id)
         logger.debug('RstStream is called.')
+        data = data or b''
         if len(data) != 4:
             raise Exception('Frame size error')
 
@@ -471,7 +475,7 @@ class Data(FrameBase):
         if isinstance(data, str):
             payload = BytesIO(data.encode())
         else:
-            payload = BytesIO(data)
+            payload = BytesIO(data or b'')
 
         if self.padded:
             pad_length = int.from_bytes(payload.read(1), 'big', signed=False)
@@ -500,7 +504,7 @@ class Priority(FrameBase):
         super().__init__(length, type_, flags, stream_id)
         logger.debug('Priority is called.')
 
-        payload = BytesIO(data)
+        payload = BytesIO(data or b'')
 
         _t = int.from_bytes(payload.read(4), 'big', signed=False)
         logger.info(_t)
