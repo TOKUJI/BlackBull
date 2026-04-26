@@ -15,7 +15,7 @@ import time
 import socket
 
 # private library
-from ..utils import HTTP2, pop_safe, EventEmitter, check_port
+from ..utils import HTTP2, pop_safe, check_port
 from ..protocol.stream import Stream, StreamState
 from ..protocol.rsock import create_dual_stack_sockets
 from ..protocol.frame import ErrorCodes, FrameFactory, FrameTypes, FrameBase, parse_priority_field, PseudoHeaders
@@ -57,6 +57,7 @@ class AccessLogRecord:
 
     Phase 1 (after parse): client_ip, method, path, http_version.
     Phase 2 (during send): status, response_bytes.
+    For WebSocket sessions, close_code is captured on disconnect instead.
     Emitted as one INFO line on 'blackbull.access' after the response completes.
     """
     client_ip:      str
@@ -65,6 +66,7 @@ class AccessLogRecord:
     http_version:   str
     status:         int | str = '-'
     response_bytes: int       = 0
+    close_code:     int | None = None
     _started_at:    float     = field(default_factory=time.monotonic, repr=False)
 
     @classmethod
@@ -81,13 +83,18 @@ class AccessLogRecord:
         return (time.monotonic() - self._started_at) * 1000
 
     def format(self) -> str:
+        if self.close_code is not None:
+            return (f'{self.client_ip} '
+                    f'"{self.method} {self.path} WS/{self.http_version}" '
+                    f'101 close={self.close_code} '
+                    f'{self.duration_ms():.0f}ms')
         return (f'{self.client_ip} '
                 f'"{self.method} {self.path} HTTP/{self.http_version}" '
                 f'{self.status} {self.response_bytes} '
                 f'{self.duration_ms():.0f}ms')
 
     def as_extra(self) -> dict:
-        return {
+        d: dict = {
             'client_ip':      self.client_ip,
             'method':         self.method,
             'path':           self.path,
@@ -96,6 +103,9 @@ class AccessLogRecord:
             'response_bytes': self.response_bytes,
             'duration_ms':    self.duration_ms(),
         }
+        if self.close_code is not None:
+            d['close_code'] = self.close_code
+        return d
 
 
 def _make_capturing_send(send, record: AccessLogRecord):
@@ -108,6 +118,33 @@ def _make_capturing_send(send, record: AccessLogRecord):
                 record.response_bytes += len(event.get('body', b''))
         await send(event, *args, **kwargs)
     return capturing_send
+
+
+def _make_capturing_receive(receive, record: AccessLogRecord):
+    """Wrap *receive* to capture the WebSocket close code on disconnect."""
+    async def capturing_receive():
+        event = await receive()
+        if isinstance(event, dict) and event.get('type') == 'websocket.disconnect':
+            record.close_code = event.get('code', 1000)
+        return event
+    return capturing_receive
+
+
+async def _run_with_log(coro, record: AccessLogRecord) -> None:
+    """Await *coro* then emit one access log entry on 'blackbull.access'.
+
+    CancelledError re-raised so TaskGroup cancellation propagates correctly.
+    All other exceptions are logged and swallowed so a failing stream does not
+    cancel sibling streams through the TaskGroup.
+    """
+    try:
+        await coro
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        logger.exception('HTTP/2 stream raised an unhandled exception')
+    finally:
+        _access_logger.info(record.format(), extra=record.as_extra())
 
 
 
@@ -174,7 +211,7 @@ class WebSocketHandler(BaseHandler):
                 self.scope['headers'] = Headers(self.scope['headers'])
             logger.debug(self.scope)
 
-    async def run(self):
+    async def run(self, *, record: 'AccessLogRecord | None' = None):
         """Complete the upgrade handshake then call the ASGI application."""
         send = SenderFactory.http1(self.writer)
 
@@ -211,6 +248,8 @@ class WebSocketHandler(BaseHandler):
 
         send = SenderFactory.websocket(self.writer)
         receive = RecipientFactory.websocket(self.reader, self.writer)
+        if record is not None:
+            receive = _make_capturing_receive(receive, record)
         await self.app(self.scope, receive, send)
 
 
@@ -243,7 +282,14 @@ class HTTP11Handler(BaseHandler):
                 logger.debug(scope)
 
                 if scope.get('type') == 'websocket':
-                    await WebSocketHandler(self.app, self.reader, self.writer, scope).run()
+                    log_record = AccessLogRecord.from_scope(scope)
+                    log_record.status = HTTPStatus.SWITCHING_PROTOCOLS
+                    try:
+                        await WebSocketHandler(
+                            self.app, self.reader, self.writer, scope
+                        ).run(record=log_record)
+                    finally:
+                        _access_logger.info(log_record.format(), extra=log_record.as_extra())
                     return
 
                 if scope['headers'].get(b'expect').lower() == b'100-continue':
@@ -348,6 +394,9 @@ class HTTP2Handler(BaseHandler):
         self.max_concurrent_streams = float('inf')
         # Server-initiated (pushed) streams use even IDs (RFC 7540 §5.1.1).
         self._next_push_stream_id = 2
+        # Set to the active TaskGroup while run() is executing so that
+        # _handle_push() can add pushed-stream tasks to the same group.
+        self._task_group: asyncio.TaskGroup | None = None
 
     def find_stream(self, stream_id):
         if stream_id == 0:
@@ -432,9 +481,15 @@ class HTTP2Handler(BaseHandler):
 
         push_sender = SenderFactory.http2(
             self.writer, self.factory, push_stream_id,
-            push_callback=self._handle_push)  # nested pushes allowed by RFC 7540
+            push_callback=None)  # RFC 7540 §8.2: server-initiated streams cannot send PUSH_PROMISE
 
-        asyncio.create_task(self.app(pushed_scope, push_recipient, push_sender))
+        push_log_record = AccessLogRecord.from_scope(pushed_scope)
+        if self._task_group is not None:
+            self._task_group.create_task(
+                _run_with_log(
+                    self.app(pushed_scope, push_recipient, push_sender),
+                    push_log_record)
+            )
 
     async def receive(self) -> bytes | None:
         """Read the stream, get some data from incoming frames, and parse it"""
@@ -473,15 +528,28 @@ class HTTP2Handler(BaseHandler):
         await self.send_frame(my_settings)
         logger.info(my_settings)
 
-        waiting_continuation = False
-
-        # Then, parse and handle frames in this loop.
-        header_frame = None
-        accumulated_body: bytes = b''
         # Per-stream recipients: keyed by stream ID so each stream's receive
         # queue is isolated. A shared queue would let one stream's events leak
         # into another stream's handler (e.g. GET's empty event consumed by POST).
         recipients: dict[int, HTTP2Recipient] = {}
+
+        async with asyncio.TaskGroup() as tg:
+            self._task_group = tg
+            await self._frame_loop(tg, recipients)
+        # TaskGroup block: every per-stream task has completed by this point.
+        self._task_group = None
+
+    async def _frame_loop(self, tg: asyncio.TaskGroup,
+                          recipients: dict[int, HTTP2Recipient]) -> None:
+        """Read frames from the connection and dispatch per-stream ASGI tasks.
+
+        Runs as the main body of the TaskGroup in run().  Exits when the
+        connection sends GOAWAY or closes (receive() returns falsy).  All
+        per-stream tasks are children of *tg* so the TaskGroup waits for
+        them to finish before run() returns.
+        """
+        waiting_continuation = False
+        header_frame = None
 
         while data := await self.receive():
 
@@ -514,7 +582,13 @@ class HTTP2Handler(BaseHandler):
                         if frame.end_stream:
                             # No body will follow — enqueue an empty request event now.
                             stream_recipient.put_event({'type': 'http.request', 'body': b'', 'more_body': False})
-                        asyncio.create_task(self.app(scope, stream_recipient, send))
+                        log_record = AccessLogRecord.from_scope(scope)
+                        capturing_send = _make_capturing_send(send, log_record)
+                        tg.create_task(
+                            _run_with_log(
+                                self.app(scope, stream_recipient, capturing_send),
+                                log_record)
+                        )
                     else:
                         waiting_continuation = True
                         header_frame = frame
@@ -538,7 +612,13 @@ class HTTP2Handler(BaseHandler):
                         stream.scope = scope   # store so _handle_push can read it
                         stream_recipient = RecipientFactory.http2()
                         recipients[stream.stream_id] = stream_recipient
-                        asyncio.create_task(self.app(scope, stream_recipient, send))
+                        log_record = AccessLogRecord.from_scope(scope)
+                        capturing_send = _make_capturing_send(send, log_record)
+                        tg.create_task(
+                            _run_with_log(
+                                self.app(scope, stream_recipient, capturing_send),
+                                log_record)
+                        )
                     else:
                         continue  # more CONTINUATION frames expected
 
@@ -558,7 +638,7 @@ class HTTP2Handler(BaseHandler):
                 case FrameTypes.GOAWAY:
                     await self.send_frame(self.factory.goaway(last_stream_id))
                     self.writer.close()
-                    break
+                    return
 
                 case _:
                     await ResponderFactory.create(frame).respond(self)
@@ -598,6 +678,10 @@ class LifespanManager:
         await self._send_q.get()   # lifespan.shutdown.complete
         if self._task is not None:
             self._task.cancel()
+            try:
+                await self._task   # drain finally blocks inside the lifespan app
+            except asyncio.CancelledError:
+                pass
         return False
 
 
@@ -773,16 +857,18 @@ class ASGIServer:
             async with LifespanManager(self.app):
                 logger.info(f'Server(s) created: {servers}')
                 try:
-                    await asyncio.gather(*(srv.serve_forever() for srv in servers))
+                    async with asyncio.TaskGroup() as tg:
+                        for srv in servers:
+                            tg.create_task(srv.serve_forever())
 
-                except KeyboardInterrupt:
-                    logger.info('KeyboardInterrupt is caught.')
+                except* KeyboardInterrupt:
+                    logger.info('KeyboardInterrupt received — shutting down.')
 
-                except asyncio.exceptions.CancelledError as e:
-                    logger.info(type(e))
+                except* asyncio.CancelledError:
+                    logger.info('Server task cancelled.')
 
-                except Exception:
-                    logger.error(traceback.format_exc())
+                except* Exception as eg:
+                    logger.error('Server error: %s', eg)
 
         logger.info('Server has been stopped.')
 

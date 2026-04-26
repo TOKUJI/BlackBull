@@ -1,4 +1,5 @@
 import asyncio
+import os
 from abc import ABC, abstractmethod
 from enum import IntEnum
 from http import HTTPStatus
@@ -405,21 +406,33 @@ class WebSocketSender(BaseSender):
                 logger.warning('WebSocketSender: unknown event type %r', event_type)
 
     @staticmethod
-    def _encode_frame(payload: bytes, opcode: WSOpcode | int = WSOpcode.TEXT) -> bytes:
-        """Encode *payload* as an unmasked WebSocket data frame (RFC 6455 §5).
+    def _encode_frame(payload: bytes, opcode: WSOpcode | int = WSOpcode.TEXT,
+                      *, mask: bool = False) -> bytes:
+        """Encode *payload* as a WebSocket data frame (RFC 6455 §5).
 
         ``opcode`` defaults to ``WSOpcode.TEXT``; pass ``WSOpcode.BINARY`` for
         binary frames, ``WSOpcode.CLOSE`` for close frames, etc.
-        The server MUST NOT mask frames it sends to the client (RFC 6455 §5.1).
+
+        Masking (RFC 6455 §5.1):
+        - Server → client frames MUST NOT be masked: callers in the server
+          path keep ``mask=False`` (the default).
+        - Client → server frames MUST be masked: the protocol-layer client
+          passes ``mask=True``, which prepends a random 4-byte masking key
+          and XORs the payload with it.
         """
         length = len(payload)
         header = bytes([WSFrameBits.FIN | opcode])
+        mask_bit = WSFrameBits.MASK_BIT if mask else 0
         if length < 126:
-            header += bytes([length])
+            header += bytes([mask_bit | length])
         elif length < 65536:
-            header += bytes([126]) + length.to_bytes(2, 'big')
+            header += bytes([mask_bit | 126]) + length.to_bytes(2, 'big')
         else:
-            header += bytes([127]) + length.to_bytes(8, 'big')
+            header += bytes([mask_bit | 127]) + length.to_bytes(8, 'big')
+        if mask:
+            mask_key = os.urandom(4)
+            masked_payload = bytes(b ^ mask_key[i % 4] for i, b in enumerate(payload))
+            return header + mask_key + masked_payload
         return header + payload
     
     @staticmethod

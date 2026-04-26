@@ -361,13 +361,15 @@ class BlackBull:
         tasks.append(self.server.run(port=port))
 
         try:
-            await asyncio.gather(*tasks, return_exceptions=True)
+            async with asyncio.TaskGroup() as tg:
+                for coro in tasks:
+                    tg.create_task(coro)
 
-        except asyncio.exceptions.CancelledError:
-            self._logger.info('The tasks have been cancelled.')
+        except* asyncio.CancelledError:
+            self._logger.info('Tasks cancelled.')
 
-        except BaseException:
-            self._logger.error(traceback.format_exc())
+        except* BaseException as eg:
+            self._logger.error('Task error: %s', eg)
 
     def wait_for_port(self, timeout: float = 10.0, poll_interval: float = 0.1):
         self.server.wait_for_port(timeout=timeout, poll_interval=poll_interval)

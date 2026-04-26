@@ -1,133 +1,125 @@
-from ..protocol.frame import FrameTypes, SettingFrameFlags
-from ..logger import get_logger_set, log
+"""Client-side responders: react to incoming HTTP/2 frames.
+
+Each ``Responder`` subclass handles one ``FrameTypes`` value.  ``respond()``
+delegates the protocol-level state mutation back to the owning
+``HTTP2Client`` via underscore-prefixed callbacks (``_on_response_headers``,
+``_on_response_data``, …) so the client owns its state and the responders
+stay thin dispatchers.
+
+The dispatch table is built once via ``__init_subclass__`` so
+``ResponderFactory.create(frame)`` is O(1).
+"""
+from ..protocol.frame import FrameTypes, PingFrameFlags, SettingFrameFlags
+from ..logger import get_logger_set
+
 logger, _ = get_logger_set('client.response')
 
 
 class ResponderFactory:
+    """Looks up the ``Responder`` for an incoming frame type and instantiates it."""
+
     @staticmethod
-    def create(frame):
-        factory = {klass.FrameType(): klass for klass in Responder.__subclasses__()}
-        return factory[frame.FrameType()](frame)
+    def create(frame) -> 'Responder':
+        cls = Responder._registry.get(frame.FrameType())
+        if cls is None:
+            return _NullResponder(frame)
+        return cls(frame)
 
 
 class Responder:
+    """Base class for client-side reactions to an incoming HTTP/2 frame.
+
+    Subclasses set ``FRAME_TYPE`` and implement ``respond(client)``.
+    ``__init_subclass__`` registers each concrete subclass keyed on its
+    ``FRAME_TYPE`` so ``ResponderFactory.create`` can dispatch by type.
+    """
+
+    FRAME_TYPE: 'FrameTypes | None' = None
+    _registry: 'dict[FrameTypes, type[Responder]]' = {}
+
     def __init__(self, frame):
         self.frame = frame
 
-    async def respond(self, handler):
-        raise NotImplementedError()
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+        if cls.FRAME_TYPE is None:
+            return
+        if cls.FRAME_TYPE in cls._registry:
+            raise ValueError(f'Duplicate FRAME_TYPE: {cls.FRAME_TYPE}')
+        cls._registry[cls.FRAME_TYPE] = cls
 
-    @staticmethod
-    def FrameType():
-        raise NotImplementedError()
-
-
-class PingResponder(Responder):
-    async def respond(self, handler):
-        res = handler.factory.create(FrameTypes.PING,
-                                     SettingFrameFlags.ACK,
-                                     self.frame.stream_id,
-                                     self.frame.payload)
-        await handler.send_frame(res)
-        return handler
-
-    @staticmethod
-    def FrameType():
-        return FrameTypes.PING
+    async def respond(self, client) -> None:
+        raise NotImplementedError
 
 
-class WindowUpdateResponder(Responder):
-    async def respond(self, handler):
-        if self.frame.stream_id == 0:
-            handler.connection_window_size = self.frame.window_size
-        else:
-            handler.stream_window_size[self.frame.stream_id] = self.frame.window_size
+class _NullResponder(Responder):
+    """Drops frame types the client does not handle (PRIORITY, PRIORITY_UPDATE,
+    PUSH_PROMISE, CONTINUATION until reassembly is added) without raising.
 
-    @staticmethod
-    def FrameType():
-        return FrameTypes.WINDOW_UPDATE
+    Inherits from ``Responder`` but keeps ``FRAME_TYPE = None`` so
+    ``__init_subclass__`` skips registration — this class is only ever
+    created directly by ``ResponderFactory.create`` as the fallback.
+    """
 
-
-class SettingsResponder(Responder):
-    async def respond(self, handler):
-        res = handler.factory.create(FrameTypes.SETTINGS,
-                                     SettingFrameFlags.ACK,
-                                     self.frame.stream_id,
-                                     )
-        await handler.send_frame(res)
-        if self.frame.flags == SettingFrameFlags.INIT:
-            if hasattr(self.frame, 'initial_window_size'):
-                handler.initial_window_size = self.frame.initial_window_size
-            if hasattr(self.frame, 'header_table_size'):
-                # TODO: update header_table_size
-                pass
-            res = handler.factory.create(FrameTypes.SETTINGS,
-                                         SettingFrameFlags.ACK,
-                                         self.frame.stream_id)
-            await handler.send_frame(res)
-
-        elif self.frame.flags == SettingFrameFlags.ACK:
-            logger.debug('Got ACK. Do nothing.')
-
-    @staticmethod
-    def FrameType():
-        return FrameTypes.SETTINGS
-
-
-class DataResponder(Responder):
-    @log(logger)
-    async def respond(self, handler):
-        """
-        To parse the payload of a DATA frame, scope['content-type'] is required.
-        If the frame indicates the end of stream, run the operating
-        function, get the result and respond it to the client.
-        """
-        logger.debug(self.frame)
-        stream_id = self.frame.stream_id  # to be shorten the description
-
-        if stream := handler.find_stream(stream_id):
-            pass
-        else:
-            stream = handler.create_stream(stream_id)
-
-        stream.update_event(data=self.frame)
-
-        if self.frame.end_stream:
-            return stream.scope, stream.event
-
-    @staticmethod
-    def FrameType():
-        return FrameTypes.DATA
+    async def respond(self, client) -> None:
+        logger.debug('Unhandled frame type %r dropped', self.frame.FrameType())
 
 
 class HeaderResponder(Responder):
-    async def respond(self, handler):
-        """
-        Open a stream if the stream_id is not in the dict of stream.
-        Append the payload of the header to the current scope object.
-        If the header frame indicates the end of stream, run the operating
-        function, get the result and respond it to the client.
-        """
-        stream_id = self.frame.stream_id  # to be shorten the description
-        stream = handler.find_stream(stream_id)
-        if not stream:
-            stream = handler.create_stream(stream_id)
+    FRAME_TYPE = FrameTypes.HEADERS
 
-        logger.debug(stream.scope)
-        stream.update_scope(headers=self.frame)
-        logger.debug(stream.scope)
+    async def respond(self, client) -> None:
+        client._on_response_headers(self.frame)
 
-        if self.frame.end_stream:
-            async def receive():  # TODO: implement properly
-                return {}
 
-            async def send(event):  # TODO: implement properly
-                pass
+class DataResponder(Responder):
+    FRAME_TYPE = FrameTypes.DATA
 
-            await handler.app(stream.scope, receive, send)
+    async def respond(self, client) -> None:
+        client._on_response_data(self.frame)
 
-            handler.streams[stream_id].frame = None
 
-    @staticmethod
-    def FrameType():
-        return FrameTypes.HEADERS
+class PingResponder(Responder):
+    FRAME_TYPE = FrameTypes.PING
+
+    async def respond(self, client) -> None:
+        if self.frame.flags & PingFrameFlags.ACK:
+            return  # ACK to one of our own pings — nothing to do
+        ack = client._factory.create(
+            FrameTypes.PING, PingFrameFlags.ACK,
+            self.frame.stream_id, data=self.frame.payload,
+        )
+        await client._send_raw_frame(ack)
+
+
+class SettingsResponder(Responder):
+    FRAME_TYPE = FrameTypes.SETTINGS
+
+    async def respond(self, client) -> None:
+        if self.frame.flags & SettingFrameFlags.ACK:
+            return  # ACK to our SETTINGS — nothing to do
+        if getattr(self.frame, 'initial_window_size', None) is not None:
+            client._on_initial_window_size(self.frame.initial_window_size)
+        ack = client._factory.create(FrameTypes.SETTINGS, SettingFrameFlags.ACK, 0)
+        await client._send_raw_frame(ack)
+
+
+class WindowUpdateResponder(Responder):
+    FRAME_TYPE = FrameTypes.WINDOW_UPDATE
+
+    async def respond(self, client) -> None:
+        client._on_window_update(self.frame)
+
+
+class GoAwayResponder(Responder):
+    FRAME_TYPE = FrameTypes.GOAWAY
+
+    async def respond(self, client) -> None:
+        client._on_goaway(self.frame)
+
+
+class RstStreamResponder(Responder):
+    FRAME_TYPE = FrameTypes.RST_STREAM
+
+    async def respond(self, client) -> None:
+        client._on_rst_stream(self.frame)

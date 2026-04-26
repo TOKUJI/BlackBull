@@ -477,7 +477,7 @@ class TestClientConnectedCbDispatch:
         def spy_init(self, *args, **kwargs):
             original_ws_init(self, *args, **kwargs)
 
-        async def noop_run(self):
+        async def noop_run(self, **kwargs):
             # Simulate forwarding scope to app (as the fixed code does)
             async def _noop_send(event, *args, **kwargs): pass
             async def _noop_receive(): return {}
@@ -639,7 +639,7 @@ class TestScopePopulation:
         handler.writer = writer
         handler.request = b''
 
-        async def noop_ws_run(self):
+        async def noop_ws_run(self, **kwargs):
             captured.update(self.scope)
 
         with patch.object(WebSocketHandler, 'run', noop_ws_run):
@@ -1557,3 +1557,88 @@ class TestAccessLogging:
             f'Access log must include response status; records: '
             f'{[r.message for r in caplog.records]}'
         )
+
+    async def test_websocket_access_log_emitted(self, caplog):
+        """HTTP11Handler must emit one access log entry per completed WebSocket session."""
+        import logging
+        raw = _ws_request(path='/chat')
+        writer = _FakeWriter()
+
+        app_called = []
+
+        async def app(scope, receive, send):
+            app_called.append(scope.get('type'))
+            # Accept and immediately close
+            await send({'type': 'websocket.accept'})
+
+        with patch.object(WebSocketHandler, 'run', new=AsyncMock()) as mock_run:
+            handler = HTTP11Handler(app, _FakeReader(raw), writer, raw[:1])
+            handler.request = raw
+            with caplog.at_level(logging.INFO):
+                await handler.run()
+
+        access_records = [r for r in caplog.records
+                          if r.name == 'blackbull.access']
+        assert access_records, 'Expected one access log entry for WebSocket session'
+        msg = access_records[0].message
+        assert '/chat' in msg, f'Log must include request path; got: {msg!r}'
+        assert '101' in msg, f'Log must include upgrade status 101; got: {msg!r}'
+
+    async def test_websocket_access_log_includes_close_code(self, caplog):
+        """The WebSocket access log entry must include the RFC 6455 close code."""
+        import logging
+        from blackbull.server.server import AccessLogRecord, _make_capturing_receive
+
+        record = AccessLogRecord(
+            client_ip='127.0.0.1', method='GET', path='/ws', http_version='1.1',
+            status=101,
+        )
+
+        events = [
+            {'type': 'websocket.connect'},
+            {'type': 'websocket.disconnect', 'code': 1001},
+        ]
+        idx = 0
+
+        async def fake_receive():
+            nonlocal idx
+            ev = events[idx]
+            idx += 1
+            return ev
+
+        wrapped = _make_capturing_receive(fake_receive, record)
+        await wrapped()  # websocket.connect — close_code stays None
+        assert record.close_code is None
+        await wrapped()  # websocket.disconnect with code 1001
+        assert record.close_code == 1001
+
+    async def test_http2_access_log_emitted_per_stream(self, caplog):
+        """HTTP2Handler must emit one access log entry per completed HTTP/2 stream."""
+        import logging
+        from blackbull.server.server import AccessLogRecord, _run_with_log
+
+        async def app(scope, receive, send):
+            pass
+
+        async def noop_send(event, *a, **kw):
+            pass
+
+        record = AccessLogRecord(
+            client_ip='10.0.0.1', method='GET', path='/h2', http_version='2',
+        )
+        scope = {
+            'type': 'http', 'method': 'GET', 'path': '/h2',
+            'http_version': '2', 'client': ['10.0.0.1', 0],
+        }
+
+        async def fake_receive():
+            return {'type': 'http.request', 'body': b'', 'more_body': False}
+
+        with caplog.at_level(logging.INFO):
+            await _run_with_log(app(scope, fake_receive, noop_send), record)
+
+        access_records = [r for r in caplog.records
+                          if r.name == 'blackbull.access']
+        assert access_records, 'Expected one access log entry for HTTP/2 stream'
+        msg = access_records[0].message
+        assert '/h2' in msg, f'Log must include request path; got: {msg!r}'

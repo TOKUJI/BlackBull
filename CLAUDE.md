@@ -109,6 +109,10 @@ python app.py --port 8443 --cert cert.pem --key key.pem   # HTTPS + HTTP/2
 ```
 
 ## Testing
+- Always run pytest with a timeout: `--timeout=30` (requires pytest-timeout)
+- Always use `timeout` command as a safety wrapper: `timeout 60 python -m pytest ...`
+- If tests hang, kill and report what was last running rather than waiting
+- Never run pytest without a timeout limit
 
 ```bash
 pytest                   # run all tests (uses pytest.ini config)
