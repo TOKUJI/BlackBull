@@ -1,3 +1,11 @@
+"""Case-insensitive, ordered, multi-valued HTTP header store.
+
+Provides:
+
+- `Headers`: satisfies the ASGI ``Iterable[tuple[bytes, bytes]]`` contract while
+  adding ``get``, ``getlist``, case-insensitive lookup, ``append``, and ``+`` concatenation.
+- `HeaderList`: type alias for ``Iterable[tuple[bytes, bytes]]``.
+"""
 from collections.abc import Iterable
 from typing import TypeAlias
 

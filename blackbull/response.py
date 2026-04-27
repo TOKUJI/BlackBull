@@ -1,3 +1,13 @@
+"""HTTP and WebSocket response objects.
+
+Provides:
+
+- `Response`: plain HTTP response (HTML / plain text / binary).
+- `JSONResponse`: convenience subclass that serialises a Python object to JSON.
+- `StreamingResponse`: pushes an async generator to the client without buffering.
+- `WebSocketResponse`: wraps text, bytes, or dict data as a WebSocket send event.
+- `cookie_header`: builds a ``(b'set-cookie', ...)`` header tuple with secure defaults.
+"""
 import json
 from collections.abc import AsyncIterator
 from http import HTTPStatus

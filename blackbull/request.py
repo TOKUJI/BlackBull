@@ -1,3 +1,12 @@
+"""Request body and cookie helpers.
+
+Provides:
+
+- `read_body`: buffers all ASGI ``http.request`` chunks into a single ``bytes`` object.
+- `parse_cookies`: parses the ``Cookie`` request header into a ``dict[str, str]``.
+"""
+
+
 async def read_body(receive) -> bytes:
     """Read the complete request body from the ASGI receive channel."""
     body = b''

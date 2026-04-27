@@ -218,7 +218,7 @@ automatically — no boilerplate needed.
 
 #### No parameters
 
-The handler in [`examples/helloworld-simple.py`](../examples/helloworld-simple.py)
+The handler in [`examples/helloworld-simple.py`](https://github.com/TOKUJI/BlackBull/blob/master/examples/helloworld-simple.py)
 is the minimal form:
 
 ```python
@@ -1084,7 +1084,7 @@ if __name__ == '__main__':
 ```
 
 The working implementation of this skeleton is
-[`examples/SimpleTaskManager/app.py`](../examples/SimpleTaskManager/app.py).
+[`examples/SimpleTaskManager/app.py`](https://github.com/TOKUJI/BlackBull/blob/master/examples/SimpleTaskManager/app.py).
 
 ---
 
@@ -1447,7 +1447,7 @@ enqueues records in O(1) without blocking, and a background thread drains
 the queue and calls the real (blocking) HTTP handler.
 
 A complete two-process example is provided in
-[`examples/LoggingExample/`](../examples/LoggingExample/):
+[`examples/LoggingExample/`](https://github.com/TOKUJI/BlackBull/tree/master/examples/LoggingExample/):
 
 | File | Role |
 |---|---|

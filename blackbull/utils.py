@@ -1,3 +1,13 @@
+"""Shared utilities and enumerations.
+
+Provides:
+
+- `Scheme`: ``StrEnum`` with ``http`` and ``websocket`` values used throughout routing.
+- `check_port`: returns ``True`` when a host/port is not yet in use.
+- `pop_safe`: moves a key between dicts with an optional rename, no-op when absent.
+- `parse_post_data`: parses ``application/x-www-form-urlencoded`` bodies.
+- `EventEmitter`: lightweight async event-emitter backed by ``asyncio.create_task``.
+"""
 from collections import defaultdict
 import asyncio
 import re
