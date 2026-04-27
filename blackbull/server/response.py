@@ -3,9 +3,10 @@ import traceback
 
 from ..protocol.stream import Stream
 from ..protocol.frame import FrameTypes, SettingFrameFlags
-from ..logger import get_logger_set, log
+import logging
+from ..logger import log
 
-logger, _ = get_logger_set(__name__)
+logger = logging.getLogger(__name__)
 
 
 class ResponderFactory:
@@ -144,7 +145,7 @@ class PriorityUpdateResponder(Responder):
 
 class RstStreamResponder(Responder):
 
-    @log(logger)
+    @log
     async def respond(self, handler):
         """
         To terminate current stream and record the reason in the log

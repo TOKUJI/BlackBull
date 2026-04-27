@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from http import HTTPMethod, HTTPStatus
 from typing import Iterable
 
-from ..logger import get_logger_set
+import logging
 from ..protocol.frame import (DEFAULT_INITIAL_WINDOW_SIZE,
                               DataFrameFlags,
                               FrameBase,
@@ -29,7 +29,7 @@ from ..utils import HTTP2 as _HTTP2_PREFACE
 from .exceptions import ConnectionError, ProtocolError, StreamReset
 from .response import ResponderFactory
 
-logger, _ = get_logger_set('client.http2')
+logger = logging.getLogger(__name__)
 
 
 # Number of bytes in the fixed HTTP/2 frame header (RFC 7540 §4.1).

@@ -5,9 +5,9 @@ from enum import Enum, StrEnum, auto
 import socket
 from contextlib import closing
 
-from .logger import get_logger_set
+import logging
 
-logger, _ = get_logger_set('utils')
+logger = logging.getLogger(__name__)
 
 
 async def do_nothing(*args, **kwargs):

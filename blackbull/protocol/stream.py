@@ -14,8 +14,8 @@ from enum import Enum
 from urllib.parse import urlparse
 
 from .frame import PseudoHeaders, DataFrameFlags, HeaderFrameFlags, FrameTypes
-from ..logger import get_logger_set
-logger, log = get_logger_set(__name__)
+import logging
+logger = logging.getLogger(__name__)
 
 
 class StreamState(Enum):

@@ -17,7 +17,6 @@ from http import HTTPStatus, HTTPMethod
 import re
 import inspect
 from .utils import Scheme, do_nothing
-from .logger import get_logger_set
 
 # RouteGroup is defined in app.py to avoid a circular import;
 # re-export here so tests can import it from either location.
@@ -29,7 +28,8 @@ def __getattr__(name):
 
 
 
-logger, _ = get_logger_set(__name__)
+import logging
+logger = logging.getLogger(__name__)
 
 # Sentinel used when scheme is omitted, matching any scheme at lookup time
 class _AnyScheme:

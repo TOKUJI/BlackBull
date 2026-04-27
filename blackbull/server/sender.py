@@ -9,7 +9,7 @@ from typing import NamedTuple
 from ..protocol.frame import (FrameTypes, HeaderFrameFlags, DataFrameFlags,
                                SettingFrameFlags, FrameBase, PseudoHeaders,
                                DEFAULT_INITIAL_WINDOW_SIZE)
-from ..logger import get_logger_set
+import logging
 from .headers import Headers, HeaderList
 
 class WSOpcode(IntEnum):
@@ -47,7 +47,7 @@ class WSFrameHeader(NamedTuple):
     rsv2:   bool
     rsv3:   bool
 
-logger, _ = get_logger_set(__name__)
+logger = logging.getLogger(__name__)
 
 _CRLF = b'\r\n'
 

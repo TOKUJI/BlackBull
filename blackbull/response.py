@@ -3,8 +3,8 @@ from collections.abc import AsyncIterator
 from http import HTTPStatus
 from typing import Union
 
-from .logger import get_logger_set
-logger, log = get_logger_set('response')
+import logging
+logger = logging.getLogger(__name__)
 
 
 class Response:

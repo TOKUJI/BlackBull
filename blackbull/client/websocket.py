@@ -21,7 +21,7 @@ from hashlib import sha1
 from http import HTTPStatus
 from typing import Iterable
 
-from ..logger import get_logger_set
+import logging
 from ..server.headers import Headers
 from ..server.recipient import (AbstractReader, AsyncioReader,
                                 WebSocketRecipient)
@@ -30,7 +30,7 @@ from ..server.sender import (AbstractWriter, AsyncioWriter, WebSocketSender,
 from .exceptions import HandshakeError
 from .http1 import HTTP1RequestSender, HTTP1ResponseRecipient
 
-logger, _ = get_logger_set('client.websocket')
+logger = logging.getLogger(__name__)
 
 
 # RFC 6455 §1.3 — appended to the client's Sec-WebSocket-Key, hashed with

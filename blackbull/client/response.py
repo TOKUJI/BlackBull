@@ -10,9 +10,9 @@ The dispatch table is built once via ``__init_subclass__`` so
 ``ResponderFactory.create(frame)`` is O(1).
 """
 from ..protocol.frame import FrameTypes, PingFrameFlags, SettingFrameFlags
-from ..logger import get_logger_set
+import logging
 
-logger, _ = get_logger_set('client.response')
+logger = logging.getLogger(__name__)
 
 
 class ResponderFactory:

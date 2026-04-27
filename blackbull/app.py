@@ -27,11 +27,11 @@ import sys
 import traceback
 
 # import from this package
+import logging
 from .utils import Scheme
 from .router import Router, ErrorRouter, MethodNotApplicable, PathNotRegistered
-from .logger import get_logger_set
 from .server.watch import Watcher, force_reload
-logger, log = get_logger_set(__name__)
+logger = logging.getLogger(__name__)
 
 
 def _wrap_send(raw_send):
@@ -106,12 +106,9 @@ class BlackBull:
     def __init__(self,
                  router=Router(),
                  loop=None,
-                 logger=logger,
-                 log=log,
                  ):
         self._router = router
         self._logger = logger
-        self._log = log
         self._error_router = ErrorRouter()
 
         # Register the comprehensive default handler for every HTTPStatus error

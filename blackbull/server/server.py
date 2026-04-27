@@ -19,13 +19,13 @@ from ..utils import HTTP2, pop_safe, check_port
 from ..protocol.stream import Stream, StreamState
 from ..protocol.rsock import create_dual_stack_sockets
 from ..protocol.frame import ErrorCodes, FrameFactory, FrameTypes, FrameBase, parse_priority_field, PseudoHeaders
-from ..logger import get_logger_set
+from ..logger import log
 from .response import ResponderFactory
 from .parser import ParserFactory
 from .sender import SenderFactory
 from .recipient import RecipientFactory, HTTP2Recipient, AbstractReader, AsyncioReader, IncompleteReadError
 from .headers import Headers
-logger, log = get_logger_set(__name__)
+logger = logging.getLogger(__name__)
 _access_logger = logging.getLogger('blackbull.access')
 
 _DEFAULT_PRIORITY: dict[str, int | bool] = {'urgency': 3, 'incremental': False}

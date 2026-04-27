@@ -1,53 +1,34 @@
+import inspect
+import logging
 from functools import wraps
-from logging import getLogger, NullHandler, Formatter
-from copy import copy
 from inspect import iscoroutinefunction
+from logging import Formatter
+from copy import copy
 from typing import Literal
 
 
-def get_logger_set(name=None):
-    """ Returns a pair of logger and its decorator. """
-    if name:
-        logger = getLogger('blackbull').getChild(name)
+def log(fn):
+    """Decorator: log call arguments at DEBUG level.
+
+    Automatically uses the logger of the module where @log is applied,
+    determined by inspecting the caller's frame at decoration time.
+    """
+    frame = inspect.stack()[1]
+    module_name = frame[0].f_globals.get('__name__', 'blackbull')
+    _logger = logging.getLogger(module_name)
+
+    if iscoroutinefunction(fn):
+        @wraps(fn)
+        async def async_wrapper(*args, **kwds):
+            _logger.debug('%s(%s, %s)', fn.__name__, args, kwds)
+            return await fn(*args, **kwds)
+        return async_wrapper
     else:
-        logger = getLogger('blackbull')
-    logger.addHandler(NullHandler())
-
-    def _log(fn):
-        if iscoroutinefunction(fn):
-            @wraps(fn)
-            async def async_wrapper(*args, **kwds):
-                logger.debug(f'{fn.__name__}({args}, {kwds})')
-                res = await fn(*args, **kwds)
-                return res
-            return async_wrapper
-        else:
-            def wrapper(*args, **kwds):
-                logger.debug(f'{fn.__name__}({args}, {kwds})')
-                res = fn(*args, **kwds)
-                return res
-            return wrapper
-
-    return logger, _log
-
-
-def log(logger):
-    def _log(fn):
-        if iscoroutinefunction(fn):
-            @wraps(fn)
-            async def async_wrapper(*args, **kwds):
-                logger.debug(f'{fn.__name__}({args}, {kwds})')
-                res = await fn(*args, **kwds)
-                return res
-            return async_wrapper
-        else:
-            @wraps(fn)
-            def wrapper(*args, **kwds):
-                logger.debug(f'{fn.__name__}({args}, {kwds})')
-                res = fn(*args, **kwds)
-                return res
-            return wrapper
-    return _log
+        @wraps(fn)
+        def wrapper(*args, **kwds):
+            _logger.debug('%s(%s, %s)', fn.__name__, args, kwds)
+            return fn(*args, **kwds)
+        return wrapper
 
 
 # https://stackoverflow.com/questions/384076/how-can-i-color-python-logging-output
@@ -81,9 +62,7 @@ class ColoredFormatter(Formatter):
 
 if __name__ == '__main__':
     import logging
-    logger, _log = get_logger_set('test')
-    # logging.basicConfig(level=logging.DEBUG)
-
+    logger = logging.getLogger('blackbull.test')
     logger.setLevel(logging.DEBUG)
 
     handler = logging.StreamHandler()

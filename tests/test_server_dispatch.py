@@ -1642,3 +1642,134 @@ class TestAccessLogging:
         assert access_records, 'Expected one access log entry for HTTP/2 stream'
         msg = access_records[0].message
         assert '/h2' in msg, f'Log must include request path; got: {msg!r}'
+
+
+# ---------------------------------------------------------------------------
+# Recipient coverage tests
+# ---------------------------------------------------------------------------
+
+class TestAsyncioReader:
+    def test_invalid_stream_raises_typeerror(self):
+        from blackbull.server.recipient import AsyncioReader
+        with pytest.raises(TypeError, match='read()'):
+            AsyncioReader(object())  # plain object has no read/readuntil
+
+
+class TestHTTP1Recipient:
+    def _make_reader(self, data: bytes):
+        """Return an AbstractReader that yields *data* from read()."""
+        from blackbull.server.recipient import AbstractReader
+
+        class _BufReader(AbstractReader):
+            def __init__(self, buf):
+                self._buf = buf
+
+            async def read(self, n):
+                chunk, self._buf = self._buf[:n], self._buf[n:]
+                return chunk
+
+            async def readuntil(self, sep):
+                idx = self._buf.find(sep)
+                if idx == -1:
+                    chunk, self._buf = self._buf, b''
+                    return chunk
+                chunk, self._buf = self._buf[:idx + len(sep)], self._buf[idx + len(sep):]
+                return chunk
+
+            async def readexactly(self, n):
+                chunk, self._buf = self._buf[:n], self._buf[n:]
+                return chunk
+
+        return _BufReader(data)
+
+    @pytest.mark.asyncio
+    async def test_unsupported_transfer_encoding_raises(self):
+        from blackbull.server.recipient import HTTP1Recipient
+
+        scope = {
+            'headers': [(b'transfer-encoding', b'gzip')],
+        }
+        reader = self._make_reader(b'')
+        with pytest.raises(NotImplementedError, match='not supported'):
+            HTTP1Recipient(reader, scope)
+
+    @pytest.mark.asyncio
+    async def test_second_call_returns_disconnect(self):
+        from blackbull.server.recipient import HTTP1Recipient
+
+        scope = {
+            'headers': [(b'content-length', b'5')],
+        }
+        reader = self._make_reader(b'hello')
+        r = HTTP1Recipient(reader, scope)
+        first = await r()
+        assert first['type'] == 'http.request'
+        second = await r()
+        assert second == {'type': 'http.disconnect'}
+
+
+class TestHTTP2Recipient:
+    @pytest.mark.asyncio
+    async def test_with_initial_frame_enqueues_event(self):
+        from blackbull.server.recipient import HTTP2Recipient
+        from blackbull.protocol.frame import Data
+
+        frame = MagicMock(spec=Data)
+        frame.payload = b'body'
+        frame.end_stream = True
+
+        r = HTTP2Recipient(frame)
+        event = await r()
+        assert event == {'type': 'http.request', 'body': b'body', 'more_body': False}
+
+
+class TestWebSocketRecipientUnsupportedOpcode:
+    @pytest.mark.asyncio
+    async def test_unknown_opcode_logs_warning(self, caplog):
+        import logging
+        from blackbull.server.recipient import WebSocketRecipient, AbstractReader
+        from blackbull.server.sender import WSOpcode
+
+        class _FakeReader(AbstractReader):
+            """Returns one frame with a reserved/unknown opcode (0x03)."""
+            _called = False
+
+            async def read(self, n):
+                return b'\x00' * n
+
+            async def readuntil(self, sep):
+                return b''
+
+            async def readexactly(self, n):
+                # Frame header: FIN=1, opcode=0x03, no mask, payload_len=2
+                # Then 2 payload bytes.
+                if not self._called:
+                    self._called = True
+                    # byte0: 0b10000011 (FIN=1, RSV=0, opcode=3)
+                    # byte1: 0b00000010 (MASK=0, len=2)
+                    header = bytes([0x83, 0x02])
+                    payload = b'\x00\x00'
+                    data = (header + payload)
+                    return data[:n]
+                return b'\x00' * n
+
+        reader = _FakeReader()
+        writer = MagicMock()
+        writer.write = MagicMock()
+        writer.drain = AsyncMock()
+
+        r = WebSocketRecipient(reader, writer, require_masked=False)
+        r._connect_sent = True  # skip the connect event
+
+        # Patch _read_frame_header and _read_payload to feed a fake unknown-opcode frame
+        from blackbull.server.sender import WebSocketSender, WSFrameHeader
+
+        fake_header = WSFrameHeader(fin=True, rsv1=False, rsv2=False, rsv3=False, opcode=0x03, masked=False, length=2)
+
+        with patch.object(WebSocketSender, '_read_frame_header', AsyncMock(return_value=fake_header)):
+            with patch.object(WebSocketSender, '_read_payload', AsyncMock(return_value=b'\x00\x00')):
+                with caplog.at_level(logging.WARNING, logger='blackbull.server.recipient'):
+                    event = await r()
+
+        assert event['type'] == 'websocket.receive'
+        assert any('unsupported opcode' in r.message for r in caplog.records)

@@ -6,10 +6,10 @@ import asyncio
 import os
 from pathlib import Path
 
-from ..logger import get_logger_set, log
+import logging
+from ..logger import log
 
-_logger, _ = get_logger_set('watcher')
-_log = log(_logger)
+_logger = logging.getLogger(__name__)
 
 
 _lib_name = find_library('c')
@@ -139,14 +139,14 @@ class Watcher(object):
         else:
             self.loop = loop
 
-        @_log
+        @log
         def _execl(*args, **kwds):
             self.__del__()
             _base(*args, **kwds)
 
         os.execl = _execl
 
-    @_log
+    @log
     def add_watch(self, path, callback=None, except_=[]):
         # Find child directories if path is a directory.
         p = Path(path)
@@ -170,7 +170,7 @@ class Watcher(object):
 
         return wd
 
-    @_log
+    @log
     def handle_event(self):
         buf = os.read(self._fd, _InotifyEvent.size() + self.max_path_length + 1)
         header = _InotifyEvent(*unpack("@iIII", buf[:_InotifyEvent.size()]))
@@ -186,7 +186,7 @@ class Watcher(object):
             self._watch[header.wd]['callback']()
         self._event.set()
 
-    @_log
+    @log
     async def watch(self):
         self.loop.add_reader(self._fd, self.handle_event)
         self._event = asyncio.Event()

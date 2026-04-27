@@ -1,3 +1,4 @@
+import re
 from logging import getLogger
 from http import HTTPStatus, HTTPMethod
 from unittest.mock import AsyncMock
@@ -6,7 +7,12 @@ import pytest
 
 # Test targets
 from blackbull.utils import Scheme
-from blackbull.router import Router, _middleware_param, has_middleware_param, _is_simplified_handler, _adapt_handler
+from blackbull.router import (
+    Router, BaseRouter, ErrorRouter,
+    _middleware_param, has_middleware_param,
+    _is_simplified_handler, _adapt_handler,
+    PathNotRegistered, MethodNotApplicable,
+)
 from blackbull import BlackBull, Response, JSONResponse
 from blackbull.router import RouteGroup
 
@@ -799,3 +805,108 @@ class TestSimplifiedHandlerRegistration:
         router.route(path='/full', methods=[HTTPMethod.GET])(full)
         fn = router[('/full', HTTPMethod.GET, Scheme.http)]
         assert fn is not None
+
+
+# ---------------------------------------------------------------------------
+# BaseRouter abstract method tests
+# ---------------------------------------------------------------------------
+
+class TestBaseRouter:
+    def test_setitem_raises(self):
+        r = BaseRouter()
+        with pytest.raises(NotImplementedError):
+            r['key'] = 'value'
+
+    def test_getitem_raises(self):
+        r = BaseRouter()
+        with pytest.raises(NotImplementedError):
+            _ = r['key']
+
+    def test_contains_raises(self):
+        r = BaseRouter()
+        with pytest.raises(NotImplementedError):
+            _ = 'key' in r
+
+    def test_route_raises(self):
+        r = BaseRouter()
+        with pytest.raises(NotImplementedError):
+            r.route()
+
+
+# ---------------------------------------------------------------------------
+# Router edge-case tests
+# ---------------------------------------------------------------------------
+
+class TestRouterEdgeCases:
+    def test_setitem_two_tuple_key(self):
+        router = Router()
+        async def fn(scope, receive, send): pass
+        router[('/two', HTTPMethod.GET)] = fn
+        # Must be reachable with any scheme
+        result = router[('/two', HTTPMethod.GET, Scheme.http)]
+        assert result is not None
+
+    def test_setitem_regex_pattern(self):
+        router = Router()
+        async def fn(scope, receive, send): pass
+        pattern = re.compile(r'^/api/\d+$')
+        router[(pattern, HTTPMethod.GET, Scheme.http)] = fn
+        # Stored in regex_, not data
+        assert any(k[0] is pattern for k in router.regex_)
+        assert not any(k[0] == pattern for k in router.data)
+
+    def test_getitem_scheme_mismatch_raises(self):
+        router = Router()
+        async def fn(scope, receive, send): pass
+        router[('/only-ws', HTTPMethod.GET, Scheme.websocket)] = fn
+        with pytest.raises(PathNotRegistered):
+            router[('/only-ws', HTTPMethod.GET, Scheme.http)]
+
+    def test_contains_regex_pattern(self):
+        router = Router()
+        async def fn(scope, receive, send): pass
+        router[(re.compile(r'^/api/\d+$'), HTTPMethod.GET, Scheme.http)] = fn
+        assert '/api/42' in router
+        assert '/other' not in router
+
+    def test_repr_is_string(self):
+        router = Router()
+        r = repr(router)
+        assert isinstance(r, str)
+        assert 'Router' in r
+
+    def test_route_fn_invalid_method_type_raises(self):
+        router = Router()
+        with pytest.raises(ValueError):
+            router.route_fn(methods=['GET'], path='/x')
+
+    def test_register_chain_non_middleware_in_middle_raises(self):
+        router = Router()
+
+        async def plain_fn(scope, receive, send): pass  # no call_next
+
+        async def terminal(scope, receive, send): pass
+
+        with pytest.raises(ValueError):
+            router._register_chain([plain_fn, terminal], '/x', [HTTPMethod.GET], Scheme.http)
+
+
+# ---------------------------------------------------------------------------
+# ErrorRouter edge-case tests
+# ---------------------------------------------------------------------------
+
+class TestErrorRouterEdgeCases:
+    def test_setitem_invalid_key_raises_typeerror(self):
+        er = ErrorRouter()
+        with pytest.raises(TypeError):
+            er[42] = lambda: None
+
+    def test_getitem_invalid_key_raises_typeerror(self):
+        er = ErrorRouter()
+        with pytest.raises(TypeError):
+            _ = er[42]
+
+    def test_setitem_non_error_status_raises_valueerror(self):
+        er = ErrorRouter()
+        with pytest.raises(ValueError):
+            er[HTTPStatus.OK] = lambda: None

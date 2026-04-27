@@ -1,6 +1,6 @@
-from ..logger import get_logger_set
+import logging
 
-logger, _ = get_logger_set(__name__)
+logger = logging.getLogger(__name__)
 
 _connect = {'type': 'websocket.connect'}
 _accept  = {'type': 'websocket.accept', 'subprotocol': None}

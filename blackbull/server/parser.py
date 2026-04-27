@@ -3,10 +3,10 @@ import traceback
 
 from ..protocol.stream import Stream
 from ..protocol.frame import FrameTypes, PseudoHeaders
-from ..logger import get_logger_set, log
+import logging
 from .headers import Headers
 
-logger, _ = get_logger_set(__name__)
+logger = logging.getLogger(__name__)
 
 
 def _make_scope():

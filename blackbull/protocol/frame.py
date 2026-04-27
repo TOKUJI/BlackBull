@@ -16,9 +16,10 @@ from enum import Enum, IntEnum, StrEnum
 from io import BytesIO
 from hpack import Encoder, Decoder
 
-from ..logger import get_logger_set
+import logging
+from ..logger import log
 from ..utils import pop_safe
-logger, log = get_logger_set('frame')
+logger = logging.getLogger(__name__)
 
 
 # RFC 7540 §6.9.2 — connection and stream flow-control windows both start

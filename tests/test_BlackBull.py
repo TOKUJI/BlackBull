@@ -1,8 +1,9 @@
 from http import HTTPStatus, HTTPMethod
+from unittest.mock import AsyncMock
 import ssl
 import pathlib
 
-from blackbull.logger import get_logger_set
+import logging
 
 # Library for test-fixture
 from multiprocessing import Process
@@ -19,7 +20,7 @@ from blackbull.utils import Scheme
 import httpx
 import websockets
 
-logger, log = get_logger_set()
+logger = logging.getLogger(__name__)
 
 
 def run_application(app):
@@ -292,3 +293,70 @@ async def test_multiple_startup_hooks_run_in_order():
     receive = _make_lifespan_receive('lifespan.startup', 'lifespan.shutdown')
     await app_({'type': 'lifespan'}, receive, noop_send3)
     assert log == ['a', 'b']
+
+
+# ---------------------------------------------------------------------------
+# app.py property and dispatch coverage
+# ---------------------------------------------------------------------------
+
+def test_loop_property_sync_context():
+    app = BlackBull()
+    # In a synchronous context no event loop is running → should return None
+    assert app.loop is None
+
+
+def test_certfile_property():
+    app = BlackBull()
+    assert app.certfile is None
+
+
+def test_keyfile_property():
+    app = BlackBull()
+    assert app.keyfile is None
+
+
+def test_ws_protocols_setter_encodes_strings():
+    app = BlackBull()
+    app.available_ws_protocols = ['h2', 'http/1.1']
+    assert app.available_ws_protocols == [b'h2', b'http/1.1']
+
+
+def test_ws_protocols_setter_keeps_bytes():
+    app = BlackBull()
+    app.available_ws_protocols = [b'h2']
+    assert app.available_ws_protocols == [b'h2']
+
+
+def test_has_server_false_initially():
+    app = BlackBull()
+    assert app.has_server() is False
+
+
+@pytest.mark.asyncio
+async def test_dispatch_invalid_scheme_raises():
+    app = BlackBull()
+    scope = {'type': 'ftp', 'method': 'GET', 'path': '/', 'headers': []}
+    with pytest.raises(Exception, match='Invalid scheme'):
+        await app._dispatch(scope, AsyncMock(), AsyncMock())
+
+
+@pytest.mark.asyncio
+async def test_dispatch_websocket_no_handler_returns_silently():
+    app = BlackBull()
+    scope = {'type': 'websocket', 'path': '/ws', 'headers': []}
+    # No handler registered — should return without raising
+    await app._dispatch(scope, AsyncMock(), AsyncMock())
+
+
+@pytest.mark.asyncio
+async def test_dispatch_websocket_calls_handler():
+    app = BlackBull()
+    called = []
+
+    @app.route(path='/ws', scheme=Scheme.websocket)
+    async def ws_handler(scope, receive, send):
+        called.append(True)
+
+    scope = {'type': 'websocket', 'path': '/ws', 'headers': []}
+    await app._dispatch(scope, AsyncMock(), AsyncMock())
+    assert called == [True]

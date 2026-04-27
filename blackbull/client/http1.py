@@ -15,7 +15,7 @@ from collections.abc import AsyncIterable, AsyncIterator
 from http import HTTPMethod
 from typing import Union
 
-from ..logger import get_logger_set
+import logging
 from ..server.headers import Headers, HeaderList
 from ..server.recipient import (AbstractReader, AsyncioReader,
                                 IncompleteReadError)
@@ -23,7 +23,7 @@ from ..server.sender import AbstractWriter, AsyncioWriter
 from .exceptions import ConnectionError, ProtocolError
 from .http2 import ClientResponse  # shared dataclass
 
-logger, _ = get_logger_set('client.http1')
+logger = logging.getLogger(__name__)
 
 
 # Type for request bodies — either a complete byte string or an async iterable

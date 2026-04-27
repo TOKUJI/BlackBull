@@ -12,11 +12,11 @@ import asyncio
 import ssl as _ssl
 from typing import Union
 
-from ..logger import get_logger_set
+import logging
 from .http1 import HTTP1Client
 from .http2 import HTTP2Client
 
-logger, _ = get_logger_set('client.dispatcher')
+logger = logging.getLogger(__name__)
 
 
 # Type alias: whichever inner client the dispatcher selected.

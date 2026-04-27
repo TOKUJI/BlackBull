@@ -1,7 +1,7 @@
 import socket
 
-from ..logger import get_logger_set
-logger, log = get_logger_set('socket')
+import logging
+logger = logging.getLogger(__name__)
 
 
 def _bind_socket(family, host, port):

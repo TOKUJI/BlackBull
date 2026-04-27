@@ -5,9 +5,9 @@ from abc import ABC, abstractmethod
 from .sender import WebSocketSender, WSOpcode
 from .headers import Headers
 from ..protocol.frame import FrameBase, Data
-from ..logger import get_logger_set
+import logging
 
-logger, _ = get_logger_set(__name__)
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
