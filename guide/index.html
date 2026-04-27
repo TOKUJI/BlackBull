@@ -1,0 +1,5794 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Async ASGI web framework for HTTP/1.1, HTTP/2, and WebSocket">
+      
+      
+      
+        <link rel="canonical" href="https://TOKUJI.github.io/BlackBull/guide/">
+      
+      
+        <link rel="prev" href="..">
+      
+      
+        <link rel="next" href="../api/blackbull/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>User Guide - BlackBull</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/_mkdocstrings.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    <body dir="ltr">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#blackbull-developer-guide" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="BlackBull" class="md-header__button md-logo" aria-label="BlackBull" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            BlackBull
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              User Guide
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/TOKUJI/BlackBull" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    TOKUJI/BlackBull
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="BlackBull" class="md-nav__button md-logo" aria-label="BlackBull" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    BlackBull
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/TOKUJI/BlackBull" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    TOKUJI/BlackBull
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    User Guide
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    User Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#0-prerequisites-installation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        §0 Prerequisites &amp; Installation
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="§0 Prerequisites &amp; Installation">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#01-what-blackbull-is-not" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        §0.1 What BlackBull is not
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#1-quick-start" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        §1 Quick Start
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-core-concepts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        §2 Core Concepts
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="§2 Core Concepts">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#common-scope-keys" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Common scope keys
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-routing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        §3 Routing
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="§3 Routing">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#31-http-routes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.1 HTTP routes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#32-path-parameters" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.2 Path parameters
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#33-websocket-routes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.3 WebSocket routes
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3.3 WebSocket routes">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#subprotocol-negotiation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Subprotocol negotiation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fragmented-messages" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fragmented messages
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#34-simplified-handler-signatures" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.4 Simplified handler signatures
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3.4 Simplified handler signatures">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#no-parameters" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        No parameters
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#path-parameters-by-name" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Path parameters by name
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#request-body" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Request body
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-scope-dict" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The scope dict
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#return-value-mapping" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Return value mapping
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#when-to-use-the-full-triplet" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        When to use the full triplet
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#35-detecting-client-disconnection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.5 Detecting client disconnection
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-middleware" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        §4 Middleware
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="§4 Middleware">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#41-writing-a-middleware" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.1 Writing a middleware
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#42-attaching-middleware-to-a-route" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.2 Attaching middleware to a route
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#43-path-parameters" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.3 Path parameters
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#44-built-in-middleware" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.4 Built-in middleware
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="4.4 Built-in middleware">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#websocket" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        websocket
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#compress" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        compress
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#45-injecting-values-into-scope" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.5 Injecting values into scope
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-route-groups" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        §5 Route Groups
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-request-helpers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        §6 Request Helpers
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="§6 Request Helpers">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#61-reading-the-request-body" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.1 Reading the request body
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#62-json-body-recommended-middleware-pattern" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.2 JSON body — recommended middleware pattern
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#63-reading-request-headers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.3 Reading request headers
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#64-parsing-cookies" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.4 Parsing cookies
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#65-query-parameters" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.5 Query parameters
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#66-form-data" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.6 Form data
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-responses" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        §7 Responses
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="§7 Responses">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#71-html-plain-text-redirects" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.1 HTML / plain text / redirects
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#72-json" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.2 JSON
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#73-custom-response-headers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.3 Custom response headers
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#74-set-cookie-helper" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.4 Set-Cookie helper
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#75-http-trailers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.5 HTTP trailers
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#76-websocket-frames" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.6 WebSocket frames
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8-error-handling" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        §8 Error Handling
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="§8 Error Handling">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#81-default-behaviour" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8.1 Default behaviour
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#82-custom-error-handlers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8.2 Custom error handlers
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#9-lifespan-hooks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        §9 Lifespan Hooks
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#10-running-the-server" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        §10 Running the Server
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="§10 Running the Server">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#generating-a-self-signed-certificate-for-local-https" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Generating a self-signed certificate for local HTTPS
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#102-production-deployment" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        §10.2 Production deployment
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#103-mutual-tls-mtls" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        §10.3 Mutual TLS (mTLS)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#11-complete-example-simpletaskmanager-skeleton" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        §11 Complete Example — SimpleTaskManager Skeleton
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#12-testing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        §12 Testing
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="§12 Testing">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#121-unit-testing-a-handler-directly" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        12.1 Unit testing a handler directly
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#122-integration-testing-with-httpx-recommended" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        12.2 Integration testing with httpx (recommended)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#123-testing-middleware-in-isolation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        12.3 Testing middleware in isolation
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#13-common-middleware-recipes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        §13 Common Middleware Recipes
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="§13 Common Middleware Recipes">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#131-cors" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        13.1 CORS
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#132-request-id" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        13.2 Request ID
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#133-rate-limiting-token-bucket-in-process" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        13.3 Rate limiting (token bucket, in-process)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#14-logging" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        §14 Logging
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="§14 Logging">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#141-access-log-blackbullaccess" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        14.1 Access log — blackbull.access
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="14.1 Access log — blackbull.access">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#named-fields-in-the-logrecord" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Named fields in the LogRecord
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#142-extending-the-access-log-record-from-middleware" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        14.2 Extending the access log record from middleware
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#143-debug-framework-log-blackbull" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        14.3 Debug / framework log — blackbull
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#144-forwarding-access-logs-to-a-remote-server" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        14.4 Forwarding access logs to a remote server
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#146-what-is-not-yet-implemented" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        14.6 What is not yet implemented
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#15-http2-protocol-internals" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        §15 HTTP/2 Protocol Internals
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="§15 HTTP/2 Protocol Internals">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#151-stream-state-machine-rfc-7540-51" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        15.1 Stream state machine (RFC 7540 §5.1)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#152-priority-rfc-7540-vs-rfc-9218" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        15.2 Priority: RFC 7540 vs RFC 9218
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#153-flow-control" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        15.3 Flow control
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#154-reading-priority-hints-in-handlers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        15.4 Reading priority hints in handlers
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="15.4 Reading priority hints in handlers">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#minimal-handler-example" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Minimal handler example
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#middleware-example" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Middleware example
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#testing-the-feature-with-curl" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Testing the feature with curl
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#155-http2-server-push" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        15.5 HTTP/2 server push
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="15.5 HTTP/2 server push">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#asgi-event" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ASGI event
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-blackbull-does" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What BlackBull does
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#checking-for-support" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Checking for support
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#limitations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Limitations
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#16-global-middleware-and-static-file-serving" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        §16 Global Middleware and Static File Serving
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="§16 Global Middleware and Static File Serving">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#161-global-middleware-appuse" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        §16.1 Global middleware — app.use()
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#162-static-file-serving-appstatic" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        §16.2 Static file serving — app.static()
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="§16.2 Static file serving — app.static()">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#standalone-usage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Standalone usage
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#environment-gate-blackbull_env" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Environment gate — BLACKBULL_ENV
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#range-requests-rfc-7233" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Range requests — RFC 7233
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#security" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Security
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#inspecting-registered-roots" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Inspecting registered roots
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#17-streaming-responses" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        §17 Streaming Responses
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="§17 Streaming Responses">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#streamingresponse" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        StreamingResponse
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#how-http11-delivers-streaming-responses" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How HTTP/1.1 delivers streaming responses
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#writing-streaming-safe-middleware-with-streamingawaremiddleware" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Writing streaming-safe middleware with StreamingAwareMiddleware
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#warning-for-non-conforming-class-middlewares" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Warning for non-conforming class middlewares
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    API Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_1" >
+        
+          
+          <label class="md-nav__link" for="__nav_3_1" id="__nav_3_1_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    blackbull
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_1_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_1">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    blackbull
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/blackbull/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    blackbull
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/blackbull/app/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    app
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_1_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3_1_3" id="__nav_3_1_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    client
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_3_1_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_1_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    client
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/blackbull/client/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    blackbull.client
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/blackbull/client/client/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    client
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/blackbull/client/exceptions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    exceptions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/blackbull/client/http1/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    http1
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/blackbull/client/http2/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    http2
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/blackbull/client/response/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    response
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/blackbull/client/websocket/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    websocket
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/blackbull/env/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    env
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/blackbull/logger/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    logger
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_1_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_3_1_6" id="__nav_3_1_6_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    middleware
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_3_1_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_1_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    middleware
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/blackbull/middleware/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    blackbull.middleware
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/blackbull/middleware/base/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    base
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/blackbull/middleware/compression/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    compression
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/blackbull/middleware/static/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    static
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/blackbull/middleware/websocket/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    websocket
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_1_7" >
+        
+          
+          <label class="md-nav__link" for="__nav_3_1_7" id="__nav_3_1_7_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    protocol
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_3_1_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_1_7">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    protocol
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/blackbull/protocol/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    blackbull.protocol
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/blackbull/protocol/frame/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    frame
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/blackbull/protocol/rsock/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    rsock
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/blackbull/protocol/stream/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    stream
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/blackbull/request/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    request
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/blackbull/response/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    response
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/blackbull/router/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    router
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_1_11" >
+        
+          
+          <label class="md-nav__link" for="__nav_3_1_11" id="__nav_3_1_11_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    server
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_3_1_11_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_1_11">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    server
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/blackbull/server/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    blackbull.server
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/blackbull/server/headers/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    headers
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/blackbull/server/parser/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    parser
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/blackbull/server/recipient/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    recipient
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/blackbull/server/response/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    response
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/blackbull/server/sender/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    sender
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/blackbull/server/server/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    server
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/blackbull/server/watch/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    watch
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/blackbull/utils/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    utils
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#0-prerequisites-installation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        §0 Prerequisites &amp; Installation
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="§0 Prerequisites &amp; Installation">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#01-what-blackbull-is-not" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        §0.1 What BlackBull is not
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#1-quick-start" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        §1 Quick Start
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-core-concepts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        §2 Core Concepts
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="§2 Core Concepts">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#common-scope-keys" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Common scope keys
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-routing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        §3 Routing
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="§3 Routing">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#31-http-routes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.1 HTTP routes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#32-path-parameters" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.2 Path parameters
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#33-websocket-routes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.3 WebSocket routes
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3.3 WebSocket routes">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#subprotocol-negotiation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Subprotocol negotiation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fragmented-messages" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fragmented messages
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#34-simplified-handler-signatures" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.4 Simplified handler signatures
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3.4 Simplified handler signatures">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#no-parameters" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        No parameters
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#path-parameters-by-name" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Path parameters by name
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#request-body" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Request body
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-scope-dict" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The scope dict
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#return-value-mapping" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Return value mapping
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#when-to-use-the-full-triplet" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        When to use the full triplet
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#35-detecting-client-disconnection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.5 Detecting client disconnection
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-middleware" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        §4 Middleware
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="§4 Middleware">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#41-writing-a-middleware" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.1 Writing a middleware
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#42-attaching-middleware-to-a-route" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.2 Attaching middleware to a route
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#43-path-parameters" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.3 Path parameters
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#44-built-in-middleware" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.4 Built-in middleware
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="4.4 Built-in middleware">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#websocket" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        websocket
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#compress" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        compress
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#45-injecting-values-into-scope" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.5 Injecting values into scope
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-route-groups" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        §5 Route Groups
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-request-helpers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        §6 Request Helpers
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="§6 Request Helpers">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#61-reading-the-request-body" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.1 Reading the request body
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#62-json-body-recommended-middleware-pattern" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.2 JSON body — recommended middleware pattern
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#63-reading-request-headers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.3 Reading request headers
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#64-parsing-cookies" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.4 Parsing cookies
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#65-query-parameters" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.5 Query parameters
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#66-form-data" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.6 Form data
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-responses" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        §7 Responses
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="§7 Responses">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#71-html-plain-text-redirects" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.1 HTML / plain text / redirects
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#72-json" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.2 JSON
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#73-custom-response-headers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.3 Custom response headers
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#74-set-cookie-helper" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.4 Set-Cookie helper
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#75-http-trailers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.5 HTTP trailers
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#76-websocket-frames" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.6 WebSocket frames
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8-error-handling" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        §8 Error Handling
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="§8 Error Handling">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#81-default-behaviour" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8.1 Default behaviour
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#82-custom-error-handlers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8.2 Custom error handlers
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#9-lifespan-hooks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        §9 Lifespan Hooks
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#10-running-the-server" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        §10 Running the Server
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="§10 Running the Server">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#generating-a-self-signed-certificate-for-local-https" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Generating a self-signed certificate for local HTTPS
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#102-production-deployment" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        §10.2 Production deployment
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#103-mutual-tls-mtls" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        §10.3 Mutual TLS (mTLS)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#11-complete-example-simpletaskmanager-skeleton" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        §11 Complete Example — SimpleTaskManager Skeleton
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#12-testing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        §12 Testing
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="§12 Testing">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#121-unit-testing-a-handler-directly" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        12.1 Unit testing a handler directly
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#122-integration-testing-with-httpx-recommended" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        12.2 Integration testing with httpx (recommended)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#123-testing-middleware-in-isolation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        12.3 Testing middleware in isolation
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#13-common-middleware-recipes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        §13 Common Middleware Recipes
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="§13 Common Middleware Recipes">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#131-cors" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        13.1 CORS
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#132-request-id" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        13.2 Request ID
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#133-rate-limiting-token-bucket-in-process" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        13.3 Rate limiting (token bucket, in-process)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#14-logging" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        §14 Logging
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="§14 Logging">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#141-access-log-blackbullaccess" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        14.1 Access log — blackbull.access
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="14.1 Access log — blackbull.access">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#named-fields-in-the-logrecord" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Named fields in the LogRecord
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#142-extending-the-access-log-record-from-middleware" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        14.2 Extending the access log record from middleware
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#143-debug-framework-log-blackbull" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        14.3 Debug / framework log — blackbull
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#144-forwarding-access-logs-to-a-remote-server" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        14.4 Forwarding access logs to a remote server
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#146-what-is-not-yet-implemented" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        14.6 What is not yet implemented
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#15-http2-protocol-internals" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        §15 HTTP/2 Protocol Internals
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="§15 HTTP/2 Protocol Internals">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#151-stream-state-machine-rfc-7540-51" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        15.1 Stream state machine (RFC 7540 §5.1)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#152-priority-rfc-7540-vs-rfc-9218" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        15.2 Priority: RFC 7540 vs RFC 9218
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#153-flow-control" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        15.3 Flow control
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#154-reading-priority-hints-in-handlers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        15.4 Reading priority hints in handlers
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="15.4 Reading priority hints in handlers">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#minimal-handler-example" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Minimal handler example
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#middleware-example" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Middleware example
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#testing-the-feature-with-curl" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Testing the feature with curl
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#155-http2-server-push" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        15.5 HTTP/2 server push
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="15.5 HTTP/2 server push">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#asgi-event" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ASGI event
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-blackbull-does" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What BlackBull does
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#checking-for-support" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Checking for support
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#limitations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Limitations
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#16-global-middleware-and-static-file-serving" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        §16 Global Middleware and Static File Serving
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="§16 Global Middleware and Static File Serving">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#161-global-middleware-appuse" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        §16.1 Global middleware — app.use()
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#162-static-file-serving-appstatic" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        §16.2 Static file serving — app.static()
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="§16.2 Static file serving — app.static()">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#standalone-usage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Standalone usage
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#environment-gate-blackbull_env" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Environment gate — BLACKBULL_ENV
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#range-requests-rfc-7233" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Range requests — RFC 7233
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#security" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Security
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#inspecting-registered-roots" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Inspecting registered roots
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#17-streaming-responses" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        §17 Streaming Responses
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="§17 Streaming Responses">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#streamingresponse" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        StreamingResponse
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#how-http11-delivers-streaming-responses" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How HTTP/1.1 delivers streaming responses
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#writing-streaming-safe-middleware-with-streamingawaremiddleware" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Writing streaming-safe middleware with StreamingAwareMiddleware
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#warning-for-non-conforming-class-middlewares" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Warning for non-conforming class middlewares
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="blackbull-developer-guide">BlackBull Developer Guide</h1>
+<p>BlackBull is a Python ASGI 3.0 web framework supporting HTTP/1.1, HTTP/2, and WebSocket.</p>
+<hr />
+<h2 id="0-prerequisites-installation">§0  Prerequisites &amp; Installation</h2>
+<p><strong>Python 3.10+</strong> is required.</p>
+<pre><code class="language-bash">git clone &lt;repo&gt;
+cd BlackBull
+pip install .
+</code></pre>
+<p>Core imports:</p>
+<pre><code class="language-python">from blackbull import BlackBull, Response, JSONResponse, read_body
+from http import HTTPMethod, HTTPStatus
+</code></pre>
+<h3 id="01-what-blackbull-is-not">§0.1  What BlackBull is not</h3>
+<p>BlackBull is a <strong>routing and middleware layer</strong>.  It does not include:</p>
+<ul>
+<li>An ORM or database layer — bring your own (SQLite, SQLAlchemy, asyncpg, …)</li>
+<li>A template engine — render HTML with Jinja2, Mako, or plain f-strings</li>
+<li>A request-validation library — validate with Pydantic, marshmallow, or manually</li>
+<li>A session store — implement session middleware using a dict, Redis, or a signed cookie</li>
+</ul>
+<p>This keeps the framework small and lets you swap any of these concerns independently.</p>
+<hr />
+<h2 id="1-quick-start">§1  Quick Start</h2>
+<pre><code class="language-python">import asyncio
+from blackbull import BlackBull, Response
+
+app = BlackBull()
+
+@app.route(path='/')
+async def hello(scope, receive, send):
+    await send(Response(b'Hello, world!'))
+
+if __name__ == '__main__':
+    asyncio.run(app.run(port=8000))
+</code></pre>
+<p>Every handler is an <code>async</code> function.  The full form receives <code>(scope, receive, send)</code>
+and calls <code>send</code> directly.  A simplified form omits those parameters and returns the
+response value instead — BlackBull wraps it automatically (see §3.5).</p>
+<hr />
+<h2 id="2-core-concepts">§2  Core Concepts</h2>
+<p>Every HTTP request arrives as the ASGI triple <code>(scope, receive, send)</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Argument</th>
+<th>Type</th>
+<th>Role</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>scope</code></td>
+<td><code>dict</code></td>
+<td>Request metadata (method, path, headers, …)</td>
+</tr>
+<tr>
+<td><code>receive</code></td>
+<td><code>async callable</code></td>
+<td>Read request body events</td>
+</tr>
+<tr>
+<td><code>send</code></td>
+<td><code>async callable</code></td>
+<td>Write the response</td>
+</tr>
+</tbody>
+</table>
+<h3 id="common-scope-keys">Common scope keys</h3>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>scope['type']</code></td>
+<td><code>str</code></td>
+<td><code>'http'</code> or <code>'websocket'</code></td>
+</tr>
+<tr>
+<td><code>scope['method']</code></td>
+<td><code>str</code></td>
+<td><code>'GET'</code>, <code>'POST'</code>, …</td>
+</tr>
+<tr>
+<td><code>scope['path']</code></td>
+<td><code>str</code></td>
+<td>URL path, e.g. <code>'/tasks/42'</code></td>
+</tr>
+<tr>
+<td><code>scope['headers']</code></td>
+<td><code>Headers</code></td>
+<td>See §6.3 for the Headers API</td>
+</tr>
+<tr>
+<td><code>scope['query_string']</code></td>
+<td><code>bytes</code></td>
+<td>Raw query string, e.g. <code>b'q=hello&amp;page=2'</code>; parse with <code>urllib.parse.parse_qs</code> — see §6.5</td>
+</tr>
+<tr>
+<td><code>scope['path_params']</code></td>
+<td><code>dict</code></td>
+<td>Values from <code>{name}</code> path segments; see §4.3</td>
+</tr>
+<tr>
+<td><code>scope['state']</code></td>
+<td><code>dict</code></td>
+<td>Framework error info; see §8</td>
+</tr>
+</tbody>
+</table>
+<p>Custom middleware may add additional keys — e.g. <code>scope['user']</code>, <code>scope['json']</code>.</p>
+<hr />
+<h2 id="3-routing">§3  Routing</h2>
+<h3 id="31-http-routes">3.1  HTTP routes</h3>
+<pre><code class="language-python">from http import HTTPMethod
+
+@app.route(methods=[HTTPMethod.GET], path='/tasks')
+async def list_tasks(scope, receive, send):
+    await send(Response(b'[]'))
+</code></pre>
+<p><code>methods</code> defaults to <code>[HTTPMethod.GET]</code>.  Pass a list to accept multiple methods
+on the same handler:</p>
+<pre><code class="language-python">@app.route(methods=[HTTPMethod.GET, HTTPMethod.HEAD], path='/healthz')
+async def healthz(scope, receive, send):
+    await send(Response(b'ok'))
+</code></pre>
+<h3 id="32-path-parameters">3.2  Path parameters</h3>
+<p>Use <code>{name}</code> segments in the path string.  Parameters are always strings and are
+available in <code>scope['path_params']</code>:</p>
+<pre><code class="language-python">@app.route(path='/tasks/{task_id}')
+async def get_task(scope, receive, send):
+    task_id = scope['path_params']['task_id']   # str
+    await send(Response(task_id.encode()))
+</code></pre>
+<p><code>{name}</code> matches <code>[a-zA-Z0-9_\-\.\~]+</code>.  For other patterns supply a compiled
+regex with named groups; the captured values are always injected into
+<code>scope['path_params']</code> — the same place as <code>{name}</code> parameters:</p>
+<pre><code class="language-python">import re
+
+@app.route(path=re.compile(r'^/items/(?P&lt;id&gt;\d+)$'))
+async def get_item(scope, receive, send):
+    item_id = scope['path_params']['id']    # same interface as {name} style
+    await send(Response(item_id.encode()))
+</code></pre>
+<h3 id="33-websocket-routes">3.3  WebSocket routes</h3>
+<pre><code class="language-python">from blackbull.utils import Scheme
+
+@app.route(path='/ws', scheme=Scheme.websocket)
+async def ws_handler(scope, receive, send):
+    await receive()                          # consume 'websocket.connect'
+    await send({'type': 'websocket.accept'})
+    while True:
+        event = await receive()
+        if event['type'] == 'websocket.disconnect':
+            break
+        # event['type'] == 'websocket.receive'
+        text = event.get('text') or event.get('bytes', b'').decode()
+        await send({'type': 'websocket.send', 'text': text})
+</code></pre>
+<p>The built-in <code>blackbull.middleware.websocket</code> handles the connect/accept handshake
+automatically; include it in <code>middlewares=[websocket, ...]</code> on the route.</p>
+<p>BlackBull validates <code>Sec-WebSocket-Version: 13</code> and supports per-message deflate
+(RFC 7692) automatically when the client negotiates it.</p>
+<h4 id="subprotocol-negotiation">Subprotocol negotiation</h4>
+<p>Register the protocols the server supports before starting:</p>
+<pre><code class="language-python">app.available_ws_protocols = ['chat', 'superchat']
+</code></pre>
+<p>BlackBull picks the first protocol from the client's <code>Sec-WebSocket-Protocol</code> offer
+that appears in this list and returns it in the 101 handshake response.  If there is
+no match, or if the client did not offer any protocol, no <code>Sec-WebSocket-Protocol</code>
+header is sent and the connection proceeds without a subprotocol.</p>
+<p>The list accepts <code>str</code> or <code>bytes</code> values.  Typical protocol names:</p>
+<table>
+<thead>
+<tr>
+<th>Protocol</th>
+<th>Use case</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>graphql-ws</code></td>
+<td>Legacy GraphQL subscriptions (Apollo)</td>
+</tr>
+<tr>
+<td><code>graphql-transport-ws</code></td>
+<td>Modern GraphQL subscriptions</td>
+</tr>
+<tr>
+<td><code>stomp</code> / <code>v12.stomp</code></td>
+<td>STOMP messaging (RabbitMQ, ActiveMQ)</td>
+</tr>
+<tr>
+<td><code>mqtt</code></td>
+<td>MQTT over WebSocket (IoT)</td>
+</tr>
+<tr>
+<td><code>wamp</code></td>
+<td>Web Application Messaging Protocol</td>
+</tr>
+<tr>
+<td><code>ocpp1.6</code> / <code>ocpp2.0</code></td>
+<td>EV charging stations</td>
+</tr>
+</tbody>
+</table>
+<h4 id="fragmented-messages">Fragmented messages</h4>
+<p>WebSocket clients may split a single logical message across multiple frames
+(RFC 6455 §5.4).  BlackBull reassembles fragments transparently — the app
+always receives one <code>websocket.receive</code> event containing the full payload,
+regardless of how many frames the client used.</p>
+<p>A fragmented sequence looks like this on the wire:</p>
+<pre><code>FIN=0, opcode=TEXT,  payload=b'hel'   ← opener
+FIN=0, opcode=0x0,   payload=b'lo'    ← continuation
+FIN=1, opcode=0x0,   payload=b''      ← final continuation
+</code></pre>
+<p>The app sees a single event:</p>
+<pre><code class="language-python">{'type': 'websocket.receive', 'text': 'hello', 'bytes': None}
+</code></pre>
+<p>Control frames (ping, pong, close) may legally appear between data fragments;
+BlackBull handles them immediately (responding to pings with pong) and then
+continues reassembling the fragmented message.</p>
+<p>The following are protocol violations and raise <code>ProtocolError</code>:</p>
+<table>
+<thead>
+<tr>
+<th>Violation</th>
+<th>RFC reference</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>CONTINUATION frame with no fragmentation in progress</td>
+<td>§5.4</td>
+</tr>
+<tr>
+<td>New TEXT or BINARY frame while a fragment sequence is open</td>
+<td>§5.4</td>
+</tr>
+<tr>
+<td>Control frame (ping/pong/close) with FIN=0</td>
+<td>§5.5</td>
+</tr>
+</tbody>
+</table>
+<h3 id="34-simplified-handler-signatures">3.4  Simplified handler signatures</h3>
+<p>The full <code>(scope, receive, send)</code> triplet is always available, but for most
+handlers only a subset of that information is needed.  BlackBull detects at
+registration time whether a handler omits those parameters and wraps it
+automatically — no boilerplate needed.</p>
+<h4 id="no-parameters">No parameters</h4>
+<p>The handler in <a href="https://github.com/TOKUJI/BlackBull/blob/master/examples/helloworld-simple.py"><code>examples/helloworld-simple.py</code></a>
+is the minimal form:</p>
+<pre><code class="language-python">@app.route(path='/')
+async def hello():
+    return &quot;Hello, world!&quot;
+</code></pre>
+<p>BlackBull sends the return value as the response body.  No <code>send</code> call needed.</p>
+<h4 id="path-parameters-by-name">Path parameters by name</h4>
+<p>Declare parameters whose names match <code>{name}</code> segments in the path.  BlackBull
+extracts the captured value from <code>scope['path_params']</code> and injects it directly:</p>
+<pre><code class="language-python">@app.route(path='/tasks/{task_id}')
+async def get_task(task_id):       # str by default
+    return f&quot;Task {task_id}&quot;
+</code></pre>
+<p>Add a type annotation and BlackBull coerces the value before calling the handler:</p>
+<pre><code class="language-python">@app.route(path='/tasks/{task_id}')
+async def get_task(task_id: int):  # coerced to int; raises 500 if not convertible
+    return {&quot;id&quot;: task_id}
+</code></pre>
+<h4 id="request-body">Request body</h4>
+<p>Name a parameter <code>body</code> to receive the complete request body as <code>bytes</code>.
+BlackBull reads all chunks before calling the handler:</p>
+<pre><code class="language-python">import json
+
+@app.route(path='/echo', methods=[HTTPMethod.POST])
+async def echo(body: bytes):
+    data = json.loads(body)
+    return data          # dict → JSONResponse automatically
+</code></pre>
+<h4 id="the-scope-dict">The <code>scope</code> dict</h4>
+<p>Name a parameter <code>scope</code> to receive the full scope dict alongside other
+simplified parameters:</p>
+<pre><code class="language-python">@app.route(path='/items/{item_id}')
+async def get_item(item_id: int, scope):
+    lang = scope['headers'].get(b'accept-language', b'en').decode()
+    return {&quot;id&quot;: item_id, &quot;lang&quot;: lang}
+</code></pre>
+<h4 id="return-value-mapping">Return value mapping</h4>
+<table>
+<thead>
+<tr>
+<th>Return type</th>
+<th>Response sent</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>str</code></td>
+<td><code>Response(value.encode())</code> — <code>text/html; charset=utf-8</code></td>
+</tr>
+<tr>
+<td><code>bytes</code></td>
+<td><code>Response(value)</code> — <code>text/html; charset=utf-8</code></td>
+</tr>
+<tr>
+<td><code>dict</code></td>
+<td><code>JSONResponse(value)</code> — <code>application/json</code></td>
+</tr>
+<tr>
+<td><code>Response</code> / <code>JSONResponse</code></td>
+<td>Passed to <code>send</code> as-is</td>
+</tr>
+<tr>
+<td><code>None</code></td>
+<td>Nothing sent (handler called <code>send</code> directly, or intentionally empty)</td>
+</tr>
+</tbody>
+</table>
+<h4 id="when-to-use-the-full-triplet">When to use the full triplet</h4>
+<ul>
+<li><strong>WebSocket handlers</strong> always receive the full <code>(scope, receive, send)</code> triplet.</li>
+<li><strong>Middleware functions</strong> must keep the <code>call_next</code> (or <code>inner</code>) parameter — the
+  simplified adaptation does not apply to them.</li>
+<li>When you need to call <code>receive()</code> in a loop (streaming uploads, long-polling)
+  use the full form and call <code>receive()</code> yourself.</li>
+</ul>
+<h3 id="35-detecting-client-disconnection">3.5  Detecting client disconnection</h3>
+<p>When the remote side closes the connection, <code>receive()</code> returns
+<code>{'type': 'http.disconnect'}</code>.  This is useful for long-polling and
+server-sent events (SSE) to avoid writing to a closed socket.</p>
+<blockquote>
+<p><strong>Note — streaming responses</strong>: For most cases use <code>StreamingResponse</code> (see
+§17), which wraps an async generator and emits <code>more_body=True</code> on every
+chunk.  The example below uses the raw ASGI event-dict API directly, which
+is convenient when each chunk needs custom shaping (e.g. SSE event framing).
+Either form works; passing <code>Response(b'')</code> to <code>send</code> ends the connection
+immediately with <code>Content-Length: 0</code> and cannot be followed by additional chunks.</p>
+</blockquote>
+<pre><code class="language-python">@app.route(path='/events')
+async def sse(scope, receive, send):
+    # Open the response without Content-Length, keep connection alive
+    await send({
+        'type': 'http.response.start',
+        'status': 200,
+        'headers': [
+            (b'content-type',  b'text/event-stream'),
+            (b'cache-control', b'no-cache'),
+        ],
+    })
+    while True:
+        event = await receive()
+        if event['type'] == 'http.disconnect':
+            break
+        await send({
+            'type': 'http.response.body',
+            'body': b'data: ping\n\n',
+            'more_body': True,   # keep the response stream open
+        })
+    # Signal end of stream
+    await send({'type': 'http.response.body', 'body': b'', 'more_body': False})
+</code></pre>
+<hr />
+<h2 id="4-middleware">§4  Middleware</h2>
+<h3 id="41-writing-a-middleware">4.1  Writing a middleware</h3>
+<pre><code class="language-python">import time
+
+async def logging_mw(scope, receive, send, call_next):
+    t0 = time.monotonic()
+    await call_next(scope, receive, send)
+    elapsed = (time.monotonic() - t0) * 1000
+    print(f&quot;{scope['method']} {scope['path']}  {elapsed:.1f} ms&quot;)
+</code></pre>
+<p>Signature: <code>async def mw(scope, receive, send, call_next)</code>.</p>
+<ul>
+<li>Call <code>await call_next(scope, receive, send)</code> to pass control to the next layer.</li>
+<li>The legacy parameter name <code>inner</code> is accepted as an alias for <code>call_next</code>.</li>
+<li>Sending a response without calling <code>call_next</code> <strong>short-circuits</strong> all inner layers.</li>
+</ul>
+<h3 id="42-attaching-middleware-to-a-route">4.2  Attaching middleware to a route</h3>
+<p>Middleware wraps the handler like nested shells.  The list order is
+<strong>outer-to-inner</strong>: the first entry runs first on the way in and last on the way out.</p>
+<pre><code class="language-python">@app.route(path='/protected', middlewares=[auth_mw, logging_mw])
+async def handler(scope, receive, send):
+    ...
+</code></pre>
+<pre><code>            ┌─ auth_mw ──────────────────────────────────┐
+  request → │  ┌─ logging_mw ─────────────────────────┐  │ → response
+            │  │  ┌─ handler ─┐                        │  │
+            │  │  │  (runs)   │                        │  │
+            │  │  └───────────┘                        │  │
+            │  └─────────────────────────────────────── ┘  │
+            └────────────────────────────────────────────── ┘
+</code></pre>
+<p><code>auth_mw</code> runs first; it either short-circuits (returns without calling <code>call_next</code>)
+or delegates to <code>logging_mw</code>, which then delegates to <code>handler</code>.  Post-handler code
+(after <code>await call_next(...)</code>) runs in reverse order: <code>logging_mw</code> post → <code>auth_mw</code>
+post.</p>
+<h3 id="43-path-parameters">4.3  Path parameters</h3>
+<blockquote>
+<p><strong>Note</strong> — Path parameters — whether from <code>{name}</code> string patterns or
+<code>re.compile(...)</code> named groups — are always injected into <code>scope['path_params']</code>,
+regardless of whether <code>middlewares=[...]</code> is present.  The handler signature is
+always <code>(scope, receive, send)</code>:
+</p>
+</blockquote>
+<pre><code class="language-python">@app.route(path='/tasks/{task_id}', methods=[HTTPMethod.DELETE])
+async def delete_task(scope, receive, send):
+    task_id = scope['path_params']['task_id']   # always correct
+    ...
+</code></pre>
+<h3 id="44-built-in-middleware">4.4  Built-in middleware</h3>
+<h4 id="websocket">websocket</h4>
+<p>Consumes the initial <code>websocket.connect</code> event and sends <code>websocket.accept</code> so
+the inner handler can skip that boilerplate:</p>
+<pre><code class="language-python">from blackbull.middleware import websocket
+from blackbull.utils import Scheme
+
+@app.route(path='/chat', scheme=Scheme.websocket, middlewares=[websocket])
+async def chat(scope, receive, send):
+    # Connection already accepted; go straight to reading messages
+    while True:
+        event = await receive()
+        if event['type'] == 'websocket.disconnect':
+            break
+        await send({'type': 'websocket.send', 'text': event.get('text', '')})
+</code></pre>
+<h4 id="compress">compress</h4>
+<p>Compresses HTTP response bodies using the codec the client prefers (brotli &gt; zstd &gt;
+gzip, based on <code>Accept-Encoding</code>):</p>
+<pre><code class="language-python">from blackbull.middleware import compress
+
+@app.route(path='/data', middlewares=[compress])
+async def data_handler(scope, receive, send):
+    await send(Response(large_payload))
+</code></pre>
+<p>Brotli and zstandard are optional extras:</p>
+<pre><code class="language-bash">pip install 'blackbull[compression]'   # installs brotli + zstandard
+</code></pre>
+<p><code>compress</code> skips compression when the response body is smaller than 100 bytes.
+To change the threshold, construct <code>CompressionMiddleware</code> directly:</p>
+<pre><code class="language-python">from blackbull.middleware.compression import CompressionMiddleware
+
+compress_big = CompressionMiddleware(min_size=4096)
+
+@app.route(path='/large', middlewares=[compress_big])
+async def large(scope, receive, send):
+    ...
+</code></pre>
+<h3 id="45-injecting-values-into-scope">4.5  Injecting values into scope</h3>
+<p>Middleware may add any key to <code>scope</code> for inner layers to consume:</p>
+<pre><code class="language-python">async def auth_mw(scope, receive, send, call_next):
+    auth = scope['headers'].get(b'authorization', b'')
+    token = auth[7:].decode() if auth.startswith(b'Bearer ') else ''
+    user = SESSIONS.get(token)
+    if not user:
+        await send(JSONResponse({'error': 'Unauthorized'},
+                                status=HTTPStatus.UNAUTHORIZED))
+        return                  # short-circuit: inner layers never run
+    scope['user'] = user        # available to all inner layers
+    scope['token'] = token
+    await call_next(scope, receive, send)
+</code></pre>
+<hr />
+<h2 id="5-route-groups">§5  Route Groups</h2>
+<p><code>app.group(middlewares=[...])</code> returns a <code>RouteGroup</code> whose <code>.route()</code> method
+prepends the group's middlewares to every route registered through it.</p>
+<pre><code class="language-python">public    = app.group(middlewares=[error_mw, logging_mw])
+protected = app.group(middlewares=[error_mw, logging_mw, auth_mw])
+
+@public.route(methods=[HTTPMethod.GET], path='/')
+async def index(scope, receive, send):
+    await send(Response(b'&lt;h1&gt;Login&lt;/h1&gt;'))
+
+@protected.route(methods=[HTTPMethod.GET], path='/tasks')
+async def get_tasks(scope, receive, send):
+    await send(JSONResponse([]))
+</code></pre>
+<p>Per-route <code>middlewares=[...]</code> are <strong>appended after</strong> the group middlewares:</p>
+<pre><code class="language-python"># Effective chain: error_mw → logging_mw → auth_mw → json_body_mw → create_task
+@protected.route(methods=[HTTPMethod.POST], path='/tasks',
+                 middlewares=[json_body_mw])
+async def create_task(scope, receive, send):
+    ...
+</code></pre>
+<hr />
+<h2 id="6-request-helpers">§6  Request Helpers</h2>
+<h3 id="61-reading-the-request-body">6.1  Reading the request body</h3>
+<pre><code class="language-python">from blackbull import read_body
+
+raw: bytes = await read_body(receive)
+</code></pre>
+<p>Reads all body chunks until <code>more_body=False</code>.  The stream is consumed — call at
+most once per request (typically inside a middleware, not the handler).</p>
+<p>For streaming uploads, call <code>receive()</code> directly — each call returns one chunk
+with <code>more_body=True</code> until the final chunk arrives with <code>more_body=False</code>.
+<code>read_body</code> is a convenience wrapper that buffers all chunks into a single <code>bytes</code>
+object before returning.</p>
+<h3 id="62-json-body-recommended-middleware-pattern">6.2  JSON body — recommended middleware pattern</h3>
+<pre><code class="language-python">import json
+
+async def json_body_mw(scope, receive, send, call_next):
+    raw = await read_body(receive)
+    try:
+        scope['json'] = json.loads(raw)
+    except (json.JSONDecodeError, ValueError):
+        await send(JSONResponse({'error': 'Invalid JSON'},
+                                status=HTTPStatus.BAD_REQUEST))
+        return
+    await call_next(scope, receive, send)
+</code></pre>
+<p>The handler then reads <code>scope['json']</code> without touching <code>receive</code>.</p>
+<h3 id="63-reading-request-headers">6.3  Reading request headers</h3>
+<p><code>scope['headers']</code> is a <code>Headers</code> object with the following API:</p>
+<pre><code class="language-python"># First value for a header; returns b'' when absent
+ct   = scope['headers'].get(b'content-type')
+auth = scope['headers'].get(b'authorization', b'')
+
+# All (name, value) pairs for a header (multi-value support)
+pairs = scope['headers'].getlist(b'accept')   # list[tuple[bytes, bytes]]
+
+# ASGI-compliant iteration
+for name, value in scope['headers']:
+    ...
+
+# Membership test
+if b'content-length' in scope['headers']:
+    ...
+</code></pre>
+<p>Header names are <strong>case-insensitive</strong> and stored lowercase.</p>
+<h3 id="64-parsing-cookies">6.4  Parsing cookies</h3>
+<pre><code class="language-python">from blackbull import parse_cookies
+
+cookies: dict[str, str] = parse_cookies(scope)
+session = cookies.get('session', '')
+</code></pre>
+<h3 id="65-query-parameters">6.5  Query parameters</h3>
+<p><code>scope['query_string']</code> contains the raw query string as bytes (everything after
+<code>?</code> in the URL).  Parse it with the standard library:</p>
+<pre><code class="language-python">from urllib.parse import parse_qs, parse_qsl
+
+# parse_qs: each key maps to a list of values (handles ?tag=a&amp;tag=b correctly)
+params = parse_qs(scope['query_string'].decode())
+page   = int(params.get('page', ['1'])[0])
+tags   = params.get('tag', [])             # ['a', 'b'] for ?tag=a&amp;tag=b
+
+# parse_qsl: flat list of (key, value) pairs preserving order
+pairs = parse_qsl(scope['query_string'].decode())
+</code></pre>
+<p>For convenience, wrap this in a middleware or a per-handler helper:</p>
+<pre><code class="language-python">def qp(scope) -&gt; dict[str, str]:
+    &quot;&quot;&quot;Return first value for each query parameter key.&quot;&quot;&quot;
+    return {k: v[0] for k, v in parse_qs(scope['query_string'].decode()).items()}
+
+@app.route(path='/tasks')
+async def list_tasks(scope, receive, send):
+    p = qp(scope)
+    done = p.get('done', 'false').lower() == 'true'
+    await send(JSONResponse({'done_filter': done}))
+</code></pre>
+<h3 id="66-form-data">6.6  Form data</h3>
+<p>HTML forms with <code>enctype="application/x-www-form-urlencoded"</code> (the default) send
+key=value pairs in the body.  Read and parse with <code>read_body</code> + <code>parse_qs</code>:</p>
+<pre><code class="language-python">from urllib.parse import parse_qs
+from blackbull import read_body
+
+async def form_body_mw(scope, receive, send, call_next):
+    &quot;&quot;&quot;Parse application/x-www-form-urlencoded body; inject scope['form'].&quot;&quot;&quot;
+    raw = await read_body(receive)
+    scope['form'] = {k: v[0] for k, v in parse_qs(raw.decode()).items()}
+    await call_next(scope, receive, send)
+
+@app.route(methods=[HTTPMethod.POST], path='/submit', middlewares=[form_body_mw])
+async def submit(scope, receive, send):
+    name = scope['form'].get('name', '')
+    await send(JSONResponse({'received': name}))
+</code></pre>
+<blockquote>
+<p>Multipart file uploads (<code>multipart/form-data</code>) are not yet supported by a
+built-in helper.  Use the <code>python-multipart</code> package to parse the body manually.</p>
+</blockquote>
+<hr />
+<h2 id="7-responses">§7  Responses</h2>
+<h3 id="71-html-plain-text-redirects">7.1  HTML / plain text / redirects</h3>
+<pre><code class="language-python">from blackbull import Response
+from http import HTTPStatus
+
+await send(Response(b'&lt;h1&gt;Hello&lt;/h1&gt;'))
+await send(Response('Hello', status=HTTPStatus.OK))           # str also accepted
+await send(Response(b'Not found', status=HTTPStatus.NOT_FOUND))
+
+# Redirect
+await send(Response(b'', status=HTTPStatus.FOUND,
+                    headers=[(b'location', b'/')]))
+</code></pre>
+<p>Default <code>content_type</code> is <code>'text/html; charset=utf-8'</code>.  Override via the
+<code>content_type</code> parameter:</p>
+<pre><code class="language-python">Response(b'plain text', content_type='text/plain; charset=utf-8')
+</code></pre>
+<h3 id="72-json">7.2  JSON</h3>
+<pre><code class="language-python">from blackbull import JSONResponse
+
+await send(JSONResponse({'ok': True}))
+await send(JSONResponse({'error': 'Bad request'}, status=HTTPStatus.BAD_REQUEST))
+await send(JSONResponse({'id': 1, 'title': 'Buy milk'}, status=HTTPStatus.CREATED))
+</code></pre>
+<p>Content-Type is set to <code>application/json</code> automatically.</p>
+<h3 id="73-custom-response-headers">7.3  Custom response headers</h3>
+<p>Both <code>Response</code> and <code>JSONResponse</code> accept <code>headers=[(bytes, bytes), ...]</code>:</p>
+<pre><code class="language-python">await send(JSONResponse({'ok': True}, headers=[
+    (b'x-request-id', b'abc123'),
+    (b'cache-control', b'no-store'),
+]))
+</code></pre>
+<h3 id="74-set-cookie-helper">7.4  Set-Cookie helper</h3>
+<pre><code class="language-python">from blackbull import cookie_header
+
+hdr = cookie_header('session', token, http_only=True)
+# → (b'set-cookie', b'session=TOKEN; Path=/; HttpOnly; SameSite=Lax')
+
+await send(JSONResponse({'ok': True}, headers=[hdr]))
+</code></pre>
+<p>Signature: <code>cookie_header(name, value, path='/', http_only=True)</code>.</p>
+<blockquote>
+<p><strong>Note for browser clients over plain HTTP</strong>: browsers may not reliably forward
+<code>HttpOnly</code> cookies set by a <code>fetch()</code> response on the next page navigation.
+For single-page apps, store the session token in <code>sessionStorage</code> and send it
+as <code>Authorization: Bearer &lt;token&gt;</code> instead (see §4.5 example).</p>
+</blockquote>
+<h3 id="75-http-trailers">7.5  HTTP trailers</h3>
+<p>HTTP/1.1 chunked responses can carry trailing headers after the body.  Use the
+<code>http.response.trailers</code> event after the last <code>http.response.body</code> chunk:</p>
+<pre><code class="language-python">@app.route(path='/chunked')
+async def chunked(scope, receive, send):
+    await send({
+        'type': 'http.response.start',
+        'status': 200,
+        'headers': [
+            (b'content-type',     b'text/plain'),
+            (b'transfer-encoding', b'chunked'),
+            (b'trailer',          b'x-checksum'),
+        ],
+    })
+    await send({
+        'type': 'http.response.body',
+        'body': b'chunk data here',
+        'more_body': True,
+    })
+    await send({
+        'type': 'http.response.trailers',
+        'headers': [(b'x-checksum', b'abc123')],
+    })
+</code></pre>
+<h3 id="76-websocket-frames">7.6  WebSocket frames</h3>
+<pre><code class="language-python">from blackbull import WebSocketResponse
+
+await send(WebSocketResponse('hello'))           # str  → text frame
+await send(WebSocketResponse(b'\x00\x01'))       # bytes → binary frame
+await send(WebSocketResponse({'type': 'msg'}))   # other → JSON-serialised text frame
+</code></pre>
+<p>(See also §3.3 and §4.4 for WebSocket routing and the built-in <code>websocket</code> middleware.)</p>
+<hr />
+<h2 id="8-error-handling">§8  Error Handling</h2>
+<h3 id="81-default-behaviour">8.1  Default behaviour</h3>
+<table>
+<thead>
+<tr>
+<th>Condition</th>
+<th>Default response</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Path not registered</td>
+<td>404 plain text</td>
+</tr>
+<tr>
+<td>Method not allowed</td>
+<td>405 plain text + <code>Allow</code> header</td>
+</tr>
+<tr>
+<td>Unhandled exception in handler</td>
+<td>500 plain text with exception class and message</td>
+</tr>
+</tbody>
+</table>
+<h3 id="82-custom-error-handlers">8.2  Custom error handlers</h3>
+<pre><code class="language-python">@app.on_error(HTTPStatus.NOT_FOUND)
+async def handle_404(scope, receive, send):
+    await send(JSONResponse({'error': 'not found'}, status=HTTPStatus.NOT_FOUND))
+
+@app.on_error(HTTPStatus.METHOD_NOT_ALLOWED)
+async def handle_405(scope, receive, send):
+    allowed = ', '.join(scope['state'].get('allowed_methods', ()))
+    await send(JSONResponse({'error': f'allowed: {allowed}'},
+                            status=HTTPStatus.METHOD_NOT_ALLOWED))
+
+@app.on_error(ValueError)
+async def handle_value_error(scope, receive, send):
+    exc = scope['state'].get('error_exception')
+    await send(JSONResponse({'error': str(exc)}, status=HTTPStatus.BAD_REQUEST))
+</code></pre>
+<p>Exception handlers use MRO walk: a handler registered for <code>Exception</code> catches all
+unhandled subclasses.</p>
+<p><strong><code>scope['state']</code> keys set by the framework on errors:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Present when</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>'error_status'</code></td>
+<td><code>HTTPStatus</code></td>
+<td>Always</td>
+</tr>
+<tr>
+<td><code>'error_exception'</code></td>
+<td>exception</td>
+<td>Triggered by uncaught exception</td>
+</tr>
+<tr>
+<td><code>'allowed_methods'</code></td>
+<td>tuple of str</td>
+<td>405 Method Not Allowed</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="9-lifespan-hooks">§9  Lifespan Hooks</h2>
+<pre><code class="language-python">@app.on_startup
+async def startup():
+    await db.connect()
+    print('Database ready')
+
+@app.on_shutdown
+async def shutdown():
+    await db.disconnect()
+</code></pre>
+<ul>
+<li><code>on_startup</code> fires after the server socket is bound, before accepting connections.</li>
+<li><code>on_shutdown</code> fires when the server receives a stop signal (e.g. <code>Ctrl-C</code>).</li>
+<li>Multiple hooks can be registered; they run in registration order.</li>
+</ul>
+<hr />
+<h2 id="10-running-the-server">§10  Running the Server</h2>
+<pre><code class="language-python">import asyncio
+
+# HTTP/1.1
+asyncio.run(app.run(port=8000))
+
+# HTTPS + HTTP/2 (negotiated via TLS ALPN)
+asyncio.run(app.run(port=8443, certfile='cert.pem', keyfile='key.pem'))
+
+# Development: hot-reload when source files change
+asyncio.run(app.run(port=8000, debug=True))
+</code></pre>
+<p><code>app.run()</code> signature:</p>
+<pre><code class="language-python">async def run(port=0, certfile=None, keyfile=None, debug=False)
+</code></pre>
+<h3 id="generating-a-self-signed-certificate-for-local-https">Generating a self-signed certificate for local HTTPS</h3>
+<pre><code class="language-bash">openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem \
+  -days 365 -nodes -subj '/CN=localhost' \
+  -addext 'subjectAltName=DNS:localhost,IP:127.0.0.1'
+</code></pre>
+<p>Then start the server:</p>
+<pre><code class="language-bash">python app.py --cert cert.pem --key key.pem --port 8443
+# Open https://localhost:8443  (accept the browser security warning once)
+</code></pre>
+<blockquote>
+<p>Browsers only use HTTP/2 over HTTPS.  With TLS the server negotiates HTTP/2
+automatically via ALPN; plain HTTP connections use HTTP/1.1.</p>
+</blockquote>
+<h3 id="102-production-deployment">§10.2  Production deployment</h3>
+<p>BlackBull binds directly to a TCP port.  For production, run it behind a reverse
+proxy (<strong>nginx</strong>, <strong>Caddy</strong>) that handles TLS termination, static files, and load
+balancing across multiple processes.</p>
+<p><strong>Minimal nginx config (HTTP/2, proxy to BlackBull on port 8000):</strong></p>
+<pre><code class="language-nginx">server {
+    listen 443 ssl http2;
+    server_name example.com;
+
+    ssl_certificate     /etc/letsencrypt/live/example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/example.com/privkey.pem;
+
+    location / {
+        proxy_pass         http://127.0.0.1:8000;
+        proxy_http_version 1.1;
+        proxy_set_header   Host $host;
+        proxy_set_header   X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+}
+</code></pre>
+<p><strong>Docker one-liner:</strong></p>
+<pre><code class="language-dockerfile">FROM python:3.12-slim
+WORKDIR /app
+COPY . .
+RUN pip install .
+EXPOSE 8000
+CMD [&quot;python&quot;, &quot;app.py&quot;, &quot;--port&quot;, &quot;8000&quot;]
+</code></pre>
+<p><strong>Environment variables</strong> for secrets (never hardcode):</p>
+<pre><code class="language-python">import os
+DB_URL  = os.environ['DATABASE_URL']
+SECRET  = os.environ['SECRET_KEY']
+PORT    = int(os.environ.get('PORT', 8000))
+</code></pre>
+<h3 id="103-mutual-tls-mtls">§10.3  Mutual TLS (mTLS)</h3>
+<p>mTLS requires clients to present a certificate signed by a trusted CA.  Set it up
+before starting the server:</p>
+<pre><code class="language-python">import asyncio
+from blackbull import BlackBull
+
+app = BlackBull()
+
+# ... define routes ...
+
+# Create the server manually so we can configure mTLS before accepting connections
+app.create_server(certfile='cert.pem', keyfile='key.pem', port=8443)
+app.server.configure_mtls(ca_cert='ca.pem')   # enables CERT_REQUIRED
+asyncio.run(app.run())
+</code></pre>
+<p><code>configure_mtls</code> raises <code>RuntimeError</code> if called before TLS is configured (i.e.
+before <code>certfile</code> and <code>keyfile</code> are provided).</p>
+<p>Generate a test CA and client certificate:</p>
+<pre><code class="language-bash"># CA
+openssl req -x509 -newkey rsa:4096 -keyout ca.key -out ca.pem \
+  -days 365 -nodes -subj '/CN=Test CA'
+
+# Server cert signed by the CA
+openssl req -newkey rsa:4096 -keyout key.pem -out server.csr \
+  -nodes -subj '/CN=localhost'
+openssl x509 -req -in server.csr -CA ca.pem -CAkey ca.key \
+  -CAcreateserial -out cert.pem -days 365
+
+# Client cert signed by the CA
+openssl req -newkey rsa:4096 -keyout client.key -out client.csr \
+  -nodes -subj '/CN=client'
+openssl x509 -req -in client.csr -CA ca.pem -CAkey ca.key \
+  -CAcreateserial -out client.pem -days 365
+</code></pre>
+<hr />
+<h2 id="11-complete-example-simpletaskmanager-skeleton">§11  Complete Example — SimpleTaskManager Skeleton</h2>
+<p>The following skeleton demonstrates every concept from §1-10 and can be expanded
+into a full REST + HTML task management application.</p>
+<pre><code class="language-python">import asyncio
+import json
+import secrets
+from http import HTTPMethod, HTTPStatus
+
+from blackbull import BlackBull, JSONResponse, Response, read_body
+
+app = BlackBull()
+SESSIONS: dict[str, str] = {}   # token → username
+
+# ── Middleware ────────────────────────────────────────────────────────────────
+
+async def error_mw(scope, receive, send, call_next):
+    &quot;&quot;&quot;Catch unhandled exceptions and return JSON 500.&quot;&quot;&quot;
+    try:
+        await call_next(scope, receive, send)
+    except Exception as exc:
+        await send(JSONResponse({'error': str(exc)},
+                                status=HTTPStatus.INTERNAL_SERVER_ERROR))
+
+
+async def logging_mw(scope, receive, send, call_next):
+    import time
+    t0 = time.monotonic()
+    print(f&quot;→ {scope.get('method')} {scope.get('path')}&quot;)
+    await call_next(scope, receive, send)
+    print(f&quot;  {(time.monotonic() - t0) * 1000:.1f} ms&quot;)
+
+
+async def auth_mw(scope, receive, send, call_next):
+    &quot;&quot;&quot;Validate Bearer token; inject scope['user'] and scope['token'].&quot;&quot;&quot;
+    auth = scope['headers'].get(b'authorization', b'')
+    token = auth[7:].decode() if auth.startswith(b'Bearer ') else ''
+    user = SESSIONS.get(token)
+    if not user:
+        await send(JSONResponse({'error': 'Unauthorized'},
+                                status=HTTPStatus.UNAUTHORIZED))
+        return
+    scope['user'] = user
+    scope['token'] = token
+    await call_next(scope, receive, send)
+
+
+async def json_body_mw(scope, receive, send, call_next):
+    &quot;&quot;&quot;Parse request body as JSON; inject scope['json'].&quot;&quot;&quot;
+    try:
+        scope['json'] = json.loads(await read_body(receive))
+    except (json.JSONDecodeError, ValueError):
+        await send(JSONResponse({'error': 'Invalid JSON'},
+                                status=HTTPStatus.BAD_REQUEST))
+        return
+    await call_next(scope, receive, send)
+
+# ── Route groups ──────────────────────────────────────────────────────────────
+
+public = app.group(middlewares=[error_mw, logging_mw])
+api    = app.group(middlewares=[error_mw, logging_mw, auth_mw])
+
+# ── Lifespan ──────────────────────────────────────────────────────────────────
+
+@app.on_startup
+async def startup():
+    print('Server ready. Default user: admin / admin')
+    # e.g.: await db.init()
+
+# ── Public routes ─────────────────────────────────────────────────────────────
+
+@public.route(methods=[HTTPMethod.GET], path='/')
+async def index(scope, receive, send):
+    await send(Response(b'&lt;h1&gt;Login page&lt;/h1&gt;'))
+
+
+@public.route(methods=[HTTPMethod.GET], path='/app')
+async def app_page(scope, receive, send):
+    await send(Response(b'&lt;h1&gt;Task Manager&lt;/h1&gt;'))  # serve index.html
+
+
+@public.route(methods=[HTTPMethod.POST], path='/register',
+              middlewares=[json_body_mw])
+async def register(scope, receive, send):
+    data = scope['json']
+    username = str(data.get('username', '')).strip()
+    password = str(data.get('password', ''))
+    if not username or not password:
+        await send(JSONResponse({'error': 'username and password required'},
+                                status=HTTPStatus.BAD_REQUEST))
+        return
+    # ... create user in DB, return 409 if duplicate ...
+    token = secrets.token_urlsafe(32)
+    SESSIONS[token] = username
+    await send(JSONResponse({'ok': True, 'token': token}))
+
+
+@public.route(methods=[HTTPMethod.POST], path='/login',
+              middlewares=[json_body_mw])
+async def login(scope, receive, send):
+    data = scope['json']
+    username = str(data.get('username', '')).strip()
+    password = str(data.get('password', ''))
+    # ... verify_user(username, password) ...
+    token = secrets.token_urlsafe(32)
+    SESSIONS[token] = username
+    await send(JSONResponse({'ok': True, 'token': token}))
+
+# ── Protected API routes ──────────────────────────────────────────────────────
+
+@api.route(methods=[HTTPMethod.GET], path='/tasks')
+async def list_tasks(scope, receive, send):
+    user = scope['user']
+    tasks = []  # replace with: await db.get_tasks(user)
+    await send(JSONResponse(tasks))
+
+
+@api.route(methods=[HTTPMethod.POST], path='/tasks',
+           middlewares=[json_body_mw])
+async def create_task(scope, receive, send):
+    title = str(scope['json'].get('title', '')).strip()
+    if not title:
+        await send(JSONResponse({'error': 'title required'},
+                                status=HTTPStatus.BAD_REQUEST))
+        return
+    task = {'id': 1, 'title': title, 'completed': False}  # replace with DB call
+    await send(JSONResponse(task, status=HTTPStatus.CREATED))
+
+
+@api.route(methods=[HTTPMethod.PUT], path='/tasks/{task_id}',
+           middlewares=[json_body_mw])
+async def update_task(scope, receive, send):
+    task_id = scope['path_params']['task_id']
+    # ... db.update_task(scope['user'], int(task_id), ...) ...
+    await send(JSONResponse({'id': task_id, 'title': 'updated'}))
+
+
+@api.route(methods=[HTTPMethod.DELETE], path='/tasks/{task_id}')
+async def delete_task(scope, receive, send):
+    task_id = scope['path_params']['task_id']
+    # ... db.delete_task(scope['user'], int(task_id)) ...
+    await send(JSONResponse({'ok': True}))
+
+
+@api.route(methods=[HTTPMethod.POST], path='/logout')
+async def logout(scope, receive, send):
+    SESSIONS.pop(scope.get('token', ''), None)
+    await send(JSONResponse({'ok': True}))
+
+# ── Entry point ───────────────────────────────────────────────────────────────
+
+if __name__ == '__main__':
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--port', type=int, default=8000)
+    parser.add_argument('--cert', default=None)
+    parser.add_argument('--key',  default=None)
+    args = parser.parse_args()
+    asyncio.run(app.run(port=args.port, certfile=args.cert, keyfile=args.key))
+</code></pre>
+<p>The working implementation of this skeleton is
+<a href="https://github.com/TOKUJI/BlackBull/blob/master/examples/SimpleTaskManager/app.py"><code>examples/SimpleTaskManager/app.py</code></a>.</p>
+<hr />
+<h2 id="12-testing">§12  Testing</h2>
+<p>BlackBull's <code>app</code> is a plain ASGI callable, so it can be tested without a running
+server.</p>
+<h3 id="121-unit-testing-a-handler-directly">12.1  Unit testing a handler directly</h3>
+<p>Construct a minimal scope dict and fake <code>receive</code>/<code>send</code> callables:</p>
+<pre><code class="language-python"># test_handlers.py
+import asyncio
+import pytest
+from http import HTTPStatus
+from blackbull import BlackBull, JSONResponse
+from blackbull.server.headers import Headers
+
+app = BlackBull()
+
+@app.route(path='/ping')
+async def ping(scope, receive, send):
+    await send(JSONResponse({'pong': True}))
+
+
+def make_scope(method='GET', path='/ping'):
+    return {
+        'type': 'http',
+        'method': method,
+        'path': path,
+        'query_string': b'',
+        'headers': Headers([]),
+        'state': {},
+    }
+
+async def fake_receive():
+    return {'type': 'http.request', 'body': b'', 'more_body': False}
+
+
+@pytest.mark.asyncio
+async def test_ping():
+    responses = []
+
+    async def fake_send(body, status=HTTPStatus.OK, headers=[]):
+        responses.append({'body': body, 'status': status})
+
+    await app(make_scope(), fake_receive, fake_send)
+    assert responses[0]['status'] == HTTPStatus.OK
+    assert b'&quot;pong&quot;' in responses[0]['body']
+</code></pre>
+<h3 id="122-integration-testing-with-httpx-recommended">12.2  Integration testing with <code>httpx</code> (recommended)</h3>
+<p><a href="https://www.python-httpx.org/"><code>httpx</code></a> ships an <code>ASGITransport</code> adapter that
+drives the app over an in-process connection — no open port needed:</p>
+<pre><code class="language-bash">pip install httpx pytest-asyncio
+</code></pre>
+<pre><code class="language-python"># test_integration.py
+import pytest
+import httpx
+from myapp import app   # your BlackBull instance
+
+@pytest.mark.asyncio
+async def test_register_and_list_tasks():
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url='http://test',
+    ) as client:
+        # Register
+        r = await client.post('/register',
+                              json={'username': 'alice', 'password': 'secret'})
+        assert r.status_code == 200
+        token = r.json()['token']
+
+        # Create a task
+        r = await client.post('/tasks',
+                              json={'title': 'Buy milk'},
+                              headers={'Authorization': f'Bearer {token}'})
+        assert r.status_code == 201
+
+        # List tasks
+        r = await client.get('/tasks',
+                             headers={'Authorization': f'Bearer {token}'})
+        assert r.json()[0]['title'] == 'Buy milk'
+</code></pre>
+<p><code>pytest.ini</code> or <code>pyproject.toml</code> to configure asyncio mode:</p>
+<pre><code class="language-ini">[pytest]
+asyncio_mode = auto
+</code></pre>
+<h3 id="123-testing-middleware-in-isolation">12.3  Testing middleware in isolation</h3>
+<p>Middleware is just an async function — test it by passing stub callables:</p>
+<pre><code class="language-python">@pytest.mark.asyncio
+async def test_auth_mw_rejects_missing_token():
+    from myapp import auth_mw
+    from blackbull.server.headers import Headers
+
+    scope = {'type': 'http', 'method': 'GET', 'path': '/tasks',
+             'headers': Headers([]), 'state': {}}
+
+    responses = []
+    async def fake_send(body, status=200, headers=[]):
+        responses.append(status)
+
+    call_next_called = False
+    async def fake_call_next(scope, receive, send):
+        nonlocal call_next_called
+        call_next_called = True
+
+    await auth_mw(scope, None, fake_send, fake_call_next)
+
+    assert not call_next_called          # short-circuited
+    assert responses[0] == HTTPStatus.UNAUTHORIZED
+</code></pre>
+<hr />
+<h2 id="13-common-middleware-recipes">§13  Common Middleware Recipes</h2>
+<p>Reusable middleware patterns that most applications need.</p>
+<h3 id="131-cors">13.1  CORS</h3>
+<p>Browsers send a pre-flight <code>OPTIONS</code> request before cross-origin fetch calls.
+BlackBull has no built-in CORS middleware, but one is straightforward to write:</p>
+<pre><code class="language-python">from http import HTTPStatus
+from blackbull import Response
+
+ALLOWED_ORIGINS = {
+    'http://localhost:3000',
+    'https://myapp.example.com',
+}
+
+async def cors_mw(scope, receive, send, call_next):
+    origin = scope['headers'].get(b'origin', b'').decode()
+    allowed = origin in ALLOWED_ORIGINS
+
+    # Pre-flight request
+    if scope['method'] == 'OPTIONS':
+        hdrs = [
+            (b'access-control-allow-methods', b'GET,POST,PUT,DELETE,OPTIONS'),
+            (b'access-control-allow-headers', b'Authorization,Content-Type'),
+            (b'access-control-max-age',        b'3600'),
+        ]
+        if allowed:
+            hdrs.append((b'access-control-allow-origin', origin.encode()))
+        await send(Response(b'', status=HTTPStatus.NO_CONTENT, headers=hdrs))
+        return
+
+    # Wrap send to inject CORS header on every response
+    _send = send
+    async def cors_send(body, status=HTTPStatus.OK, headers=[]):
+        hdrs = list(headers)
+        if allowed:
+            hdrs.append((b'access-control-allow-origin', origin.encode()))
+        await _send(body, status, hdrs)
+
+    await call_next(scope, receive, cors_send)
+</code></pre>
+<p>Apply it to every route via a group:</p>
+<pre><code class="language-python">app_group = app.group(middlewares=[cors_mw, error_mw, logging_mw])
+</code></pre>
+<h3 id="132-request-id">13.2  Request ID</h3>
+<p>Attach a unique ID to every request for distributed tracing:</p>
+<pre><code class="language-python">import uuid
+
+async def request_id_mw(scope, receive, send, call_next):
+    req_id = (scope['headers'].get(b'x-request-id', b'')
+              or uuid.uuid4().hex.encode())
+    scope['request_id'] = req_id.decode() if isinstance(req_id, bytes) else req_id
+
+    _send = send
+    async def tagged_send(body, status=200, headers=[]):
+        await _send(body, status,
+                    list(headers) + [(b'x-request-id', scope['request_id'].encode())])
+
+    await call_next(scope, receive, tagged_send)
+</code></pre>
+<h3 id="133-rate-limiting-token-bucket-in-process">13.3  Rate limiting (token bucket, in-process)</h3>
+<pre><code class="language-python">import time
+from collections import defaultdict
+
+_buckets: dict[str, tuple[float, int]] = defaultdict(lambda: (time.monotonic(), 0))
+RATE_LIMIT = 60   # requests per minute per IP
+
+async def rate_limit_mw(scope, receive, send, call_next):
+    ip = (scope.get('client') or ['unknown'])[0]
+    now = time.monotonic()
+    window_start, count = _buckets[ip]
+
+    if now - window_start &gt; 60:       # new window
+        _buckets[ip] = (now, 1)
+    elif count &gt;= RATE_LIMIT:
+        await send(JSONResponse({'error': 'rate limit exceeded'},
+                                status=HTTPStatus.TOO_MANY_REQUESTS))
+        return
+    else:
+        _buckets[ip] = (window_start, count + 1)
+
+    await call_next(scope, receive, send)
+</code></pre>
+<hr />
+<h2 id="14-logging">§14  Logging</h2>
+<p>BlackBull uses two separate logger hierarchies, each with a distinct purpose.</p>
+<h3 id="141-access-log-blackbullaccess">14.1  Access log — <code>blackbull.access</code></h3>
+<p>For every completed HTTP/1.1 request the server emits one <code>INFO</code> record on
+the <code>blackbull.access</code> logger.  The record format is:</p>
+<pre><code>{client_ip} &quot;{method} {path} HTTP/{version}&quot; {status} {bytes} {duration}ms
+</code></pre>
+<p>Example line:</p>
+<pre><code>203.0.113.42 &quot;POST /tasks HTTP/1.1&quot; 201 87 3ms
+</code></pre>
+<p>By default the logger has no handlers attached, so nothing is printed.
+Enable it the same way as any Python logger:</p>
+<pre><code class="language-python">import logging
+
+# To stdout
+handler = logging.StreamHandler()
+handler.setFormatter(logging.Formatter('%(asctime)s %(message)s'))
+logging.getLogger('blackbull.access').addHandler(handler)
+logging.getLogger('blackbull.access').setLevel(logging.INFO)
+</code></pre>
+<p>To a rotating file:</p>
+<pre><code class="language-python">from logging.handlers import RotatingFileHandler
+
+fh = RotatingFileHandler('access.log', maxBytes=10_000_000, backupCount=5)
+fh.setFormatter(logging.Formatter('%(message)s'))
+logging.getLogger('blackbull.access').addHandler(fh)
+logging.getLogger('blackbull.access').setLevel(logging.INFO)
+</code></pre>
+<p>The record is emitted after the response completes — even if the app raises
+an unhandled exception (the log line is written in a <code>finally</code> block, so
+the status field may remain <code>'-'</code> when the app never sent a response).</p>
+<h4 id="named-fields-in-the-logrecord">Named fields in the LogRecord</h4>
+<p>Every access log record carries the following named attributes, available in
+a custom <code>logging.Formatter</code> format string:</p>
+<table>
+<thead>
+<tr>
+<th>Attribute</th>
+<th>Type</th>
+<th>Example</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>%(client_ip)s</code></td>
+<td>str</td>
+<td><code>203.0.113.42</code></td>
+</tr>
+<tr>
+<td><code>%(method)s</code></td>
+<td>str</td>
+<td><code>POST</code></td>
+</tr>
+<tr>
+<td><code>%(path)s</code></td>
+<td>str</td>
+<td><code>/tasks</code></td>
+</tr>
+<tr>
+<td><code>%(http_version)s</code></td>
+<td>str</td>
+<td><code>1.1</code></td>
+</tr>
+<tr>
+<td><code>%(status)s</code></td>
+<td>int or <code>'-'</code></td>
+<td><code>201</code></td>
+</tr>
+<tr>
+<td><code>%(response_bytes)d</code></td>
+<td>int</td>
+<td><code>87</code></td>
+</tr>
+<tr>
+<td><code>%(duration_ms).1f</code></td>
+<td>float</td>
+<td><code>3.4</code></td>
+</tr>
+</tbody>
+</table>
+<p>Custom format example:</p>
+<pre><code class="language-python">fmt = ('%(asctime)s %(client_ip)s &quot;%(method)s %(path)s&quot; '
+       '%(status)s %(response_bytes)d %(duration_ms).0fms')
+logging.getLogger('blackbull.access').handlers[0].setFormatter(
+    logging.Formatter(fmt)
+)
+</code></pre>
+<h3 id="142-extending-the-access-log-record-from-middleware">14.2  Extending the access log record from middleware</h3>
+<p>The <code>AccessLogRecord</code> for the current request is stored at
+<code>scope['state']['access_log']</code>.  Middleware that runs before the handler can
+attach extra attributes and read them back in a custom formatter or a
+post-processing handler:</p>
+<pre><code class="language-python">import uuid
+
+async def request_id_mw(scope, receive, send, call_next):
+    req_id = uuid.uuid4().hex
+    scope['request_id'] = req_id
+    # Attach to the access log record so it appears in log output
+    record = scope['state'].get('access_log')
+    if record:
+        record.request_id = req_id   # arbitrary extra attribute
+    await call_next(scope, receive, send)
+</code></pre>
+<p>A custom <code>logging.Filter</code> can then surface the attribute:</p>
+<pre><code class="language-python">class AccessLogFilter(logging.Filter):
+    def filter(self, record):
+        record.request_id = getattr(record, 'request_id', '-')
+        return True
+
+handler = logging.StreamHandler()
+handler.addFilter(AccessLogFilter())
+handler.setFormatter(logging.Formatter(
+    '%(message)s req_id=%(request_id)s'
+))
+logging.getLogger('blackbull.access').addHandler(handler)
+</code></pre>
+<h3 id="143-debug-framework-log-blackbull">14.3  Debug / framework log — <code>blackbull</code></h3>
+<p>Internal framework events (frame parsing, HPACK, routing decisions, TLS
+handshake) are logged on the <code>blackbull</code> logger and its children
+(<code>blackbull.server.server</code>, <code>blackbull.protocol.frame</code>, …) at <code>DEBUG</code> level.</p>
+<p>Enable for development:</p>
+<pre><code class="language-python">import logging
+logging.basicConfig(level=logging.DEBUG)
+# or target just the server layer:
+logging.getLogger('blackbull.server').setLevel(logging.DEBUG)
+</code></pre>
+<p>This is separate from the access log so that production deployments can
+enable access logging without flooding logs with internal debug output.</p>
+<h3 id="144-forwarding-access-logs-to-a-remote-server">14.4  Forwarding access logs to a remote server</h3>
+<p><code>logging.Handler.emit()</code> is synchronous.  Calling a blocking HTTP request
+directly from <code>emit</code> would stall the asyncio event loop.  The solution is
+the standard library's <code>QueueHandler</code> + <code>QueueListener</code> pair: the handler
+enqueues records in O(1) without blocking, and a background thread drains
+the queue and calls the real (blocking) HTTP handler.</p>
+<p>A complete two-process example is provided in
+<a href="https://github.com/TOKUJI/BlackBull/tree/master/examples/LoggingExample/"><code>examples/LoggingExample/</code></a>:</p>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>Role</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>web_server.py</code></td>
+<td>BlackBull hello-world with <code>JsonHTTPHandler</code> + <code>QueueListener</code></td>
+</tr>
+<tr>
+<td><code>log_server.py</code></td>
+<td><code>http.server</code> that receives JSON records and inserts them into SQLite</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Start order:</strong></p>
+<pre><code class="language-bash"># Terminal 1
+python examples/LoggingExample/log_server.py   # listens on :9000
+
+# Terminal 2
+python examples/LoggingExample/web_server.py   # listens on :8000
+
+# Make some requests
+curl http://localhost:8000/
+curl http://localhost:8000/tasks
+
+# Inspect the database
+sqlite3 examples/LoggingExample/logs.db \
+    &quot;SELECT client_ip, method, path, status, duration_ms FROM access_logs;&quot;
+</code></pre>
+<p><strong>Key classes:</strong></p>
+<p><code>JsonHTTPHandler</code> (in <code>web_server.py</code>) is a <code>logging.Handler</code> subclass that
+serialises a <code>LogRecord</code> — including the named access-log fields added via
+<code>extra=</code> — as a JSON POST body:</p>
+<pre><code class="language-python">class JsonHTTPHandler(logging.Handler):
+    def emit(self, record: logging.LogRecord) -&gt; None:
+        payload = json.dumps({
+            'created':        record.created,
+            'level':          record.levelname,
+            'message':        self.format(record),
+            'client_ip':      getattr(record, 'client_ip', '-'),
+            'method':         getattr(record, 'method',    '-'),
+            'path':           getattr(record, 'path',      '-'),
+            'status':         getattr(record, 'status',    '-'),
+            'response_bytes': getattr(record, 'response_bytes', 0),
+            'duration_ms':    getattr(record, 'duration_ms',   0.0),
+        }).encode()
+        conn = http.client.HTTPConnection(self.host)
+        conn.request('POST', self.url, payload,
+                     {'Content-Type': 'application/json'})
+        conn.getresponse()
+        conn.close()
+</code></pre>
+<p>The non-blocking wiring:</p>
+<pre><code class="language-python">import queue
+from logging.handlers import QueueHandler, QueueListener
+
+_log_queue    = queue.Queue(-1)          # unbounded
+_json_handler = JsonHTTPHandler('localhost:9000')
+_listener     = QueueListener(_log_queue, _json_handler,
+                               respect_handler_level=True)
+_listener.start()
+
+logging.getLogger('blackbull.access').addHandler(QueueHandler(_log_queue))
+logging.getLogger('blackbull.access').setLevel(logging.INFO)
+</code></pre>
+<p><code>QueueHandler.emit()</code> puts the record in the queue and returns immediately.
+<code>QueueListener</code> runs in a daemon thread and calls <code>JsonHTTPHandler.emit()</code>
+there — the blocking HTTP call never touches the event-loop thread.</p>
+<p>Call <code>_listener.stop()</code> on shutdown to flush the queue and join the thread.</p>
+<h3 id="146-what-is-not-yet-implemented">14.6  What is not yet implemented</h3>
+<ul>
+<li>HTTP/2 access logging: per-stream entry using the same <code>AccessLogRecord</code>
+  and <code>_make_capturing_send</code> helper in <code>HTTP2Handler</code>.</li>
+<li>WebSocket access logging: connection-level entry (client IP, path, close
+  code, duration).</li>
+</ul>
+<hr />
+<h2 id="15-http2-protocol-internals">§15  HTTP/2 Protocol Internals</h2>
+<h3 id="151-stream-state-machine-rfc-7540-51">15.1  Stream state machine (RFC 7540 §5.1)</h3>
+<p>Every HTTP/2 request lives on a numbered stream.  BlackBull tracks each
+stream's lifecycle with a minimal state machine:</p>
+<pre><code>IDLE ──HEADERS──► OPEN ──DATA+END_STREAM──► CLOSED
+                 │
+                 └─HEADERS+END_STREAM──► HALF_CLOSED_REMOTE ──DATA+END_STREAM──► CLOSED
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>State</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>IDLE</code></td>
+<td>Stream allocated but no frames seen yet</td>
+</tr>
+<tr>
+<td><code>OPEN</code></td>
+<td>HEADERS received, body may follow</td>
+</tr>
+<tr>
+<td><code>HALF_CLOSED_REMOTE</code></td>
+<td>HEADERS+END_STREAM received; client will send no more frames on this stream</td>
+</tr>
+<tr>
+<td><code>CLOSED</code></td>
+<td>Full request received</td>
+</tr>
+</tbody>
+</table>
+<p>State transitions happen in <code>server.py</code>'s <code>HTTP2Handler.run()</code> loop:</p>
+<pre><code class="language-python"># HEADERS frame
+stream.on_headers_received(end_stream=bool(frame.end_stream))
+
+# DATA frame — reject if stream is already done
+if stream.state in (StreamState.HALF_CLOSED_REMOTE, StreamState.CLOSED):
+    await self.send_frame(
+        self.factory.rst_stream(stream.identifier, ErrorCodes.STREAM_CLOSED))
+else:
+    stream.on_data_received(end_stream=bool(frame.end_stream))
+    ...
+</code></pre>
+<h3 id="152-priority-rfc-7540-vs-rfc-9218">15.2  Priority: RFC 7540 vs RFC 9218</h3>
+<p><strong>RFC 7540 §5.3 (legacy PRIORITY frames)</strong> defined a dependency tree with
+weights 1–256.  Very few clients ever sent these frames, and the overhead
+was considered not worth it — RFC 9218 supersedes the mechanism.</p>
+<p><strong>RFC 9218 (Extensible Prioritization Scheme)</strong> replaces the dependency tree
+with two simpler fields sent in a <code>PRIORITY_UPDATE</code> frame (type <code>0x10</code>):</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Values</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>urgency</code></td>
+<td>0 (highest) – 7 (lowest)</td>
+<td>relative importance</td>
+</tr>
+<tr>
+<td><code>incremental</code></td>
+<td><code>?0</code> / <code>?1</code></td>
+<td>whether the server may interleave responses</td>
+</tr>
+</tbody>
+</table>
+<p>BlackBull's stance: <strong>receive but do not schedule</strong>.  Priority signals are
+accepted, logged at DEBUG, and discarded.  This is valid per RFC 9218 §2:
+"A server that does not implement prioritization MUST ignore this frame."</p>
+<p>Implementation details:</p>
+<ul>
+<li><code>FrameTypes.PRIORITY_UPDATE = b'\x10'</code> — frame type registered in the
+  <code>FrameTypes</code> enum so the parser does not raise <code>ValueError</code>.</li>
+<li><code>PriorityUpdate</code> frame class — parses <code>prioritized_stream_id</code> (4 bytes)
+  and <code>priority_field</code> (ASCII string, e.g. <code>"u=3, i"</code>).</li>
+<li><code>PriorityUpdateResponder</code> — no-op responder that logs the hint at DEBUG
+  level via <code>response.py</code>'s <code>ResponderFactory</code>.</li>
+</ul>
+<p><strong>Weight off-by-one (RFC 7540 §6.3)</strong>: the wire format stores <code>weight − 1</code>
+(range 0–255 → logical weight 1–256).  BlackBull adds 1 on parse so
+<code>stream.weight</code> always holds the logical value.</p>
+<h3 id="153-flow-control">15.3  Flow control</h3>
+<p>HTTP/2 has two independent flow-control windows:</p>
+<ul>
+<li><strong>Connection-level</strong>: shared across all streams on one connection.</li>
+<li><strong>Stream-level</strong>: per-stream budget.</li>
+</ul>
+<p><code>HTTP2Sender._write()</code> blocks on <code>asyncio.Event</code> when the window is
+exhausted.  <code>WindowUpdateResponder.respond()</code> credits the relevant sender(s)
+and sets the event to unblock waiting writes.  No user code needs to interact
+with flow control directly.</p>
+<h3 id="154-reading-priority-hints-in-handlers">15.4  Reading priority hints in handlers</h3>
+<p>Every HTTP/2 request scope contains an <code>http2_priority</code> key populated by
+BlackBull before your handler is called:</p>
+<pre><code class="language-python">scope['http2_priority']  # → {'urgency': int, 'incremental': bool}
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Default</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>urgency</code></td>
+<td><code>int</code> 0–7</td>
+<td><code>3</code></td>
+<td>0 = most urgent, 7 = least urgent</td>
+</tr>
+<tr>
+<td><code>incremental</code></td>
+<td><code>bool</code></td>
+<td><code>False</code></td>
+<td>Client accepts interleaved partial responses</td>
+</tr>
+</tbody>
+</table>
+<p>BlackBull resolves the value in this order (first wins):</p>
+<ol>
+<li><code>PRIORITY_UPDATE</code> frame (type <code>0x10</code>) received from the client — either
+   before or after the HEADERS frame.</li>
+<li><code>priority</code> HTTP header in the request (e.g. <code>priority: u=1, i</code>).</li>
+<li>RFC 9218 §4.1 defaults: <code>urgency=3</code>, <code>incremental=False</code>.</li>
+</ol>
+<p>For HTTP/1.1 requests the key is absent.  Always use <code>.get()</code> or supply
+a default so your code works across both protocols.</p>
+<h4 id="minimal-handler-example">Minimal handler example</h4>
+<pre><code class="language-python">_DEFAULT_PRIORITY = {'urgency': 3, 'incremental': False}
+
+@app.route(path='/search')
+async def search(scope, receive, send):
+    hint = scope.get('http2_priority', _DEFAULT_PRIORITY)
+    if hint['urgency'] &lt;= 2:
+        # High-urgency: return cached / pre-computed result immediately.
+        result = get_cached_result()
+    else:
+        # Normal / background: run the full search.
+        result = await run_full_search()
+    await send(JSONResponse(result))
+</code></pre>
+<h4 id="middleware-example">Middleware example</h4>
+<p>The pattern scales cleanly to middleware so every route in a group benefits
+without repeating the check:</p>
+<pre><code class="language-python">async def priority_mw(scope, receive, send, call_next):
+    hint = scope.get('http2_priority', {'urgency': 3, 'incremental': False})
+    urgency = hint['urgency']
+    scope['_priority_urgency'] = urgency   # pass downstream
+
+    if urgency &lt;= 1:
+        logger.warning('HIGH-PRIORITY %s %s u=%d',
+                       scope.get('method'), scope.get('path'), urgency)
+    elif urgency &gt;= 6:
+        scope['_background'] = True        # suppress verbose logging
+
+    await call_next(scope, receive, send)
+
+api = app.group(middlewares=[priority_mw, auth_mw])
+</code></pre>
+<p>See <code>examples/SimpleTaskManager/app.py</code> for a complete integration and
+<code>examples/PriorityExample/</code> for a dedicated server + client pair that
+demonstrates all three endpoints and the <code>priority</code> header fallback.</p>
+<h4 id="testing-the-feature-with-curl">Testing the feature with curl</h4>
+<pre><code class="language-bash"># Default priority (urgency=3)
+curl --http2 -k https://localhost:8443/priority-echo
+
+# High urgency
+curl --http2 -k -H 'priority: u=1' https://localhost:8443/priority-echo
+
+# Background prefetch, incremental
+curl --http2 -k -H 'priority: u=6, i' https://localhost:8443/priority-echo
+</code></pre>
+<blockquote>
+<p><strong>Note</strong> — curl converts the <code>priority</code> header to a <code>PRIORITY_UPDATE</code>
+frame when talking HTTP/2 over TLS.  httpx (Python) sends it as a plain
+header; BlackBull parses both forms.</p>
+</blockquote>
+<h3 id="155-http2-server-push">15.5  HTTP/2 server push</h3>
+<p>Server push lets the server proactively send a resource to the client before
+the client asks for it.  A typical use case is pushing a CSS file alongside
+the HTML page that references it, saving one round-trip.</p>
+<h4 id="asgi-event">ASGI event</h4>
+<p>The app signals a push by calling <code>send</code> with an <code>http.response.push</code> event
+before the final <code>http.response.body</code>:</p>
+<pre><code class="language-python">@app.route(path='/')
+async def index(scope, receive, send):
+    # Push a stylesheet before sending the HTML.
+    await send({
+        'type': 'http.response.push',
+        'path': '/static/style.css',
+        'headers': [],               # regular headers only; pseudo-headers are added automatically
+    })
+    await send({'type': 'http.response.start', 'status': 200,
+                'headers': [(b'content-type', b'text/html')]})
+    await send({'type': 'http.response.body',
+                'body': b'&lt;html&gt;...&lt;/html&gt;'})
+</code></pre>
+<p><code>path</code> must be a plain string (percent-encoding decoded).  Pseudo-headers
+(<code>:method</code>, <code>:scheme</code>, <code>:authority</code>) are filled in automatically by the
+server; do not include them in <code>headers</code>.</p>
+<h4 id="what-blackbull-does">What BlackBull does</h4>
+<ol>
+<li>Allocates the next even stream ID for the pushed resource (RFC 7540 §5.1.1
+   — server-initiated streams are always even: 2, 4, 6, …).</li>
+<li>Sends a <code>PUSH_PROMISE</code> frame on the <strong>parent stream</strong> (the one that
+   triggered the push).  The frame contains the synthetic request headers
+   (<code>GET /static/style.css</code>) the client can use to match its cache.</li>
+<li>Creates a synthetic scope (<code>type='http'</code>, <code>method='GET'</code>,
+   <code>path='/static/style.css'</code>) and dispatches it to your app as a new
+   <code>asyncio.Task</code> on the promised stream.  Your app handles the pushed
+   request exactly like a normal GET — the same route, same middleware,
+   same response cycle.</li>
+</ol>
+<h4 id="checking-for-support">Checking for support</h4>
+<p>The server advertises push support in <code>scope['extensions']</code>:</p>
+<pre><code class="language-python">if 'http.response.push' in scope.get('extensions', {}):
+    await send({'type': 'http.response.push', 'path': '/logo.png', 'headers': []})
+</code></pre>
+<p>For HTTP/1.1 requests <code>scope['extensions']</code> does not contain
+<code>'http.response.push'</code>, so the guard above makes the same handler work on
+both protocols.</p>
+<h4 id="limitations">Limitations</h4>
+<ul>
+<li>Clients can disable server push by sending <code>SETTINGS_ENABLE_PUSH=0</code>.
+  BlackBull does not currently check this setting; if the client rejects the
+  push it will send a <code>RST_STREAM</code> which BlackBull logs and ignores.</li>
+<li>Pushed resources should be cacheable.  Pushing non-cacheable content wastes
+  bandwidth and may confuse browsers.</li>
+</ul>
+<hr />
+<h2 id="16-global-middleware-and-static-file-serving">§16  Global Middleware and Static File Serving</h2>
+<h3 id="161-global-middleware-appuse">§16.1  Global middleware — <code>app.use()</code></h3>
+<p>Global middlewares run before routing for every non-lifespan request.</p>
+<pre><code class="language-python">app.use(my_middleware)
+</code></pre>
+<p>The middleware signature is the same as route middleware:</p>
+<pre><code class="language-python">async def my_middleware(scope, receive, send, call_next):
+    # pre-processing
+    await call_next(scope, receive, send)
+    # post-processing
+</code></pre>
+<p>Multiple <code>use()</code> calls build a chain: the first registered middleware is the
+outermost (runs first).  A middleware that does not call <code>call_next</code>
+short-circuits the chain — no route handler is invoked.</p>
+<p>Lifespan events (<code>scope['type'] == 'lifespan'</code>) bypass the global middleware
+chain entirely.</p>
+<h3 id="162-static-file-serving-appstatic">§16.2  Static file serving — <code>app.static()</code></h3>
+<p><code>app.static(url_prefix, root_dir)</code> registers a <code>StaticFiles</code> global
+middleware that serves files from <code>root_dir</code> for paths that start with
+<code>url_prefix</code>.</p>
+<pre><code class="language-python">from blackbull import BlackBull
+
+app = BlackBull()
+app.static('/assets', 'public/assets')
+app.static('/images', 'public/images')
+
+@app.route(path='/')
+async def index(scope, receive, send):
+    ...
+</code></pre>
+<p>A request to <code>/assets/style.css</code> is intercepted by the global middleware
+before routing and served from <code>public/assets/style.css</code>.  Requests that do
+not match the prefix fall through to the route handlers normally.</p>
+<h4 id="standalone-usage">Standalone usage</h4>
+<p><code>StaticFiles</code> can also be used as a standalone ASGI app (useful in tests or
+when mounting without BlackBull):</p>
+<pre><code class="language-python">from blackbull.middleware.static import StaticFiles
+
+app = StaticFiles(directory='public')
+# app(scope, receive, send)  — 3-argument ASGI
+</code></pre>
+<h4 id="environment-gate-blackbull_env">Environment gate — <code>BLACKBULL_ENV</code></h4>
+<p>Set the <code>BLACKBULL_ENV</code> environment variable to control serving behaviour:</p>
+<table>
+<thead>
+<tr>
+<th>Value</th>
+<th>Effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>production</code></td>
+<td>Always return 404; static files are never served</td>
+</tr>
+<tr>
+<td><code>development</code> (default)</td>
+<td>Serve files normally</td>
+</tr>
+<tr>
+<td><code>test</code></td>
+<td>Serve files normally</td>
+</tr>
+</tbody>
+</table>
+<pre><code class="language-bash">BLACKBULL_ENV=production python app.py   # static routes return 404
+BLACKBULL_ENV=development python app.py  # static files served
+</code></pre>
+<h4 id="range-requests-rfc-7233">Range requests — RFC 7233</h4>
+<p><code>StaticFiles</code> supports <code>Range</code> requests out of the box:</p>
+<pre><code>GET /assets/video.mp4 HTTP/1.1
+Range: bytes=0-1023
+</code></pre>
+<p>Response:</p>
+<pre><code>HTTP/1.1 206 Partial Content
+Content-Range: bytes 0-1023/4096000
+Content-Length: 1024
+</code></pre>
+<p>Unsatisfiable ranges return <code>416 Range Not Satisfiable</code>.</p>
+<h4 id="security">Security</h4>
+<ul>
+<li><strong>Path traversal</strong>: URL-encoded paths are decoded with <code>urllib.parse.unquote</code>
+  before resolution.  Any resolved path that escapes the configured root
+  directory returns <code>400 Bad Request</code>.</li>
+<li><strong>Directory listing</strong>: Requests for bare directories return <code>404</code>; no
+  directory listing is ever served.</li>
+</ul>
+<h4 id="inspecting-registered-roots">Inspecting registered roots</h4>
+<pre><code class="language-python">app.static('/a', 'public/a')
+app.static('/b', 'public/b')
+print(app._static_roots)
+# [('/a', PosixPath('/abs/public/a')), ('/b', PosixPath('/abs/public/b'))]
+</code></pre>
+<hr />
+<h2 id="17-streaming-responses">§17  Streaming Responses</h2>
+<h3 id="streamingresponse"><code>StreamingResponse</code></h3>
+<p>Use <code>StreamingResponse</code> to push an async generator to the client without
+buffering the whole body in memory.  The class calls <code>send</code> directly, so it
+works as a nested ASGI app:</p>
+<pre><code class="language-python">import asyncio
+from blackbull import BlackBull, StreamingResponse
+
+app = BlackBull()
+
+async def countdown():
+    for i in range(5, 0, -1):
+        yield f'{i}\n'.encode()
+        await asyncio.sleep(1)
+    yield b'done\n'
+
+@app.route(path='/stream')
+async def handler(scope, receive, send):
+    await StreamingResponse(countdown())(scope, receive, send)
+</code></pre>
+<p><code>StreamingResponse.__init__</code> accepts:</p>
+<table>
+<thead>
+<tr>
+<th>parameter</th>
+<th>default</th>
+<th>description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>content</code></td>
+<td>—</td>
+<td><code>AsyncIterator</code> of <code>bytes</code> or <code>str</code> chunks</td>
+</tr>
+<tr>
+<td><code>status</code></td>
+<td><code>200</code></td>
+<td>HTTP status code</td>
+</tr>
+<tr>
+<td><code>headers</code></td>
+<td><code>[]</code></td>
+<td>extra header tuples <code>(bytes, bytes)</code></td>
+</tr>
+<tr>
+<td><code>media_type</code></td>
+<td><code>'text/plain'</code></td>
+<td><code>Content-Type</code> value (injected if absent from <code>headers</code>)</td>
+</tr>
+</tbody>
+</table>
+<p><code>str</code> chunks are encoded to UTF-8 automatically.</p>
+<h3 id="how-http11-delivers-streaming-responses">How HTTP/1.1 delivers streaming responses</h3>
+<p>When <code>more_body=True</code> appears on the first <code>http.response.body</code> event,
+<code>HTTP1Sender</code> adds <code>Transfer-Encoding: chunked</code> to the response headers and
+formats each body event as a hex-length chunk:</p>
+<pre><code>5\r\n
+hello\r\n
+5\r\n
+world\r\n
+0\r\n
+\r\n
+</code></pre>
+<p>The terminal <code>0\r\n\r\n</code> is written automatically when <code>more_body=False</code> arrives
+(unless <code>trailers=True</code> was set in <code>http.response.start</code>, in which case the
+<code>http.response.trailers</code> handler writes it).</p>
+<p>HTTP/2 is unaffected — DATA frames carry explicit length and <code>END_STREAM</code> maps
+to <code>more_body=False</code>.</p>
+<h3 id="writing-streaming-safe-middleware-with-streamingawaremiddleware">Writing streaming-safe middleware with <code>StreamingAwareMiddleware</code></h3>
+<p>Any middleware that wraps the <code>send</code> callable and collects body parts will
+silently buffer a streaming response, defeating <code>more_body=True</code>.</p>
+<p><code>StreamingAwareMiddleware</code> solves this once.  Subclasses override two hooks and
+never deal with <code>more_body</code> directly:</p>
+<pre><code class="language-python">from blackbull.middleware import StreamingAwareMiddleware
+
+class PrefixMiddleware(StreamingAwareMiddleware):
+    async def on_response_body(self, start: dict, body: bytes) -&gt; tuple[dict, bytes]:
+        &quot;&quot;&quot;Called with the complete body — only for non-streaming responses.&quot;&quot;&quot;
+        return start, b'[prefix] ' + body
+
+    async def on_response_start(self, start: dict) -&gt; dict:
+        &quot;&quot;&quot;Called when streaming is detected (more_body=True on first chunk).&quot;&quot;&quot;
+        return start  # modify or pass through
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Hook</th>
+<th>When called</th>
+<th>What to return</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>on_response_body(start, body)</code></td>
+<td>non-streaming response; <code>body</code> is the full bytes</td>
+<td><code>(start, body)</code> after any transformation</td>
+</tr>
+<tr>
+<td><code>on_response_start(start)</code></td>
+<td>streaming detected; <code>start</code> is the <code>http.response.start</code> event</td>
+<td>modified start event</td>
+</tr>
+</tbody>
+</table>
+<p>For streaming responses the base class passes all subsequent chunks directly to
+<code>send</code> without buffering — <code>on_response_body</code> is <strong>never</strong> called.</p>
+<h3 id="warning-for-non-conforming-class-middlewares">Warning for non-conforming class middlewares</h3>
+<p>When <code>app.use(mw)</code> is called with a class instance that does not inherit from
+<code>StreamingAwareMiddleware</code>, BlackBull emits a <code>UserWarning</code> at registration time:</p>
+<pre><code>UserWarning: Class-based middleware 'MyMiddleware' does not inherit from
+StreamingAwareMiddleware.  If its __call__ wraps the 'send' callable, it will
+silently buffer streaming responses.
+</code></pre>
+<p>The warning is advisory — the middleware is still registered and works.
+Function-based middlewares (<code>async def mw(scope, receive, send, call_next): ...</code>)
+and <code>functools.partial</code> wrappers do not trigger the warning.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": [], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>
