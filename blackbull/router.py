@@ -204,9 +204,9 @@ class Router(UserDict, BaseRouter):
 
     def __setitem__(
         self,
-        key: Tuple[str | re.Pattern,
-                   HTTPMethod | Iterable[HTTPMethod],
-                   Optional[Scheme | Iterable[Scheme]]],
+        key: (Tuple[str | re.Pattern, HTTPMethod | Iterable[HTTPMethod]]
+              | Tuple[str | re.Pattern, HTTPMethod | Iterable[HTTPMethod],
+                      Scheme | Iterable[Scheme] | None]),
         value: Any,
     ):
         """

@@ -5,6 +5,13 @@ from unittest.mock import AsyncMock
 # import asyncio
 import pytest
 
+try:
+    from typeguard import TypeCheckError as _TypeCheckError
+except ImportError:
+    _TypeCheckError = None  # type: ignore[assignment,misc]
+
+_TYPE_ERRORS = (TypeError,) if _TypeCheckError is None else (TypeError, _TypeCheckError)
+
 # Test targets
 from blackbull.utils import Scheme
 from blackbull.router import (
@@ -898,12 +905,12 @@ class TestRouterEdgeCases:
 class TestErrorRouterEdgeCases:
     def test_setitem_invalid_key_raises_typeerror(self):
         er = ErrorRouter()
-        with pytest.raises(TypeError):
+        with pytest.raises(_TYPE_ERRORS):
             er[42] = lambda: None
 
     def test_getitem_invalid_key_raises_typeerror(self):
         er = ErrorRouter()
-        with pytest.raises(TypeError):
+        with pytest.raises(_TYPE_ERRORS):
             _ = er[42]
 
     def test_setitem_non_error_status_raises_valueerror(self):
