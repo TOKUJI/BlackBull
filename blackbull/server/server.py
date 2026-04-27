@@ -756,7 +756,7 @@ class ASGIServer:
         context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
         context.set_alpn_protocols(['h2', 'http/1.1'])
         context.load_cert_chain(certfile=self.certfile, keyfile=self.keyfile)
-        context.options |= ssl.OP_NO_TLSv1 | ssl.OP_NO_TLSv1_1
+        context.minimum_version = ssl.TLSVersion.TLSv1_2
         context.options |= ssl.OP_NO_COMPRESSION
         self.ssl_context = context
 
