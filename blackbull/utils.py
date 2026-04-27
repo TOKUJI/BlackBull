@@ -89,7 +89,16 @@ def parse_post_data(string):
 
 
 class EventEmitter:
-    """ Asynchronous EventEmitter? """
+    """Lightweight async event-emitter backed by ``asyncio.create_task``.
+
+    !!! experimental
+        This class is under active development and its API is not yet stable.
+        Do not use in production code — method signatures and behaviour may
+        change without notice.
+
+    Listeners registered with `on` are called every time the event fires.
+    Listeners registered with `once` are called exactly once, then removed.
+    """
     def __init__(self):
         self._listeners = defaultdict(list)
         self._listeners_once = defaultdict(list)

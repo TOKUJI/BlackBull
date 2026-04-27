@@ -109,6 +109,9 @@ class _InotifyEvent(Structure):
 
 
 class Watcher(object):
+    """
+    !!! experimental
+    """
     IN_CHANGED = INOTIFY_EVENT_NAME["IN_MODIFY"] \
                | INOTIFY_EVENT_NAME["IN_CLOSE_WRITE"]  \
                | INOTIFY_EVENT_NAME["IN_MOVED_FROM"] \
