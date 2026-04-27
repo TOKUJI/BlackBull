@@ -111,6 +111,9 @@ class _InotifyEvent(Structure):
 class Watcher(object):
     """
     !!! experimental
+        This class is under active development and its API is not yet stable.
+        Do not use in production code — method signatures and behaviour may
+        change without notice.
     """
     IN_CHANGED = INOTIFY_EVENT_NAME["IN_MODIFY"] \
                | INOTIFY_EVENT_NAME["IN_CLOSE_WRITE"]  \
