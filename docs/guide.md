@@ -50,8 +50,9 @@ if __name__ == '__main__':
     asyncio.run(app.run(port=8000))
 ```
 
-Every handler is an `async` function receiving `(scope, receive, send)`.  Pass a
-`Response` or `JSONResponse` directly to `send` — BlackBull unwraps it automatically.
+Every handler is an `async` function.  The full form receives `(scope, receive, send)`
+and calls `send` directly.  A simplified form omits those parameters and returns the
+response value instead — BlackBull wraps it automatically (see §3.5).
 
 ---
 
@@ -208,7 +209,90 @@ The following are protocol violations and raise `ProtocolError`:
 | New TEXT or BINARY frame while a fragment sequence is open | §5.4 |
 | Control frame (ping/pong/close) with FIN=0 | §5.5 |
 
-### 3.4  Detecting client disconnection
+### 3.4  Simplified handler signatures
+
+The full `(scope, receive, send)` triplet is always available, but for most
+handlers only a subset of that information is needed.  BlackBull detects at
+registration time whether a handler omits those parameters and wraps it
+automatically — no boilerplate needed.
+
+#### No parameters
+
+The handler in [`examples/helloworld-simple.py`](../examples/helloworld-simple.py)
+is the minimal form:
+
+```python
+@app.route(path='/')
+async def hello():
+    return "Hello, world!"
+```
+
+BlackBull sends the return value as the response body.  No `send` call needed.
+
+#### Path parameters by name
+
+Declare parameters whose names match `{name}` segments in the path.  BlackBull
+extracts the captured value from `scope['path_params']` and injects it directly:
+
+```python
+@app.route(path='/tasks/{task_id}')
+async def get_task(task_id):       # str by default
+    return f"Task {task_id}"
+```
+
+Add a type annotation and BlackBull coerces the value before calling the handler:
+
+```python
+@app.route(path='/tasks/{task_id}')
+async def get_task(task_id: int):  # coerced to int; raises 500 if not convertible
+    return {"id": task_id}
+```
+
+#### Request body
+
+Name a parameter `body` to receive the complete request body as `bytes`.
+BlackBull reads all chunks before calling the handler:
+
+```python
+import json
+
+@app.route(path='/echo', methods=[HTTPMethod.POST])
+async def echo(body: bytes):
+    data = json.loads(body)
+    return data          # dict → JSONResponse automatically
+```
+
+#### The `scope` dict
+
+Name a parameter `scope` to receive the full scope dict alongside other
+simplified parameters:
+
+```python
+@app.route(path='/items/{item_id}')
+async def get_item(item_id: int, scope):
+    lang = scope['headers'].get(b'accept-language', b'en').decode()
+    return {"id": item_id, "lang": lang}
+```
+
+#### Return value mapping
+
+| Return type | Response sent |
+|---|---|
+| `str` | `Response(value.encode())` — `text/html; charset=utf-8` |
+| `bytes` | `Response(value)` — `text/html; charset=utf-8` |
+| `dict` | `JSONResponse(value)` — `application/json` |
+| `Response` / `JSONResponse` | Passed to `send` as-is |
+| `None` | Nothing sent (handler called `send` directly, or intentionally empty) |
+
+#### When to use the full triplet
+
+- **WebSocket handlers** always receive the full `(scope, receive, send)` triplet.
+- **Middleware functions** must keep the `call_next` (or `inner`) parameter — the
+  simplified adaptation does not apply to them.
+- When you need to call `receive()` in a loop (streaming uploads, long-polling)
+  use the full form and call `receive()` yourself.
+
+### 3.5  Detecting client disconnection
 
 When the remote side closes the connection, `receive()` returns
 `{'type': 'http.disconnect'}`.  This is useful for long-polling and
