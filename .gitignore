@@ -105,3 +105,6 @@ venv.bak/
 
 # vscode
 .vscode/
+
+# private development notes (not for end users)
+CLAUDE_DEV.md
