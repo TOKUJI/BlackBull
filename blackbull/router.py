@@ -69,6 +69,98 @@ def has_middleware_param(fn) -> bool:
 has_inner = has_middleware_param  # backward-compat alias
 
 
+_ASGI_PARAMS = frozenset({'scope', 'receive', 'send'})
+
+
+def _is_simplified_handler(fn) -> bool:
+    """Return True if *fn* lacks the full ASGI (scope, receive, send) signature.
+
+    Middlewares (call_next/inner) and variadic handlers (*args/**kwargs) are
+    never considered simplified — they can already accept any arguments.
+    """
+    if _middleware_param(fn) is not None:
+        return False
+    params = inspect.signature(fn).parameters
+    # *args / **kwargs handlers are variadic — leave them untouched
+    for p in params.values():
+        if p.kind in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD):
+            return False
+    return not _ASGI_PARAMS.issubset(params)
+
+
+def _adapt_handler(fn, path: str):
+    """Wrap a simplified handler in an ASGI (scope, receive, send) coroutine.
+
+    Parameter resolution:
+    - Name matches a {param} in the path pattern → scope['path_params'][name],
+      coerced to the annotated type if one is given.
+    - 'body' → await read_body(receive)
+    - 'scope' → the raw scope dict
+    - Anything else → TypeError raised at registration time (fail fast).
+
+    Return values: Response → send(result); bytes → send(Response(result));
+    str → send(Response(result.encode())); dict → send(JSONResponse(result));
+    None → no send; other → TypeError at call time.
+    """
+    from .request import read_body as _read_body
+    from .response import Response as _Response, JSONResponse as _JSONResponse
+
+    path_param_names: set[str] = set(Router.f_string.findall(path))
+    params = inspect.signature(fn).parameters
+    annotations = {n: p.annotation for n, p in params.items()}
+
+    for name in params:
+        if name in path_param_names or name in ('body', 'scope'):
+            continue
+        raise TypeError(
+            f"Simplified handler {fn.__name__!r}: cannot resolve parameter {name!r}. "
+            f"Expected path params {sorted(path_param_names)!r}, 'body', or 'scope'."
+        )
+
+    is_async = inspect.iscoroutinefunction(fn)
+
+    @wraps(fn)
+    async def _wrapper(scope, receive, send):
+        kwargs: dict = {}
+        for name in params:
+            if name == 'scope':
+                kwargs[name] = scope
+            elif name == 'body':
+                kwargs[name] = await _read_body(receive)
+            else:
+                raw = scope.get('path_params', {}).get(name, '')
+                ann = annotations.get(name, inspect.Parameter.empty)
+                if ann is not inspect.Parameter.empty and isinstance(ann, type):
+                    try:
+                        kwargs[name] = ann(raw)
+                    except (ValueError, TypeError) as exc:
+                        raise TypeError(
+                            f"Path param {name!r}: cannot coerce {raw!r} to {ann.__name__}"
+                        ) from exc
+                else:
+                    kwargs[name] = raw
+
+        result = (await fn(**kwargs)) if is_async else fn(**kwargs)
+
+        if result is None:
+            return
+        elif isinstance(result, _Response):
+            await send(result)
+        elif isinstance(result, bytes):
+            await send(_Response(result))
+        elif isinstance(result, str):
+            await send(_Response(result.encode()))
+        elif isinstance(result, dict):
+            await send(_JSONResponse(result))
+        else:
+            raise TypeError(
+                f"Simplified handler {fn.__name__!r} returned unsupported type "
+                f"{type(result).__name__!r}."
+            )
+
+    return _wrapper
+
+
 def _to_tuple(value: Any) -> tuple:
     """
     Normalise a value into a tuple.
@@ -290,6 +382,9 @@ class Router(UserDict, BaseRouter):
         def register(fn):
             logger.debug(f'Router.route_fn.register() is called. {fn}')
 
+            if _is_simplified_handler(fn):
+                fn = _adapt_handler(fn, path)
+
             @wraps(fn)
             def wrapper(*args, **kwds):
                 logger.debug('Router.route_fn.register.wrapper() is called.')
@@ -346,12 +441,16 @@ class Router(UserDict, BaseRouter):
         logger.debug('Router.route() is called. functions=%r middlewares=%r', functions, middlewares)
 
         if functions:
-            self._register_chain(list(functions), path, methods, scheme)
+            fns = list(functions)
+            if _is_simplified_handler(fns[-1]):
+                fns[-1] = _adapt_handler(fns[-1], path)
+            self._register_chain(fns, path, methods, scheme)
             return lambda fn: fn
 
         if middlewares:
             def decorator(fn):
-                self._register_chain(list(middlewares) + [fn], path, methods, scheme)
+                adapted = _adapt_handler(fn, path) if _is_simplified_handler(fn) else fn
+                self._register_chain(list(middlewares) + [adapted], path, methods, scheme)
                 return fn
             return decorator
 

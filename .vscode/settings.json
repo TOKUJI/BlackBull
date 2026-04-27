@@ -5,6 +5,7 @@
   "python.analysis.typeCheckingMode": "basic",
   "python.testing.pytestArgs": [
     "--typeguard-packages=blackbull",
-    "tests"
+    "tests",
+    "--cov-config=pyproject.toml"
   ]
 }

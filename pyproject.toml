@@ -1,0 +1,7 @@
+[tool.coverage.run]
+source = ["blackbull"]
+
+[tool.coverage.report]
+omit = ["*/tests/*",
+        "examples/*"
+        ]

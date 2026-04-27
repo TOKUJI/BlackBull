@@ -1,12 +1,13 @@
 from logging import getLogger
 from http import HTTPStatus, HTTPMethod
+from unittest.mock import AsyncMock
 # import asyncio
 import pytest
 
 # Test targets
 from blackbull.utils import Scheme
-from blackbull.router import Router, _middleware_param, has_middleware_param
-from blackbull import BlackBull
+from blackbull.router import Router, _middleware_param, has_middleware_param, _is_simplified_handler, _adapt_handler
+from blackbull import BlackBull, Response, JSONResponse
 from blackbull.router import RouteGroup
 
 logger = getLogger(__name__)
@@ -513,3 +514,288 @@ async def test_plain_route_path_param_in_scope(router):
     scope = {}
     await f(scope, None, None)
     assert scope['path_params']['value'] == 'hello'
+
+
+# ---------------------------------------------------------------------------
+# Simplified handler tests
+# ---------------------------------------------------------------------------
+
+class TestSimplifiedHandlerDetection:
+    def test_full_asgi_not_simplified(self):
+        async def fn(scope, receive, send): pass
+        assert _is_simplified_handler(fn) is False
+
+    def test_middleware_not_simplified(self):
+        async def fn(scope, receive, send, call_next): pass
+        assert _is_simplified_handler(fn) is False
+
+    def test_middleware_inner_not_simplified(self):
+        async def fn(scope, receive, send, inner): pass
+        assert _is_simplified_handler(fn) is False
+
+    def test_no_params_is_simplified(self):
+        async def fn(): pass
+        assert _is_simplified_handler(fn) is True
+
+    def test_path_param_only_is_simplified(self):
+        async def fn(task_id): pass
+        assert _is_simplified_handler(fn) is True
+
+    def test_body_only_is_simplified(self):
+        async def fn(body: bytes): pass
+        assert _is_simplified_handler(fn) is True
+
+    def test_scope_only_is_simplified(self):
+        async def fn(scope): pass
+        assert _is_simplified_handler(fn) is True
+
+    def test_partial_asgi_is_simplified(self):
+        # Has 'scope' but not 'receive'/'send'
+        async def fn(scope, receive): pass
+        assert _is_simplified_handler(fn) is True
+
+
+class TestSimplifiedHandlerFailFast:
+    def test_unknown_param_raises_at_registration(self):
+        async def fn(x): pass
+        with pytest.raises(TypeError, match="cannot resolve parameter 'x'"):
+            _adapt_handler(fn, '/items/{id}')
+
+    def test_unknown_param_raises_when_not_a_path_param(self):
+        async def fn(name): pass
+        with pytest.raises(TypeError, match="cannot resolve parameter 'name'"):
+            # path has {id}, not {name}
+            _adapt_handler(fn, '/items/{id}')
+
+
+class TestSimplifiedHandlerPathParams:
+    @pytest.mark.asyncio
+    async def test_no_params(self):
+        send = AsyncMock()
+        async def fn(): return Response(b'hello')
+        wrapper = _adapt_handler(fn, '/')
+        await wrapper({}, None, send)
+        send.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_path_param_str_no_annotation(self):
+        captured = {}
+        async def fn(task_id): captured['task_id'] = task_id
+        wrapper = _adapt_handler(fn, '/tasks/{task_id}')
+        await wrapper({'path_params': {'task_id': '42'}}, None, AsyncMock())
+        assert captured['task_id'] == '42'
+        assert isinstance(captured['task_id'], str)
+
+    @pytest.mark.asyncio
+    async def test_path_param_int_annotation(self):
+        captured = {}
+        async def fn(task_id: int): captured['task_id'] = task_id
+        wrapper = _adapt_handler(fn, '/tasks/{task_id}')
+        await wrapper({'path_params': {'task_id': '42'}}, None, AsyncMock())
+        assert captured['task_id'] == 42
+        assert isinstance(captured['task_id'], int)
+
+    @pytest.mark.asyncio
+    async def test_multiple_path_params(self):
+        captured = {}
+        async def fn(x, y: int): captured.update({'x': x, 'y': y})
+        wrapper = _adapt_handler(fn, '/a/{x}/{y}')
+        await wrapper({'path_params': {'x': 'hello', 'y': '7'}}, None, AsyncMock())
+        assert captured == {'x': 'hello', 'y': 7}
+
+    @pytest.mark.asyncio
+    async def test_path_param_coercion_error(self):
+        async def fn(task_id: int): pass
+        wrapper = _adapt_handler(fn, '/tasks/{task_id}')
+        with pytest.raises(TypeError, match="cannot coerce"):
+            await wrapper({'path_params': {'task_id': 'notanint'}}, None, AsyncMock())
+
+    @pytest.mark.asyncio
+    async def test_scope_escape_hatch(self):
+        captured = {}
+        async def fn(scope): captured['scope'] = scope
+        wrapper = _adapt_handler(fn, '/')
+        fake_scope = {'type': 'http', 'method': 'GET'}
+        await wrapper(fake_scope, None, AsyncMock())
+        assert captured['scope'] is fake_scope
+
+
+class TestSimplifiedHandlerBodyInjection:
+    @pytest.mark.asyncio
+    async def test_body_injected(self):
+        captured = {}
+        async def fn(body: bytes): captured['body'] = body
+
+        async def fake_receive():
+            return {'type': 'http.request', 'body': b'hello', 'more_body': False}
+
+        wrapper = _adapt_handler(fn, '/')
+        await wrapper({}, fake_receive, AsyncMock())
+        assert captured['body'] == b'hello'
+
+    @pytest.mark.asyncio
+    async def test_no_body_param_does_not_call_receive(self):
+        async def fn(task_id): pass
+
+        called = []
+        async def should_not_be_called():
+            called.append(True)
+            return {'type': 'http.request', 'body': b'', 'more_body': False}
+
+        wrapper = _adapt_handler(fn, '/tasks/{task_id}')
+        await wrapper({'path_params': {'task_id': '1'}}, should_not_be_called, AsyncMock())
+        assert called == []
+
+
+class TestSimplifiedHandlerReturnValues:
+    @pytest.mark.asyncio
+    async def test_returns_response(self):
+        send = AsyncMock()
+        resp = Response(b'ok')
+        async def fn(): return resp
+        wrapper = _adapt_handler(fn, '/')
+        await wrapper({}, None, send)
+        send.assert_called_once_with(resp)
+
+    @pytest.mark.asyncio
+    async def test_returns_bytes(self):
+        send = AsyncMock()
+        async def fn(): return b'hello'
+        wrapper = _adapt_handler(fn, '/')
+        await wrapper({}, None, send)
+        send.assert_called_once()
+        arg = send.call_args[0][0]
+        assert isinstance(arg, Response)
+
+    @pytest.mark.asyncio
+    async def test_returns_str(self):
+        send = AsyncMock()
+        async def fn(): return 'hello'
+        wrapper = _adapt_handler(fn, '/')
+        await wrapper({}, None, send)
+        send.assert_called_once()
+        arg = send.call_args[0][0]
+        assert isinstance(arg, Response)
+
+    @pytest.mark.asyncio
+    async def test_returns_dict(self):
+        send = AsyncMock()
+        async def fn(): return {'key': 'value'}
+        wrapper = _adapt_handler(fn, '/')
+        await wrapper({}, None, send)
+        send.assert_called_once()
+        arg = send.call_args[0][0]
+        assert isinstance(arg, JSONResponse)
+
+    @pytest.mark.asyncio
+    async def test_returns_none_no_send(self):
+        send = AsyncMock()
+        async def fn(): return None
+        wrapper = _adapt_handler(fn, '/')
+        await wrapper({}, None, send)
+        send.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_returns_unsupported_type_raises(self):
+        async def fn(): return 42
+        wrapper = _adapt_handler(fn, '/')
+        with pytest.raises(TypeError, match="unsupported type"):
+            await wrapper({}, None, AsyncMock())
+
+
+class TestSimplifiedHandlerSyncAndAsync:
+    @pytest.mark.asyncio
+    async def test_sync_handler(self):
+        send = AsyncMock()
+        def fn(task_id: int): return Response(str(task_id).encode())
+        wrapper = _adapt_handler(fn, '/tasks/{task_id}')
+        await wrapper({'path_params': {'task_id': '7'}}, None, send)
+        send.assert_called_once()
+        arg = send.call_args[0][0]
+        assert isinstance(arg, Response)
+
+    @pytest.mark.asyncio
+    async def test_async_handler(self):
+        send = AsyncMock()
+        async def fn(task_id: int): return Response(str(task_id).encode())
+        wrapper = _adapt_handler(fn, '/tasks/{task_id}')
+        await wrapper({'path_params': {'task_id': '7'}}, None, send)
+        send.assert_called_once()
+
+
+class TestSimplifiedHandlerRegistration:
+    @pytest.mark.asyncio
+    async def test_route_fn_path(self, router):
+        """Simplified handler registered via plain @router.route() decorator."""
+        @router.route(path='/tasks/{task_id}', methods=[HTTPMethod.GET])
+        async def get_task(task_id):
+            return Response(task_id.encode())
+
+        send = AsyncMock()
+        fn = router[('/tasks/99', HTTPMethod.GET, Scheme.http)]
+        await fn({'path_params': {'task_id': '99'}}, None, send)
+        send.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_no_params_route(self, router):
+        """Handler with no params at all."""
+        @router.route(path='/', methods=[HTTPMethod.GET])
+        async def index():
+            return Response(b'Hello')
+
+        send = AsyncMock()
+        fn = router[('/', HTTPMethod.GET, Scheme.http)]
+        await fn({}, None, send)
+        send.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_middlewares_branch(self, router):
+        """Simplified handler at the end of a middlewares=[...] chain."""
+        seen = []
+
+        async def mw(scope, receive, send, call_next):
+            seen.append('mw')
+            await call_next(scope, receive, send)
+
+        @router.route(path='/tasks/{task_id}', methods=[HTTPMethod.GET],
+                      middlewares=[mw])
+        async def get_task(task_id):
+            seen.append(task_id)
+            return Response(task_id.encode())
+
+        send = AsyncMock()
+        fn = router[('/tasks/5', HTTPMethod.GET, Scheme.http)]
+        await fn({'path_params': {'task_id': '5'}}, None, send)
+        assert seen == ['mw', '5']
+        send.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_functions_branch(self, router):
+        """Simplified handler as the last item in functions=[...]."""
+        seen = []
+
+        async def mw(scope, receive, send, call_next):
+            seen.append('mw')
+            await call_next(scope, receive, send)
+
+        async def get_task(task_id: int):
+            seen.append(task_id)
+            return Response(str(task_id).encode())
+
+        router.route(path='/tasks/{task_id}', methods=[HTTPMethod.GET],
+                     functions=[mw, get_task])
+
+        send = AsyncMock()
+        fn = router[('/tasks/3', HTTPMethod.GET, Scheme.http)]
+        await fn({'path_params': {'task_id': '3'}}, None, send)
+        assert seen == ['mw', 3]
+        send.assert_called_once()
+
+    def test_full_asgi_handler_unchanged(self, router):
+        """Full ASGI handler still passes through _is_simplified_handler as False."""
+        async def full(scope, receive, send): pass
+        assert _is_simplified_handler(full) is False
+        # Registering it should work without any wrapping
+        router.route(path='/full', methods=[HTTPMethod.GET])(full)
+        fn = router[('/full', HTTPMethod.GET, Scheme.http)]
+        assert fn is not None
