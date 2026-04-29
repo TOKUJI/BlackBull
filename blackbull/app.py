@@ -19,7 +19,7 @@ Companion definitions live in this module to avoid circular imports:
 import functools
 import inspect
 import warnings
-from collections.abc import Callable, Iterable
+from collections.abc import Awaitable, Callable, Iterable
 from http import HTTPStatus, HTTPMethod
 from pathlib import Path
 import asyncio
@@ -159,7 +159,7 @@ class BlackBull:
             v.encode() if isinstance(v, str) else v for v in value
         ]
 
-    def on_startup(self, fn: EventHandler) -> EventHandler:
+    def on_startup(self, fn: Callable[[], Awaitable[None]]) -> Callable[[], Awaitable[None]]:
         """Register a zero-argument coroutine to run at lifespan startup.
 
         The handler is wrapped in an adapter and registered as an
@@ -187,7 +187,7 @@ class BlackBull:
         self._dispatcher.intercept('app_startup', _adapter)
         return fn
 
-    def on_shutdown(self, fn: EventHandler) -> EventHandler:
+    def on_shutdown(self, fn: Callable[[], Awaitable[None]]) -> Callable[[], Awaitable[None]]:
         """Register a zero-argument coroutine to run at lifespan shutdown.
 
         The handler is wrapped in an adapter and registered as an
