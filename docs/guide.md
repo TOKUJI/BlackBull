@@ -885,9 +885,10 @@ Events that application code can subscribe to.  Internal Level A events used by 
 | `app_startup` | Server has bound its socket and is about to accept connections | *(empty)* | Sugar: `@app.on_startup` |
 | `app_shutdown` | Server has received a stop signal and is about to exit | *(empty)* | Sugar: `@app.on_shutdown` |
 | `websocket_message` | A WebSocket message has been fully received and reassembled by the server, before the ASGI handler reads it via `receive()` | `scope` (the connection scope dict), `text` (`str` for text frames, `None` otherwise), `bytes` (`bytes` for binary frames, `None` otherwise) | Observation only — see §9.6.1 |
+| `request_completed` | An HTTP request has finished — the response has been fully sent (or the request failed before that, e.g. 404 or unhandled exception) | `scope`, `client_ip`, `method`, `path`, `http_version`, `status` (`int` or `'-'`), `response_bytes` (`int`), `duration_ms` (`float`) | Observation only — see §9.6.2 |
 
 > Additional events (`request_received`, `before_handler`, `after_handler`,
-> `request_completed`, `request_disconnected`, `error`,
+> `request_disconnected`, `error`,
 > `websocket_connected`, `websocket_disconnected`) are
 > on the roadmap and will appear in this table as they ship.
 
@@ -908,6 +909,40 @@ async def log_message(event: Event):
 
 !!! note "Per-connection identity"
     The `scope` dict identifies the connection path and headers, but does not yet carry a unique connection ID.  Two simultaneous connections from the same client to the same path produce indistinguishable scopes.  A `websocket_connected` event (planned) will provide per-connection identity when it ships.
+
+#### 9.6.2 `request_completed` — observation only
+
+`request_completed` fires once per HTTP request, after the response has been sent (or after the request has otherwise concluded — for example, after a 404 or after an unhandled exception in the handler).  It fires from the same site as the `blackbull.access` log record, so every request that produces an access-log entry also produces this event.
+
+`detail` carries both the connection `scope` and the same flattened fields the access log carries:
+
+| Key | Type | Description |
+| --- | --- | --- |
+| `scope` | `dict` | The ASGI scope dict for the request |
+| `client_ip` | `str` | Remote address (`'-'` when unavailable) |
+| `method` | `str` | HTTP method (e.g. `'GET'`) |
+| `path` | `str` | Request path (e.g. `'/api/items'`) |
+| `http_version` | `str` | Protocol version (e.g. `'1.1'`, `'2'`) |
+| `status` | `int` \| `str` | Response status code, or `'-'` if not sent |
+| `response_bytes` | `int` | Total body bytes written to the wire |
+| `duration_ms` | `float` | Wall-clock duration from first byte received to response complete, in milliseconds |
+
+```python
+@app.on('request_completed')
+async def log_request(event: Event):
+    d = event.detail
+    print(f"{d['method']} {d['path']} → {d['status']} ({d['duration_ms']:.1f}ms)")
+```
+
+Use `scope` when you need request context beyond the flat fields — for example, path parameters injected by the router, or a trace span stored in `scope['state']`.
+
+**This event is observation only.**  The response has already been sent by the time the event fires, so nothing an interceptor registered with `@app.intercept('request_completed')` can do will change what the client received.  The framework makes no guarantees about:
+
+- whether mutations to `detail` are propagated anywhere;
+- whether raising from an interceptor changes the response;
+- ordering between an interceptor and shutdown or other completion steps.
+
+If you need to act *during* the request (authentication, header rewriting, validation), use middleware (§4) — its event-driven counterpart will be `@app.intercept('before_handler')` once that event ships.
 
 ### 9.7 Exception handling
 

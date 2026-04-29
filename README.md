@@ -56,6 +56,9 @@ pytest
 - [x] HTTP/2: normalize header names to lowercase after HPACK decode (RFC 7540 §8.1.2)
 - [x] HTTP/2 `DATA` frame: `HTTP2Handler.run()` dropped the `DATA` case during CONTINUATION refactoring — restore so DATA frames call the ASGI app (regression)
 - [x] HTTP/2 `GOAWAY` frame: `ResponderFactory` has no `GoAwayResponder` handler — receiving GOAWAY raises `KeyError` (server-side); sending GOAWAY on graceful shutdown is also missing
+- [ ] WebSocket §5.2: send CLOSE frame (1002) and fail connection on unknown opcode (currently logs warning and delivers as websocket.receive)
+- [ ] WebSocket §7.2: send CLOSE frame (1002) before TCP teardown for protocol violations (currently exception propagates without CLOSE)
+- [ ] WebSocket: explicit writer.close() on protocol violations (currently relies on outer finally block)
 
 ### P2 — Important protocol features
 

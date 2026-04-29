@@ -16,6 +16,7 @@ import socket
 
 # private library
 from ..utils import HTTP2, pop_safe, check_port
+from ..event import Event
 from ..protocol.stream import Stream, StreamState
 from ..protocol.rsock import create_dual_stack_sockets
 from ..protocol.frame import ErrorCodes, FrameFactory, FrameTypes, FrameBase, parse_priority_field, PseudoHeaders
@@ -130,7 +131,8 @@ def _make_capturing_receive(receive, record: AccessLogRecord):
     return capturing_receive
 
 
-async def _run_with_log(coro, record: AccessLogRecord) -> None:
+async def _run_with_log(coro, record: AccessLogRecord,
+                        dispatcher=None, scope: dict | None = None) -> None:
     """Await *coro* then emit one access log entry on 'blackbull.access'.
 
     CancelledError re-raised so TaskGroup cancellation propagates correctly.
@@ -145,6 +147,20 @@ async def _run_with_log(coro, record: AccessLogRecord) -> None:
         logger.exception('HTTP/2 stream raised an unhandled exception')
     finally:
         _access_logger.info(record.format(), extra=record.as_extra())
+        if dispatcher is not None and scope is not None:
+            await dispatcher.emit(Event(
+                'request_completed',
+                detail={
+                    'scope': scope,
+                    'client_ip': record.client_ip,
+                    'method': record.method,
+                    'path': record.path,
+                    'http_version': record.http_version,
+                    'status': record.status,
+                    'response_bytes': record.response_bytes,
+                    'duration_ms': record.duration_ms(),
+                },
+            ))
 
 
 
@@ -302,10 +318,25 @@ class HTTP11Handler(BaseHandler):
                 log_record = AccessLogRecord.from_scope(scope)
                 scope['state']['access_log'] = log_record
                 capturing_send = _make_capturing_send(send, log_record)
+                _dispatcher = getattr(self.app, '_dispatcher', None)
                 try:
                     await self.app(scope, RecipientFactory.http1(self.reader, scope), capturing_send)
                 finally:
                     _access_logger.info(log_record.format(), extra=log_record.as_extra())
+                    if _dispatcher is not None:
+                        await _dispatcher.emit(Event(
+                            'request_completed',
+                            detail={
+                                'scope': scope,
+                                'client_ip': log_record.client_ip,
+                                'method': log_record.method,
+                                'path': log_record.path,
+                                'http_version': log_record.http_version,
+                                'status': log_record.status,
+                                'response_bytes': log_record.response_bytes,
+                                'duration_ms': log_record.duration_ms(),
+                            },
+                        ))
                 self.request = b''
 
                 # Keep-alive: read the start of the next request.
@@ -591,7 +622,9 @@ class HTTP2Handler(BaseHandler):
                         tg.create_task(
                             _run_with_log(
                                 self.app(scope, stream_recipient, capturing_send),
-                                log_record)
+                                log_record,
+                                dispatcher=getattr(self.app, '_dispatcher', None),
+                                scope=scope)
                         )
                     else:
                         waiting_continuation = True
@@ -621,7 +654,9 @@ class HTTP2Handler(BaseHandler):
                         tg.create_task(
                             _run_with_log(
                                 self.app(scope, stream_recipient, capturing_send),
-                                log_record)
+                                log_record,
+                                dispatcher=getattr(self.app, '_dispatcher', None),
+                                scope=scope)
                         )
                     else:
                         continue  # more CONTINUATION frames expected

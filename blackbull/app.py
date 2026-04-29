@@ -78,7 +78,8 @@ async def _default_error_handler(scope, receive, send):  # noqa: ARG001
         lines.append(f"{type(exc).__name__}: {exc}")
     body = '\n'.join(lines).encode()
 
-    await send(body, status, headers)
+    await send({'type': 'http.response.start', 'status': int(status), 'headers': headers})
+    await send({'type': 'http.response.body', 'body': body, 'more_body': False})
 
 
 class RouteGroup:
