@@ -1766,7 +1766,9 @@ class TestWebSocketRecipientUnsupportedOpcode:
 
         fake_header = WSFrameHeader(fin=True, rsv1=False, rsv2=False, rsv3=False, opcode=0x03, masked=False, length=2)
 
-        with patch.object(WebSocketSender, '_read_frame_header', AsyncMock(return_value=fake_header)):
+        eof = asyncio.IncompleteReadError(b'', 2)
+        with patch.object(WebSocketSender, '_read_frame_header',
+                          AsyncMock(side_effect=[fake_header, eof])):
             with patch.object(WebSocketSender, '_read_payload', AsyncMock(return_value=b'\x00\x00')):
                 with caplog.at_level(logging.WARNING, logger='blackbull.server.recipient'):
                     event = await r()

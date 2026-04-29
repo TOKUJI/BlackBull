@@ -352,6 +352,9 @@ Signature: `async def mw(scope, receive, send, call_next)`.
 - The legacy parameter name `inner` is accepted as an alias for `call_next`.
 - Sending a response without calling `call_next` **short-circuits** all inner layers.
 
+> **See also**: §9 Events covers the underlying hook API. 
+> Middleware in this section is in fact a sugar layer over `@app.intercept('before_handler')`; for purely observational concerns (logging, metrics, tracing) prefer `@app.on(...)` from §9 — middleware semantics force every observer to run on the request critical path, and one slow observer can degrade every response.
+
 ### 4.2  Attaching middleware to a route
 
 Middleware wraps the handler like nested shells.  The list order is
@@ -773,22 +776,153 @@ unhandled subclasses.
 
 ---
 
-## §9  Lifespan Hooks
+## §9 Events
+
+BlackBull exposes an event-driven hook API on top of (and integrated with) the ASGI request lifecycle.  Application code registers handlers with one of two decorators — `@app.intercept(...)` for synchronous interception, or `@app.on(...)` for asynchronous observation — and the framework dispatches events to them at well-defined points in the application's lifetime.
+
+### 9.1 Overview — interception vs observation
+
+There are two kinds of hook, with deliberately different semantics:
+
+| Property | `@app.intercept(name)` | `@app.on(name)` |
+| --- | --- | --- |
+| Execution | Synchronous (awaited inline) | Asynchronous (fire-and-forget) |
+| Order | Registration order, serial | Independent, no inter-handler order |
+| Exceptions | Propagate to the emitter | Isolated, logged, never propagate |
+| Can short-circuit / modify flow | Yes | No |
+| Typical use | Auth, validation, rewriting | Logging, metrics, tracing |
+
+The split is a defence against subtle bugs.  Writing an authentication check as an observer would silently let unauthorized requests through (the request proceeds before the observer has finished, and the observer cannot signal failure to the emitter).  Conversely, putting slow telemetry into an interceptor would block the request path on every emission.
+
+Note that BlackBull does not provide hooks to "observe but also block" or "intercept but also fire-and-forget".
+
+### 9.2 The `@app.intercept` decorator
+
+Register a synchronous interceptor for a named event:
+
+```python
+from blackbull import BlackBull, Event
+
+app = BlackBull()
+
+@app.intercept('app_startup')
+async def warm_cache(event: Event):
+    await cache.preload()
+```
+
+Interceptors are awaited in registration order during emission.  An exception raised by an interceptor:
+
+* aborts the remaining interceptors for that event, and
+* propagates to the code that called `emit`.
+
+For lifespan events, that means an interceptor exception will surface to the ASGI server driving the lifespan protocol — typically aborting startup.
+
+### 9.3 The `@app.on` decorator
+
+Register an asynchronous observer for a named event:
+
+```python
+@app.on('app_shutdown')
+async def flush_metrics(event: Event):
+    await metrics_client.flush()
+```
+
+Observers are scheduled with `asyncio.create_task` when the event is emitted and run independently of the emitter.  They cannot block the emitter, and their exceptions are caught, logged on the `blackbull` logger at `ERROR`, and discarded — they cannot surface to the emitter or to other observers.
+
+Use observers for telemetry, audit logging, cache warming, and other side-effects that the request path should not depend on.
+
+### 9.4 The `Event` object
+
+Both decorators register handlers with the signature `async def handler(event: Event)`.  `Event` is a frozen dataclass:
+
+```python
+from dataclasses import dataclass, field
+
+@dataclass(frozen=True)
+class Event:
+    name: str
+    detail: dict = field(default_factory=dict)
+```
+
+`name` identifies which event fired; `detail` carries event-specific data (for example, a `request_completed` event may carry timing information in its `detail`).  The catalogue of event names and their `detail` shape is in §9.6.
+
+### 9.5 Lifespan events — `app_startup` / `app_shutdown`
+
+The two lifespan events fire once per server lifetime and correspond directly to the ASGI `lifespan.startup` / `lifespan.shutdown` messages.
+
+For the common case where you do not need access to the `Event` object, two zero-argument sugar decorators are provided:
 
 ```python
 @app.on_startup
-async def startup():
+async def init_db():
     await db.connect()
-    print('Database ready')
 
 @app.on_shutdown
-async def shutdown():
+async def close_db():
     await db.disconnect()
 ```
 
-- `on_startup` fires after the server socket is bound, before accepting connections.
-- `on_shutdown` fires when the server receives a stop signal (e.g. `Ctrl-C`).
-- Multiple hooks can be registered; they run in registration order.
+These are exact equivalents of:
+
+```python
+@app.intercept('app_startup')
+async def _wrapped_init_db(event: Event):
+    await init_db()
+
+@app.intercept('app_shutdown')
+async def _wrapped_close_db(event: Event):
+    await close_db()
+```
+
+Use the sugar form when your handler does not need the event itself; reach for `@app.intercept('app_startup')` directly when you want the consistency of writing every hook as `(event: Event) -> None`.
+
+### 9.6 Event reference
+
+Events that application code can subscribe to.  Internal Level A events used by the framework's own components are documented separately and are not subscribable from application code.
+
+| Event name | Fires when | `detail` keys | Notes |
+| --- | --- | --- | --- |
+| `app_startup` | Server has bound its socket and is about to accept connections | *(empty)* | Sugar: `@app.on_startup` |
+| `app_shutdown` | Server has received a stop signal and is about to exit | *(empty)* | Sugar: `@app.on_shutdown` |
+| `websocket_message` | A WebSocket message has been fully received and reassembled by the server, before the ASGI handler reads it via `receive()` | `scope` (the connection scope dict), `text` (`str` for text frames, `None` otherwise), `bytes` (`bytes` for binary frames, `None` otherwise) | Observation only — see §9.6.1 |
+
+> Additional events (`request_received`, `before_handler`, `after_handler`,
+> `request_completed`, `request_disconnected`, `error`,
+> `websocket_connected`, `websocket_disconnected`) are
+> on the roadmap and will appear in this table as they ship.
+
+#### 9.6.1 `websocket_message` — observation only
+
+`websocket_message` fires once per fully reassembled WebSocket message, inside the server read loop, *before* the message is delivered to the application's `receive()` call.  Observers therefore see every message the server accepted — including ones the handler never reads.
+
+```python
+@app.on('websocket_message')
+async def log_message(event: Event):
+    if event.detail['text'] is not None:
+        print(f"[ws] text on {event.detail['scope']['path']}: {event.detail['text']!r}")
+    else:
+        print(f"[ws] binary on {event.detail['scope']['path']}: {len(event.detail['bytes'])} bytes")
+```
+
+**This event is observation only.**  Because the message has already been read off the wire and buffered, interceptors registered with `@app.intercept('websocket_message')` cannot suppress delivery to the application handler.  Use the observe path (`@app.on`) for analytics, logging, and monitoring.
+
+!!! note "Per-connection identity"
+    The `scope` dict identifies the connection path and headers, but does not yet carry a unique connection ID.  Two simultaneous connections from the same client to the same path produce indistinguishable scopes.  A `websocket_connected` event (planned) will provide per-connection identity when it ships.
+
+### 9.7 Exception handling
+
+The two hook kinds have deliberately different exception semantics, summarised in §9.1.  Concretely:
+
+* **Interceptor raises** → remaining interceptors for that event do not run; the exception propagates to the emitter (the framework code that called `emit`).  For lifespan events, this typically aborts startup or shutdown.
+* **Observer raises** → the exception is caught and logged at `ERROR` on the `blackbull` logger; other observers for the same event continue to run; the emitter never sees the exception.
+
+There is no built-in re-emission of failures as a separate `error` event yet.  If you want one, register a wrapper observer that emits an application-defined event in its own `except` block.
+
+### 9.8 Observer task lifecycle at shutdown
+
+Observers run as detached `asyncio.Task`s, which means in-flight observers can outlive the request that triggered them.  At `app_shutdown`, BlackBull waits up to `observer_shutdown_timeout` seconds (default 5, set in `BlackBull(observer_shutdown_timeout=...)`) for any still-running observer tasks to finish.  Any task still running after the timeout is cancelled and a `WARNING` is logged on the `blackbull` logger naming the unfinished coroutine.
+
+Observers therefore have a *conditional* fire-and-forget guarantee: during normal request processing they do not block the emitter, but during shutdown they are expected to finish promptly.  If you have observation work that legitimately takes longer than a few seconds (for example, sending events to a remote analytics endpoint), enqueue the work from the observer into your own queue rather than performing it inline — that way the queue can outlive shutdown if you arrange for it to.
 
 ---
 

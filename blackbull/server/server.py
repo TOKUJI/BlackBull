@@ -247,7 +247,11 @@ class WebSocketHandler(BaseHandler):
         logger.debug('WebSocket handshake complete.')
 
         send = SenderFactory.websocket(self.writer)
-        receive = RecipientFactory.websocket(self.reader, self.writer)
+        receive = RecipientFactory.websocket(
+            self.reader, self.writer,
+            dispatcher=getattr(self.app, '_dispatcher', None),
+            scope=self.scope,
+        )
         if record is not None:
             receive = _make_capturing_receive(receive, record)
         await self.app(self.scope, receive, send)

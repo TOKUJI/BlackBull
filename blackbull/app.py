@@ -19,7 +19,7 @@ Companion definitions live in this module to avoid circular imports:
 import functools
 import inspect
 import warnings
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from http import HTTPStatus, HTTPMethod
 from pathlib import Path
 import asyncio
@@ -28,7 +28,7 @@ import traceback
 
 # import from this package
 import logging
-from .event import Event, EventDispatcher
+from .event import Event, EventDispatcher, EventHandler
 from .utils import Scheme
 from .router import Router, ErrorRouter, MethodNotApplicable, PathNotRegistered
 from .server.watch import Watcher, force_reload
@@ -159,7 +159,7 @@ class BlackBull:
             v.encode() if isinstance(v, str) else v for v in value
         ]
 
-    def on_startup(self, fn):
+    def on_startup(self, fn: EventHandler) -> EventHandler:
         """Register a zero-argument coroutine to run at lifespan startup.
 
         The handler is wrapped in an adapter and registered as an
@@ -187,7 +187,7 @@ class BlackBull:
         self._dispatcher.intercept('app_startup', _adapter)
         return fn
 
-    def on_shutdown(self, fn):
+    def on_shutdown(self, fn: EventHandler) -> EventHandler:
         """Register a zero-argument coroutine to run at lifespan shutdown.
 
         The handler is wrapped in an adapter and registered as an
@@ -215,7 +215,7 @@ class BlackBull:
         self._dispatcher.intercept('app_shutdown', _adapter)
         return fn
 
-    def on(self, event_name: str):
+    def on(self, event_name: str) -> Callable[[EventHandler], EventHandler]:
         """Decorate a handler to observe ``event_name`` (fire-and-forget).
 
         The handler is scheduled as an independent ``asyncio.Task`` each time
@@ -241,7 +241,7 @@ class BlackBull:
             return handler
         return decorator
 
-    def intercept(self, event_name: str):
+    def intercept(self, event_name: str) -> Callable[[EventHandler], EventHandler]:
         """Decorate a handler to intercept ``event_name`` synchronously.
 
         The handler is awaited in registration order when the event fires.
