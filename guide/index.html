@@ -870,13 +870,124 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#9-lifespan-hooks" class="md-nav__link">
+  <a href="#9-events" class="md-nav__link">
     <span class="md-ellipsis">
       
-        §9 Lifespan Hooks
+        §9 Events
       
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="§9 Events">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#91-overview-interception-vs-observation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9.1 Overview — interception vs observation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#92-the-appintercept-decorator" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9.2 The @app.intercept decorator
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#93-the-appon-decorator" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9.3 The @app.on decorator
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#94-the-event-object" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9.4 The Event object
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#95-lifespan-events-app_startup-app_shutdown" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9.5 Lifespan events — app_startup / app_shutdown
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#96-event-reference" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9.6 Event reference
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="9.6 Event reference">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#961-websocket_message-observation-only" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9.6.1 websocket_message — observation only
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#97-exception-handling" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9.7 Exception handling
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#98-observer-task-lifecycle-at-shutdown" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9.8 Observer task lifecycle at shutdown
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -1896,6 +2007,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../api/blackbull/event/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    event
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../api/blackbull/logger/" class="md-nav__link">
         
   
@@ -1932,10 +2071,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_1_6" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_1_7" >
         
           
-          <label class="md-nav__link" for="__nav_3_1_6" id="__nav_3_1_6_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_3_1_7" id="__nav_3_1_7_label" tabindex="0">
             
   
   
@@ -1953,8 +2092,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_3_1_6_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_3_1_6">
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_3_1_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_1_7">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -2127,10 +2266,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_1_7" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_1_8" >
         
           
-          <label class="md-nav__link" for="__nav_3_1_7" id="__nav_3_1_7_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_3_1_8" id="__nav_3_1_8_label" tabindex="0">
             
   
   
@@ -2148,8 +2287,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_3_1_7_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_3_1_7">
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_3_1_8_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_1_8">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -2378,10 +2517,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_1_11" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_1_12" >
         
           
-          <label class="md-nav__link" for="__nav_3_1_11" id="__nav_3_1_11_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_3_1_12" id="__nav_3_1_12_label" tabindex="0">
             
   
   
@@ -2399,8 +2538,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_3_1_11_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_3_1_11">
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_3_1_12_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_1_12">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -3267,13 +3406,124 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#9-lifespan-hooks" class="md-nav__link">
+  <a href="#9-events" class="md-nav__link">
     <span class="md-ellipsis">
       
-        §9 Lifespan Hooks
+        §9 Events
       
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="§9 Events">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#91-overview-interception-vs-observation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9.1 Overview — interception vs observation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#92-the-appintercept-decorator" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9.2 The @app.intercept decorator
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#93-the-appon-decorator" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9.3 The @app.on decorator
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#94-the-event-object" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9.4 The Event object
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#95-lifespan-events-app_startup-app_shutdown" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9.5 Lifespan events — app_startup / app_shutdown
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#96-event-reference" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9.6 Event reference
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="9.6 Event reference">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#961-websocket_message-observation-only" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9.6.1 websocket_message — observation only
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#97-exception-handling" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9.7 Exception handling
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#98-observer-task-lifecycle-at-shutdown" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9.8 Observer task lifecycle at shutdown
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -4253,6 +4503,10 @@ async def logging_mw(scope, receive, send, call_next):
 <li>The legacy parameter name <code>inner</code> is accepted as an alias for <code>call_next</code>.</li>
 <li>Sending a response without calling <code>call_next</code> <strong>short-circuits</strong> all inner layers.</li>
 </ul>
+<blockquote>
+<p><strong>See also</strong>: §9 Events covers the underlying hook API. 
+Middleware in this section is in fact a sugar layer over <code>@app.intercept('before_handler')</code>; for purely observational concerns (logging, metrics, tracing) prefer <code>@app.on(...)</code> from §9 — middleware semantics force every observer to run on the request critical path, and one slow observer can degrade every response.</p>
+</blockquote>
 <h3 id="42-attaching-middleware-to-a-route">4.2  Attaching middleware to a route</h3>
 <p>Middleware wraps the handler like nested shells.  The list order is
 <strong>outer-to-inner</strong>: the first entry runs first on the way in and last on the way out.</p>
@@ -4606,21 +4860,165 @@ unhandled subclasses.</p>
 </tbody>
 </table>
 <hr />
-<h2 id="9-lifespan-hooks">§9  Lifespan Hooks</h2>
+<h2 id="9-events">§9 Events</h2>
+<p>BlackBull exposes an event-driven hook API on top of (and integrated with) the ASGI request lifecycle.  Application code registers handlers with one of two decorators — <code>@app.intercept(...)</code> for synchronous interception, or <code>@app.on(...)</code> for asynchronous observation — and the framework dispatches events to them at well-defined points in the application's lifetime.</p>
+<h3 id="91-overview-interception-vs-observation">9.1 Overview — interception vs observation</h3>
+<p>There are two kinds of hook, with deliberately different semantics:</p>
+<table>
+<thead>
+<tr>
+<th>Property</th>
+<th><code>@app.intercept(name)</code></th>
+<th><code>@app.on(name)</code></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Execution</td>
+<td>Synchronous (awaited inline)</td>
+<td>Asynchronous (fire-and-forget)</td>
+</tr>
+<tr>
+<td>Order</td>
+<td>Registration order, serial</td>
+<td>Independent, no inter-handler order</td>
+</tr>
+<tr>
+<td>Exceptions</td>
+<td>Propagate to the emitter</td>
+<td>Isolated, logged, never propagate</td>
+</tr>
+<tr>
+<td>Can short-circuit / modify flow</td>
+<td>Yes</td>
+<td>No</td>
+</tr>
+<tr>
+<td>Typical use</td>
+<td>Auth, validation, rewriting</td>
+<td>Logging, metrics, tracing</td>
+</tr>
+</tbody>
+</table>
+<p>The split is a defence against subtle bugs.  Writing an authentication check as an observer would silently let unauthorized requests through (the request proceeds before the observer has finished, and the observer cannot signal failure to the emitter).  Conversely, putting slow telemetry into an interceptor would block the request path on every emission.</p>
+<p>Note that BlackBull does not provide hooks to "observe but also block" or "intercept but also fire-and-forget".</p>
+<h3 id="92-the-appintercept-decorator">9.2 The <code>@app.intercept</code> decorator</h3>
+<p>Register a synchronous interceptor for a named event:</p>
+<pre><code class="language-python">from blackbull import BlackBull, Event
+
+app = BlackBull()
+
+@app.intercept('app_startup')
+async def warm_cache(event: Event):
+    await cache.preload()
+</code></pre>
+<p>Interceptors are awaited in registration order during emission.  An exception raised by an interceptor:</p>
+<ul>
+<li>aborts the remaining interceptors for that event, and</li>
+<li>propagates to the code that called <code>emit</code>.</li>
+</ul>
+<p>For lifespan events, that means an interceptor exception will surface to the ASGI server driving the lifespan protocol — typically aborting startup.</p>
+<h3 id="93-the-appon-decorator">9.3 The <code>@app.on</code> decorator</h3>
+<p>Register an asynchronous observer for a named event:</p>
+<pre><code class="language-python">@app.on('app_shutdown')
+async def flush_metrics(event: Event):
+    await metrics_client.flush()
+</code></pre>
+<p>Observers are scheduled with <code>asyncio.create_task</code> when the event is emitted and run independently of the emitter.  They cannot block the emitter, and their exceptions are caught, logged on the <code>blackbull</code> logger at <code>ERROR</code>, and discarded — they cannot surface to the emitter or to other observers.</p>
+<p>Use observers for telemetry, audit logging, cache warming, and other side-effects that the request path should not depend on.</p>
+<h3 id="94-the-event-object">9.4 The <code>Event</code> object</h3>
+<p>Both decorators register handlers with the signature <code>async def handler(event: Event)</code>.  <code>Event</code> is a frozen dataclass:</p>
+<pre><code class="language-python">from dataclasses import dataclass, field
+
+@dataclass(frozen=True)
+class Event:
+    name: str
+    detail: dict = field(default_factory=dict)
+</code></pre>
+<p><code>name</code> identifies which event fired; <code>detail</code> carries event-specific data (for example, a <code>request_completed</code> event may carry timing information in its <code>detail</code>).  The catalogue of event names and their <code>detail</code> shape is in §9.6.</p>
+<h3 id="95-lifespan-events-app_startup-app_shutdown">9.5 Lifespan events — <code>app_startup</code> / <code>app_shutdown</code></h3>
+<p>The two lifespan events fire once per server lifetime and correspond directly to the ASGI <code>lifespan.startup</code> / <code>lifespan.shutdown</code> messages.</p>
+<p>For the common case where you do not need access to the <code>Event</code> object, two zero-argument sugar decorators are provided:</p>
 <pre><code class="language-python">@app.on_startup
-async def startup():
+async def init_db():
     await db.connect()
-    print('Database ready')
 
 @app.on_shutdown
-async def shutdown():
+async def close_db():
     await db.disconnect()
 </code></pre>
+<p>These are exact equivalents of:</p>
+<pre><code class="language-python">@app.intercept('app_startup')
+async def _wrapped_init_db(event: Event):
+    await init_db()
+
+@app.intercept('app_shutdown')
+async def _wrapped_close_db(event: Event):
+    await close_db()
+</code></pre>
+<p>Use the sugar form when your handler does not need the event itself; reach for <code>@app.intercept('app_startup')</code> directly when you want the consistency of writing every hook as <code>(event: Event) -&gt; None</code>.</p>
+<h3 id="96-event-reference">9.6 Event reference</h3>
+<p>Events that application code can subscribe to.  Internal Level A events used by the framework's own components are documented separately and are not subscribable from application code.</p>
+<table>
+<thead>
+<tr>
+<th>Event name</th>
+<th>Fires when</th>
+<th><code>detail</code> keys</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>app_startup</code></td>
+<td>Server has bound its socket and is about to accept connections</td>
+<td><em>(empty)</em></td>
+<td>Sugar: <code>@app.on_startup</code></td>
+</tr>
+<tr>
+<td><code>app_shutdown</code></td>
+<td>Server has received a stop signal and is about to exit</td>
+<td><em>(empty)</em></td>
+<td>Sugar: <code>@app.on_shutdown</code></td>
+</tr>
+<tr>
+<td><code>websocket_message</code></td>
+<td>A WebSocket message has been fully received and reassembled by the server, before the ASGI handler reads it via <code>receive()</code></td>
+<td><code>scope</code> (the connection scope dict), <code>text</code> (<code>str</code> for text frames, <code>None</code> otherwise), <code>bytes</code> (<code>bytes</code> for binary frames, <code>None</code> otherwise)</td>
+<td>Observation only — see §9.6.1</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p>Additional events (<code>request_received</code>, <code>before_handler</code>, <code>after_handler</code>,
+<code>request_completed</code>, <code>request_disconnected</code>, <code>error</code>,
+<code>websocket_connected</code>, <code>websocket_disconnected</code>) are
+on the roadmap and will appear in this table as they ship.</p>
+</blockquote>
+<h4 id="961-websocket_message-observation-only">9.6.1 <code>websocket_message</code> — observation only</h4>
+<p><code>websocket_message</code> fires once per fully reassembled WebSocket message, inside the server read loop, <em>before</em> the message is delivered to the application's <code>receive()</code> call.  Observers therefore see every message the server accepted — including ones the handler never reads.</p>
+<pre><code class="language-python">@app.on('websocket_message')
+async def log_message(event: Event):
+    if event.detail['text'] is not None:
+        print(f&quot;[ws] text on {event.detail['scope']['path']}: {event.detail['text']!r}&quot;)
+    else:
+        print(f&quot;[ws] binary on {event.detail['scope']['path']}: {len(event.detail['bytes'])} bytes&quot;)
+</code></pre>
+<p><strong>This event is observation only.</strong>  Because the message has already been read off the wire and buffered, interceptors registered with <code>@app.intercept('websocket_message')</code> cannot suppress delivery to the application handler.  Use the observe path (<code>@app.on</code>) for analytics, logging, and monitoring.</p>
+<div class="admonition note">
+<p class="admonition-title">Per-connection identity</p>
+<p>The <code>scope</code> dict identifies the connection path and headers, but does not yet carry a unique connection ID.  Two simultaneous connections from the same client to the same path produce indistinguishable scopes.  A <code>websocket_connected</code> event (planned) will provide per-connection identity when it ships.</p>
+</div>
+<h3 id="97-exception-handling">9.7 Exception handling</h3>
+<p>The two hook kinds have deliberately different exception semantics, summarised in §9.1.  Concretely:</p>
 <ul>
-<li><code>on_startup</code> fires after the server socket is bound, before accepting connections.</li>
-<li><code>on_shutdown</code> fires when the server receives a stop signal (e.g. <code>Ctrl-C</code>).</li>
-<li>Multiple hooks can be registered; they run in registration order.</li>
+<li><strong>Interceptor raises</strong> → remaining interceptors for that event do not run; the exception propagates to the emitter (the framework code that called <code>emit</code>).  For lifespan events, this typically aborts startup or shutdown.</li>
+<li><strong>Observer raises</strong> → the exception is caught and logged at <code>ERROR</code> on the <code>blackbull</code> logger; other observers for the same event continue to run; the emitter never sees the exception.</li>
 </ul>
+<p>There is no built-in re-emission of failures as a separate <code>error</code> event yet.  If you want one, register a wrapper observer that emits an application-defined event in its own <code>except</code> block.</p>
+<h3 id="98-observer-task-lifecycle-at-shutdown">9.8 Observer task lifecycle at shutdown</h3>
+<p>Observers run as detached <code>asyncio.Task</code>s, which means in-flight observers can outlive the request that triggered them.  At <code>app_shutdown</code>, BlackBull waits up to <code>observer_shutdown_timeout</code> seconds (default 5, set in <code>BlackBull(observer_shutdown_timeout=...)</code>) for any still-running observer tasks to finish.  Any task still running after the timeout is cancelled and a <code>WARNING</code> is logged on the <code>blackbull</code> logger naming the unfinished coroutine.</p>
+<p>Observers therefore have a <em>conditional</em> fire-and-forget guarantee: during normal request processing they do not block the emitter, but during shutdown they are expected to finish promptly.  If you have observation work that legitimately takes longer than a few seconds (for example, sending events to a remote analytics endpoint), enqueue the work from the observer into your own queue rather than performing it inline — that way the queue can outlive shutdown if you arrange for it to.</p>
 <hr />
 <h2 id="10-running-the-server">§10  Running the Server</h2>
 <pre><code class="language-python">import asyncio
