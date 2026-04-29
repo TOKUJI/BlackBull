@@ -159,28 +159,108 @@ class BlackBull:
         ]
 
     def on_startup(self, fn):
-        """Decorator: register an async callable invoked at lifespan startup."""
+        """Register a zero-argument coroutine to run at lifespan startup.
+
+        The handler is wrapped in an adapter and registered as an
+        ``'app_startup'`` interception handler so it runs before the ASGI
+        server receives the ``lifespan.startup.complete`` acknowledgement.
+        Startup handlers run in registration order; an exception aborts the
+        remaining handlers and prevents the completion event from being sent.
+
+        Args:
+            fn: Async callable that takes no arguments.
+
+        Returns:
+            fn unchanged, so the decorator can be stacked or the function
+            used normally after registration.
+
+        Example:
+            ```python
+            @app.on_startup
+            async def open_db():
+                await db.connect()
+            ```
+        """
         async def _adapter(_event: Event) -> None:
             await fn()
         self._dispatcher.intercept('app_startup', _adapter)
         return fn
 
     def on_shutdown(self, fn):
-        """Decorator: register an async callable invoked at lifespan shutdown."""
+        """Register a zero-argument coroutine to run at lifespan shutdown.
+
+        The handler is wrapped in an adapter and registered as an
+        ``'app_shutdown'`` interception handler so it runs before the ASGI
+        server receives the ``lifespan.shutdown.complete`` acknowledgement.
+        Shutdown handlers run in registration order; an exception aborts the
+        remaining handlers.
+
+        Args:
+            fn: Async callable that takes no arguments.
+
+        Returns:
+            fn unchanged, so the decorator can be stacked or the function
+            used normally after registration.
+
+        Example:
+            ```python
+            @app.on_shutdown
+            async def close_db():
+                await db.disconnect()
+            ```
+        """
         async def _adapter(_event: Event) -> None:
             await fn()
         self._dispatcher.intercept('app_shutdown', _adapter)
         return fn
 
     def on(self, event_name: str):
-        """Decorator: register a fire-and-forget observation handler for ``event_name``."""
+        """Decorate a handler to observe ``event_name`` (fire-and-forget).
+
+        The handler is scheduled as an independent ``asyncio.Task`` each time
+        the event fires.  Exceptions raised by the handler are caught and
+        logged; they do not propagate to the emitter or affect other handlers.
+
+        Args:
+            event_name: Name of the event to observe (e.g. ``'app_startup'``).
+
+        Returns:
+            A decorator that registers the wrapped coroutine and returns it
+            unchanged.
+
+        Example:
+            ```python
+            @app.on('app_startup')
+            async def handler(event: Event):
+                print(event.detail)
+            ```
+        """
         def decorator(handler):
             self._dispatcher.on(event_name, handler)
             return handler
         return decorator
 
     def intercept(self, event_name: str):
-        """Decorator: register a synchronous interception handler for ``event_name``."""
+        """Decorate a handler to intercept ``event_name`` synchronously.
+
+        The handler is awaited in registration order when the event fires.
+        Exceptions propagate to the emitter and abort subsequent interceptors
+        registered for the same event.
+
+        Args:
+            event_name: Name of the event to intercept (e.g. ``'app_startup'``).
+
+        Returns:
+            A decorator that registers the wrapped coroutine and returns it
+            unchanged.
+
+        Example:
+            ```python
+            @app.intercept('app_startup')
+            async def handler(event: Event):
+                await setup()
+            ```
+        """
         def decorator(handler):
             self._dispatcher.intercept(event_name, handler)
             return handler
