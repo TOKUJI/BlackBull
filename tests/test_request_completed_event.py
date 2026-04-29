@@ -125,6 +125,8 @@ async def test_scope_and_record_fields_agree_on_method_path_and_version():
 
     await _run_request(app, _raw_request(method='GET', path='/x'))
     await asyncio.wait_for(seen.wait(), timeout=2.0)
+    await asyncio.sleep(0.2)
+    assert len(captured) == 1
 
     d = captured[0].detail
     assert d['method'] == d['scope']['method']
@@ -153,6 +155,8 @@ async def test_status_and_response_bytes_reflect_actual_response():
 
     await _run_request(app, _raw_request(path='/data'))
     await asyncio.wait_for(seen.wait(), timeout=2.0)
+    await asyncio.sleep(0.2)
+    assert len(captured) == 1
 
     d = captured[0].detail
     assert d['status'] == 200
@@ -164,18 +168,15 @@ async def test_status_and_response_bytes_reflect_actual_response():
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_event_fires_once_per_request():
-    """Exactly one event fires per HTTP request."""
+async def test_event_fires_exactly_once_per_request_in_sequence():
+    """Each of N sequential requests produces exactly one event — no duplicates."""
     target_count = 3
     app = BlackBull()
     captured: list[Event] = []
-    done = asyncio.Event()
 
     @app.on('request_completed')
     async def observer(event: Event):
         captured.append(event)
-        if len(captured) >= target_count:
-            done.set()
 
     @app.route(path='/r')
     async def handler(scope, receive, send):
@@ -185,8 +186,41 @@ async def test_event_fires_once_per_request():
     for _ in range(target_count):
         await _run_request(app, _raw_request(path='/r'))
 
-    await asyncio.wait_for(done.wait(), timeout=2.0)
-    assert len(captured) == target_count
+    deadline = asyncio.get_event_loop().time() + 2.0
+    while len(captured) < target_count:
+        if asyncio.get_event_loop().time() > deadline:
+            pytest.fail(f"Only got {len(captured)} events, expected {target_count}")
+        await asyncio.sleep(0.01)
+
+    await asyncio.sleep(0.2)
+    assert len(captured) == target_count, (
+        f"Expected exactly {target_count} events, got {len(captured)}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_event_fires_exactly_once_for_single_request():
+    """A single request produces exactly one event with no duplicates."""
+    app = BlackBull()
+    captured: list[Event] = []
+    seen = asyncio.Event()
+
+    @app.on('request_completed')
+    async def observer(event: Event):
+        captured.append(event)
+        seen.set()
+
+    @app.route(path='/once')
+    async def handler(scope, receive, send):
+        await send({'type': 'http.response.start', 'status': 200, 'headers': []})
+        await send({'type': 'http.response.body', 'body': b'ok', 'more_body': False})
+
+    await _run_request(app, _raw_request(path='/once'))
+    await asyncio.wait_for(seen.wait(), timeout=2.0)
+    await asyncio.sleep(0.2)
+    assert len(captured) == 1
+    assert captured[0].name == 'request_completed'
+    assert captured[0].detail['path'] == '/once'
 
 
 @pytest.mark.asyncio
@@ -207,6 +241,8 @@ async def test_event_fires_for_handler_exception():
 
     await _run_request(app, _raw_request(path='/boom'))
     await asyncio.wait_for(seen.wait(), timeout=2.0)
+    await asyncio.sleep(0.2)
+    assert len(captured) == 1
 
     d = captured[0].detail
     assert d['status'] == 500
@@ -227,6 +263,8 @@ async def test_event_fires_for_404():
 
     await _run_request(app, _raw_request(path='/does-not-exist'))
     await asyncio.wait_for(seen.wait(), timeout=2.0)
+    await asyncio.sleep(0.2)
+    assert len(captured) == 1
 
     d = captured[0].detail
     assert d['status'] == 404
@@ -252,6 +290,8 @@ async def test_duration_is_nonnegative_float():
 
     await _run_request(app, _raw_request(path='/timed'))
     await asyncio.wait_for(seen.wait(), timeout=2.0)
+    await asyncio.sleep(0.2)
+    assert len(captured) == 1
 
     d = captured[0].detail
     assert isinstance(d['duration_ms'], float)
@@ -298,6 +338,8 @@ async def test_event_fires_per_stream_on_http2():
     await _run_with_log(app(scope, fake_receive, noop_send), record,
                         dispatcher=dispatcher, scope=scope)
     await asyncio.wait_for(seen.wait(), timeout=2.0)
+    await asyncio.sleep(0.2)
+    assert len(captured) == 1
 
     d = captured[0].detail
     assert d['path'] == '/h2'
@@ -333,6 +375,8 @@ async def test_event_fires_after_streaming_response_completes():
 
     await _run_request(app, _raw_request(path='/stream'))
     await asyncio.wait_for(seen.wait(), timeout=2.0)
+    await asyncio.sleep(0.2)
+    assert len(captured) == 1
 
     d = captured[0].detail
     assert d['status'] == 200
