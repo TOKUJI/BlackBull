@@ -107,6 +107,7 @@ class BlackBull:
     def __init__(self,
                  router=Router(),
                  loop=None,
+                 observer_shutdown_timeout: float = 5.0,
                  ):
         self._router = router
         self._logger = logger
@@ -119,7 +120,7 @@ class BlackBull:
                 self._error_router[status] = _default_error_handler
         self._error_router[Exception] = _default_error_handler
 
-        self._dispatcher = EventDispatcher()
+        self._dispatcher = EventDispatcher(shutdown_timeout=observer_shutdown_timeout)
         self._loop = loop
         self._certfile = None
         self._keyfile = None
@@ -276,6 +277,7 @@ class BlackBull:
             elif event['type'] == 'lifespan.shutdown':
                 self._logger.debug('lifespan shutdown')
                 await self._dispatcher.emit(Event('app_shutdown'))
+                await self._dispatcher.aclose()
                 await send({'type': 'lifespan.shutdown.complete'})
                 return
 
