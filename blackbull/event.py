@@ -1,10 +1,13 @@
-"""Event-driven dispatcher (Level B).
+"""Event-driven dispatcher.
 
-See ``CLAUDE_DEV.md`` § "Event-driven architecture (Actor model)" for the
-overall design. This module implements the minimal Pub/Sub dispatcher used
-by ``BlackBull.on`` / ``BlackBull.intercept``.  Per-Actor mailboxes are not
-introduced yet; this is intentional — Actor-ization is deferred until the
-existing examples have been migrated to the new hook API.
+Implements the minimal Pub/Sub dispatcher used by ``BlackBull.on`` /
+``BlackBull.intercept``.  Two delivery modes are supported:
+
+- **Interception** (``intercept``): handlers are awaited in registration order;
+  exceptions propagate to the emitter and abort subsequent interceptors.
+- **Observation** (``on``): handlers are scheduled as independent
+  ``asyncio.Task``s (fire-and-forget); exceptions are caught and logged and
+  never reach the emitter or other observers.
 """
 import asyncio
 import logging
@@ -19,8 +22,7 @@ class Event:
     """An immutable message dispatched through ``EventDispatcher``.
 
     Attributes:
-        name: The event name (e.g. ``"app_startup"``).  See
-            ``CLAUDE_DEV.md`` for the catalogue of Level B event names.
+        name: The event name (e.g. ``"app_startup"``).
         detail: Arbitrary per-event data.  ``detail`` is used (rather than
             ``payload``) to avoid colliding with HTTP/2 and WebSocket
             protocol terminology already used in the codebase.
@@ -40,8 +42,6 @@ class EventDispatcher:
     their exceptions propagate to the emitter.  Observation handlers (``on``)
     are scheduled via ``asyncio.create_task`` (fire-and-forget) and their
     exceptions are caught and logged — they never reach the emitter.
-
-    See ``CLAUDE_DEV.md`` § "Delivery semantics" / "Exception propagation".
     """
 
     def __init__(self) -> None:
