@@ -295,6 +295,40 @@ async def test_multiple_startup_hooks_run_in_order():
     assert log == ['a', 'b']
 
 
+@pytest.mark.asyncio
+async def test_on_startup_handler_runs_via_dispatcher():
+    """@app.on_startup fires once during lifespan startup (via dispatcher)."""
+    app_ = BlackBull()
+    called = []
+
+    @app_.on_startup
+    async def _():
+        called.append('startup')
+
+    async def noop_send_d(_): pass
+    receive = _make_lifespan_receive('lifespan.startup', 'lifespan.shutdown')
+    await app_({'type': 'lifespan'}, receive, noop_send_d)
+    assert called == ['startup']
+
+
+@pytest.mark.asyncio
+async def test_on_intercept_app_startup_is_equivalent_to_on_startup():
+    """@app.intercept('app_startup') receives an Event with name 'app_startup'."""
+    from blackbull.event import Event
+    app_ = BlackBull()
+    received = []
+
+    @app_.intercept('app_startup')
+    async def _(event: Event):
+        received.append(event)
+
+    async def noop_send_e(_): pass
+    receive = _make_lifespan_receive('lifespan.startup', 'lifespan.shutdown')
+    await app_({'type': 'lifespan'}, receive, noop_send_e)
+    assert len(received) == 1
+    assert received[0].name == 'app_startup'
+
+
 # ---------------------------------------------------------------------------
 # app.py property and dispatch coverage
 # ---------------------------------------------------------------------------

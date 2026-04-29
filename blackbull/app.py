@@ -28,6 +28,7 @@ import traceback
 
 # import from this package
 import logging
+from .event import Event, EventDispatcher
 from .utils import Scheme
 from .router import Router, ErrorRouter, MethodNotApplicable, PathNotRegistered
 from .server.watch import Watcher, force_reload
@@ -118,11 +119,10 @@ class BlackBull:
                 self._error_router[status] = _default_error_handler
         self._error_router[Exception] = _default_error_handler
 
+        self._dispatcher = EventDispatcher()
         self._loop = loop
         self._certfile = None
         self._keyfile = None
-        self._startup_hooks: list = []
-        self._shutdown_hooks: list = []
         self._wsprotocols = None
         self._global_middlewares: list = []
         self._static_roots: list[tuple[str, Path]] = []
@@ -160,26 +160,42 @@ class BlackBull:
 
     def on_startup(self, fn):
         """Decorator: register an async callable invoked at lifespan startup."""
-        self._startup_hooks.append(fn)
+        async def _adapter(_event: Event) -> None:
+            await fn()
+        self._dispatcher.intercept('app_startup', _adapter)
         return fn
 
     def on_shutdown(self, fn):
         """Decorator: register an async callable invoked at lifespan shutdown."""
-        self._shutdown_hooks.append(fn)
+        async def _adapter(_event: Event) -> None:
+            await fn()
+        self._dispatcher.intercept('app_shutdown', _adapter)
         return fn
+
+    def on(self, event_name: str):
+        """Decorator: register a fire-and-forget observation handler for ``event_name``."""
+        def decorator(handler):
+            self._dispatcher.on(event_name, handler)
+            return handler
+        return decorator
+
+    def intercept(self, event_name: str):
+        """Decorator: register a synchronous interception handler for ``event_name``."""
+        def decorator(handler):
+            self._dispatcher.intercept(event_name, handler)
+            return handler
+        return decorator
 
     async def _handle_lifespan(self, scope, receive, send):  # noqa: ARG001
         while True:
             event = await receive()
             if event['type'] == 'lifespan.startup':
                 self._logger.debug('lifespan startup')
-                for hook in self._startup_hooks:
-                    await hook()
+                await self._dispatcher.emit(Event('app_startup'))
                 await send({'type': 'lifespan.startup.complete'})
             elif event['type'] == 'lifespan.shutdown':
                 self._logger.debug('lifespan shutdown')
-                for hook in self._shutdown_hooks:
-                    await hook()
+                await self._dispatcher.emit(Event('app_shutdown'))
                 await send({'type': 'lifespan.shutdown.complete'})
                 return
 
