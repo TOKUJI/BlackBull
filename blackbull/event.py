@@ -11,6 +11,7 @@ Implements the minimal Pub/Sub dispatcher used by ``BlackBull.on`` /
 """
 import asyncio
 import logging
+from collections import defaultdict
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 
@@ -45,16 +46,16 @@ class EventDispatcher:
     """
 
     def __init__(self) -> None:
-        self._observers: dict[str, list[EventHandler]] = {}
-        self._interceptors: dict[str, list[EventHandler]] = {}
+        self._observers: defaultdict[str, list[EventHandler]] = defaultdict(list)
+        self._interceptors: defaultdict[str, list[EventHandler]] = defaultdict(list)
 
     def on(self, event_name: str, handler: EventHandler) -> None:
         """Register an observation handler for ``event_name``."""
-        self._observers.setdefault(event_name, []).append(handler)
+        self._observers[event_name].append(handler)
 
     def intercept(self, event_name: str, handler: EventHandler) -> None:
         """Register an interception handler for ``event_name``."""
-        self._interceptors.setdefault(event_name, []).append(handler)
+        self._interceptors[event_name].append(handler)
 
     async def emit(self, event: Event) -> None:
         """Dispatch ``event`` to all registered handlers.
