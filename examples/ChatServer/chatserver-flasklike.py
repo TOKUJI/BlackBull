@@ -150,6 +150,12 @@ def _sse_encode(event: dict) -> bytes:
 app = BlackBull()
 
 
+@app.on('before_handler')
+async def log_request(event):
+    """Observer: log every HTTP request — fire-and-forget, never short-circuits."""
+    logger.info('%s %s', event.detail['method'], event.detail['path'])
+
+
 @app.route(methods=[HTTPMethod.GET], path='/')
 async def handle_login_page(scope, receive, send):  # noqa: ARG001
     await send(Response(_load('login.html')))

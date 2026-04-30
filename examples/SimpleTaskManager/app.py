@@ -1,11 +1,21 @@
 """
 Simple Task Manager
 ===================
-REST + HTML task management application demonstrating BlackBull's middleware
-pipeline pattern.
+REST + HTML task management application demonstrating BlackBull's event-driven
+and middleware APIs together.
 
-Middleware pipeline (outer → inner):
-    error_mw → logging_mw → auth_mw → json_body_mw → handler
+Cross-cutting concerns:
+    Request logging  → @app.on('before_handler')  observer (fire-and-forget)
+    Error wrapping   → error_mw per-route middleware (must wrap send)
+    Bearer auth      → auth_mw per-route-group middleware (short-circuits to 401)
+    JSON body        → json_body_mw per-route middleware (injects scope['json'])
+
+Why @app.on for logging, not middleware?
+    Logging must never block or abort the request.  Observers run in an
+    independent asyncio.Task — they cannot short-circuit the handler chain,
+    and any exception they raise is caught and logged rather than surfaced.
+    Per-route middleware (auth, error handling) is still the right tool when
+    the cross-cutting concern must run synchronously or needs to short-circuit.
 
 Authentication: Bearer token in the Authorization header, stored in
 sessionStorage by the browser.  Avoids HttpOnly-cookie/SameSite browser
@@ -22,7 +32,6 @@ import json
 import logging
 import pathlib
 import secrets
-import time
 from http import HTTPMethod, HTTPStatus
 
 import db
@@ -64,19 +73,6 @@ async def error_mw(scope, receive, send, call_next):
                                 status=HTTPStatus.INTERNAL_SERVER_ERROR))
 
 
-async def logging_mw(scope, receive, send, call_next):
-    """Log the request method, path, and elapsed time.
-
-    Skips timing output for background-priority requests (urgency >= 6)
-    because those are low-value and would flood the log.
-    """
-    t0 = time.monotonic()
-    logger.info('%s %s', scope.get('method', '?'), scope.get('path', '?'))
-    await call_next(scope, receive, send)
-    if not scope.get('_skip_timing'):
-        logger.info('  → %.1f ms', (time.monotonic() - t0) * 1000)
-
-
 async def auth_mw(scope, receive, send, call_next):
     """Validate Bearer token from Authorization header; inject scope['user']."""
     auth = scope['headers'].get(b'authorization', b'')
@@ -98,9 +94,7 @@ async def priority_mw(scope, receive, send, call_next):
     For HTTP/1.1 it is absent; this middleware defaults gracefully.
 
     urgency 0-1  → high-priority: log the request prominently.
-    urgency 6-7  → background:    skip the per-request timing log so the
-                   event loop stays uncluttered for more urgent work.
-    urgency 2-5  → normal:        no change.
+    urgency 2-7  → normal/background: no change.
     """
     hint = scope.get('http2_priority', {'urgency': 3, 'incremental': False})
     urgency = hint['urgency']
@@ -109,8 +103,6 @@ async def priority_mw(scope, receive, send, call_next):
     if urgency <= 1:
         logger.info('HIGH-PRIORITY request u=%d: %s %s',
                     urgency, scope.get('method', '?'), scope.get('path', '?'))
-    elif urgency >= 6:
-        scope['_skip_timing'] = True   # signal to logging_mw
 
     await call_next(scope, receive, send)
 
@@ -132,8 +124,24 @@ async def json_body_mw(scope, receive, send, call_next):
 
 app = BlackBull()
 
-public = app.group(middlewares=[error_mw, logging_mw])
-api    = app.group(middlewares=[error_mw, logging_mw, priority_mw, auth_mw])
+public = app.group(middlewares=[error_mw])
+api    = app.group(middlewares=[error_mw, priority_mw, auth_mw])
+
+
+@app.on('before_handler')
+async def log_request(event):
+    """Observer: log every request — fire-and-forget, never short-circuits."""
+    logger.info('%s %s', event.detail['method'], event.detail['path'])
+
+
+@app.on('after_handler')
+async def log_response(event):
+    """Observer: log completion and any unhandled exception."""
+    exc = event.detail.get('exception')
+    if exc:
+        logger.error('  → unhandled %s: %s', type(exc).__name__, exc)
+    else:
+        logger.info('  → OK')
 
 
 @app.on_startup

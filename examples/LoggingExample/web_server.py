@@ -7,6 +7,12 @@ Usage (start log_server.py first):
 Every request to http://localhost:8000/ is answered with "Hello, world!" and
 one JSON access log record is POSTed to http://localhost:9000/logs.
 
+Why @app.on (observer) instead of @app.intercept?
+    Access logging must never block or short-circuit the request.  Observers
+    (@app.on) run fire-and-forget in an independent asyncio.Task — even if the
+    observer raises, the request is unaffected.  Interceptors (@app.intercept)
+    block the handler and can abort the request, which is wrong for logging.
+
 Why QueueHandler + QueueListener?
     BlackBull runs on asyncio.  A plain logging.Handler.emit() call is
     synchronous; if it blocks (e.g. waiting for an HTTP response), it
@@ -23,6 +29,7 @@ import http.client
 import json
 import logging
 import queue
+import time
 from logging.handlers import QueueHandler, QueueListener
 
 from blackbull import BlackBull, JSONResponse, Response
@@ -88,7 +95,10 @@ _json_handler = JsonHTTPHandler(LOG_SERVER_HOST, LOG_SERVER_URL)
 _listener     = QueueListener(_log_queue, _json_handler, respect_handler_level=True)
 _listener.start()
 
-_access_logger = logging.getLogger('blackbull.access')
+# Logger that feeds into the non-blocking queue pipeline.
+# We use our own namespace ('example.access') so application events are
+# explicitly driven by @app.on observers rather than framework internals.
+_access_logger = logging.getLogger('example.access')
 _access_logger.addHandler(QueueHandler(_log_queue))
 _access_logger.setLevel(logging.INFO)
 
@@ -98,6 +108,47 @@ _access_logger.setLevel(logging.INFO)
 # ---------------------------------------------------------------------------
 
 app = BlackBull()
+
+
+@app.on('before_handler')
+async def log_request(event):
+    """Observer: log every incoming request — fire-and-forget, never blocks."""
+    _access_logger.info(
+        '%s %s',
+        event.detail['method'],
+        event.detail['path'],
+        extra={
+            'client_ip':      event.detail['client_ip'] or '-',
+            'method':         event.detail['method'],
+            'path':           event.detail['path'],
+            'http_version':   '-',
+            'status':         '-',
+            'response_bytes': 0,
+            'duration_ms':    0.0,
+        },
+    )
+
+
+@app.on('after_handler')
+async def log_response(event):
+    """Observer: log the outcome; captures exceptions without affecting the request."""
+    exc = event.detail.get('exception')
+    status = 'ERROR' if exc else 'OK'
+    _access_logger.info(
+        '%s %s → %s',
+        event.detail['method'],
+        event.detail['path'],
+        status,
+        extra={
+            'client_ip':      event.detail['client_ip'] or '-',
+            'method':         event.detail['method'],
+            'path':           event.detail['path'],
+            'http_version':   '-',
+            'status':         status,
+            'response_bytes': 0,
+            'duration_ms':    0.0,
+        },
+    )
 
 
 @app.route(path='/')
