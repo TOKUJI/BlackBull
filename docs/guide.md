@@ -885,12 +885,11 @@ Events that application code can subscribe to.  Internal Level A events used by 
 | `app_startup` | Server has bound its socket and is about to accept connections | *(empty)* | Sugar: `@app.on_startup` |
 | `app_shutdown` | Server has received a stop signal and is about to exit | *(empty)* | Sugar: `@app.on_shutdown` |
 | `websocket_message` | A WebSocket message has been fully received and reassembled by the server, before the ASGI handler reads it via `receive()` | `scope` (the connection scope dict), `text` (`str` for text frames, `None` otherwise), `bytes` (`bytes` for binary frames, `None` otherwise) | Observation only — see §9.6.1 |
+| `request_received` | HTTP request headers parsed, before routing and handler dispatch | `scope`, `client_ip`, `method`, `path`, `http_version`, `headers` | Supports both `@app.on` and `@app.intercept` — see §9.6.4 |
 | `request_completed` | An HTTP request has finished — the response has been fully sent (or the request failed before that, e.g. 404 or unhandled exception).  **Not** fired if the client disconnected before the response completed, and **not** fired for WebSocket connections | `scope`, `client_ip`, `method`, `path`, `http_version`, `status` (`int` or `'-'`), `response_bytes` (`int`), `duration_ms` (`float`) | Observation only — see §9.6.2 |
 | `request_disconnected` | An HTTP client closed the connection before the response was fully sent | `scope`, `client_ip`, `method`, `path`, `http_version` | Observation only — see §9.6.3 |
 
-> Additional events (`request_received`, `before_handler`, `after_handler`,
-> `error`,
-> `websocket_connected`, `websocket_disconnected`) are
+> Additional events (`before_handler`, `after_handler`, `error`) are
 > on the roadmap and will appear in this table as they ship.
 
 #### 9.6.1 `websocket_message` — observation only
@@ -970,7 +969,37 @@ The event fires when the server detects the disconnect via the application's `re
 
 **This event is observation only.**  Although `@app.intercept('request_disconnected')` will accept a registration without error, the disconnect has already occurred by the time the event fires; the framework does not guarantee that interceptor side-effects affect anything visible to the client.
 
-WebSocket connections never fire `request_disconnected`.  Use `websocket_disconnected` (planned) for that case.
+WebSocket connections never fire `request_disconnected`.  Use `websocket_disconnected` instead.
+
+#### 9.6.4 `request_received`
+
+`request_received` fires at the earliest point an HTTP request is visible to application code — after the request line and headers are parsed but before routing or handler dispatch.  It fires for both HTTP/1.1 and HTTP/2 (once per stream).  WebSocket connections never fire this event.
+
+**Ordering guarantee:**  `request_received` → routing → `before_handler` → handler → `request_completed`.
+
+| detail key | type | value |
+| --- | --- | --- |
+| `scope` | `dict` | The full ASGI scope for this request |
+| `client_ip` | `str` | Remote address |
+| `method` | `str` | e.g. `'GET'` |
+| `path` | `str` | e.g. `'/api/users'` |
+| `http_version` | `str` | e.g. `'1.1'` or `'2'` |
+| `headers` | `Headers` | Parsed request headers |
+
+Use `@app.intercept('request_received')` for early gates (authentication, rate limiting) — the interceptor runs synchronously before the route handler, so returning without raising short-circuits the request.  Use `@app.on('request_received')` for passive observation (metrics, logging).
+
+```python
+@app.intercept('request_received')
+async def require_api_key(event):
+    headers = event.detail['scope']['headers']
+    if headers.get(b'x-api-key') != b'secret':
+        raise PermissionError('missing or invalid API key')
+    # returning normally allows the request to proceed
+
+@app.on('request_received')
+async def record_hit(event):
+    metrics.increment('http.requests', tags={'path': event.detail['path']})
+```
 
 ### 9.7 Exception handling
 

@@ -196,6 +196,18 @@ async def _run_with_log(coro, record: AccessLogRecord,
     cancel sibling streams through the TaskGroup.
     """
     try:
+        if dispatcher is not None and scope is not None and scope.get('type') == 'http':
+            await dispatcher.emit(Event(
+                'request_received',
+                detail={
+                    'scope':        scope,
+                    'client_ip':    record.client_ip,
+                    'method':       record.method,
+                    'path':         record.path,
+                    'http_version': record.http_version,
+                    'headers':      scope.get('headers', []),
+                },
+            ))
         await coro
     except asyncio.CancelledError:
         raise
@@ -387,6 +399,18 @@ class HTTP11Handler(BaseHandler):
                 else:
                     detecting_receive = inner_receive
                 try:
+                    if _dispatcher is not None:
+                        await _dispatcher.emit(Event(
+                            'request_received',
+                            detail={
+                                'scope':        scope,
+                                'client_ip':    log_record.client_ip,
+                                'method':       log_record.method,
+                                'path':         log_record.path,
+                                'http_version': log_record.http_version,
+                                'headers':      scope.get('headers', []),
+                            },
+                        ))
                     await self.app(scope, detecting_receive, capturing_send)
                 finally:
                     _access_logger.info(log_record.format(), extra=log_record.as_extra())
