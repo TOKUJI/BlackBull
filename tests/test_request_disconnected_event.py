@@ -309,3 +309,69 @@ async def test_disconnect_fires_request_disconnected_exactly_once():
     await asyncio.wait_for(seen.wait(), timeout=2.0)
     await asyncio.sleep(0.3)
     assert len(captured) == 1
+
+
+# ---------------------------------------------------------------------------
+# Negative: normal response must not fire request_disconnected
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_normal_response_does_not_fire_request_disconnected():
+    """A request that completes normally must not fire request_disconnected."""
+    app = BlackBull()
+    disconnected: list[Event] = []
+    completed: list[Event] = []
+    completed_seen = asyncio.Event()
+
+    @app.on('request_disconnected')
+    async def on_disconnected(event: Event):
+        disconnected.append(event)
+
+    @app.on('request_completed')
+    async def on_completed(event: Event):
+        completed.append(event)
+        completed_seen.set()
+
+    @app.route(path='/ok')
+    async def handler(scope, receive, send):
+        await send({'type': 'http.response.start', 'status': 200, 'headers': []})
+        await send({'type': 'http.response.body', 'body': b'ok', 'more_body': False})
+
+    await _run_request(app, _raw_request(path='/ok'))
+    await asyncio.wait_for(completed_seen.wait(), timeout=2.0)
+    await asyncio.sleep(0.3)
+    assert len(completed) == 1, 'request_completed must fire for normal request'
+    assert len(disconnected) == 0, (
+        f'request_disconnected must not fire for normal request, '
+        f'got {len(disconnected)}'
+    )
+
+
+# ---------------------------------------------------------------------------
+# Negative: WebSocket connections must not fire request_disconnected
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_websocket_connection_does_not_fire_request_disconnected():
+    """A WebSocket connection must not fire request_disconnected at any point."""
+    from unittest.mock import AsyncMock, patch
+    raw = _ws_request()
+    writer = _FakeWriter()
+    app = BlackBull()
+    disconnected: list[Event] = []
+
+    @app.on('request_disconnected')
+    async def on_disconnected(event: Event):
+        disconnected.append(event)
+
+    with patch.object(WebSocketHandler, 'run', new=AsyncMock()):
+        reader = _FakeReader(raw)
+        handler = HTTP11Handler(app, reader, writer, raw[:1])
+        handler.request = raw
+        await handler.run()
+
+    await asyncio.sleep(0.3)
+    assert len(disconnected) == 0, (
+        f'request_disconnected must not fire for WebSocket connections, '
+        f'got {len(disconnected)}'
+    )
