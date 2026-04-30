@@ -1,6 +1,7 @@
 import gzip as _gzip
 from collections.abc import Callable
 from ..server.headers import Headers
+from ..asgi import ResponseStart, ResponseBody, parse_response_event
 
 _MIN_SIZE = 100  # default minimum body size to bother compressing
 _SERVER_PREFERENCE = ['br', 'zstd', 'gzip']  # server-side priority order
@@ -22,6 +23,10 @@ _SKIP_CONTENT_TYPES = (
 )
 
 
+# ---------------------------------------------------------------------------
+# Codec detection and selection
+# ---------------------------------------------------------------------------
+
 def _detect_codecs() -> dict[str, Callable[[bytes], bytes]]:
     """Return a dict of codec-name → compress-callable for every available encoder."""
     available: dict[str, Callable[[bytes], bytes]] = {}
@@ -40,16 +45,16 @@ def _detect_codecs() -> dict[str, Callable[[bytes], bytes]]:
     return available
 
 
-def _is_compressible_content_type(headers: list) -> bool:
+def _is_compressible_content_type(headers: Headers) -> bool:
     """Return False when the Content-Type signals already-compressed content."""
-    for k, v in headers:
-        if k.lower() == b'content-type':
-            ct = v.split(b';')[0].strip().lower().decode('ascii', errors='ignore')
-            if any(ct.startswith(prefix) for prefix in _SKIP_CONTENT_TYPES):
-                return False
-            break
-    return True
+    ct = headers.get(b'content-type', b'').split(b';')[0].strip().lower()
+    ct_str = ct.decode('ascii', errors='ignore')
+    return not any(ct_str.startswith(prefix) for prefix in _SKIP_CONTENT_TYPES)
 
+
+# ---------------------------------------------------------------------------
+# Middleware
+# ---------------------------------------------------------------------------
 
 class CompressionMiddleware:
     """ASGI middleware: compress the response body using the best codec the
@@ -132,30 +137,25 @@ class CompressionMiddleware:
 
         async def intercepting_send(event: dict) -> None:
             nonlocal streaming, skip_compression
-            event_type = event.get('type')
-
-            if event_type == 'http.response.start':
-                start_event.update(event)
-                if not _is_compressible_content_type(event.get('headers', [])):
-                    skip_compression = True
-
-            elif event_type == 'http.response.body':
-                chunk = event.get('body', b'')
-                more_body = event.get('more_body', False)
-
-                if streaming or skip_compression:
-                    await send(event)
-                elif more_body:
-                    streaming = True
-                    await send(start_event)
-                    if chunk:
-                        await send({'type': 'http.response.body',
-                                    'body': chunk, 'more_body': True})
-                else:
-                    body_parts.append(chunk)
-
-            else:
-                await send(event)
+            parsed = parse_response_event(event)
+            match parsed:
+                case ResponseStart():
+                    start_event.update(parsed)
+                    if not _is_compressible_content_type(parsed.headers):
+                        skip_compression = True
+                case ResponseBody():
+                    if streaming or skip_compression:
+                        await send(parsed)
+                    elif parsed.more_body:
+                        streaming = True
+                        await send(start_event)
+                        if parsed.body:
+                            await send({'type': 'http.response.body',
+                                        'body': parsed.body, 'more_body': True})
+                    else:
+                        body_parts.append(parsed.body)
+                case _:
+                    await send(parsed)
 
         await call_next(scope, receive, intercepting_send)
 
