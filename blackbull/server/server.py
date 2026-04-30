@@ -5,6 +5,7 @@ import logging
 import ssl
 import traceback
 import re
+import uuid
 from collections import defaultdict, deque
 from contextlib import asynccontextmanager
 from urllib.parse import urlparse
@@ -158,6 +159,34 @@ def _make_disconnect_detecting_receive(receive, scope: dict, dispatcher, log_rec
     return detecting_receive
 
 
+def _make_ws_accept_detecting_send(send, scope: dict, dispatcher):
+    """Wrap WebSocket *send* to emit websocket_connected on websocket.accept.
+
+    Sets scope['_connection_id'] on first accept so subsequent events
+    (websocket_message, websocket_disconnected) can reference the same ID.
+    Emits after calling the original send so the handshake is fully processed
+    before observers are notified.
+    """
+    async def detecting_send(event, *args, **kwargs):
+        await send(event, *args, **kwargs)
+        if (isinstance(event, dict)
+                and event.get('type') == 'websocket.accept'
+                and not scope.get('_connection_id')):
+            connection_id = str(uuid.uuid4())
+            scope['_connection_id'] = connection_id
+            await dispatcher.emit(Event(
+                'websocket_connected',
+                detail={
+                    'scope': scope,
+                    'connection_id': connection_id,
+                    'client_ip': scope['client'][0] if scope.get('client') else '',
+                    'path': scope.get('path', ''),
+                    'subprotocol': event.get('subprotocol') or None,
+                },
+            ))
+    return detecting_send
+
+
 async def _run_with_log(coro, record: AccessLogRecord,
                         dispatcher=None, scope: dict | None = None) -> None:
     """Await *coro* then emit one access log entry on 'blackbull.access'.
@@ -292,9 +321,12 @@ class WebSocketHandler(BaseHandler):
         logger.debug('WebSocket handshake complete.')
 
         send = SenderFactory.websocket(self.writer)
+        _dispatcher = getattr(self.app, '_dispatcher', None)
+        if _dispatcher is not None:
+            send = _make_ws_accept_detecting_send(send, self.scope, _dispatcher)
         receive = RecipientFactory.websocket(
             self.reader, self.writer,
-            dispatcher=getattr(self.app, '_dispatcher', None),
+            dispatcher=_dispatcher,
             scope=self.scope,
         )
         if record is not None:
