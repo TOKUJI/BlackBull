@@ -321,6 +321,7 @@ class WebSocketRecipient(BaseRecipient):
                         await self._event_queue.put(asgi_event)
 
                     case WSOpcode.CLOSE:
+                        await self._emit_disconnected(1000)
                         await self._event_queue.put(
                             {'type': 'websocket.disconnect', 'code': 1000})
                         return
@@ -342,12 +343,29 @@ class WebSocketRecipient(BaseRecipient):
                             {'type': 'websocket.receive', 'text': None, 'bytes': payload})
 
         except asyncio.IncompleteReadError:
+            await self._emit_disconnected(1006)
             await self._event_queue.put({'type': 'websocket.disconnect', 'code': 1006})
         except Exception as exc:
             # Protocol violations (ValueError, ProtocolError, …) are placed on
             # the queue as exception objects so __call__ can re-raise them to
             # the application, preserving the pre-queue-refactor contract.
             await self._event_queue.put(exc)
+
+    async def _emit_disconnected(self, code: int) -> None:
+        """Emit websocket_disconnected exactly once per connection."""
+        if (self._dispatcher is not None and self._scope is not None
+                and not self._scope.get('_ws_disconnected')):
+            self._scope['_ws_disconnected'] = True
+            await self._dispatcher.emit(Event(
+                'websocket_disconnected',
+                detail={
+                    'scope':         self._scope,
+                    'connection_id': self._scope.get('_connection_id', ''),
+                    'client_ip':     self._scope['client'][0] if self._scope.get('client') else '',
+                    'path':          self._scope.get('path', ''),
+                    'code':          code,
+                },
+            ))
 
     def _ensure_reader_started(self) -> None:
         if self._event_queue is None:
