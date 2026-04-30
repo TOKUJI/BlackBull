@@ -959,6 +959,28 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#962-request_completed-observation-only" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9.6.2 request_completed — observation only
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#963-request_disconnected-observation-only" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9.6.3 request_disconnected — observation only
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -3495,6 +3517,28 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#962-request_completed-observation-only" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9.6.2 request_completed — observation only
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#963-request_disconnected-observation-only" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9.6.3 request_disconnected — observation only
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -4987,11 +5031,23 @@ async def _wrapped_close_db(event: Event):
 <td><code>scope</code> (the connection scope dict), <code>text</code> (<code>str</code> for text frames, <code>None</code> otherwise), <code>bytes</code> (<code>bytes</code> for binary frames, <code>None</code> otherwise)</td>
 <td>Observation only — see §9.6.1</td>
 </tr>
+<tr>
+<td><code>request_completed</code></td>
+<td>An HTTP request has finished — the response has been fully sent (or the request failed before that, e.g. 404 or unhandled exception).  <strong>Not</strong> fired if the client disconnected before the response completed, and <strong>not</strong> fired for WebSocket connections</td>
+<td><code>scope</code>, <code>client_ip</code>, <code>method</code>, <code>path</code>, <code>http_version</code>, <code>status</code> (<code>int</code> or <code>'-'</code>), <code>response_bytes</code> (<code>int</code>), <code>duration_ms</code> (<code>float</code>)</td>
+<td>Observation only — see §9.6.2</td>
+</tr>
+<tr>
+<td><code>request_disconnected</code></td>
+<td>An HTTP client closed the connection before the response was fully sent</td>
+<td><code>scope</code>, <code>client_ip</code>, <code>method</code>, <code>path</code>, <code>http_version</code></td>
+<td>Observation only — see §9.6.3</td>
+</tr>
 </tbody>
 </table>
 <blockquote>
 <p>Additional events (<code>request_received</code>, <code>before_handler</code>, <code>after_handler</code>,
-<code>request_completed</code>, <code>request_disconnected</code>, <code>error</code>,
+<code>error</code>,
 <code>websocket_connected</code>, <code>websocket_disconnected</code>) are
 on the roadmap and will appear in this table as they ship.</p>
 </blockquote>
@@ -5009,6 +5065,120 @@ async def log_message(event: Event):
 <p class="admonition-title">Per-connection identity</p>
 <p>The <code>scope</code> dict identifies the connection path and headers, but does not yet carry a unique connection ID.  Two simultaneous connections from the same client to the same path produce indistinguishable scopes.  A <code>websocket_connected</code> event (planned) will provide per-connection identity when it ships.</p>
 </div>
+<h4 id="962-request_completed-observation-only">9.6.2 <code>request_completed</code> — observation only</h4>
+<p><code>request_completed</code> fires once per HTTP request, after the response has been sent (or after the request has otherwise concluded — for example, after a 404 or after an unhandled exception in the handler).  It fires from the same site as the <code>blackbull.access</code> log record, so every request that produces an access-log entry also produces this event.</p>
+<p><code>detail</code> carries both the connection <code>scope</code> and the same flattened fields the access log carries:</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>scope</code></td>
+<td><code>dict</code></td>
+<td>The ASGI scope dict for the request</td>
+</tr>
+<tr>
+<td><code>client_ip</code></td>
+<td><code>str</code></td>
+<td>Remote address (<code>'-'</code> when unavailable)</td>
+</tr>
+<tr>
+<td><code>method</code></td>
+<td><code>str</code></td>
+<td>HTTP method (e.g. <code>'GET'</code>)</td>
+</tr>
+<tr>
+<td><code>path</code></td>
+<td><code>str</code></td>
+<td>Request path (e.g. <code>'/api/items'</code>)</td>
+</tr>
+<tr>
+<td><code>http_version</code></td>
+<td><code>str</code></td>
+<td>Protocol version (e.g. <code>'1.1'</code>, <code>'2'</code>)</td>
+</tr>
+<tr>
+<td><code>status</code></td>
+<td><code>int</code> | <code>str</code></td>
+<td>Response status code, or <code>'-'</code> if not sent</td>
+</tr>
+<tr>
+<td><code>response_bytes</code></td>
+<td><code>int</code></td>
+<td>Total body bytes written to the wire</td>
+</tr>
+<tr>
+<td><code>duration_ms</code></td>
+<td><code>float</code></td>
+<td>Wall-clock duration from first byte received to response complete, in milliseconds</td>
+</tr>
+</tbody>
+</table>
+<pre><code class="language-python">@app.on('request_completed')
+async def log_request(event: Event):
+    d = event.detail
+    print(f&quot;{d['method']} {d['path']} → {d['status']} ({d['duration_ms']:.1f}ms)&quot;)
+</code></pre>
+<p>Use <code>scope</code> when you need request context beyond the flat fields — for example, path parameters injected by the router, or a trace span stored in <code>scope['state']</code>.</p>
+<p><strong>This event is observation only.</strong>  The response has already been sent by the time the event fires, so nothing an interceptor registered with <code>@app.intercept('request_completed')</code> can do will change what the client received.  The framework makes no guarantees about:</p>
+<ul>
+<li>whether mutations to <code>detail</code> are propagated anywhere;</li>
+<li>whether raising from an interceptor changes the response;</li>
+<li>ordering between an interceptor and shutdown or other completion steps.</li>
+</ul>
+<p>If you need to act <em>during</em> the request (authentication, header rewriting, validation), use middleware (§4) — its event-driven counterpart will be <code>@app.intercept('before_handler')</code> once that event ships.</p>
+<h4 id="963-request_disconnected-observation-only">9.6.3 <code>request_disconnected</code> — observation only</h4>
+<p><code>request_disconnected</code> fires when an HTTP client closes the connection before the response has been fully sent.  It is <strong>mutually exclusive</strong> with <code>request_completed</code>: a request that disconnected does not also fire <code>request_completed</code>.  The framework still emits the <code>blackbull.access</code> log record for the request (with status <code>'-'</code> per §14.1).</p>
+<p><code>detail</code> carries the request identification fields but <strong>not</strong> response-side fields (status, response_bytes, duration_ms) — those are not meaningful for an aborted request:</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>scope</code></td>
+<td><code>dict</code></td>
+<td>The ASGI scope dict for the request</td>
+</tr>
+<tr>
+<td><code>client_ip</code></td>
+<td><code>str</code></td>
+<td>Remote address (<code>'-'</code> when unavailable)</td>
+</tr>
+<tr>
+<td><code>method</code></td>
+<td><code>str</code></td>
+<td>HTTP method</td>
+</tr>
+<tr>
+<td><code>path</code></td>
+<td><code>str</code></td>
+<td>Request path</td>
+</tr>
+<tr>
+<td><code>http_version</code></td>
+<td><code>str</code></td>
+<td>Protocol version</td>
+</tr>
+</tbody>
+</table>
+<pre><code class="language-python">@app.on('request_disconnected')
+async def on_disconnect(event: Event):
+    d = event.detail
+    print(f&quot;Client disconnected from {d['method']} {d['path']}&quot;)
+</code></pre>
+<p>The event fires when the server detects the disconnect via the application's <code>receive()</code> call — specifically when <code>receive()</code> returns <code>{'type': 'http.disconnect'}</code>.  Long-polling or SSE handlers that call <code>receive()</code> to watch for disconnect will trigger this event the moment the client closes the connection.</p>
+<p><strong>This event is observation only.</strong>  Although <code>@app.intercept('request_disconnected')</code> will accept a registration without error, the disconnect has already occurred by the time the event fires; the framework does not guarantee that interceptor side-effects affect anything visible to the client.</p>
+<p>WebSocket connections never fire <code>request_disconnected</code>.  Use <code>websocket_disconnected</code> (planned) for that case.</p>
 <h3 id="97-exception-handling">9.7 Exception handling</h3>
 <p>The two hook kinds have deliberately different exception semantics, summarised in §9.1.  Concretely:</p>
 <ul>
