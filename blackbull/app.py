@@ -337,15 +337,35 @@ class BlackBull:
             return
 
         self._logger.debug((self, function))
+        exc_caught: Exception | None = None
         try:
+            await self._dispatcher.emit(Event('before_handler', detail={
+                'scope':     scope,
+                'client_ip': scope['client'][0] if scope.get('client') else '',
+                'method':    scope.get('method', ''),
+                'path':      scope.get('path', ''),
+                'handler':   function.__name__,
+            }))
             await function(scope, receive, send)
         except Exception as e:
+            exc_caught = e
             self._logger.error(traceback.format_exc())
+        finally:
+            await self._dispatcher.emit(Event('after_handler', detail={
+                'scope':     scope,
+                'client_ip': scope['client'][0] if scope.get('client') else '',
+                'method':    scope.get('method', ''),
+                'path':      scope.get('path', ''),
+                'handler':   function.__name__,
+                'exception': exc_caught,
+            }))
+
+        if exc_caught is not None:
             scope.setdefault('state', {}).update({
                 'error_status': HTTPStatus.INTERNAL_SERVER_ERROR,
-                'error_exception': e,
+                'error_exception': exc_caught,
             })
-            handler = self._error_router[e]
+            handler = self._error_router[exc_caught]
             if handler is not None:
                 await handler(scope, receive, send)
 
