@@ -885,10 +885,11 @@ Events that application code can subscribe to.  Internal Level A events used by 
 | `app_startup` | Server has bound its socket and is about to accept connections | *(empty)* | Sugar: `@app.on_startup` |
 | `app_shutdown` | Server has received a stop signal and is about to exit | *(empty)* | Sugar: `@app.on_shutdown` |
 | `websocket_message` | A WebSocket message has been fully received and reassembled by the server, before the ASGI handler reads it via `receive()` | `scope` (the connection scope dict), `text` (`str` for text frames, `None` otherwise), `bytes` (`bytes` for binary frames, `None` otherwise) | Observation only — see §9.6.1 |
-| `request_completed` | An HTTP request has finished — the response has been fully sent (or the request failed before that, e.g. 404 or unhandled exception) | `scope`, `client_ip`, `method`, `path`, `http_version`, `status` (`int` or `'-'`), `response_bytes` (`int`), `duration_ms` (`float`) | Observation only — see §9.6.2 |
+| `request_completed` | An HTTP request has finished — the response has been fully sent (or the request failed before that, e.g. 404 or unhandled exception).  **Not** fired if the client disconnected before the response completed, and **not** fired for WebSocket connections | `scope`, `client_ip`, `method`, `path`, `http_version`, `status` (`int` or `'-'`), `response_bytes` (`int`), `duration_ms` (`float`) | Observation only — see §9.6.2 |
+| `request_disconnected` | An HTTP client closed the connection before the response was fully sent | `scope`, `client_ip`, `method`, `path`, `http_version` | Observation only — see §9.6.3 |
 
 > Additional events (`request_received`, `before_handler`, `after_handler`,
-> `request_disconnected`, `error`,
+> `error`,
 > `websocket_connected`, `websocket_disconnected`) are
 > on the roadmap and will appear in this table as they ship.
 
@@ -943,6 +944,33 @@ Use `scope` when you need request context beyond the flat fields — for example
 - ordering between an interceptor and shutdown or other completion steps.
 
 If you need to act *during* the request (authentication, header rewriting, validation), use middleware (§4) — its event-driven counterpart will be `@app.intercept('before_handler')` once that event ships.
+
+#### 9.6.3 `request_disconnected` — observation only
+
+`request_disconnected` fires when an HTTP client closes the connection before the response has been fully sent.  It is **mutually exclusive** with `request_completed`: a request that disconnected does not also fire `request_completed`.  The framework still emits the `blackbull.access` log record for the request (with status `'-'` per §14.1).
+
+`detail` carries the request identification fields but **not** response-side fields (status, response_bytes, duration_ms) — those are not meaningful for an aborted request:
+
+| Key | Type | Description |
+| --- | --- | --- |
+| `scope` | `dict` | The ASGI scope dict for the request |
+| `client_ip` | `str` | Remote address (`'-'` when unavailable) |
+| `method` | `str` | HTTP method |
+| `path` | `str` | Request path |
+| `http_version` | `str` | Protocol version |
+
+```python
+@app.on('request_disconnected')
+async def on_disconnect(event: Event):
+    d = event.detail
+    print(f"Client disconnected from {d['method']} {d['path']}")
+```
+
+The event fires when the server detects the disconnect via the application's `receive()` call — specifically when `receive()` returns `{'type': 'http.disconnect'}`.  Long-polling or SSE handlers that call `receive()` to watch for disconnect will trigger this event the moment the client closes the connection.
+
+**This event is observation only.**  Although `@app.intercept('request_disconnected')` will accept a registration without error, the disconnect has already occurred by the time the event fires; the framework does not guarantee that interceptor side-effects affect anything visible to the client.
+
+WebSocket connections never fire `request_disconnected`.  Use `websocket_disconnected` (planned) for that case.
 
 ### 9.7 Exception handling
 

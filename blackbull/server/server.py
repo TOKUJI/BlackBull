@@ -131,6 +131,33 @@ def _make_capturing_receive(receive, record: AccessLogRecord):
     return capturing_receive
 
 
+def _make_disconnect_detecting_receive(receive, scope: dict, dispatcher, log_record: AccessLogRecord):
+    """Wrap *receive* to emit request_disconnected when http.disconnect is seen.
+
+    Sets scope['_disconnected'] = True on first detection so that the
+    request_completed emit site can skip firing the completion event.
+    The flag is idempotent — if the handler calls receive() again after the
+    first disconnect, the event is not emitted twice.
+    """
+    async def detecting_receive():
+        event = await receive()
+        if isinstance(event, dict) and event.get('type') == 'http.disconnect':
+            if not scope.get('_disconnected'):
+                scope['_disconnected'] = True
+                await dispatcher.emit(Event(
+                    'request_disconnected',
+                    detail={
+                        'scope': scope,
+                        'client_ip': log_record.client_ip,
+                        'method': log_record.method,
+                        'path': log_record.path,
+                        'http_version': log_record.http_version,
+                    },
+                ))
+        return event
+    return detecting_receive
+
+
 async def _run_with_log(coro, record: AccessLogRecord,
                         dispatcher=None, scope: dict | None = None) -> None:
     """Await *coro* then emit one access log entry on 'blackbull.access'.
@@ -147,7 +174,9 @@ async def _run_with_log(coro, record: AccessLogRecord,
         logger.exception('HTTP/2 stream raised an unhandled exception')
     finally:
         _access_logger.info(record.format(), extra=record.as_extra())
-        if dispatcher is not None and scope is not None:
+        if (dispatcher is not None and scope is not None
+                and scope.get('type') == 'http'
+                and not scope.get('_disconnected')):
             await dispatcher.emit(Event(
                 'request_completed',
                 detail={
@@ -319,11 +348,19 @@ class HTTP11Handler(BaseHandler):
                 scope['state']['access_log'] = log_record
                 capturing_send = _make_capturing_send(send, log_record)
                 _dispatcher = getattr(self.app, '_dispatcher', None)
+                inner_receive = RecipientFactory.http1(self.reader, scope)
+                if _dispatcher is not None:
+                    detecting_receive = _make_disconnect_detecting_receive(
+                        inner_receive, scope, _dispatcher, log_record)
+                else:
+                    detecting_receive = inner_receive
                 try:
-                    await self.app(scope, RecipientFactory.http1(self.reader, scope), capturing_send)
+                    await self.app(scope, detecting_receive, capturing_send)
                 finally:
                     _access_logger.info(log_record.format(), extra=log_record.as_extra())
-                    if _dispatcher is not None:
+                    if (_dispatcher is not None
+                            and scope.get('type') == 'http'
+                            and not scope.get('_disconnected')):
                         await _dispatcher.emit(Event(
                             'request_completed',
                             detail={
