@@ -178,10 +178,24 @@ app = BlackBull()
 protected = app.group(middlewares=[session_mw])
 
 
-@app.on('before_handler')
+@app.on('request_received')
 async def log_request(event):
     """Observer: log every HTTP request — fire-and-forget, never short-circuits."""
     logger.info('%s %s', event.detail['method'], event.detail['path'])
+
+
+@app.on('websocket_connected')
+async def on_ws_connected(event):
+    """Observer: log each new WebSocket connection."""
+    logger.info('WebSocket connected id=%s path=%s',
+                event.detail['connection_id'], event.detail['path'])
+
+
+@app.on('websocket_disconnected')
+async def on_ws_disconnected(event):
+    """Observer: log WebSocket disconnections (fires even on abrupt close)."""
+    logger.info('WebSocket disconnected id=%s code=%s',
+                event.detail['connection_id'], event.detail['code'])
 
 
 @app.route(methods=[HTTPMethod.GET], path='/')

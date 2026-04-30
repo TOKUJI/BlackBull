@@ -29,7 +29,6 @@ import http.client
 import json
 import logging
 import queue
-import time
 from logging.handlers import QueueHandler, QueueListener
 
 from blackbull import BlackBull, JSONResponse, Response
@@ -62,7 +61,7 @@ class JsonHTTPHandler(logging.Handler):
                 'level':   record.levelname,
                 'logger':  record.name,
                 'message': self.format(record),
-                # Access-log fields injected via extra= in AccessLogRecord.as_extra()
+                # Access-log fields injected via extra= in the observer
                 'client_ip':      getattr(record, 'client_ip',      '-'),
                 'method':         getattr(record, 'method',         '-'),
                 'path':           getattr(record, 'path',           '-'),
@@ -87,13 +86,12 @@ class JsonHTTPHandler(logging.Handler):
 
 
 # ---------------------------------------------------------------------------
-# Wire up non-blocking access logging
+# Non-blocking access logging pipeline (queue created at import; started at startup)
 # ---------------------------------------------------------------------------
 
 _log_queue    = queue.Queue(-1)                         # unbounded, thread-safe
 _json_handler = JsonHTTPHandler(LOG_SERVER_HOST, LOG_SERVER_URL)
 _listener     = QueueListener(_log_queue, _json_handler, respect_handler_level=True)
-_listener.start()
 
 # Logger that feeds into the non-blocking queue pipeline.
 # We use our own namespace ('example.access') so application events are
@@ -110,9 +108,25 @@ _access_logger.setLevel(logging.INFO)
 app = BlackBull()
 
 
-@app.on('before_handler')
+@app.on_startup
+async def start_log_listener():
+    """Start the background thread that forwards log records to log_server."""
+    _listener.start()
+
+
+@app.on_shutdown
+async def stop_log_listener():
+    """Drain the log queue and stop the background thread cleanly."""
+    _listener.stop()
+
+
+@app.on('request_received')
 async def log_request(event):
-    """Observer: log every incoming request — fire-and-forget, never blocks."""
+    """Observer: log every incoming request — fire-and-forget, never blocks.
+
+    Uses request_received (server-level, fires before routing) so every
+    request is counted, even those that 404 or 405 before reaching a handler.
+    """
     _access_logger.info(
         '%s %s',
         event.detail['method'],
@@ -121,7 +135,7 @@ async def log_request(event):
             'client_ip':      event.detail['client_ip'] or '-',
             'method':         event.detail['method'],
             'path':           event.detail['path'],
-            'http_version':   '-',
+            'http_version':   event.detail.get('http_version', '-'),
             'status':         '-',
             'response_bytes': 0,
             'duration_ms':    0.0,
@@ -129,24 +143,27 @@ async def log_request(event):
     )
 
 
-@app.on('after_handler')
+@app.on('request_completed')
 async def log_response(event):
-    """Observer: log the outcome; captures exceptions without affecting the request."""
-    exc = event.detail.get('exception')
-    status = 'ERROR' if exc else 'OK'
+    """Observer: log the completed request with status and timing.
+
+    request_completed fires after the response is sent and carries
+    status, response_bytes, and duration_ms from the server layer.
+    """
     _access_logger.info(
-        '%s %s → %s',
+        '%s %s → %s (%.1f ms)',
         event.detail['method'],
         event.detail['path'],
-        status,
+        event.detail['status'],
+        event.detail['duration_ms'],
         extra={
             'client_ip':      event.detail['client_ip'] or '-',
             'method':         event.detail['method'],
             'path':           event.detail['path'],
-            'http_version':   '-',
-            'status':         status,
-            'response_bytes': 0,
-            'duration_ms':    0.0,
+            'http_version':   event.detail.get('http_version', '-'),
+            'status':         event.detail['status'],
+            'response_bytes': event.detail['response_bytes'],
+            'duration_ms':    event.detail['duration_ms'],
         },
     )
 
@@ -166,7 +183,4 @@ if __name__ == '__main__':
     print('Web server on http://localhost:8000')
     print(f'Access logs → http://{LOG_SERVER_HOST}{LOG_SERVER_URL}')
     print('Press Ctrl-C to stop.\n')
-    try:
-        asyncio.run(app.run(port=8000))
-    finally:
-        _listener.stop()   # flush queue and join background thread cleanly
+    asyncio.run(app.run(port=8000))

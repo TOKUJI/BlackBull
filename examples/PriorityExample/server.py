@@ -55,7 +55,7 @@ def _priority(scope: dict) -> dict:
     return scope.get('http2_priority', _DEFAULT_PRIORITY)
 
 
-@app.on('before_handler')
+@app.on('request_received')
 async def log_priority(event):
     """Observer: log the RFC 9218 priority hint for every incoming request.
 

@@ -2,20 +2,29 @@
 Simple Task Manager
 ===================
 REST + HTML task management application demonstrating BlackBull's event-driven
-and middleware APIs together.
+API alongside per-route function middleware.
 
 Cross-cutting concerns:
-    Request logging  → @app.on('before_handler')  observer (fire-and-forget)
-    Error wrapping   → error_mw per-route middleware (must wrap send)
-    Bearer auth      → auth_mw per-route-group middleware (short-circuits to 401)
+    Request logging  → @app.on('request_received')   observer (fire-and-forget)
+    Bearer auth      → @app.intercept('before_handler') (short-circuits to 401)
+    HTTP/2 priority  → @app.intercept('before_handler') (reads urgency hint)
     JSON body        → json_body_mw per-route middleware (injects scope['json'])
+    DB startup       → @app.on_startup
 
 Why @app.on for logging, not middleware?
     Logging must never block or abort the request.  Observers run in an
-    independent asyncio.Task — they cannot short-circuit the handler chain,
-    and any exception they raise is caught and logged rather than surfaced.
-    Per-route middleware (auth, error handling) is still the right tool when
-    the cross-cutting concern must run synchronously or needs to short-circuit.
+    independent asyncio.Task — exceptions are isolated, the handler is
+    never short-circuited.
+
+Why @app.intercept for auth?
+    Auth must run synchronously before the handler; raising Unauthorized
+    prevents the handler from running.  The @app.on_error(Unauthorized)
+    handler maps that exception to a 401 JSON response.
+
+Why json_body_mw stays as per-route middleware?
+    JSON parsing is a per-request concern only for POST/PUT routes; making
+    it global via intercept would parse the body on GET requests where no
+    body exists.
 
 Authentication: Bearer token in the Authorization header, stored in
 sessionStorage by the browser.  Avoids HttpOnly-cookie/SameSite browser
@@ -60,52 +69,8 @@ logging.basicConfig(level=logging.INFO,
 SESSIONS: dict[str, str] = {}   # token → username
 
 # ---------------------------------------------------------------------------
-# Middleware
+# Per-route middleware (request-scoped; not suitable for global intercept)
 # ---------------------------------------------------------------------------
-
-async def error_mw(scope, receive, send, call_next):
-    """Catch unhandled exceptions and return a JSON 500 response."""
-    try:
-        await call_next(scope, receive, send)
-    except Exception as exc:
-        logger.exception('Unhandled error')
-        await send(JSONResponse({'error': str(exc)},
-                                status=HTTPStatus.INTERNAL_SERVER_ERROR))
-
-
-async def auth_mw(scope, receive, send, call_next):
-    """Validate Bearer token from Authorization header; inject scope['user']."""
-    auth = scope['headers'].get(b'authorization', b'')
-    token = auth[7:].decode() if auth.startswith(b'Bearer ') else ''
-    username = SESSIONS.get(token)
-    if not username:
-        await send(JSONResponse({'error': 'Unauthorized'},
-                                status=HTTPStatus.UNAUTHORIZED))
-        return
-    scope['user'] = username
-    scope['token'] = token
-    await call_next(scope, receive, send)
-
-
-async def priority_mw(scope, receive, send, call_next):
-    """Read HTTP/2 priority hint and adjust downstream behaviour.
-
-    scope['http2_priority'] is populated by BlackBull for HTTP/2 requests.
-    For HTTP/1.1 it is absent; this middleware defaults gracefully.
-
-    urgency 0-1  → high-priority: log the request prominently.
-    urgency 2-7  → normal/background: no change.
-    """
-    hint = scope.get('http2_priority', {'urgency': 3, 'incremental': False})
-    urgency = hint['urgency']
-    scope['_priority_urgency'] = urgency
-
-    if urgency <= 1:
-        logger.info('HIGH-PRIORITY request u=%d: %s %s',
-                    urgency, scope.get('method', '?'), scope.get('path', '?'))
-
-    await call_next(scope, receive, send)
-
 
 async def json_body_mw(scope, receive, send, call_next):
     """Read and parse the request body as JSON; inject scope['json']."""
@@ -119,29 +84,17 @@ async def json_body_mw(scope, receive, send, call_next):
     await call_next(scope, receive, send)
 
 # ---------------------------------------------------------------------------
-# Application + route groups
+# Custom exception for auth failures — caught by @app.on_error below
+# ---------------------------------------------------------------------------
+
+class Unauthorized(Exception):
+    pass
+
+# ---------------------------------------------------------------------------
+# Application
 # ---------------------------------------------------------------------------
 
 app = BlackBull()
-
-public = app.group(middlewares=[error_mw])
-api    = app.group(middlewares=[error_mw, priority_mw, auth_mw])
-
-
-@app.on('before_handler')
-async def log_request(event):
-    """Observer: log every request — fire-and-forget, never short-circuits."""
-    logger.info('%s %s', event.detail['method'], event.detail['path'])
-
-
-@app.on('after_handler')
-async def log_response(event):
-    """Observer: log completion and any unhandled exception."""
-    exc = event.detail.get('exception')
-    if exc:
-        logger.error('  → unhandled %s: %s', type(exc).__name__, exc)
-    else:
-        logger.info('  → OK')
 
 
 @app.on_startup
@@ -150,22 +103,77 @@ async def startup():
     await db.init_db()
     logger.info('Database ready. Default user: admin / admin')
 
+
+@app.on_error(Unauthorized)
+async def handle_unauthorized(scope, receive, send):
+    """Convert Unauthorized raised by the auth interceptor into a 401 response."""
+    await send(JSONResponse({'error': 'Unauthorized'}, status=HTTPStatus.UNAUTHORIZED))
+
+
+@app.intercept('before_handler')
+async def require_auth(event):
+    """Interceptor: validate Bearer token for protected routes.
+
+    Raises Unauthorized when the token is missing or invalid; the
+    @app.on_error(Unauthorized) handler above sends the 401 response.
+    Routes that do not start with a protected prefix are passed through.
+    """
+    path = event.detail['path']
+    if not (path.startswith('/tasks') or path == '/logout'):
+        return
+    scope = event.detail['scope']
+    auth = scope['headers'].get(b'authorization', b'')
+    token = auth[7:].decode() if auth.startswith(b'Bearer ') else ''
+    username = SESSIONS.get(token)
+    if not username:
+        raise Unauthorized('Unauthorized')
+    scope['user'] = username
+    scope['token'] = token
+
+
+@app.intercept('before_handler')
+async def handle_priority(event):
+    """Interceptor: read HTTP/2 priority hint and annotate the scope.
+
+    urgency 0-1  → high-priority: log prominently.
+    urgency 2-7  → normal/background: annotate scope only.
+    """
+    scope = event.detail['scope']
+    hint = scope.get('http2_priority', {'urgency': 3, 'incremental': False})
+    urgency = hint['urgency']
+    scope['_priority_urgency'] = urgency
+    if urgency <= 1:
+        logger.info('HIGH-PRIORITY u=%d: %s %s',
+                    urgency, event.detail['method'], event.detail['path'])
+
+
+@app.on('request_received')
+async def log_request(event):
+    """Observer: log every incoming request — fire-and-forget, never short-circuits."""
+    logger.info('%s %s', event.detail['method'], event.detail['path'])
+
+
+@app.on('request_completed')
+async def log_response(event):
+    """Observer: log completion with status code and timing."""
+    logger.info('  → %s (%.1f ms)', event.detail['status'], event.detail['duration_ms'])
+
 # ---------------------------------------------------------------------------
 # Public routes
 # ---------------------------------------------------------------------------
 
-@public.route(methods=[HTTPMethod.GET], path='/')
+@app.route(methods=[HTTPMethod.GET], path='/')
 async def handle_login_page(scope, receive, send):  # noqa: ARG001
     await send(Response(_load('login.html')))
 
 
-@public.route(methods=[HTTPMethod.GET], path='/register')
+@app.route(methods=[HTTPMethod.GET], path='/register')
 async def handle_register_page(scope, receive, send):  # noqa: ARG001
     await send(Response(_load('register.html')))
 
 
-@public.route(methods=[HTTPMethod.POST], path='/register',
-              middlewares=[json_body_mw])
+@app.route(methods=[HTTPMethod.POST], path='/register',
+           middlewares=[json_body_mw])
 async def handle_register(scope, receive, send):  # noqa: ARG001
     data = scope['json']
     username = str(data.get('username', '')).strip()
@@ -187,8 +195,8 @@ async def handle_register(scope, receive, send):  # noqa: ARG001
     await send(JSONResponse({'ok': True, 'token': token}))
 
 
-@public.route(methods=[HTTPMethod.POST], path='/login',
-              middlewares=[json_body_mw])
+@app.route(methods=[HTTPMethod.POST], path='/login',
+           middlewares=[json_body_mw])
 async def handle_login(scope, receive, send):  # noqa: ARG001
     data = scope['json']
     username = str(data.get('username', '')).strip()
@@ -210,21 +218,21 @@ async def handle_login(scope, receive, send):  # noqa: ARG001
 
 
 # /app — always public; the page JS checks auth via GET /tasks on load
-@public.route(methods=[HTTPMethod.GET], path='/app')
+@app.route(methods=[HTTPMethod.GET], path='/app')
 async def handle_app_page(scope, receive, send):  # noqa: ARG001
     await send(Response(_load('index.html')))
 
 # ---------------------------------------------------------------------------
-# REST API — tasks (require Bearer auth)
+# REST API — tasks (protected by require_auth interceptor above)
 # ---------------------------------------------------------------------------
 
-@api.route(methods=[HTTPMethod.GET], path='/tasks')
+@app.route(methods=[HTTPMethod.GET], path='/tasks')
 async def handle_get_tasks(scope, receive, send):  # noqa: ARG001
     tasks = await db.get_tasks(scope['user'])
     await send(JSONResponse(tasks))
 
 
-@api.route(methods=[HTTPMethod.POST], path='/tasks',
+@app.route(methods=[HTTPMethod.POST], path='/tasks',
            middlewares=[json_body_mw])
 async def handle_create_task(scope, receive, send):
     title = str(scope['json'].get('title', '')).strip()
@@ -236,7 +244,7 @@ async def handle_create_task(scope, receive, send):
     await send(JSONResponse(task, status=HTTPStatus.CREATED))
 
 
-@api.route(methods=[HTTPMethod.PUT], path='/tasks/{task_id}',
+@app.route(methods=[HTTPMethod.PUT], path='/tasks/{task_id}',
            middlewares=[json_body_mw])
 async def handle_update_task(scope, receive, send):
     try:
@@ -258,7 +266,7 @@ async def handle_update_task(scope, receive, send):
     await send(JSONResponse(task))
 
 
-@api.route(methods=[HTTPMethod.DELETE], path='/tasks/{task_id}')
+@app.route(methods=[HTTPMethod.DELETE], path='/tasks/{task_id}')
 async def handle_delete_task(scope, receive, send):
     try:
         task_id = int(scope['path_params']['task_id'])
@@ -274,7 +282,7 @@ async def handle_delete_task(scope, receive, send):
     await send(JSONResponse({'ok': True}))
 
 
-@api.route(methods=[HTTPMethod.POST], path='/logout')
+@app.route(methods=[HTTPMethod.POST], path='/logout')
 async def handle_logout(scope, receive, send):
     SESSIONS.pop(scope.get('token', ''), None)
     await send(JSONResponse({'ok': True}))
