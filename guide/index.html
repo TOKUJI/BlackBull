@@ -981,6 +981,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#964-request_received" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9.6.4 request_received
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -3539,6 +3550,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#964-request_received" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9.6.4 request_received
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -5032,6 +5054,12 @@ async def _wrapped_close_db(event: Event):
 <td>Observation only — see §9.6.1</td>
 </tr>
 <tr>
+<td><code>request_received</code></td>
+<td>HTTP request headers parsed, before routing and handler dispatch</td>
+<td><code>scope</code>, <code>client_ip</code>, <code>method</code>, <code>path</code>, <code>http_version</code>, <code>headers</code></td>
+<td>Supports both <code>@app.on</code> and <code>@app.intercept</code> — see §9.6.4</td>
+</tr>
+<tr>
 <td><code>request_completed</code></td>
 <td>An HTTP request has finished — the response has been fully sent (or the request failed before that, e.g. 404 or unhandled exception).  <strong>Not</strong> fired if the client disconnected before the response completed, and <strong>not</strong> fired for WebSocket connections</td>
 <td><code>scope</code>, <code>client_ip</code>, <code>method</code>, <code>path</code>, <code>http_version</code>, <code>status</code> (<code>int</code> or <code>'-'</code>), <code>response_bytes</code> (<code>int</code>), <code>duration_ms</code> (<code>float</code>)</td>
@@ -5046,9 +5074,7 @@ async def _wrapped_close_db(event: Event):
 </tbody>
 </table>
 <blockquote>
-<p>Additional events (<code>request_received</code>, <code>before_handler</code>, <code>after_handler</code>,
-<code>error</code>,
-<code>websocket_connected</code>, <code>websocket_disconnected</code>) are
+<p>Additional events (<code>before_handler</code>, <code>after_handler</code>, <code>error</code>) are
 on the roadmap and will appear in this table as they ship.</p>
 </blockquote>
 <h4 id="961-websocket_message-observation-only">9.6.1 <code>websocket_message</code> — observation only</h4>
@@ -5178,7 +5204,63 @@ async def on_disconnect(event: Event):
 </code></pre>
 <p>The event fires when the server detects the disconnect via the application's <code>receive()</code> call — specifically when <code>receive()</code> returns <code>{'type': 'http.disconnect'}</code>.  Long-polling or SSE handlers that call <code>receive()</code> to watch for disconnect will trigger this event the moment the client closes the connection.</p>
 <p><strong>This event is observation only.</strong>  Although <code>@app.intercept('request_disconnected')</code> will accept a registration without error, the disconnect has already occurred by the time the event fires; the framework does not guarantee that interceptor side-effects affect anything visible to the client.</p>
-<p>WebSocket connections never fire <code>request_disconnected</code>.  Use <code>websocket_disconnected</code> (planned) for that case.</p>
+<p>WebSocket connections never fire <code>request_disconnected</code>.  Use <code>websocket_disconnected</code> instead.</p>
+<h4 id="964-request_received">9.6.4 <code>request_received</code></h4>
+<p><code>request_received</code> fires at the earliest point an HTTP request is visible to application code — after the request line and headers are parsed but before routing or handler dispatch.  It fires for both HTTP/1.1 and HTTP/2 (once per stream).  WebSocket connections never fire this event.</p>
+<p><strong>Ordering guarantee:</strong>  <code>request_received</code> → routing → <code>before_handler</code> → handler → <code>request_completed</code>.</p>
+<table>
+<thead>
+<tr>
+<th>detail key</th>
+<th>type</th>
+<th>value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>scope</code></td>
+<td><code>dict</code></td>
+<td>The full ASGI scope for this request</td>
+</tr>
+<tr>
+<td><code>client_ip</code></td>
+<td><code>str</code></td>
+<td>Remote address</td>
+</tr>
+<tr>
+<td><code>method</code></td>
+<td><code>str</code></td>
+<td>e.g. <code>'GET'</code></td>
+</tr>
+<tr>
+<td><code>path</code></td>
+<td><code>str</code></td>
+<td>e.g. <code>'/api/users'</code></td>
+</tr>
+<tr>
+<td><code>http_version</code></td>
+<td><code>str</code></td>
+<td>e.g. <code>'1.1'</code> or <code>'2'</code></td>
+</tr>
+<tr>
+<td><code>headers</code></td>
+<td><code>Headers</code></td>
+<td>Parsed request headers</td>
+</tr>
+</tbody>
+</table>
+<p>Use <code>@app.intercept('request_received')</code> for early gates (authentication, rate limiting) — the interceptor runs synchronously before the route handler, so returning without raising short-circuits the request.  Use <code>@app.on('request_received')</code> for passive observation (metrics, logging).</p>
+<pre><code class="language-python">@app.intercept('request_received')
+async def require_api_key(event):
+    headers = event.detail['scope']['headers']
+    if headers.get(b'x-api-key') != b'secret':
+        raise PermissionError('missing or invalid API key')
+    # returning normally allows the request to proceed
+
+@app.on('request_received')
+async def record_hit(event):
+    metrics.increment('http.requests', tags={'path': event.detail['path']})
+</code></pre>
 <h3 id="97-exception-handling">9.7 Exception handling</h3>
 <p>The two hook kinds have deliberately different exception semantics, summarised in §9.1.  Concretely:</p>
 <ul>
