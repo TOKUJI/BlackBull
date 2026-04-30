@@ -1,7 +1,6 @@
 """
 Tests for HTTP/1.1 chunked Transfer-Encoding, StreamingResponse,
-StreamingAwareMiddleware, CompressionMiddleware streaming safety,
-and the use() warning for class-based middlewares.
+CompressionMiddleware streaming safety, and app.use() registration.
 """
 import functools
 import warnings
@@ -10,7 +9,6 @@ import pytest
 
 from blackbull.server.sender import HTTP1Sender, AbstractWriter
 from blackbull.response import StreamingResponse
-from blackbull.middleware.base import StreamingAwareMiddleware
 from blackbull.middleware.compression import CompressionMiddleware
 from blackbull.app import BlackBull
 
@@ -171,114 +169,6 @@ class TestStreamingResponse:
 
 
 # ---------------------------------------------------------------------------
-# TestStreamingAwareMiddleware
-# ---------------------------------------------------------------------------
-
-class TestStreamingAwareMiddleware:
-    @pytest.mark.asyncio
-    async def test_noop_passes_through_single_body(self):
-        mw = StreamingAwareMiddleware()
-        received: list = []
-
-        async def call_next(scope, receive, send):
-            await send({'type': 'http.response.start', 'status': 200, 'headers': []})
-            await send({'type': 'http.response.body', 'body': b'hello', 'more_body': False})
-
-        async def send(event):
-            received.append(event)
-
-        await mw(_make_scope(), None, send, call_next)
-
-        assert received[0]['type'] == 'http.response.start'
-        body_event = next(e for e in received if e['type'] == 'http.response.body')
-        assert body_event['body'] == b'hello'
-
-    @pytest.mark.asyncio
-    async def test_on_response_body_hook_transforms(self):
-        class UpperMiddleware(StreamingAwareMiddleware):
-            async def on_response_body(self, start, body):
-                return start, body.upper()
-
-        mw = UpperMiddleware()
-        received: list = []
-
-        async def call_next(scope, receive, send):
-            await send({'type': 'http.response.start', 'status': 200, 'headers': []})
-            await send({'type': 'http.response.body', 'body': b'hello', 'more_body': False})
-
-        async def send(event):
-            received.append(event)
-
-        await mw(_make_scope(), None, send, call_next)
-
-        body_event = next(e for e in received if e['type'] == 'http.response.body')
-        assert body_event['body'] == b'HELLO'
-
-    @pytest.mark.asyncio
-    async def test_streaming_bypasses_on_response_body(self):
-        called: list = []
-
-        class TrackingMiddleware(StreamingAwareMiddleware):
-            async def on_response_body(self, start, body):
-                called.append('on_response_body')
-                return start, body
-
-            async def on_response_start(self, start):
-                called.append('on_response_start')
-                return start
-
-        mw = TrackingMiddleware()
-        received: list = []
-
-        async def call_next(scope, receive, send):
-            await send({'type': 'http.response.start', 'status': 200, 'headers': []})
-            await send({'type': 'http.response.body', 'body': b'chunk', 'more_body': True})
-            await send({'type': 'http.response.body', 'body': b'', 'more_body': False})
-
-        async def send(event):
-            received.append(event)
-
-        await mw(_make_scope(), None, send, call_next)
-
-        assert 'on_response_start' in called
-        assert 'on_response_body' not in called
-
-    @pytest.mark.asyncio
-    async def test_streaming_chunks_passed_through(self):
-        mw = StreamingAwareMiddleware()
-        received: list = []
-
-        async def call_next(scope, receive, send):
-            await send({'type': 'http.response.start', 'status': 200, 'headers': []})
-            await send({'type': 'http.response.body', 'body': b'a', 'more_body': True})
-            await send({'type': 'http.response.body', 'body': b'b', 'more_body': False})
-
-        async def send(event):
-            received.append(event)
-
-        await mw(_make_scope(), None, send, call_next)
-
-        body_events = [e for e in received if e['type'] == 'http.response.body']
-        bodies = b''.join(e['body'] for e in body_events)
-        assert bodies == b'ab'
-
-    @pytest.mark.asyncio
-    async def test_non_http_scope_passed_through(self):
-        mw = StreamingAwareMiddleware()
-        received_scope: list = []
-
-        async def call_next(scope, receive, send):
-            received_scope.append(scope)
-
-        async def send(event):
-            pass
-
-        scope = {'type': 'websocket'}
-        await mw(scope, None, send, call_next)
-        assert received_scope[0] is scope
-
-
-# ---------------------------------------------------------------------------
 # TestCompressionMiddlewareStreaming
 # ---------------------------------------------------------------------------
 
@@ -338,30 +228,6 @@ class TestCompressionMiddlewareStreaming:
 # ---------------------------------------------------------------------------
 
 class TestUseWarning:
-    def test_class_middleware_warns(self):
-        class BareMiddleware:
-            async def __call__(self, scope, receive, send, call_next):
-                await call_next(scope, receive, send)
-
-        app = BlackBull()
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter('always')
-            app.use(BareMiddleware())
-        user_warnings = [x for x in w if issubclass(x.category, UserWarning)]
-        assert user_warnings
-        assert any('StreamingAwareMiddleware' in str(x.message) for x in user_warnings)
-
-    def test_streaming_aware_no_warn(self):
-        class GoodMiddleware(StreamingAwareMiddleware):
-            pass
-
-        app = BlackBull()
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter('always')
-            app.use(GoodMiddleware())
-        user_warnings = [x for x in w if issubclass(x.category, UserWarning)]
-        assert not user_warnings
-
     def test_function_middleware_no_warn(self):
         async def fn_mw(scope, receive, send, call_next):
             await call_next(scope, receive, send)

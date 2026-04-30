@@ -387,6 +387,35 @@ class TestHTTPCompression:
             f'Tiny body must not be compressed; got {body_event["body"]!r}'
         )
 
+    async def test_already_compressed_content_type_not_recompressed(self):
+        """Responses with already-compressed Content-Types must not be re-compressed."""
+        body = b'\xff\xd8\xff' + b'JFIF' * 100  # fake JPEG bytes
+
+        async def handler(_scope, _receive, send):
+            await send({'type': 'http.response.start', 'status': 200,
+                        'headers': [(b'content-type', b'image/jpeg')]})
+            await send({'type': 'http.response.body', 'body': body, 'more_body': False})
+
+        scope = {
+            'type': 'http',
+            'headers': Headers([(b'accept-encoding', b'gzip')]),
+        }
+        events = []
+
+        async def capture_send(event):
+            events.append(event)
+
+        await compress(scope, AsyncMock(return_value={'type': 'http.disconnect'}),
+                       capture_send, call_next=handler)
+
+        start = next(e for e in events if e.get('type') == 'http.response.start')
+        header_dict = {k.lower(): v for k, v in start.get('headers', [])}
+        assert b'content-encoding' not in header_dict, (
+            f'image/jpeg must not have Content-Encoding; headers: {header_dict}'
+        )
+        body_event = next(e for e in events if e.get('type') == 'http.response.body')
+        assert body_event['body'] == body, 'Body must be unmodified for already-compressed type'
+
 
 @pytest.mark.asyncio
 @pytest.mark.skipif(not _HAVE_BROTLI, reason='brotli not installed')

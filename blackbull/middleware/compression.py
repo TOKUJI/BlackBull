@@ -1,10 +1,25 @@
 import gzip as _gzip
 from collections.abc import Callable
 from ..server.headers import Headers
-from .base import StreamingAwareMiddleware
 
 _MIN_SIZE = 100  # default minimum body size to bother compressing
 _SERVER_PREFERENCE = ['br', 'zstd', 'gzip']  # server-side priority order
+
+# Content-Type prefixes whose payloads are already compressed or binary and
+# should not be re-compressed (compressing them wastes CPU with no size gain).
+_SKIP_CONTENT_TYPES = (
+    'image/',
+    'audio/',
+    'video/',
+    'application/zip',
+    'application/gzip',
+    'application/x-gzip',
+    'application/x-brotli',
+    'application/zstd',
+    'application/x-zstd',
+    'application/pdf',
+    'application/wasm',
+)
 
 
 def _detect_codecs() -> dict[str, Callable[[bytes], bytes]]:
@@ -25,11 +40,24 @@ def _detect_codecs() -> dict[str, Callable[[bytes], bytes]]:
     return available
 
 
-class CompressionMiddleware(StreamingAwareMiddleware):
+def _is_compressible_content_type(headers: list) -> bool:
+    """Return False when the Content-Type signals already-compressed content."""
+    for k, v in headers:
+        if k.lower() == b'content-type':
+            ct = v.split(b';')[0].strip().lower().decode('ascii', errors='ignore')
+            if any(ct.startswith(prefix) for prefix in _SKIP_CONTENT_TYPES):
+                return False
+            break
+    return True
+
+
+class CompressionMiddleware:
     """ASGI middleware: compress the response body using the best codec the
     client accepts (br > zstd > gzip, in server-preference order).
 
     Bodies smaller than *min_size* bytes are forwarded uncompressed.
+    Responses with already-compressed Content-Types (image/*, video/*, etc.)
+    are forwarded uncompressed.
     brotli and zstandard are optional — if not installed the middleware
     falls back gracefully to gzip or no compression.
 
@@ -83,6 +111,10 @@ class CompressionMiddleware(StreamingAwareMiddleware):
         return None
 
     async def __call__(self, scope, receive, send, call_next):
+        if scope.get('type') != 'http':
+            await call_next(scope, receive, send)
+            return
+
         headers = scope.get('headers', [])
         if not isinstance(headers, Headers):
             headers = Headers(headers)
@@ -91,16 +123,57 @@ class CompressionMiddleware(StreamingAwareMiddleware):
         if selection is None:
             await call_next(scope, receive, send)
             return
-        self._codec_name, self._compressor = selection
-        await super().__call__(scope, receive, send, call_next)
 
-    async def on_response_body(self, start: dict, body: bytes) -> tuple[dict, bytes]:
-        if len(body) < self._min_size:
-            return start, body
-        compressed = self._compressor(body)
-        existing = list(start.get('headers', []))
-        existing.append((b'content-encoding', self._codec_name.encode()))
-        return {**start, 'headers': existing}, compressed
+        codec_name, compressor = selection
+        start_event: dict = {}
+        body_parts: list[bytes] = []
+        streaming = False
+        skip_compression = False
+
+        async def intercepting_send(event: dict) -> None:
+            nonlocal streaming, skip_compression
+            event_type = event.get('type')
+
+            if event_type == 'http.response.start':
+                start_event.update(event)
+                if not _is_compressible_content_type(event.get('headers', [])):
+                    skip_compression = True
+
+            elif event_type == 'http.response.body':
+                chunk = event.get('body', b'')
+                more_body = event.get('more_body', False)
+
+                if streaming or skip_compression:
+                    await send(event)
+                elif more_body:
+                    streaming = True
+                    await send(start_event)
+                    if chunk:
+                        await send({'type': 'http.response.body',
+                                    'body': chunk, 'more_body': True})
+                else:
+                    body_parts.append(chunk)
+
+            else:
+                await send(event)
+
+        await call_next(scope, receive, intercepting_send)
+
+        if streaming:
+            return
+
+        body = b''.join(body_parts)
+
+        if skip_compression or len(body) < self._min_size:
+            await send(start_event)
+            await send({'type': 'http.response.body', 'body': body, 'more_body': False})
+            return
+
+        compressed = compressor(body)
+        existing = list(start_event.get('headers', []))
+        existing.append((b'content-encoding', codec_name.encode()))
+        await send({**start_event, 'headers': existing})
+        await send({'type': 'http.response.body', 'body': compressed, 'more_body': False})
 
 
 # Default instance — used as a plain middleware function

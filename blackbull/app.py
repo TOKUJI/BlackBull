@@ -18,7 +18,6 @@ Companion definitions live in this module to avoid circular imports:
 """
 import functools
 import inspect
-import warnings
 from collections.abc import Awaitable, Callable, Iterable
 from http import HTTPStatus, HTTPMethod
 from pathlib import Path
@@ -400,20 +399,6 @@ class BlackBull:
 
     def use(self, mw) -> None:
         """Register a global middleware applied to every non-lifespan request."""
-        if not (inspect.isfunction(mw)
-                or inspect.iscoroutinefunction(mw)
-                or isinstance(mw, functools.partial)):
-            from .middleware.base import StreamingAwareMiddleware
-            if not isinstance(mw, StreamingAwareMiddleware):
-                warnings.warn(
-                    f"Class-based middleware {type(mw).__name__!r} does not inherit from "
-                    f"StreamingAwareMiddleware.  If its __call__ wraps the 'send' callable, "
-                    f"it will silently buffer streaming responses.  "
-                    f"Inherit from blackbull.middleware.StreamingAwareMiddleware to opt in "
-                    f"to automatic streaming-safe behaviour.",
-                    UserWarning,
-                    stacklevel=2,
-                )
         self._global_middlewares.append(mw)
 
     def static(self, url_prefix: str, root_dir: str | Path) -> None:

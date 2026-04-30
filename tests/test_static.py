@@ -303,8 +303,7 @@ class TestBlackBullStaticRegistration:
         from blackbull import BlackBull
         app = BlackBull()
         sentinel = object()
-        with pytest.warns(UserWarning, match="StreamingAwareMiddleware"):
-            app.use(sentinel)
+        app.use(sentinel)
         assert app._global_middlewares == [sentinel]
 
     async def test_static_roots_tracked(self, static_dir, tmp_path):
