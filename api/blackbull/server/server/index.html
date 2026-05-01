@@ -1406,6 +1406,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../http1_actor/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    http1_actor
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../parser/" class="md-nav__link">
         
   
@@ -2564,6 +2592,10 @@ Parse received request and make ASGI scope object.</p>
               Bases: <code><a class="autorefs autorefs-internal" title="BaseHandler (blackbull.server.server.BaseHandler)" href="#blackbull.server.server.BaseHandler">BaseHandler</a></code></p>
 
 
+
+        <p>Thin wrapper — delegates the keep-alive loop to HTTP1Actor.</p>
+<p><code>parse()</code>, <code>_fill_connection_info()</code>, and <code>has_request()</code> are kept
+for callers that use them directly (e.g. test helpers and parsers).</p>
 
 
 

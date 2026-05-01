@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://TOKUJI.github.io/BlackBull/api/blackbull/middleware/compression/">
+        <link rel="canonical" href="https://TOKUJI.github.io/BlackBull/api/blackbull/server/http1_actor/">
       
       
-        <link rel="prev" href="../base/">
+        <link rel="prev" href="../headers/">
       
       
-        <link rel="next" href="../static/">
+        <link rel="next" href="../parser/">
       
       
         
@@ -27,7 +27,7 @@
     
     
       
-        <title>compression - BlackBull</title>
+        <title>http1_actor - BlackBull</title>
       
     
     
@@ -72,7 +72,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#blackbullmiddlewarecompression" class="md-skip">
+        <a href="#blackbullserverhttp1_actor" class="md-skip">
           Skip to content
         </a>
       
@@ -108,7 +108,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              compression
+              http1_actor
             
           </span>
         </div>
@@ -852,20 +852,18 @@
                 
   
   
-    
   
   
-  
     
     
     
     
     
-    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_1_10" checked>
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_1_10" >
         
           
           <label class="md-nav__link" for="__nav_3_1_10" id="__nav_3_1_10_label" tabindex="0">
@@ -886,7 +884,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_3_1_10_label" aria-expanded="true">
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_3_1_10_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_3_1_10">
             <span class="md-nav__icon md-icon"></span>
             
@@ -904,7 +902,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../" class="md-nav__link">
+      <a href="../../middleware/" class="md-nav__link">
         
   
   
@@ -932,7 +930,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../base/" class="md-nav__link">
+      <a href="../../middleware/base/" class="md-nav__link">
         
   
   
@@ -957,37 +955,10 @@
                 
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    compression
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../../middleware/compression/" class="md-nav__link">
         
   
   
@@ -1003,54 +974,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#blackbull.middleware.compression" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        compression
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="compression">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.middleware.compression.CompressionMiddleware" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        CompressionMiddleware
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -1063,7 +986,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../static/" class="md-nav__link">
+      <a href="../../middleware/static/" class="md-nav__link">
         
   
   
@@ -1091,7 +1014,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../websocket/" class="md-nav__link">
+      <a href="../../middleware/websocket/" class="md-nav__link">
         
   
   
@@ -1375,18 +1298,20 @@
                 
   
   
+    
   
   
+  
     
     
     
     
     
-    <li class="md-nav__item md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_1_15" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_1_15" checked>
         
           
           <label class="md-nav__link" for="__nav_3_1_15" id="__nav_3_1_15_label" tabindex="0">
@@ -1407,7 +1332,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_3_1_15_label" aria-expanded="false">
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_3_1_15_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_3_1_15">
             <span class="md-nav__icon md-icon"></span>
             
@@ -1425,7 +1350,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/" class="md-nav__link">
+      <a href="../" class="md-nav__link">
         
   
   
@@ -1453,7 +1378,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/headers/" class="md-nav__link">
+      <a href="../headers/" class="md-nav__link">
         
   
   
@@ -1478,10 +1403,37 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../../server/http1_actor/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    http1_actor
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -1497,6 +1449,82 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#blackbull.server.http1_actor" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        http1_actor
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="http1_actor">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.http1_actor.HTTP1Actor" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        HTTP1Actor
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="HTTP1Actor">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.http1_actor.HTTP1Actor.run" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        run
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.http1_actor.RequestActor" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        RequestActor
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -1509,7 +1537,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/parser/" class="md-nav__link">
+      <a href="../parser/" class="md-nav__link">
         
   
   
@@ -1537,7 +1565,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/recipient/" class="md-nav__link">
+      <a href="../recipient/" class="md-nav__link">
         
   
   
@@ -1565,7 +1593,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/response/" class="md-nav__link">
+      <a href="../response/" class="md-nav__link">
         
   
   
@@ -1593,7 +1621,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/sender/" class="md-nav__link">
+      <a href="../sender/" class="md-nav__link">
         
   
   
@@ -1621,7 +1649,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/server/" class="md-nav__link">
+      <a href="../server/" class="md-nav__link">
         
   
   
@@ -1649,7 +1677,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/watch/" class="md-nav__link">
+      <a href="../watch/" class="md-nav__link">
         
   
   
@@ -1748,22 +1776,50 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#blackbull.middleware.compression" class="md-nav__link">
+  <a href="#blackbull.server.http1_actor" class="md-nav__link">
     <span class="md-ellipsis">
       
-        compression
+        http1_actor
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="compression">
+    <nav class="md-nav" aria-label="http1_actor">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#blackbull.middleware.compression.CompressionMiddleware" class="md-nav__link">
+  <a href="#blackbull.server.http1_actor.HTTP1Actor" class="md-nav__link">
     <span class="md-ellipsis">
       
-        CompressionMiddleware
+        HTTP1Actor
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="HTTP1Actor">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.http1_actor.HTTP1Actor.run" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        run
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.http1_actor.RequestActor" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        RequestActor
       
     </span>
   </a>
@@ -1795,20 +1851,24 @@
   
 
 
-<h1 id="blackbullmiddlewarecompression"><code>blackbull.middleware.compression</code></h1>
+<h1 id="blackbullserverhttp1_actor"><code>blackbull.server.http1_actor</code></h1>
 
 
 <div class="doc doc-object doc-module">
 
 
 
-<h2 id="blackbull.middleware.compression" class="doc doc-heading">
-            <code>blackbull.middleware.compression</code>
+<h2 id="blackbull.server.http1_actor" class="doc doc-heading">
+            <code>blackbull.server.http1_actor</code>
 
 
 </h2>
 
     <div class="doc doc-contents first">
+
+        <p>HTTP/1.1 Actor classes for the BlackBull Actor model (Phase 6 Step 3).</p>
+<p>HTTP1Actor drives the keep-alive loop for one TCP connection.
+RequestActor owns the lifetime of a single HTTP request.</p>
 
 
 
@@ -1833,30 +1893,99 @@
 
 
 
-<h3 id="blackbull.middleware.compression.CompressionMiddleware" class="doc doc-heading">
-            <code>CompressionMiddleware</code>
+<h3 id="blackbull.server.http1_actor.HTTP1Actor" class="doc doc-heading">
+            <code>HTTP1Actor</code>
 
 
 </h3>
 
 
     <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><a class="autorefs autorefs-internal" title="Actor (blackbull.actor.Actor)" href="../../actor/#blackbull.actor.Actor">Actor</a></code></p>
 
 
 
-        <p>ASGI middleware: compress the response body using the best codec the
-client accepts (br &gt; zstd &gt; gzip, in server-preference order).</p>
-<p>Bodies smaller than <em>min_size</em> bytes are forwarded uncompressed.
-Responses with already-compressed Content-Types (image/<em>, video/</em>, etc.)
-are forwarded uncompressed.
-brotli and zstandard are optional — if not installed the middleware
-falls back gracefully to gzip or no compression.</p>
-<p>BlackBull middleware convention::</p>
-<pre><code>compress = CompressionMiddleware()
+        <p>Drives the HTTP/1.1 keep-alive loop for one connection.</p>
+<p>Supervisor strategy: isolate — an unhandled exception from a RequestActor
+closes the connection without crashing sibling connections.</p>
+<p>If <em>aggregator</em> is <code>None</code> the actor falls back to the legacy direct-
+dispatcher path (same behaviour as the pre-Actor HTTP11Handler), so that
+HTTP11Handler can delegate here without requiring a production-ready
+EventAggregator.</p>
 
-@app.route(path='/', middlewares=[compress])
-async def handler(scope, receive, send): ...
-</code></pre>
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.server.http1_actor.HTTP1Actor.run" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">run</span><span class="p">()</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-async"><code>async</code></small>
+  </span>
+
+</h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Keep-alive loop — process requests until connection closes.</p>
+
+
+    </div>
+
+</div>
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="blackbull.server.http1_actor.RequestActor" class="doc doc-heading">
+            <code>RequestActor</code>
+
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><a class="autorefs autorefs-internal" title="Actor (blackbull.actor.Actor)" href="../../actor/#blackbull.actor.Actor">Actor</a></code></p>
+
+
+
+        <p>Owns one HTTP/1.1 request lifetime.</p>
+<p>Spawned by HTTP1Actor, awaited to completion.  Calls the ASGI app and
+emits before_handler / after_handler / request_completed / error via
+EventAggregator.</p>
 
 
 
