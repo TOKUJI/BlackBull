@@ -1,5 +1,13 @@
 [project]
+name = "blackbull"
+version = "0.0.1"
+description = "ASGI web framework"
+readme = "README.md"
 requires-python = ">=3.11"
+authors = [
+    { name = "TOKUJI" }
+]
+
 
 [tool.coverage.run]
 source = ["blackbull"]
