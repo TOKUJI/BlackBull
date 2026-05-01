@@ -1,13 +1,47 @@
 [project]
 name = "blackbull"
 version = "0.0.1"
-description = "ASGI web framework"
+description = "Asynchronous ASGI application framework."
 readme = "README.md"
 requires-python = ">=3.11"
+
 authors = [
     { name = "TOKUJI" }
 ]
 
+license = { file = "LICENSE" }
+
+dependencies = [
+    "h2",
+    "httpx",
+    "websockets",
+    "uvicorn",
+    "asgiref",
+    "pydantic"
+]
+
+[project.urls]
+Homepage = "https://github.com/TOKUJI/BlackBull"
+Repository = "https://github.com/TOKUJI/BlackBull"
+
+[project.optional-dependencies]
+compression = [
+    "brotli",
+    "zstandard"
+]
+
+testing = [
+    "pytest",
+    "pytest-asyncio"
+]
+
+docs = [
+    "mkdocs-material",
+    "mkdocstrings[python]",
+    "mkdocs-gen-files",
+    "mkdocs-literate-nav",
+    "mkdocs-autorefs"
+]
 
 [tool.coverage.run]
 source = ["blackbull"]
@@ -16,3 +50,6 @@ source = ["blackbull"]
 omit = ["*/tests/*",
         "examples/*"
         ]
+
+[tool.setuptools.packages.find]
+where = ["."]
