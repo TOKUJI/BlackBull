@@ -3,7 +3,7 @@
 ## Project overview
 
 BlackBull is a Python ASGI 3.0 web framework built from scratch.
-It handles HTTP/1.1, HTTP/2, and WebSocket at the protocol level (no uvicorn/starlette underneath).
+It handles HTTP/1.1, HTTP/2, and WebSocket at the protocol level.
 The codebase is a personal learning project, so correctness over the wire matters more than API stability.
 
 ---
@@ -11,46 +11,13 @@ The codebase is a personal learning project, so correctness over the wire matter
 ## Package layout
 
 ```
-blackbull/
-  app.py                # BlackBull app class: routing, lifespan, error handlers
-  router.py             # Route/group registration and matching
-  response.py           # Response, JSONResponse, StreamingResponse, WebSocketResponse, cookie_header
-  request.py            # read_body, parse_cookies
-  utils.py              # Scheme enum, EventEmitter (experimental), helpers
-  logger.py             # @log decorator (auto-detects caller module via inspect.stack)
-  env.py                # BLACKBULL_ENV environment gate (development/test/production)
+blackbull/              # The package's root directory
   middleware/
-    __init__.py         # exports: compress, websocket, StreamingAwareMiddleware
-    base.py             # StreamingAwareMiddleware ABC for streaming-safe class middleware
-    compression.py      # CompressionMiddleware (gzip/br/zstd)
-    static.py           # StaticFiles global middleware (Range, path-traversal guard)
-    websocket.py        # websocket middleware (connect/accept boilerplate)
-  server/
-    server.py           # ASGIServer, HTTP1/2/WebSocketHandler, LifespanManager
-    sender.py           # HTTP1Sender, HTTP2Sender, WebSocketSender + AbstractWriter
-    recipient.py        # HTTP1Recipient, HTTP2Recipient, WebSocketRecipient + AbstractReader
-    headers.py          # Headers class (multi-value, case-insensitive, bytes keys)
-    parser.py           # HTTP/1.1 request line + header parser
-    response.py         # ResponderFactory (maps frame types to response handlers)
-    watch.py            # Watcher (inotify-based hot-reload, Linux only)
-  protocol/
-    frame.py            # HTTP/2 frame encoding/decoding (HPACK via h2 library)
-    stream.py           # HTTP/2 stream state machine
-    rsock.py            # Dual-stack socket helpers
+  server/               # ASGIServer and HTTP1/2/WebSocketHandler
+  protocol/             # HTTP/2 and other protocols
   client/               # Experimental async HTTP/1.1 and HTTP/2 client
-examples/
-  helloworld.py           # Minimal HTTP/1.1 server
-  helloworld-simple.py    # Simplified handler signatures demo
-  SimpleTaskManager/      # REST API + HTML UI, SQLite, Bearer auth
-  ChatServer/             # WebSocket in three styles
-  LoggingExample/         # Access log → SQLite via QueueHandler + QueueListener
-  PriorityExample/        # HTTP/2 PRIORITY_UPDATE demo
-docs/
-  index.md              # MkDocs landing page
-  guide.md              # Full developer guide (17 sections)
-  gen_ref_pages.py      # MkDocs-gen-files script: auto-generates API reference pages
-  stylesheets/
-    extra.css           # Custom "experimental" admonition (amber flask icon)
+examples/               # Example applications. See also docs/guide.md
+docs/                   # Docs for users
 tests/                  # pytest test suite
 mkdocs.yml              # MkDocs configuration (mkdocs-material theme)
 .github/workflows/
@@ -103,10 +70,21 @@ async def my_mw(scope, receive, send, call_next):
 ```
 
 - `call_next` is bound by `_register_chain` via `functools.partial`
-- The legacy name `inner` is accepted as an alias
 - Short-circuit by returning without calling `call_next`
-- Class-based middleware that wraps `send` must inherit `StreamingAwareMiddleware`
-  (or a `UserWarning` is emitted at registration)
+
+## Event API
+
+`@app.on` / `@app.intercept` are now core to the framework.
+
+```python
+@app.on('request_received')          # fire-and-forget; exceptions are isolated
+async def log_it(event): ...
+
+@app.intercept('before_handler')     # synchronous; exceptions propagate to emitter
+async def auth(scope, receive, send, call_next):
+    ...
+    await call_next(scope, receive, send)
+```
 
 ## Logging
 
@@ -118,26 +96,7 @@ async def my_fn(x, y):   # logs call at DEBUG level using the caller module's lo
     ...
 ```
 
-`@log` takes no arguments. It calls `inspect.stack()[1]` at decoration time to
-find the enclosing module's `__name__` and binds to that logger automatically.
-
 Framework internals use two separate logger hierarchies:
 - `blackbull.*` — DEBUG-level protocol/routing/TLS events
 - `blackbull.access` — INFO-level access log (one record per completed request)
 
-## ASGI event types used
-
-| Direction | Event type | Notes |
-|---|---|---|
-| receive | `http.request` | `body`, `more_body` |
-| receive | `http.disconnect` | client closed |
-| receive | `websocket.connect` | first receive() call |
-| receive | `websocket.receive` | `text` or `bytes` |
-| receive | `websocket.disconnect` | `code` |
-| send | `http.response.start` | `status`, `headers` |
-| send | `http.response.body` | `body`, `more_body` |
-| send | `http.response.trailers` | `headers` (chunked trailer) |
-| send | `http.response.push` | HTTP/2 server push (path, headers) |
-| send | `websocket.accept` | |
-| send | `websocket.send` | `text` or `bytes` |
-| send | `websocket.close` | |
