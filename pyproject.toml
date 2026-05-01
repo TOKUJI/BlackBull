@@ -1,3 +1,6 @@
+[project]
+requires-python = ">=3.11"
+
 [tool.coverage.run]
 source = ["blackbull"]
 
