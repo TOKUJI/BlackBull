@@ -10,28 +10,24 @@
       
       
       
-        <link rel="canonical" href="https://TOKUJI.github.io/BlackBull/api/blackbull/middleware/websocket/">
+        <link rel="canonical" href="https://TOKUJI.github.io/BlackBull/ActorDesign/">
       
       
-        <link rel="prev" href="../static/">
-      
-      
-        <link rel="next" href="../../protocol/">
       
       
         
       
       
-      <link rel="icon" href="../../../../assets/images/favicon.png">
+      <link rel="icon" href="../assets/images/favicon.png">
       <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
     
     
       
-        <title>websocket - BlackBull</title>
+        <title>BlackBull — Level A Actor Model Design - BlackBull</title>
       
     
     
-      <link rel="stylesheet" href="../../../../assets/stylesheets/main.484c7ddc.min.css">
+      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
       
       
 
@@ -50,11 +46,11 @@
       
     
     
-      <link rel="stylesheet" href="../../../../assets/_mkdocstrings.css">
+      <link rel="stylesheet" href="../assets/_mkdocstrings.css">
     
-      <link rel="stylesheet" href="../../../../stylesheets/extra.css">
+      <link rel="stylesheet" href="../stylesheets/extra.css">
     
-    <script>__md_scope=new URL("../../../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
     
       
 
@@ -72,7 +68,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#blackbullmiddlewarewebsocket" class="md-skip">
+        <a href="#blackbull-level-a-actor-model-design" class="md-skip">
           Skip to content
         </a>
       
@@ -88,7 +84,7 @@
 
 <header class="md-header md-header--shadow" data-md-component="header">
   <nav class="md-header__inner md-grid" aria-label="Header">
-    <a href="../../../.." title="BlackBull" class="md-header__button md-logo" aria-label="BlackBull" data-md-component="logo">
+    <a href=".." title="BlackBull" class="md-header__button md-logo" aria-label="BlackBull" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
@@ -108,7 +104,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              websocket
+              BlackBull — Level A Actor Model Design
             
           </span>
         </div>
@@ -198,7 +194,7 @@
 
 <nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
   <label class="md-nav__title" for="__drawer">
-    <a href="../../../.." title="BlackBull" class="md-nav__button md-logo" aria-label="BlackBull" data-md-component="logo">
+    <a href=".." title="BlackBull" class="md-nav__button md-logo" aria-label="BlackBull" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
@@ -228,7 +224,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../.." class="md-nav__link">
+      <a href=".." class="md-nav__link">
         
   
   
@@ -255,7 +251,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../guide/" class="md-nav__link">
+      <a href="../guide/" class="md-nav__link">
         
   
   
@@ -279,20 +275,18 @@
       
   
   
-    
   
   
-  
     
     
     
     
     
-    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
         
           
           <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
@@ -313,7 +307,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_3">
             <span class="md-nav__icon md-icon"></span>
             
@@ -328,20 +322,18 @@
                 
   
   
-    
   
   
-  
     
     
     
     
     
-    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_1" checked>
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_1" >
         
           
           <label class="md-nav__link" for="__nav_3_1" id="__nav_3_1_label" tabindex="0">
@@ -362,7 +354,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_1_label" aria-expanded="true">
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_1_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_3_1">
             <span class="md-nav__icon md-icon"></span>
             
@@ -380,7 +372,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../" class="md-nav__link">
+      <a href="../api/blackbull/" class="md-nav__link">
         
   
   
@@ -408,7 +400,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../actor/" class="md-nav__link">
+      <a href="../api/blackbull/actor/" class="md-nav__link">
         
   
   
@@ -436,7 +428,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../app/" class="md-nav__link">
+      <a href="../api/blackbull/app/" class="md-nav__link">
         
   
   
@@ -464,7 +456,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../asgi/" class="md-nav__link">
+      <a href="../api/blackbull/asgi/" class="md-nav__link">
         
   
   
@@ -539,7 +531,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../client/" class="md-nav__link">
+      <a href="../api/blackbull/client/" class="md-nav__link">
         
   
   
@@ -567,7 +559,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../client/client/" class="md-nav__link">
+      <a href="../api/blackbull/client/client/" class="md-nav__link">
         
   
   
@@ -595,7 +587,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../client/exceptions/" class="md-nav__link">
+      <a href="../api/blackbull/client/exceptions/" class="md-nav__link">
         
   
   
@@ -623,7 +615,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../client/http1/" class="md-nav__link">
+      <a href="../api/blackbull/client/http1/" class="md-nav__link">
         
   
   
@@ -651,7 +643,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../client/http2/" class="md-nav__link">
+      <a href="../api/blackbull/client/http2/" class="md-nav__link">
         
   
   
@@ -679,7 +671,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../client/response/" class="md-nav__link">
+      <a href="../api/blackbull/client/response/" class="md-nav__link">
         
   
   
@@ -707,7 +699,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../client/websocket/" class="md-nav__link">
+      <a href="../api/blackbull/client/websocket/" class="md-nav__link">
         
   
   
@@ -743,7 +735,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../env/" class="md-nav__link">
+      <a href="../api/blackbull/env/" class="md-nav__link">
         
   
   
@@ -771,7 +763,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../event/" class="md-nav__link">
+      <a href="../api/blackbull/event/" class="md-nav__link">
         
   
   
@@ -799,7 +791,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../event_aggregator/" class="md-nav__link">
+      <a href="../api/blackbull/event_aggregator/" class="md-nav__link">
         
   
   
@@ -827,7 +819,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../logger/" class="md-nav__link">
+      <a href="../api/blackbull/logger/" class="md-nav__link">
         
   
   
@@ -852,20 +844,18 @@
                 
   
   
-    
   
   
-  
     
     
     
     
     
-    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_1_10" checked>
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_1_10" >
         
           
           <label class="md-nav__link" for="__nav_3_1_10" id="__nav_3_1_10_label" tabindex="0">
@@ -886,7 +876,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_3_1_10_label" aria-expanded="true">
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_3_1_10_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_3_1_10">
             <span class="md-nav__icon md-icon"></span>
             
@@ -904,7 +894,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../" class="md-nav__link">
+      <a href="../api/blackbull/middleware/" class="md-nav__link">
         
   
   
@@ -932,7 +922,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../base/" class="md-nav__link">
+      <a href="../api/blackbull/middleware/base/" class="md-nav__link">
         
   
   
@@ -960,7 +950,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../compression/" class="md-nav__link">
+      <a href="../api/blackbull/middleware/compression/" class="md-nav__link">
         
   
   
@@ -988,7 +978,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../static/" class="md-nav__link">
+      <a href="../api/blackbull/middleware/static/" class="md-nav__link">
         
   
   
@@ -1013,37 +1003,10 @@
                 
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    websocket
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../api/blackbull/middleware/websocket/" class="md-nav__link">
         
   
   
@@ -1059,37 +1022,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#blackbull.middleware.websocket" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        websocket
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -1157,7 +1089,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../protocol/" class="md-nav__link">
+      <a href="../api/blackbull/protocol/" class="md-nav__link">
         
   
   
@@ -1185,7 +1117,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../protocol/frame/" class="md-nav__link">
+      <a href="../api/blackbull/protocol/frame/" class="md-nav__link">
         
   
   
@@ -1213,7 +1145,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../protocol/rsock/" class="md-nav__link">
+      <a href="../api/blackbull/protocol/rsock/" class="md-nav__link">
         
   
   
@@ -1241,7 +1173,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../protocol/stream/" class="md-nav__link">
+      <a href="../api/blackbull/protocol/stream/" class="md-nav__link">
         
   
   
@@ -1277,7 +1209,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../request/" class="md-nav__link">
+      <a href="../api/blackbull/request/" class="md-nav__link">
         
   
   
@@ -1305,7 +1237,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../response/" class="md-nav__link">
+      <a href="../api/blackbull/response/" class="md-nav__link">
         
   
   
@@ -1333,7 +1265,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../router/" class="md-nav__link">
+      <a href="../api/blackbull/router/" class="md-nav__link">
         
   
   
@@ -1408,7 +1340,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/" class="md-nav__link">
+      <a href="../api/blackbull/server/" class="md-nav__link">
         
   
   
@@ -1436,7 +1368,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/headers/" class="md-nav__link">
+      <a href="../api/blackbull/server/headers/" class="md-nav__link">
         
   
   
@@ -1464,7 +1396,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/parser/" class="md-nav__link">
+      <a href="../api/blackbull/server/parser/" class="md-nav__link">
         
   
   
@@ -1492,7 +1424,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/recipient/" class="md-nav__link">
+      <a href="../api/blackbull/server/recipient/" class="md-nav__link">
         
   
   
@@ -1520,7 +1452,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/response/" class="md-nav__link">
+      <a href="../api/blackbull/server/response/" class="md-nav__link">
         
   
   
@@ -1548,7 +1480,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/sender/" class="md-nav__link">
+      <a href="../api/blackbull/server/sender/" class="md-nav__link">
         
   
   
@@ -1576,7 +1508,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/server/" class="md-nav__link">
+      <a href="../api/blackbull/server/server/" class="md-nav__link">
         
   
   
@@ -1604,7 +1536,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/watch/" class="md-nav__link">
+      <a href="../api/blackbull/server/watch/" class="md-nav__link">
         
   
   
@@ -1640,7 +1572,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../utils/" class="md-nav__link">
+      <a href="../api/blackbull/utils/" class="md-nav__link">
         
   
   
@@ -1703,10 +1635,192 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#blackbull.middleware.websocket" class="md-nav__link">
+  <a href="#goal" class="md-nav__link">
     <span class="md-ellipsis">
       
-        websocket
+        Goal
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#primitives" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Primitives
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#actor-hierarchy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Actor Hierarchy
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#actor-responsibilities" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Actor Responsibilities
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Actor Responsibilities">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#serveractor" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ServerActor
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#connectionactor" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ConnectionActor
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#http1actor" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        HTTP1Actor
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#requestactor" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        RequestActor
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#http2actor" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        HTTP2Actor
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#streamactor" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        StreamActor
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#websocketactor" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WebSocketActor
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#level-a-level-b-aggregation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Level A → Level B Aggregation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#supervisor-strategy-summary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Supervisor Strategy Summary
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#message-protocol" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Message Protocol
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#exception-propagation-rules-per-event-decisions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Exception Propagation Rules (per-event decisions)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#migration-path" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Migration Path
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#resolved-questions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Resolved Questions
       
     </span>
   </a>
@@ -1733,48 +1847,340 @@
   
 
 
-<h1 id="blackbullmiddlewarewebsocket"><code>blackbull.middleware.websocket</code></h1>
+<h1 id="blackbull-level-a-actor-model-design">BlackBull — Level A Actor Model Design</h1>
+<p><strong>Status</strong>: Draft — Phase 5 / M4<br />
+<strong>Prerequisite completed</strong>: Phase 3 (examples migration), Phase 4 (docs)</p>
+<hr />
+<h2 id="goal">Goal</h2>
+<p>Refactor BlackBull's internal components into an Actor-model architecture (Level A),
+where each Actor owns its state and communicates exclusively via message queues.
+Level B application-facing events remain unchanged.</p>
+<hr />
+<h2 id="primitives">Primitives</h2>
+<p>BlackBull does not depend on an external Actor framework.
+Each Actor is implemented as:</p>
+<pre><code class="language-python">class Actor:
+    def __init__(self):
+        self._inbox: asyncio.Queue[Message] = asyncio.Queue()
 
+    async def run(self) -&gt; None:
+        &quot;&quot;&quot;Main loop — consume inbox forever.&quot;&quot;&quot;
+        async for msg in self._inbox_iter():
+            await self._handle(msg)
 
-<div class="doc doc-object doc-module">
+    async def send(self, msg: Message) -&gt; None:
+        await self._inbox.put(msg)
 
+    async def _inbox_iter(self):
+        while True:
+            yield await self._inbox.get()
+</code></pre>
+<ul>
+<li>Each Actor runs as an <code>asyncio.Task</code> started by its Supervisor.</li>
+<li>Actors never share mutable state — all coordination is via <code>send()</code>.</li>
+<li>The ask-pattern (request/reply) is used only when a caller must await a result;
+  otherwise fire-and-forget <code>send()</code> is preferred.</li>
+</ul>
+<hr />
+<h2 id="actor-hierarchy">Actor Hierarchy</h2>
+<pre><code>ServerActor  (Supervisor — one per process)
+│
+└── ConnectionActor  (one per accepted TCP connection)
+      │
+      ├── HTTP1Actor           (HTTP/1.1 protocol driver)
+      │     └── RequestActor   (one per HTTP/1.1 request, short-lived)
+      │
+      ├── HTTP2Actor           (HTTP/2 connection driver)
+      │     └── StreamActor    (one per HTTP/2 stream, short-lived)
+      │
+      └── WebSocketActor       (spawned after upgrade, replaces HTTP1/2Actor)
+</code></pre>
+<p><code>EventAggregator</code> is a <strong>non-Actor</strong> component that sits between Level A and
+Level B. It subscribes to Level A messages by reference and emits Level B events
+via the existing <code>EventDispatcher</code>. It has no inbox and no lifecycle of its own.</p>
+<hr />
+<h2 id="actor-responsibilities">Actor Responsibilities</h2>
+<h3 id="serveractor">ServerActor</h3>
+<ul>
+<li>Owns the listening socket.</li>
+<li>Accepts TCP connections; for each, spawns a <code>ConnectionActor</code> task.</li>
+<li>Supervisor strategy: <strong>restart</strong> on failure (bind/accept errors are retried
+  with backoff; the server does not crash on one bad connection).</li>
+<li>Emits: <code>app_startup</code>, <code>app_shutdown</code> (Level B, via <code>EventAggregator</code>).</li>
+</ul>
+<h3 id="connectionactor">ConnectionActor</h3>
+<ul>
+<li>Owns the <code>AbstractReader</code> / <code>AbstractWriter</code> for one TCP connection.</li>
+<li>Detects protocol: TLS → HTTP/2 preface check → spawns <code>HTTP2Actor</code> or <code>HTTP1Actor</code>.</li>
+<li>Supervisor strategy: <strong>isolate</strong> — one connection dying does not affect others.
+  <code>ExceptionGroup</code> from the child <code>TaskGroup</code> is caught here; unhandled exceptions
+  are logged and the connection is closed.</li>
+<li>Emits (Level A): <code>connection_accepted</code>, <code>tls_handshake_started</code>,
+  <code>tls_handshake_completed</code>.</li>
+</ul>
+<h3 id="http1actor">HTTP1Actor</h3>
+<ul>
+<li>Drives the HTTP/1.1 request/response cycle.</li>
+<li>For each request: spawns a short-lived <code>RequestActor</code>, awaits completion,
+  then loops for keep-alive.</li>
+<li>On <code>Connection: Upgrade</code> (WebSocket): tears itself down and hands the
+  reader/writer to a new <code>WebSocketActor</code>.</li>
+<li>Supervisor strategy: <strong>isolate</strong> — an error in one request closes the connection.</li>
+<li>Emits (Level A): <code>http1_request_line_received</code>, (aggregated into Level B
+  <code>request_received</code>).</li>
+</ul>
+<h3 id="requestactor">RequestActor</h3>
+<ul>
+<li>Owns one HTTP/1.1 request lifetime.</li>
+<li>Receives the parsed headers and body from <code>HTTP1Actor</code>.</li>
+<li>Calls the ASGI app, collects the response, writes it via <code>HTTP1Actor</code>'s writer.</li>
+<li>Emits (Level A): used by <code>EventAggregator</code> to fire <code>before_handler</code>,
+  <code>after_handler</code>, <code>request_completed</code>, <code>error</code>.</li>
+</ul>
+<h3 id="http2actor">HTTP2Actor</h3>
+<ul>
+<li>Drives the HTTP/2 connection state machine (settings, flow control, GOAWAY).</li>
+<li>For each <code>HEADERS</code> frame with a new stream ID: spawns a <code>StreamActor</code>.</li>
+<li>Owns the connection-level send window; <code>StreamActor</code>s block via ask-pattern
+  when the window is exhausted.</li>
+<li>Supervisor strategy: <strong>propagate</strong> — a framing error on the connection is fatal;
+  <code>HTTP2Actor</code> sends GOAWAY and exits, causing <code>ConnectionActor</code> to close.</li>
+<li>Emits (Level A): <code>http2_preface_received</code>, <code>http2_settings_received</code>,
+  <code>stream_window_updated</code>.</li>
+</ul>
+<h3 id="streamactor">StreamActor</h3>
+<ul>
+<li>Owns one HTTP/2 stream.</li>
+<li>Assembles DATA frames, calls the ASGI app, writes response frames back via
+  ask-pattern to <code>HTTP2Actor</code>.</li>
+<li>Emits (Level A): <code>stream_headers_received</code>, <code>stream_data_received</code>,
+  <code>stream_priority_updated</code>, <code>stream_closed</code>.</li>
+<li>Supervisor strategy: <strong>isolate</strong> — stream errors send <code>RST_STREAM</code> and exit;
+  the connection continues.</li>
+</ul>
+<h3 id="websocketactor">WebSocketActor</h3>
+<ul>
+<li>Owns one WebSocket connection after the upgrade handshake.</li>
+<li>Runs the <code>FragmentAssembler</code> internally; the ASGI app sees only complete messages.</li>
+<li>Emits (Level A): <code>websocket_frame_received</code>, <code>websocket_fragment_appended</code>.</li>
+<li>Supervisor strategy: <strong>isolate</strong> — a protocol error closes this connection only.</li>
+</ul>
+<hr />
+<h2 id="level-a-level-b-aggregation">Level A → Level B Aggregation</h2>
+<p><code>EventAggregator</code> translates Level A messages into Level B <code>EventDispatcher</code> calls.
+It is instantiated once and passed (by reference) to each Actor at construction.</p>
+<table>
+<thead>
+<tr>
+<th>Level A message(s)</th>
+<th>Level B event</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>connection_accepted</code> + app routing complete</td>
+<td><code>request_received</code></td>
+</tr>
+<tr>
+<td><code>RequestActor</code> pre-dispatch</td>
+<td><code>before_handler</code></td>
+</tr>
+<tr>
+<td><code>RequestActor</code> post-dispatch</td>
+<td><code>after_handler</code></td>
+</tr>
+<tr>
+<td><code>stream_closed</code> (HTTP/2) / response sent (HTTP/1.1)</td>
+<td><code>request_completed</code></td>
+</tr>
+<tr>
+<td>Reader EOF / <code>RST_STREAM</code> before response</td>
+<td><code>request_disconnected</code></td>
+</tr>
+<tr>
+<td>Any Actor unhandled exception</td>
+<td><code>error</code></td>
+</tr>
+<tr>
+<td><code>WebSocketActor</code> handshake complete</td>
+<td><code>websocket_connected</code></td>
+</tr>
+<tr>
+<td><code>websocket_frame_received</code> (complete message)</td>
+<td><code>websocket_message</code></td>
+</tr>
+<tr>
+<td><code>WebSocketActor</code> exit</td>
+<td><code>websocket_disconnected</code></td>
+</tr>
+<tr>
+<td><code>ServerActor</code> startup</td>
+<td><code>app_startup</code></td>
+</tr>
+<tr>
+<td><code>ServerActor</code> shutdown drain</td>
+<td><code>app_shutdown</code></td>
+</tr>
+</tbody>
+</table>
+<p>The aggregation logic lives in <code>blackbull/event_aggregator.py</code> (new file).
+It must not be exported from the package's public <code>__init__.py</code>.</p>
+<hr />
+<h2 id="supervisor-strategy-summary">Supervisor Strategy Summary</h2>
+<table>
+<thead>
+<tr>
+<th>Actor</th>
+<th>Strategy</th>
+<th>Rationale</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ServerActor</code></td>
+<td>Restart with backoff</td>
+<td>Accept loop must stay alive</td>
+</tr>
+<tr>
+<td><code>ConnectionActor</code></td>
+<td>Isolate</td>
+<td>One bad connection must not affect others</td>
+</tr>
+<tr>
+<td><code>HTTP1Actor</code></td>
+<td>Isolate</td>
+<td>Error closes the connection cleanly</td>
+</tr>
+<tr>
+<td><code>RequestActor</code></td>
+<td>Isolate</td>
+<td>Error fires <code>error</code> event; connection survives</td>
+</tr>
+<tr>
+<td><code>HTTP2Actor</code></td>
+<td>Propagate to <code>ConnectionActor</code></td>
+<td>Framing error is connection-fatal</td>
+</tr>
+<tr>
+<td><code>StreamActor</code></td>
+<td>Isolate (RST_STREAM)</td>
+<td>Stream error is stream-fatal only</td>
+</tr>
+<tr>
+<td><code>WebSocketActor</code></td>
+<td>Isolate</td>
+<td>Protocol error closes this WS connection only</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="message-protocol">Message Protocol</h2>
+<p>All messages are <code>dataclass</code> instances (not dicts) for type safety.
+A base class provides the actor-source reference for reply routing:</p>
+<pre><code class="language-python">@dataclass
+class Message:
+    sender: Actor | None = None  # None for externally-originated messages
 
+# Example Level A messages
+@dataclass
+class ConnectionAccepted(Message):
+    reader: AbstractReader
+    writer: AbstractWriter
+    peername: tuple[str, int]
 
-<h2 id="blackbull.middleware.websocket" class="doc doc-heading">
-            <code>blackbull.middleware.websocket</code>
+@dataclass
+class StreamHeadersReceived(Message):
+    stream_id: int
+    headers: HeaderList
+    end_stream: bool
 
-
-</h2>
-
-    <div class="doc doc-contents first">
-
-
-
-
-
-
-
-
-
-
-<div class="doc doc-children">
-
-
-
-
-
-
-
-
-
-
-
-
-  </div>
-
-    </div>
-
-</div>
+@dataclass
+class WindowUpdate(Message):       # ask-pattern reply
+    stream_id: int
+    increment: int
+</code></pre>
+<hr />
+<h2 id="exception-propagation-rules-per-event-decisions">Exception Propagation Rules (per-event decisions)</h2>
+<table>
+<thead>
+<tr>
+<th>Scenario</th>
+<th>Strategy</th>
+<th>Reason</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>RequestActor</code> handler raises</td>
+<td>(b) isolate + (c) re-emit as <code>error</code></td>
+<td>Handler error must not kill the connection</td>
+</tr>
+<tr>
+<td><code>HTTP2Actor</code> framing error</td>
+<td>(a) propagate to <code>ConnectionActor</code></td>
+<td>GOAWAY required; connection is unusable</td>
+</tr>
+<tr>
+<td><code>StreamActor</code> app error</td>
+<td>(b) isolate + RST_STREAM</td>
+<td>Other streams continue</td>
+</tr>
+<tr>
+<td><code>WebSocketActor</code> protocol error</td>
+<td>(b) isolate + CLOSE frame</td>
+<td>Single connection</td>
+</tr>
+<tr>
+<td>Observer handler raises</td>
+<td>(b) isolate</td>
+<td>Existing Level B contract</td>
+</tr>
+<tr>
+<td>Intercept handler raises</td>
+<td>(a) propagate to emitter</td>
+<td>Existing Level B contract</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="migration-path">Migration Path</h2>
+<p>Phase 5 is <strong>design and specification only</strong>. No production code changes in this phase.</p>
+<p>Suggested implementation order (Phase 6+):</p>
+<ol>
+<li>Define <code>Message</code> dataclasses and the <code>Actor</code> base class (<code>blackbull/actor.py</code>).</li>
+<li>Implement <code>EventAggregator</code> with stubs that forward to existing <code>EventDispatcher</code>.</li>
+<li>Extract <code>HTTP1Actor</code> from the current <code>HTTP1Handler</code> — keep existing tests green.</li>
+<li>Extract <code>StreamActor</code> + <code>HTTP2Actor</code> from <code>HTTP2Handler</code>.</li>
+<li>Introduce <code>ConnectionActor</code> wrapping the above two.</li>
+<li>Introduce <code>ServerActor</code> wrapping <code>ASGIServer</code>.</li>
+<li>Delete the old handler classes once all tests pass.</li>
+</ol>
+<p>Each step keeps the full test suite green before proceeding to the next.</p>
+<hr />
+<h2 id="resolved-questions">Resolved Questions</h2>
+<ol>
+<li>
+<p><strong>Ask-pattern timeout</strong>: use the connection-level idle timeout already
+   configured on <code>ASGIServer</code>. No separate timeout value introduced.</p>
+</li>
+<li>
+<p><strong><code>EventAggregator</code> threading</strong>: currently always called from the event loop
+   thread (single-event-loop design). Do not add a thread-safety layer now;
+   revisit if multi-loop or thread-executor support is added later.</p>
+</li>
+<li>
+<p><strong>Server push</strong>: yes — pushed streams (even stream IDs) become <code>StreamActor</code>s
+   with the same lifecycle as request-driven streams.</p>
+</li>
+<li>
+<p><strong><code>ExceptionGroup</code> surface</strong>: emit a <strong>single</strong> Level B <code>error</code> event with the
+   <code>ExceptionGroup</code> placed in <code>detail['exception']</code>. <code>ExceptionGroup</code> is a
+   <code>BaseException</code> subclass, so the event contract is unchanged. Subscribers that
+   need the individual failures iterate <code>eg.exceptions</code>; subscribers that do not
+   care are unaffected. Note: <code>ExceptionGroup</code> and <code>except*</code> require Python 3.11+;
+   <code>pyproject.toml</code> should reflect this floor explicitly.</p>
+</li>
+</ol>
 
 
 
@@ -1824,10 +2230,10 @@
     
       
       
-      <script id="__config" type="application/json">{"annotate": null, "base": "../../../..", "features": [], "search": "../../../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": [], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
     
     
-      <script src="../../../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
       
     
   </body>
