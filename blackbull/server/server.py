@@ -347,6 +347,12 @@ class WebSocketHandler(BaseHandler):
 
 
 class HTTP11Handler(BaseHandler):
+    """Thin wrapper — delegates the keep-alive loop to HTTP1Actor.
+
+    ``parse()``, ``_fill_connection_info()``, and ``has_request()`` are kept
+    for callers that use them directly (e.g. test helpers and parsers).
+    """
+
     @log
     def __init__(self, app, reader, writer, request: bytes, *args, **kwargs):
         if not isinstance(reader, AbstractReader):
@@ -358,91 +364,21 @@ class HTTP11Handler(BaseHandler):
         return self.request is not None
 
     async def run(self):
-        # self.request holds only the first line on entry; accumulate header
-        # bytes until we have a complete block, then serve the request.  Loop
-        # for HTTP/1.1 Keep-Alive: after each response, read the next request.
-        REQ_END = b'\r\n\r\n'
-        send = self.make_sender()
-        try:
-            while True:
-                # Accumulate until we have complete headers.  self.request may
-                # already end with REQ_END (e.g. when set directly in tests).
-                while not self.request.endswith(REQ_END):
-                    self.request += await self.reader.readuntil(REQ_END)
-
-                scope = self.parse()
-                self._fill_connection_info(scope)
-                logger.debug(scope)
-
-                if scope.get('type') == 'websocket':
-                    log_record = AccessLogRecord.from_scope(scope)
-                    log_record.status = HTTPStatus.SWITCHING_PROTOCOLS
-                    try:
-                        await WebSocketHandler(
-                            self.app, self.reader, self.writer, scope
-                        ).run(record=log_record)
-                    finally:
-                        _access_logger.info(log_record.format(), extra=log_record.as_extra())
-                    return
-
-                if scope['headers'].get(b'expect').lower() == b'100-continue':
-                    await send(b'', HTTPStatus.CONTINUE)
-
-                log_record = AccessLogRecord.from_scope(scope)
-                scope['state']['access_log'] = log_record
-                capturing_send = _make_capturing_send(send, log_record)
-                _dispatcher = getattr(self.app, '_dispatcher', None)
-                inner_receive = RecipientFactory.http1(self.reader, scope)
-                if _dispatcher is not None:
-                    detecting_receive = _make_disconnect_detecting_receive(
-                        inner_receive, scope, _dispatcher, log_record)
-                else:
-                    detecting_receive = inner_receive
-                try:
-                    if _dispatcher is not None:
-                        await _dispatcher.emit(Event(
-                            'request_received',
-                            detail={
-                                'scope':        scope,
-                                'client_ip':    log_record.client_ip,
-                                'method':       log_record.method,
-                                'path':         log_record.path,
-                                'http_version': log_record.http_version,
-                                'headers':      scope.get('headers', []),
-                            },
-                        ))
-                    await self.app(scope, detecting_receive, capturing_send)
-                finally:
-                    _access_logger.info(log_record.format(), extra=log_record.as_extra())
-                    if (_dispatcher is not None
-                            and scope.get('type') == 'http'
-                            and not scope.get('_disconnected')):
-                        await _dispatcher.emit(Event(
-                            'request_completed',
-                            detail={
-                                'scope': scope,
-                                'client_ip': log_record.client_ip,
-                                'method': log_record.method,
-                                'path': log_record.path,
-                                'http_version': log_record.http_version,
-                                'status': log_record.status,
-                                'response_bytes': log_record.response_bytes,
-                                'duration_ms': log_record.duration_ms(),
-                            },
-                        ))
-                self.request = b''
-
-                # Keep-alive: read the start of the next request.
-                # _FakeReader (and asyncio on clean close) returns REQ_END when
-                # the connection has no more data — treat that as the sentinel.
-                next_chunk = await self.reader.readuntil(REQ_END)
-                if next_chunk == REQ_END:
-                    break  # connection closing cleanly
-                self.request = next_chunk
-
-        except IncompleteReadError:
-            # Client closed the connection mid-headers (or mid-keep-alive gap).
-            await send({'type': 'http.disconnect'})
+        from .http1_actor import HTTP1Actor  # noqa: PLC0415 — lazy to avoid circular dep
+        from .sender import AsyncioWriter   # noqa: PLC0415
+        transport = self.writer.transport
+        peername = transport.get_extra_info('peername') if transport else None
+        sockname = transport.get_extra_info('sockname') if transport else None
+        ssl = transport.get_extra_info('ssl_object') is not None if transport else False
+        actor = HTTP1Actor(
+            self.reader, AsyncioWriter(self.writer), self.app,
+            aggregator=None,  # use legacy direct-dispatcher path
+            request=self.request,
+            peername=peername,
+            sockname=sockname,
+            ssl=ssl,
+        )
+        await actor.run()
 
     def _fill_connection_info(self, scope: dict) -> None:
         """Populate scope['client'], scope['server'], and scope['scheme'] from the transport."""

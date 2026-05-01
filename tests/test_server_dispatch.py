@@ -28,6 +28,7 @@ from http import HTTPStatus
 
 from blackbull.server.server import ASGIServer, WebSocketHandler, HTTP11Handler
 from blackbull.server.parser import _make_scope as _make_http2_scope
+from blackbull.server.recipient import AbstractReader
 
 
 # ---------------------------------------------------------------------------
@@ -312,7 +313,7 @@ class TestHTTP2ScopeFields:
 # client_connected_cb dispatch
 # ---------------------------------------------------------------------------
 
-class _FakeReader:
+class _FakeReader(AbstractReader):
     """Replay a pre-built byte string through the asyncio StreamReader API."""
 
     def __init__(self, data: bytes):

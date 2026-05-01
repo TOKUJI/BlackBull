@@ -501,6 +501,8 @@ class SenderFactory:
 
     @staticmethod
     def http1(stream_writer) -> HTTP1Sender:
+        if isinstance(stream_writer, AbstractWriter):
+            return HTTP1Sender(stream_writer)
         return HTTP1Sender(AsyncioWriter(stream_writer))
 
     @staticmethod
@@ -511,4 +513,6 @@ class SenderFactory:
 
     @staticmethod
     def websocket(stream_writer) -> WebSocketSender:
+        if isinstance(stream_writer, AbstractWriter):
+            return WebSocketSender(stream_writer)
         return WebSocketSender(AsyncioWriter(stream_writer))
