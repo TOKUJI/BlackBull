@@ -174,9 +174,9 @@ class HTTP1Actor(Actor):
         aggregator: 'EventAggregator | None',
         *,
         request: bytes = b'',
-        peername: tuple | None = None,
-        sockname: tuple | None = None,
         ssl: bool = False,
+        client: list | None = None,
+        server: list | None = None,
     ) -> None:
         super().__init__()
         self._reader = reader
@@ -184,9 +184,9 @@ class HTTP1Actor(Actor):
         self._app = app
         self._aggregator = aggregator
         self._request = request
-        self._peername = peername
-        self._sockname = sockname
         self._ssl = ssl
+        self._client = client
+        self._server = server
 
     async def run(self) -> None:
         """Keep-alive loop — process requests until connection closes."""
@@ -322,10 +322,14 @@ class HTTP1Actor(Actor):
         return scope
 
     def _fill_connection_info(self, scope: dict) -> None:
-        if self._peername:
-            scope['client'] = list(self._peername[:2])
-        if self._sockname and scope['server'] is None:
-            scope['server'] = list(self._sockname[:2])
+        if self._client is not None:
+            scope['client'] = self._client
+
+        if scope['server']:
+            pass
+        elif self._server is not None:
+            scope['server'] = self._server
+
         if self._ssl:
             scope['scheme'] = 'wss' if scope.get('type') == 'websocket' else 'https'
 
