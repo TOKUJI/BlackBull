@@ -889,8 +889,10 @@ Events that application code can subscribe to.  Internal Level A events used by 
 | `request_completed` | An HTTP request has finished — the response has been fully sent (or the request failed before that, e.g. 404 or unhandled exception).  **Not** fired if the client disconnected before the response completed, and **not** fired for WebSocket connections | `scope`, `client_ip`, `method`, `path`, `http_version`, `status` (`int` or `'-'`), `response_bytes` (`int`), `duration_ms` (`float`) | Observation only — see §9.6.2 |
 | `request_disconnected` | An HTTP client closed the connection before the response was fully sent | `scope`, `client_ip`, `method`, `path`, `http_version` | Observation only — see §9.6.3 |
 
-> Additional events (`before_handler`, `after_handler`, `error`) are
-> on the roadmap and will appear in this table as they ship.
+| `before_handler` | Route matched, immediately before the handler (and its middleware chain) is called | `scope`, `client_ip`, `method`, `path`, `http_version`, `headers` | Supports both `@app.on` and `@app.intercept` — raise to abort the request |
+| `after_handler` | Handler (and its middleware chain) has returned normally | `scope`, `client_ip`, `method`, `path`, `http_version` | Observation only |
+| `websocket_connected` | WebSocket connection accepted (`websocket.accept` sent) | `connection_id`, `path`, `client_ip`, `subprotocol` | Observation only |
+| `websocket_disconnected` | WebSocket connection closed or dropped | `connection_id`, `code` | Observation only |
 
 #### 9.6.1 `websocket_message` — observation only
 
@@ -908,7 +910,7 @@ async def log_message(event: Event):
 **This event is observation only.**  Because the message has already been read off the wire and buffered, interceptors registered with `@app.intercept('websocket_message')` cannot suppress delivery to the application handler.  Use the observe path (`@app.on`) for analytics, logging, and monitoring.
 
 !!! note "Per-connection identity"
-    The `scope` dict identifies the connection path and headers, but does not yet carry a unique connection ID.  Two simultaneous connections from the same client to the same path produce indistinguishable scopes.  A `websocket_connected` event (planned) will provide per-connection identity when it ships.
+    The `scope` dict identifies the connection path and headers but does not carry a unique connection ID.  Use the `websocket_connected` event (§9.6.5) which provides a `connection_id` for per-connection identity.
 
 #### 9.6.2 `request_completed` — observation only
 
@@ -942,7 +944,7 @@ Use `scope` when you need request context beyond the flat fields — for example
 - whether raising from an interceptor changes the response;
 - ordering between an interceptor and shutdown or other completion steps.
 
-If you need to act *during* the request (authentication, header rewriting, validation), use middleware (§4) — its event-driven counterpart will be `@app.intercept('before_handler')` once that event ships.
+If you need to act *during* the request (authentication, header rewriting, validation), use `@app.intercept('before_handler')` (§9.6.4) — it runs synchronously before the handler and can abort the request by raising.
 
 #### 9.6.3 `request_disconnected` — observation only
 
@@ -1000,6 +1002,31 @@ async def require_api_key(event):
 async def record_hit(event):
     metrics.increment('http.requests', tags={'path': event.detail['path']})
 ```
+
+#### 9.6.5 `websocket_connected` and `websocket_disconnected`
+
+`websocket_connected` fires once per connection, immediately after the server sends the `websocket.accept` event.  `websocket_disconnected` fires when the server detects the close, whether the client or the handler closed it.
+
+Both events carry a `connection_id` (a UUID string) that is stable for the lifetime of the connection — you can correlate `connected` and `disconnected` records to compute connection duration.
+
+| Event | Key `detail` fields |
+|---|---|
+| `websocket_connected` | `connection_id`, `path`, `client_ip`, `subprotocol` |
+| `websocket_disconnected` | `connection_id`, `code` |
+
+```python
+@app.on('websocket_connected')
+async def on_connected(event):
+    logger.info('WS connected id=%s path=%s',
+                event.detail['connection_id'], event.detail['path'])
+
+@app.on('websocket_disconnected')
+async def on_disconnected(event):
+    logger.info('WS disconnected id=%s code=%s',
+                event.detail['connection_id'], event.detail['code'])
+```
+
+Both events are **observation only** — the connection lifecycle is driven by the ASGI handler, not by interceptors.
 
 ### 9.7 Exception handling
 
@@ -1162,38 +1189,7 @@ from blackbull import BlackBull, JSONResponse, Response, read_body
 app = BlackBull()
 SESSIONS: dict[str, str] = {}   # token → username
 
-# ── Middleware ────────────────────────────────────────────────────────────────
-
-async def error_mw(scope, receive, send, call_next):
-    """Catch unhandled exceptions and return JSON 500."""
-    try:
-        await call_next(scope, receive, send)
-    except Exception as exc:
-        await send(JSONResponse({'error': str(exc)},
-                                status=HTTPStatus.INTERNAL_SERVER_ERROR))
-
-
-async def logging_mw(scope, receive, send, call_next):
-    import time
-    t0 = time.monotonic()
-    print(f"→ {scope.get('method')} {scope.get('path')}")
-    await call_next(scope, receive, send)
-    print(f"  {(time.monotonic() - t0) * 1000:.1f} ms")
-
-
-async def auth_mw(scope, receive, send, call_next):
-    """Validate Bearer token; inject scope['user'] and scope['token']."""
-    auth = scope['headers'].get(b'authorization', b'')
-    token = auth[7:].decode() if auth.startswith(b'Bearer ') else ''
-    user = SESSIONS.get(token)
-    if not user:
-        await send(JSONResponse({'error': 'Unauthorized'},
-                                status=HTTPStatus.UNAUTHORIZED))
-        return
-    scope['user'] = user
-    scope['token'] = token
-    await call_next(scope, receive, send)
-
+# ── Per-route middleware (JSON body parsing only) ──────────────────────────────
 
 async def json_body_mw(scope, receive, send, call_next):
     """Parse request body as JSON; inject scope['json']."""
@@ -1205,10 +1201,10 @@ async def json_body_mw(scope, receive, send, call_next):
         return
     await call_next(scope, receive, send)
 
-# ── Route groups ──────────────────────────────────────────────────────────────
+# ── Custom exception for auth failures ────────────────────────────────────────
 
-public = app.group(middlewares=[error_mw, logging_mw])
-api    = app.group(middlewares=[error_mw, logging_mw, auth_mw])
+class Unauthorized(Exception):
+    pass
 
 # ── Lifespan ──────────────────────────────────────────────────────────────────
 
@@ -1217,20 +1213,52 @@ async def startup():
     print('Server ready. Default user: admin / admin')
     # e.g.: await db.init()
 
+# ── Cross-cutting concerns via event hooks ────────────────────────────────────
+
+@app.on_error(Unauthorized)
+async def handle_unauthorized(scope, receive, send):
+    await send(JSONResponse({'error': 'Unauthorized'}, status=HTTPStatus.UNAUTHORIZED))
+
+
+@app.intercept('before_handler')
+async def require_auth(event):
+    """Validate Bearer token for protected routes; raise Unauthorized to abort."""
+    path = event.detail['path']
+    if not (path.startswith('/tasks') or path == '/logout'):
+        return
+    scope = event.detail['scope']
+    auth = scope['headers'].get(b'authorization', b'')
+    token = auth[7:].decode() if auth.startswith(b'Bearer ') else ''
+    user = SESSIONS.get(token)
+    if not user:
+        raise Unauthorized('Unauthorized')
+    scope['user'] = user
+    scope['token'] = token
+
+
+@app.on('request_received')
+async def log_request(event):
+    print(f"→ {event.detail['method']} {event.detail['path']}")
+
+
+@app.on('request_completed')
+async def log_response(event):
+    print(f"  → {event.detail['status']} ({event.detail['duration_ms']:.1f} ms)")
+
 # ── Public routes ─────────────────────────────────────────────────────────────
 
-@public.route(methods=[HTTPMethod.GET], path='/')
+@app.route(methods=[HTTPMethod.GET], path='/')
 async def index(scope, receive, send):
     await send(Response(b'<h1>Login page</h1>'))
 
 
-@public.route(methods=[HTTPMethod.GET], path='/app')
+@app.route(methods=[HTTPMethod.GET], path='/app')
 async def app_page(scope, receive, send):
     await send(Response(b'<h1>Task Manager</h1>'))  # serve index.html
 
 
-@public.route(methods=[HTTPMethod.POST], path='/register',
-              middlewares=[json_body_mw])
+@app.route(methods=[HTTPMethod.POST], path='/register',
+           middlewares=[json_body_mw])
 async def register(scope, receive, send):
     data = scope['json']
     username = str(data.get('username', '')).strip()
@@ -1245,8 +1273,8 @@ async def register(scope, receive, send):
     await send(JSONResponse({'ok': True, 'token': token}))
 
 
-@public.route(methods=[HTTPMethod.POST], path='/login',
-              middlewares=[json_body_mw])
+@app.route(methods=[HTTPMethod.POST], path='/login',
+           middlewares=[json_body_mw])
 async def login(scope, receive, send):
     data = scope['json']
     username = str(data.get('username', '')).strip()
@@ -1256,16 +1284,16 @@ async def login(scope, receive, send):
     SESSIONS[token] = username
     await send(JSONResponse({'ok': True, 'token': token}))
 
-# ── Protected API routes ──────────────────────────────────────────────────────
+# ── Protected API routes (guarded by require_auth interceptor above) ──────────
 
-@api.route(methods=[HTTPMethod.GET], path='/tasks')
+@app.route(methods=[HTTPMethod.GET], path='/tasks')
 async def list_tasks(scope, receive, send):
     user = scope['user']
     tasks = []  # replace with: await db.get_tasks(user)
     await send(JSONResponse(tasks))
 
 
-@api.route(methods=[HTTPMethod.POST], path='/tasks',
+@app.route(methods=[HTTPMethod.POST], path='/tasks',
            middlewares=[json_body_mw])
 async def create_task(scope, receive, send):
     title = str(scope['json'].get('title', '')).strip()
@@ -1277,7 +1305,7 @@ async def create_task(scope, receive, send):
     await send(JSONResponse(task, status=HTTPStatus.CREATED))
 
 
-@api.route(methods=[HTTPMethod.PUT], path='/tasks/{task_id}',
+@app.route(methods=[HTTPMethod.PUT], path='/tasks/{task_id}',
            middlewares=[json_body_mw])
 async def update_task(scope, receive, send):
     task_id = scope['path_params']['task_id']
@@ -1285,14 +1313,14 @@ async def update_task(scope, receive, send):
     await send(JSONResponse({'id': task_id, 'title': 'updated'}))
 
 
-@api.route(methods=[HTTPMethod.DELETE], path='/tasks/{task_id}')
+@app.route(methods=[HTTPMethod.DELETE], path='/tasks/{task_id}')
 async def delete_task(scope, receive, send):
     task_id = scope['path_params']['task_id']
     # ... db.delete_task(scope['user'], int(task_id)) ...
     await send(JSONResponse({'ok': True}))
 
 
-@api.route(methods=[HTTPMethod.POST], path='/logout')
+@app.route(methods=[HTTPMethod.POST], path='/logout')
 async def logout(scope, receive, send):
     SESSIONS.pop(scope.get('token', ''), None)
     await send(JSONResponse({'ok': True}))
@@ -1735,17 +1763,50 @@ _log_queue    = queue.Queue(-1)          # unbounded
 _json_handler = JsonHTTPHandler('localhost:9000')
 _listener     = QueueListener(_log_queue, _json_handler,
                                respect_handler_level=True)
-_listener.start()
 
-logging.getLogger('blackbull.access').addHandler(QueueHandler(_log_queue))
-logging.getLogger('blackbull.access').setLevel(logging.INFO)
+_access_logger = logging.getLogger('example.access')
+_access_logger.addHandler(QueueHandler(_log_queue))
+_access_logger.setLevel(logging.INFO)
+
+
+@app.on_startup
+async def start_log_listener():
+    _listener.start()
+
+
+@app.on_shutdown
+async def stop_log_listener():
+    _listener.stop()
+
+
+@app.on('request_received')
+async def log_request(event):
+    _access_logger.info('%s %s', event.detail['method'], event.detail['path'],
+                        extra={'client_ip': event.detail['client_ip'] or '-',
+                               'method': event.detail['method'],
+                               'path': event.detail['path'],
+                               'status': '-', 'response_bytes': 0, 'duration_ms': 0.0})
+
+
+@app.on('request_completed')
+async def log_response(event):
+    d = event.detail
+    _access_logger.info('%s %s → %s (%.1f ms)',
+                        d['method'], d['path'], d['status'], d['duration_ms'],
+                        extra={'client_ip': d['client_ip'] or '-',
+                               'method': d['method'], 'path': d['path'],
+                               'status': d['status'],
+                               'response_bytes': d['response_bytes'],
+                               'duration_ms': d['duration_ms']})
 ```
 
 `QueueHandler.emit()` puts the record in the queue and returns immediately.
 `QueueListener` runs in a daemon thread and calls `JsonHTTPHandler.emit()`
 there — the blocking HTTP call never touches the event-loop thread.
 
-Call `_listener.stop()` on shutdown to flush the queue and join the thread.
+`@app.on_startup` / `@app.on_shutdown` tie the listener lifecycle to the server,
+so the background thread starts only when the server is ready and is flushed and
+joined cleanly before the process exits.
 
 ### 14.6  What is not yet implemented
 
@@ -1875,26 +1936,22 @@ async def search(scope, receive, send):
     await send(JSONResponse(result))
 ```
 
-#### Middleware example
+#### Interceptor example
 
-The pattern scales cleanly to middleware so every route in a group benefits
-without repeating the check:
+The pattern scales cleanly to a `before_handler` interceptor so every route
+benefits without repeating the check:
 
 ```python
-async def priority_mw(scope, receive, send, call_next):
+@app.intercept('before_handler')
+async def handle_priority(event):
+    scope = event.detail['scope']
     hint = scope.get('http2_priority', {'urgency': 3, 'incremental': False})
     urgency = hint['urgency']
-    scope['_priority_urgency'] = urgency   # pass downstream
+    scope['_priority_urgency'] = urgency   # pass downstream to handler
 
     if urgency <= 1:
-        logger.warning('HIGH-PRIORITY %s %s u=%d',
-                       scope.get('method'), scope.get('path'), urgency)
-    elif urgency >= 6:
-        scope['_background'] = True        # suppress verbose logging
-
-    await call_next(scope, receive, send)
-
-api = app.group(middlewares=[priority_mw, auth_mw])
+        logger.info('HIGH-PRIORITY u=%d: %s %s',
+                    urgency, event.detail['method'], event.detail['path'])
 ```
 
 See `examples/SimpleTaskManager/app.py` for a complete integration and
@@ -2155,46 +2212,38 @@ The terminal `0\r\n\r\n` is written automatically when `more_body=False` arrives
 HTTP/2 is unaffected — DATA frames carry explicit length and `END_STREAM` maps
 to `more_body=False`.
 
-### Writing streaming-safe middleware with `StreamingAwareMiddleware`
+### Writing streaming-safe middleware
 
 Any middleware that wraps the `send` callable and collects body parts will
 silently buffer a streaming response, defeating `more_body=True`.
 
-`StreamingAwareMiddleware` solves this once.  Subclasses override two hooks and
-never deal with `more_body` directly:
+For function-based middleware, the safest approach is to pass body events
+through immediately rather than accumulating them:
 
 ```python
-from blackbull.middleware import StreamingAwareMiddleware
+async def prefix_mw(scope, receive, send, call_next):
+    captured_start = None
 
-class PrefixMiddleware(StreamingAwareMiddleware):
-    async def on_response_body(self, start: dict, body: bytes) -> tuple[dict, bytes]:
-        """Called with the complete body — only for non-streaming responses."""
-        return start, b'[prefix] ' + body
+    async def capturing_send(event):
+        nonlocal captured_start
+        if event.get('type') == 'http.response.start':
+            captured_start = event
+        elif event.get('type') == 'http.response.body':
+            if event.get('more_body'):
+                # Streaming response — pass through without buffering
+                await send(captured_start)
+                captured_start = None
+                await send(event)
+            else:
+                # Non-streaming — transform the body
+                body = b'[prefix] ' + event.get('body', b'')
+                await send(captured_start)
+                await send({**event, 'body': body})
+        else:
+            await send(event)
 
-    async def on_response_start(self, start: dict) -> dict:
-        """Called when streaming is detected (more_body=True on first chunk)."""
-        return start  # modify or pass through
+    await call_next(scope, receive, capturing_send)
 ```
 
-| Hook | When called | What to return |
-|---|---|---|
-| `on_response_body(start, body)` | non-streaming response; `body` is the full bytes | `(start, body)` after any transformation |
-| `on_response_start(start)` | streaming detected; `start` is the `http.response.start` event | modified start event |
-
-For streaming responses the base class passes all subsequent chunks directly to
-`send` without buffering — `on_response_body` is **never** called.
-
-### Warning for non-conforming class middlewares
-
-When `app.use(mw)` is called with a class instance that does not inherit from
-`StreamingAwareMiddleware`, BlackBull emits a `UserWarning` at registration time:
-
-```
-UserWarning: Class-based middleware 'MyMiddleware' does not inherit from
-StreamingAwareMiddleware.  If its __call__ wraps the 'send' callable, it will
-silently buffer streaming responses.
-```
-
-The warning is advisory — the middleware is still registered and works.
-Function-based middlewares (`async def mw(scope, receive, send, call_next): ...`)
-and `functools.partial` wrappers do not trigger the warning.
+For most use cases (header injection, logging) the middleware does not touch
+the body at all and streaming safety is not a concern.
