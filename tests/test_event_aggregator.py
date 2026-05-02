@@ -1,13 +1,14 @@
 import pytest
 from unittest.mock import AsyncMock
+from blackbull.event import Event, EventDispatcher
 from blackbull.event_aggregator import EventAggregator
 
 
 @pytest.fixture
 def dispatcher():
-    d = AsyncMock()
+    d = AsyncMock(spec_set=EventDispatcher)
     d.emit = AsyncMock()
-    d.emit_intercept = AsyncMock()
+    # d.emit_intercept = AsyncMock()
     return d
 
 
@@ -19,7 +20,7 @@ def aggregator(dispatcher):
 @pytest.mark.asyncio
 async def test_on_app_startup(aggregator, dispatcher) -> None:
     await aggregator.on_app_startup()
-    dispatcher.emit.assert_called_once_with("app_startup", {})
+    dispatcher.emit.assert_called_once_with(Event("app_startup", {}))
 
 
 @pytest.mark.asyncio
@@ -27,7 +28,7 @@ async def test_on_request_received(aggregator, dispatcher) -> None:
     scope = {"type": "http", "path": "/"}
     await aggregator.on_request_received(scope)
     dispatcher.emit.assert_called_once_with(
-        "request_received", {"scope": scope}
+        Event("request_received", {"scope": scope})
     )
 
 
@@ -35,9 +36,12 @@ async def test_on_request_received(aggregator, dispatcher) -> None:
 async def test_on_before_handler(aggregator, dispatcher) -> None:
     scope, receive, send, call_next = {}, AsyncMock(), AsyncMock(), AsyncMock()
     await aggregator.on_before_handler(scope, receive, send, call_next)
-    dispatcher.emit_intercept.assert_called_once_with(
-        "before_handler", scope, receive, send, call_next
+    dispatcher.emit.assert_called_once_with(
+        Event("before_handler", {"scope": scope,})
     )
+    # dispatcher.emit_intercept.assert_called_once_with(
+    #     "before_handler", scope, receive, send, call_next
+    # )
 
 
 @pytest.mark.asyncio
@@ -45,7 +49,7 @@ async def test_on_after_handler_success(aggregator, dispatcher) -> None:
     scope = {"type": "http"}
     await aggregator.on_after_handler(scope)
     dispatcher.emit.assert_called_once_with(
-        "after_handler", {"scope": scope, "exception": None}
+        Event("after_handler", {"scope": scope, "exception": None})
     )
 
 
@@ -55,7 +59,7 @@ async def test_on_after_handler_with_exception(aggregator, dispatcher) -> None:
     exc = ValueError("boom")
     await aggregator.on_after_handler(scope, exception=exc)
     dispatcher.emit.assert_called_once_with(
-        "after_handler", {"scope": scope, "exception": exc}
+        Event("after_handler", {"scope": scope, "exception": exc})
     )
 
 
@@ -65,7 +69,7 @@ async def test_on_error_with_exception_group(aggregator, dispatcher) -> None:
     eg = ExceptionGroup("multi", [ValueError("a"), RuntimeError("b")])
     await aggregator.on_error(scope, eg)
     dispatcher.emit.assert_called_once_with(
-        "error", {"scope": scope, "exception": eg}
+        Event("error", {"scope": scope, "exception": eg})
     )
 
 

@@ -367,19 +367,18 @@ class HTTP11Handler(BaseHandler):
         from .http1_actor import HTTP1Actor  # noqa: PLC0415 — lazy to avoid circular dep
         from .sender import AsyncioWriter   # noqa: PLC0415
         transport = self.writer.transport
+
         peername = transport.get_extra_info('peername') if transport else None
-        client = list(peername[:2]) if peername else None
         sockname = transport.get_extra_info('sockname') if transport else None
-        server = list(sockname[:2]) if sockname else None
         ssl = transport.get_extra_info('ssl_object') is not None if transport else False
 
         actor = HTTP1Actor(
             self.reader, AsyncioWriter(self.writer), self.app,
             aggregator=None,  # use legacy direct-dispatcher path
             request=self.request,
+            peername=peername,
+            sockname=sockname,
             ssl=ssl,
-            client=client,
-            server=server,
         )
         await actor.run()
     
