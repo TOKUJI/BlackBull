@@ -61,7 +61,8 @@ class WebSocketSession:
         self._reader = reader
         self._writer = writer
         self._raw_writer = raw_writer
-        self._recipient = WebSocketRecipient(reader, raw_writer,
+        self._recipient = WebSocketRecipient(reader,
+                                             writer,
                                              require_masked=False)
         # Skip the synthetic 'websocket.connect' first-call event — the
         # handshake (HTTP 101) already established the connection.

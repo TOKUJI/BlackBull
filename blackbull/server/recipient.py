@@ -252,12 +252,12 @@ class WebSocketRecipient(BaseRecipient):
     writer is stored alongside the reader.
     """
 
-    def __init__(self, reader: AbstractReader, writer, *,
+    def __init__(self, reader: AbstractReader, writer: AbstractWriter, *,
                  require_masked: bool = True,
                  dispatcher: EventDispatcher | None = None,
                  scope: dict | None = None):
         super().__init__(reader)
-        self._writer = writer if isinstance(writer, AbstractWriter) else AsyncioWriter(writer)
+        self._writer = writer
         self._connect_sent = False
         self._assembler = FragmentAssembler()
         # Server-side: client frames MUST be masked (RFC 6455 §5.1).  Client-side:

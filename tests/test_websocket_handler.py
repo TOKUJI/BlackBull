@@ -132,7 +132,9 @@ class _RecipientWrapper:
 
     def __init__(self, raw_bytes: bytes):
         self.writer = _FakeWriter()
-        self._recipient = WebSocketRecipient(AsyncioReader(_FakeReader(raw_bytes)), self.writer)
+        # Wrap the sync _FakeWriter in AsyncioWriter so WebSocketRecipient
+        # receives a proper AbstractWriter (shim removed from __init__).
+        self._recipient = WebSocketRecipient(AsyncioReader(_FakeReader(raw_bytes)), AsyncioWriter(self.writer))
 
     async def receive(self):
         return await self._recipient()

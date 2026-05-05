@@ -8,6 +8,7 @@ import pytest
 from blackbull import BlackBull, Event
 from blackbull.utils import Scheme
 from blackbull.server.recipient import WebSocketRecipient, AsyncioReader
+from blackbull.server.sender import AbstractWriter
 
 
 # ---------------------------------------------------------------------------
@@ -59,21 +60,12 @@ class _FakeReader:
         return chunk
 
 
-class _FakeWriter:
+class _FakeWriter(AbstractWriter):
     def __init__(self):
         self.written = bytearray()
 
-    def write(self, data: bytes) -> None:
+    async def write(self, data: bytes) -> None:
         self.written += data
-
-    async def drain(self) -> None:
-        pass
-
-    def close(self) -> None:
-        pass
-
-    async def wait_closed(self) -> None:
-        pass
 
 
 # ---------------------------------------------------------------------------
