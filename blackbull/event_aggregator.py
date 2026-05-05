@@ -46,12 +46,10 @@ class EventAggregator:
     async def on_before_handler(
         self, scope: dict[str, Any], receive: Any, send: Any, call_next: Any
     ) -> None:
-        """Fire Level B ``before_handler`` (intercept)."""
+        """Fire Level B ``before_handler`` then invoke the next handler."""
         await self._dispatcher.emit(
             Event("before_handler", {"scope": scope}))
-        # await self._dispatcher.emit_intercept(
-        #     "before_handler", scope, receive, send, call_next
-        # )
+        await call_next(scope, receive, send)
 
     async def on_after_handler(
         self, scope: dict[str, Any], exception: BaseException | None = None
@@ -96,3 +94,10 @@ class EventAggregator:
     async def on_websocket_disconnected(self, scope: dict[str, Any]) -> None:
         """Fire Level B ``websocket_disconnected``."""
         await self._dispatcher.emit(Event("websocket_disconnected", {"scope": scope}))
+
+    # ------------------------------------------------------------------
+    # Connection lifecycle
+    # ------------------------------------------------------------------
+
+    async def on_connection_accepted(self, peername) -> None:
+        """Level A notification — no Level B event fires yet."""

@@ -73,6 +73,9 @@ class AbstractWriter(ABC):
         """Write *data* to the transport and ensure it is flushed."""
         ...
 
+    async def close(self) -> None:
+        """Close the underlying transport. Default: no-op."""
+
 
 class AsyncioWriter(AbstractWriter):
     """Adapts an asyncio-compatible stream to ``AbstractWriter``.
@@ -96,6 +99,14 @@ class AsyncioWriter(AbstractWriter):
     async def write(self, data: bytes) -> None:
         self._sw.write(data)
         await self._sw.drain()
+
+    async def close(self) -> None:
+        self._sw.close()
+        if hasattr(self._sw, 'wait_closed'):
+            try:
+                await self._sw.wait_closed()
+            except Exception:
+                pass
 
 
 # ---------------------------------------------------------------------------

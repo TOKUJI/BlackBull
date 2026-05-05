@@ -2,7 +2,7 @@ import asyncio
 import zlib
 from abc import ABC, abstractmethod
 
-from .sender import WebSocketSender, WSOpcode
+from .sender import WebSocketSender, WSOpcode, AbstractWriter, AsyncioWriter
 from .headers import Headers
 from ..protocol.frame import FrameBase, Data
 from ..event import Event, EventDispatcher
@@ -257,7 +257,7 @@ class WebSocketRecipient(BaseRecipient):
                  dispatcher: EventDispatcher | None = None,
                  scope: dict | None = None):
         super().__init__(reader)
-        self._writer = writer
+        self._writer = writer if isinstance(writer, AbstractWriter) else AsyncioWriter(writer)
         self._connect_sent = False
         self._assembler = FragmentAssembler()
         # Server-side: client frames MUST be masked (RFC 6455 §5.1).  Client-side:
@@ -330,8 +330,7 @@ class WebSocketRecipient(BaseRecipient):
                         pong = WebSocketSender._encode_frame(
                             payload, opcode=WSOpcode.PONG,
                             mask=not self._require_masked)
-                        self._writer.write(pong)
-                        await self._writer.drain()
+                        await self._writer.write(pong)
 
                     case WSOpcode.PONG:
                         pass  # unsolicited pong — silently drop
@@ -411,4 +410,6 @@ class RecipientFactory:
                   scope: dict | None = None) -> WebSocketRecipient:
         if not isinstance(reader, AbstractReader):
             reader = AsyncioReader(reader)
+        if not isinstance(writer, AbstractWriter):
+            writer = AsyncioWriter(writer)
         return WebSocketRecipient(reader, writer, dispatcher=dispatcher, scope=scope)

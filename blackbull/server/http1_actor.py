@@ -332,8 +332,19 @@ class HTTP1Actor(Actor):
             scope['scheme'] = 'wss' if scope.get('type') == 'websocket' else 'https'
 
     async def _handle_upgrade(self, scope: dict) -> None:
-        """Delegate WebSocket upgrade to WebSocketHandler (replaced in Step 5)."""
-        # Lazy import avoids circular dependency with server.py
+        """Handle WebSocket upgrade."""
+        if self._aggregator is not None:
+            from uuid import uuid4  # noqa: PLC0415
+            from .websocket_actor import WebSocketActor  # noqa: PLC0415
+            await self._do_ws_handshake(scope)
+            scope['_connection_id'] = str(uuid4())
+            ws_actor = WebSocketActor(
+                self._reader, self._writer, scope, self._app, self._aggregator,
+                peername=self._peername, sockname=self._sockname, ssl=self._ssl,
+            )
+            await ws_actor.run()
+            return
+        # Legacy path — delegate to WebSocketHandler
         from .server import WebSocketHandler  # noqa: PLC0415
         log_record = _AccessLogRecord.from_scope(scope)
         log_record.status = HTTPStatus.SWITCHING_PROTOCOLS
@@ -341,6 +352,24 @@ class HTTP1Actor(Actor):
             await WebSocketHandler(self._app, self._reader, self._writer, scope).run()
         finally:
             _access_logger.info(log_record.format(), extra=log_record.as_extra())
+
+    async def _do_ws_handshake(self, scope: dict) -> None:
+        """Send HTTP 101 Switching Protocols (RFC 6455 §4.2.2)."""
+        send = SenderFactory.http1(self._writer)
+        headers = scope.get('headers', Headers([]))
+        key = headers.get(b'sec-websocket-key', b'')
+        accept = b64encode(sha1(key + b'258EAFA5-E914-47DA-95CA-C5AB0DC85B11').digest())
+        version = headers.get(b'sec-websocket-version', b'')
+        if version != b'13':
+            await send(b'', HTTPStatus.BAD_REQUEST,
+                       [(b'sec-websocket-version', b'13')])
+            return
+        hs_headers = Headers([
+            (b'upgrade', b'websocket'),
+            (b'connection', b'upgrade'),
+            (b'sec-websocket-accept', accept),
+        ])
+        await send(b'', HTTPStatus.SWITCHING_PROTOCOLS, hs_headers)
 
     @staticmethod
     def _make_legacy_disconnect_receive(receive, scope: dict, dispatcher, log_record):

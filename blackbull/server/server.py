@@ -595,33 +595,31 @@ class ASGIServer:
         self.ssl_context.load_verify_locations(cafile=ca_cert)
 
     async def client_connected_cb(self, reader, writer):
-        """
-        This function is called when the server receives an access request from a client.
-        Handler must handles every exception in it and not raise any exception.
-        """
-        request_data = await reader.readuntil(b'\r\n')
+        """Called when the server receives a new TCP connection."""
+        from .connection_actor import ConnectionActor  # noqa: PLC0415
+        from ..event_aggregator import EventAggregator  # noqa: PLC0415
+        from .sender import AsyncioWriter  # noqa: PLC0415
+        from .recipient import AsyncioReader  # noqa: PLC0415
 
-        try:
-            if request_data == HTTP2[:-8]:
-                request_data += await reader.read(8)
+        transport = getattr(writer, 'transport', None)
+        peername = transport.get_extra_info('peername') if transport else None
+        sockname = transport.get_extra_info('sockname') if transport else None
+        ssl_flag = (transport.get_extra_info('ssl_object') is not None
+                    if transport else False)
 
-                if request_data == HTTP2:
-                    logger.info('HTTP/2 connection is requested.')
-                    handler = HTTP2Handler(self.app, reader, writer)
-                else:
-                    raise ValueError(f'Received an invalid request ({request_data}).')
+        wrapped_reader = (reader if isinstance(reader, AbstractReader)
+                          else AsyncioReader(reader))
+        wrapped_writer = (writer if isinstance(writer, AbstractWriter)
+                          else AsyncioWriter(writer))
 
-            else:
-                logger.info('HTTP1.1 connection is requested.')
-                handler = HTTP11Handler(self.app, reader, writer, request_data)
+        dispatcher = getattr(self.app, '_dispatcher', None)
+        aggregator = EventAggregator(dispatcher) if dispatcher is not None else None
 
-            await handler.run()
-
-        except Exception:
-            logger.error(traceback.format_exc())
-
-        finally:
-            writer.close()
+        actor = ConnectionActor(
+            wrapped_reader, wrapped_writer, self.app, aggregator,
+            peername=peername, sockname=sockname, ssl=ssl_flag,
+        )
+        await actor.run()
 
     def open_socket(self, port=0):
         if not check_port(port=port):
