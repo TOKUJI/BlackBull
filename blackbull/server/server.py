@@ -24,9 +24,10 @@ from ..protocol.frame import ErrorCodes, FrameFactory, FrameTypes, FrameBase, pa
 from ..logger import log
 from .response import ResponderFactory
 from .parser import ParserFactory
-from .sender import SenderFactory
+from .sender import SenderFactory, AbstractWriter
 from .recipient import RecipientFactory, HTTP2Recipient, AbstractReader, AsyncioReader, IncompleteReadError
 from .headers import Headers
+from .http2_actor import HTTP2Actor
 logger = logging.getLogger(__name__)
 _access_logger = logging.getLogger('blackbull.access')
 
@@ -443,276 +444,28 @@ class HTTP11Handler(BaseHandler):
         return SenderFactory.http1(self.writer)
 
 
-class HTTP2Handler(BaseHandler):
-    """An ASGI Server class.
-    """
+class HTTP2Handler(HTTP2Actor):
+    """Thin wrapper — delegates to HTTP2Actor. Preserved for backward compatibility."""
+
+    @log
     def __init__(self, app, reader, writer):
-        super().__init__(app, reader, writer)
-        self.root_stream = Stream(0, None, 1)
-        self.factory = FrameFactory()
-        # Stream 0: connection-level control-plane sender (SETTINGS, PING, …)
-        self._control_sender = SenderFactory.http2(self.writer, self.factory, 0)
-        # Cache of per-stream senders keyed by stream ID.
-        # Keeping one sender per stream ensures WINDOW_UPDATE frames can reach
-        # the same sender instance that the ASGI app task is holding.
-        self._senders: dict = {}
-        # RFC 7540 §6.5.2: default is unlimited; updated by client SETTINGS.
-        self.max_concurrent_streams = float('inf')
-        # Server-initiated (pushed) streams use even IDs (RFC 7540 §5.1.1).
-        self._next_push_stream_id = 2
-        # Set to the active TaskGroup while run() is executing so that
-        # _handle_push() can add pushed-stream tasks to the same group.
-        self._task_group: asyncio.TaskGroup | None = None
+        transport = getattr(writer, 'transport', None)
+        peername = transport.get_extra_info('peername') if transport else None
+        sockname = transport.get_extra_info('sockname') if transport else None
+        ssl_flag = transport.get_extra_info('ssl_object') is not None if transport else False
 
-    def find_stream(self, stream_id):
-        if stream_id == 0:
-            return self.root_stream
-        else:
-            return self.root_stream.find_child(stream_id)
+        if reader is not None and not isinstance(reader, AbstractReader):
+            reader = AsyncioReader(reader)
 
-    def _allocate_push_stream_id(self) -> int:
-        sid = self._next_push_stream_id
-        self._next_push_stream_id += 2
-        return sid
+        from .sender import AsyncioWriter  # noqa: PLC0415
+        wrapped_writer = writer if isinstance(writer, AbstractWriter) else AsyncioWriter(writer)
 
-    def make_sender(self, stream_id: int):
-        if stream_id not in self._senders:
-            self._senders[stream_id] = SenderFactory.http2(
-                self.writer, self.factory, stream_id,
-                push_callback=self._handle_push)
-        return self._senders[stream_id]
-
-    async def send_frame(self, frame: FrameBase):
-        """Send a raw HTTP/2 frame via the control-plane sender."""
-        await self._control_sender(frame)
-
-    async def _handle_push(self, event: dict, parent_stream_id: int) -> None:
-        """Handle an 'http.response.push' ASGI event (RFC 7540 §8.2).
-
-        Allocates an even promised stream ID, sends a PUSH_PROMISE frame on
-        the parent stream, then dispatches a synthetic GET request to the app
-        on the promised stream so the pushed resource is fully delivered.
-        """
-        push_stream_id = self._allocate_push_stream_id()
-        path = event.get('path', '/')
-
-        # Derive :authority from the parent stream's scope if available.
-        parent_stream = self.root_stream.find_child(parent_stream_id)
-        parent_scope = (parent_stream.scope if (parent_stream and parent_stream.scope is not None)
-                        else {})
-        raw_authority = (parent_scope.get('headers', Headers([]))
-                                     .get(b':authority') or
-                         parent_scope.get('headers', Headers([]))
-                                     .get(b'host') or b'localhost')
-        authority = raw_authority.decode() if isinstance(raw_authority, bytes) else raw_authority
-
-        pseudo = {
-            PseudoHeaders.METHOD:    'GET',
-            PseudoHeaders.PATH:      path,
-            PseudoHeaders.SCHEME:    parent_scope.get('scheme', 'https'),
-            PseudoHeaders.AUTHORITY: authority,
-        }
-        # Strip pseudo-headers from the app-supplied list; keep regular headers.
-        regular = [
-            (k.decode() if isinstance(k, bytes) else k,
-             v.decode() if isinstance(v, bytes) else v)
-            for k, v in event.get('headers', [])
-            if not (k.decode() if isinstance(k, bytes) else k).startswith(':')
-        ]
-
-        pp = self.factory.push_promise(parent_stream_id, push_stream_id, pseudo, regular)
-        await self.send_frame(pp)
-
-        # Build a synthetic scope for the pushed resource.
-        query = urlparse(path).query
-        pushed_scope: dict = {
-            'type': 'http',
-            'http_version': '2',
-            'method': 'GET',
-            'path': path,
-            'scheme': parent_scope.get('scheme', 'https'),
-            'query_string': query.encode() if query else b'',
-            'root_path': '',
-            'client': parent_scope.get('client'),
-            'headers': Headers([(k.encode() if isinstance(k, str) else k,
-                                  v.encode() if isinstance(v, str) else v)
-                                 for k, v in regular]),
-            'extensions': {'http.response.push': {}},
-            'http2_priority': {'urgency': 3, 'incremental': False},
-        }
-
-        # The pushed request is already complete (GET has no body).
-        push_recipient = RecipientFactory.http2()
-        push_recipient.put_event({'type': 'http.request', 'body': b'', 'more_body': False})
-
-        push_sender = SenderFactory.http2(
-            self.writer, self.factory, push_stream_id,
-            push_callback=None)  # RFC 7540 §8.2: server-initiated streams cannot send PUSH_PROMISE
-
-        push_log_record = AccessLogRecord.from_scope(pushed_scope)
-        if self._task_group is not None:
-            self._task_group.create_task(
-                _run_with_log(
-                    self.app(pushed_scope, push_recipient, push_sender),
-                    push_log_record)
-            )
-
-    async def receive(self) -> bytes | None:
-        """Read the stream, get some data from incoming frames, and parse it"""
-        # to distinguish the type of incoming frame
-        if (data := await self.reader.read(9)) == 0:
-            logger.info('StreamReader got EOF')
-            return None
-
-        size = int.from_bytes(data[:3], 'big', signed=False)
-        data += await self.reader.read(size)  # Add error handling for the case of insufficient data
-
-        return data
-
-    def parse(self, data):
-        frame = self.factory.load(data)
-
-        self.root_stream.add_child(frame.stream_id)
-        if (stream := self.root_stream.find_child(frame.stream_id)) is None:
-            logger.error(f'Stream {frame.stream_id} is not found.')
-            raise Exception('Unused stream identifier')
-
-        scope = None
-        if frame.FrameType() in (FrameTypes.HEADERS, FrameTypes.DATA):
-            scope = ParserFactory.Get(frame, stream).parse()
-
-        return frame, stream, scope
-
-    def is_connect(self, frame):
-        if not frame or frame.FrameType() == FrameTypes.GOAWAY:
-            return False
-        return True
-
-    async def run(self):
-        # Send the settings at first.
-        my_settings = self.factory.settings()
-        await self.send_frame(my_settings)
-        logger.info(my_settings)
-
-        # Per-stream recipients: keyed by stream ID so each stream's receive
-        # queue is isolated. A shared queue would let one stream's events leak
-        # into another stream's handler (e.g. GET's empty event consumed by POST).
-        recipients: dict[int, HTTP2Recipient] = {}
-
-        async with asyncio.TaskGroup() as tg:
-            self._task_group = tg
-            await self._frame_loop(tg, recipients)
-        # TaskGroup block: every per-stream task has completed by this point.
-        self._task_group = None
-
-    async def _frame_loop(self, tg: asyncio.TaskGroup,
-                          recipients: dict[int, HTTP2Recipient]) -> None:
-        """Read frames from the connection and dispatch per-stream ASGI tasks.
-
-        Runs as the main body of the TaskGroup in run().  Exits when the
-        connection sends GOAWAY or closes (receive() returns falsy).  All
-        per-stream tasks are children of *tg* so the TaskGroup waits for
-        them to finish before run() returns.
-        """
-        waiting_continuation = False
-        header_frame = None
-
-        while data := await self.receive():
-
-            # Get a frame object by parsing the received data.
-            frame = self.factory.load(data)
-
-            # Add the stream identifier of the frame to the root stream's children if it's not already there.
-            self.root_stream.add_child(frame.stream_id)
-            if (stream := self.root_stream.find_child(frame.stream_id)) is None:
-                logger.error(f'Stream {frame.stream_id} is not found.')
-                raise Exception('Unused stream identifier')
-
-            send = self.make_sender(stream.stream_id)
-            last_stream_id = self.root_stream.max_stream_id()
-
-            match frame.FrameType():
-                case FrameTypes.HEADERS:
-                    if len(self.root_stream.get_children()) >= self.max_concurrent_streams:
-                        await self.send_frame(self.factory.rst_stream(stream.stream_id, ErrorCodes.REFUSED_STREAM))
-
-                    if frame.end_headers:
-                        waiting_continuation = False
-                        scope = ParserFactory.Get(frame, stream).parse()
-                        scope['http2_priority'] = _resolve_priority(stream, scope)
-                        scope['extensions'] = {'http.response.push': {}}
-                        stream.scope = scope   # store so _handle_push can read it
-                        stream_recipient = RecipientFactory.http2()
-                        recipients[stream.stream_id] = stream_recipient
-                        stream.on_headers_received(end_stream=bool(frame.end_stream))
-                        if frame.end_stream:
-                            # No body will follow — enqueue an empty request event now.
-                            stream_recipient.put_event({'type': 'http.request', 'body': b'', 'more_body': False})
-                        log_record = AccessLogRecord.from_scope(scope)
-                        capturing_send = _make_capturing_send(send, log_record)
-                        tg.create_task(
-                            _run_with_log(
-                                self.app(scope, stream_recipient, capturing_send),
-                                log_record,
-                                dispatcher=getattr(self.app, '_dispatcher', None),
-                                scope=scope)
-                        )
-                    else:
-                        waiting_continuation = True
-                        header_frame = frame
-                        continue
-
-                case FrameTypes.CONTINUATION:
-                    if not waiting_continuation:
-                        logger.error('Received unexpected CONTINUATION frame without preceding HEADERS frame.')
-                        await self.send_frame(self.factory.goaway(last_stream_id))
-
-                    assert header_frame is not None
-                    header_frame.raw_block += frame.payload
-
-                    if frame.end_headers:
-                        logger.debug('Received complete HEADERS block after CONTINUATION frames.')
-                        waiting_continuation = False
-                        header_frame.parse_payload()
-                        scope = ParserFactory.Get(header_frame, stream).parse()
-                        scope['http2_priority'] = _resolve_priority(stream, scope)
-                        scope['extensions'] = {'http.response.push': {}}
-                        stream.scope = scope   # store so _handle_push can read it
-                        stream_recipient = RecipientFactory.http2()
-                        recipients[stream.stream_id] = stream_recipient
-                        log_record = AccessLogRecord.from_scope(scope)
-                        capturing_send = _make_capturing_send(send, log_record)
-                        tg.create_task(
-                            _run_with_log(
-                                self.app(scope, stream_recipient, capturing_send),
-                                log_record,
-                                dispatcher=getattr(self.app, '_dispatcher', None),
-                                scope=scope)
-                        )
-                    else:
-                        continue  # more CONTINUATION frames expected
-
-                case FrameTypes.DATA:
-                    # Send WINDOW_UPDATE for every DATA frame (RFC 7540 §6.9).
-                    await self.send_frame(self.factory.window_update(stream.stream_id, frame.length))
-                    if stream.state in (StreamState.HALF_CLOSED_REMOTE, StreamState.CLOSED):
-                        # RFC 7540 §6.1: DATA on a closed stream is a stream error.
-                        await self.send_frame(self.factory.rst_stream(stream.stream_id, ErrorCodes.STREAM_CLOSED))
-                    else:
-                        stream.on_data_received(end_stream=bool(frame.end_stream))
-                        if stream.stream_id in recipients:
-                            recipients[stream.stream_id].put_DATAFrame(frame)
-                        else:
-                            logger.warning('DATA for stream %d but no recipient found', stream.stream_id)
-
-                case FrameTypes.GOAWAY:
-                    await self.send_frame(self.factory.goaway(last_stream_id))
-                    self.writer.close()
-                    return
-
-                case _:
-                    await ResponderFactory.create(frame).respond(self)
-                
+        super().__init__(
+            reader, wrapped_writer, app, aggregator=None,
+            peername=peername, sockname=sockname, ssl=ssl_flag,
+        )
+        # Keep the raw writer accessible for legacy callers that call .close() etc.
+        self.writer = writer
 
 
 class LifespanManager:

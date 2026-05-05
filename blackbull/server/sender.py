@@ -508,6 +508,8 @@ class SenderFactory:
     @staticmethod
     def http2(stream_writer, factory, stream_id: int,
               push_callback=None) -> HTTP2Sender:
+        if isinstance(stream_writer, AbstractWriter):
+            return HTTP2Sender(stream_writer, factory, stream_id, push_callback)
         return HTTP2Sender(AsyncioWriter(stream_writer), factory,
                            stream_id, push_callback)
 
