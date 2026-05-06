@@ -108,3 +108,6 @@ venv.bak/
 
 # private development notes (not for end users)
 CLAUDE_DEV.md
+.claude/design/
+.claude/phases/
+.claude/patterns/
