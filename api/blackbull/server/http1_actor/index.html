@@ -16,7 +16,7 @@
         <link rel="prev" href="../headers/">
       
       
-        <link rel="next" href="../parser/">
+        <link rel="next" href="../http2_actor/">
       
       
         
@@ -1378,6 +1378,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../connection_actor/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    connection_actor
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../headers/" class="md-nav__link">
         
   
@@ -1525,6 +1553,34 @@
   
 </nav>
       
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../http2_actor/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    http2_actor
+  
+
+    
+  </span>
+  
+  
+
+      </a>
     </li>
   
 
@@ -1685,6 +1741,34 @@
     
   
     watch
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../websocket_actor/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    websocket_actor
   
 
     
@@ -1910,9 +1994,8 @@ RequestActor owns the lifetime of a single HTTP request.</p>
 <p>Supervisor strategy: isolate — an unhandled exception from a RequestActor
 closes the connection without crashing sibling connections.</p>
 <p>If <em>aggregator</em> is <code>None</code> the actor falls back to the legacy direct-
-dispatcher path (same behaviour as the pre-Actor HTTP11Handler), so that
-HTTP11Handler can delegate here without requiring a production-ready
-EventAggregator.</p>
+dispatcher path (fires events via <code>app._dispatcher</code> directly), so that
+BlackBull apps without a full EventAggregator still receive lifecycle events.</p>
 
 
 

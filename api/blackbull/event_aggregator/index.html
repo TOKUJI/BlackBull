@@ -927,6 +927,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.event_aggregator.EventAggregator.on_connection_accepted" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        on_connection_accepted
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.event_aggregator.EventAggregator.on_error" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1578,6 +1589,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../server/connection_actor/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    connection_actor
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../server/headers/" class="md-nav__link">
         
   
@@ -1614,6 +1653,34 @@
     
   
     http1_actor
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../server/http2_actor/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    http2_actor
   
 
     
@@ -1795,6 +1862,34 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../server/websocket_actor/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    websocket_actor
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -1934,6 +2029,17 @@
     <span class="md-ellipsis">
       
         on_before_handler
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.event_aggregator.EventAggregator.on_connection_accepted" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        on_connection_accepted
       
     </span>
   </a>
@@ -2212,7 +2318,29 @@ It is a framework-internal component.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Fire Level B <code>before_handler</code> (intercept).</p>
+        <p>Fire Level B <code>before_handler</code> then invoke the next handler.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.event_aggregator.EventAggregator.on_connection_accepted" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">on_connection_accepted</span><span class="p">(</span><span class="n">peername</span><span class="p">)</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-async"><code>async</code></small>
+  </span>
+
+</h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Level A notification — no Level B event fires yet.</p>
 
 
     </div>
@@ -2311,7 +2439,7 @@ It is a framework-internal component.</p>
 
 
 <h4 id="blackbull.event_aggregator.EventAggregator.on_websocket_connected" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">on_websocket_connected</span><span class="p">(</span><span class="n">scope</span><span class="p">)</span></code>
+            <code class="highlight language-python"><span class="n">on_websocket_connected</span><span class="p">(</span><span class="n">scope</span><span class="p">,</span> <span class="n">subprotocol</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
 
   <span class="doc doc-labels">
       <small class="doc doc-label doc-label-async"><code>async</code></small>
@@ -2333,7 +2461,7 @@ It is a framework-internal component.</p>
 
 
 <h4 id="blackbull.event_aggregator.EventAggregator.on_websocket_disconnected" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">on_websocket_disconnected</span><span class="p">(</span><span class="n">scope</span><span class="p">)</span></code>
+            <code class="highlight language-python"><span class="n">on_websocket_disconnected</span><span class="p">(</span><span class="n">scope</span><span class="p">,</span> <span class="n">code</span><span class="o">=</span><span class="mi">1006</span><span class="p">)</span></code>
 
   <span class="doc doc-labels">
       <small class="doc doc-label doc-label-async"><code>async</code></small>
