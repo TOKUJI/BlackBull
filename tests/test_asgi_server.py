@@ -36,7 +36,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 import pytest_asyncio
 
-from blackbull.server.server import ASGIServer, HTTP11Handler
+from blackbull.server.server import ASGIServer
 from blackbull.server.recipient import RecipientFactory
 from blackbull.protocol.rsock import create_dual_stack_sockets, _bind_socket
 

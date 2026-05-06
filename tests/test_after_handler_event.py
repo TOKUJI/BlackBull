@@ -7,51 +7,22 @@ import asyncio
 import pytest
 from blackbull import BlackBull
 from blackbull.event import Event
-from blackbull.server.server import HTTP11Handler
+from blackbull.server.http1_actor import HTTP1Actor
+from blackbull.server.recipient import AbstractReader
+from blackbull.server.sender import AbstractWriter
 
 
-class _FakeTransport:
-    def __init__(self, peername=None, sockname=None, ssl_object=None):
-        self._extras = {
-            'peername': peername,
-            'sockname': sockname,
-            'ssl_object': ssl_object,
-        }
-
-    def get_extra_info(self, key, default=None):
-        return self._extras.get(key, default)
-
-
-class _FakeWriter:
-    def __init__(self, peername=('127.0.0.1', 54321), sockname=('0.0.0.0', 8000)):
+class _FakeWriter(AbstractWriter):
+    def __init__(self):
         self.written = bytearray()
-        self.transport = _FakeTransport(peername=peername, sockname=sockname)
 
-    def write(self, data: bytes) -> None:
+    async def write(self, data: bytes) -> None:
         self.written += data
 
-    async def drain(self) -> None:
-        pass
 
-    def close(self) -> None:
-        pass
-
-    async def wait_closed(self) -> None:
-        pass
-
-
-class _FakeReader:
+class _FakeReader(AbstractReader):
     def __init__(self, data: bytes):
         self._buf = bytearray(data)
-
-    async def readline(self) -> bytes:
-        idx = self._buf.find(b'\n')
-        if idx == -1:
-            chunk, self._buf = bytes(self._buf), bytearray()
-            return chunk
-        chunk = bytes(self._buf[:idx + 1])
-        del self._buf[:idx + 1]
-        return chunk
 
     async def read(self, n: int = -1) -> bytes:
         if n < 0:
@@ -86,9 +57,13 @@ def _raw_request(method: str = 'GET', path: str = '/',
 
 async def _run_request(app, raw: bytes) -> _FakeWriter:
     writer = _FakeWriter()
-    handler = HTTP11Handler(app, _FakeReader(b''), writer, raw[:1])
-    handler.request = raw
-    await handler.run()
+    actor = HTTP1Actor(
+        _FakeReader(b''), writer, app, None,
+        request=raw,
+        peername=('127.0.0.1', 54321),
+        sockname=('0.0.0.0', 8000),
+    )
+    await actor.run()
     return writer
 
 

@@ -199,7 +199,6 @@ class HTTP2Actor(Actor):
         self._sockname = sockname
         self._ssl = ssl
 
-        # Public aliases for backward compat (HTTP2Handler tests access these)
         self.app = app
         self.reader = reader
 

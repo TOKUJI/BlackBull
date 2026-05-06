@@ -79,9 +79,18 @@ class EventAggregator:
     # WebSocket lifecycle
     # ------------------------------------------------------------------
 
-    async def on_websocket_connected(self, scope: dict[str, Any]) -> None:
+    async def on_websocket_connected(
+        self, scope: dict[str, Any], subprotocol: str | None = None
+    ) -> None:
         """Fire Level B ``websocket_connected``."""
-        await self._dispatcher.emit(Event("websocket_connected", {"scope": scope}))
+        client = scope.get('client')
+        await self._dispatcher.emit(Event("websocket_connected", {
+            "scope":         scope,
+            "connection_id": scope.get('_connection_id', ''),
+            "client_ip":     client[0] if client else '',
+            "path":          scope.get('path', ''),
+            "subprotocol":   subprotocol,
+        }))
 
     async def on_websocket_message(
         self, scope: dict[str, Any], message: dict[str, Any]
@@ -91,9 +100,18 @@ class EventAggregator:
             Event("websocket_message", {"scope": scope, "message": message})
         )
 
-    async def on_websocket_disconnected(self, scope: dict[str, Any]) -> None:
+    async def on_websocket_disconnected(
+        self, scope: dict[str, Any], code: int = 1006
+    ) -> None:
         """Fire Level B ``websocket_disconnected``."""
-        await self._dispatcher.emit(Event("websocket_disconnected", {"scope": scope}))
+        client = scope.get('client')
+        await self._dispatcher.emit(Event("websocket_disconnected", {
+            "scope":         scope,
+            "connection_id": scope.get('_connection_id', ''),
+            "client_ip":     client[0] if client else '',
+            "path":          scope.get('path', ''),
+            "code":          code,
+        }))
 
     # ------------------------------------------------------------------
     # Connection lifecycle

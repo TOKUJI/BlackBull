@@ -10,7 +10,11 @@ import pytest
 from blackbull import BlackBull
 from blackbull.event import Event
 from blackbull.utils import Scheme
-from blackbull.server.server import HTTP11Handler, WebSocketHandler
+from blackbull.server.http1_actor import HTTP1Actor
+from blackbull.server.websocket_actor import WebSocketActor
+from blackbull.server.recipient import AbstractReader
+from blackbull.server.sender import AbstractWriter
+from blackbull.event_aggregator import EventAggregator
 from blackbull.server.headers import Headers
 
 
@@ -18,7 +22,7 @@ from blackbull.server.headers import Headers
 # Shared test infrastructure
 # ---------------------------------------------------------------------------
 
-class _FakeReader:
+class _FakeReader(AbstractReader):
     """Replay a pre-built byte string through the asyncio StreamReader API."""
 
     def __init__(self, data: bytes):
@@ -48,25 +52,13 @@ class _FakeReader:
         del self._buf[:n]
         return chunk
 
-    async def readline(self) -> bytes:
-        return await self.readuntil(b'\n')
 
-
-class _FakeWriter:
+class _FakeWriter(AbstractWriter):
     def __init__(self):
         self.written = bytearray()
 
-    def write(self, data: bytes) -> None:
+    async def write(self, data: bytes) -> None:
         self.written += data
-
-    async def drain(self) -> None:
-        pass
-
-    def close(self) -> None:
-        pass
-
-    async def wait_closed(self) -> None:
-        pass
 
 
 def _make_client_frame(payload: bytes, opcode: int = 0x1, fin: bool = True) -> bytes:
@@ -110,12 +102,11 @@ def _make_ws_scope(path: str) -> dict:
 
 
 async def _drive_ws_session(app, path: str) -> None:
-    """Run a WebSocket session via WebSocketHandler.run() (no client messages)."""
+    """Run a WebSocket session via WebSocketActor.run() (no client messages)."""
     scope = _make_ws_scope(path)
-    reader = _FakeReader(b'')
-    writer = _FakeWriter()
-    handler = WebSocketHandler(app, reader, writer, scope)
-    await handler.run()
+    aggregator = EventAggregator(app._dispatcher)
+    actor = WebSocketActor(_FakeReader(b''), _FakeWriter(), scope, app, aggregator)
+    await actor.run()
 
 
 async def _drive_ws_session_with_message(app, path: str, *, message: str) -> None:
@@ -123,10 +114,9 @@ async def _drive_ws_session_with_message(app, path: str, *, message: str) -> Non
     scope = _make_ws_scope(path)
     payload = message.encode('utf-8')
     raw = _make_client_frame(payload, opcode=0x1) + _make_client_frame(b'', opcode=0x8)
-    reader = _FakeReader(raw)
-    writer = _FakeWriter()
-    handler = WebSocketHandler(app, reader, writer, scope)
-    await handler.run()
+    aggregator = EventAggregator(app._dispatcher)
+    actor = WebSocketActor(_FakeReader(raw), _FakeWriter(), scope, app, aggregator)
+    await actor.run()
 
 
 # ---------------------------------------------------------------------------
@@ -315,36 +305,13 @@ async def test_websocket_connected_not_fired_for_http():
         await send({'type': 'http.response.body', 'body': b'ok', 'more_body': False})
 
     raw = b'GET /hello HTTP/1.1\r\nHost: localhost:8000\r\n\r\n'
-    writer = _FakeWriter()
-
-    class _FakeReaderWithTransport(_FakeReader):
-        pass
-
-    class _WriterWithTransport:
-        class _Transport:
-            def get_extra_info(self, key, default=None):
-                return None
-        transport = _Transport()
-
-        def __init__(self):
-            self.written = bytearray()
-
-        def write(self, data: bytes) -> None:
-            self.written += data
-
-        async def drain(self) -> None:
-            pass
-
-        def close(self) -> None:
-            pass
-
-        async def wait_closed(self) -> None:
-            pass
-
-    w = _WriterWithTransport()
-    handler_inst = HTTP11Handler(app, _FakeReader(b''), w, raw[:1])
-    handler_inst.request = raw
-    await handler_inst.run()
+    actor = HTTP1Actor(
+        _FakeReader(b''), _FakeWriter(), app, None,
+        request=raw,
+        peername=('127.0.0.1', 54321),
+        sockname=('0.0.0.0', 8000),
+    )
+    await actor.run()
 
     await asyncio.sleep(0.2)
     assert len(fired) == 0

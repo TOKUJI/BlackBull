@@ -9,7 +9,11 @@ import pytest
 from blackbull import BlackBull
 from blackbull.event import Event
 from blackbull.utils import Scheme
-from blackbull.server.server import HTTP11Handler, WebSocketHandler
+from blackbull.server.http1_actor import HTTP1Actor
+from blackbull.server.websocket_actor import WebSocketActor
+from blackbull.server.recipient import AbstractReader
+from blackbull.server.sender import AbstractWriter
+from blackbull.event_aggregator import EventAggregator
 from blackbull.server.headers import Headers
 
 
@@ -17,7 +21,7 @@ from blackbull.server.headers import Headers
 # Shared test infrastructure  (mirrors test_websocket_connected_event.py)
 # ---------------------------------------------------------------------------
 
-class _FakeReader:
+class _FakeReader(AbstractReader):
     def __init__(self, data: bytes):
         self._buf = bytearray(data)
 
@@ -45,25 +49,13 @@ class _FakeReader:
         del self._buf[:n]
         return chunk
 
-    async def readline(self) -> bytes:
-        return await self.readuntil(b'\n')
 
-
-class _FakeWriter:
+class _FakeWriter(AbstractWriter):
     def __init__(self):
         self.written = bytearray()
 
-    def write(self, data: bytes) -> None:
+    async def write(self, data: bytes) -> None:
         self.written += data
-
-    async def drain(self) -> None:
-        pass
-
-    def close(self) -> None:
-        pass
-
-    async def wait_closed(self) -> None:
-        pass
 
 
 def _make_client_frame(payload: bytes, opcode: int = 0x1, fin: bool = True) -> bytes:
@@ -107,26 +99,24 @@ def _make_ws_scope(path: str) -> dict:
 
 
 async def _drive_ws_session(app, path: str) -> None:
-    """Run a WebSocket session via WebSocketHandler.run().
+    """Run a WebSocket session via WebSocketActor.run().
 
     Uses _FakeReader(b'') so _read_loop hits IncompleteReadError and
     emits websocket_disconnected with code 1006.
     """
     scope = _make_ws_scope(path)
-    reader = _FakeReader(b'')
-    writer = _FakeWriter()
-    handler = WebSocketHandler(app, reader, writer, scope)
-    await handler.run()
+    aggregator = EventAggregator(app._dispatcher)
+    actor = WebSocketActor(_FakeReader(b''), _FakeWriter(), scope, app, aggregator)
+    await actor.run()
 
 
 async def _drive_ws_session_with_close(app, path: str) -> None:
     """Run a WebSocket session ending with a proper client close frame (code 1000)."""
     scope = _make_ws_scope(path)
     close_frame = _make_client_frame(b'', opcode=0x8)
-    reader = _FakeReader(close_frame)
-    writer = _FakeWriter()
-    handler = WebSocketHandler(app, reader, writer, scope)
-    await handler.run()
+    aggregator = EventAggregator(app._dispatcher)
+    actor = WebSocketActor(_FakeReader(close_frame), _FakeWriter(), scope, app, aggregator)
+    await actor.run()
 
 
 # ---------------------------------------------------------------------------
@@ -282,32 +272,13 @@ async def test_websocket_disconnected_not_fired_for_http():
         await send({'type': 'http.response.body', 'body': b'ok', 'more_body': False})
 
     raw = b'GET /hello HTTP/1.1\r\nHost: localhost:8000\r\n\r\n'
-
-    class _WriterWithTransport:
-        class _Transport:
-            def get_extra_info(self, key, default=None):
-                return None
-        transport = _Transport()
-
-        def __init__(self):
-            self.written = bytearray()
-
-        def write(self, data: bytes) -> None:
-            self.written += data
-
-        async def drain(self) -> None:
-            pass
-
-        def close(self) -> None:
-            pass
-
-        async def wait_closed(self) -> None:
-            pass
-
-    w = _WriterWithTransport()
-    handler_inst = HTTP11Handler(app, _FakeReader(b''), w, raw[:1])
-    handler_inst.request = raw
-    await handler_inst.run()
+    actor = HTTP1Actor(
+        _FakeReader(b''), _FakeWriter(), app, None,
+        request=raw,
+        peername=('127.0.0.1', 54321),
+        sockname=('0.0.0.0', 8000),
+    )
+    await actor.run()
 
     await asyncio.sleep(0.2)
     assert len(fired) == 0

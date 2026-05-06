@@ -13,7 +13,8 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock
 from hpack import Encoder
 
-from blackbull.server.server import HTTP2Handler
+from blackbull.server.http2_actor import HTTP2Actor
+from blackbull.server.sender import AsyncioWriter
 from blackbull.protocol.frame import (FrameFactory, FrameTypes, FrameFlags,
                               HeaderFrameFlags, DataFrameFlags,
                               SettingFrameFlags)
@@ -47,13 +48,13 @@ def _make_headers_frame(stream_id: int = 1, end_stream: bool = False,
 
 
 def _make_h2_handler(app=None):
-    """Create an HTTP2Handler with a fake writer and mocked send_frame."""
+    """Create an HTTP2Actor with a fake writer and mocked send_frame."""
     if app is None:
         app = AsyncMock()
     writer = MagicMock()
     writer.drain = AsyncMock()
     writer.close = MagicMock()
-    handler = HTTP2Handler(app, reader=None, writer=writer)
+    handler = HTTP2Actor(None, AsyncioWriter(writer), app, aggregator=None)
     handler.send_frame = AsyncMock()
     return handler, app
 

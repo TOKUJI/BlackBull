@@ -8,51 +8,23 @@ import pytest
 from unittest.mock import AsyncMock, patch
 from blackbull import BlackBull
 from blackbull.event import Event
-from blackbull.server.server import HTTP11Handler, WebSocketHandler
+from blackbull.server.http1_actor import HTTP1Actor
+from blackbull.server.websocket_actor import WebSocketActor
+from blackbull.server.recipient import AbstractReader
+from blackbull.server.sender import AbstractWriter
 
 
-class _FakeTransport:
-    def __init__(self, peername=None, sockname=None, ssl_object=None):
-        self._extras = {
-            'peername': peername,
-            'sockname': sockname,
-            'ssl_object': ssl_object,
-        }
-
-    def get_extra_info(self, key, default=None):
-        return self._extras.get(key, default)
-
-
-class _FakeWriter:
-    def __init__(self, peername=('127.0.0.1', 54321), sockname=('0.0.0.0', 8000)):
+class _FakeWriter(AbstractWriter):
+    def __init__(self):
         self.written = bytearray()
-        self.transport = _FakeTransport(peername=peername, sockname=sockname)
 
-    def write(self, data: bytes) -> None:
+    async def write(self, data: bytes) -> None:
         self.written += data
 
-    async def drain(self) -> None:
-        pass
 
-    def close(self) -> None:
-        pass
-
-    async def wait_closed(self) -> None:
-        pass
-
-
-class _FakeReader:
+class _FakeReader(AbstractReader):
     def __init__(self, data: bytes):
         self._buf = bytearray(data)
-
-    async def readline(self) -> bytes:
-        idx = self._buf.find(b'\n')
-        if idx == -1:
-            chunk, self._buf = bytes(self._buf), bytearray()
-            return chunk
-        chunk = bytes(self._buf[:idx + 1])
-        del self._buf[:idx + 1]
-        return chunk
 
     async def read(self, n: int = -1) -> bytes:
         if n < 0:
@@ -100,9 +72,13 @@ def _ws_request(path: str = '/ws') -> bytes:
 
 async def _run_request(app, raw: bytes) -> None:
     writer = _FakeWriter()
-    handler = HTTP11Handler(app, _FakeReader(b''), writer, raw[:1])
-    handler.request = raw
-    await handler.run()
+    actor = HTTP1Actor(
+        _FakeReader(b''), writer, app, None,
+        request=raw,
+        peername=('127.0.0.1', 54321),
+        sockname=('0.0.0.0', 8000),
+    )
+    await actor.run()
 
 
 # ---------------------------------------------------------------------------
@@ -248,9 +224,13 @@ async def test_before_handler_intercept_short_circuits():
 
     writer = _FakeWriter()
     raw = _raw_request(path='/guarded')
-    h = HTTP11Handler(app, _FakeReader(b''), writer, raw[:1])
-    h.request = raw
-    await h.run()
+    actor = HTTP1Actor(
+        _FakeReader(b''), writer, app, None,
+        request=raw,
+        peername=('127.0.0.1', 54321),
+        sockname=('0.0.0.0', 8000),
+    )
+    await actor.run()
 
     assert not handler_ran
     assert len(writer.written) > 0  # an error response was written
@@ -272,11 +252,13 @@ async def test_before_handler_not_fired_for_websocket():
     async def observer(event: Event):
         fired.append(event)
 
-    with patch.object(WebSocketHandler, 'run', new=AsyncMock()):
-        reader = _FakeReader(raw)
-        handler = HTTP11Handler(app, reader, writer, raw[:1])
-        handler.request = raw
-        await handler.run()
+    with patch.object(WebSocketActor, 'run', new=AsyncMock()):
+        actor = HTTP1Actor(
+            _FakeReader(raw), writer, app, None,
+            request=raw,
+            peername=('127.0.0.1', 54321),
+        )
+        await actor.run()
 
     await asyncio.sleep(0.2)
     assert len(fired) == 0

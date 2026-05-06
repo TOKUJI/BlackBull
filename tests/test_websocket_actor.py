@@ -137,8 +137,8 @@ async def test_websocket_lifecycle_events(
         fake_ws_reader, fake_writer, scope, mock_ws_app, aggregator)
     await actor.run()
 
-    aggregator.on_websocket_connected.assert_called_once_with(scope)
-    aggregator.on_websocket_disconnected.assert_called_once_with(scope)
+    aggregator.on_websocket_connected.assert_called_once_with(scope, None)
+    aggregator.on_websocket_disconnected.assert_called_once_with(scope, code=1006)
 
 
 @pytest.mark.asyncio
@@ -168,4 +168,4 @@ async def test_websocket_protocol_error_isolated(
     await actor.run()  # must not raise
 
     aggregator.on_error.assert_called_once()
-    aggregator.on_websocket_disconnected.assert_called_once()
+    aggregator.on_websocket_disconnected.assert_called_once_with(scope, code=1006)

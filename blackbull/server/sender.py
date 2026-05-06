@@ -412,7 +412,7 @@ class WebSocketSender(BaseSender):
                 await self._write(frame)
 
             case 'websocket.accept':
-                pass  # handshake reply is sent by WebSocketHandler.run()
+                pass  # handshake reply is sent by HTTP1Actor._do_ws_handshake()
             case _:
                 logger.warning('WebSocketSender: unknown event type %r', event_type)
 

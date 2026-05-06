@@ -161,9 +161,8 @@ class HTTP1Actor(Actor):
     closes the connection without crashing sibling connections.
 
     If *aggregator* is ``None`` the actor falls back to the legacy direct-
-    dispatcher path (same behaviour as the pre-Actor HTTP11Handler), so that
-    HTTP11Handler can delegate here without requiring a production-ready
-    EventAggregator.
+    dispatcher path (fires events via ``app._dispatcher`` directly), so that
+    BlackBull apps without a full EventAggregator still receive lifecycle events.
     """
 
     def __init__(
@@ -225,7 +224,7 @@ class HTTP1Actor(Actor):
                     finally:
                         _access_logger.info(log_record.format(), extra=log_record.as_extra())
                 else:
-                    # Legacy path — mirrors existing HTTP11Handler behaviour
+                    # Legacy path — direct dispatcher (aggregator=None)
                     _dispatcher = getattr(self._app, '_dispatcher', None)
                     if _dispatcher is not None:
                         detecting_receive = self._make_legacy_disconnect_receive(
@@ -333,28 +332,36 @@ class HTTP1Actor(Actor):
 
     async def _handle_upgrade(self, scope: dict) -> None:
         """Handle WebSocket upgrade."""
-        if self._aggregator is not None:
-            from uuid import uuid4  # noqa: PLC0415
-            from .websocket_actor import WebSocketActor  # noqa: PLC0415
-            await self._do_ws_handshake(scope)
-            scope['_connection_id'] = str(uuid4())
-            ws_actor = WebSocketActor(
-                self._reader, self._writer, scope, self._app, self._aggregator,
-                peername=self._peername, sockname=self._sockname, ssl=self._ssl,
-            )
-            await ws_actor.run()
-            return
-        # Legacy path — delegate to WebSocketHandler
-        from .server import WebSocketHandler  # noqa: PLC0415
+        from uuid import uuid4  # noqa: PLC0415
+        from .websocket_actor import WebSocketActor  # noqa: PLC0415
+        aggregator = self._aggregator
+        if aggregator is None:
+            # No aggregator — use a silent dispatcher so WebSocketActor can fire
+            # lifecycle events without any subscribers receiving them.
+            from ..event import EventDispatcher  # noqa: PLC0415
+            from ..event_aggregator import EventAggregator  # noqa: PLC0415
+            aggregator = EventAggregator(EventDispatcher())
+
         log_record = _AccessLogRecord.from_scope(scope)
-        log_record.status = HTTPStatus.SWITCHING_PROTOCOLS
+        log_record.status = 101  # HTTP 101 Switching Protocols
+
+        await self._do_ws_handshake(scope)
+        scope['_connection_id'] = str(uuid4())
+        ws_actor = WebSocketActor(
+            self._reader, self._writer, scope, self._app, aggregator,
+            peername=self._peername, sockname=self._sockname, ssl=self._ssl,
+        )
         try:
-            await WebSocketHandler(self._app, self._reader, self._writer, scope).run()
+            await ws_actor.run()
         finally:
             _access_logger.info(log_record.format(), extra=log_record.as_extra())
 
     async def _do_ws_handshake(self, scope: dict) -> None:
-        """Send HTTP 101 Switching Protocols (RFC 6455 §4.2.2)."""
+        """Send HTTP 101 Switching Protocols (RFC 6455 §4.2.2).
+
+        Also negotiates Sec-WebSocket-Protocol if the app exposes an
+        ``available_ws_protocols`` attribute listing accepted subprotocols.
+        """
         send = SenderFactory.http1(self._writer)
         headers = scope.get('headers', Headers([]))
         key = headers.get(b'sec-websocket-key', b'')
@@ -364,11 +371,22 @@ class HTTP1Actor(Actor):
             await send(b'', HTTPStatus.BAD_REQUEST,
                        [(b'sec-websocket-version', b'13')])
             return
+
         hs_headers = Headers([
             (b'upgrade', b'websocket'),
             (b'connection', b'upgrade'),
             (b'sec-websocket-accept', accept),
         ])
+
+        # Subprotocol negotiation (RFC 6455 §4.2.2, §11.3.4)
+        raw = headers.get(b'sec-websocket-protocol', b'')
+        if raw:
+            client_protos = [p.strip() for p in raw.split(b',')]
+            available = set(getattr(self._app, 'available_ws_protocols', []))
+            subprotocol = next((p for p in client_protos if p in available), None)
+            if subprotocol:
+                hs_headers.append(b'sec-websocket-protocol', subprotocol)
+
         await send(b'', HTTPStatus.SWITCHING_PROTOCOLS, hs_headers)
 
     @staticmethod

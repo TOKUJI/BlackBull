@@ -29,7 +29,8 @@ from hpack import Encoder
 from blackbull.protocol.frame import (FrameFactory, FrameTypes, FrameFlags,
                               HeaderFrameFlags, DataFrameFlags, SettingFrameFlags,
                               Headers, PseudoHeaders)
-from blackbull.server.server import HTTP2Handler
+from blackbull.server.http2_actor import HTTP2Actor
+from blackbull.server.sender import AsyncioWriter
 
 
 # ---------------------------------------------------------------------------
@@ -48,10 +49,10 @@ def _make_h2_frame(type_byte: FrameTypes, flags: FrameFlags | int,
 
 
 def _make_handler(app):
-    """Create an ``HTTP2Handler`` with a fake writer and mocked ``send_frame``."""
+    """Create an ``HTTP2Actor`` with a fake writer and mocked ``send_frame``."""
     writer = MagicMock()
     writer.drain = AsyncMock()
-    handler = HTTP2Handler(app, reader=None, writer=writer)
+    handler = HTTP2Actor(None, AsyncioWriter(writer), app, aggregator=None)
     handler.send_frame = AsyncMock()
     return handler
 

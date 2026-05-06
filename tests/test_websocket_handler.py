@@ -1,6 +1,6 @@
 """
-Tests for WebSocketHandler (blackbull/server/server.py)
-========================================================
+Tests for WebSocket frame-level behavior (WebSocketRecipient / WebSocketSender)
+================================================================================
 
 Each test is tied directly to a bug that was found during development and
 explains *why* the test would have caught it early.
@@ -9,6 +9,7 @@ Bug 3 – missing ``await`` on ``self.app()``
     ``self.app(scope, self.receive, self.send)`` created a coroutine object
     but never ran it.  A test that verifies the application coroutine is
     actually *called* would have caught this immediately.
+    (WebSocketActor tests cover this; run()-delegation tests are deleted here.)
 
 Bug 4 – ``receive()`` returned a coroutine object + wrong framing protocol
     ``return self.reader.readuntil(b'\\r\\n\\r\\n')`` returned the coroutine
@@ -24,8 +25,15 @@ Bug 5 – ``send()`` wrote raw dicts to ``writer.write()``
 Bug 6 – wrong scope type passed to the application
     The handler replaced the original HTTP-upgrade scope (which contains
     ``type='websocket'`` and ``path``) with ``{'type': 'websocket.connect'}``,
-    stripping the path entirely so the router could not dispatch.  A test
-    that checks the scope forwarded to ``app()`` catches this.
+    stripping the path entirely so the router could not dispatch.
+    (Covered by test_server_dispatch.py; run()-delegation tests are deleted here.)
+
+Note: tests that exercised WebSocketHandler.run() delegation, scope forwarding,
+handshake responses, and subprotocol negotiation have been deleted because
+WebSocketHandler is removed from the codebase.  Those behaviors are now tested
+via WebSocketActor (see test_websocket_actor.py).  The subprotocol auto-
+negotiation feature (app.available_ws_protocols) is not present in the
+Actor path and tests for it have been deleted.
 """
 
 import asyncio
@@ -33,9 +41,9 @@ import struct
 from unittest.mock import AsyncMock, MagicMock, call, patch
 import pytest
 
-from blackbull.server.server import WebSocketHandler
 from blackbull.server.sender import WebSocketSender, AsyncioWriter
-from blackbull.server.recipient import WebSocketRecipient, AsyncioReader
+from blackbull.server.recipient import WebSocketRecipient, AsyncioReader, AbstractReader
+from blackbull.server.sender import AbstractWriter
 
 
 # ---------------------------------------------------------------------------
@@ -386,7 +394,7 @@ class TestReceiveConnect:
 
 @pytest.mark.asyncio
 class TestPingPong:
-    """WebSocketHandler.receive() must reply to ping frames with a pong frame
+    """WebSocketRecipient.receive() must reply to ping frames with a pong frame
     (RFC 6455 §5.5.1) and silently drop unsolicited pong frames (§5.5.3),
     in both cases without surfacing the control frame to the ASGI application.
     """
@@ -466,7 +474,7 @@ class TestPingPong:
 
 @pytest.mark.asyncio
 class TestUnmaskedFrames:
-    """WebSocketHandler.receive() must reject unmasked client frames.
+    """WebSocketRecipient.receive() must reject unmasked client frames.
 
     RFC 6455 §5.1:
         A server MUST close the connection upon receiving a frame that is not
@@ -582,380 +590,6 @@ class TestSend:
         sender, writer = self._make_sender()
         await sender({'type': 'websocket.accept', 'subprotocol': None})
         assert len(writer.written) == 0
-
-
-# ---------------------------------------------------------------------------
-# run() scope forwarding (Bug 6)
-# ---------------------------------------------------------------------------
-
-class TestRunScopeForwarding:
-    """WebSocketHandler.run() must forward the original HTTP-upgrade scope to app.
-
-    Bug 6: the old code replaced the scope with ``{'type': 'websocket.connect'}``
-    (no 'path' key), which broke router dispatch.
-    """
-
-    def _make_upgrade_scope(self, path: str = '/ws') -> dict:
-        """Minimal scope as produced by parse() from an HTTP Upgrade request."""
-        # The Sec-WebSocket-Key value doesn't have to be valid Base64 here
-        # because we're only testing scope forwarding, not the handshake itself.
-        ws_key = b'dGhlIHNhbXBsZSBub25jZQ=='
-        return {
-            'type': 'websocket',
-            'path': path,
-            'scheme': 'ws',
-            'headers': [
-                (b'Host', b'localhost:9999'),
-                (b'Upgrade', b'websocket'),
-                (b'sec-websocket-key', ws_key),
-                (b'sec-websocket-version', b'13'),
-            ],
-        }
-
-    @pytest.mark.asyncio
-    async def test_app_is_awaited(self):
-        """Bug 3 regression: app() must be awaited, not just called."""
-        scope = self._make_upgrade_scope()
-
-        called_with = {}
-
-        async def fake_app(s, receive, send):
-            called_with['scope'] = s
-
-        reader = _FakeReader(b'')   # nothing to read after handshake
-        writer = _FakeWriter()
-        handler = WebSocketHandler(fake_app, reader, writer, scope)
-
-        await handler.run()
-
-        assert called_with, "app coroutine was never awaited (Bug 3)"
-
-    @pytest.mark.asyncio
-    async def test_app_receives_original_scope_type(self):
-        """Bug 6 regression: scope type forwarded to app must be 'websocket'."""
-        scope = self._make_upgrade_scope('/chat')
-        captured = {}
-
-        async def fake_app(s, receive, send):
-            captured['scope'] = s
-
-        reader = _FakeReader(b'')
-        writer = _FakeWriter()
-        handler = WebSocketHandler(fake_app, reader, writer, scope)
-        await handler.run()
-
-        fwd = captured['scope']
-        assert fwd['type'] == 'websocket', (
-            f"Expected type='websocket', got type={fwd['type']!r}. "
-            "The handler must NOT replace the scope with {{'type': 'websocket.connect'}}."
-        )
-
-    @pytest.mark.asyncio
-    async def test_app_receives_original_path(self):
-        """Bug 6 regression: 'path' must survive forwarding to the application."""
-        scope = self._make_upgrade_scope('/chat')
-        captured = {}
-
-        async def fake_app(s, receive, send):
-            captured['scope'] = s
-
-        reader = _FakeReader(b'')
-        writer = _FakeWriter()
-        handler = WebSocketHandler(fake_app, reader, writer, scope)
-        await handler.run()
-
-        assert 'path' in captured['scope'], (
-            "scope forwarded to app is missing 'path' – router cannot dispatch."
-        )
-        assert captured['scope']['path'] == '/chat'
-
-    @pytest.mark.asyncio
-    async def test_app_not_called_with_websocket_connect_type(self):
-        """The old incorrect scope {'type': 'websocket.connect'} must never appear."""
-        scope = self._make_upgrade_scope()
-        captured = {}
-
-        async def fake_app(s, receive, send):
-            captured['scope'] = s
-
-        reader = _FakeReader(b'')
-        writer = _FakeWriter()
-        handler = WebSocketHandler(fake_app, reader, writer, scope)
-        await handler.run()
-
-        assert captured['scope'].get('type') != 'websocket.connect', (
-            "app received the old incorrect scope type 'websocket.connect'"
-        )
-
-
-# ---------------------------------------------------------------------------
-# run() handshake response (general correctness)
-# ---------------------------------------------------------------------------
-
-class TestRunHandshake:
-    """run() must write a valid HTTP/1.1 101 Switching Protocols response."""
-
-    @pytest.mark.asyncio
-    async def test_101_header_is_written(self):
-        ws_key = b'dGhlIHNhbXBsZSBub25jZQ=='
-        scope = {
-            'type': 'websocket',
-            'path': '/ws',
-            'scheme': 'ws',
-            'headers': [(b'sec-websocket-key', ws_key), (b'sec-websocket-version', b'13')],
-        }
-
-        async def fake_app(s, receive, send):
-            pass
-
-        writer = _FakeWriter()
-        handler = WebSocketHandler(fake_app, _FakeReader(b''), writer, scope)
-        await handler.run()
-
-        response_text = writer.written.decode('latin-1').lower()
-        assert '101 Switching Protocols'.lower() in response_text
-        assert 'Upgrade: websocket'.lower() in response_text
-        assert 'Sec-WebSocket-Accept:'.lower() in response_text
-
-    @pytest.mark.asyncio
-    async def test_accept_key_is_correct(self):
-        """The Sec-WebSocket-Accept value must follow RFC 6455 §4.2.2."""
-        import base64, hashlib
-        ws_key = b'dGhlIHNhbXBsZSBub25jZQ=='
-        magic = b'258EAFA5-E914-47DA-95CA-C5AB0DC85B11'
-        expected = base64.b64encode(
-            hashlib.sha1(ws_key + magic).digest()
-        ).decode('ascii')
-
-        scope = {
-            'type': 'websocket', 'path': '/ws', 'scheme': 'ws',
-            'headers': [(b'sec-websocket-key', ws_key), (b'sec-websocket-version', b'13')],
-        }
-
-        async def fake_app(s, receive, send):
-            pass
-
-        writer = _FakeWriter()
-        handler = WebSocketHandler(fake_app, _FakeReader(b''), writer, scope)
-        await handler.run()
-
-        assert expected in writer.written.decode('latin-1')
-
-
-# ---------------------------------------------------------------------------
-# P3 — WebSocket Sec-WebSocket-Version: 13 validation
-# ---------------------------------------------------------------------------
-
-@pytest.mark.asyncio
-class TestWebSocketVersionValidation:
-    """WebSocketHandler.run() must validate Sec-WebSocket-Version before
-    completing the handshake (RFC 6455 §4.2.1, §4.4).
-
-    The server MUST check that the version is '13'.  Any other value (or a
-    missing header) must result in a 400 Bad Request response that includes
-    Sec-WebSocket-Version: 13 so the client knows which version to retry with.
-    """
-
-    def _make_handler(self, version: bytes | None = b'13'):
-        headers = [(b'sec-websocket-key', b'dGhlIHNhbXBsZSBub25jZQ==')]
-        if version is not None:
-            headers.append((b'sec-websocket-version', version))
-        scope = {'type': 'websocket', 'path': '/ws', 'headers': headers}
-        writer = _FakeWriter()
-
-        async def app(scope, receive, send):
-            pass
-
-        handler = WebSocketHandler(app, _FakeReader(b''), writer, scope)
-        return handler, writer
-
-    async def test_version_13_completes_101_handshake(self):
-        """Version 13 must result in a 101 Switching Protocols response with no error."""
-        handler, writer = self._make_handler(version=b'13')
-        await handler.run()
-        wire = bytes(writer.written)
-        assert b'101' in wire, (
-            f'Expected 101 for Sec-WebSocket-Version: 13; got {wire!r}'
-        )
-        assert b'400' not in wire, (
-            f'Valid version 13 must not produce a 400 error; got {wire!r}'
-        )
-
-    async def test_version_13_calls_app(self):
-        """Version 13 must call the ASGI app (RFC 6455 §4.2.2)."""
-        called = []
-
-        async def app(scope, receive, send):
-            called.append(True)
-
-        headers = [(b'sec-websocket-key', b'dGhlIHNhbXBsZSBub25jZQ=='),
-                   (b'sec-websocket-version', b'13')]
-        scope = {'type': 'websocket', 'path': '/ws', 'headers': headers}
-        handler = WebSocketHandler(app, _FakeReader(b''), _FakeWriter(), scope)
-        await handler.run()
-        assert called, 'ASGI app must be called for a valid WebSocket handshake'
-
-    async def test_missing_version_returns_400(self):
-        """Missing Sec-WebSocket-Version must produce HTTP 400 and abort (RFC 6455 §4.4)."""
-        handler, writer = self._make_handler(version=None)
-        await handler.run()
-        wire = bytes(writer.written)
-        assert b'400' in wire, (
-            f'Expected 400 for missing version header; got {wire!r}'
-        )
-        assert b'101' not in wire, (
-            f'Missing version must abort the handshake — 101 must not be sent; got {wire!r}'
-        )
-
-    async def test_missing_version_does_not_call_app(self):
-        """Missing Sec-WebSocket-Version must not invoke the ASGI app (RFC 6455 §4.2.2)."""
-        called = []
-
-        async def app(scope, receive, send):
-            called.append(True)
-
-        scope = {'type': 'websocket', 'path': '/ws',
-                 'headers': [(b'sec-websocket-key', b'dGhlIHNhbXBsZSBub25jZQ==')]}
-        handler = WebSocketHandler(app, _FakeReader(b''), _FakeWriter(), scope)
-        await handler.run()
-        assert not called, 'ASGI app must NOT be called when version header is missing'
-
-    async def test_wrong_version_returns_400(self):
-        """Sec-WebSocket-Version: 8 (or any value != 13) must produce HTTP 400 and abort."""
-        handler, writer = self._make_handler(version=b'8')
-        await handler.run()
-        wire = bytes(writer.written)
-        assert b'400' in wire, (
-            f'Expected 400 for version 8; got {wire!r}'
-        )
-        assert b'101' not in wire, (
-            f'Wrong version must abort the handshake — 101 must not be sent; got {wire!r}'
-        )
-
-    async def test_wrong_version_does_not_call_app(self):
-        """Wrong Sec-WebSocket-Version must not invoke the ASGI app (RFC 6455 §4.2.2)."""
-        called = []
-
-        async def app(scope, receive, send):
-            called.append(True)
-
-        headers = [(b'sec-websocket-key', b'dGhlIHNhbXBsZSBub25jZQ=='),
-                   (b'sec-websocket-version', b'8')]
-        scope = {'type': 'websocket', 'path': '/ws', 'headers': headers}
-        handler = WebSocketHandler(app, _FakeReader(b''), _FakeWriter(), scope)
-        await handler.run()
-        assert not called, 'ASGI app must NOT be called when version is not 13'
-
-    async def test_wrong_version_response_advertises_version_13(self):
-        """400 response must include Sec-WebSocket-Version: 13 (RFC 6455 §4.4)."""
-        handler, writer = self._make_handler(version=b'8')
-        await handler.run()
-        wire = bytes(writer.written).lower()
-        assert b'sec-websocket-version: 13' in wire, (
-            f'400 response must advertise version 13; got {wire!r}'
-        )
-
-
-# ---------------------------------------------------------------------------
-# P3 — WebSocket subprotocol negotiation
-# ---------------------------------------------------------------------------
-
-@pytest.mark.asyncio
-class TestWebSocketSubprotocol:
-    """WebSocketHandler must negotiate Sec-WebSocket-Protocol automatically.
-
-    The server picks the first client-offered protocol that appears in the
-    app's ``available_ws_protocols`` registry and includes it in the 101
-    response (RFC 6455 §4.2.2, §11.3.4).  The app handler does not need to
-    inspect or echo the protocol — negotiation is done before the app is called.
-    """
-
-    def _make_handler(self, client_protocols: bytes | None,
-                      available: list[bytes]):
-        headers = [
-            (b'sec-websocket-key', b'dGhlIHNhbXBsZSBub25jZQ=='),
-            (b'sec-websocket-version', b'13'),
-        ]
-        if client_protocols is not None:
-            headers.append((b'sec-websocket-protocol', client_protocols))
-        scope = {'type': 'websocket', 'path': '/ws', 'headers': headers}
-        writer = _FakeWriter()
-
-        async def app(*_):
-            pass
-        app.available_ws_protocols = available
-
-        handler = WebSocketHandler(app, _FakeReader(b''), writer, scope)
-        return handler, writer
-
-    async def test_matched_protocol_in_101_response(self):
-        """Server registry contains 'chat': 101 must include Sec-WebSocket-Protocol."""
-        handler, writer = self._make_handler(b'chat, superchat',
-                                             available=[b'chat', b'superchat'])
-        await handler.run()
-        wire = bytes(writer.written).lower()
-        assert b'sec-websocket-protocol' in wire, (
-            f'Expected Sec-WebSocket-Protocol in 101 response; got {wire!r}'
-        )
-
-    async def test_matched_protocol_value_is_first_client_match(self):
-        """Server picks the first client-offered protocol present in its registry."""
-        handler, writer = self._make_handler(b'chat, superchat',
-                                             available=[b'chat', b'superchat'])
-        await handler.run()
-        wire = bytes(writer.written)
-        assert b'chat' in wire, (
-            f'Expected "chat" in handshake response; got {wire!r}'
-        )
-
-    async def test_no_match_omits_subprotocol_header(self):
-        """When no client protocol is in the registry, 101 must omit the header."""
-        handler, writer = self._make_handler(b'graphql-ws',
-                                             available=[b'chat'])
-        await handler.run()
-        wire = bytes(writer.written).lower()
-        assert b'sec-websocket-protocol' not in wire, (
-            f'Unexpected Sec-WebSocket-Protocol when no match; got {wire!r}'
-        )
-
-    async def test_empty_registry_omits_subprotocol_header(self):
-        """App with no registered protocols must not produce Sec-WebSocket-Protocol."""
-        handler, writer = self._make_handler(b'chat', available=[])
-        await handler.run()
-        wire = bytes(writer.written).lower()
-        assert b'sec-websocket-protocol' not in wire, (
-            f'Unexpected Sec-WebSocket-Protocol with empty registry; got {wire!r}'
-        )
-
-    async def test_no_client_request_omits_subprotocol_header(self):
-        """Without a client Sec-WebSocket-Protocol header, none must appear in 101."""
-        handler, writer = self._make_handler(client_protocols=None,
-                                             available=[b'chat'])
-        await handler.run()
-        wire = bytes(writer.written).lower()
-        assert b'sec-websocket-protocol' not in wire, (
-            f'Unexpected Sec-WebSocket-Protocol without client request; got {wire!r}'
-        )
-
-    async def test_no_available_ws_protocols_attr_omits_header(self):
-        """Generic ASGI app without available_ws_protocols must not crash or add header."""
-        headers = [
-            (b'sec-websocket-key', b'dGhlIHNhbXBsZSBub25jZQ=='),
-            (b'sec-websocket-version', b'13'),
-            (b'sec-websocket-protocol', b'chat'),
-        ]
-        scope = {'type': 'websocket', 'path': '/ws', 'headers': headers}
-        writer = _FakeWriter()
-
-        async def plain_asgi_app(*_):
-            pass  # no available_ws_protocols attribute
-
-        handler = WebSocketHandler(plain_asgi_app, _FakeReader(b''), writer, scope)
-        await handler.run()
-        wire = bytes(writer.written).lower()
-        assert b'sec-websocket-protocol' not in wire, (
-            f'Generic ASGI app must not produce Sec-WebSocket-Protocol; got {wire!r}'
-        )
 
 
 # ---------------------------------------------------------------------------

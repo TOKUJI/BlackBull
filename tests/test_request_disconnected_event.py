@@ -17,57 +17,29 @@ import pytest
 from unittest.mock import MagicMock, AsyncMock, patch
 from blackbull import BlackBull
 from blackbull.event import Event
-from blackbull.server.server import HTTP11Handler, WebSocketHandler
+from blackbull.server.http1_actor import HTTP1Actor
+from blackbull.server.websocket_actor import WebSocketActor
+from blackbull.server.recipient import AbstractReader
+from blackbull.server.sender import AbstractWriter
 
 
 # ---------------------------------------------------------------------------
 # Shared test infrastructure
 # ---------------------------------------------------------------------------
 
-class _FakeTransport:
-    def __init__(self, peername=None, sockname=None, ssl_object=None):
-        self._extras = {
-            'peername': peername,
-            'sockname': sockname,
-            'ssl_object': ssl_object,
-        }
-
-    def get_extra_info(self, key, default=None):
-        return self._extras.get(key, default)
-
-
-class _FakeWriter:
-    def __init__(self, peername=('127.0.0.1', 54321), sockname=('0.0.0.0', 8000)):
+class _FakeWriter(AbstractWriter):
+    def __init__(self):
         self.written = bytearray()
-        self.transport = _FakeTransport(peername=peername, sockname=sockname)
 
-    def write(self, data: bytes):
+    async def write(self, data: bytes) -> None:
         self.written += data
 
-    async def drain(self):
-        pass
 
-    def close(self):
-        pass
-
-    async def wait_closed(self):
-        pass
-
-
-class _FakeReader:
+class _FakeReader(AbstractReader):
     """Replay a pre-built byte string through the asyncio StreamReader API."""
 
     def __init__(self, data: bytes):
         self._buf = bytearray(data)
-
-    async def readline(self) -> bytes:
-        idx = self._buf.find(b'\n')
-        if idx == -1:
-            chunk, self._buf = bytes(self._buf), bytearray()
-            return chunk
-        chunk = bytes(self._buf[:idx + 1])
-        del self._buf[:idx + 1]
-        return chunk
 
     async def read(self, n: int = -1) -> bytes:
         if n < 0:
@@ -116,11 +88,15 @@ def _ws_request(path: str = '/ws') -> bytes:
 
 
 async def _run_request(app, raw: bytes) -> None:
-    """Run a single HTTP/1.1 request through HTTP11Handler and return."""
+    """Run a single HTTP/1.1 request through HTTP1Actor and return."""
     writer = _FakeWriter()
-    handler = HTTP11Handler(app, _FakeReader(b''), writer, raw[:1])
-    handler.request = raw
-    await handler.run()
+    actor = HTTP1Actor(
+        _FakeReader(b''), writer, app, None,
+        request=raw,
+        peername=('127.0.0.1', 54321),
+        sockname=('0.0.0.0', 8000),
+    )
+    await actor.run()
 
 
 async def _drive_request_with_disconnect(
@@ -139,9 +115,13 @@ async def _drive_request_with_disconnect(
     """
     raw = _raw_request(path=path)
     writer = _FakeWriter()
-    handler = HTTP11Handler(app, _FakeReader(b''), writer, raw[:1])
-    handler.request = raw
-    await handler.run()
+    actor = HTTP1Actor(
+        _FakeReader(b''), writer, app, None,
+        request=raw,
+        peername=('127.0.0.1', 54321),
+        sockname=('0.0.0.0', 8000),
+    )
+    await actor.run()
 
 
 # ---------------------------------------------------------------------------
@@ -228,11 +208,13 @@ async def test_websocket_connection_does_not_fire_request_completed():
     async def on_completed(event: Event):
         completed.append(event)
 
-    with patch.object(WebSocketHandler, 'run', new=AsyncMock()):
-        reader = _FakeReader(raw)
-        handler = HTTP11Handler(app, reader, writer, raw[:1])
-        handler.request = raw
-        await handler.run()
+    with patch.object(WebSocketActor, 'run', new=AsyncMock()):
+        actor = HTTP1Actor(
+            _FakeReader(raw), writer, app, None,
+            request=raw,
+            peername=('127.0.0.1', 54321),
+        )
+        await actor.run()
 
     await asyncio.sleep(0.3)
     assert len(completed) == 0, (
@@ -364,11 +346,13 @@ async def test_websocket_connection_does_not_fire_request_disconnected():
     async def on_disconnected(event: Event):
         disconnected.append(event)
 
-    with patch.object(WebSocketHandler, 'run', new=AsyncMock()):
-        reader = _FakeReader(raw)
-        handler = HTTP11Handler(app, reader, writer, raw[:1])
-        handler.request = raw
-        await handler.run()
+    with patch.object(WebSocketActor, 'run', new=AsyncMock()):
+        actor = HTTP1Actor(
+            _FakeReader(raw), writer, app, None,
+            request=raw,
+            peername=('127.0.0.1', 54321),
+        )
+        await actor.run()
 
     await asyncio.sleep(0.3)
     assert len(disconnected) == 0, (
