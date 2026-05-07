@@ -112,12 +112,12 @@ async def server_port():
 # Cert/key files used by the TLS fixture (mirrors test_asgi_server.py).
 @pytest.fixture
 def cert_path():
-    return pathlib.Path(__file__).parent / 'cert.pem'
+    return pathlib.Path(__file__).parent.parent.parent / 'cert.pem'
 
 
 @pytest.fixture
 def key_path():
-    return pathlib.Path(__file__).parent / 'key.pem'
+    return pathlib.Path(__file__).parent.parent.parent / 'key.pem'
 
 
 @pytest_asyncio.fixture

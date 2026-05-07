@@ -169,3 +169,29 @@ async def test_stream_error_isolated(fake_two_stream_reader, fake_writer) -> Non
 
     aggregator.on_error.assert_called_once()
     aggregator.on_request_completed.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Test 4: scope['client'] and scope['server'] populated from TCP metadata
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_scope_has_client_and_server(fake_h2_reader, fake_writer) -> None:
+    """Regression: HTTP2Actor must inject peername/sockname into scope."""
+    received_scope = {}
+
+    async def capture_app(scope, receive, send):
+        received_scope.update(scope)
+        await send({'type': 'http.response.start', 'status': 200, 'headers': []})
+        await send({'type': 'http.response.body', 'body': b''})
+
+    aggregator = _call_through_aggregator()
+    actor = HTTP2Actor(
+        fake_h2_reader, fake_writer, capture_app, aggregator,
+        peername=('192.168.1.1', 54321),
+        sockname=('0.0.0.0', 443),
+    )
+    await actor.run()
+
+    assert received_scope['client'] == ['192.168.1.1', 54321]
+    assert received_scope['server'] == ['0.0.0.0', 443]

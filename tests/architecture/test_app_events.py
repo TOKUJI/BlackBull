@@ -174,5 +174,4 @@ async def test_on_handler_exception_does_not_propagate():
 
     # Must not raise
     await app._dispatcher.emit(Event('custom_event'))
-    # Give the observer task a chance to run and fail internally
-    await asyncio.sleep(0)
+    await asyncio.wait_for(app._dispatcher.aclose(), timeout=1.0)

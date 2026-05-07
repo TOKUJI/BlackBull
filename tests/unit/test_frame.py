@@ -323,3 +323,67 @@ class TestGoAwayHandling:
 #     Priority(length, type_, flags, sid, data=payload)
 #
 #     assert 0 == 1
+
+
+# ---------------------------------------------------------------------------
+# Frame serialization — save() must include the payload bytes
+# ---------------------------------------------------------------------------
+
+class TestFrameSavePayload:
+    """Frame.save() must include the payload bytes, not just the 9-byte header.
+
+    Bug: WindowUpdate.save(), RstStream.save(), and GoAway.save() all called
+    super().save() but returned without appending the actual payload bytes.
+    The receiver read past the header expecting `length` more bytes, got the
+    beginning of the next frame instead, and the entire HTTP/2 stream parser
+    desynced.
+    """
+
+    def test_window_update_save_includes_increment(self):
+        """WindowUpdate.save() must produce a 13-byte frame (9 header + 4 payload)."""
+        from blackbull.protocol.frame import ErrorCodes
+        frame = FrameFactory().window_update(stream_id=3, increment=35)
+        wire = frame.save()
+        assert len(wire) == 13, (
+            f'WindowUpdate wire frame must be 13 bytes (9-byte header + '
+            f'4-byte increment); got {len(wire)} bytes: {wire.hex()}'
+        )
+        assert wire[:3] == b'\x00\x00\x04', (
+            f'Length field must be 4; got {wire[:3].hex()}'
+        )
+        assert int.from_bytes(wire[9:13], 'big') == 35, (
+            f'Increment in wire payload must be 35; '
+            f'got {int.from_bytes(wire[9:13], "big")}'
+        )
+
+    def test_rst_stream_save_includes_error_code(self):
+        """RstStream.save() must produce a 13-byte frame (9 header + 4 error code)."""
+        from blackbull.protocol.frame import ErrorCodes
+        frame = FrameFactory().rst_stream(stream_id=3,
+                                          error_code=ErrorCodes.REFUSED_STREAM)
+        wire = frame.save()
+        assert len(wire) == 13, (
+            f'RstStream wire frame must be 13 bytes; got {len(wire)}: {wire.hex()}'
+        )
+        assert int.from_bytes(wire[9:13], 'big') == int(ErrorCodes.REFUSED_STREAM), (
+            f'Error code in wire payload must be REFUSED_STREAM '
+            f'({int(ErrorCodes.REFUSED_STREAM)}); '
+            f'got {int.from_bytes(wire[9:13], "big")}'
+        )
+
+    def test_goaway_save_includes_last_stream_id_and_error_code(self):
+        """GoAway.save() must produce a 17-byte frame (9 header + 8 payload)."""
+        frame = FrameFactory().goaway(last_stream_id=3, error_code=0)
+        wire = frame.save()
+        assert len(wire) == 17, (
+            f'GoAway wire frame must be 17 bytes (9 header + 4 last-stream-id '
+            f'+ 4 error-code); got {len(wire)}: {wire.hex()}'
+        )
+        assert int.from_bytes(wire[9:13], 'big') == 3, (
+            f'Last-stream-id in GoAway payload must be 3; '
+            f'got {int.from_bytes(wire[9:13], "big")}'
+        )
+        assert int.from_bytes(wire[13:17], 'big') == 0, (
+            f'Error code in GoAway payload must be 0; '
+            f'got {int.from_bytes(wire[13:17], "big")}'
+        )

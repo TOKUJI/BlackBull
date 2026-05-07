@@ -32,3 +32,216 @@ def test_base_parse_not_implemented():
     parser = HTTP2ParserBase(frame, stream)
     with pytest.raises(NotImplementedError):
         parser.parse()
+
+
+# ---------------------------------------------------------------------------
+# Migrated from test_server_dispatch.py — HTTP/1.1 and HTTP/2 scope parsing
+# ---------------------------------------------------------------------------
+
+from blackbull.server.http1_actor import HTTP1Actor as _HTTP1Actor
+from blackbull.server.parser import _make_scope as _make_http2_scope, ParserFactory as _ParserFactory
+
+
+def _get_scope(raw_request: bytes) -> dict:
+    """Parse raw HTTP/1.1 request bytes and return the resulting scope dict."""
+    actor = object.__new__(_HTTP1Actor)
+    return actor._parse(raw_request)
+
+
+def _http_request(method='GET', path='/', version='HTTP/1.1',
+                  headers: dict | None = None) -> bytes:
+    if headers is None:
+        headers = {'Host': 'localhost:8000'}
+    lines = [f'{method} {path} {version}']
+    for k, v in headers.items():
+        lines.append(f'{k}: {v}')
+    lines.append('')
+    lines.append('')
+    return '\r\n'.join(lines).encode()
+
+
+def _ws_request_dispatch(path='/ws', host='localhost:8000') -> bytes:
+    return _http_request(
+        method='GET', path=path,
+        headers={
+            'Host': host,
+            'Upgrade': 'websocket',
+            'Connection': 'Upgrade',
+            'Sec-WebSocket-Key': 'dGhlIHNhbXBsZSBub25jZQ==',
+            'Sec-WebSocket-Version': '13',
+        }
+    )
+
+
+class TestParse:
+    """Unit tests for HTTP1Actor._parse() — HTTP/1.1 scope building."""
+
+    def test_method_is_extracted(self):
+        assert _get_scope(_http_request(method='GET'))['method'] == 'GET'
+
+    def test_post_method(self):
+        assert _get_scope(_http_request(method='POST'))['method'] == 'POST'
+
+    def test_path_is_extracted(self):
+        assert _get_scope(_http_request(path='/hello'))['path'] == '/hello'
+
+    def test_root_path(self):
+        assert _get_scope(_http_request(path='/'))['path'] == '/'
+
+    def test_http_version_is_extracted(self):
+        assert _get_scope(_http_request(version='HTTP/1.1'))['http_version'] == '1.1'
+
+    def test_http_version_is_extracted_10(self):
+        assert _get_scope(_http_request(version='HTTP/1.0'))['http_version'] == '1.0'
+
+    def test_http2_version_string_is_spec_compliant(self):
+        """ASGI spec: http_version must be '2' for HTTP/2, not '2.0'."""
+        scope = _make_http2_scope()
+        assert scope['http_version'] == '2'
+
+    def test_type_is_http_by_default(self):
+        assert _get_scope(_http_request())['type'] == 'http'
+
+    def test_asgi_version_is_set(self):
+        assert _get_scope(_http_request()).get('asgi', {}).get('version') == '3.0'
+
+    def test_server_host_and_port_are_parsed(self):
+        scope = _get_scope(_http_request(headers={'Host': 'localhost:9000'}))
+        assert scope['server'] == ['localhost', 9000]
+
+    def test_websocket_upgrade_sets_type_websocket(self):
+        scope = _get_scope(_ws_request_dispatch())
+        assert scope['type'] == 'websocket', (
+            f"Expected type='websocket', got {scope['type']!r}."
+        )
+
+    def test_websocket_upgrade_sets_scheme_ws(self):
+        assert _get_scope(_ws_request_dispatch())['scheme'] == 'ws'
+
+    def test_websocket_path_is_preserved(self):
+        scope = _get_scope(_ws_request_dispatch(path='/chat'))
+        assert scope['path'] == '/chat'
+
+    def test_headers_is_iterable_of_pairs(self):
+        from blackbull.server.headers import Headers
+        scope = _get_scope(_http_request())
+        assert isinstance(scope['headers'], Headers)
+        for name, value in scope['headers']:
+            assert isinstance(name, bytes)
+            assert isinstance(value, bytes)
+
+    def test_root_path_is_present_in_scope(self):
+        assert 'root_path' in _get_scope(_http_request())
+
+    def test_root_path_default_is_empty_string(self):
+        assert _get_scope(_http_request()).get('root_path') == ''
+
+    def test_root_path_from_x_forwarded_prefix(self):
+        scope = _get_scope(_http_request(
+            headers={'Host': 'localhost:8000', 'X-Forwarded-Prefix': '/api'}
+        ))
+        assert scope.get('root_path') == '/api'
+
+    def test_root_path_nested_prefix(self):
+        scope = _get_scope(_http_request(
+            headers={'Host': 'localhost:8000', 'X-Forwarded-Prefix': '/api/v1'}
+        ))
+        assert scope.get('root_path') == '/api/v1'
+
+    def test_root_path_not_set_when_prefix_absent(self):
+        assert _get_scope(_http_request(headers={'Host': 'localhost:8000'})).get('root_path') == ''
+
+    def test_path_excludes_query_string(self):
+        assert _get_scope(_http_request(path='/tasks?done=true'))['path'] == '/tasks'
+
+    def test_query_string_populated_when_present(self):
+        scope = _get_scope(_http_request(path='/tasks?done=true&page=2'))
+        assert scope['query_string'] == b'done=true&page=2'
+
+    def test_query_string_empty_bytes_when_absent(self):
+        assert _get_scope(_http_request(path='/tasks'))['query_string'] == b''
+
+
+def _make_h2_headers_frame_dispatch(extra_headers: list | None = None) -> object:
+    from hpack import Encoder
+    from blackbull.protocol.frame import FrameFactory, FrameTypes, HeaderFrameFlags
+
+    encoder = Encoder()
+    header_list = [
+        (b':method', b'GET'),
+        (b':path',   b'/'),
+        (b':scheme', b'https'),
+    ]
+    if extra_headers:
+        header_list.extend(extra_headers)
+
+    block = encoder.encode(header_list)
+    flags = HeaderFrameFlags.END_HEADERS | HeaderFrameFlags.END_STREAM
+    stream_id = 1
+    raw = (len(block).to_bytes(3, 'big')
+           + FrameTypes.HEADERS
+           + bytes([flags])
+           + stream_id.to_bytes(4, 'big')
+           + block)
+    return FrameFactory().load(raw)
+
+
+class _FakeStream:
+    identifier = 1
+
+
+class TestHTTP2ScopeFields:
+    """HTTP2HEADParser.parse() must populate scope fields correctly."""
+
+    def test_root_path_default_empty_string(self):
+        frame = _make_h2_headers_frame_dispatch()
+        scope = _ParserFactory.Get(frame, _FakeStream()).parse()
+        assert scope.get('root_path') == ''
+
+    def test_root_path_from_x_forwarded_prefix(self):
+        frame = _make_h2_headers_frame_dispatch(
+            extra_headers=[(b'x-forwarded-prefix', b'/api')]
+        )
+        scope = _ParserFactory.Get(frame, _FakeStream()).parse()
+        assert scope.get('root_path') == '/api'
+
+    def test_root_path_nested_prefix(self):
+        frame = _make_h2_headers_frame_dispatch(
+            extra_headers=[(b'x-forwarded-prefix', b'/api/v2')]
+        )
+        scope = _ParserFactory.Get(frame, _FakeStream()).parse()
+        assert scope.get('root_path') == '/api/v2'
+
+
+class TestHTTP11DuplicateHeaders:
+    """HTTP1Actor._parse() must preserve every occurrence of a repeated header."""
+
+    def _raw_with_duplicate(self, name: str, values: list[str]) -> bytes:
+        lines = ['GET / HTTP/1.1', 'Host: localhost:8000']
+        for v in values:
+            lines.append(f'{name}: {v}')
+        lines += ['', '']
+        return '\r\n'.join(lines).encode()
+
+    def test_single_header_preserved(self):
+        scope = _get_scope(_http_request(headers={'Host': 'localhost:8000', 'Accept': 'text/html'}))
+        keys = [k for k, _ in scope['headers']]
+        assert b'accept' in keys
+
+    def test_two_set_cookie_both_in_headers(self):
+        raw = self._raw_with_duplicate('Set-Cookie', ['a=1', 'b=2'])
+        scope = _get_scope(raw)
+        cookie_values = [v for k, v in scope['headers'] if k == b'set-cookie']
+        assert len(cookie_values) == 2
+
+    def test_duplicate_accept_both_preserved(self):
+        raw = self._raw_with_duplicate('Accept', ['text/html', 'application/json'])
+        scope = _get_scope(raw)
+        accept_values = [v for k, v in scope['headers'] if k == b'accept']
+        assert len(accept_values) == 2
+
+    def test_first_value_not_overwritten(self):
+        raw = self._raw_with_duplicate('X-Custom', ['first', 'second'])
+        scope = _get_scope(raw)
+        values = [v for k, v in scope['headers'] if k == b'x-custom']
+        assert b'first' in values

@@ -74,3 +74,18 @@ def test_parse_cookies_strips_whitespace():
 def test_parse_cookies_no_cookie_header():
     scope = {'headers': Headers([(b'content-type', b'application/json')])}
     assert parse_cookies(scope) == {}
+
+
+def test_parse_cookies_multiple_http2_fields():
+    # RFC 7540 §8.1.2.5: HTTP/2 sends each cookie as a separate header field.
+    # All fields must be concatenated with "; " before parsing.
+    scope = {'headers': Headers([
+        (b'cookie', b'session_id=abc'),
+        (b'cookie', b'chat_method=poll'),
+        (b'cookie', b'other=xyz'),
+    ])}
+    assert parse_cookies(scope) == {
+        'session_id': 'abc',
+        'chat_method': 'poll',
+        'other': 'xyz',
+    }

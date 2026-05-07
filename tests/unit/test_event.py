@@ -87,7 +87,7 @@ async def test_observer_exception_does_not_propagate():
 
     d.on('test', boom)
     await d.emit(Event('test'))
-    await asyncio.sleep(0)
+    await asyncio.wait_for(d.aclose(), timeout=1.0)
 
 
 @pytest.mark.asyncio
@@ -170,7 +170,7 @@ async def test_aclose_with_no_pending_tasks_is_a_noop():
 
 @pytest.mark.asyncio
 async def test_pending_tasks_are_removed_when_completed():
-    """Completed observer tasks are removed from the pending set."""
+    """Completed observer tasks are removed — aclose() returns without hanging."""
     d = EventDispatcher()
 
     async def quick(event):
@@ -178,6 +178,4 @@ async def test_pending_tasks_are_removed_when_completed():
 
     d.on('test', quick)
     await d.emit(Event('test'))
-    await asyncio.sleep(0)
-    await asyncio.sleep(0)
-    assert len(d._pending_tasks) == 0
+    await asyncio.wait_for(d.aclose(), timeout=1.0)

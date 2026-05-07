@@ -47,12 +47,12 @@ from blackbull.protocol.rsock import create_dual_stack_sockets, _bind_socket
 
 @pytest.fixture
 def cert_path():
-    return pathlib.Path(__file__).parent / 'cert.pem'
+    return pathlib.Path(__file__).parent.parent / 'cert.pem'
 
 
 @pytest.fixture
 def key_path():
-    return pathlib.Path(__file__).parent / 'key.pem'
+    return pathlib.Path(__file__).parent.parent / 'key.pem'
 
 
 async def _noop_app(scope, receive, send):
@@ -562,3 +562,162 @@ class TestMTLS:
         server = ASGIServer(_noop_app)   # no certfile/keyfile → ssl_context is None
         with pytest.raises((AttributeError, RuntimeError, TypeError)):
             server.configure_mtls(ca_cert='/some/ca.pem')
+
+
+# ---------------------------------------------------------------------------
+# client_connected_cb dispatch — migrated from test_server_dispatch.py
+# ---------------------------------------------------------------------------
+
+from unittest.mock import patch
+from blackbull.server.http1_actor import HTTP1Actor as _HTTP1Actor_dispatch
+from blackbull.server.websocket_actor import WebSocketActor as _WebSocketActor_dispatch
+from blackbull.server.recipient import AbstractReader as _AbstractReader_dispatch
+from blackbull.server.sender import AbstractWriter as _AbstractWriter_dispatch
+
+
+class _DispatchReader(_AbstractReader_dispatch):
+    def __init__(self, data: bytes):
+        self._buf = bytearray(data)
+
+    async def readline(self) -> bytes:
+        idx = self._buf.find(b'\n')
+        if idx == -1:
+            chunk, self._buf = bytes(self._buf), bytearray()
+            return chunk
+        chunk = bytes(self._buf[:idx + 1])
+        del self._buf[:idx + 1]
+        return chunk
+
+    async def read(self, n: int = -1) -> bytes:
+        if n < 0:
+            chunk, self._buf = bytes(self._buf), bytearray()
+            return chunk
+        chunk = bytes(self._buf[:n])
+        del self._buf[:n]
+        return chunk
+
+    async def readuntil(self, sep: bytes) -> bytes:
+        idx = self._buf.find(sep)
+        if idx == -1:
+            chunk, self._buf = bytes(self._buf), bytearray()
+            return chunk + sep
+        chunk = bytes(self._buf[:idx + len(sep)])
+        del self._buf[:idx + len(sep)]
+        return chunk
+
+    async def readexactly(self, n: int) -> bytes:
+        import asyncio
+        if len(self._buf) < n:
+            raise asyncio.IncompleteReadError(bytes(self._buf), n)
+        chunk = bytes(self._buf[:n])
+        del self._buf[:n]
+        return chunk
+
+
+class _DispatchWriter(_AbstractWriter_dispatch):
+    def __init__(self):
+        self.written = bytearray()
+        self.closed = False
+
+    async def write(self, data: bytes) -> None:
+        self.written += data
+
+    async def close(self) -> None:
+        self.closed = True
+
+
+def _dispatch_http_request(method='GET', path='/', version='HTTP/1.1',
+                            headers: dict | None = None) -> bytes:
+    if headers is None:
+        headers = {'Host': 'localhost:8000'}
+    lines = [f'{method} {path} {version}']
+    for k, v in headers.items():
+        lines.append(f'{k}: {v}')
+    lines += ['', '']
+    return '\r\n'.join(lines).encode()
+
+
+def _dispatch_ws_request(path='/ws', host='localhost:8000') -> bytes:
+    return _dispatch_http_request(
+        method='GET', path=path,
+        headers={
+            'Host': host,
+            'Upgrade': 'websocket',
+            'Connection': 'Upgrade',
+            'Sec-WebSocket-Key': 'dGhlIHNhbXBsZSBub25jZQ==',
+            'Sec-WebSocket-Version': '13',
+        }
+    )
+
+
+async def _dispatch_noop_app(scope, receive, send):
+    pass
+
+
+class TestClientConnectedCbDispatch:
+    """ASGIServer.client_connected_cb() must route to the correct handler class."""
+
+    @pytest.mark.asyncio
+    async def test_websocket_request_dispatches_to_websocket_actor(self):
+        raw = _dispatch_ws_request(path='/ws')
+        reader = _DispatchReader(raw)
+        writer = _DispatchWriter()
+        server = ASGIServer(_dispatch_noop_app)
+
+        with patch.object(_WebSocketActor_dispatch, 'run', new=AsyncMock()) as mock_ws_run:
+            await server.client_connected_cb(reader, writer)
+
+        assert mock_ws_run.called, (
+            "An HTTP Upgrade: websocket request must be routed to WebSocketActor."
+        )
+
+    @pytest.mark.asyncio
+    async def test_plain_http_request_dispatches_to_http1_actor(self):
+        raw = _dispatch_http_request(method='GET', path='/hello')
+        reader = _DispatchReader(raw)
+        writer = _DispatchWriter()
+        server = ASGIServer(_dispatch_noop_app)
+        dispatched_type = {}
+
+        original_init = _HTTP1Actor_dispatch.__init__
+
+        def capturing_init(self, *args, **kwargs):
+            dispatched_type['actor'] = 'HTTP1Actor'
+            original_init(self, *args, **kwargs)
+
+        async def noop_run(self):
+            pass
+
+        with patch.object(_HTTP1Actor_dispatch, '__init__', capturing_init):
+            with patch.object(_HTTP1Actor_dispatch, 'run', noop_run):
+                await server.client_connected_cb(reader, writer)
+
+        assert dispatched_type.get('actor') == 'HTTP1Actor'
+
+    @pytest.mark.asyncio
+    async def test_websocket_handler_receives_correct_scope_type(self):
+        """WebSocketActor.run must be called for WS upgrade requests."""
+        raw = _dispatch_ws_request(path='/chat/room1')
+        reader = _DispatchReader(raw)
+        writer = _DispatchWriter()
+        server = ASGIServer(_dispatch_noop_app)
+
+        with patch.object(_WebSocketActor_dispatch, 'run', new=AsyncMock()) as mock_run:
+            await server.client_connected_cb(reader, writer)
+
+        assert mock_run.called
+
+    @pytest.mark.asyncio
+    async def test_writer_is_closed_after_connection(self):
+        raw = _dispatch_http_request()
+        reader = _DispatchReader(raw)
+        writer = _DispatchWriter()
+        server = ASGIServer(_dispatch_noop_app)
+
+        async def noop_run(self):
+            pass
+
+        with patch.object(_HTTP1Actor_dispatch, 'run', noop_run):
+            await server.client_connected_cb(reader, writer)
+
+        assert writer.closed

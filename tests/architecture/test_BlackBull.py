@@ -55,7 +55,7 @@ async def wait_for_server(host, port, *, timeout=10.0, interval=0.1):
 @pytest_asyncio.fixture
 async def app(manage_cert_and_key):
     logger.info('At set-up.')
-    cd = pathlib.Path(__file__).parent
+    cd = pathlib.Path(__file__).parent.parent
     cert_path = cd / 'cert.pem'
     key_path = cd / 'key.pem'
 
@@ -162,7 +162,7 @@ async def app(manage_cert_and_key):
 async def ssl_context():
     ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     logger.info(pathlib.Path(__file__))
-    localhost_pem = pathlib.Path(__file__).with_name("cert.pem")
+    localhost_pem = pathlib.Path(__file__).parent.parent / "cert.pem"
     ssl_context.load_verify_locations(localhost_pem)
 
     yield ssl_context
@@ -175,7 +175,7 @@ async def ssl_context():
 async def ssl_h2context():
     ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     logger.info(pathlib.Path(__file__))
-    localhost_pem = pathlib.Path(__file__).with_name("cert.pem")
+    localhost_pem = pathlib.Path(__file__).parent.parent / "cert.pem"
     ssl_context.load_verify_locations(localhost_pem)
     ssl_context.set_alpn_protocols(['h2'])
 
