@@ -11,12 +11,14 @@ from blackbull import BlackBull, Response
 app = BlackBull()
 
 @app.route(path='/')
-async def hello(scope, receive, send):
-    await send(Response(b'Hello, world!'))
+async def hello():
+    return "Hello, world!"
 
 if __name__ == '__main__':
     asyncio.run(app.run(port=8000))
 ```
+
+Handlers also accept `(scope, receive, send)` for full ASGI control.
 
 **Full documentation:** [`docs/guide.md`](docs/guide.md)
 
@@ -47,7 +49,6 @@ pytest
 
 ### P1 — Spec violations / breaks conformant ASGI apps
 
-receiving GOAWAY raises `KeyError` (server-side); sending GOAWAY on graceful shutdown is also missing
 - [ ] WebSocket §5.2: send CLOSE frame (1002) and fail connection on unknown opcode (currently logs warning and delivers as websocket.receive)
 - [ ] WebSocket §7.2: send CLOSE frame (1002) before TCP teardown for protocol violations (currently exception propagates without CLOSE)
 - [ ] WebSocket: explicit writer.close() on protocol violations (currently relies on outer finally block)

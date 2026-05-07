@@ -32,3 +32,39 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   as intercept hook registrations.
 - Examples (`SimpleTaskManager`, `ChatServer`, `LoggingExample`, `PriorityExample`)
   rewritten to use the event API.
+
+### Added (Phase 6 — Actor model)
+
+- `blackbull/actor.py` — `Message` dataclass base and `Actor` base class with
+  queue-based inbox (`asyncio.Queue`).
+- `blackbull/event_aggregator.py` — `EventAggregator` bridges Level A Actor messages
+  to Level B `EventDispatcher` calls. Framework-internal; not exported from
+  `blackbull/__init__.py`.
+- `blackbull/server/http1_actor.py` — `HTTP1Actor` (keep-alive loop per connection)
+  and `RequestActor` (single request lifetime). Transport metadata (`peername`,
+  `sockname`, `ssl`) injected as explicit keyword args — no `asyncio.StreamWriter`
+  dependency.
+- `blackbull/server/http2_actor.py` — `HTTP2Actor` (connection state machine) and
+  `StreamActor` (per-stream ASGI dispatch). Runs stream tasks in `asyncio.TaskGroup`
+  so all streams complete before the connection closes.
+- `blackbull/server/websocket_actor.py` — `WebSocketActor` drives the WebSocket
+  lifecycle after the HTTP upgrade.
+- `blackbull/server/connection_actor.py` — `ConnectionActor` accepts TCP connections
+  and dispatches to the correct protocol actor.
+- `blackbull/client/` — async client package: `HTTP1Client`, `HTTP2Client`,
+  `WebSocketClient`, and `Client` (ALPN-dispatching front door).
+
+### Changed (Phase 6)
+
+- `HTTP11Handler`, `HTTP2Handler`, `WebSocketHandler` deleted; Actors are the sole
+  runtime path.
+- `AbstractReader` / `AbstractWriter` used throughout — no implicit
+  `asyncio.StreamWriter` dependency anywhere.
+- Test suite reorganised into `tests/unit/` (parsing, framing, data structures),
+  `tests/architecture/` (actor + event contracts), and `tests/compliance/http1/`
+  and `tests/compliance/http2/` (full round-trip tests against a real `ASGIServer`).
+
+### Fixed
+
+- `parse_cookies()` now collects all `Cookie` headers. Firefox sends separate
+  headers per cookie over HTTP/2; the previous code discarded all but the first.

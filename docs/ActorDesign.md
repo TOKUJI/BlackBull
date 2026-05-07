@@ -1,7 +1,7 @@
 # BlackBull — Level A Actor Model Design
 
-**Status**: Draft — Phase 5 / M4  
-**Prerequisite completed**: Phase 3 (examples migration), Phase 4 (docs)
+**Status**: Implemented — Phase 6 complete (commit 7da77a6)  
+**Prerequisite completed**: Phase 3 (examples migration), Phase 4 (docs), Phase 6 (Actor model)
 
 ---
 
@@ -211,19 +211,15 @@ class WindowUpdate(Message):       # ask-pattern reply
 
 ## Migration Path
 
-Phase 5 is **design and specification only**. No production code changes in this phase.
+Phase 6 implemented this design in order, keeping the full test suite green at each step:
 
-Suggested implementation order (Phase 6+):
-
-1. Define `Message` dataclasses and the `Actor` base class (`blackbull/actor.py`).
-2. Implement `EventAggregator` with stubs that forward to existing `EventDispatcher`.
-3. Extract `HTTP1Actor` from the current `HTTP1Handler` — keep existing tests green.
-4. Extract `StreamActor` + `HTTP2Actor` from `HTTP2Handler`.
-5. Introduce `ConnectionActor` wrapping the above two.
-6. Introduce `ServerActor` wrapping `ASGIServer`.
-7. Delete the old handler classes once all tests pass.
-
-Each step keeps the full test suite green before proceeding to the next.
+1. ✅ Defined `Message` dataclasses and the `Actor` base class (`blackbull/actor.py`).
+2. ✅ Implemented `EventAggregator` forwarding to `EventDispatcher`.
+3. ✅ Extracted `HTTP1Actor` + `RequestActor`; transport metadata via explicit keyword args.
+4. ✅ Extracted `StreamActor` + `HTTP2Actor`; streams run in `asyncio.TaskGroup`.
+5. ✅ Introduced `WebSocketActor` + `ConnectionActor`; added `on_connection_accepted`.
+6. ✅ `ServerActor` role absorbed by `ASGIServer` + `ConnectionActor` (no separate class needed).
+7. ✅ Deleted `HTTP11Handler`, `HTTP2Handler`, `WebSocketHandler`.
 
 ---
 
