@@ -59,6 +59,7 @@ class WebSocketActor(Actor):
         finally:
             await self._aggregator.on_websocket_disconnected(
                 self._scope, code=self._disconnect_code)
+            await self._writer.close()
 
     async def _receive(self) -> dict[str, Any]:
         event = await self._ws_receive()

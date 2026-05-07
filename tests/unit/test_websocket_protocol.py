@@ -501,6 +501,78 @@ class TestUnmaskedFrames:
 
 
 # ---------------------------------------------------------------------------
+# Unknown opcode handling (P1 §5.2)
+# ---------------------------------------------------------------------------
+
+_CLOSE_1002 = WebSocketSender._encode_frame((1002).to_bytes(2, 'big'), opcode=0x8)
+
+
+@pytest.mark.asyncio
+class TestUnknownOpcodeHandling:
+    """RFC 6455 §5.2: unknown/reserved opcode must send CLOSE(1002) and fail the connection.
+
+    P1 bug: the previous ``case _:`` branch logged a warning and delivered the
+    frame as ``websocket.receive``, silently violating the spec.
+    """
+
+    def _make_handler(self, raw_bytes: bytes):
+        return _RecipientWrapper(raw_bytes)
+
+    async def test_unknown_opcode_sends_close_1002(self):
+        """Reserved opcode 0x03 must cause a CLOSE(1002) frame to be written to the wire."""
+        frame = _make_client_frame(b'data', opcode=0x03)
+        handler = self._make_handler(frame)
+        await handler.receive()         # consume websocket.connect
+        await handler.receive()         # triggers unknown-opcode path
+        assert _CLOSE_1002 in bytes(handler.writer.written)
+
+    async def test_unknown_opcode_disconnects_not_receive(self):
+        """Unknown opcode must produce websocket.disconnect, not websocket.receive."""
+        frame = _make_client_frame(b'data', opcode=0x03)
+        handler = self._make_handler(frame)
+        await handler.receive()         # connect
+        event = await handler.receive()
+        assert event['type'] == 'websocket.disconnect'
+        assert event['code'] == 1002
+
+    async def test_unknown_opcode_disconnect_code_is_1002(self):
+        """Disconnect code for unknown opcode must be 1002 (protocol error)."""
+        frame = _make_client_frame(b'', opcode=0x05)  # another reserved opcode
+        handler = self._make_handler(frame)
+        await handler.receive()
+        event = await handler.receive()
+        assert event.get('code') == 1002
+
+
+@pytest.mark.asyncio
+class TestUnmaskedFrameSendsClose:
+    """RFC 6455 §5.1 + §7.2: unmasked frame must send CLOSE(1002) before failing.
+
+    P1 bug: the previous implementation raised the exception without writing
+    a CLOSE frame to the wire first.
+    """
+
+    def _make_handler(self, raw_bytes: bytes):
+        return _RecipientWrapper(raw_bytes)
+
+    async def test_unmasked_frame_sends_close_1002(self):
+        """CLOSE(1002) must appear on the wire when an unmasked frame is received."""
+        handler = self._make_handler(_make_unmasked_frame(b'hello', opcode=0x1))
+        await handler.receive()         # connect
+        with pytest.raises(Exception):
+            await handler.receive()
+        assert _CLOSE_1002 in bytes(handler.writer.written)
+
+    async def test_unmasked_binary_frame_sends_close_1002(self):
+        """Same for binary opcode."""
+        handler = self._make_handler(_make_unmasked_frame(b'\x00', opcode=0x2))
+        await handler.receive()
+        with pytest.raises(Exception):
+            await handler.receive()
+        assert _CLOSE_1002 in bytes(handler.writer.written)
+
+
+# ---------------------------------------------------------------------------
 # send() (Bug 5)
 # ---------------------------------------------------------------------------
 

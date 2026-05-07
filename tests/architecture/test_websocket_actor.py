@@ -65,9 +65,13 @@ class _FakeReader(AbstractReader):
 class _FakeWriter(AbstractWriter):
     def __init__(self):
         self.written = bytearray()
+        self.closed = False
 
     async def write(self, data: bytes) -> None:
         self.written += data
+
+    async def close(self) -> None:
+        self.closed = True
 
 
 # ---------------------------------------------------------------------------
@@ -156,6 +160,7 @@ async def test_websocket_message_fires_per_message(
 @pytest.mark.asyncio
 async def test_websocket_protocol_error_isolated(
         fake_bad_frame_reader, fake_writer) -> None:
+    from blackbull.server.sender import WebSocketSender
     aggregator = AsyncMock(spec_set=EventAggregator)
     scope = {'type': 'websocket', '_connection_id': 'test-id'}
 
@@ -169,3 +174,24 @@ async def test_websocket_protocol_error_isolated(
 
     aggregator.on_error.assert_called_once()
     aggregator.on_websocket_disconnected.assert_called_once_with(scope, code=1006)
+    close_1002 = WebSocketSender._encode_frame((1002).to_bytes(2, 'big'), opcode=0x8)
+    assert close_1002 in bytes(fake_writer.written), (
+        'CLOSE(1002) frame must be written to the wire on protocol violation'
+    )
+
+
+@pytest.mark.asyncio
+async def test_protocol_violation_closes_writer(
+        fake_bad_frame_reader, fake_writer) -> None:
+    """writer.close() must be called explicitly on protocol violations (P1 §7.2)."""
+    aggregator = AsyncMock(spec_set=EventAggregator)
+    scope = {'type': 'websocket', '_connection_id': 'test-id'}
+
+    async def app(scope, receive, send):
+        await receive()   # websocket.connect
+        await receive()   # raises ValueError (unmasked frame)
+
+    actor = WebSocketActor(fake_bad_frame_reader, fake_writer, scope, app, aggregator)
+    await actor.run()
+
+    assert fake_writer.closed, 'writer.close() must be called after protocol violation'

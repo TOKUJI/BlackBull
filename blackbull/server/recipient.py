@@ -336,18 +336,27 @@ class WebSocketRecipient(BaseRecipient):
                         pass  # unsolicited pong — silently drop
 
                     case _:
-                        logger.warning(
-                            'WebSocketRecipient: unsupported opcode 0x%02x', h.opcode)
+                        close = WebSocketSender._encode_frame(
+                            (1002).to_bytes(2, 'big'), opcode=WSOpcode.CLOSE)
+                        try:
+                            await self._writer.write(close)
+                        except Exception:
+                            pass
+                        await self._emit_disconnected(1002)
                         await self._event_queue.put(
-                            {'type': 'websocket.receive', 'text': None, 'bytes': payload})
+                            {'type': 'websocket.disconnect', 'code': 1002})
+                        return
 
         except asyncio.IncompleteReadError:
             await self._emit_disconnected(1006)
             await self._event_queue.put({'type': 'websocket.disconnect', 'code': 1006})
         except Exception as exc:
-            # Protocol violations (ValueError, ProtocolError, …) are placed on
-            # the queue as exception objects so __call__ can re-raise them to
-            # the application, preserving the pre-queue-refactor contract.
+            close = WebSocketSender._encode_frame(
+                (1002).to_bytes(2, 'big'), opcode=WSOpcode.CLOSE)
+            try:
+                await self._writer.write(close)
+            except Exception:
+                pass
             await self._event_queue.put(exc)
 
     async def _emit_disconnected(self, code: int) -> None:

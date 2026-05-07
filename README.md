@@ -49,9 +49,9 @@ pytest
 
 ### P1 — Spec violations / breaks conformant ASGI apps
 
-- [ ] WebSocket §5.2: send CLOSE frame (1002) and fail connection on unknown opcode (currently logs warning and delivers as websocket.receive)
-- [ ] WebSocket §7.2: send CLOSE frame (1002) before TCP teardown for protocol violations (currently exception propagates without CLOSE)
-- [ ] WebSocket: explicit writer.close() on protocol violations (currently relies on outer finally block)
+- [x] WebSocket §5.2: send CLOSE frame (1002) and fail connection on unknown opcode
+- [x] WebSocket §7.2: send CLOSE frame (1002) before TCP teardown for protocol violations
+- [x] WebSocket: explicit writer.close() on protocol violations
 
 ### P2 — Important protocol features
 

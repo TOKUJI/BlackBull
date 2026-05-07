@@ -641,44 +641,28 @@ class TestHTTP2Recipient:
 
 class TestWebSocketRecipientUnsupportedOpcode:
     @pytest.mark.asyncio
-    async def test_unknown_opcode_logs_warning(self, caplog):
-        import logging
+    async def test_unknown_opcode_sends_close_and_disconnects(self):
+        """RFC 6455 §5.2: unknown opcode must send CLOSE(1002) and return disconnect."""
         from blackbull.server.recipient import WebSocketRecipient
         from blackbull.server.sender import WebSocketSender, WSFrameHeader
 
-        class _UnsupportedReader(AbstractReader):
-            _called = False
-
-            async def read(self, n):
-                return b'\x00' * n
-
-            async def readuntil(self, sep):
-                return b''
-
-            async def readexactly(self, n):
-                if not self._called:
-                    self._called = True
-                    return (bytes([0x83, 0x02]) + b'\x00\x00')[:n]
-                return b'\x00' * n
-
-        reader = _UnsupportedReader()
-        writer = MagicMock()
-        writer.write = MagicMock()
-        writer.drain = AsyncMock()
-
-        r = WebSocketRecipient(reader, writer, require_masked=False)
-        r._connect_sent = True
-
         fake_header = WSFrameHeader(fin=True, rsv1=False, rsv2=False, rsv3=False,
                                     opcode=0x03, masked=False, length=2)
-        eof = asyncio.IncompleteReadError(b'', 2)
 
+        writer = MagicMock(spec_set=AbstractWriter)
+        writer.write = AsyncMock()
+
+        r = WebSocketRecipient(_FakeReader(b''), writer, require_masked=False)
+        r._connect_sent = True
+
+        eof = asyncio.IncompleteReadError(b'', 2)
         with patch.object(WebSocketSender, '_read_frame_header',
                           AsyncMock(side_effect=[fake_header, eof])):
             with patch.object(WebSocketSender, '_read_payload',
                                AsyncMock(return_value=b'\x00\x00')):
-                with caplog.at_level(logging.WARNING, logger='blackbull.server.recipient'):
-                    event = await r()
+                event = await r()
 
-        assert event['type'] == 'websocket.receive'
-        assert any('unsupported opcode' in r.message for r in caplog.records)
+        assert event['type'] == 'websocket.disconnect'
+        assert event['code'] == 1002
+        close_1002 = WebSocketSender._encode_frame((1002).to_bytes(2, 'big'), opcode=0x8)
+        writer.write.assert_called_once_with(close_1002)
