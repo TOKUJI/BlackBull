@@ -25,23 +25,27 @@ async def test_on_app_startup(aggregator, dispatcher) -> None:
 
 @pytest.mark.asyncio
 async def test_on_request_received(aggregator, dispatcher) -> None:
-    scope = {"type": "http", "path": "/"}
+    scope = {"type": "http", "method": "GET", "path": "/foo",
+             "http_version": "1.1", "headers": [], "client": ("1.2.3.4", 9000)}
     await aggregator.on_request_received(scope)
-    dispatcher.emit.assert_called_once_with(
-        Event("request_received", {"scope": scope})
-    )
+    detail = dispatcher.emit.call_args[0][0].detail
+    assert detail['scope'] is scope
+    assert detail['method'] == 'GET'
+    assert detail['path'] == '/foo'
+    assert detail['client_ip'] == '1.2.3.4'
+    assert detail['http_version'] == '1.1'
 
 
 @pytest.mark.asyncio
 async def test_on_before_handler(aggregator, dispatcher) -> None:
-    scope, receive, send, call_next = {}, AsyncMock(), AsyncMock(), AsyncMock()
+    scope = {"method": "POST", "path": "/submit"}
+    receive, send, call_next = AsyncMock(), AsyncMock(), AsyncMock()
     await aggregator.on_before_handler(scope, receive, send, call_next)
-    dispatcher.emit.assert_called_once_with(
-        Event("before_handler", {"scope": scope,})
-    )
-    # dispatcher.emit_intercept.assert_called_once_with(
-    #     "before_handler", scope, receive, send, call_next
-    # )
+    detail = dispatcher.emit.call_args[0][0].detail
+    assert detail['scope'] is scope
+    assert detail['method'] == 'POST'
+    assert detail['path'] == '/submit'
+    call_next.assert_awaited_once_with(scope, receive, send)
 
 
 @pytest.mark.asyncio

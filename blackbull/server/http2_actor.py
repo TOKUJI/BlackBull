@@ -233,6 +233,13 @@ class HTTP2Actor(Actor):
             )
         return self._senders[stream_id]
 
+    def _fill_scope_connection(self, scope: dict) -> None:
+        """Inject peername/sockname into a freshly-parsed HTTP/2 scope."""
+        if self._peername:
+            scope['client'] = list(self._peername[:2])
+        if self._sockname:
+            scope['server'] = list(self._sockname[:2])
+
     @log
     async def send_frame(self, frame: FrameBase) -> None:
         """Send a raw HTTP/2 frame via the control-plane sender."""
@@ -294,6 +301,7 @@ class HTTP2Actor(Actor):
                     if frame.end_headers:
                         waiting_continuation = False
                         scope = ParserFactory.Get(frame, stream).parse()
+                        self._fill_scope_connection(scope)
                         scope['http2_priority'] = _resolve_priority(stream, scope)
                         scope['extensions'] = {'http.response.push': {}}
                         stream.scope = scope
@@ -336,6 +344,7 @@ class HTTP2Actor(Actor):
                         waiting_continuation = False
                         header_frame.parse_payload()
                         scope = ParserFactory.Get(header_frame, stream).parse()
+                        self._fill_scope_connection(scope)
                         scope['http2_priority'] = _resolve_priority(stream, scope)
                         scope['extensions'] = {'http.response.push': {}}
                         stream.scope = scope

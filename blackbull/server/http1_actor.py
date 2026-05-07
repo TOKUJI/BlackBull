@@ -308,15 +308,15 @@ class HTTP1Actor(Actor):
         }
 
         if headers.getlist(b'host'):
-            host, port = headers.get(b'host').split(b':')
-            scope['server'] = [host.decode('utf-8'), int(port)]
+            parts = headers.get(b'host').split(b':')
+            host = parts[0]
+            port = int(parts[1]) if len(parts) > 1 else (443 if self._ssl else 80)
+            scope['server'] = [host.decode('utf-8'), port]
 
         if headers.getlist(b'upgrade'):
             scope['type'] = headers.get(b'upgrade').decode('utf-8').lower()
             if scope['type'] == 'websocket':
                 scope['scheme'] = 'ws'
-        elif headers.getlist(b'connection'):
-            scope['scheme'] = headers.get(b'connection').decode('utf-8').lower()
 
         return scope
 

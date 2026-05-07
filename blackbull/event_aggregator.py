@@ -41,14 +41,25 @@ class EventAggregator:
 
     async def on_request_received(self, scope: dict[str, Any]) -> None:
         """Fire Level B ``request_received``."""
-        await self._dispatcher.emit(Event("request_received", {"scope": scope}))
+        client = scope.get('client') or ['-']
+        await self._dispatcher.emit(Event("request_received", {
+            'scope':        scope,
+            'client_ip':    str(client[0]),
+            'method':       scope.get('method', '-'),
+            'path':         scope.get('path', '-'),
+            'http_version': scope.get('http_version', '-'),
+            'headers':      scope.get('headers', []),
+        }))
 
     async def on_before_handler(
         self, scope: dict[str, Any], receive: Any, send: Any, call_next: Any
     ) -> None:
         """Fire Level B ``before_handler`` then invoke the next handler."""
-        await self._dispatcher.emit(
-            Event("before_handler", {"scope": scope}))
+        await self._dispatcher.emit(Event("before_handler", {
+            'scope':  scope,
+            'method': scope.get('method', '-'),
+            'path':   scope.get('path', '-'),
+        }))
         await call_next(scope, receive, send)
 
     async def on_after_handler(
@@ -61,11 +72,29 @@ class EventAggregator:
 
     async def on_request_completed(self, scope: dict[str, Any]) -> None:
         """Fire Level B ``request_completed``."""
-        await self._dispatcher.emit(Event("request_completed", {"scope": scope}))
+        log = scope.get('state', {}).get('access_log')
+        client = scope.get('client') or ['-']
+        await self._dispatcher.emit(Event("request_completed", {
+            'scope':          scope,
+            'client_ip':      str(client[0]),
+            'method':         scope.get('method', '-'),
+            'path':           scope.get('path', '-'),
+            'http_version':   scope.get('http_version', '-'),
+            'status':         log.status if log else '-',
+            'response_bytes': log.response_bytes if log else 0,
+            'duration_ms':    log.duration_ms() if log else 0.0,
+        }))
 
     async def on_request_disconnected(self, scope: dict[str, Any]) -> None:
         """Fire Level B ``request_disconnected``."""
-        await self._dispatcher.emit(Event("request_disconnected", {"scope": scope}))
+        client = scope.get('client') or ['-']
+        await self._dispatcher.emit(Event("request_disconnected", {
+            'scope':        scope,
+            'client_ip':    str(client[0]),
+            'method':       scope.get('method', '-'),
+            'path':         scope.get('path', '-'),
+            'http_version': scope.get('http_version', '-'),
+        }))
 
     async def on_error(
         self, scope: dict[str, Any], exception: BaseException
