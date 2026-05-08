@@ -68,4 +68,4 @@ pytest
 - [ ] Caching
 - [ ] Built-in session middleware (server-side sessions)
 - [ ] OpenAPI / interactive API docs (Swagger UI)
-- [ ] beartype opt-in for call-time type checking on route handlers
+- [ ] beartype for startup type checking on route handlers

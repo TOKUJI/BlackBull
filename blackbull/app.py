@@ -105,11 +105,10 @@ class RouteGroup:
 
 class BlackBull:
     def __init__(self,
-                 router=None,
                  loop=None,
                  observer_shutdown_timeout: float = 5.0,
                  ):
-        self._router = router if router is not None else Router()
+        self._router = Router()
         self._logger = logger
         self._error_router = ErrorRouter()
 
