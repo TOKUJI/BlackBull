@@ -12,12 +12,7 @@ authors = [
 license = { file = "LICENSE" }
 
 dependencies = [
-    "h2",
-    "httpx",
-    "websockets",
-    "uvicorn",
-    "asgiref",
-    "pydantic"
+    "hpack",
 ]
 
 [project.urls]
@@ -32,7 +27,12 @@ compression = [
 
 testing = [
     "pytest",
-    "pytest-asyncio"
+    "pytest-asyncio",
+    "pytest-timeout",
+    "pytest-cov",
+    "typeguard",
+    "httpx",
+    "websockets",
 ]
 
 docs = [

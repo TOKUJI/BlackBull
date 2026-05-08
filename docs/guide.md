@@ -6,7 +6,7 @@ BlackBull is a Python ASGI 3.0 web framework supporting HTTP/1.1, HTTP/2, and We
 
 ## §0  Prerequisites & Installation
 
-**Python 3.10+** is required.
+**Python 3.11+** is required.
 
 ```bash
 git clone <repo>
@@ -105,19 +105,23 @@ async def healthz(scope, receive, send):
 
 ### 3.2  Path parameters
 
-Use `{name}` segments in the path string.  Parameters are always strings and are
-available in `scope['path_params']`:
+Use `{name}` segments in the path string.  Captured values are available in
+`scope['path_params']`:
 
 ```python
 @app.route(path='/tasks/{task_id}')
 async def get_task(scope, receive, send):
-    task_id = scope['path_params']['task_id']   # str
+    task_id = scope['path_params']['task_id']   # str (default converter)
     await send(Response(task_id.encode()))
 ```
 
-`{name}` matches `[a-zA-Z0-9_\-\.\~]+`.  For other patterns supply a compiled
-regex with named groups; the captured values are always injected into
-`scope['path_params']` — the same place as `{name}` parameters:
+`{name}` (no converter) matches `[^/]+` and injects a `str`.  Append `:converter`
+to control both the pattern and the injected type — see §3.5 for `int`, `uuid`,
+`path`, and custom converters.
+
+For fully custom patterns supply a compiled regex with named groups; the captured
+values are injected into `scope['path_params']` — the same place as `{name}`
+parameters:
 
 ```python
 import re
@@ -240,11 +244,21 @@ async def get_task(task_id):       # str by default
     return f"Task {task_id}"
 ```
 
-Add a type annotation and BlackBull coerces the value before calling the handler:
+Use a `{param:int}` converter (see §3.5) so the URL pattern only matches integers
+and the value arrives already coerced — this is the preferred approach:
+
+```python
+@app.route(path='/tasks/{task_id:int}')
+async def get_task(task_id: int):  # int injected by the router
+    return {"id": task_id}
+```
+
+Alternatively, annotate without a converter and BlackBull will coerce the captured
+string at call time (raises HTTP 500 if not convertible):
 
 ```python
 @app.route(path='/tasks/{task_id}')
-async def get_task(task_id: int):  # coerced to int; raises 500 if not convertible
+async def get_task(task_id: int):  # str captured; int() applied by _adapt_handler
     return {"id": task_id}
 ```
 
@@ -292,7 +306,7 @@ async def get_item(item_id: int, scope):
 - When you need to call `receive()` in a loop (streaming uploads, long-polling)
   use the full form and call `receive()` yourself.
 
-### 3.5  Detecting client disconnection
+### 3.6  Detecting client disconnection
 
 When the remote side closes the connection, `receive()` returns
 `{'type': 'http.disconnect'}`.  This is useful for long-polling and
@@ -332,9 +346,9 @@ async def sse(scope, receive, send):
 
 ---
 
-## §3.5  Typed Routes
+### 3.5  Typed Routes
 
-### Path parameter converters
+#### Path parameter converters
 
 Append `:converter` to a path parameter to control both the URL pattern and the Python type injected into the handler:
 
@@ -361,7 +375,7 @@ async def get_file(rest: str):   # rest may contain slashes
     return {'path': rest}
 ```
 
-### URL reverse lookup — `url_path_for`
+#### URL reverse lookup — `url_path_for`
 
 Register a route with a `name=` keyword, then build its path from parameters:
 
@@ -375,7 +389,7 @@ app.url_path_for('item-detail', id=42)   # → '/items/42'
 
 `url_path_for` raises `KeyError` for unknown names and `ValueError` when required parameters are missing.
 
-### Startup validation
+#### Startup validation
 
 `app.run()` and the ASGI lifespan `startup` event both call `Router.validate()` before accepting connections. Validation checks:
 
@@ -385,7 +399,7 @@ app.url_path_for('item-detail', id=42)   # → '/items/42'
 
 On failure, a `ConfigurationError` is raised (or sent as `lifespan.startup.failed`) listing every violated route. On success, the router is **frozen** — further route registration raises `RuntimeError`.
 
-#### Example — validation passes ([`examples/typed_routes_ok.py`](../examples/typed_routes_ok.py))
+#### Example — validation passes ([`examples/typed_routes_ok.py`](https://github.com/TOKUJI/BlackBull/blob/master/examples/typed_routes_ok.py))
 
 ```python
 import asyncio
@@ -415,7 +429,7 @@ if __name__ == '__main__':
 
 Every converter type matches its handler annotation, so `validate()` succeeds and the server starts.
 
-#### Example — validation fails ([`examples/typed_routes_fail.py`](../examples/typed_routes_fail.py))
+#### Example — validation fails ([`examples/typed_routes_fail.py`](https://github.com/TOKUJI/BlackBull/blob/master/examples/typed_routes_fail.py))
 
 ```python
 import asyncio
@@ -1516,7 +1530,7 @@ async def test_ping():
 drives the app over an in-process connection — no open port needed:
 
 ```bash
-pip install httpx pytest-asyncio
+pip install -e '.[testing]'   # installs httpx, pytest-asyncio, typeguard, etc.
 ```
 
 ```python
@@ -1549,12 +1563,9 @@ async def test_register_and_list_tasks():
         assert r.json()[0]['title'] == 'Buy milk'
 ```
 
-`pytest.ini` or `pyproject.toml` to configure asyncio mode:
-
-```ini
-[pytest]
-asyncio_mode = auto
-```
+BlackBull's own `pytest.ini` sets `asyncio_mode = strict`, which requires every
+async test to carry `@pytest.mark.asyncio` explicitly.  Match this in application
+test suites for consistent behaviour:
 
 ### 12.3  Testing middleware in isolation
 
