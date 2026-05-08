@@ -25,6 +25,10 @@ compression = [
     "zstandard"
 ]
 
+validation = [
+    "typeguard",
+]
+
 testing = [
     "pytest",
     "pytest-asyncio",

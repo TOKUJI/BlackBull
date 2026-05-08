@@ -395,7 +395,7 @@ app.url_path_for('item-detail', id=42)   # → '/items/42'
 
 - Every `{param:converter}` uses a known converter name.
 - Every path parameter appears in the handler's signature.
-- When `typeguard` is installed: the converter's output type matches the handler's annotation (e.g. `{id:int}` with `id: str` is an error).
+- When `typeguard` is installed (`pip install 'blackbull[validation]'`): the converter's output type matches the handler's annotation (e.g. `{id:int}` with `id: str` is an error).
 
 On failure, a `ConfigurationError` is raised (or sent as `lifespan.startup.failed`) listing every violated route. On success, the router is **frozen** — further route registration raises `RuntimeError`.
 
