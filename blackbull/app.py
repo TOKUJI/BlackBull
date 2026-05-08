@@ -94,12 +94,13 @@ class RouteGroup:
 
     def route(self, methods: HTTPMethod | Iterable[HTTPMethod] = [HTTPMethod.GET],
               path: str = '/', scheme: Scheme | Iterable[Scheme] = Scheme.http,
-              middlewares: list = []):
+              middlewares: list = [], name: str | None = None):
         return self._app.route(
             methods=methods,
             path=path,
             scheme=scheme,
             middlewares=self._group_mw + list(middlewares),
+            name=name,
         )
 
 
@@ -388,7 +389,8 @@ class BlackBull:
 
     def route(self, methods: HTTPMethod | Iterable[HTTPMethod] = [HTTPMethod.GET],
               path: str = '/', scheme: Scheme | Iterable[Scheme] = Scheme.http,
-              functions: list = [], middlewares: list = []):
+              functions: list = [], middlewares: list = [],
+              name: str | None = None):
         """Register a route handler, optionally wrapping it in middlewares."""
         return self._router.route(
             methods=methods,
@@ -396,6 +398,7 @@ class BlackBull:
             scheme=scheme,
             functions=functions,
             middlewares=middlewares,
+            name=name,
             )
 
     def group(self, middlewares=[]) -> 'RouteGroup':
@@ -447,7 +450,7 @@ class BlackBull:
         self.server.open_socket(port)
         self._logger.info(self.server)
 
-    def url_path_for(self, name: str, **params) -> str:
+    def url_path_for(self, name: str, /, **params) -> str:
         """Return the path for the named route with *params* substituted."""
         return self._router.url_path_for(name, **params)
 

@@ -508,7 +508,7 @@ class Router(UserDict, BaseRouter):
             name=name,
         ))
 
-    def url_path_for(self, name: str, **params) -> str:
+    def url_path_for(self, name: str, /, **params) -> str:
         """Return the path for the named route with *params* substituted.
 
         Raises KeyError if the name is unknown, ValueError if required params

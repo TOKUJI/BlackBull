@@ -28,6 +28,8 @@ Handlers also accept `(scope, receive, send)` for full ASGI control.
 |---|---|
 | [`examples/SimpleTaskManager/`](examples/SimpleTaskManager/) | REST API + HTML UI, middleware pipeline, route groups, SQLite, Bearer token auth |
 | [`examples/ChatServer/`](examples/ChatServer/) | WebSocket, SSE, long polling — three implementation styles (raw ASGI → Flask-like → middleware) |
+| [`examples/typed_routes_ok.py`](examples/typed_routes_ok.py) | `{param:converter}` syntax, `url_path_for` — validation passes |
+| [`examples/typed_routes_fail.py`](examples/typed_routes_fail.py) | Same routes with annotation mismatch — `ConfigurationError` at startup |
 
 ## Running
 

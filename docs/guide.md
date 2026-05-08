@@ -385,13 +385,67 @@ app.url_path_for('item-detail', id=42)   # → '/items/42'
 
 On failure, a `ConfigurationError` is raised (or sent as `lifespan.startup.failed`) listing every violated route. On success, the router is **frozen** — further route registration raises `RuntimeError`.
 
+#### Example — validation passes ([`examples/typed_routes_ok.py`](../examples/typed_routes_ok.py))
+
 ```python
+import asyncio
+import uuid
+from http import HTTPMethod
+from blackbull import BlackBull
+
+app = BlackBull()
+
+@app.route(path='/greet/{name:str}', methods=HTTPMethod.GET, name='greet')
+async def greet(name: str):
+    return f'Hello, {name}!'
+
+@app.route(path='/double/{n:int}', methods=HTTPMethod.GET, name='double')
+async def double(n: int):
+    return {'input': n, 'result': n * 2}
+
+@app.route(path='/info/{uid:uuid}', methods=HTTPMethod.GET, name='info')
+async def info(uid: uuid.UUID):
+    return {'uuid': str(uid), 'version': uid.version}
+
+if __name__ == '__main__':
+    print(app.url_path_for('greet', name='Alice'))   # /greet/Alice
+    print(app.url_path_for('double', n=21))           # /double/21
+    asyncio.run(app.run(port=8000))
+```
+
+Every converter type matches its handler annotation, so `validate()` succeeds and the server starts.
+
+#### Example — validation fails ([`examples/typed_routes_fail.py`](../examples/typed_routes_fail.py))
+
+```python
+import asyncio
+from http import HTTPMethod
+from blackbull import BlackBull
 from blackbull.router import ConfigurationError
 
-try:
-    app.url_path_for('missing')
-except KeyError:
-    ...  # no route named 'missing'
+app = BlackBull()
+
+@app.route(path='/greet/{name:str}', methods=HTTPMethod.GET)
+async def greet(name: str):
+    return f'Hello, {name}!'
+
+@app.route(path='/double/{n:int}', methods=HTTPMethod.GET)
+async def double(n: str):      # BUG: converter is int, annotation is str
+    return f'double of {n}'
+
+if __name__ == '__main__':
+    try:
+        asyncio.run(app.run(port=8000))
+    except* ConfigurationError as eg:
+        for exc in eg.exceptions:
+            print(f'ConfigurationError: {exc}')
+```
+
+Output before the server binds any port:
+
+```
+ConfigurationError: Route '/double/{n:int}' param 'n': converter 'int' yields 'int'
+but annotation is <class 'str'>: int is not an instance of str
 ```
 
 ---
