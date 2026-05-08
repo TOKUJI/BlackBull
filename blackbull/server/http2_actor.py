@@ -29,6 +29,28 @@ from .http1_actor import RequestActor
 logger = logging.getLogger(__name__)
 
 
+def _signal_recipients(recipients: dict[int, HTTP2Recipient]) -> None:
+    """Inject http.disconnect into every active stream recipient."""
+    for recipient in recipients.values():
+        recipient.put_disconnect()
+
+
+def _make_h2_disconnect_receiver(receive, scope: dict, aggregator: EventAggregator):
+    """Wrap an HTTP2Recipient so it emits request_disconnected on http.disconnect.
+
+    Mirrors the HTTP/1.1 _make_disconnect_detecting_receive pattern from server.py.
+    Defined here to avoid a circular import (http2_actor must not import server).
+    """
+    async def detecting_receive():
+        event = await receive()
+        if isinstance(event, dict) and event.get('type') == 'http.disconnect':
+            if not scope.get('_disconnected'):
+                scope['_disconnected'] = True
+                await aggregator.on_request_disconnected(scope)
+        return event
+    return detecting_receive
+
+
 def _make_capturing_send(send, record):
     """Wrap *send* to capture status and response_bytes into *record*."""
     async def capturing_send(event, *args, **kwargs):
@@ -317,7 +339,8 @@ class HTTP2Actor(Actor):
                             stream_actor = StreamActor(
                                 stream_id=stream.stream_id,
                                 scope=scope,
-                                receive=stream_recipient,
+                                receive=_make_h2_disconnect_receiver(
+                                    stream_recipient, scope, self._aggregator),
                                 send=capturing_send,
                                 app=self.app,
                                 aggregator=self._aggregator,
@@ -356,7 +379,8 @@ class HTTP2Actor(Actor):
                             stream_actor = StreamActor(
                                 stream_id=stream.stream_id,
                                 scope=scope,
-                                receive=stream_recipient,
+                                receive=_make_h2_disconnect_receiver(
+                                    stream_recipient, scope, self._aggregator),
                                 send=capturing_send,
                                 app=self.app,
                                 aggregator=self._aggregator,
@@ -385,10 +409,14 @@ class HTTP2Actor(Actor):
 
                 case FrameTypes.GOAWAY:
                     await self.send_frame(self.factory.goaway(last_stream_id))
+                    _signal_recipients(recipients)
                     return
 
                 case _:
                     await ResponderFactory.create(frame).respond(self)
+
+        # EOF — while loop exited because receive() returned b''
+        _signal_recipients(recipients)
 
     def _legacy_spawn(
         self,

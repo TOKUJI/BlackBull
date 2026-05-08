@@ -233,6 +233,10 @@ class HTTP2Recipient(BaseRecipient):
         """Enqueue a pre-built event dict (e.g. empty-body for HEADERS+END_STREAM)."""
         self._queue.put_nowait(event)
 
+    def put_disconnect(self) -> None:
+        """Unblock a waiting __call__() with an http.disconnect event."""
+        self._queue.put_nowait({'type': 'http.disconnect'})
+
     async def __call__(self) -> dict:
         return await self._queue.get()
 

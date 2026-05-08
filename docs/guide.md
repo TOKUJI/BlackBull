@@ -690,6 +690,28 @@ if b'content-length' in scope['headers']:
 
 Header names are **case-insensitive** and stored lowercase.
 
+#### `get` vs `getlist`
+
+Use `.get(name)` for headers that appear at most once (e.g. `content-type`,
+`authorization`, `host`).  Use `.getlist(name)` for headers that may repeat:
+
+| Header | Why it can repeat |
+|---|---|
+| `accept`, `accept-encoding` | Clients may send multiple preference lines |
+| `set-cookie` | Servers send one `Set-Cookie` field per cookie |
+| `cookie` (HTTP/2) | RFC 7540 §8.1.2.5 requires one field per cookie pair |
+
+`.getlist` returns `list[tuple[bytes, bytes]]` — the full `(name, value)` pairs
+in insertion order, or `[]` if the header is absent.  `.get` returns only the
+first value as `bytes`.
+
+> **Why `cookie` needs `getlist` on HTTP/2:** HTTP/1.1 combines all cookies
+> into a single `Cookie: a=1; b=2` field.  HTTP/2 must send each cookie as a
+> separate header field to enable HPACK compression of individual values.
+> Calling `.get(b'cookie')` on an HTTP/2 scope silently discards all but the
+> first cookie.  `parse_cookies` (§6.4) handles this correctly for all
+> protocols.
+
 ### 6.4  Parsing cookies
 
 ```python
@@ -698,6 +720,11 @@ from blackbull import parse_cookies
 cookies: dict[str, str] = parse_cookies(scope)
 session = cookies.get('session', '')
 ```
+
+`parse_cookies` works for HTTP/1.1, HTTP/2, and WebSocket scopes — all three
+put a `Headers` object in `scope['headers']`.  Internally it calls
+`.getlist(b'cookie')` and joins all fields before parsing, so the result is
+identical regardless of how the client sent the cookies.
 
 ### 6.5  Query parameters
 
@@ -1100,6 +1127,8 @@ async def on_disconnect(event: Event):
 ```
 
 The event fires when the server detects the disconnect via the application's `receive()` call — specifically when `receive()` returns `{'type': 'http.disconnect'}`.  Long-polling or SSE handlers that call `receive()` to watch for disconnect will trigger this event the moment the client closes the connection.
+
+This applies to **both HTTP/1.1 and HTTP/2**.  For HTTP/2, when the underlying TCP connection closes while streams are still in flight (the common case for SSE), the framework injects an `http.disconnect` event into every active stream's receive channel.  Handlers using the `_watch_disconnect` pattern (calling `await receive()` in a concurrent coroutine) will unblock immediately.
 
 **This event is observation only.**  Although `@app.intercept('request_disconnected')` will accept a registration without error, the disconnect has already occurred by the time the event fires; the framework does not guarantee that interceptor side-effects affect anything visible to the client.
 
