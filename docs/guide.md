@@ -332,6 +332,70 @@ async def sse(scope, receive, send):
 
 ---
 
+## §3.5  Typed Routes
+
+### Path parameter converters
+
+Append `:converter` to a path parameter to control both the URL pattern and the Python type injected into the handler:
+
+| Syntax | Regex matched | Python type |
+|---|---|---|
+| `{name}` or `{name:str}` | `[^/]+` | `str` |
+| `{id:int}` | `-?[0-9]+` | `int` |
+| `{uid:uuid}` | UUID hex pattern | `uuid.UUID` |
+| `{rest:path}` | `.+` (matches `/`) | `str` |
+
+```python
+import uuid
+
+@app.route(path='/items/{id:int}', methods=HTTPMethod.GET)
+async def get_item(id: int):
+    return {'id': id}            # id is already int, not a string
+
+@app.route(path='/users/{uid:uuid}', methods=HTTPMethod.GET)
+async def get_user(uid: uuid.UUID):
+    return {'uid': str(uid)}
+
+@app.route(path='/files/{rest:path}', methods=HTTPMethod.GET)
+async def get_file(rest: str):   # rest may contain slashes
+    return {'path': rest}
+```
+
+### URL reverse lookup — `url_path_for`
+
+Register a route with a `name=` keyword, then build its path from parameters:
+
+```python
+@app.route(path='/items/{id:int}', methods=HTTPMethod.GET, name='item-detail')
+async def get_item(id: int):
+    return {'id': id}
+
+app.url_path_for('item-detail', id=42)   # → '/items/42'
+```
+
+`url_path_for` raises `KeyError` for unknown names and `ValueError` when required parameters are missing.
+
+### Startup validation
+
+`app.run()` and the ASGI lifespan `startup` event both call `Router.validate()` before accepting connections. Validation checks:
+
+- Every `{param:converter}` uses a known converter name.
+- Every path parameter appears in the handler's signature.
+- When `typeguard` is installed: the converter's output type matches the handler's annotation (e.g. `{id:int}` with `id: str` is an error).
+
+On failure, a `ConfigurationError` is raised (or sent as `lifespan.startup.failed`) listing every violated route. On success, the router is **frozen** — further route registration raises `RuntimeError`.
+
+```python
+from blackbull.router import ConfigurationError
+
+try:
+    app.url_path_for('missing')
+except KeyError:
+    ...  # no route named 'missing'
+```
+
+---
+
 ## §4  Middleware
 
 ### 4.1  Writing a middleware

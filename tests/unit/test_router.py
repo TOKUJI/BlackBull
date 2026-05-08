@@ -14,11 +14,12 @@ _TYPE_ERRORS = (TypeError,) if _TypeCheckError is None else (TypeError, _TypeChe
 
 # Test targets
 from blackbull.utils import Scheme
+import uuid
 from blackbull.router import (
     Router, BaseRouter, ErrorRouter,
     _middleware_param, has_middleware_param,
     _is_simplified_handler, _adapt_handler,
-    PathNotRegistered, MethodNotApplicable,
+    PathNotRegistered, MethodNotApplicable, ConfigurationError,
 )
 from blackbull import BlackBull, Response, JSONResponse
 from blackbull.router import RouteGroup
@@ -917,3 +918,227 @@ class TestErrorRouterEdgeCases:
         er = ErrorRouter()
         with pytest.raises(ValueError):
             er[HTTPStatus.OK] = lambda: None
+
+
+# ---------------------------------------------------------------------------
+# Type converter tests
+# ---------------------------------------------------------------------------
+
+class TestConverterRouting:
+    @pytest.mark.asyncio
+    async def test_int_converter_injects_int(self):
+        router = Router()
+
+        @router.route(path='/items/{id:int}', methods=HTTPMethod.GET)
+        async def handler(scope, receive, send):
+            pass
+
+        scope = {'path_params': {}}
+        fn = router[('/items/42', HTTPMethod.GET, Scheme.http)]
+        await fn(scope, None, None)
+        assert scope['path_params']['id'] == 42
+        assert isinstance(scope['path_params']['id'], int)
+
+    @pytest.mark.asyncio
+    async def test_uuid_converter_injects_uuid(self):
+        router = Router()
+        uid = '12345678-1234-5678-1234-567812345678'
+
+        @router.route(path='/users/{uid:uuid}', methods=HTTPMethod.GET)
+        async def handler(scope, receive, send):
+            pass
+
+        scope = {'path_params': {}}
+        fn = router[(f'/users/{uid}', HTTPMethod.GET, Scheme.http)]
+        await fn(scope, None, None)
+        assert scope['path_params']['uid'] == uuid.UUID(uid)
+
+    @pytest.mark.asyncio
+    async def test_path_converter_matches_slashes(self):
+        router = Router()
+
+        @router.route(path='/files/{rest:path}', methods=HTTPMethod.GET)
+        async def handler(scope, receive, send):
+            pass
+
+        scope = {'path_params': {}}
+        fn = router[('/files/a/b/c.txt', HTTPMethod.GET, Scheme.http)]
+        await fn(scope, None, None)
+        assert scope['path_params']['rest'] == 'a/b/c.txt'
+
+    def test_unknown_converter_raises_at_registration(self):
+        router = Router()
+
+        async def fn(scope, receive, send): pass
+
+        with pytest.raises(ValueError, match="Unknown converter 'foo'"):
+            router[('/x/{id:foo}', HTTPMethod.GET, Scheme.http)] = fn
+
+    @pytest.mark.asyncio
+    async def test_str_converter_is_default(self):
+        router = Router()
+
+        @router.route(path='/things/{name}', methods=HTTPMethod.GET)
+        async def handler(scope, receive, send):
+            pass
+
+        scope = {'path_params': {}}
+        fn = router[('/things/hello', HTTPMethod.GET, Scheme.http)]
+        await fn(scope, None, None)
+        assert scope['path_params']['name'] == 'hello'
+        assert isinstance(scope['path_params']['name'], str)
+
+
+class TestConverterSimplifiedHandler:
+    @pytest.mark.asyncio
+    async def test_int_converter_with_simplified_handler(self):
+        router = Router()
+
+        @router.route(path='/items/{id:int}', methods=HTTPMethod.GET)
+        async def handler(id: int):
+            return str(id * 2)
+
+        scope = {'type': 'http', 'path_params': {}}
+        send_calls = []
+
+        async def fake_send(data, status=None, headers=None):
+            send_calls.append(data)
+
+        fn = router[('/items/21', HTTPMethod.GET, Scheme.http)]
+        await fn(scope, None, fake_send)
+        assert b'42' in send_calls[0].body
+
+    @pytest.mark.asyncio
+    async def test_uuid_converter_with_simplified_handler(self):
+        router = Router()
+        uid = '12345678-1234-5678-1234-567812345678'
+
+        @router.route(path='/users/{uid:uuid}', methods=HTTPMethod.GET)
+        async def handler(uid: uuid.UUID):
+            return str(uid)
+
+        scope = {'type': 'http', 'path_params': {}}
+        send_calls = []
+
+        async def fake_send(data, status=None, headers=None):
+            send_calls.append(data)
+
+        fn = router[(f'/users/{uid}', HTTPMethod.GET, Scheme.http)]
+        await fn(scope, None, fake_send)
+        assert uid.encode() in send_calls[0].body
+
+
+# ---------------------------------------------------------------------------
+# url_path_for tests
+# ---------------------------------------------------------------------------
+
+class TestUrlPathFor:
+    def test_simple_substitution(self):
+        router = Router()
+
+        @router.route(path='/items/{id:int}', methods=HTTPMethod.GET, name='item-detail')
+        async def handler(scope, receive, send): pass
+
+        assert router.url_path_for('item-detail', id=42) == '/items/42'
+
+    def test_no_params(self):
+        router = Router()
+
+        @router.route(path='/about', methods=HTTPMethod.GET, name='about')
+        async def handler(scope, receive, send): pass
+
+        assert router.url_path_for('about') == '/about'
+
+    def test_multiple_params(self):
+        router = Router()
+
+        @router.route(path='/a/{x}/b/{y}', methods=HTTPMethod.GET, name='nested')
+        async def handler(scope, receive, send): pass
+
+        assert router.url_path_for('nested', x='foo', y='bar') == '/a/foo/b/bar'
+
+    def test_unknown_name_raises_keyerror(self):
+        router = Router()
+        with pytest.raises(KeyError, match="nope"):
+            router.url_path_for('nope')
+
+    def test_missing_param_raises_valueerror(self):
+        router = Router()
+
+        @router.route(path='/items/{id:int}', methods=HTTPMethod.GET, name='item')
+        async def handler(scope, receive, send): pass
+
+        with pytest.raises(ValueError, match="missing params"):
+            router.url_path_for('item')
+
+    def test_duplicate_name_raises_valueerror(self):
+        router = Router()
+
+        @router.route(path='/a', methods=HTTPMethod.GET, name='dup')
+        async def h1(scope, receive, send): pass
+
+        with pytest.raises(ValueError, match="Duplicate route name"):
+            @router.route(path='/b', methods=HTTPMethod.GET, name='dup')
+            async def h2(scope, receive, send): pass
+
+
+# ---------------------------------------------------------------------------
+# Startup validation tests
+# ---------------------------------------------------------------------------
+
+class TestStartupValidation:
+    def test_valid_routes_pass(self):
+        router = Router()
+
+        @router.route(path='/items/{id:int}', methods=HTTPMethod.GET)
+        async def handler(id: int): return ''
+
+        router.validate()  # must not raise
+
+    def test_router_frozen_after_validate(self):
+        router = Router()
+
+        @router.route(path='/x', methods=HTTPMethod.GET)
+        async def handler(scope, receive, send): pass
+
+        router.validate()
+        assert router._frozen is True
+
+    def test_annotation_mismatch_raises(self):
+        router = Router()
+
+        @router.route(path='/items/{id:int}', methods=HTTPMethod.GET)
+        async def handler(id: str): return ''  # int converter but str annotation
+
+        with pytest.raises(ConfigurationError, match="id"):
+            router.validate()
+
+    def test_validate_idempotent_after_error(self):
+        router = Router()
+
+        @router.route(path='/items/{id:int}', methods=HTTPMethod.GET)
+        async def handler(id: str): return ''
+
+        with pytest.raises(ConfigurationError):
+            router.validate()
+        # frozen must NOT be set when validation fails
+        assert router._frozen is False
+
+
+class TestFrozenRouter:
+    def test_setitem_raises_after_freeze(self):
+        router = Router()
+        router.validate()  # freezes empty router
+
+        async def fn(scope, receive, send): pass
+
+        with pytest.raises(RuntimeError, match="frozen"):
+            router[('/x', HTTPMethod.GET, Scheme.http)] = fn
+
+    def test_route_raises_after_freeze(self):
+        router = Router()
+        router.validate()
+
+        with pytest.raises(RuntimeError, match="frozen"):
+            @router.route(path='/y', methods=HTTPMethod.GET)
+            async def fn(scope, receive, send): pass

@@ -29,7 +29,7 @@ import traceback
 import logging
 from .event import Event, EventDispatcher, EventHandler
 from .utils import Scheme
-from .router import Router, ErrorRouter, MethodNotApplicable, PathNotRegistered
+from .router import Router, ErrorRouter, MethodNotApplicable, PathNotRegistered, ConfigurationError
 from .server.watch import Watcher, force_reload
 logger = logging.getLogger(__name__)
 
@@ -105,11 +105,11 @@ class RouteGroup:
 
 class BlackBull:
     def __init__(self,
-                 router=Router(),
+                 router=None,
                  loop=None,
                  observer_shutdown_timeout: float = 5.0,
                  ):
-        self._router = router
+        self._router = router if router is not None else Router()
         self._logger = logger
         self._error_router = ErrorRouter()
 
@@ -272,6 +272,12 @@ class BlackBull:
             event = await receive()
             if event['type'] == 'lifespan.startup':
                 self._logger.debug('lifespan startup')
+                try:
+                    self._router.validate()
+                except ConfigurationError as exc:
+                    self._logger.error('Route configuration error:\n%s', exc)
+                    await send({'type': 'lifespan.startup.failed', 'message': str(exc)})
+                    return
                 await self._dispatcher.emit(Event('app_startup'))
                 await send({'type': 'lifespan.startup.complete'})
             elif event['type'] == 'lifespan.shutdown':
@@ -442,8 +448,13 @@ class BlackBull:
         self.server.open_socket(port)
         self._logger.info(self.server)
 
+    def url_path_for(self, name: str, **params) -> str:
+        """Return the path for the named route with *params* substituted."""
+        return self._router.url_path_for(name, **params)
+
     async def run(self, certfile=None, keyfile=None, port=0, debug=False):
         self._logger.info('Run is called.')
+        self._router.validate()
         tasks = []
 
         if not self.has_server():

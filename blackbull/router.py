@@ -1,21 +1,24 @@
 """URL routing for BlackBull.
 
 ``Router`` maps ``(path, method, scheme)`` triples to handler chains.  Paths
-support exact strings, regex patterns, and ``{name}`` parameter syntax;
-``ErrorRouter`` does the same for HTTPStatus codes and exception classes.
-``_register_chain`` composes per-route middlewares with ``functools.partial``
-so each middleware receives ``call_next`` bound to the next link.
+support exact strings, regex patterns, and ``{name}`` / ``{name:converter}``
+parameter syntax; ``ErrorRouter`` does the same for HTTPStatus codes and
+exception classes.  ``_register_chain`` composes per-route middlewares with
+``functools.partial`` so each middleware receives ``call_next`` bound to the
+next link.
 
 ``RouteGroup`` is defined in :mod:`blackbull.app` to avoid a circular
 import; this module re-exports it lazily through ``__getattr__``.
 """
 from collections import UserDict
 from collections.abc import Iterable
+from dataclasses import dataclass, field
 from typing import Any, Callable, List, Tuple, Type, Optional
 from functools import wraps, partial
 from http import HTTPStatus, HTTPMethod
 import re
 import inspect
+import uuid as _uuid
 from .utils import Scheme, do_nothing
 
 # RouteGroup is defined in app.py to avoid a circular import;
@@ -30,6 +33,38 @@ def __getattr__(name):
 
 import logging
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Converter table
+# ---------------------------------------------------------------------------
+
+_CONVERTERS: dict[str, tuple[str, type]] = {
+    'str':  (r'[^/]+',                                                                 str),
+    'int':  (r'-?[0-9]+',                                                              int),
+    'uuid': (r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}',       _uuid.UUID),
+    'path': (r'.+',                                                                    str),
+}
+
+_SAMPLE_INPUTS: dict[str, str] = {
+    'str':  'test',
+    'int':  '42',
+    'uuid': '00000000-0000-0000-0000-000000000000',
+    'path': 'a/b/c',
+}
+
+
+class ConfigurationError(Exception):
+    """Raised by Router.validate() when route definitions are inconsistent."""
+
+
+@dataclass
+class _RouteInfo:
+    template: str
+    handler: Callable
+    param_specs: dict[str, str]    # {param_name: converter_spec}
+    name: str | None = None
+
 
 # Sentinel used when scheme is omitted, matching any scheme at lookup time
 class _AnyScheme:
@@ -105,7 +140,7 @@ def _adapt_handler(fn, path: str):
     from .request import read_body as _read_body
     from .response import Response as _Response, JSONResponse as _JSONResponse
 
-    path_param_names: set[str] = set(Router.f_string.findall(path))
+    path_param_names: set[str] = {m.group(1) for m in Router._param_pattern.finditer(path)}
     params = inspect.signature(fn).parameters
     annotations = {n: p.annotation for n, p in params.items()}
 
@@ -130,7 +165,8 @@ def _adapt_handler(fn, path: str):
             else:
                 raw = scope.get('path_params', {}).get(name, '')
                 ann = annotations.get(name, inspect.Parameter.empty)
-                if ann is not inspect.Parameter.empty and isinstance(ann, type):
+                if (ann is not inspect.Parameter.empty and isinstance(ann, type)
+                        and not isinstance(raw, ann)):
                     try:
                         kwargs[name] = ann(raw)
                     except (ValueError, TypeError) as exc:
@@ -197,10 +233,15 @@ class Router(UserDict, BaseRouter):
     value: (function, methods, scheme)
     """
     f_string = re.compile(r'\{([a-zA-Z_]\w*?)\}', flags=re.ASCII)
+    _param_pattern = re.compile(r'\{([a-zA-Z_]\w*?)(?::([a-zA-Z_]\w*?))?\}', flags=re.ASCII)
 
     def __init__(self, *args, **kwds):
         super(Router, self).__init__(*args, **kwds)
         self.regex_ = {}
+        self._param_converters: dict[re.Pattern, dict[str, Callable]] = {}
+        self._route_info: list[_RouteInfo] = []
+        self._named_routes: dict[str, tuple[str, dict[str, str]]] = {}
+        self._frozen: bool = False
 
     def __setitem__(
         self,
@@ -212,14 +253,19 @@ class Router(UserDict, BaseRouter):
         """
         If key[0] is a str:
             - Store it in self.data under the normalised (path, methods, scheme) key.
-            - Also compile a regex from {param} placeholders and store it in self.regex_.
- 
+            - Also compile a regex from {param} / {param:converter} placeholders and
+              store it in self.regex_ together with per-param converter functions.
+
         If key[0] is a re.Pattern:
             - Store it in self.regex_ only.
- 
+
         When scheme is omitted it is stored as _ANY_SCHEME,
         which matches any scheme at lookup time.
         """
+        if self._frozen:
+            raise RuntimeError(
+                "Router is frozen — routes cannot be added after startup validation")
+
         # Unpack key
         if len(key) == 3:
             path, methods, scheme = key
@@ -231,7 +277,7 @@ class Router(UserDict, BaseRouter):
                 f"key must be a 2- or 3-element tuple (path, methods) or "
                 f"(path, methods, scheme), got: {key!r}"
             )
- 
+
         # Normalise methods / scheme to tuples
         methods = _to_tuple(methods)
         scheme  = _ANY_SCHEME if scheme is None or isinstance(scheme, _AnyScheme) \
@@ -239,22 +285,36 @@ class Router(UserDict, BaseRouter):
 
         logger.debug("setitem key=%r", key)
 
+        scheme_key = _ANY_SCHEME if isinstance(scheme, _AnyScheme) else tuple(scheme)
+
         # Dispatch on path type
         if isinstance(path, str):
             # Store under the normalised 3-element key in self.data
-            normalized_key = (path, tuple(methods), _ANY_SCHEME if isinstance(scheme, _AnyScheme) else tuple(scheme))
-            self.data[normalized_key] = value
+            self.data[(path, tuple(methods), scheme_key)] = value
 
-            # Expand {param} placeholders into named capture groups
-            pattern_str = self.f_string.sub(
-                r'(?P<\1>[a-zA-Z0-9_\-\.\~]+)', path
-            )
+            # Expand {param} / {param:converter} placeholders into named capture groups
+            converters: dict[str, Callable] = {}
+
+            def _replace(m: re.Match) -> str:
+                name = m.group(1)
+                spec = m.group(2) or 'str'
+                if spec not in _CONVERTERS:
+                    raise ValueError(
+                        f"Unknown converter {spec!r} in path {path!r}. "
+                        f"Valid converters: {sorted(_CONVERTERS)}")
+                regex_str, converter_fn = _CONVERTERS[spec]
+                converters[name] = converter_fn
+                return f'(?P<{name}>{regex_str})'
+
+            pattern_str = self._param_pattern.sub(_replace, path)
             compiled = re.compile(f'^{pattern_str}$')
-            self.regex_[(compiled, tuple(methods), _ANY_SCHEME if isinstance(scheme, _AnyScheme) else tuple(scheme))] = value
+            self.regex_[(compiled, tuple(methods), scheme_key)] = value
+            if converters:
+                self._param_converters[compiled] = converters
 
         elif isinstance(path, re.Pattern):
-            self.regex_[(path, tuple(methods), _ANY_SCHEME if isinstance(scheme, _AnyScheme) else tuple(scheme))] = value
- 
+            self.regex_[(path, tuple(methods), scheme_key)] = value
+
         else:
             logger.error(f"Unexpected type for path: {key!r}")
             raise TypeError(f"path must be str or re.Pattern, got: {path!r}")
@@ -303,7 +363,10 @@ class Router(UserDict, BaseRouter):
             if self._method_matches(key_method, ms):
                 logger.debug("regex_ hit: pattern=%r fn=%r", pattern, fn)
                 if gdict := m.groupdict():
-                    _fn, _params = fn, gdict
+                    _cvts = self._param_converters.get(pattern, {})
+                    _params = {k: _cvts[k](v) if k in _cvts else v
+                               for k, v in gdict.items()}
+                    _fn = fn
                     async def _inject(scope, receive, send,
                                       _fn=_fn, _params=_params):
                         scope.setdefault('path_params', {}).update(_params)
@@ -371,7 +434,8 @@ class Router(UserDict, BaseRouter):
     def route_fn(self,
                  methods: HTTPMethod | Iterable[HTTPMethod] = [HTTPMethod.GET],
                  path: str = '/',
-                 scheme: Scheme | Iterable[Scheme] = Scheme.http):
+                 scheme: Scheme | Iterable[Scheme] = Scheme.http,
+                 name: str | None = None):
 
         logger.debug('Router.route_fn() is called.')
         methods = _to_tuple(methods)
@@ -382,6 +446,7 @@ class Router(UserDict, BaseRouter):
         def register(fn):
             logger.debug(f'Router.route_fn.register() is called. {fn}')
 
+            original = fn
             if _is_simplified_handler(fn):
                 fn = _adapt_handler(fn, path)
 
@@ -393,11 +458,13 @@ class Router(UserDict, BaseRouter):
             logger.debug((path, methods, scheme))
             self[(path, methods, scheme)] = wrapper
 
+            self._record_route(path, original, name)
             return wrapper
 
         return register
 
-    def _register_chain(self, functions, path, methods, scheme):
+    def _register_chain(self, functions, path, methods, scheme,
+                        name: str | None = None, original_handler=None):
         """Build a middleware chain from *functions* and register it."""
         if not isinstance(functions, Iterable):
             raise TypeError(f'{functions} is not iterable.')
@@ -424,10 +491,93 @@ class Router(UserDict, BaseRouter):
             return await _ic(scope, receive, send)
 
         self[(path, methods, scheme)] = _chain_wrapper
+        self._record_route(path, original_handler or fns[-1], name)
+
+    def _record_route(self, path: str, handler: Callable, name: str | None) -> None:
+        """Store route metadata for validation and url_path_for."""
+        param_specs = {m.group(1): (m.group(2) or 'str')
+                       for m in self._param_pattern.finditer(path)}
+        if name is not None:
+            if name in self._named_routes:
+                raise ValueError(f"Duplicate route name {name!r}")
+            self._named_routes[name] = (path, param_specs)
+        self._route_info.append(_RouteInfo(
+            template=path,
+            handler=handler,
+            param_specs=param_specs,
+            name=name,
+        ))
+
+    def url_path_for(self, name: str, **params) -> str:
+        """Return the path for the named route with *params* substituted.
+
+        Raises KeyError if the name is unknown, ValueError if required params
+        are missing.
+        """
+        if name not in self._named_routes:
+            raise KeyError(f"No route named {name!r}")
+        template, specs = self._named_routes[name]
+        missing = set(specs) - set(params)
+        if missing:
+            raise ValueError(f"url_path_for({name!r}): missing params {sorted(missing)}")
+        return self._param_pattern.sub(lambda m: str(params[m.group(1)]), template)
+
+    def validate(self) -> None:
+        """Check all route definitions for consistency, then freeze the router.
+
+        Checks performed:
+        - Every converter spec names a known converter.
+        - Every path param appears in the handler signature (simplified handlers).
+        - Converter output type matches the handler's annotation (requires typeguard).
+
+        Raises ConfigurationError listing all violations found.
+        Sets self._frozen = True on success so no further routes can be added.
+        """
+        try:
+            from typeguard import check_type as _check_type
+            _has_typeguard = True
+        except ImportError:
+            _has_typeguard = False
+
+        errors: list[str] = []
+
+        for info in self._route_info:
+            for param_name, spec in info.param_specs.items():
+                if spec not in _CONVERTERS:
+                    errors.append(
+                        f"Route {info.template!r}: unknown converter {spec!r} "
+                        f"for {{{param_name}}}")
+                    continue
+
+                try:
+                    sig = inspect.signature(info.handler)
+                except (ValueError, TypeError):
+                    continue
+
+                p = sig.parameters.get(param_name)
+                if p is None or p.annotation is inspect.Parameter.empty:
+                    continue
+
+                if _has_typeguard:
+                    _regex_str, converter_fn = _CONVERTERS[spec]
+                    sample = converter_fn(_SAMPLE_INPUTS[spec])
+                    try:
+                        _check_type(sample, p.annotation)
+                    except Exception as exc:
+                        errors.append(
+                            f"Route {info.template!r} param {param_name!r}: "
+                            f"converter {spec!r} yields {type(sample).__name__!r} "
+                            f"but annotation is {p.annotation!r}: {exc}")
+
+        if errors:
+            raise ConfigurationError('\n'.join(errors))
+
+        self._frozen = True
 
     def route(self, methods: HTTPMethod | Iterable[HTTPMethod] = [HTTPMethod.GET],
               path: str = '/', scheme: Scheme | Iterable[Scheme] = Scheme.http,
-              functions: list = [], middlewares: list = []):
+              functions: list = [], middlewares: list = [],
+              name: str | None = None):
         """Register a function or middleware chain in the routing table.
 
         Three calling conventions:
@@ -437,24 +587,33 @@ class Router(UserDict, BaseRouter):
            returns None (same as before).
         3. ``middlewares=[...]`` — returns a decorator; the decorated handler is
            appended to the middleware list before the chain is registered.
+
+        ``name`` registers the route for use with ``url_path_for()``.
         """
         logger.debug('Router.route() is called. functions=%r middlewares=%r', functions, middlewares)
 
+        if self._frozen:
+            raise RuntimeError(
+                "Router is frozen — routes cannot be added after startup validation")
+
         if functions:
             fns = list(functions)
+            original = fns[-1]
             if _is_simplified_handler(fns[-1]):
                 fns[-1] = _adapt_handler(fns[-1], path)
-            self._register_chain(fns, path, methods, scheme)
+            self._register_chain(fns, path, methods, scheme,
+                                 name=name, original_handler=original)
             return lambda fn: fn
 
         if middlewares:
             def decorator(fn):
                 adapted = _adapt_handler(fn, path) if _is_simplified_handler(fn) else fn
-                self._register_chain(list(middlewares) + [adapted], path, methods, scheme)
+                self._register_chain(list(middlewares) + [adapted], path, methods, scheme,
+                                     name=name, original_handler=fn)
                 return fn
             return decorator
 
-        return self.route_fn(methods, path, scheme)
+        return self.route_fn(methods, path, scheme, name=name)
 
 
 class ErrorRouter:

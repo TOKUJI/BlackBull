@@ -59,8 +59,8 @@ pytest
 ### P3 — Features and enhancements
 
 - [ ] Worker processes / multiprocessing
-- [ ] URL reverse lookup (`url_for(name, **params)`)
-- [ ] Path parameter type converters (`int`, `uuid`, `path`, …)
+- [x] URL reverse lookup (`app.url_path_for(name, **params)`)
+- [x] Path parameter type converters (`int`, `uuid`, `path`, …)
 - [ ] Built-in CORS middleware
  
 ### P4 — Application framework
@@ -68,3 +68,4 @@ pytest
 - [ ] Caching
 - [ ] Built-in session middleware (server-side sessions)
 - [ ] OpenAPI / interactive API docs (Swagger UI)
+- [ ] beartype opt-in for call-time type checking on route handlers
