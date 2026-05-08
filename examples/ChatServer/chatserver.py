@@ -27,10 +27,11 @@ import pathlib
 import secrets
 import time
 import uuid
-from http import HTTPStatus
+from http import HTTPMethod, HTTPStatus
 
-from blackbull import WebSocketResponse
-from blackbull.server.server import ASGIServer
+from blackbull import BlackBull, JSONResponse, Response, WebSocketResponse, cookie_header
+from blackbull.request import parse_cookies, read_body
+from blackbull.utils import Scheme
 
 _TEMPLATES = pathlib.Path(__file__).parent / 'templates'
 
@@ -131,97 +132,62 @@ state = ChatState()
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _parse_cookie(scope) -> dict[str, str]:
-    raw = scope['headers'].get(b'cookie')
-    result = {}
-    if not raw:
-        return result
-    for part in raw.split(b';'):
-        k, _, v = part.strip().partition(b'=')
-        result[k.strip().decode(errors='replace')] = v.strip().decode(errors='replace')
-    return result
-
-
 def _session_from_scope(scope) -> Session | None:
-    cookies = _parse_cookie(scope)
+    cookies = parse_cookies(scope)
     sid = cookies.get('session_id', '')
     return state.get(sid) if sid else None
-
-
-async def _read_body(receive) -> bytes:
-    body = b''
-    while True:
-        event = await receive()
-        body += event.get('body', b'')
-        if not event.get('more_body', False):
-            break
-    return body
-
-
-def _set_cookie_header(name: str, value: str, path: str = '/',
-                       http_only: bool = True) -> tuple[bytes, bytes]:
-    flags = '; HttpOnly' if http_only else ''
-    return (b'set-cookie', f'{name}={value}; Path={path}{flags}; SameSite=Lax'.encode())
-
-
-async def _send_html(send, html: bytes, status: HTTPStatus = HTTPStatus.OK,
-                     extra_headers: list | None = None):
-    headers = [(b'content-type', b'text/html; charset=utf-8')]
-    if extra_headers:
-        headers.extend(extra_headers)
-    await send({
-        'type': 'http.response.start',
-        'status': status.value,
-        'headers': headers,
-    })
-    await send({'type': 'http.response.body', 'body': html, 'more_body': False})
-
-
-async def _send_json(send, data, status: HTTPStatus = HTTPStatus.OK,
-                     extra_headers: list | None = None):
-    body = json.dumps(data).encode()
-    headers = [(b'content-type', b'application/json')]
-    if extra_headers:
-        headers.extend(extra_headers)
-    await send({
-        'type': 'http.response.start',
-        'status': status.value,
-        'headers': headers,
-    })
-    await send({'type': 'http.response.body', 'body': body, 'more_body': False})
 
 
 def _sse_encode(event: dict) -> bytes:
     return b'data: ' + json.dumps(event).encode() + b'\n\n'
 
 # ---------------------------------------------------------------------------
+# BlackBull application
+# ---------------------------------------------------------------------------
+
+app = BlackBull()
+
+
+@app.on('app_startup')
+async def _on_startup(_event):
+    logger.info('Chat server starting up')
+
+
+@app.on('app_shutdown')
+async def _on_shutdown(_event):
+    logger.info('Chat server shutting down')
+
+
+# ---------------------------------------------------------------------------
 # Route handlers
 # ---------------------------------------------------------------------------
 
+@app.route(methods=[HTTPMethod.GET], path='/')
 async def handle_login_page(scope, receive, send):  # noqa: ARG001
-    await _send_html(send, _load('login.html'))
+    await send(Response(_load('login.html')))
 
 
+@app.route(methods=[HTTPMethod.POST], path='/login')
 async def handle_do_login(scope, receive, send):
-    body = await _read_body(receive)
+    body = await read_body(receive)
     try:
         data = json.loads(body)
     except (json.JSONDecodeError, ValueError):
-        await _send_json(send, {'error': 'Invalid JSON'}, HTTPStatus.BAD_REQUEST)
+        await send(JSONResponse({'error': 'Invalid JSON'}, status=HTTPStatus.BAD_REQUEST))
         return
 
     username = str(data.get('username', '')).strip()
     comm_type = str(data.get('method', 'poll'))
 
     if not username:
-        await _send_json(send, {'error': 'Username required'}, HTTPStatus.BAD_REQUEST)
+        await send(JSONResponse({'error': 'Username required'}, status=HTTPStatus.BAD_REQUEST))
         return
     if comm_type not in ('websocket', 'sse', 'poll'):
-        await _send_json(send, {'error': 'Unsupported method'}, HTTPStatus.BAD_REQUEST)
+        await send(JSONResponse({'error': 'Unsupported method'}, status=HTTPStatus.BAD_REQUEST))
         return
 
     # Check for existing valid session (reconnect)
-    cookies = _parse_cookie(scope)
+    cookies = parse_cookies(scope)
     existing_sid = cookies.get('session_id', '')
     session = state.get(existing_sid) if existing_sid else None
 
@@ -231,47 +197,47 @@ async def handle_do_login(scope, receive, send):
         session.comm_type = comm_type
 
     extra = [
-        _set_cookie_header('session_id', session.session_id, http_only=True),
-        _set_cookie_header('chat_method', comm_type, http_only=False),
+        cookie_header('session_id', session.session_id, http_only=True),
+        cookie_header('chat_method', comm_type, http_only=False),
     ]
-    await _send_json(send, {'ok': True}, extra_headers=extra)
+    await send(JSONResponse({'ok': True}, headers=extra))
 
 
+@app.route(methods=[HTTPMethod.GET], path='/chat')
 async def handle_chat_page(scope, receive, send):
     session = _session_from_scope(scope)
     if session is None:
-        headers = [(b'location', b'/')]
-        await send({'type': 'http.response.start', 'status': 302, 'headers': headers})
-        await send({'type': 'http.response.body', 'body': b'', 'more_body': False})
+        await send(Response(b'', status=HTTPStatus.FOUND, headers=[(b'location', b'/')]))
         return
-    await _send_html(send, _load('chat.html'))
+    await send(Response(_load('chat.html')))
 
 
+@app.route(methods=[HTTPMethod.POST], path='/send')
 async def handle_send(scope, receive, send):
     session = _session_from_scope(scope)
     if session is None:
-        await _send_json(send, {'error': 'Unauthorized'}, HTTPStatus.UNAUTHORIZED)
+        await send(JSONResponse({'error': 'Unauthorized'}, status=HTTPStatus.UNAUTHORIZED))
         return
 
-    body = await _read_body(receive)
+    body = await read_body(receive)
     try:
         data = json.loads(body)
     except (json.JSONDecodeError, ValueError):
-        await _send_json(send, {'error': 'Invalid JSON'}, HTTPStatus.BAD_REQUEST)
+        await send(JSONResponse({'error': 'Invalid JSON'}, status=HTTPStatus.BAD_REQUEST))
         return
 
     text = str(data.get('message', '')).strip()
     if not text:
-        await _send_json(send, {'error': 'Empty message'}, HTTPStatus.BAD_REQUEST)
+        await send(JSONResponse({'error': 'Empty message'}, status=HTTPStatus.BAD_REQUEST))
         return
 
     msg = await state.add_message(session, text)
     await state.broadcast({'type': 'message', 'payload': msg})
-    await _send_json(send, {'ok': True})
+    await send(JSONResponse({'ok': True}))
 
 
+@app.route(methods=[HTTPMethod.GET], path='/ws', scheme=Scheme.websocket)
 async def handle_websocket(scope, receive, send):
-    # Receive websocket.connect
     event = await receive()
     if event.get('type') != 'websocket.connect':
         return
@@ -285,7 +251,6 @@ async def handle_websocket(scope, receive, send):
     session.connected = True
     session.disconnect_time = None
 
-    # Send history + join event
     history = {'type': 'history', 'payload': list(state.messages)}
     await send(WebSocketResponse(history))
 
@@ -301,7 +266,6 @@ async def handle_websocket(scope, receive, send):
                 evt = await asyncio.wait_for(session.queue.get(), timeout=30)
                 await send(WebSocketResponse(evt))
             except asyncio.TimeoutError:
-                # Send a ping-like keepalive (empty message won't confuse client)
                 pass
             except Exception:
                 break
@@ -309,8 +273,8 @@ async def handle_websocket(scope, receive, send):
     async def _receiver():
         while True:
             event = await receive()
-            t = event.get('type', '')
-            if t == 'websocket.disconnect':
+            if event.get('type', '') == 'websocket.disconnect':
+                session.connected = False  # unblock _sender without waiting for its timeout
                 break
 
     try:
@@ -325,18 +289,18 @@ async def handle_websocket(scope, receive, send):
         await state.broadcast(leave_event)
 
 
+@app.route(methods=[HTTPMethod.GET], path='/sse')
 async def handle_sse(scope, receive, send):
     if scope.get('http_version') != '2':
-        await _send_json(
-            send,
+        await send(JSONResponse(
             {'error': 'SSE requires HTTP/2. Connect via HTTPS with a client that supports HTTP/2.'},
-            HTTPStatus.BAD_REQUEST,
-        )
+            status=HTTPStatus.BAD_REQUEST,
+        ))
         return
 
     session = _session_from_scope(scope)
     if session is None:
-        await _send_json(send, {'error': 'Unauthorized'}, HTTPStatus.UNAUTHORIZED)
+        await send(JSONResponse({'error': 'Unauthorized'}, status=HTTPStatus.UNAUTHORIZED))
         return
 
     await send({
@@ -352,7 +316,6 @@ async def handle_sse(scope, receive, send):
     session.connected = True
     session.disconnect_time = None
 
-    # Send history
     history = {'type': 'history', 'payload': list(state.messages)}
     await send({'type': 'http.response.body', 'body': _sse_encode(history), 'more_body': True})
 
@@ -362,31 +325,41 @@ async def handle_sse(scope, receive, send):
     }
     await state.broadcast(join_event)
 
-    try:
+    async def _watch_disconnect():
         while True:
+            event = await receive()
+            if event.get('type') == 'http.disconnect':
+                session.connected = False  # unblock _push without waiting for its timeout
+                break
+
+    async def _push():
+        while session.connected:
             try:
                 evt = await asyncio.wait_for(session.queue.get(), timeout=25)
                 await send({'type': 'http.response.body', 'body': _sse_encode(evt), 'more_body': True})
             except asyncio.TimeoutError:
-                # Send SSE comment as keepalive
                 await send({'type': 'http.response.body', 'body': b': keepalive\n\n', 'more_body': True})
-    except Exception:
-        pass
-    finally:
-        session.connected = False
-        session.disconnect_time = time.monotonic()
-        leave_event = {
-            'type': 'user_leave',
-            'payload': {'username': session.username, 'participants': state.participants()},
-        }
-        await state.broadcast(leave_event)
-        await send({'type': 'http.response.body', 'body': b'', 'more_body': False})
+            except Exception:
+                session.connected = False
+                break
+
+    await asyncio.gather(_watch_disconnect(), _push())
+
+    session.connected = False
+    session.disconnect_time = time.monotonic()
+    leave_event = {
+        'type': 'user_leave',
+        'payload': {'username': session.username, 'participants': state.participants()},
+    }
+    await state.broadcast(leave_event)
+    await send({'type': 'http.response.body', 'body': b'', 'more_body': False})
 
 
+@app.route(methods=[HTTPMethod.GET], path='/poll')
 async def handle_poll(scope, receive, send):
     session = _session_from_scope(scope)
     if session is None:
-        await _send_json(send, {'error': 'Unauthorized'}, HTTPStatus.UNAUTHORIZED)
+        await send(JSONResponse({'error': 'Unauthorized'}, status=HTTPStatus.UNAUTHORIZED))
         return
 
     was_connected = session.connected
@@ -396,7 +369,6 @@ async def handle_poll(scope, receive, send):
     events = []
 
     if not was_connected:
-        # First connection: send history + join
         events.append({'type': 'history', 'payload': list(state.messages)})
         join_event = {
             'type': 'user_join',
@@ -405,26 +377,25 @@ async def handle_poll(scope, receive, send):
         await state.broadcast(join_event)
         events.append(join_event)
 
-    # Drain any queued events immediately
     while not session.queue.empty():
         events.append(session.queue.get_nowait())
 
     if not events:
-        # Hold the connection waiting for the next event
         try:
             evt = await asyncio.wait_for(session.queue.get(), timeout=POLL_TIMEOUT)
             events.append(evt)
-            # Drain any extras that arrived while we were waiting
             while not session.queue.empty():
                 events.append(session.queue.get_nowait())
         except asyncio.TimeoutError:
             pass
 
     session.last_seen = time.monotonic()
-    await _send_json(send, events)
+    await send(JSONResponse(events))
 
+
+@app.route(methods=[HTTPMethod.POST], path='/logout')
 async def handle_logout(scope, receive, send):  # noqa: ARG001
-    cookies = _parse_cookie(scope)
+    cookies = parse_cookies(scope)
     sid = cookies.get('session_id', '')
     if sid:
         session = await state.remove(sid)
@@ -436,52 +407,11 @@ async def handle_logout(scope, receive, send):  # noqa: ARG001
             await state.broadcast(leave_event)
 
     expire = 'Thu, 01 Jan 1970 00:00:00 GMT'
-    await _send_json(send, {'ok': True}, extra_headers=[
+    await send(JSONResponse({'ok': True}, headers=[
         (b'set-cookie', f'session_id=; Path=/; Expires={expire}; HttpOnly; SameSite=Lax'.encode()),
         (b'set-cookie', f'chat_method=; Path=/; Expires={expire}; SameSite=Lax'.encode()),
-    ])
+    ]))
 
-
-# ---------------------------------------------------------------------------
-# ASGI application
-# ---------------------------------------------------------------------------
-
-ROUTES: dict[tuple[str, str], object] = {
-    ('GET',  '/'):        handle_login_page,
-    ('POST', '/login'):   handle_do_login,
-    ('GET',  '/chat'):    handle_chat_page,
-    ('POST', '/send'):    handle_send,
-    ('POST', '/logout'):  handle_logout,
-    ('GET',  '/sse'):     handle_sse,
-    ('GET',  '/poll'):    handle_poll,
-}
-
-
-async def app(scope, receive, send):
-    t = scope.get('type')
-
-    if t == 'lifespan':
-        while True:
-            event = await receive()
-            if event['type'] == 'lifespan.startup':
-                logger.info('Chat server starting up')
-                await send({'type': 'lifespan.startup.complete'})
-            elif event['type'] == 'lifespan.shutdown':
-                logger.info('Chat server shutting down')
-                await send({'type': 'lifespan.shutdown.complete'})
-                return
-
-    elif t == 'websocket':
-        await handle_websocket(scope, receive, send)
-
-    elif t == 'http':
-        method = scope.get('method', 'GET').upper()
-        path = scope.get('path', '/')
-        handler = ROUTES.get((method, path))
-        if handler is None:
-            await _send_json(send, {'error': 'Not Found'}, HTTPStatus.NOT_FOUND)
-        else:
-            await handler(scope, receive, send)
 
 # ---------------------------------------------------------------------------
 # Entry point
@@ -494,15 +424,12 @@ if __name__ == '__main__':
     parser.add_argument('--key',  default=None, help='TLS private key file')
     args = parser.parse_args()
 
-    server = ASGIServer(app, certfile=args.cert, keyfile=args.key)
-    server.open_socket(args.port)
-
     proto = 'https' if args.cert else 'http'
     logger.info('Listening on %s://localhost:%d', proto, args.port)
     if not args.cert:
         logger.info('TLS not configured — SSE (HTTP/2) unavailable; WebSocket and Long Polling work.')
 
     try:
-        asyncio.run(server.run(port=args.port))
+        asyncio.run(app.run(certfile=args.cert, keyfile=args.key, port=args.port))
     except KeyboardInterrupt:
         logger.info('Stopped.')

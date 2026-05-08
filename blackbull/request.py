@@ -21,10 +21,11 @@ async def read_body(receive) -> bytes:
 def parse_cookies(scope) -> dict[str, str]:
     """Parse the ``Cookie`` request header from an ASGI scope into a dict.
 
-    HTTP/2 sends each cookie as a separate header field (RFC 7540 §8.1.2.5);
-    this function concatenates all ``cookie`` fields before parsing so that
-    HTTP/1.1 (one combined field) and HTTP/2 (multiple fields) are handled
-    identically.
+    Works identically for HTTP/1.1, HTTP/2, and WebSocket scopes.
+    HTTP/1.1 sends a single combined ``Cookie`` header; HTTP/2 may split it
+    into multiple fields (RFC 7540 §8.1.2.5).  This function uses
+    ``Headers.getlist`` to collect all ``cookie`` fields before joining and
+    parsing, so both wire formats produce the same result.
     """
     # getlist returns [(name, value), ...]; join all values with "; "
     cookie_pairs = scope['headers'].getlist(b'cookie')
