@@ -554,6 +554,84 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#35-typed-routes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        §3.5 Typed Routes
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="§3.5 Typed Routes">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#path-parameter-converters" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Path parameter converters
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#url-reverse-lookup-url_path_for" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        URL reverse lookup — url_path_for
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#startup-validation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Startup validation
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Startup validation">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#example-validation-passes-examplestyped_routes_okpy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Example — validation passes (examples/typed_routes_ok.py)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#example-validation-fails-examplestyped_routes_failpy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Example — validation fails (examples/typed_routes_fail.py)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#4-middleware" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3319,6 +3397,84 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#35-typed-routes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        §3.5 Typed Routes
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="§3.5 Typed Routes">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#path-parameter-converters" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Path parameter converters
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#url-reverse-lookup-url_path_for" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        URL reverse lookup — url_path_for
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#startup-validation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Startup validation
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Startup validation">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#example-validation-passes-examplestyped_routes_okpy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Example — validation passes (examples/typed_routes_ok.py)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#example-validation-fails-examplestyped_routes_failpy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Example — validation fails (examples/typed_routes_fail.py)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#4-middleware" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4747,6 +4903,125 @@ async def sse(scope, receive, send):
         })
     # Signal end of stream
     await send({'type': 'http.response.body', 'body': b'', 'more_body': False})
+</code></pre>
+<hr />
+<h2 id="35-typed-routes">§3.5  Typed Routes</h2>
+<h3 id="path-parameter-converters">Path parameter converters</h3>
+<p>Append <code>:converter</code> to a path parameter to control both the URL pattern and the Python type injected into the handler:</p>
+<table>
+<thead>
+<tr>
+<th>Syntax</th>
+<th>Regex matched</th>
+<th>Python type</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>{name}</code> or <code>{name:str}</code></td>
+<td><code>[^/]+</code></td>
+<td><code>str</code></td>
+</tr>
+<tr>
+<td><code>{id:int}</code></td>
+<td><code>-?[0-9]+</code></td>
+<td><code>int</code></td>
+</tr>
+<tr>
+<td><code>{uid:uuid}</code></td>
+<td>UUID hex pattern</td>
+<td><code>uuid.UUID</code></td>
+</tr>
+<tr>
+<td><code>{rest:path}</code></td>
+<td><code>.+</code> (matches <code>/</code>)</td>
+<td><code>str</code></td>
+</tr>
+</tbody>
+</table>
+<pre><code class="language-python">import uuid
+
+@app.route(path='/items/{id:int}', methods=HTTPMethod.GET)
+async def get_item(id: int):
+    return {'id': id}            # id is already int, not a string
+
+@app.route(path='/users/{uid:uuid}', methods=HTTPMethod.GET)
+async def get_user(uid: uuid.UUID):
+    return {'uid': str(uid)}
+
+@app.route(path='/files/{rest:path}', methods=HTTPMethod.GET)
+async def get_file(rest: str):   # rest may contain slashes
+    return {'path': rest}
+</code></pre>
+<h3 id="url-reverse-lookup-url_path_for">URL reverse lookup — <code>url_path_for</code></h3>
+<p>Register a route with a <code>name=</code> keyword, then build its path from parameters:</p>
+<pre><code class="language-python">@app.route(path='/items/{id:int}', methods=HTTPMethod.GET, name='item-detail')
+async def get_item(id: int):
+    return {'id': id}
+
+app.url_path_for('item-detail', id=42)   # → '/items/42'
+</code></pre>
+<p><code>url_path_for</code> raises <code>KeyError</code> for unknown names and <code>ValueError</code> when required parameters are missing.</p>
+<h3 id="startup-validation">Startup validation</h3>
+<p><code>app.run()</code> and the ASGI lifespan <code>startup</code> event both call <code>Router.validate()</code> before accepting connections. Validation checks:</p>
+<ul>
+<li>Every <code>{param:converter}</code> uses a known converter name.</li>
+<li>Every path parameter appears in the handler's signature.</li>
+<li>When <code>typeguard</code> is installed: the converter's output type matches the handler's annotation (e.g. <code>{id:int}</code> with <code>id: str</code> is an error).</li>
+</ul>
+<p>On failure, a <code>ConfigurationError</code> is raised (or sent as <code>lifespan.startup.failed</code>) listing every violated route. On success, the router is <strong>frozen</strong> — further route registration raises <code>RuntimeError</code>.</p>
+<h4 id="example-validation-passes-examplestyped_routes_okpy">Example — validation passes (<a href="../examples/typed_routes_ok.py"><code>examples/typed_routes_ok.py</code></a>)</h4>
+<pre><code class="language-python">import asyncio
+import uuid
+from http import HTTPMethod
+from blackbull import BlackBull
+
+app = BlackBull()
+
+@app.route(path='/greet/{name:str}', methods=HTTPMethod.GET, name='greet')
+async def greet(name: str):
+    return f'Hello, {name}!'
+
+@app.route(path='/double/{n:int}', methods=HTTPMethod.GET, name='double')
+async def double(n: int):
+    return {'input': n, 'result': n * 2}
+
+@app.route(path='/info/{uid:uuid}', methods=HTTPMethod.GET, name='info')
+async def info(uid: uuid.UUID):
+    return {'uuid': str(uid), 'version': uid.version}
+
+if __name__ == '__main__':
+    print(app.url_path_for('greet', name='Alice'))   # /greet/Alice
+    print(app.url_path_for('double', n=21))           # /double/21
+    asyncio.run(app.run(port=8000))
+</code></pre>
+<p>Every converter type matches its handler annotation, so <code>validate()</code> succeeds and the server starts.</p>
+<h4 id="example-validation-fails-examplestyped_routes_failpy">Example — validation fails (<a href="../examples/typed_routes_fail.py"><code>examples/typed_routes_fail.py</code></a>)</h4>
+<pre><code class="language-python">import asyncio
+from http import HTTPMethod
+from blackbull import BlackBull
+from blackbull.router import ConfigurationError
+
+app = BlackBull()
+
+@app.route(path='/greet/{name:str}', methods=HTTPMethod.GET)
+async def greet(name: str):
+    return f'Hello, {name}!'
+
+@app.route(path='/double/{n:int}', methods=HTTPMethod.GET)
+async def double(n: str):      # BUG: converter is int, annotation is str
+    return f'double of {n}'
+
+if __name__ == '__main__':
+    try:
+        asyncio.run(app.run(port=8000))
+    except* ConfigurationError as eg:
+        for exc in eg.exceptions:
+            print(f'ConfigurationError: {exc}')
+</code></pre>
+<p>Output before the server binds any port:</p>
+<pre><code>ConfigurationError: Route '/double/{n:int}' param 'n': converter 'int' yields 'int'
+but annotation is &lt;class 'str'&gt;: int is not an instance of str
 </code></pre>
 <hr />
 <h2 id="4-middleware">§4  Middleware</h2>

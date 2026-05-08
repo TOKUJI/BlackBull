@@ -608,6 +608,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.app.BlackBull.url_path_for" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        url_path_for
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.app.BlackBull.use" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2058,6 +2069,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.app.BlackBull.url_path_for" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        url_path_for
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.app.BlackBull.use" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2626,7 +2648,7 @@ async def open_db():
 
 
 <h4 id="blackbull.app.BlackBull.route" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">route</span><span class="p">(</span><span class="n">methods</span><span class="o">=</span><span class="p">[</span><span class="n">HTTPMethod</span><span class="o">.</span><span class="n">GET</span><span class="p">],</span> <span class="n">path</span><span class="o">=</span><span class="s1">&#39;/&#39;</span><span class="p">,</span> <span class="n">scheme</span><span class="o">=</span><span class="n">Scheme</span><span class="o">.</span><span class="n">http</span><span class="p">,</span> <span class="n">functions</span><span class="o">=</span><span class="p">[],</span> <span class="n">middlewares</span><span class="o">=</span><span class="p">[])</span></code>
+            <code class="highlight language-python"><span class="n">route</span><span class="p">(</span><span class="n">methods</span><span class="o">=</span><span class="p">[</span><span class="n">HTTPMethod</span><span class="o">.</span><span class="n">GET</span><span class="p">],</span> <span class="n">path</span><span class="o">=</span><span class="s1">&#39;/&#39;</span><span class="p">,</span> <span class="n">scheme</span><span class="o">=</span><span class="n">Scheme</span><span class="o">.</span><span class="n">http</span><span class="p">,</span> <span class="n">functions</span><span class="o">=</span><span class="p">[],</span> <span class="n">middlewares</span><span class="o">=</span><span class="p">[],</span> <span class="n">name</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
 
 </h4>
 
@@ -2652,6 +2674,24 @@ async def open_db():
     <div class="doc doc-contents ">
 
         <p>Serve static files from <em>root_dir</em> under <em>url_prefix</em> via global middleware.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.app.BlackBull.url_path_for" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">url_path_for</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="o">/</span><span class="p">,</span> <span class="o">**</span><span class="n">params</span><span class="p">)</span></code>
+
+</h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Return the path for the named route with <em>params</em> substituted.</p>
 
 
     </div>

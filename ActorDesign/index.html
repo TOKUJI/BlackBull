@@ -1960,8 +1960,8 @@
 
 
 <h1 id="blackbull-level-a-actor-model-design">BlackBull — Level A Actor Model Design</h1>
-<p><strong>Status</strong>: Draft — Phase 5 / M4<br />
-<strong>Prerequisite completed</strong>: Phase 3 (examples migration), Phase 4 (docs)</p>
+<p><strong>Status</strong>: Implemented — Phase 6 complete (commit 7da77a6)<br />
+<strong>Prerequisite completed</strong>: Phase 3 (examples migration), Phase 4 (docs), Phase 6 (Actor model)</p>
 <hr />
 <h2 id="goal">Goal</h2>
 <p>Refactor BlackBull's internal components into an Actor-model architecture (Level A),
@@ -2256,18 +2256,16 @@ class WindowUpdate(Message):       # ask-pattern reply
 </table>
 <hr />
 <h2 id="migration-path">Migration Path</h2>
-<p>Phase 5 is <strong>design and specification only</strong>. No production code changes in this phase.</p>
-<p>Suggested implementation order (Phase 6+):</p>
+<p>Phase 6 implemented this design in order, keeping the full test suite green at each step:</p>
 <ol>
-<li>Define <code>Message</code> dataclasses and the <code>Actor</code> base class (<code>blackbull/actor.py</code>).</li>
-<li>Implement <code>EventAggregator</code> with stubs that forward to existing <code>EventDispatcher</code>.</li>
-<li>Extract <code>HTTP1Actor</code> from the current <code>HTTP1Handler</code> — keep existing tests green.</li>
-<li>Extract <code>StreamActor</code> + <code>HTTP2Actor</code> from <code>HTTP2Handler</code>.</li>
-<li>Introduce <code>ConnectionActor</code> wrapping the above two.</li>
-<li>Introduce <code>ServerActor</code> wrapping <code>ASGIServer</code>.</li>
-<li>Delete the old handler classes once all tests pass.</li>
+<li>✅ Defined <code>Message</code> dataclasses and the <code>Actor</code> base class (<code>blackbull/actor.py</code>).</li>
+<li>✅ Implemented <code>EventAggregator</code> forwarding to <code>EventDispatcher</code>.</li>
+<li>✅ Extracted <code>HTTP1Actor</code> + <code>RequestActor</code>; transport metadata via explicit keyword args.</li>
+<li>✅ Extracted <code>StreamActor</code> + <code>HTTP2Actor</code>; streams run in <code>asyncio.TaskGroup</code>.</li>
+<li>✅ Introduced <code>WebSocketActor</code> + <code>ConnectionActor</code>; added <code>on_connection_accepted</code>.</li>
+<li>✅ <code>ServerActor</code> role absorbed by <code>ASGIServer</code> + <code>ConnectionActor</code> (no separate class needed).</li>
+<li>✅ Deleted <code>HTTP11Handler</code>, <code>HTTP2Handler</code>, <code>WebSocketHandler</code>.</li>
 </ol>
-<p>Each step keeps the full test suite green before proceeding to the next.</p>
 <hr />
 <h2 id="resolved-questions">Resolved Questions</h2>
 <ol>

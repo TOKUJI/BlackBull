@@ -1345,6 +1345,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#blackbull.router.ConfigurationError" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ConfigurationError
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.router.ErrorRouter" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1455,6 +1466,28 @@
     <span class="md-ellipsis">
       
         route
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.router.Router.url_path_for" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        url_path_for
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.router.Router.validate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        validate
       
     </span>
   </a>
@@ -1953,6 +1986,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#blackbull.router.ConfigurationError" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ConfigurationError
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.router.ErrorRouter" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2069,6 +2113,28 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#blackbull.router.Router.url_path_for" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        url_path_for
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.router.Router.validate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        validate
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -2116,10 +2182,11 @@
 
         <p>URL routing for BlackBull.</p>
 <p><code>Router</code> maps <code>(path, method, scheme)</code> triples to handler chains.  Paths
-support exact strings, regex patterns, and <code>{name}</code> parameter syntax;
-<code>ErrorRouter</code> does the same for HTTPStatus codes and exception classes.
-<code>_register_chain</code> composes per-route middlewares with <code>functools.partial</code>
-so each middleware receives <code>call_next</code> bound to the next link.</p>
+support exact strings, regex patterns, and <code>{name}</code> / <code>{name:converter}</code>
+parameter syntax; <code>ErrorRouter</code> does the same for HTTPStatus codes and
+exception classes.  <code>_register_chain</code> composes per-route middlewares with
+<code>functools.partial</code> so each middleware receives <code>call_next</code> bound to the
+next link.</p>
 <p><code>RouteGroup</code> is defined in :mod:<code>blackbull.app</code> to avoid a circular
 import; this module re-exports it lazily through <code>__getattr__</code>.</p>
 
@@ -2141,6 +2208,37 @@ import; this module re-exports it lazily through <code>__getattr__</code>.</p>
 
 
 
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="blackbull.router.ConfigurationError" class="doc doc-heading">
+            <code>ConfigurationError</code>
+
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="Exception">Exception</span></code></p>
+
+
+
+        <p>Raised by Router.validate() when route definitions are inconsistent.</p>
+
+
+
+
+
+
+
+
+
+    </div>
+
+</div>
 
 <div class="doc doc-object doc-class">
 
@@ -2442,7 +2540,8 @@ Search both self.data and self.regex_.</p>
 
         <p>If key[0] is a str:
     - Store it in self.data under the normalised (path, methods, scheme) key.
-    - Also compile a regex from {param} placeholders and store it in self.regex_.</p>
+    - Also compile a regex from {param} / {param:converter} placeholders and
+      store it in self.regex_ together with per-param converter functions.</p>
 <p>If key[0] is a re.Pattern:
     - Store it in self.regex_ only.</p>
 <p>When scheme is omitted it is stored as _ANY_SCHEME,
@@ -2457,7 +2556,7 @@ which matches any scheme at lookup time.</p>
 
 
 <h4 id="blackbull.router.Router.route" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">route</span><span class="p">(</span><span class="n">methods</span><span class="o">=</span><span class="p">[</span><span class="n">HTTPMethod</span><span class="o">.</span><span class="n">GET</span><span class="p">],</span> <span class="n">path</span><span class="o">=</span><span class="s1">&#39;/&#39;</span><span class="p">,</span> <span class="n">scheme</span><span class="o">=</span><span class="n">Scheme</span><span class="o">.</span><span class="n">http</span><span class="p">,</span> <span class="n">functions</span><span class="o">=</span><span class="p">[],</span> <span class="n">middlewares</span><span class="o">=</span><span class="p">[])</span></code>
+            <code class="highlight language-python"><span class="n">route</span><span class="p">(</span><span class="n">methods</span><span class="o">=</span><span class="p">[</span><span class="n">HTTPMethod</span><span class="o">.</span><span class="n">GET</span><span class="p">],</span> <span class="n">path</span><span class="o">=</span><span class="s1">&#39;/&#39;</span><span class="p">,</span> <span class="n">scheme</span><span class="o">=</span><span class="n">Scheme</span><span class="o">.</span><span class="n">http</span><span class="p">,</span> <span class="n">functions</span><span class="o">=</span><span class="p">[],</span> <span class="n">middlewares</span><span class="o">=</span><span class="p">[],</span> <span class="n">name</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
 
 </h4>
 
@@ -2472,6 +2571,51 @@ which matches any scheme at lookup time.</p>
    returns None (same as before).
 3. <code>middlewares=[...]</code> — returns a decorator; the decorated handler is
    appended to the middleware list before the chain is registered.</p>
+<p><code>name</code> registers the route for use with <code>url_path_for()</code>.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.router.Router.url_path_for" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">url_path_for</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="o">/</span><span class="p">,</span> <span class="o">**</span><span class="n">params</span><span class="p">)</span></code>
+
+</h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Return the path for the named route with <em>params</em> substituted.</p>
+<p>Raises KeyError if the name is unknown, ValueError if required params
+are missing.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.router.Router.validate" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">validate</span><span class="p">()</span></code>
+
+</h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Check all route definitions for consistency, then freeze the router.</p>
+<p>Checks performed:
+- Every converter spec names a known converter.
+- Every path param appears in the handler signature (simplified handlers).
+- Converter output type matches the handler's annotation (requires typeguard).</p>
+<p>Raises ConfigurationError listing all violations found.
+Sets self._frozen = True on success so no further routes can be added.</p>
 
 
     </div>
