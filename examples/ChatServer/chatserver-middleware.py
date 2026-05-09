@@ -149,26 +149,48 @@ def _sse_encode(event: dict) -> bytes:
 # ---------------------------------------------------------------------------
 
 async def session_mw(scope, receive, send, call_next):
-    """Resolve the session cookie → Session; reject with 401 if missing."""
-    cookies = parse_cookies(scope)
-    sid = cookies.get('session_id', '')
-    session = state.get(sid) if sid else None
-    if session is None:
-        await send(JSONResponse({'error': 'Unauthorized'}, status=HTTPStatus.UNAUTHORIZED))
-        return
+    """Resolve session cookie → scope['session']; reject unauthenticated requests.
+
+    HTTP:      sends 401 JSON response.
+    WebSocket: consumes the connect event, then closes with 4401.
+    """
+    if scope.get('type') == 'websocket':
+        event = await receive()
+        if event.get('type') != 'websocket.connect':
+            return
+        cookies = parse_cookies(scope)
+        sid = cookies.get('session_id', '')
+        session = state.get(sid) if sid else None
+        if session is None:
+            await send({'type': 'websocket.close', 'code': 4401})
+            return
+    else:
+        cookies = parse_cookies(scope)
+        sid = cookies.get('session_id', '')
+        session = state.get(sid) if sid else None
+        if session is None:
+            await send(JSONResponse({'error': 'Unauthorized'}, status=HTTPStatus.UNAUTHORIZED))
+            return
     scope['session'] = session
     await call_next(scope, receive, send)
 
 
 async def json_body_mw(scope, receive, send, call_next):
-    """Read and parse the request body as JSON; reject with 400 on error."""
+    """Parse JSON body → scope['json']; wrap send so bare dicts become JSON responses."""
     raw = await read_body(receive)
     try:
         scope['json'] = json.loads(raw)
     except (json.JSONDecodeError, ValueError):
         await send(JSONResponse({'error': 'Invalid JSON'}, status=HTTPStatus.BAD_REQUEST))
         return
-    await call_next(scope, receive, send)
+
+    async def json_send(event):
+        if isinstance(event, dict) and 'type' not in event:
+            await send(JSONResponse(event))
+        else:
+            await send(event)
+
+    await call_next(scope, receive, json_send)
 
 # ---------------------------------------------------------------------------
 # Application
@@ -259,7 +281,7 @@ async def handle_send(scope, receive, send):
 
     msg = await state.add_message(session, text)
     await state.broadcast({'type': 'message', 'payload': msg})
-    await send(JSONResponse({'ok': True}))
+    await send({'ok': True})
 
 
 @protected.route(methods=[HTTPMethod.POST], path='/logout')
@@ -368,21 +390,9 @@ async def handle_poll(scope, receive, send):  # noqa: ARG001
     await send(JSONResponse(events))
 
 
-@app.route(methods=[HTTPMethod.GET], path='/ws', scheme=Scheme.websocket)
+@protected.route(methods=[HTTPMethod.GET], path='/ws', scheme=Scheme.websocket)
 async def handle_websocket(scope, receive, send):
-    # WebSocket auth: close with 4401 instead of 401, so it's handled inline
-    # rather than via session_mw (which sends HTTP 401, invalid for WS upgrade).
-    event = await receive()
-    if event.get('type') != 'websocket.connect':
-        return
-
-    cookies = parse_cookies(scope)
-    sid = cookies.get('session_id', '')
-    session = state.get(sid) if sid else None
-    if session is None:
-        await send({'type': 'websocket.close', 'code': 4401})
-        return
-
+    session: Session = scope['session']
     await send({'type': 'websocket.accept'})
     session.connected = True
     session.disconnect_time = None
@@ -409,7 +419,11 @@ async def handle_websocket(scope, receive, send):
     async def _receiver():
         while True:
             evt = await receive()
-            if evt.get('type', '') == 'websocket.disconnect':
+            if evt.get('type') == 'websocket.receive':
+                logger.info('WebSocket message user=%s text=%r bytes=%r',
+                            session.username, evt.get('text'), evt.get('bytes'))
+            elif evt.get('type', '') == 'websocket.disconnect':
+                session.connected = False   # unblock _sender immediately
                 break
 
     try:
@@ -436,7 +450,11 @@ if __name__ == '__main__':
 
     proto = 'https' if args.cert else 'http'
     logger.info('Listening on %s://localhost:%d', proto, args.port)
-    if not args.cert:
+    if args.cert:
+        logger.warning('TLS active — browser negotiates HTTP/2 via ALPN; WebSocket upgrade '
+                       '(HTTP/1.1 only) will be blocked. Use SSE or Long Polling instead, '
+                       'or run without --cert to enable WebSocket.')
+    else:
         logger.info('TLS not configured — SSE (HTTP/2) unavailable; WebSocket and Long Polling work.')
 
     try:
