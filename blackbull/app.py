@@ -108,6 +108,7 @@ class BlackBull:
     def __init__(self,
                  loop=None,
                  observer_shutdown_timeout: float = 5.0,
+                 trusted_proxies: list[str] | str | None = None,
                  ):
         self._router = Router()
         self._logger = logger
@@ -127,6 +128,10 @@ class BlackBull:
         self._wsprotocols = None
         self._global_middlewares: list = []
         self._static_roots: list[tuple[str, Path]] = []
+
+        if trusted_proxies is not None:
+            from .middleware.proxy import TrustedProxyMiddleware  # noqa: PLC0415
+            self.use(TrustedProxyMiddleware(trusted_proxies))
 
     @property
     def loop(self):

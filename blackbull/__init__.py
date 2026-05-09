@@ -7,6 +7,7 @@ Public API exports:
 - `cookie_header`: builds a ``Set-Cookie`` header tuple.
 - `read_body`: reads and buffers the full request body from the ASGI receive channel.
 - `parse_cookies`: parses the ``Cookie`` header into a plain ``dict``.
+- `TrustedProxyMiddleware`: rewrites ``scope['client']`` / ``scope['scheme']`` from proxy headers.
 """
 import logging
 logging.getLogger('blackbull').addHandler(logging.NullHandler())
@@ -16,3 +17,4 @@ from .request import read_body, parse_cookies
 from .response import Response, JSONResponse, StreamingResponse, WebSocketResponse, cookie_header
 from .event import Event, EventHandler
 from .asgi import ResponseStart, ResponseBody, parse_response_event
+from .middleware.proxy import TrustedProxyMiddleware

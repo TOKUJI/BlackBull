@@ -57,6 +57,8 @@ pytest
 
 ### P2 — Important protocol features
 
+- [ ] RFC 8441 — WebSocket over HTTP/2 (Extended CONNECT). Currently WebSocket requires HTTP/1.1; when TLS is active the browser negotiates HTTP/2 via ALPN and WebSocket upgrade is blocked.
+- [x] Trusted-proxy support — `TrustedProxyMiddleware` reads `X-Forwarded-For` / `X-Forwarded-Proto` / RFC 7239 `Forwarded` and rewrites `scope['client']` and `scope['scheme']` when the peer is in the configured trusted set. Enable via `BlackBull(trusted_proxies=[...])` or `app.use(TrustedProxyMiddleware([...]))`.
 
 ### P3 — Features and enhancements
 
