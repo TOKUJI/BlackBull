@@ -150,11 +150,13 @@ app = BlackBull()
 
 @app.on('app_startup')
 async def _on_startup(_event):
+    """Observer: log server startup."""
     logger.info('Chat server starting up')
 
 
 @app.on('app_shutdown')
 async def _on_shutdown(_event):
+    """Observer: log server shutdown."""
     logger.info('Chat server shutting down')
 
 

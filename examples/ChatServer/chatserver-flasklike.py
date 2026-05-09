@@ -301,24 +301,34 @@ async def handle_sse(scope, receive, send):  # noqa: ARG001
     }
     await state.broadcast(join_event)
 
-    try:
+    async def _watch_disconnect():
         while True:
+            event = await receive()
+            if event.get('type') == 'http.disconnect':
+                session.connected = False  # unblock _push without waiting for its timeout
+                break
+
+    async def _push():
+        while session.connected:
             try:
                 evt = await asyncio.wait_for(session.queue.get(), timeout=25)
                 await send({'type': 'http.response.body', 'body': _sse_encode(evt), 'more_body': True})
             except asyncio.TimeoutError:
                 await send({'type': 'http.response.body', 'body': b': keepalive\n\n', 'more_body': True})
-    except Exception:
-        pass
-    finally:
-        session.connected = False
-        session.disconnect_time = time.monotonic()
-        leave_event = {
-            'type': 'user_leave',
-            'payload': {'username': session.username, 'participants': state.participants()},
-        }
-        await state.broadcast(leave_event)
-        await send({'type': 'http.response.body', 'body': b'', 'more_body': False})
+            except Exception:
+                session.connected = False
+                break
+
+    await asyncio.gather(_watch_disconnect(), _push())
+
+    session.connected = False
+    session.disconnect_time = time.monotonic()
+    leave_event = {
+        'type': 'user_leave',
+        'payload': {'username': session.username, 'participants': state.participants()},
+    }
+    await state.broadcast(leave_event)
+    await send({'type': 'http.response.body', 'body': b'', 'more_body': False})
 
 
 @app.route(methods=[HTTPMethod.GET], path='/poll')
@@ -397,6 +407,7 @@ async def handle_websocket(scope, receive, send):
         while True:
             event = await receive()
             if event.get('type', '') == 'websocket.disconnect':
+                session.connected = False   # unblock _sender immediately
                 break
 
     try:

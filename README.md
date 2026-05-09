@@ -51,20 +51,13 @@ pytest
 
 ### P1 — Spec violations / breaks conformant ASGI apps
 
-- [x] WebSocket §5.2: send CLOSE frame (1002) and fail connection on unknown opcode
-- [x] WebSocket §7.2: send CLOSE frame (1002) before TCP teardown for protocol violations
-- [x] WebSocket: explicit writer.close() on protocol violations
-
 ### P2 — Important protocol features
 
 - [ ] RFC 8441 — WebSocket over HTTP/2 (Extended CONNECT). Currently WebSocket requires HTTP/1.1; when TLS is active the browser negotiates HTTP/2 via ALPN and WebSocket upgrade is blocked.
-- [x] Trusted-proxy support — `TrustedProxyMiddleware` reads `X-Forwarded-For` / `X-Forwarded-Proto` / RFC 7239 `Forwarded` and rewrites `scope['client']` and `scope['scheme']` when the peer is in the configured trusted set. Enable via `BlackBull(trusted_proxies=[...])` or `app.use(TrustedProxyMiddleware([...]))`.
 
 ### P3 — Features and enhancements
 
 - [ ] Worker processes / multiprocessing
-- [x] URL reverse lookup (`app.url_path_for(name, **params)`)
-- [x] Path parameter type converters (`int`, `uuid`, `path`, …)
 - [ ] Built-in CORS middleware
  
 ### P4 — Application framework

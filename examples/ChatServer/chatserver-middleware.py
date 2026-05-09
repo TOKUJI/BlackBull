@@ -176,7 +176,12 @@ async def session_mw(scope, receive, send, call_next):
 
 
 async def json_body_mw(scope, receive, send, call_next):
-    """Parse JSON body → scope['json']; wrap send so bare dicts become JSON responses."""
+    """Parse JSON body → scope['json']; wrap send so bare dicts become JSON responses.
+
+    Rejects malformed JSON with 400.  Handlers that pass a bare dict (no ``type``
+    key) to ``send`` receive an automatic ``JSONResponse``; handlers that need a
+    custom status or headers still use ``JSONResponse(...)`` explicitly.
+    """
     raw = await read_body(receive)
     try:
         scope['json'] = json.loads(raw)
@@ -284,16 +289,19 @@ async def handle_send(scope, receive, send):
     await send({'ok': True})
 
 
-@protected.route(methods=[HTTPMethod.POST], path='/logout')
+@app.route(methods=[HTTPMethod.POST], path='/logout')
 async def handle_logout(scope, receive, send):  # noqa: ARG001
-    session: Session = scope['session']
-    removed = await state.remove(session.session_id)
-    if removed:
-        leave_event = {
-            'type': 'user_leave',
-            'payload': {'username': removed.username, 'participants': state.participants()},
-        }
-        await state.broadcast(leave_event)
+    # Not in `protected`: logout must succeed even with an expired session cookie.
+    cookies = parse_cookies(scope)
+    sid = cookies.get('session_id', '')
+    if sid:
+        session = await state.remove(sid)
+        if session:
+            leave_event = {
+                'type': 'user_leave',
+                'payload': {'username': session.username, 'participants': state.participants()},
+            }
+            await state.broadcast(leave_event)
 
     expire = 'Thu, 01 Jan 1970 00:00:00 GMT'
     await send(JSONResponse({'ok': True}, headers=[
@@ -335,24 +343,34 @@ async def handle_sse(scope, receive, send):  # noqa: ARG001
     }
     await state.broadcast(join_event)
 
-    try:
+    async def _watch_disconnect():
         while True:
+            event = await receive()
+            if event.get('type') == 'http.disconnect':
+                session.connected = False  # unblock _push without waiting for its timeout
+                break
+
+    async def _push():
+        while session.connected:
             try:
                 evt = await asyncio.wait_for(session.queue.get(), timeout=25)
                 await send({'type': 'http.response.body', 'body': _sse_encode(evt), 'more_body': True})
             except asyncio.TimeoutError:
                 await send({'type': 'http.response.body', 'body': b': keepalive\n\n', 'more_body': True})
-    except Exception:
-        pass
-    finally:
-        session.connected = False
-        session.disconnect_time = time.monotonic()
-        leave_event = {
-            'type': 'user_leave',
-            'payload': {'username': session.username, 'participants': state.participants()},
-        }
-        await state.broadcast(leave_event)
-        await send({'type': 'http.response.body', 'body': b'', 'more_body': False})
+            except Exception:
+                session.connected = False
+                break
+
+    await asyncio.gather(_watch_disconnect(), _push())
+
+    session.connected = False
+    session.disconnect_time = time.monotonic()
+    leave_event = {
+        'type': 'user_leave',
+        'payload': {'username': session.username, 'participants': state.participants()},
+    }
+    await state.broadcast(leave_event)
+    await send({'type': 'http.response.body', 'body': b'', 'more_body': False})
 
 
 @protected.route(methods=[HTTPMethod.GET], path='/poll')
