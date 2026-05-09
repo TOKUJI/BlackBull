@@ -1044,6 +1044,34 @@
   
   
     <li class="md-nav__item">
+      <a href="middleware/proxy/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    proxy
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="middleware/static/" class="md-nav__link">
         
   
@@ -1866,6 +1894,7 @@
 <li><code>cookie_header</code>: builds a <code>Set-Cookie</code> header tuple.</li>
 <li><code>read_body</code>: reads and buffers the full request body from the ASGI receive channel.</li>
 <li><code>parse_cookies</code>: parses the <code>Cookie</code> header into a plain <code>dict</code>.</li>
+<li><code>TrustedProxyMiddleware</code>: rewrites <code>scope['client']</code> / <code>scope['scheme']</code> from proxy headers.</li>
 </ul>
 
 
