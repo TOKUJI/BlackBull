@@ -1,9 +1,9 @@
+import os
 import pathlib
 import pytest
 import pytest_asyncio
 
 
-# 通常実行では skip し、明示指定時だけ実行するマーカー
 DEFAULT_SKIPPED_MARKERS = {
     "integration": "--run-integration",
     "system": "--run-system",
@@ -12,7 +12,6 @@ DEFAULT_SKIPPED_MARKERS = {
     "docker": "--run-docker",
     "network": "--run-network",
 }
-
 
 
 def pytest_addoption(parser):
@@ -25,21 +24,46 @@ def pytest_addoption(parser):
         )
 
 
+def _is_explicit_vscode_selected_run(items):
+    """
+    VSCode Test Explorer execution では、-m が実行フェーズに見えず、
+    RUN_TEST_IDS_PIPE 経由で選択テストだけが実行されることがある。
+
+    その場合、現在の収集対象が「すべて skip-by-default マーカー付き」
+    なら、ユーザーが明示的にその種別のテストを選んだとみなして実行を許可する。
+    """
+    if not os.environ.get("RUN_TEST_IDS_PIPE"):
+        return False
+
+    if not items:
+        return False
+
+    restricted = set(DEFAULT_SKIPPED_MARKERS)
+
+    return all(
+        any(mark.name in restricted for mark in item.iter_markers())
+        for item in items
+    )
+
+
 def pytest_collection_modifyitems(config, items):
-    # -m が指定された場合は、pytest本来の marker selection を優先する
-    # 例:
-    #   pytest -m integration
-    #   pytest -m "integration or system"
-    #   pytest -m "slow and not docker"
     markexpr = (config.option.markexpr or "").strip()
+
+    # 1. CLIで -m を明示指定した場合は pytest 標準選別を優先
     if markexpr:
         return
 
+    # 2. --run-* が1つでも付いていれば、その marker は許可
     enabled_markers = {
         marker_name
         for marker_name, option_name in DEFAULT_SKIPPED_MARKERS.items()
         if config.getoption(option_name)
     }
+
+    # 3. VSCode Test Explorer が選択済み restricted tests のみを実行している場合
+    #    （実行時に -m が見えなくても）許可
+    if _is_explicit_vscode_selected_run(items):
+        return
 
     disabled_markers = set(DEFAULT_SKIPPED_MARKERS) - enabled_markers
     if not disabled_markers:
@@ -62,18 +86,11 @@ def pytest_collection_modifyitems(config, items):
                 )
             )
 
+
 @pytest_asyncio.fixture(scope="session", autouse=True)
 def manage_cert_and_key():
-    """Ensure the real cert.pem / key.pem are present for the test session.
-
-    Previously this fixture replaced the real files with stub (invalid) PEM
-    content, which caused ssl.load_cert_chain() to fail with an SSLError.
-    The real cert/key files that already live in tests/ are self-signed and
-    valid; the test suite just needs them to be present, so this fixture now
-    simply verifies they exist and leaves them untouched.
-    """
-    cert_path = pathlib.Path(__file__).parent / 'cert.pem'
-    key_path = pathlib.Path(__file__).parent / 'key.pem'
+    cert_path = pathlib.Path(__file__).parent / "cert.pem"
+    key_path = pathlib.Path(__file__).parent / "key.pem"
 
     if not cert_path.exists() or not key_path.exists():
         raise FileNotFoundError(
@@ -83,4 +100,3 @@ def manage_cert_and_key():
         )
 
     yield
-
