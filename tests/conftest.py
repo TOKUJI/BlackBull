@@ -15,6 +15,13 @@ DEFAULT_SKIPPED_MARKERS = {
 
 
 def pytest_addoption(parser):
+    parser.addoption(
+        "--run-all",
+        action="store_true",
+        default=False,
+        help="run all tests including default-skipped marker tests",
+    )
+
     for marker_name, option_name in DEFAULT_SKIPPED_MARKERS.items():
         parser.addoption(
             option_name,
@@ -24,46 +31,22 @@ def pytest_addoption(parser):
         )
 
 
-def _is_explicit_vscode_selected_run(items):
-    """
-    VSCode Test Explorer execution では、-m が実行フェーズに見えず、
-    RUN_TEST_IDS_PIPE 経由で選択テストだけが実行されることがある。
-
-    その場合、現在の収集対象が「すべて skip-by-default マーカー付き」
-    なら、ユーザーが明示的にその種別のテストを選んだとみなして実行を許可する。
-    """
-    if not os.environ.get("RUN_TEST_IDS_PIPE"):
-        return False
-
-    if not items:
-        return False
-
-    restricted = set(DEFAULT_SKIPPED_MARKERS)
-
-    return all(
-        any(mark.name in restricted for mark in item.iter_markers())
-        for item in items
-    )
-
-
 def pytest_collection_modifyitems(config, items):
     markexpr = (config.option.markexpr or "").strip()
 
-    # 1. CLIで -m を明示指定した場合は pytest 標準選別を優先
+    # -m 指定時は pytest 標準の marker selection を優先
     if markexpr:
         return
 
-    # 2. --run-* が1つでも付いていれば、その marker は許可
+    # 全量実行オプション
+    if config.getoption("--run-all"):
+        return
+
     enabled_markers = {
         marker_name
         for marker_name, option_name in DEFAULT_SKIPPED_MARKERS.items()
         if config.getoption(option_name)
     }
-
-    # 3. VSCode Test Explorer が選択済み restricted tests のみを実行している場合
-    #    （実行時に -m が見えなくても）許可
-    if _is_explicit_vscode_selected_run(items):
-        return
 
     disabled_markers = set(DEFAULT_SKIPPED_MARKERS) - enabled_markers
     if not disabled_markers:
@@ -81,7 +64,7 @@ def pytest_collection_modifyitems(config, items):
                 pytest.mark.skip(
                     reason=(
                         f"skipped by default for marker(s): {', '.join(blocked_markers)}; "
-                        f"enable with {required_options} or run with -m"
+                        f"enable with {required_options} or run with --run-all"
                     )
                 )
             )
