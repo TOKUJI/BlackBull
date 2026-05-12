@@ -3,6 +3,7 @@ import zlib
 from abc import ABC, abstractmethod
 
 from .sender import WebSocketSender, WSOpcode, AbstractWriter, AsyncioWriter
+from .constants import ASGIEvent, WSCloseCode
 from .headers import Headers
 from ..protocol.frame import FrameBase, Data
 from ..event import Event, EventDispatcher
@@ -73,7 +74,10 @@ class AsyncioReader(AbstractReader):
             raise IncompleteReadError(exc.partial) from exc
 
     async def readexactly(self, n: int) -> bytes:
-        return await self._sr.readexactly(n)
+        try:
+            return await self._sr.readexactly(n)
+        except asyncio.IncompleteReadError as exc:
+            raise IncompleteReadError(exc.partial) from exc
 
 
 # ---------------------------------------------------------------------------
@@ -181,7 +185,7 @@ class HTTP1Recipient(BaseRecipient):
 
     async def __call__(self) -> dict:
         if self._done:
-            return {'type': 'http.disconnect'}
+            return {'type': ASGIEvent.HTTP_DISCONNECT}
 
         try:
             if self._chunked:
@@ -190,19 +194,19 @@ class HTTP1Recipient(BaseRecipient):
                 if chunk_size == 0:
                     await self._reader.readuntil(b'\r\n')   # consume trailing CRLF
                     self._done = True
-                    return {'type': 'http.request', 'body': b'', 'more_body': False}
+                    return {'type': ASGIEvent.HTTP_REQUEST, 'body': b'', 'more_body': False}
                 data = await self._reader.read(chunk_size)
                 await self._reader.readuntil(b'\r\n')        # consume CRLF after chunk data
-                return {'type': 'http.request', 'body': data, 'more_body': True}
+                return {'type': ASGIEvent.HTTP_REQUEST, 'body': data, 'more_body': True}
             else:
                 self._done = True
-                body = await self._reader.read(self._content_length) if self._content_length else b''
+                body = await self._reader.readexactly(self._content_length) if self._content_length else b''
                 logger.debug('HTTP1Recipient body: %r', body)
-                return {'type': 'http.request', 'body': body, 'more_body': False}
+                return {'type': ASGIEvent.HTTP_REQUEST, 'body': body, 'more_body': False}
 
         except IncompleteReadError:
             self._done = True
-            return {'type': 'http.disconnect'}
+            return {'type': ASGIEvent.HTTP_DISCONNECT}
 
 
 class HTTP2Recipient(BaseRecipient):
@@ -221,7 +225,7 @@ class HTTP2Recipient(BaseRecipient):
 
     def make_event(self, frame: Data) -> dict:
         return {
-            'type': 'http.request',
+            'type': ASGIEvent.HTTP_REQUEST,
             'body': frame.payload,
             'more_body': False if frame.end_stream else True,
         }
@@ -235,7 +239,7 @@ class HTTP2Recipient(BaseRecipient):
 
     def put_disconnect(self) -> None:
         """Unblock a waiting __call__() with an http.disconnect event."""
-        self._queue.put_nowait({'type': 'http.disconnect'})
+        self._queue.put_nowait({'type': ASGIEvent.HTTP_DISCONNECT})
 
     async def __call__(self) -> dict:
         return await self._queue.get()
@@ -303,13 +307,13 @@ class WebSocketRecipient(BaseRecipient):
                         msg_opcode, full_payload = result
                         if msg_opcode == WSOpcode.TEXT:
                             asgi_event = {
-                                'type': 'websocket.receive',
+                                'type': ASGIEvent.WS_RECEIVE,
                                 'text': full_payload.decode('utf-8'),
                                 'bytes': None,
                             }
                         else:
                             asgi_event = {
-                                'type': 'websocket.receive',
+                                'type': ASGIEvent.WS_RECEIVE,
                                 'text': None,
                                 'bytes': full_payload,
                             }
@@ -325,9 +329,9 @@ class WebSocketRecipient(BaseRecipient):
                         await self._event_queue.put(asgi_event)
 
                     case WSOpcode.CLOSE:
-                        await self._emit_disconnected(1000)
+                        await self._emit_disconnected(WSCloseCode.NORMAL)
                         await self._event_queue.put(
-                            {'type': 'websocket.disconnect', 'code': 1000})
+                            {'type': ASGIEvent.WS_DISCONNECT, 'code': WSCloseCode.NORMAL})
                         return
 
                     case WSOpcode.PING:
@@ -341,19 +345,19 @@ class WebSocketRecipient(BaseRecipient):
 
                     case _:
                         close = WebSocketSender._encode_frame(
-                            (1002).to_bytes(2, 'big'), opcode=WSOpcode.CLOSE)
+                            WSCloseCode.PROTOCOL_ERROR.to_bytes(2, 'big'), opcode=WSOpcode.CLOSE)
                         try:
                             await self._writer.write(close)
                         except Exception:
                             pass
-                        await self._emit_disconnected(1002)
+                        await self._emit_disconnected(WSCloseCode.PROTOCOL_ERROR)
                         await self._event_queue.put(
-                            {'type': 'websocket.disconnect', 'code': 1002})
+                            {'type': ASGIEvent.WS_DISCONNECT, 'code': WSCloseCode.PROTOCOL_ERROR})
                         return
 
-        except asyncio.IncompleteReadError:
-            await self._emit_disconnected(1006)
-            await self._event_queue.put({'type': 'websocket.disconnect', 'code': 1006})
+        except (asyncio.IncompleteReadError, IncompleteReadError):
+            await self._emit_disconnected(WSCloseCode.ABNORMAL)
+            await self._event_queue.put({'type': ASGIEvent.WS_DISCONNECT, 'code': WSCloseCode.ABNORMAL})
         except Exception as exc:
             close = WebSocketSender._encode_frame(
                 (1002).to_bytes(2, 'big'), opcode=WSOpcode.CLOSE)
@@ -388,7 +392,7 @@ class WebSocketRecipient(BaseRecipient):
         if not self._connect_sent:
             self._connect_sent = True
             self._ensure_reader_started()
-            return {'type': 'websocket.connect'}
+            return {'type': ASGIEvent.WS_CONNECT}
         self._ensure_reader_started()
         item = await self._event_queue.get()  # type: ignore[union-attr]
         if isinstance(item, Exception):

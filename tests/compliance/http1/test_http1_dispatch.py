@@ -331,7 +331,7 @@ class TestHTTPDisconnect:
 
         reader = MagicMock()
         reader.readuntil = AsyncMock(return_value=b'\r\n\r\n')
-        reader.read = AsyncMock(side_effect=asyncio.IncompleteReadError(b'', 10))
+        reader.readexactly = AsyncMock(side_effect=asyncio.IncompleteReadError(b'', 10))
 
         actor = HTTP1Actor(reader, _FakeWriter(), app, None,
                            request=b'GET / HTTP/1.1\r\n')
@@ -349,7 +349,7 @@ class TestHTTPDisconnect:
 
         reader = MagicMock()
         reader.readuntil = AsyncMock(return_value=b'\r\n\r\n')
-        reader.read = AsyncMock(side_effect=asyncio.IncompleteReadError(b'hel', 5))
+        reader.readexactly = AsyncMock(side_effect=asyncio.IncompleteReadError(b'hel', 5))
 
         actor = HTTP1Actor(reader, _FakeWriter(), app, None,
                            request=b'GET / HTTP/1.1\r\n')
@@ -385,7 +385,7 @@ class TestHTTP11Expect100Continue:
 
         reader = MagicMock()
         reader.readuntil = AsyncMock(return_value=b'\r\n\r\n')
-        reader.read = AsyncMock(return_value=body)
+        reader.readexactly = AsyncMock(return_value=body)
 
         actor = HTTP1Actor(reader, writer, app, None,
                            request=b'POST /upload HTTP/1.1\r\n')
@@ -407,7 +407,7 @@ class TestHTTP11Expect100Continue:
 
         reader = MagicMock()
         reader.readuntil = AsyncMock(return_value=b'\r\n\r\n')
-        reader.read = AsyncMock(return_value=body)
+        reader.readexactly = AsyncMock(return_value=body)
 
         actor = HTTP1Actor(reader, _FakeWriter(), app, None,
                            request=b'POST /upload HTTP/1.1\r\n')
@@ -428,7 +428,7 @@ class TestHTTP11Expect100Continue:
 
         reader = MagicMock()
         reader.readuntil = AsyncMock(return_value=b'\r\n\r\n')
-        reader.read = AsyncMock(return_value=body)
+        reader.readexactly = AsyncMock(return_value=body)
 
         actor = HTTP1Actor(reader, writer, noop_app, None,
                            request=b'POST / HTTP/1.1\r\n')
@@ -448,7 +448,7 @@ class TestHTTP11Expect100Continue:
 
         reader = MagicMock()
         reader.readuntil = AsyncMock(return_value=b'\r\n\r\n')
-        reader.read = AsyncMock(return_value=b'hello')
+        reader.readexactly = AsyncMock(return_value=b'hello')
 
         actor = HTTP1Actor(reader, writer, app, None,
                            request=b'POST /upload HTTP/1.1\r\n')
@@ -469,7 +469,7 @@ class TestHTTP11Expect100Continue:
 
         reader = MagicMock()
         reader.readuntil = AsyncMock(return_value=b'\r\n\r\n')
-        reader.read = AsyncMock(return_value=body)
+        reader.readexactly = AsyncMock(return_value=body)
 
         actor = HTTP1Actor(reader, writer, app, None,
                            request=b'POST /upload HTTP/1.1\r\n')

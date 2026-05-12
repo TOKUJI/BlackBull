@@ -1,10 +1,9 @@
 import asyncio
-from dataclasses import dataclass, field
+
 from http import HTTPStatus
 import logging
 import ssl
 import traceback
-import uuid
 from collections import defaultdict, deque
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -14,174 +13,18 @@ import socket
 # private library
 from ..utils import HTTP2, pop_safe, check_port
 from ..event import Event
-from ..protocol.stream import Stream, StreamState
 from ..protocol.rsock import create_dual_stack_sockets
-from ..protocol.frame import ErrorCodes, FrameFactory, FrameTypes, FrameBase, parse_priority_field, PseudoHeaders
+from ..protocol.frame import ErrorCodes, FrameFactory, FrameTypes, FrameBase
 from .response import ResponderFactory
 from .parser import ParserFactory
 from .sender import SenderFactory, AbstractWriter
 from .recipient import RecipientFactory, HTTP2Recipient, AbstractReader, AsyncioReader, IncompleteReadError
+from .access_log import AccessLogRecord, _make_capturing_send
+from .constants import ASGIEvent
 from .headers import Headers
 from .http2_actor import HTTP2Actor
 logger = logging.getLogger(__name__)
 _access_logger = logging.getLogger('blackbull.access')
-
-_DEFAULT_PRIORITY: dict[str, int | bool] = {'urgency': 3, 'incremental': False}
-
-
-def _resolve_priority(stream: 'Stream', scope: dict) -> dict[str, int | bool]:
-    """Return the HTTP/2 priority hint for a newly-built scope.
-
-    Precedence (highest first):
-    1. A PRIORITY_UPDATE frame received before HEADERS (stored on stream).
-    2. The ``priority`` HTTP header sent in the request.
-    3. RFC 9218 §4.1 defaults (urgency=3, incremental=False).
-    """
-    if stream.priority_hint is not None:
-        return stream.priority_hint
-    raw = scope.get('headers', Headers([])).get(b'priority', b'')
-    if raw:
-        return parse_priority_field(raw.decode('ascii', errors='replace'))
-    return dict(_DEFAULT_PRIORITY)
-
-
-# ---------------------------------------------------------------------------
-# Access logging
-# ---------------------------------------------------------------------------
-
-@dataclass
-class AccessLogRecord:
-    """Per-request record populated in two phases.
-
-    Phase 1 (after parse): client_ip, method, path, http_version.
-    Phase 2 (during send): status, response_bytes.
-    For WebSocket sessions, close_code is captured on disconnect instead.
-    Emitted as one INFO line on 'blackbull.access' after the response completes.
-    """
-    client_ip:      str
-    method:         str
-    path:           str
-    http_version:   str
-    status:         int | str = '-'
-    response_bytes: int       = 0
-    close_code:     int | None = None
-    _started_at:    float     = field(default_factory=time.monotonic, repr=False)
-
-    @classmethod
-    def from_scope(cls, scope: dict) -> 'AccessLogRecord':
-        client = scope.get('client') or ['-']
-        return cls(
-            client_ip    = str(client[0]),
-            method       = scope.get('method', '-'),
-            path         = scope.get('path', '-'),
-            http_version = scope.get('http_version', '-'),
-        )
-
-    def duration_ms(self) -> float:
-        return (time.monotonic() - self._started_at) * 1000
-
-    def format(self) -> str:
-        if self.close_code is not None:
-            return (f'{self.client_ip} '
-                    f'"{self.method} {self.path} WS/{self.http_version}" '
-                    f'101 close={self.close_code} '
-                    f'{self.duration_ms():.0f}ms')
-        return (f'{self.client_ip} '
-                f'"{self.method} {self.path} HTTP/{self.http_version}" '
-                f'{self.status} {self.response_bytes} '
-                f'{self.duration_ms():.0f}ms')
-
-    def as_extra(self) -> dict:
-        d: dict = {
-            'client_ip':      self.client_ip,
-            'method':         self.method,
-            'path':           self.path,
-            'http_version':   self.http_version,
-            'status':         self.status,
-            'response_bytes': self.response_bytes,
-            'duration_ms':    self.duration_ms(),
-        }
-        if self.close_code is not None:
-            d['close_code'] = self.close_code
-        return d
-
-
-def _make_capturing_send(send, record: AccessLogRecord):
-    """Wrap *send* to update *record* with status and response size as events flow through."""
-    async def capturing_send(event, *args, **kwargs):
-        if isinstance(event, dict):
-            if event.get('type') == 'http.response.start':
-                record.status = event.get('status', '-')
-            elif event.get('type') == 'http.response.body':
-                record.response_bytes += len(event.get('body', b''))
-        await send(event, *args, **kwargs)
-    return capturing_send
-
-
-def _make_capturing_receive(receive, record: AccessLogRecord):
-    """Wrap *receive* to capture the WebSocket close code on disconnect."""
-    async def capturing_receive():
-        event = await receive()
-        if isinstance(event, dict) and event.get('type') == 'websocket.disconnect':
-            record.close_code = event.get('code', 1000)
-        return event
-    return capturing_receive
-
-
-def _make_disconnect_detecting_receive(receive, scope: dict, dispatcher, log_record: AccessLogRecord):
-    """Wrap *receive* to emit request_disconnected when http.disconnect is seen.
-
-    Sets scope['_disconnected'] = True on first detection so that the
-    request_completed emit site can skip firing the completion event.
-    The flag is idempotent — if the handler calls receive() again after the
-    first disconnect, the event is not emitted twice.
-    """
-    async def detecting_receive():
-        event = await receive()
-        if isinstance(event, dict) and event.get('type') == 'http.disconnect':
-            if not scope.get('_disconnected'):
-                scope['_disconnected'] = True
-                await dispatcher.emit(Event(
-                    'request_disconnected',
-                    detail={
-                        'scope': scope,
-                        'client_ip': log_record.client_ip,
-                        'method': log_record.method,
-                        'path': log_record.path,
-                        'http_version': log_record.http_version,
-                    },
-                ))
-        return event
-    return detecting_receive
-
-
-def _make_ws_accept_detecting_send(send, scope: dict, dispatcher):
-    """Wrap WebSocket *send* to emit websocket_connected on websocket.accept.
-
-    Sets scope['_connection_id'] on first accept so subsequent events
-    (websocket_message, websocket_disconnected) can reference the same ID.
-    Emits after calling the original send so the handshake is fully processed
-    before observers are notified.
-    """
-    async def detecting_send(event, *args, **kwargs):
-        await send(event, *args, **kwargs)
-        if (isinstance(event, dict)
-                and event.get('type') == 'websocket.accept'
-                and not scope.get('_connection_id')):
-            connection_id = str(uuid.uuid4())
-            scope['_connection_id'] = connection_id
-            await dispatcher.emit(Event(
-                'websocket_connected',
-                detail={
-                    'scope': scope,
-                    'connection_id': connection_id,
-                    'client_ip': scope['client'][0] if scope.get('client') else '',
-                    'path': scope.get('path', ''),
-                    'subprotocol': event.get('subprotocol') or None,
-                },
-            ))
-    return detecting_send
-
 
 async def _run_with_log(coro, record: AccessLogRecord,
                         dispatcher=None, scope: dict | None = None) -> None:
@@ -252,14 +95,14 @@ class LifespanManager:
         scope = {'type': 'lifespan', 'asgi': {'version': '3.0'}}
         self._task = asyncio.create_task(
             self._app(scope, self._receive_q.get, self._send_q.put))
-        await self._receive_q.put({'type': 'lifespan.startup'})
+        await self._receive_q.put({'type': ASGIEvent.LIFESPAN_STARTUP})
         event = await self._send_q.get()
-        if event.get('type') == 'lifespan.startup.failed':
+        if event.get('type') == ASGIEvent.LIFESPAN_STARTUP_FAILED:
             raise RuntimeError(event.get('message', 'Lifespan startup failed'))
         return self
 
     async def __aexit__(self, *_):
-        await self._receive_q.put({'type': 'lifespan.shutdown'})
+        await self._receive_q.put({'type': ASGIEvent.LIFESPAN_SHUTDOWN})
         await self._send_q.get()   # lifespan.shutdown.complete
         if self._task is not None:
             self._task.cancel()

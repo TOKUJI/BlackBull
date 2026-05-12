@@ -1,16 +1,18 @@
 import logging
 
+from ..server.constants import ASGIEvent
+
 logger = logging.getLogger(__name__)
 
-_connect = {'type': 'websocket.connect'}
-_accept  = {'type': 'websocket.accept', 'subprotocol': None}
-_close   = {'type': 'websocket.close'}
+_connect = {'type': ASGIEvent.WS_CONNECT}
+_accept  = {'type': ASGIEvent.WS_ACCEPT, 'subprotocol': None}
+_close   = {'type': ASGIEvent.WS_CLOSE}
 
 
 async def websocket(scope, receive, send, call_next):
     msg = await receive()
 
-    if msg.get('type') != 'websocket.connect':
+    if msg.get('type') != ASGIEvent.WS_CONNECT:
         raise ValueError(
             f'Received Message ({msg}) does not request to open a websocket connection.'
         )

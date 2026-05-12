@@ -294,7 +294,7 @@ async def get_item(item_id: int, scope):
 |---|---|
 | `str` | `Response(value.encode())` — `text/html; charset=utf-8` |
 | `bytes` | `Response(value)` — `text/html; charset=utf-8` |
-| `dict` | `JSONResponse(value)` — `application/json` |
+| `dict` or `list` | `JSONResponse(value)` — `application/json` |
 | `Response` / `JSONResponse` | Passed to `send` as-is |
 | `None` | Nothing sent (handler called `send` directly, or intentionally empty) |
 

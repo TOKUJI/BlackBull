@@ -37,20 +37,20 @@ def docker_test_config():
         os.environ["DOCKER_CONFIG"] = old
 
 @pytest.fixture
-def nginx():
-    nginx_conf = (
-        Path(__file__).parent / "nginx.conf"
+def nginx(app, tmp_path):
+    nginx_conf = tmp_path / "nginx.conf"
+    nginx_conf.write_text(
+        (Path(__file__).parent / "nginx.conf")
+        .read_text()
+        .replace(":8000", f":{app.port}")
     )
     with (
-        DockerContainer("nginx:latest")
+        DockerContainer("nginx:latest", extra_hosts={"host.docker.internal": "host-gateway"})
         .with_exposed_ports(80)
         .with_volume_mapping(
             str(nginx_conf),
             "/etc/nginx/nginx.conf",
         )
-        # .with_extra_hosts(
-        #     {"host.docker.internal": "host-gateway"}
-        # )
     ) as nginx:
         port = nginx.get_exposed_port(80)
 

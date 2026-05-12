@@ -5,10 +5,8 @@ RequestActor owns the lifetime of a single HTTP request.
 """
 import logging
 import re
-import time
 from base64 import b64encode
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, field
 from hashlib import sha1
 from http import HTTPStatus
 from typing import Any
@@ -20,78 +18,16 @@ from ..event_aggregator import EventAggregator
 from .headers import Headers
 from .recipient import AbstractReader, IncompleteReadError, RecipientFactory
 from .sender import AbstractWriter, SenderFactory
+from .access_log import AccessLogRecord as _AccessLogRecord, _make_capturing_send, _make_disconnect_detecting_receive
+from .constants import ASGIEvent, WSCloseCode
 
 logger = logging.getLogger(__name__)
 _access_logger = logging.getLogger('blackbull.access')
 
 _REQ_END = b'\r\n\r\n'
-
-
-# ---------------------------------------------------------------------------
-# Access-log helpers (mirrored from server.py; consolidated in a later step)
-# ---------------------------------------------------------------------------
-
-@dataclass
-class _AccessLogRecord:
-    client_ip:      str
-    method:         str
-    path:           str
-    http_version:   str
-    status:         int | str = '-'
-    response_bytes: int = 0
-    _started_at:    float = field(default_factory=time.monotonic, repr=False)
-
-    @classmethod
-    def from_scope(cls, scope: dict) -> '_AccessLogRecord':
-        client = scope.get('client') or ['-']
-        return cls(
-            client_ip=str(client[0]),
-            method=scope.get('method', '-'),
-            path=scope.get('path', '-'),
-            http_version=scope.get('http_version', '-'),
-        )
-
-    def duration_ms(self) -> float:
-        return (time.monotonic() - self._started_at) * 1000
-
-    def format(self) -> str:
-        return (f'{self.client_ip} '
-                f'"{self.method} {self.path} HTTP/{self.http_version}" '
-                f'{self.status} {self.response_bytes} '
-                f'{self.duration_ms():.0f}ms')
-
-    def as_extra(self) -> dict:
-        return {
-            'client_ip':      self.client_ip,
-            'method':         self.method,
-            'path':           self.path,
-            'http_version':   self.http_version,
-            'status':         self.status,
-            'response_bytes': self.response_bytes,
-            'duration_ms':    self.duration_ms(),
-        }
-
-
-def _make_capturing_send(send, record: _AccessLogRecord):
-    async def capturing_send(event, *args, **kwargs):
-        if isinstance(event, dict):
-            if event.get('type') == 'http.response.start':
-                record.status = event.get('status', '-')
-            elif event.get('type') == 'http.response.body':
-                record.response_bytes += len(event.get('body', b''))
-        await send(event, *args, **kwargs)
-    return capturing_send
-
-
-def _make_disconnect_detecting_receive(receive, scope: dict, aggregator: 'EventAggregator'):
-    async def detecting_receive():
-        event = await receive()
-        if isinstance(event, dict) and event.get('type') == 'http.disconnect':
-            if not scope.get('_disconnected'):
-                scope['_disconnected'] = True
-                await aggregator.on_request_disconnected(scope)
-        return event
-    return detecting_receive
+_WS_GUID = b'258EAFA5-E914-47DA-95CA-C5AB0DC85B11'  # RFC 6455 §1.3
+_HTTP_PORT  = 80
+_HTTPS_PORT = 443
 
 
 # ---------------------------------------------------------------------------
@@ -271,7 +207,7 @@ class HTTP1Actor(Actor):
                 self._request = next_chunk
 
         except IncompleteReadError:
-            await send({'type': 'http.disconnect'})
+            await send({'type': ASGIEvent.HTTP_DISCONNECT})
 
     # ------------------------------------------------------------------
     # Private helpers
@@ -310,7 +246,7 @@ class HTTP1Actor(Actor):
         if headers.getlist(b'host'):
             parts = headers.get(b'host').split(b':')
             host = parts[0]
-            port = int(parts[1]) if len(parts) > 1 else (443 if self._ssl else 80)
+            port = int(parts[1]) if len(parts) > 1 else (_HTTPS_PORT if self._ssl else _HTTP_PORT)
             scope['server'] = [host.decode('utf-8'), port]
 
         if headers.getlist(b'upgrade'):
@@ -345,7 +281,8 @@ class HTTP1Actor(Actor):
         log_record = _AccessLogRecord.from_scope(scope)
         log_record.status = 101  # HTTP 101 Switching Protocols
 
-        await self._do_ws_handshake(scope)
+        if not await self._do_ws_handshake(scope):
+            return  # version check failed; 400 already sent
         scope['_connection_id'] = str(uuid4())
         ws_actor = WebSocketActor(
             self._reader, self._writer, scope, self._app, aggregator,
@@ -354,47 +291,66 @@ class HTTP1Actor(Actor):
         try:
             await ws_actor.run()
         finally:
+            log_record.close_code = ws_actor._disconnect_code
             _access_logger.info(log_record.format(), extra=log_record.as_extra())
 
-    async def _do_ws_handshake(self, scope: dict) -> None:
-        """Send HTTP 101 Switching Protocols (RFC 6455 §4.2.2).
+    async def _do_ws_handshake(self, scope: dict) -> bool:
+        """Validate the WebSocket upgrade and store a deferred 101 callback.
 
-        Also negotiates Sec-WebSocket-Protocol if the app exposes an
-        ``available_ws_protocols`` attribute listing accepted subprotocols.
+        Returns True if the handshake is valid and ready to proceed, False if
+        a 400 Bad Request was already sent (bad Sec-WebSocket-Version).
+
+        The actual HTTP 101 response is deferred: it is sent by
+        WebSocketActor._send when the ASGI app calls websocket.accept, so that
+        the chosen subprotocol from that event can be included in the 101 headers
+        (RFC 6455 §4.2.2).
         """
         send = SenderFactory.http1(self._writer)
         headers = scope.get('headers', Headers([]))
         key = headers.get(b'sec-websocket-key', b'')
-        accept = b64encode(sha1(key + b'258EAFA5-E914-47DA-95CA-C5AB0DC85B11').digest())
+        accept_key = b64encode(sha1(key + _WS_GUID).digest())
         version = headers.get(b'sec-websocket-version', b'')
         if version != b'13':
             await send(b'', HTTPStatus.BAD_REQUEST,
                        [(b'sec-websocket-version', b'13')])
-            return
+            return False
 
-        hs_headers = Headers([
-            (b'upgrade', b'websocket'),
-            (b'connection', b'upgrade'),
-            (b'sec-websocket-accept', accept),
-        ])
+        # Populate scope['subprotocols'] per ASGI WebSocket spec
+        raw_sp = headers.get(b'sec-websocket-protocol', b'')
+        client_protos = (
+            [p.strip().decode('utf-8', errors='replace') for p in raw_sp.split(b',')]
+            if raw_sp else []
+        )
+        scope['subprotocols'] = client_protos
 
-        # Subprotocol negotiation (RFC 6455 §4.2.2, §11.3.4)
-        raw = headers.get(b'sec-websocket-protocol', b'')
-        if raw:
-            client_protos = [p.strip() for p in raw.split(b',')]
-            available = set(getattr(self._app, 'available_ws_protocols', []))
-            subprotocol = next((p for p in client_protos if p in available), None)
+        # Auto-negotiate from app.available_ws_protocols (backward-compat fallback).
+        # This is used when the handler calls websocket.accept without a subprotocol.
+        available_raw = getattr(self._app, 'available_ws_protocols', [])
+        available = {(p.decode('utf-8', errors='replace') if isinstance(p, bytes) else p)
+                     for p in available_raw}
+        auto_subprotocol = next((p for p in client_protos if p in available), None)
+        scope['_ws_auto_subprotocol'] = auto_subprotocol
+
+        async def _send_101(subprotocol=None):
+            hs_headers = Headers([
+                (b'upgrade', b'websocket'),
+                (b'connection', b'upgrade'),
+                (b'sec-websocket-accept', accept_key),
+            ])
             if subprotocol:
-                hs_headers.append(b'sec-websocket-protocol', subprotocol)
+                sp = subprotocol.encode() if isinstance(subprotocol, str) else subprotocol
+                hs_headers.append(b'sec-websocket-protocol', sp)
+            await send(b'', HTTPStatus.SWITCHING_PROTOCOLS, hs_headers)
 
-        await send(b'', HTTPStatus.SWITCHING_PROTOCOLS, hs_headers)
+        scope['_ws_send_101'] = _send_101
+        return True
 
     @staticmethod
     def _make_legacy_disconnect_receive(receive, scope: dict, dispatcher, log_record):
         """Legacy disconnect-detecting receive wrapper (mirrors server.py helper)."""
         async def detecting_receive():
             event = await receive()
-            if isinstance(event, dict) and event.get('type') == 'http.disconnect':
+            if isinstance(event, dict) and event.get('type') == ASGIEvent.HTTP_DISCONNECT:
                 if not scope.get('_disconnected'):
                     scope['_disconnected'] = True
                     await dispatcher.emit(Event(

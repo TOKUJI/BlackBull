@@ -5,6 +5,7 @@ middleware can dispatch on Python type rather than string comparison.
 Both subclass ``dict`` so ``isinstance(e, dict)`` remains True — required
 for typeguard and any ASGI send callable annotated ``event: dict``.
 """
+from .server.constants import ASGIEvent
 from .server.headers import Headers
 
 
@@ -41,8 +42,8 @@ def parse_response_event(event: dict) -> ResponseStart | ResponseBody | dict:
     Trailers and unknown event types are returned unchanged.
     """
     match event.get('type'):
-        case 'http.response.start':
+        case ASGIEvent.HTTP_RESPONSE_START:
             return ResponseStart(event)
-        case 'http.response.body':
+        case ASGIEvent.HTTP_RESPONSE_BODY:
             return ResponseBody(event)
     return event

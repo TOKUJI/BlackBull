@@ -1,5 +1,6 @@
 import gzip as _gzip
 from collections.abc import Callable
+from ..server.constants import ASGIEvent
 from ..server.headers import Headers
 from ..asgi import ResponseStart, ResponseBody, parse_response_event
 
@@ -150,7 +151,7 @@ class CompressionMiddleware:
                         streaming = True
                         await send(start_event)
                         if parsed.body:
-                            await send({'type': 'http.response.body',
+                            await send({'type': ASGIEvent.HTTP_RESPONSE_BODY,
                                         'body': parsed.body, 'more_body': True})
                     else:
                         body_parts.append(parsed.body)
@@ -166,14 +167,14 @@ class CompressionMiddleware:
 
         if skip_compression or len(body) < self._min_size:
             await send(start_event)
-            await send({'type': 'http.response.body', 'body': body, 'more_body': False})
+            await send({'type': ASGIEvent.HTTP_RESPONSE_BODY, 'body': body, 'more_body': False})
             return
 
         compressed = compressor(body)
         existing = list(start_event.get('headers', []))
         existing.append((b'content-encoding', codec_name.encode()))
         await send({**start_event, 'headers': existing})
-        await send({'type': 'http.response.body', 'body': compressed, 'more_body': False})
+        await send({'type': ASGIEvent.HTTP_RESPONSE_BODY, 'body': compressed, 'more_body': False})
 
 
 # Default instance — used as a plain middleware function

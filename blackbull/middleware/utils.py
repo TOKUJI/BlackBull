@@ -10,6 +10,7 @@ Public API:
 from functools import wraps
 
 from ..response import Response
+from ..server.constants import ASGIEvent
 
 
 def _normalize_send(inner_send):
@@ -25,12 +26,12 @@ def _normalize_send(inner_send):
     async def normalized(event, *args, **kwargs):
         if isinstance(event, Response):
             await inner_send({
-                'type': 'http.response.start',
+                'type': ASGIEvent.HTTP_RESPONSE_START,
                 'status': event.status,
                 'headers': list(event.headers),
             })
             await inner_send({
-                'type': 'http.response.body',
+                'type': ASGIEvent.HTTP_RESPONSE_BODY,
                 'body': event.body,
                 'more_body': False,
             })

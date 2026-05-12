@@ -9,6 +9,7 @@ from typing import NamedTuple
 from ..protocol.frame import (FrameTypes, HeaderFrameFlags, DataFrameFlags,
                                SettingFrameFlags, FrameBase, PseudoHeaders,
                                DEFAULT_INITIAL_WINDOW_SIZE)
+from .constants import ASGIEvent, WSCloseCode
 import logging
 from .headers import Headers, HeaderList
 
@@ -187,12 +188,12 @@ class HTTP1Sender(BaseSender):
                 h = headers if isinstance(headers, Headers) else Headers(headers)
                 await self._flush(status, h, body)
 
-            case {'type': 'http.response.start'}:
+            case {'type': ASGIEvent.HTTP_RESPONSE_START}:
                 self._buffered_status = HTTPStatus(body.get('status', HTTPStatus.OK))
                 self._buffered_headers = Headers(list(body.get('headers', [])))
                 self._expect_trailers = bool(body.get('trailers', False))
 
-            case {'type': 'http.response.body'}:
+            case {'type': ASGIEvent.HTTP_RESPONSE_BODY}:
                 content = body.get('body', b'')
                 more_body = body.get('more_body', False)
                 if self._buffered_status is not None:
@@ -210,7 +211,7 @@ class HTTP1Sender(BaseSender):
                         logger.debug('HTTP1Sender body: %r', content)
                         await self._write(content)
 
-            case {'type': 'http.response.trailers'}:
+            case {'type': ASGIEvent.HTTP_RESPONSE_TRAILERS}:
                 await self._write(b'0\r\n')
                 for name, value in body.get('headers', []):
                     await self._write(name + b': ' + value + b'\r\n')
@@ -341,7 +342,7 @@ class HTTP2Sender(BaseSender):
             event_type = body.get('type', '')
             logger.debug('HTTP2Sender event: %r', event_type)
 
-            if event_type == 'http.response.start':
+            if event_type == ASGIEvent.HTTP_RESPONSE_START:
                 frame = self._factory.create(
                     FrameTypes.HEADERS,
                     HeaderFrameFlags.END_HEADERS,
@@ -352,7 +353,7 @@ class HTTP2Sender(BaseSender):
                     frame.headers.append((k, v))
                 await self._write(frame.save())
 
-            elif event_type == 'http.response.body':
+            elif event_type == ASGIEvent.HTTP_RESPONSE_BODY:
                 flags = 0 if body.get('more_body', False) else DataFrameFlags.END_STREAM
                 frame = self._factory.create(
                     FrameTypes.DATA,
@@ -362,7 +363,7 @@ class HTTP2Sender(BaseSender):
                 )
                 await self._write(frame.save())
 
-            elif event_type == 'http.response.push':
+            elif event_type == ASGIEvent.HTTP_RESPONSE_PUSH:
                 if self._push_callback is not None:
                     await self._push_callback(body, self._stream_id)
                 else:
@@ -400,18 +401,19 @@ class WebSocketSender(BaseSender):
 
         match event_type:
                 
-            case 'websocket.send':
+            case ASGIEvent.WS_SEND:
                 if 'text' in body and body['text'] is not None:
                     frame = self._encode_frame(body['text'].encode('utf-8'), opcode=WSOpcode.TEXT)
                 else:
                     frame = self._encode_frame(body.get('bytes', b''), opcode=WSOpcode.BINARY)
                 await self._write(frame)
 
-            case 'websocket.close':
-                frame = self._encode_frame(b'\x03\xe8', opcode=WSOpcode.CLOSE)
+            case ASGIEvent.WS_CLOSE:
+                code = body.get('code', WSCloseCode.NORMAL)
+                frame = self._encode_frame(code.to_bytes(2, 'big'), opcode=WSOpcode.CLOSE)
                 await self._write(frame)
 
-            case 'websocket.accept':
+            case ASGIEvent.WS_ACCEPT:
                 pass  # handshake reply is sent by HTTP1Actor._do_ws_handshake()
             case _:
                 logger.warning('WebSocketSender: unknown event type %r', event_type)

@@ -186,7 +186,7 @@ def _adapt_handler(fn, path: str):
             await send(_Response(result))
         elif isinstance(result, str):
             await send(_Response(result.encode()))
-        elif isinstance(result, dict):
+        elif isinstance(result, (dict, list)):
             await send(_JSONResponse(result))
         else:
             raise TypeError(

@@ -1,3 +1,4 @@
+from ..server.constants import ASGIEvent
 from ..server.headers import Headers
 from .utils import _normalize_send
 
@@ -92,15 +93,15 @@ class CORS:
             cors_hdrs.append((b'access-control-allow-headers', self._allow_hdrs.encode()))
             if self._max_age:
                 cors_hdrs.append((b'access-control-max-age', self._max_age.encode()))
-            await send({'type': 'http.response.start', 'status': 200, 'headers': cors_hdrs})
-            await send({'type': 'http.response.body', 'body': b'', 'more_body': False})
+            await send({'type': ASGIEvent.HTTP_RESPONSE_START, 'status': 200, 'headers': cors_hdrs})
+            await send({'type': ASGIEvent.HTTP_RESPONSE_BODY, 'body': b'', 'more_body': False})
             return
 
         # Actual cross-origin request: inject CORS headers into the response start event
         cors_hdrs = self._cors_headers(origin)
 
         async def cors_send(event):
-            if isinstance(event, dict) and event.get('type') == 'http.response.start':
+            if isinstance(event, dict) and event.get('type') == ASGIEvent.HTTP_RESPONSE_START:
                 existing = list(event.get('headers', []))
                 existing.extend(cors_hdrs)
                 event = {**event, 'headers': existing}

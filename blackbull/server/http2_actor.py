@@ -24,6 +24,8 @@ from .parser import ParserFactory
 from .recipient import AbstractReader, HTTP2Recipient, RecipientFactory
 from .response import ResponderFactory
 from .sender import AbstractWriter, SenderFactory
+from .access_log import AccessLogRecord, _make_capturing_send, _make_disconnect_detecting_receive
+from .constants import ASGIEvent
 from .http1_actor import RequestActor
 
 logger = logging.getLogger(__name__)
@@ -35,37 +37,7 @@ def _signal_recipients(recipients: dict[int, HTTP2Recipient]) -> None:
         recipient.put_disconnect()
 
 
-def _make_h2_disconnect_receiver(receive, scope: dict, aggregator: EventAggregator):
-    """Wrap an HTTP2Recipient so it emits request_disconnected on http.disconnect.
-
-    Mirrors the HTTP/1.1 _make_disconnect_detecting_receive pattern from server.py.
-    Defined here to avoid a circular import (http2_actor must not import server).
-    """
-    async def detecting_receive():
-        event = await receive()
-        if isinstance(event, dict) and event.get('type') == 'http.disconnect':
-            if not scope.get('_disconnected'):
-                scope['_disconnected'] = True
-                await aggregator.on_request_disconnected(scope)
-        return event
-    return detecting_receive
-
-
-def _make_capturing_send(send, record):
-    """Wrap *send* to capture status and response_bytes into *record*."""
-    async def capturing_send(event, *args, **kwargs):
-        if isinstance(event, dict):
-            if event.get('type') == 'http.response.start':
-                record.status = event.get('status', '-')
-            elif event.get('type') == 'http.response.body':
-                record.response_bytes += len(event.get('body', b''))
-        await send(event, *args, **kwargs)
-    return capturing_send
-
-
 def _make_log_record(scope):
-    """Create an AccessLogRecord for *scope* (lazy import avoids circular dep)."""
-    from .server import AccessLogRecord  # noqa: PLC0415
     return AccessLogRecord.from_scope(scope)
 _access_logger = logging.getLogger('blackbull.access')
 
@@ -325,21 +297,21 @@ class HTTP2Actor(Actor):
                         scope = ParserFactory.Get(frame, stream).parse()
                         self._fill_scope_connection(scope)
                         scope['http2_priority'] = _resolve_priority(stream, scope)
-                        scope['extensions'] = {'http.response.push': {}}
+                        scope['extensions'] = {ASGIEvent.HTTP_RESPONSE_PUSH: {}}
                         stream.scope = scope
                         stream_recipient = RecipientFactory.http2()
                         recipients[stream.stream_id] = stream_recipient
                         stream.on_headers_received(end_stream=bool(frame.end_stream))
                         if frame.end_stream:
                             stream_recipient.put_event(
-                                {'type': 'http.request', 'body': b'', 'more_body': False})
+                                {'type': ASGIEvent.HTTP_REQUEST, 'body': b'', 'more_body': False})
                         log_record = _make_log_record(scope)
                         capturing_send = _make_capturing_send(send, log_record)
                         if self._aggregator is not None:
                             stream_actor = StreamActor(
                                 stream_id=stream.stream_id,
                                 scope=scope,
-                                receive=_make_h2_disconnect_receiver(
+                                receive=_make_disconnect_detecting_receive(
                                     stream_recipient, scope, self._aggregator),
                                 send=capturing_send,
                                 app=self.app,
@@ -369,7 +341,7 @@ class HTTP2Actor(Actor):
                         scope = ParserFactory.Get(header_frame, stream).parse()
                         self._fill_scope_connection(scope)
                         scope['http2_priority'] = _resolve_priority(stream, scope)
-                        scope['extensions'] = {'http.response.push': {}}
+                        scope['extensions'] = {ASGIEvent.HTTP_RESPONSE_PUSH: {}}
                         stream.scope = scope
                         stream_recipient = RecipientFactory.http2()
                         recipients[stream.stream_id] = stream_recipient
@@ -379,7 +351,7 @@ class HTTP2Actor(Actor):
                             stream_actor = StreamActor(
                                 stream_id=stream.stream_id,
                                 scope=scope,
-                                receive=_make_h2_disconnect_receiver(
+                                receive=_make_disconnect_detecting_receive(
                                     stream_recipient, scope, self._aggregator),
                                 send=capturing_send,
                                 app=self.app,
@@ -484,12 +456,12 @@ class HTTP2Actor(Actor):
             'headers': Headers([(k.encode() if isinstance(k, str) else k,
                                   v.encode() if isinstance(v, str) else v)
                                  for k, v in regular]),
-            'extensions': {'http.response.push': {}},
+            'extensions': {ASGIEvent.HTTP_RESPONSE_PUSH: {}},
             'http2_priority': _DEFAULT_PRIORITY,
         }
 
         push_recipient = RecipientFactory.http2()
-        push_recipient.put_event({'type': 'http.request', 'body': b'', 'more_body': False})
+        push_recipient.put_event({'type': ASGIEvent.HTTP_REQUEST, 'body': b'', 'more_body': False})
         push_sender = SenderFactory.http2(
             self._writer, self.factory, push_stream_id, push_callback=None)
         log_record = _make_log_record(pushed_scope)

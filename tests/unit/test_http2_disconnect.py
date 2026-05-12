@@ -5,7 +5,8 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from blackbull.server.recipient import HTTP2Recipient
-from blackbull.server.http2_actor import _signal_recipients, _make_h2_disconnect_receiver
+from blackbull.server.http2_actor import _signal_recipients
+from blackbull.server.access_log import _make_disconnect_detecting_receive as _make_h2_disconnect_receiver
 
 
 # ---------------------------------------------------------------------------

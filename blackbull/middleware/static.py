@@ -3,6 +3,7 @@ from pathlib import Path
 from urllib.parse import unquote
 
 from blackbull.env import get_env, Environment
+from blackbull.server.constants import ASGIEvent
 
 
 class StaticFiles:
@@ -85,22 +86,22 @@ class StaticFiles:
                 return
 
             chunk = data[start:end + 1]
-            await send({'type': 'http.response.start', 'status': 206, 'headers': [
+            await send({'type': ASGIEvent.HTTP_RESPONSE_START, 'status': 206, 'headers': [
                 (b'content-type', mime),
                 (b'content-length', str(len(chunk)).encode()),
                 (b'content-range', f'bytes {start}-{end}/{size}'.encode()),
             ]})
-            await send({'type': 'http.response.body', 'body': chunk})
+            await send({'type': ASGIEvent.HTTP_RESPONSE_BODY, 'body': chunk})
             return
 
-        await send({'type': 'http.response.start', 'status': 200, 'headers': [
+        await send({'type': ASGIEvent.HTTP_RESPONSE_START, 'status': 200, 'headers': [
             (b'content-type', mime),
             (b'content-length', str(size).encode()),
         ]})
-        await send({'type': 'http.response.body', 'body': data})
+        await send({'type': ASGIEvent.HTTP_RESPONSE_BODY, 'body': data})
 
     @staticmethod
     async def _respond(send, status: int, extra_headers=None):
-        await send({'type': 'http.response.start', 'status': status,
+        await send({'type': ASGIEvent.HTTP_RESPONSE_START, 'status': status,
                     'headers': extra_headers or []})
-        await send({'type': 'http.response.body', 'body': b''})
+        await send({'type': ASGIEvent.HTTP_RESPONSE_BODY, 'body': b''})

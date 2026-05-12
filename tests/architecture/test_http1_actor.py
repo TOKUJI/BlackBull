@@ -493,14 +493,11 @@ class TestAccessLogging:
         msg = access_records[0].message
         assert '/chat' in msg and '101' in msg
 
-    async def test_websocket_access_log_includes_close_code(self, caplog):
-        import logging
-        from blackbull.server.server import AccessLogRecord, _make_capturing_receive
+    async def test_websocket_access_log_includes_close_code(self):
+        from blackbull.server.websocket_actor import WebSocketActor
+        from blackbull.server.constants import WSCloseCode
+        from unittest.mock import AsyncMock, MagicMock
 
-        record = AccessLogRecord(
-            client_ip='127.0.0.1', method='GET', path='/ws', http_version='1.1',
-            status=101,
-        )
         events = [
             {'type': 'websocket.connect'},
             {'type': 'websocket.disconnect', 'code': 1001},
@@ -509,15 +506,45 @@ class TestAccessLogging:
 
         async def fake_receive():
             nonlocal idx
-            ev = events[idx]
+            ev = events[idx % len(events)]
             idx += 1
             return ev
 
-        wrapped = _make_capturing_receive(fake_receive, record)
-        await wrapped()
-        assert record.close_code is None
-        await wrapped()
-        assert record.close_code == 1001
+        async def fake_app(scope, receive, send):
+            await receive()  # connect
+            await receive()  # disconnect
+
+        writer = MagicMock()
+        writer.write = AsyncMock()
+        writer.close = AsyncMock()
+        aggregator = MagicMock()
+        aggregator.on_error = AsyncMock()
+        aggregator.on_websocket_disconnected = AsyncMock()
+        aggregator.on_websocket_message = AsyncMock()
+        aggregator.on_websocket_connected = AsyncMock()
+
+        from blackbull.server.recipient import RecipientFactory
+        from blackbull.server.sender import SenderFactory
+
+        # Minimal scope with _ws_send_101 so accept can proceed
+        scope = {
+            'type': 'websocket', 'path': '/ws', 'client': ['127.0.0.1', 0],
+        }
+
+        actor = WebSocketActor.__new__(WebSocketActor)
+        actor._scope = scope
+        actor._app = fake_app
+        actor._aggregator = aggregator
+        actor._writer = writer
+        actor._disconnect_code = WSCloseCode.ABNORMAL
+        actor._ws_receive = fake_receive
+        actor._ws_send = AsyncMock()
+
+        # Simulate disconnect code capture via _receive
+        event = await actor._receive()  # connect
+        assert actor._disconnect_code == WSCloseCode.ABNORMAL
+        event = await actor._receive()  # disconnect with code 1001
+        assert actor._disconnect_code == 1001
 
     async def test_http2_access_log_emitted_per_stream(self, caplog):
         import logging

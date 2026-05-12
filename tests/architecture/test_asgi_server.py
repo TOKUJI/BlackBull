@@ -275,6 +275,13 @@ class FakeStreamReader:
         del self._buf[:n]
         return chunk
 
+    async def readexactly(self, n: int) -> bytes:
+        if len(self._buf) < n:
+            raise asyncio.IncompleteReadError(bytes(self._buf), n)
+        chunk = bytes(self._buf[:n])
+        del self._buf[:n]
+        return chunk
+
     async def readuntil(self, separator: bytes) -> bytes:
         idx = self._buf.find(separator)
         if idx == -1:
@@ -496,7 +503,7 @@ class TestTimeoutHandling:
         reader = MagicMock()
         reader.readuntil = AsyncMock(side_effect=[b'POST / HTTP/1.1\r\n',
                                                   b'Content-Length: 5\r\n\r\n'])
-        reader.read = AsyncMock(side_effect=slow_body)
+        reader.readexactly = AsyncMock(side_effect=slow_body)
 
         async def noop_app(scope, receive, send):
             await receive()  # triggers body read

@@ -6,6 +6,7 @@ from uuid import uuid4
 
 from ..actor import Actor, Message
 from ..event_aggregator import EventAggregator
+from .constants import ASGIEvent, WSCloseCode
 from .recipient import AbstractReader, RecipientFactory
 from .sender import AbstractWriter, SenderFactory
 
@@ -49,7 +50,7 @@ class WebSocketActor(Actor):
         self._ssl = ssl
         self._ws_receive = RecipientFactory.websocket(reader, writer)
         self._ws_send = SenderFactory.websocket(writer)
-        self._disconnect_code: int = 1006
+        self._disconnect_code: int = WSCloseCode.ABNORMAL
 
     async def run(self) -> None:
         try:
@@ -63,19 +64,24 @@ class WebSocketActor(Actor):
 
     async def _receive(self) -> dict[str, Any]:
         event = await self._ws_receive()
-        if event.get('type') == 'websocket.receive':
+        if event.get('type') == ASGIEvent.WS_RECEIVE:
             await self._aggregator.on_websocket_message(self._scope, event)
-        elif event.get('type') == 'websocket.disconnect':
-            self._disconnect_code = event.get('code', 1006)
+        elif event.get('type') == ASGIEvent.WS_DISCONNECT:
+            self._disconnect_code = event.get('code', WSCloseCode.ABNORMAL)
         return event
 
     async def _send(self, event: dict[str, Any], _status=None, _headers=None) -> None:
-        await self._ws_send(event)
-        if isinstance(event, dict) and event.get('type') == 'websocket.accept':
+        if isinstance(event, dict) and event.get('type') == ASGIEvent.WS_ACCEPT:
+            send_101 = self._scope.pop('_ws_send_101', None)
+            if send_101:
+                subprotocol = (event.get('subprotocol')
+                               or self._scope.pop('_ws_auto_subprotocol', None))
+                await send_101(subprotocol)
             if not self._scope.get('_connection_id'):
                 self._scope['_connection_id'] = str(uuid4())
             await self._aggregator.on_websocket_connected(
                 self._scope, event.get('subprotocol'))
+        await self._ws_send(event)
 
     async def _handle(self, msg: Message) -> None:
         raise NotImplementedError
