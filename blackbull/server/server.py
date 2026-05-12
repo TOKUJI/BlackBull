@@ -302,15 +302,28 @@ class ASGIServer:
         if self.port is None:
             raise RuntimeError("Server port is not set")
 
+        # Connect via IPv4 127.0.0.1 (the same path external clients such as
+        # nginx use) and send a minimal HTTP request so that the check only
+        # succeeds once the child process's asyncio event loop has actually
+        # accepted the connection and is processing data — not merely because
+        # the OS-level listen socket was set up in the parent before fork.
+        import http.client
         deadline = time.time() + timeout
         while True:
             try:
-                with socket.create_connection(('::1', self.port), timeout=1):
-                    return True
+                conn = http.client.HTTPConnection('127.0.0.1', self.port, timeout=1)
+                conn.request('GET', '/_healthz')
+                conn.getresponse()
+                conn.close()
+                return True
+            except http.client.RemoteDisconnected:
+                # TLS server accepted the TCP connection then closed it because
+                # we sent a plain HTTP request — the asyncio loop is live.
+                return True
             except OSError:
                 if time.time() >= deadline:
                     raise TimeoutError(
-                        f"Port {self.port} on ::1 did not open within {timeout} seconds"
+                        f"Port {self.port} on 127.0.0.1 did not open within {timeout} seconds"
                     )
                 time.sleep(poll_interval)
 
