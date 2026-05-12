@@ -29,7 +29,7 @@ import traceback
 import logging
 from .event import Event, EventDispatcher, EventHandler
 from .utils import Scheme
-from .router import Router, ErrorRouter, MethodNotApplicable, PathNotRegistered, ConfigurationError
+from .router import Router, ErrorRouter, MethodNotApplicable, PathNotRegistered, ConfigurationError, has_middleware_param
 from .server.watch import Watcher, force_reload
 logger = logging.getLogger(__name__)
 
@@ -277,6 +277,16 @@ class BlackBull:
             event = await receive()
             if event['type'] == 'lifespan.startup':
                 self._logger.debug('lifespan startup')
+                mw_errors = [
+                    f"Global middleware {mw!r} has no 'call_next' parameter"
+                    for mw in self._global_middlewares
+                    if not has_middleware_param(mw)
+                ]
+                if mw_errors:
+                    exc = ConfigurationError('\n'.join(mw_errors))
+                    self._logger.error('Middleware configuration error:\n%s', exc)
+                    await send({'type': 'lifespan.startup.failed', 'message': str(exc)})
+                    return
                 try:
                     self._router.validate()
                 except ConfigurationError as exc:
