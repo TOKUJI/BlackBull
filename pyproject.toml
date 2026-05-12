@@ -35,8 +35,9 @@ testing = [
     "pytest-timeout",
     "pytest-cov",
     "typeguard",
-    "httpx",
+    "httpx[http2]",
     "websockets",
+    "hypothesis",
 ]
 
 docs = [

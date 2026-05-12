@@ -8,6 +8,8 @@ import asyncio
 import struct
 from unittest.mock import AsyncMock, MagicMock, call, patch
 import pytest
+from hypothesis import given, settings
+from hypothesis import strategies as st
 
 from blackbull.server.sender import WebSocketSender, AsyncioWriter
 from blackbull.server.recipient import WebSocketRecipient, AsyncioReader, AbstractReader
@@ -123,31 +125,24 @@ class _RecipientWrapper:
 class TestEncodeFrame:
     """_encode_frame must produce valid unmasked WebSocket frames."""
 
-    def test_small_text_frame(self):
-        """Payload < 126 bytes → 2-byte header."""
-        payload = b'hello'
-        frame = WebSocketSender._encode_frame(payload, opcode=0x1)
-        assert frame[0] == 0x80 | 0x1          # FIN + text opcode
-        assert frame[1] == len(payload)          # no mask bit, length 5
-        assert frame[2:] == payload
-
-    def test_medium_frame_126(self):
-        """Payload == 126 bytes → 126-length indicator + 2-byte extended length."""
-        payload = b'x' * 126
-        frame = WebSocketSender._encode_frame(payload, opcode=0x2)
-        assert frame[0] == 0x80 | 0x2
-        assert frame[1] == 126
-        assert int.from_bytes(frame[2:4], 'big') == 126
-        assert frame[4:] == payload
-
-    def test_large_frame(self):
-        """Payload == 65536 bytes → 127-length indicator + 8-byte extended length."""
-        payload = b'y' * 65536
-        frame = WebSocketSender._encode_frame(payload, opcode=0x2)
-        assert frame[0] == 0x80 | 0x2
-        assert frame[1] == 127
-        assert int.from_bytes(frame[2:10], 'big') == 65536
-        assert frame[10:] == payload
+    @given(payload=st.binary(min_size=0, max_size=65536),
+           opcode=st.sampled_from([0x1, 0x2, 0x8]))
+    def test_encode_frame_length_encoding(self, payload, opcode):
+        """_encode_frame uses the correct RFC 6455 length encoding for all payload sizes."""
+        frame = WebSocketSender._encode_frame(payload, opcode=opcode)
+        length = len(payload)
+        assert frame[0] == 0x80 | opcode
+        if length < 126:
+            assert frame[1] == length
+            assert frame[2:] == payload
+        elif length < 65536:
+            assert frame[1] == 126
+            assert int.from_bytes(frame[2:4], 'big') == length
+            assert frame[4:] == payload
+        else:
+            assert frame[1] == 127
+            assert int.from_bytes(frame[2:10], 'big') == length
+            assert frame[10:] == payload
 
     def test_binary_opcode(self):
         frame = WebSocketSender._encode_frame(b'\x00\x01', opcode=0x2)
@@ -165,33 +160,16 @@ class TestEncodeFrame:
 class TestReadFrame:
     """_read_frame must correctly parse masked client frames per RFC 6455."""
 
-    @pytest.mark.asyncio
-    async def test_reads_text_frame(self):
-        """Bug 4: read_frame must await reader, not return a coroutine object."""
-        payload = b'Toshio'
-        data = _make_client_frame(payload, opcode=0x1)
-        reader = _FakeReader(data)
-        opcode, got = await WebSocketSender._read_frame(reader)
-        assert opcode == 0x1
-        assert got == payload
-
-    @pytest.mark.asyncio
-    async def test_reads_binary_frame(self):
-        payload = bytes(range(16))
-        data = _make_client_frame(payload, opcode=0x2)
-        reader = _FakeReader(data)
-        opcode, got = await WebSocketSender._read_frame(reader)
-        assert opcode == 0x2
-        assert got == payload
-
-    @pytest.mark.asyncio
-    async def test_reads_close_frame(self):
-        payload = b'\x03\xe8'
-        data = _make_client_frame(payload, opcode=0x8)
-        reader = _FakeReader(data)
-        opcode, got = await WebSocketSender._read_frame(reader)
-        assert opcode == 0x8
-        assert got == payload
+    @given(opcode=st.sampled_from([0x1, 0x2, 0x8]),
+           payload=st.binary(min_size=1, max_size=256))
+    def test_reads_frame_any_opcode_and_payload(self, opcode, payload):
+        """_read_frame must round-trip any opcode+payload combination correctly."""
+        async def _run():
+            reader = _FakeReader(_make_client_frame(payload, opcode=opcode))
+            returned_opcode, got = await WebSocketSender._read_frame(reader)
+            assert returned_opcode == opcode
+            assert got == payload
+        asyncio.run(_run())
 
     @pytest.mark.asyncio
     async def test_unmask_is_applied(self):
@@ -457,40 +435,16 @@ class TestUnmaskedFrames:
     def _make_handler(self, raw_bytes: bytes):
         return _RecipientWrapper(raw_bytes)
 
-    async def test_unmasked_text_frame_raises(self):
-        """Unmasked text frame (opcode 0x1) must be rejected."""
-        handler = self._make_handler(_make_unmasked_frame(b'hello', opcode=0x1))
-        await handler.receive()       # consume websocket.connect
-        with pytest.raises(Exception):
-            await handler.receive()
-
-    async def test_unmasked_binary_frame_raises(self):
-        """Unmasked binary frame (opcode 0x2) must be rejected."""
-        handler = self._make_handler(_make_unmasked_frame(b'\x00\x01', opcode=0x2))
-        await handler.receive()
-        with pytest.raises(Exception):
-            await handler.receive()
-
-    async def test_unmasked_ping_frame_raises(self):
-        """Unmasked ping frame (opcode 0x9) must be rejected before replying."""
-        handler = self._make_handler(_make_unmasked_frame(b'', opcode=0x9))
-        await handler.receive()
-        with pytest.raises(Exception):
-            await handler.receive()
-
-    async def test_unmasked_close_frame_raises(self):
-        """Unmasked close frame (opcode 0x8) must be rejected."""
-        handler = self._make_handler(_make_unmasked_frame(b'\x03\xe8', opcode=0x8))
-        await handler.receive()
-        with pytest.raises(Exception):
-            await handler.receive()
-
-    async def test_unmasked_empty_payload_raises(self):
-        """Unmasked frame with empty payload must still be rejected."""
-        handler = self._make_handler(_make_unmasked_frame(b'', opcode=0x1))
-        await handler.receive()
-        with pytest.raises(Exception):
-            await handler.receive()
+    @given(opcode=st.sampled_from([0x1, 0x2, 0x8, 0x9]),
+           payload=st.binary(max_size=32))
+    def test_unmasked_frame_raises_for_any_opcode(self, opcode, payload):
+        """Any unmasked client frame must be rejected, regardless of opcode or payload."""
+        async def _run():
+            handler = self._make_handler(_make_unmasked_frame(payload, opcode=opcode))
+            await handler.receive()    # consume websocket.connect
+            with pytest.raises(Exception):
+                await handler.receive()
+        asyncio.run(_run())
 
     async def test_masked_frame_still_accepted(self):
         """Properly masked frame must continue to be accepted (regression)."""

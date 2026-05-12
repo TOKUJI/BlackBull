@@ -1,6 +1,8 @@
 """Tests for blackbull/server/parser.py — HTTP2ParserBase registration guards."""
 import pytest
 from unittest.mock import MagicMock
+from hypothesis import given
+from hypothesis import strategies as st
 
 from blackbull.server.parser import HTTP2ParserBase
 
@@ -136,17 +138,12 @@ class TestParse:
     def test_root_path_default_is_empty_string(self):
         assert _get_scope(_http_request()).get('root_path') == ''
 
-    def test_root_path_from_x_forwarded_prefix(self):
+    @given(prefix=st.from_regex(r'/[a-zA-Z0-9/_-]{0,40}', fullmatch=True))
+    def test_root_path_preserved_from_x_forwarded_prefix(self, prefix):
         scope = _get_scope(_http_request(
-            headers={'Host': 'localhost:8000', 'X-Forwarded-Prefix': '/api'}
+            headers={'Host': 'localhost:8000', 'X-Forwarded-Prefix': prefix}
         ))
-        assert scope.get('root_path') == '/api'
-
-    def test_root_path_nested_prefix(self):
-        scope = _get_scope(_http_request(
-            headers={'Host': 'localhost:8000', 'X-Forwarded-Prefix': '/api/v1'}
-        ))
-        assert scope.get('root_path') == '/api/v1'
+        assert scope.get('root_path') == prefix
 
     def test_root_path_not_set_when_prefix_absent(self):
         assert _get_scope(_http_request(headers={'Host': 'localhost:8000'})).get('root_path') == ''
@@ -198,19 +195,13 @@ class TestHTTP2ScopeFields:
         scope = _ParserFactory.Get(frame, _FakeStream()).parse()
         assert scope.get('root_path') == ''
 
-    def test_root_path_from_x_forwarded_prefix(self):
+    @given(prefix=st.from_regex(r'/[a-zA-Z0-9/_-]{0,40}', fullmatch=True))
+    def test_root_path_preserved_from_x_forwarded_prefix(self, prefix):
         frame = _make_h2_headers_frame_dispatch(
-            extra_headers=[(b'x-forwarded-prefix', b'/api')]
+            extra_headers=[(b'x-forwarded-prefix', prefix.encode())]
         )
         scope = _ParserFactory.Get(frame, _FakeStream()).parse()
-        assert scope.get('root_path') == '/api'
-
-    def test_root_path_nested_prefix(self):
-        frame = _make_h2_headers_frame_dispatch(
-            extra_headers=[(b'x-forwarded-prefix', b'/api/v2')]
-        )
-        scope = _ParserFactory.Get(frame, _FakeStream()).parse()
-        assert scope.get('root_path') == '/api/v2'
+        assert scope.get('root_path') == prefix
 
 
 class TestHTTP11DuplicateHeaders:

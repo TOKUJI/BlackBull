@@ -8,6 +8,8 @@ import asyncio
 import pytest
 from http import HTTPStatus
 from unittest.mock import AsyncMock, MagicMock, patch
+from hypothesis import given
+from hypothesis import strategies as st
 
 from blackbull.server.http1_actor import HTTP1Actor
 from blackbull.server.sender import AbstractWriter, SenderFactory
@@ -208,17 +210,15 @@ class TestHTTP11AutoHeaders:
         await send({'type': 'http.response.body', 'body': body, 'more_body': False})
         assert bytes(writer.written).lower().count(b'content-length:') == 1
 
-    async def test_bytes_path_content_length_not_duplicated(self):
-        send, writer = _make_sender_and_writer()
-        body = b'hello'
-        await send(body, HTTPStatus.OK, [(b'content-length', str(len(body)).encode())])
-        assert bytes(writer.written).lower().count(b'content-length:') == 1
-
-    async def test_bytes_path_uppercase_content_length_not_duplicated(self):
-        send, writer = _make_sender_and_writer()
-        body = b'hello'
-        await send(body, HTTPStatus.OK, [(b'Content-Length', str(len(body)).encode())])
-        assert bytes(writer.written).lower().count(b'content-length:') == 1
+    @given(header_case=st.sampled_from([b'content-length', b'Content-Length', b'CONTENT-LENGTH']))
+    def test_bytes_path_content_length_not_duplicated_any_case(self, header_case):
+        """content-length must not appear twice regardless of the case the app provides."""
+        async def _run():
+            send, writer = _make_sender_and_writer()
+            body = b'hello'
+            await send(body, HTTPStatus.OK, [(header_case, str(len(body)).encode())])
+            assert bytes(writer.written).lower().count(b'content-length:') == 1
+        asyncio.run(_run())
 
 
 # ---------------------------------------------------------------------------

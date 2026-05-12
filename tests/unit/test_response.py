@@ -2,6 +2,8 @@ import json
 from http import HTTPStatus
 
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 
 from blackbull import Response, JSONResponse, WebSocketResponse
 from blackbull.response import cookie_header
@@ -47,14 +49,17 @@ def test_response_extra_headers():
 # JSONResponse
 # ---------------------------------------------------------------------------
 
-def test_jsonresponse_body_dict():
-    obj = {'x': [0, '']}
+_json_value = st.recursive(
+    st.one_of(st.none(), st.booleans(), st.integers(),
+              st.floats(allow_nan=False, allow_infinity=False), st.text()),
+    lambda ch: st.lists(ch) | st.dictionaries(st.text(), ch),
+    max_leaves=10,
+)
+
+
+@given(obj=_json_value)
+def test_jsonresponse_body_encodes_any_serializable(obj):
     assert JSONResponse(obj).body == json.dumps(obj).encode()
-
-
-def test_jsonresponse_body_list():
-    lst = [1, 'two', 3]
-    assert JSONResponse(lst).body == json.dumps(lst).encode()
 
 
 def test_jsonresponse_content_type():
@@ -177,47 +182,27 @@ def test_WebSocketResponse_bytes():
     assert result == {'type': 'websocket.send', 'bytes': b'\xde\xad\xbe\xef'}
 
 
-def test_WebSocketResponse_dict_is_json_encoded():
-    obj = {'key': 'value', 'num': 42}
+@given(obj=st.one_of(st.dictionaries(st.text(), st.integers()),
+                     st.lists(st.integers())))
+def test_WebSocketResponse_collection_is_json_encoded(obj):
     result = WebSocketResponse(obj)
     assert result == {'type': 'websocket.send', 'text': json.dumps(obj)}
-
-
-def test_WebSocketResponse_list_is_json_encoded():
-    lst = [1, 'two', 3]
-    result = WebSocketResponse(lst)
-    assert result == {'type': 'websocket.send', 'text': json.dumps(lst)}
 
 
 def test_WebSocketResponse_empty_string():
     assert WebSocketResponse('') == {'type': 'websocket.send', 'text': ''}
 
 
-def test_WebSocketResponse_plain_string_is_not_json_encoded():
-    name = 'Toshio'
-    result = WebSocketResponse(name)
-    assert result['text'] == name
+@given(s=st.text())
+def test_WebSocketResponse_string_uses_text_field_verbatim(s):
+    """str input must appear in 'text' as-is, not JSON-encoded."""
+    result = WebSocketResponse(s)
+    assert result.get('type') == 'websocket.send'
+    assert result.get('text') == s
 
 
-def test_WebSocketResponse_plain_string_has_no_json_quotes():
-    result = WebSocketResponse('hello')
-    assert result['text'] == 'hello'
-    assert result['text'] != '"hello"'
-
-
-def test_WebSocketResponse_bytes_is_not_json_encoded():
-    payload = b'\xde\xad\xbe\xef'
+@given(payload=st.binary())
+def test_WebSocketResponse_bytes_uses_bytes_field(payload):
     result = WebSocketResponse(payload)
+    assert result.get('type') == 'websocket.send'
     assert result.get('bytes') == payload
-
-
-def test_WebSocketResponse_uses_text_field_for_str():
-    result = WebSocketResponse('world')
-    assert 'text' in result
-    assert result.get('type') == 'websocket.send'
-
-
-def test_WebSocketResponse_uses_bytes_field_for_bytes():
-    result = WebSocketResponse(b'raw')
-    assert 'bytes' in result
-    assert result.get('type') == 'websocket.send'
