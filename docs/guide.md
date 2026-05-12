@@ -1714,49 +1714,43 @@ Reusable middleware patterns that most applications need.
 
 ### 13.1  CORS
 
-Browsers send a pre-flight `OPTIONS` request before cross-origin fetch calls.
-BlackBull has no built-in CORS middleware, but one is straightforward to write:
+BlackBull ships a built-in `CORS` middleware that handles preflight `OPTIONS` requests
+and adds the required `Access-Control-*` headers to actual cross-origin responses.
 
 ```python
-from http import HTTPStatus
-from blackbull import Response
+from blackbull import BlackBull, CORS
 
-ALLOWED_ORIGINS = {
-    'http://localhost:3000',
-    'https://myapp.example.com',
-}
-
-async def cors_mw(scope, receive, send, call_next):
-    origin = scope['headers'].get(b'origin', b'').decode()
-    allowed = origin in ALLOWED_ORIGINS
-
-    # Pre-flight request
-    if scope['method'] == 'OPTIONS':
-        hdrs = [
-            (b'access-control-allow-methods', b'GET,POST,PUT,DELETE,OPTIONS'),
-            (b'access-control-allow-headers', b'Authorization,Content-Type'),
-            (b'access-control-max-age',        b'3600'),
-        ]
-        if allowed:
-            hdrs.append((b'access-control-allow-origin', origin.encode()))
-        await send(Response(b'', status=HTTPStatus.NO_CONTENT, headers=hdrs))
-        return
-
-    # Wrap send to inject CORS header on every response
-    _send = send
-    async def cors_send(body, status=HTTPStatus.OK, headers=[]):
-        hdrs = list(headers)
-        if allowed:
-            hdrs.append((b'access-control-allow-origin', origin.encode()))
-        await _send(body, status, hdrs)
-
-    await call_next(scope, receive, cors_send)
+app = BlackBull()
+app.use(CORS(
+    allow_origins=['https://myapp.example.com'],
+    allow_methods=['GET', 'POST', 'OPTIONS'],
+    allow_headers=['Authorization', 'Content-Type'],
+    allow_credentials=True,
+    max_age=3600,
+))
 ```
 
-Apply it to every route via a group:
+**Parameters:**
+
+| Parameter | Type | Default | Notes |
+|---|---|---|---|
+| `allow_origins` | `list[str] \| str` | `'*'` | Explicit origin strings, or `['*']` for wildcard |
+| `allow_methods` | `list[str]` | `['GET','POST','HEAD','OPTIONS']` | Methods allowed in preflight |
+| `allow_headers` | `list[str] \| str` | `'*'` | Request headers allowed; `['*']` permits all |
+| `allow_credentials` | `bool` | `False` | Emit `Access-Control-Allow-Credentials: true` |
+| `expose_headers` | `list[str]` | `[]` | Response headers the browser JS may read |
+| `max_age` | `int \| None` | `600` | Preflight cache seconds; `None` omits the header |
+
+`allow_credentials=True` cannot be combined with `allow_origins=['*']` — the CORS spec
+forbids it.  List explicit origins instead.
+
+Apply to specific route groups rather than globally when only some routes need CORS:
 
 ```python
-app_group = app.group(middlewares=[cors_mw, error_mw, logging_mw])
+api = app.group(middlewares=[CORS(allow_origins=['https://myapp.example.com'])])
+
+@api.route(path='/items')
+async def list_items(): ...
 ```
 
 ### 13.2  Request ID

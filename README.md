@@ -58,7 +58,7 @@ pytest
 ### P3 — Features and enhancements
 
 - [ ] Worker processes / multiprocessing
-- [ ] Built-in CORS middleware
+- [x] Built-in CORS middleware (`CORS`)
  
 ### P4 — Application framework
 
