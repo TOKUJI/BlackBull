@@ -972,6 +972,34 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="middleware">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.middleware.CORS" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CORS
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.middleware.middleware" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        middleware
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
     </ul>
@@ -1046,6 +1074,34 @@
   
   
     <li class="md-nav__item">
+      <a href="cors/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    cors
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="proxy/" class="md-nav__link">
         
   
@@ -1082,6 +1138,34 @@
     
   
     static
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="utils/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    utils
   
 
     
@@ -1464,6 +1548,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../server/access_log/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    access_log
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../server/connection_actor/" class="md-nav__link">
         
   
@@ -1472,6 +1584,34 @@
     
   
     connection_actor
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../server/constants/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    constants
   
 
     
@@ -1851,6 +1991,34 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="middleware">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.middleware.CORS" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CORS
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.middleware.middleware" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        middleware
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
     </ul>
@@ -1907,6 +2075,212 @@
 
 
 
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="blackbull.middleware.CORS" class="doc doc-heading">
+            <code>CORS</code>
+
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+
+
+        <p>Cross-Origin Resource Sharing (CORS) middleware.</p>
+<p>Handles preflight OPTIONS requests and attaches CORS headers to actual
+cross-origin responses.  Requests without an <code>Origin</code> header pass through
+unchanged.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>allow_origins</code>
+            </td>
+            <td>
+                  <code><span title="list">list</span>[<span title="str">str</span>] | <span title="str">str</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Explicit origin strings or <code>['*']</code> for wildcard.</p>
+              </div>
+            </td>
+            <td>
+                  <code>&#39;*&#39;</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>allow_methods</code>
+            </td>
+            <td>
+                  <code><span title="list">list</span>[<span title="str">str</span>] | None</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>HTTP methods permitted in cross-origin requests.
+Defaults to <code>['GET', 'POST', 'HEAD', 'OPTIONS']</code>.</p>
+              </div>
+            </td>
+            <td>
+                  <code>None</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>allow_headers</code>
+            </td>
+            <td>
+                  <code><span title="list">list</span>[<span title="str">str</span>] | <span title="str">str</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Request headers permitted; <code>['*']</code> allows all.</p>
+              </div>
+            </td>
+            <td>
+                  <code>&#39;*&#39;</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>allow_credentials</code>
+            </td>
+            <td>
+                  <code><span title="bool">bool</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Emit <code>Access-Control-Allow-Credentials: true</code>.
+Cannot be combined with <code>allow_origins=['*']</code>.</p>
+              </div>
+            </td>
+            <td>
+                  <code>False</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>expose_headers</code>
+            </td>
+            <td>
+                  <code><span title="list">list</span>[<span title="str">str</span>] | None</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Response headers the browser JS may read.</p>
+              </div>
+            </td>
+            <td>
+                  <code>None</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>max_age</code>
+            </td>
+            <td>
+                  <code><span title="int">int</span> | None</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Preflight cache lifetime in seconds.  <code>None</code> omits the header.</p>
+              </div>
+            </td>
+            <td>
+                  <code>600</code>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+        <p>Usage::</p>
+<pre><code>app = BlackBull()
+app.use(CORS(
+    allow_origins=['https://myapp.example.com'],
+    allow_credentials=True,
+    max_age=3600,
+))
+</code></pre>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="blackbull.middleware.middleware" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">middleware</span><span class="p">(</span><span class="n">fn</span><span class="p">)</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Decorator for middleware functions.</p>
+<p>Wraps <code>call_next</code> so any <code>send</code> callable the middleware passes to it is
+automatically normalised via <code>_normalize_send</code>.  The middleware's own
+inner <code>send</code> wrapper therefore only receives plain ASGI event dicts and
+does not need <code>isinstance</code> guards for <code>Response</code> objects.</p>
+<p>Power users who need to handle raw <code>send</code> arguments (e.g. because their
+middleware is used in a context where no simplified handlers are registered)
+should omit this decorator — their <code>call_next</code> is then wired directly to
+the next handler with no extra wrapping.</p>
+<p>Usage::</p>
+<pre><code>from blackbull import middleware
+
+@middleware
+async def timing_mw(scope, receive, send, call_next):
+    async def timed_send(event):
+        # event is always a dict here
+        await send(event)
+    await call_next(scope, receive, timed_send)
+</code></pre>
+
+
+    </div>
+
+</div>
 
 
 

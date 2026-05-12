@@ -2428,6 +2428,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../api/blackbull/middleware/cors/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    cors
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../api/blackbull/middleware/proxy/" class="md-nav__link">
         
   
@@ -2464,6 +2492,34 @@
     
   
     static
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/blackbull/middleware/utils/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    utils
   
 
     
@@ -2846,6 +2902,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../api/blackbull/server/access_log/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    access_log
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../api/blackbull/server/connection_actor/" class="md-nav__link">
         
   
@@ -2854,6 +2938,34 @@
     
   
     connection_actor
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/blackbull/server/constants/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    constants
   
 
     
@@ -4964,7 +5076,7 @@ async def get_item(item_id: int, scope):
 <td><code>Response(value)</code> — <code>text/html; charset=utf-8</code></td>
 </tr>
 <tr>
-<td><code>dict</code></td>
+<td><code>dict</code> or <code>list</code></td>
 <td><code>JSONResponse(value)</code> — <code>application/json</code></td>
 </tr>
 <tr>
@@ -6387,44 +6499,75 @@ async def test_auth_mw_rejects_missing_token():
 <h2 id="13-common-middleware-recipes">§13  Common Middleware Recipes</h2>
 <p>Reusable middleware patterns that most applications need.</p>
 <h3 id="131-cors">13.1  CORS</h3>
-<p>Browsers send a pre-flight <code>OPTIONS</code> request before cross-origin fetch calls.
-BlackBull has no built-in CORS middleware, but one is straightforward to write:</p>
-<pre><code class="language-python">from http import HTTPStatus
-from blackbull import Response
+<p>BlackBull ships a built-in <code>CORS</code> middleware that handles preflight <code>OPTIONS</code> requests
+and adds the required <code>Access-Control-*</code> headers to actual cross-origin responses.</p>
+<pre><code class="language-python">from blackbull import BlackBull, CORS
 
-ALLOWED_ORIGINS = {
-    'http://localhost:3000',
-    'https://myapp.example.com',
-}
-
-async def cors_mw(scope, receive, send, call_next):
-    origin = scope['headers'].get(b'origin', b'').decode()
-    allowed = origin in ALLOWED_ORIGINS
-
-    # Pre-flight request
-    if scope['method'] == 'OPTIONS':
-        hdrs = [
-            (b'access-control-allow-methods', b'GET,POST,PUT,DELETE,OPTIONS'),
-            (b'access-control-allow-headers', b'Authorization,Content-Type'),
-            (b'access-control-max-age',        b'3600'),
-        ]
-        if allowed:
-            hdrs.append((b'access-control-allow-origin', origin.encode()))
-        await send(Response(b'', status=HTTPStatus.NO_CONTENT, headers=hdrs))
-        return
-
-    # Wrap send to inject CORS header on every response
-    _send = send
-    async def cors_send(body, status=HTTPStatus.OK, headers=[]):
-        hdrs = list(headers)
-        if allowed:
-            hdrs.append((b'access-control-allow-origin', origin.encode()))
-        await _send(body, status, hdrs)
-
-    await call_next(scope, receive, cors_send)
+app = BlackBull()
+app.use(CORS(
+    allow_origins=['https://myapp.example.com'],
+    allow_methods=['GET', 'POST', 'OPTIONS'],
+    allow_headers=['Authorization', 'Content-Type'],
+    allow_credentials=True,
+    max_age=3600,
+))
 </code></pre>
-<p>Apply it to every route via a group:</p>
-<pre><code class="language-python">app_group = app.group(middlewares=[cors_mw, error_mw, logging_mw])
+<p><strong>Parameters:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Type</th>
+<th>Default</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>allow_origins</code></td>
+<td><code>list[str] \| str</code></td>
+<td><code>'*'</code></td>
+<td>Explicit origin strings, or <code>['*']</code> for wildcard</td>
+</tr>
+<tr>
+<td><code>allow_methods</code></td>
+<td><code>list[str]</code></td>
+<td><code>['GET','POST','HEAD','OPTIONS']</code></td>
+<td>Methods allowed in preflight</td>
+</tr>
+<tr>
+<td><code>allow_headers</code></td>
+<td><code>list[str] \| str</code></td>
+<td><code>'*'</code></td>
+<td>Request headers allowed; <code>['*']</code> permits all</td>
+</tr>
+<tr>
+<td><code>allow_credentials</code></td>
+<td><code>bool</code></td>
+<td><code>False</code></td>
+<td>Emit <code>Access-Control-Allow-Credentials: true</code></td>
+</tr>
+<tr>
+<td><code>expose_headers</code></td>
+<td><code>list[str]</code></td>
+<td><code>[]</code></td>
+<td>Response headers the browser JS may read</td>
+</tr>
+<tr>
+<td><code>max_age</code></td>
+<td><code>int \| None</code></td>
+<td><code>600</code></td>
+<td>Preflight cache seconds; <code>None</code> omits the header</td>
+</tr>
+</tbody>
+</table>
+<p><code>allow_credentials=True</code> cannot be combined with <code>allow_origins=['*']</code> — the CORS spec
+forbids it.  List explicit origins instead.</p>
+<p>Apply to specific route groups rather than globally when only some routes need CORS:</p>
+<pre><code class="language-python">api = app.group(middlewares=[CORS(allow_origins=['https://myapp.example.com'])])
+
+@api.route(path='/items')
+async def list_items(): ...
 </code></pre>
 <h3 id="132-request-id">13.2  Request ID</h3>
 <p>Attach a unique ID to every request for distributed tracing:</p>

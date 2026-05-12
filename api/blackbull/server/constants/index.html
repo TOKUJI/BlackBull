@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://TOKUJI.github.io/BlackBull/api/blackbull/server/watch/">
+        <link rel="canonical" href="https://TOKUJI.github.io/BlackBull/api/blackbull/server/constants/">
       
       
-        <link rel="prev" href="../server/">
+        <link rel="prev" href="../connection_actor/">
       
       
-        <link rel="next" href="../websocket_actor/">
+        <link rel="next" href="../headers/">
       
       
         
@@ -27,7 +27,7 @@
     
     
       
-        <title>watch - BlackBull</title>
+        <title>constants - BlackBull</title>
       
     
     
@@ -72,7 +72,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#blackbullserverwatch" class="md-skip">
+        <a href="#blackbullserverconstants" class="md-skip">
           Skip to content
         </a>
       
@@ -108,7 +108,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              watch
+              constants
             
           </span>
         </div>
@@ -1515,10 +1515,37 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../constants/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    constants
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -1534,6 +1561,54 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#blackbull.server.constants" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        constants
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="constants">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.constants.ASGIEvent" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ASGIEvent
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -1767,37 +1842,10 @@
                 
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    watch
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../watch/" class="md-nav__link">
         
   
   
@@ -1813,54 +1861,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#blackbull.server.watch" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        watch
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="watch">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.watch.Watcher" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Watcher
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -1972,22 +1972,22 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#blackbull.server.watch" class="md-nav__link">
+  <a href="#blackbull.server.constants" class="md-nav__link">
     <span class="md-ellipsis">
       
-        watch
+        constants
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="watch">
+    <nav class="md-nav" aria-label="constants">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#blackbull.server.watch.Watcher" class="md-nav__link">
+  <a href="#blackbull.server.constants.ASGIEvent" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Watcher
+        ASGIEvent
       
     </span>
   </a>
@@ -2019,20 +2019,27 @@
   
 
 
-<h1 id="blackbullserverwatch"><code>blackbull.server.watch</code></h1>
+<h1 id="blackbullserverconstants"><code>blackbull.server.constants</code></h1>
 
 
 <div class="doc doc-object doc-module">
 
 
 
-<h2 id="blackbull.server.watch" class="doc doc-heading">
-            <code>blackbull.server.watch</code>
+<h2 id="blackbull.server.constants" class="doc doc-heading">
+            <code>blackbull.server.constants</code>
 
 
 </h2>
 
     <div class="doc doc-contents first">
+
+        <p>Protocol constants shared across the server and middleware layers.</p>
+<p><code>ASGIEvent</code> groups ASGI event type strings as class attributes so they can be
+used in both equality comparisons and as dotted-name value patterns in
+<code>match</code>/<code>case</code> statements.</p>
+<p><code>WSCloseCode</code> is an <code>IntEnum</code> for the WebSocket close codes used on the
+wire (RFC 6455 §7.4).</p>
 
 
 
@@ -2057,25 +2064,18 @@
 
 
 
-<h3 id="blackbull.server.watch.Watcher" class="doc doc-heading">
-            <code>Watcher</code>
+<h3 id="blackbull.server.constants.ASGIEvent" class="doc doc-heading">
+            <code>ASGIEvent</code>
 
 
 </h3>
 
 
     <div class="doc doc-contents ">
-            <p class="doc doc-class-bases">
-              Bases: <code><span title="object">object</span></code></p>
 
 
 
-        <div class="admonition experimental">
-<p class="admonition-title">Experimental</p>
-<p>This class is under active development and its API is not yet stable.
-Do not use in production code — method signatures and behaviour may
-change without notice.</p>
-</div>
+        <p>Namespace for ASGI protocol event type strings (ASGI 3.0 spec).</p>
 
 
 

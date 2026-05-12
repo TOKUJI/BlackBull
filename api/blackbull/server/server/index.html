@@ -986,6 +986,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../middleware/cors/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    cors
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../middleware/proxy/" class="md-nav__link">
         
   
@@ -1022,6 +1050,34 @@
     
   
     static
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../middleware/utils/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    utils
   
 
     
@@ -1406,6 +1462,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../access_log/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    access_log
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../connection_actor/" class="md-nav__link">
         
   
@@ -1414,6 +1498,34 @@
     
   
     connection_actor
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../constants/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    constants
   
 
     
@@ -1763,17 +1875,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#blackbull.server.server.AccessLogRecord" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        AccessLogRecord
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#blackbull.server.server.LifespanManager" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2016,17 +2117,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#blackbull.server.server.AccessLogRecord" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        AccessLogRecord
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#blackbull.server.server.LifespanManager" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2238,60 +2328,6 @@ shutdown() can deliver 'lifespan.shutdown' to the same task.</p>
     </div>
 
 </div>
-
-
-
-  </div>
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-class">
-
-
-
-<h3 id="blackbull.server.server.AccessLogRecord" class="doc doc-heading">
-            <code>AccessLogRecord</code>
-
-
-  <span class="doc doc-labels">
-      <small class="doc doc-label doc-label-dataclass"><code>dataclass</code></small>
-  </span>
-
-</h3>
-
-
-    <div class="doc doc-contents ">
-
-
-
-        <p>Per-request record populated in two phases.</p>
-<p>Phase 1 (after parse): client_ip, method, path, http_version.
-Phase 2 (during send): status, response_bytes.
-For WebSocket sessions, close_code is captured on disconnect instead.
-Emitted as one INFO line on 'blackbull.access' after the response completes.</p>
-
-
-
-
-
-
-
-
-
-
-
-<div class="doc doc-children">
-
-
-
-
-
-
-
-
-
 
 
 
