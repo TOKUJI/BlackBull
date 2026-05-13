@@ -161,7 +161,8 @@ class TestParse:
 
 def _make_h2_headers_frame_dispatch(extra_headers: list | None = None) -> object:
     from hpack import Encoder
-    from blackbull.protocol.frame import FrameFactory, FrameTypes, HeaderFrameFlags
+    from blackbull.protocol.frame import FrameFactory
+    from blackbull.protocol.frame_types import FrameTypes, HeaderFrameFlags
 
     encoder = Encoder()
     header_list = [

@@ -1,6 +1,6 @@
 # BlackBull — Level A Actor Model Design
 
-**Status**: Implemented — Phase 6 complete (commit 7da77a6)  
+**Status**: Implemented — Phase 6 complete (commit 7da77a6); refactored (packaging, codec, frame split, method decomposition)  
 **Prerequisite completed**: Phase 3 (examples migration), Phase 4 (docs), Phase 6 (Actor model)
 
 ---
@@ -168,14 +168,15 @@ It must not be exported from the package's public `__init__.py`.
 ## Message Protocol
 
 All messages are `dataclass` instances (not dicts) for type safety.
-A base class provides the actor-source reference for reply routing:
+A base class provides the actor-source reference for reply routing.
+HTTP/2 message types are defined in `blackbull/server/http2_messages.py`:
 
 ~~~python
 @dataclass
 class Message:
     sender: Actor | None = None  # None for externally-originated messages
 
-# Example Level A messages
+# HTTP/2 Level A messages (blackbull/server/http2_messages.py)
 @dataclass
 class ConnectionAccepted(Message):
     reader: AbstractReader
@@ -220,6 +221,14 @@ Phase 6 implemented this design in order, keeping the full test suite green at e
 5. ✅ Introduced `WebSocketActor` + `ConnectionActor`; added `on_connection_accepted`.
 6. ✅ `ServerActor` role absorbed by `ASGIServer` + `ConnectionActor` (no separate class needed).
 7. ✅ Deleted `HTTP11Handler`, `HTTP2Handler`, `WebSocketHandler`.
+
+Post-Phase-6 refactoring (all steps kept 721-test suite green):
+
+- ✅ Fixed packaging: `pyproject.toml` requires Python `>=3.11`; `Pipfile` aligned to `3.11`; `h2` added to `pyproject.toml` dependencies; `hpack` added to `Pipfile`.
+- ✅ Extracted WebSocket frame codec into `blackbull/server/ws_codec.py` (`WSOpcode`, `WSFrameBits`, `WSFrameHeader`, `encode_frame`, `read_frame_header`, `read_payload`, `read_frame`).
+- ✅ Split `blackbull/protocol/frame.py`: frame-type definitions and enums moved to `blackbull/protocol/frame_types.py`; `frame.py` now contains only `FrameFactory`.
+- ✅ Extracted HTTP/2 actor message types into `blackbull/server/http2_messages.py`.
+- ✅ Decomposed long methods: `HTTP2Actor._frame_loop()` → `_on_headers_frame`, `_on_continuation_frame`, `_on_data_frame`, `_on_goaway_frame`, `_spawn_stream_task`; `HTTP1Actor.run()` → `_dispatch_request`; `WebSocketRecipient._read_loop()` → `_handle_data_frame`, `_handle_control_frame`, `_handle_unknown_opcode`.
 
 ---
 

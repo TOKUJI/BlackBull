@@ -12,9 +12,10 @@ from hpack import Encoder
 
 from blackbull.server.http2_actor import HTTP2Actor
 from blackbull.server.sender import AsyncioWriter
-from blackbull.protocol.frame import (FrameFactory, FrameTypes, FrameFlags,
-                              HeaderFrameFlags, DataFrameFlags,
-                              SettingFrameFlags)
+from blackbull.protocol.frame import FrameFactory
+from blackbull.protocol.frame_types import (FrameTypes, FrameFlags,
+                                            HeaderFrameFlags, DataFrameFlags,
+                                            SettingFrameFlags)
 
 
 # ---------------------------------------------------------------------------
@@ -554,15 +555,15 @@ class TestHTTP2PriorityScope:
         return _make_h2_frame(FrameTypes.PRIORITY_UPDATE, 0, 0, payload)
 
     async def test_parse_priority_field_default(self):
-        from blackbull.protocol.frame import parse_priority_field
+        from blackbull.protocol.frame_types import parse_priority_field
         assert parse_priority_field('') == {'urgency': 3, 'incremental': False}
 
     async def test_parse_priority_field_urgency(self):
-        from blackbull.protocol.frame import parse_priority_field
+        from blackbull.protocol.frame_types import parse_priority_field
         assert parse_priority_field('u=5') == {'urgency': 5, 'incremental': False}
 
     async def test_parse_priority_field_urgency_and_incremental(self):
-        from blackbull.protocol.frame import parse_priority_field
+        from blackbull.protocol.frame_types import parse_priority_field
         assert parse_priority_field('u=2, i') == {'urgency': 2, 'incremental': True}
 
     async def test_scope_has_default_http2_priority(self):

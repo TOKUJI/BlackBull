@@ -5,6 +5,7 @@ name = "pypi"
 
 [packages]
 h2 = "*"
+hpack = "*"
 
 [dev-packages]
 peewee = "*"
@@ -17,4 +18,4 @@ flake8 = "*"
 websockets = "*"
 
 [requires]
-python_version = "3.9"
+python_version = "3.11"

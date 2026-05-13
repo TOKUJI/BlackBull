@@ -7,6 +7,7 @@ from blackbull.event_aggregator import EventAggregator
 from blackbull.server.recipient import AbstractReader
 from blackbull.server.sender import AbstractWriter
 from blackbull.server.websocket_actor import WebSocketActor
+from blackbull.server.ws_codec import encode_frame
 
 
 # ---------------------------------------------------------------------------
@@ -160,7 +161,6 @@ async def test_websocket_message_fires_per_message(
 @pytest.mark.asyncio
 async def test_websocket_protocol_error_isolated(
         fake_bad_frame_reader, fake_writer) -> None:
-    from blackbull.server.sender import WebSocketSender
     aggregator = AsyncMock(spec_set=EventAggregator)
     scope = {'type': 'websocket', '_connection_id': 'test-id'}
 
@@ -174,7 +174,7 @@ async def test_websocket_protocol_error_isolated(
 
     aggregator.on_error.assert_called_once()
     aggregator.on_websocket_disconnected.assert_called_once_with(scope, code=1006)
-    close_1002 = WebSocketSender._encode_frame((1002).to_bytes(2, 'big'), opcode=0x8)
+    close_1002 = encode_frame((1002).to_bytes(2, 'big'), opcode=0x8)
     assert close_1002 in bytes(fake_writer.written), (
         'CLOSE(1002) frame must be written to the wire on protocol violation'
     )

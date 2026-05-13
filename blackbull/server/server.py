@@ -14,7 +14,8 @@ import socket
 from ..utils import HTTP2, pop_safe, check_port
 from ..event import Event
 from ..protocol.rsock import create_dual_stack_sockets
-from ..protocol.frame import ErrorCodes, FrameFactory, FrameTypes, FrameBase
+from ..protocol.frame import FrameFactory
+from ..protocol.frame_types import ErrorCodes, FrameTypes, FrameBase
 from .response import ResponderFactory
 from .parser import ParserFactory
 from .sender import SenderFactory, AbstractWriter

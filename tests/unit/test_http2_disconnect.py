@@ -24,7 +24,7 @@ async def test_put_disconnect_unblocks_call():
 @pytest.mark.asyncio
 async def test_put_disconnect_after_data():
     """Disconnect event is delivered after any queued data events."""
-    from blackbull.protocol.frame import Data
+    from blackbull.protocol.frame_types import Data
     frame = MagicMock(spec=Data)
     frame.payload = b'hello'
     frame.end_stream = False

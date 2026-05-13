@@ -5,7 +5,8 @@ from unittest.mock import AsyncMock
 from hpack import Encoder
 
 from blackbull.event_aggregator import EventAggregator
-from blackbull.protocol.frame import FrameFactory, FrameTypes, HeaderFrameFlags
+from blackbull.protocol.frame import FrameFactory
+from blackbull.protocol.frame_types import FrameTypes, HeaderFrameFlags
 from blackbull.server.recipient import AbstractReader
 from blackbull.server.sender import AbstractWriter
 from blackbull.server.http2_actor import HTTP2Actor

@@ -2,7 +2,7 @@ from functools import partial
 import traceback
 
 from ..protocol.stream import Stream
-from ..protocol.frame import FrameTypes, SettingFrameFlags
+from ..protocol.frame_types import FrameTypes, SettingFrameFlags
 import logging
 from ..logger import log
 

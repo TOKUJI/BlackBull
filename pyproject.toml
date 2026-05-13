@@ -12,6 +12,7 @@ authors = [
 license = { file = "LICENSE" }
 
 dependencies = [
+    "h2",
     "hpack",
 ]
 

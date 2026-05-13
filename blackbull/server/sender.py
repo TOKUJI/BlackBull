@@ -1,52 +1,15 @@
 import asyncio
-import os
 from abc import ABC, abstractmethod
-from enum import IntEnum
 from http import HTTPStatus
 from email.utils import formatdate
-from typing import NamedTuple
 
-from ..protocol.frame import (FrameTypes, HeaderFrameFlags, DataFrameFlags,
-                               SettingFrameFlags, FrameBase, PseudoHeaders,
-                               DEFAULT_INITIAL_WINDOW_SIZE)
+from ..protocol.frame_types import (FrameTypes, HeaderFrameFlags, DataFrameFlags,
+                                    SettingFrameFlags, FrameBase, PseudoHeaders,
+                                    DEFAULT_INITIAL_WINDOW_SIZE)
 from .constants import ASGIEvent, WSCloseCode
+from .ws_codec import WSOpcode, WSFrameBits, WSFrameHeader, encode_frame
 import logging
 from .headers import Headers, HeaderList
-
-class WSOpcode(IntEnum):
-    CONTINUATION = 0x0
-    TEXT         = 0x1
-    BINARY       = 0x2
-    CLOSE        = 0x8
-    PING         = 0x9
-    PONG         = 0xA
-
-class WSFrameBits(IntEnum):
-    FIN         = 0x80  # FIN bit in byte 0
-    RSV1        = 0x40  # RSV1 bit in byte 0 (per-message deflate, RFC 7692)
-    RSV2        = 0x20  # RSV2 bit in byte 0 (reserved)
-    RSV3        = 0x10  # RSV3 bit in byte 0 (reserved)
-    OPCODE_MASK = 0x0F  # opcode bits in byte 0
-    MASK_BIT    = 0x80  # mask bit in byte 1
-    LENGTH_MASK = 0x7F  # payload length bits in byte 1
-
-
-class WSFrameHeader(NamedTuple):
-    """Decoded fields from the two-byte WebSocket frame header (RFC 6455 §5.2).
-
-    Note on masking (RFC 6455 §5.1):
-    - Client → server frames MUST be masked (``masked`` is True);
-      ``WebSocketRecipient`` raises ``ValueError`` on an unmasked client frame.
-    - Server → client frames MUST NOT be masked; ``WebSocketSender`` never sets
-      the mask bit.
-    """
-    opcode: int
-    masked: bool
-    length: int
-    fin:    bool
-    rsv1:   bool
-    rsv2:   bool
-    rsv3:   bool
 
 logger = logging.getLogger(__name__)
 
@@ -403,14 +366,14 @@ class WebSocketSender(BaseSender):
                 
             case ASGIEvent.WS_SEND:
                 if 'text' in body and body['text'] is not None:
-                    frame = self._encode_frame(body['text'].encode('utf-8'), opcode=WSOpcode.TEXT)
+                    frame = encode_frame(body['text'].encode('utf-8'), opcode=WSOpcode.TEXT)
                 else:
-                    frame = self._encode_frame(body.get('bytes', b''), opcode=WSOpcode.BINARY)
+                    frame = encode_frame(body.get('bytes', b''), opcode=WSOpcode.BINARY)
                 await self._write(frame)
 
             case ASGIEvent.WS_CLOSE:
                 code = body.get('code', WSCloseCode.NORMAL)
-                frame = self._encode_frame(code.to_bytes(2, 'big'), opcode=WSOpcode.CLOSE)
+                frame = encode_frame(code.to_bytes(2, 'big'), opcode=WSOpcode.CLOSE)
                 await self._write(frame)
 
             case ASGIEvent.WS_ACCEPT:
@@ -418,85 +381,6 @@ class WebSocketSender(BaseSender):
             case _:
                 logger.warning('WebSocketSender: unknown event type %r', event_type)
 
-    @staticmethod
-    def _encode_frame(payload: bytes, opcode: WSOpcode | int = WSOpcode.TEXT,
-                      *, mask: bool = False) -> bytes:
-        """Encode *payload* as a WebSocket data frame (RFC 6455 §5).
-
-        ``opcode`` defaults to ``WSOpcode.TEXT``; pass ``WSOpcode.BINARY`` for
-        binary frames, ``WSOpcode.CLOSE`` for close frames, etc.
-
-        Masking (RFC 6455 §5.1):
-        - Server → client frames MUST NOT be masked: callers in the server
-          path keep ``mask=False`` (the default).
-        - Client → server frames MUST be masked: the protocol-layer client
-          passes ``mask=True``, which prepends a random 4-byte masking key
-          and XORs the payload with it.
-        """
-        length = len(payload)
-        header = bytes([WSFrameBits.FIN | opcode])
-        mask_bit = WSFrameBits.MASK_BIT if mask else 0
-        if length < 126:
-            header += bytes([mask_bit | length])
-        elif length < 65536:
-            header += bytes([mask_bit | 126]) + length.to_bytes(2, 'big')
-        else:
-            header += bytes([mask_bit | 127]) + length.to_bytes(8, 'big')
-        if mask:
-            mask_key = os.urandom(4)
-            masked_payload = bytes(b ^ mask_key[i % 4] for i, b in enumerate(payload))
-            return header + mask_key + masked_payload
-        return header + payload
-    
-    @staticmethod
-    async def _read_frame_header(reader) -> WSFrameHeader:
-        """Read the two-byte WebSocket frame header (RFC 6455 §5.2).
-
-        Returns a ``WSFrameHeader`` with all decoded flag and length fields.
-        RSV1 signals per-message deflate (RFC 7692 §7); RSV2 and RSV3 are
-        reserved for future extensions.
-        Raises ``asyncio.IncompleteReadError`` on EOF.
-        """
-        header = await reader.readexactly(2)
-        return WSFrameHeader(
-            opcode = header[0] & WSFrameBits.OPCODE_MASK,
-            masked = bool(header[1] & WSFrameBits.MASK_BIT),
-            length = header[1] & WSFrameBits.LENGTH_MASK,
-            fin    = bool(header[0] & WSFrameBits.FIN),
-            rsv1   = bool(header[0] & WSFrameBits.RSV1),
-            rsv2   = bool(header[0] & WSFrameBits.RSV2),
-            rsv3   = bool(header[0] & WSFrameBits.RSV3),
-        )
-    
-    @staticmethod
-    async def _read_payload(reader, masked: bool, length: int) -> bytes:
-        """Read the payload of a WebSocket frame from *reader*.
-
-        If *masked* is True, also read the 4-byte mask and unmask the payload.
-        Raises ``asyncio.IncompleteReadError`` on EOF.
-        """
-        if length == 126:
-            length = int.from_bytes(await reader.readexactly(2), 'big')
-        elif length == 127:
-            length = int.from_bytes(await reader.readexactly(8), 'big')
-
-        if masked:
-            mask = await reader.readexactly(4)
-            raw = await reader.readexactly(length)
-            return bytes(b ^ mask[i % 4] for i, b in enumerate(raw))
-        else:
-            return await reader.readexactly(length)
-
-    @staticmethod
-    async def _read_frame(reader) -> tuple[int, bytes]:
-        """Read one WebSocket frame from *reader*.
-
-        Returns ``(opcode, payload)`` where *payload* is already unmasked.
-        Raises ``asyncio.IncompleteReadError`` on EOF.
-        """
-        h = await WebSocketSender._read_frame_header(reader)
-        payload = await WebSocketSender._read_payload(reader, h.masked, h.length)
-        return h.opcode, payload
 
 
 # ---------------------------------------------------------------------------

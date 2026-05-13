@@ -13,7 +13,7 @@ import asyncio
 from enum import Enum
 from urllib.parse import urlparse
 
-from .frame import PseudoHeaders, DataFrameFlags, HeaderFrameFlags, FrameTypes
+from .frame_types import PseudoHeaders, DataFrameFlags, HeaderFrameFlags, FrameTypes
 import logging
 logger = logging.getLogger(__name__)
 

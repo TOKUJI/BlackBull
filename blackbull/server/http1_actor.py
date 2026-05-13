@@ -146,59 +146,8 @@ class HTTP1Actor(Actor):
                 capturing_send = _make_capturing_send(send, log_record)
                 inner_receive = RecipientFactory.http1(self._reader, scope)
 
-                if self._aggregator is not None:
-                    detecting_receive = _make_disconnect_detecting_receive(
-                        inner_receive, scope, self._aggregator)
-                    request_actor = RequestActor(
-                        scope, detecting_receive, capturing_send,
-                        self._app, self._aggregator,
-                    )
-                    try:
-                        await request_actor.run()
-                    except BaseException:
-                        break  # isolate: close connection on unhandled error
-                    finally:
-                        _access_logger.info(log_record.format(), extra=log_record.as_extra())
-                else:
-                    # Legacy path — direct dispatcher (aggregator=None)
-                    _dispatcher = getattr(self._app, '_dispatcher', None)
-                    if _dispatcher is not None:
-                        detecting_receive = self._make_legacy_disconnect_receive(
-                            inner_receive, scope, _dispatcher, log_record)
-                    else:
-                        detecting_receive = inner_receive
-                    try:
-                        if _dispatcher is not None:
-                            await _dispatcher.emit(Event(
-                                'request_received',
-                                detail={
-                                    'scope':        scope,
-                                    'client_ip':    log_record.client_ip,
-                                    'method':       log_record.method,
-                                    'path':         log_record.path,
-                                    'http_version': log_record.http_version,
-                                    'headers':      scope.get('headers', []),
-                                },
-                            ))
-                        await self._app(scope, detecting_receive, capturing_send)
-                    finally:
-                        _access_logger.info(log_record.format(), extra=log_record.as_extra())
-                        if (_dispatcher is not None
-                                and scope.get('type') == 'http'
-                                and not scope.get('_disconnected')):
-                            await _dispatcher.emit(Event(
-                                'request_completed',
-                                detail={
-                                    'scope':          scope,
-                                    'client_ip':      log_record.client_ip,
-                                    'method':         log_record.method,
-                                    'path':           log_record.path,
-                                    'http_version':   log_record.http_version,
-                                    'status':         log_record.status,
-                                    'response_bytes': log_record.response_bytes,
-                                    'duration_ms':    log_record.duration_ms(),
-                                },
-                            ))
+                if not await self._dispatch_request(scope, inner_receive, capturing_send, log_record):
+                    break  # unhandled error — close connection
 
                 self._request = b''
                 next_chunk = await self._reader.readuntil(_REQ_END)
@@ -365,6 +314,71 @@ class HTTP1Actor(Actor):
                     ))
             return event
         return detecting_receive
+
+    async def _dispatch_request(
+        self,
+        scope: dict,
+        inner_receive,
+        capturing_send,
+        log_record,
+    ) -> bool:
+        """Dispatch one HTTP request via the aggregator or legacy path.
+
+        Returns True on success, False if an unhandled error should close the connection.
+        """
+        if self._aggregator is not None:
+            detecting_receive = _make_disconnect_detecting_receive(
+                inner_receive, scope, self._aggregator)
+            request_actor = RequestActor(
+                scope, detecting_receive, capturing_send,
+                self._app, self._aggregator,
+            )
+            try:
+                await request_actor.run()
+            except BaseException:
+                return False
+            finally:
+                _access_logger.info(log_record.format(), extra=log_record.as_extra())
+        else:
+            _dispatcher = getattr(self._app, '_dispatcher', None)
+            if _dispatcher is not None:
+                detecting_receive = self._make_legacy_disconnect_receive(
+                    inner_receive, scope, _dispatcher, log_record)
+            else:
+                detecting_receive = inner_receive
+            try:
+                if _dispatcher is not None:
+                    await _dispatcher.emit(Event(
+                        'request_received',
+                        detail={
+                            'scope':        scope,
+                            'client_ip':    log_record.client_ip,
+                            'method':       log_record.method,
+                            'path':         log_record.path,
+                            'http_version': log_record.http_version,
+                            'headers':      scope.get('headers', []),
+                        },
+                    ))
+                await self._app(scope, detecting_receive, capturing_send)
+            finally:
+                _access_logger.info(log_record.format(), extra=log_record.as_extra())
+                if (_dispatcher is not None
+                        and scope.get('type') == 'http'
+                        and not scope.get('_disconnected')):
+                    await _dispatcher.emit(Event(
+                        'request_completed',
+                        detail={
+                            'scope':          scope,
+                            'client_ip':      log_record.client_ip,
+                            'method':         log_record.method,
+                            'path':           log_record.path,
+                            'http_version':   log_record.http_version,
+                            'status':         log_record.status,
+                            'response_bytes': log_record.response_bytes,
+                            'duration_ms':    log_record.duration_ms(),
+                        },
+                    ))
+        return True
 
     def _should_keep_alive(self, scope: dict) -> bool:
         """Return True if the connection should persist after this request."""

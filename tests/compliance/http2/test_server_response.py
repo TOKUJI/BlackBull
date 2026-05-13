@@ -6,7 +6,7 @@ from blackbull.server.response import (
     ResponderFactory, Responder, PingResponder,
     WindowUpdateResponder, PriorityResponder, PriorityUpdateResponder,
 )
-from blackbull.protocol.frame import FrameTypes
+from blackbull.protocol.frame_types import FrameTypes
 
 
 # ---------------------------------------------------------------------------

@@ -14,13 +14,10 @@ from http import HTTPMethod, HTTPStatus
 from typing import Iterable
 
 import logging
-from ..protocol.frame import (DEFAULT_INITIAL_WINDOW_SIZE,
-                              DataFrameFlags,
-                              FrameBase,
-                              FrameFactory,
-                              FrameTypes,
-                              HeaderFrameFlags,
-                              PseudoHeaders)
+from ..protocol.frame import FrameFactory
+from ..protocol.frame_types import (DEFAULT_INITIAL_WINDOW_SIZE,
+                                    DataFrameFlags, FrameBase, FrameTypes,
+                                    HeaderFrameFlags, PseudoHeaders)
 from ..protocol.stream import Stream
 from ..server.headers import Headers, HeaderList
 from ..server.recipient import AbstractReader, AsyncioReader

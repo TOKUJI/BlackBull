@@ -38,8 +38,9 @@ from unittest.mock import AsyncMock, MagicMock
 
 from hpack import Encoder
 
-from blackbull.protocol.frame import (FrameFactory, FrameTypes, FrameFlags,
-                              HeaderFrameFlags, SettingFrameFlags)
+from blackbull.protocol.frame import FrameFactory
+from blackbull.protocol.frame_types import (FrameTypes, FrameFlags,
+                                            HeaderFrameFlags, SettingFrameFlags)
 from blackbull.server.http2_actor import HTTP2Actor
 from blackbull.server.sender import AsyncioWriter
 

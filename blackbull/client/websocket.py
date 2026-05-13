@@ -9,9 +9,9 @@ Two pieces:
   ``ping`` / ``close``.
 
 Reuses ``HTTP1RequestSender`` / ``HTTP1ResponseRecipient`` for the handshake
-and ``WebSocketSender._encode_frame(mask=True)`` / ``WebSocketRecipient(
-require_masked=False)`` for post-handshake frames — the same codec serves
-both directions, parameterised by the ``mask`` flag.
+and ``encode_frame(mask=True)`` / ``WebSocketRecipient(require_masked=False)``
+for post-handshake frames — the same codec serves both directions,
+parameterised by the ``mask`` flag.
 """
 import asyncio
 import os
@@ -25,8 +25,8 @@ import logging
 from ..server.headers import Headers
 from ..server.recipient import (AbstractReader, AsyncioReader,
                                 WebSocketRecipient)
-from ..server.sender import (AbstractWriter, AsyncioWriter, WebSocketSender,
-                             WSOpcode)
+from ..server.sender import AbstractWriter, AsyncioWriter, WebSocketSender
+from ..server.ws_codec import WSOpcode, encode_frame
 from .exceptions import HandshakeError
 from .http1 import HTTP1RequestSender, HTTP1ResponseRecipient
 
@@ -108,7 +108,7 @@ class WebSocketSession:
     # ---- internal --------------------------------------------------------
 
     async def _send_frame(self, payload: bytes, opcode: WSOpcode) -> None:
-        frame = WebSocketSender._encode_frame(payload, opcode=opcode, mask=True)
+        frame = encode_frame(payload, opcode=opcode, mask=True)
         await self._writer.write(frame)
 
     # ---- async context manager (optional usage) --------------------------

@@ -5,7 +5,6 @@ StreamActor owns the lifetime of a single HTTP/2 stream.
 """
 import asyncio
 import logging
-from dataclasses import dataclass, field
 from collections.abc import Awaitable, Callable
 from http import HTTPStatus
 from typing import Any
@@ -13,13 +12,15 @@ from urllib.parse import urlparse
 
 from ..actor import Actor, Message
 from ..event_aggregator import EventAggregator
-from ..logger import log
-from ..protocol.frame import (
-    ErrorCodes, FrameBase, FrameFactory, FrameTypes,
-    DEFAULT_INITIAL_WINDOW_SIZE,
+from .http2_messages import (
+    ConnectionAccepted, StreamHeadersReceived, WindowUpdate, Header, Data,
+    SettingsReceived, Goaway, WindowRequested,
 )
+from ..logger import log
+from ..protocol.frame import FrameFactory
+from ..protocol.frame_types import ErrorCodes, FrameBase, FrameTypes
 from ..protocol.stream import Stream, StreamState
-from .headers import HeaderList, Headers
+from .headers import Headers
 from .parser import ParserFactory
 from .recipient import AbstractReader, HTTP2Recipient, RecipientFactory
 from .response import ResponderFactory
@@ -48,49 +49,6 @@ _DEFAULT_PRIORITY: dict[str, int | bool] = {'urgency': 3, 'incremental': False}
 # Level A message types (Actor inbox protocol)
 # ---------------------------------------------------------------------------
 
-@dataclass
-class ConnectionAccepted(Message):
-    reader: AbstractReader | None = field(default=None, compare=False, repr=False)
-    writer: AbstractWriter | None = field(default=None, compare=False, repr=False)
-    peername: tuple[str, int] | None = field(default=None, compare=False, repr=False)
-
-@dataclass
-class StreamHeadersReceived(Message):
-    stream_id: int | None = field(default=None, compare=False, repr=False)
-    headers: HeaderList | None = field(default=None, compare=False, repr=False)
-    end_stream: bool | None = field(default=None, compare=False, repr=False)
-
-@dataclass
-class WindowUpdate(Message):
-    stream_id: int | None = field(default=None, compare=False, repr=False)
-    increment: int | None = field(default=None, compare=False, repr=False)
-
-@dataclass
-class Header(Message):
-    stream_id: int | None = field(default=None, compare=False, repr=False)
-    headers: HeaderList | None = field(default=None, compare=False, repr=False)
-    end_stream: bool | None = field(default=None, compare=False, repr=False)
-
-@dataclass
-class Data(Message):
-    stream_id: int | None = field(default=None, compare=False, repr=False)
-    data: bytes | None = field(default=None, compare=False, repr=False)
-    end_stream: bool | None = field(default=None, compare=False, repr=False)
-
-@dataclass
-class SettingsReceived(Message):
-    settings: dict[int, int] | None = field(default=None, compare=False, repr=False)
-
-@dataclass
-class Goaway(Message):
-    last_stream_id: int | None = field(default=None, compare=False, repr=False)
-    error_code: int | None = field(default=None, compare=False, repr=False)
-    debug_data: bytes | None = field(default=None, compare=False, repr=False)
-
-@dataclass
-class WindowRequested(Message):
-    stream_id: int | None = field(default=None, compare=False, repr=False)
-    increment: int | None = field(default=None, compare=False, repr=False)
 
 
 # ---------------------------------------------------------------------------
@@ -102,7 +60,7 @@ def _resolve_priority(stream: 'Stream', scope: dict) -> dict[str, int | bool]:
         return stream.priority_hint
     raw = scope.get('headers', Headers([])).get(b'priority', b'')
     if raw:
-        from ..protocol.frame import parse_priority_field
+        from ..protocol.frame_types import parse_priority_field
         return parse_priority_field(raw.decode('ascii', errors='replace'))
     return dict(_DEFAULT_PRIORITY)
 
@@ -277,7 +235,6 @@ class HTTP2Actor(Actor):
 
         while data := await self.receive():
             frame = self.factory.load(data)
-
             self.root_stream.add_child(frame.stream_id)
             if (stream := self.root_stream.find_child(frame.stream_id)) is None:
                 logger.error('Stream %d not found.', frame.stream_id)
@@ -288,106 +245,23 @@ class HTTP2Actor(Actor):
 
             match frame.FrameType():
                 case FrameTypes.HEADERS:
-                    if len(self.root_stream.get_children()) >= self.max_concurrent_streams:
-                        await self.send_frame(
-                            self.factory.rst_stream(stream.stream_id, ErrorCodes.REFUSED_STREAM))
-
-                    if frame.end_headers:
-                        waiting_continuation = False
-                        scope = ParserFactory.Get(frame, stream).parse()
-                        self._fill_scope_connection(scope)
-                        scope['http2_priority'] = _resolve_priority(stream, scope)
-                        scope['extensions'] = {ASGIEvent.HTTP_RESPONSE_PUSH: {}}
-                        stream.scope = scope
-                        stream_recipient = RecipientFactory.http2()
-                        recipients[stream.stream_id] = stream_recipient
-                        stream.on_headers_received(end_stream=bool(frame.end_stream))
-                        if frame.end_stream:
-                            stream_recipient.put_event(
-                                {'type': ASGIEvent.HTTP_REQUEST, 'body': b'', 'more_body': False})
-                        log_record = _make_log_record(scope)
-                        capturing_send = _make_capturing_send(send, log_record)
-                        if self._aggregator is not None:
-                            stream_actor = StreamActor(
-                                stream_id=stream.stream_id,
-                                scope=scope,
-                                receive=_make_disconnect_detecting_receive(
-                                    stream_recipient, scope, self._aggregator),
-                                send=capturing_send,
-                                app=self.app,
-                                aggregator=self._aggregator,
-                                http2_actor=self,
-                                log_record=log_record,
-                            )
-                            tg.create_task(stream_actor.run())
-                        else:
-                            self._legacy_spawn(tg, scope, stream_recipient, capturing_send, log_record)
-                    else:
+                    spawned = await self._on_headers_frame(frame, stream, send, tg, recipients)
+                    if not spawned:
                         waiting_continuation = True
                         header_frame = frame
-                        continue
-
                 case FrameTypes.CONTINUATION:
-                    if not waiting_continuation:
-                        logger.error('Unexpected CONTINUATION without preceding HEADERS.')
-                        await self.send_frame(self.factory.goaway(last_stream_id))
-
-                    assert header_frame is not None
-                    header_frame.raw_block += frame.payload
-
-                    if frame.end_headers:
+                    spawned = await self._on_continuation_frame(
+                        frame, stream, send, tg, recipients, header_frame, waiting_continuation)
+                    if spawned:
                         waiting_continuation = False
-                        header_frame.parse_payload()
-                        scope = ParserFactory.Get(header_frame, stream).parse()
-                        self._fill_scope_connection(scope)
-                        scope['http2_priority'] = _resolve_priority(stream, scope)
-                        scope['extensions'] = {ASGIEvent.HTTP_RESPONSE_PUSH: {}}
-                        stream.scope = scope
-                        stream_recipient = RecipientFactory.http2()
-                        recipients[stream.stream_id] = stream_recipient
-                        log_record = _make_log_record(scope)
-                        capturing_send = _make_capturing_send(send, log_record)
-                        if self._aggregator is not None:
-                            stream_actor = StreamActor(
-                                stream_id=stream.stream_id,
-                                scope=scope,
-                                receive=_make_disconnect_detecting_receive(
-                                    stream_recipient, scope, self._aggregator),
-                                send=capturing_send,
-                                app=self.app,
-                                aggregator=self._aggregator,
-                                http2_actor=self,
-                                log_record=log_record,
-                            )
-                            tg.create_task(stream_actor.run())
-                        else:
-                            self._legacy_spawn(tg, scope, stream_recipient, capturing_send, log_record)
-                    else:
-                        continue
-
                 case FrameTypes.DATA:
-                    await self.send_frame(
-                        self.factory.window_update(stream.stream_id, frame.length))
-                    if stream.state in (StreamState.HALF_CLOSED_REMOTE, StreamState.CLOSED):
-                        await self.send_frame(
-                            self.factory.rst_stream(stream.stream_id, ErrorCodes.STREAM_CLOSED))
-                    else:
-                        stream.on_data_received(end_stream=bool(frame.end_stream))
-                        if stream.stream_id in recipients:
-                            recipients[stream.stream_id].put_DATAFrame(frame)
-                        else:
-                            logger.warning(
-                                'DATA for stream %d but no recipient found', stream.stream_id)
-
+                    await self._on_data_frame(frame, stream, recipients)
                 case FrameTypes.GOAWAY:
-                    await self.send_frame(self.factory.goaway(last_stream_id))
-                    _signal_recipients(recipients)
+                    await self._on_goaway_frame(last_stream_id, recipients)
                     return
-
                 case _:
                     await ResponderFactory.create(frame).respond(self)
 
-        # EOF — while loop exited because receive() returned b''
         _signal_recipients(recipients)
 
     def _legacy_spawn(
@@ -410,6 +284,128 @@ class HTTP2Actor(Actor):
             )
         )
 
+    def _spawn_stream_task(
+        self,
+        tg: asyncio.TaskGroup,
+        stream_id: int,
+        scope: dict,
+        recipient,
+        send,
+        log_record,
+    ) -> None:
+        """Spawn a StreamActor (aggregator path) or legacy _run_with_log task."""
+        if self._aggregator is not None:
+            stream_actor = StreamActor(
+                stream_id=stream_id,
+                scope=scope,
+                receive=_make_disconnect_detecting_receive(
+                    recipient, scope, self._aggregator),
+                send=send,
+                app=self.app,
+                aggregator=self._aggregator,
+                http2_actor=self,
+                log_record=log_record,
+            )
+            tg.create_task(stream_actor.run())
+        else:
+            self._legacy_spawn(tg, scope, recipient, send, log_record)
+
+    async def _on_headers_frame(
+        self,
+        frame,
+        stream: 'Stream',
+        send,
+        tg: asyncio.TaskGroup,
+        recipients: dict,
+    ) -> bool:
+        """Handle a HEADERS frame; return True if stream task spawned, False if awaiting CONTINUATION."""
+        if len(self.root_stream.get_children()) >= self.max_concurrent_streams:
+            await self.send_frame(
+                self.factory.rst_stream(stream.stream_id, ErrorCodes.REFUSED_STREAM))
+
+        if not frame.end_headers:
+            return False
+
+        scope = ParserFactory.Get(frame, stream).parse()
+        self._fill_scope_connection(scope)
+        scope['http2_priority'] = _resolve_priority(stream, scope)
+        scope['extensions'] = {ASGIEvent.HTTP_RESPONSE_PUSH: {}}
+        stream.scope = scope
+        stream_recipient = RecipientFactory.http2()
+        recipients[stream.stream_id] = stream_recipient
+        stream.on_headers_received(end_stream=bool(frame.end_stream))
+        if frame.end_stream:
+            stream_recipient.put_event(
+                {'type': ASGIEvent.HTTP_REQUEST, 'body': b'', 'more_body': False})
+        log_record = _make_log_record(scope)
+        capturing_send = _make_capturing_send(send, log_record)
+        self._spawn_stream_task(tg, stream.stream_id, scope, stream_recipient, capturing_send, log_record)
+        return True
+
+    async def _on_continuation_frame(
+        self,
+        frame,
+        stream: 'Stream',
+        send,
+        tg: asyncio.TaskGroup,
+        recipients: dict,
+        header_frame,
+        waiting_continuation: bool,
+    ) -> bool:
+        """Handle a CONTINUATION frame; return True if stream task spawned, False if still accumulating."""
+        if not waiting_continuation:
+            logger.error('Unexpected CONTINUATION without preceding HEADERS.')
+            await self.send_frame(
+                self.factory.goaway(self.root_stream.max_stream_id()))
+
+        assert header_frame is not None
+        header_frame.raw_block += frame.payload
+
+        if not frame.end_headers:
+            return False
+
+        header_frame.parse_payload()
+        scope = ParserFactory.Get(header_frame, stream).parse()
+        self._fill_scope_connection(scope)
+        scope['http2_priority'] = _resolve_priority(stream, scope)
+        scope['extensions'] = {ASGIEvent.HTTP_RESPONSE_PUSH: {}}
+        stream.scope = scope
+        stream_recipient = RecipientFactory.http2()
+        recipients[stream.stream_id] = stream_recipient
+        log_record = _make_log_record(scope)
+        capturing_send = _make_capturing_send(send, log_record)
+        self._spawn_stream_task(tg, stream.stream_id, scope, stream_recipient, capturing_send, log_record)
+        return True
+
+    async def _on_data_frame(
+        self,
+        frame,
+        stream: 'Stream',
+        recipients: dict,
+    ) -> None:
+        """Handle a DATA frame: update flow-control window and deliver to the stream's recipient."""
+        await self.send_frame(
+            self.factory.window_update(stream.stream_id, frame.length))
+        if stream.state in (StreamState.HALF_CLOSED_REMOTE, StreamState.CLOSED):
+            await self.send_frame(
+                self.factory.rst_stream(stream.stream_id, ErrorCodes.STREAM_CLOSED))
+        else:
+            stream.on_data_received(end_stream=bool(frame.end_stream))
+            if stream.stream_id in recipients:
+                recipients[stream.stream_id].put_DATAFrame(frame)
+            else:
+                logger.warning(
+                    'DATA for stream %d but no recipient found', stream.stream_id)
+
+    async def _on_goaway_frame(
+        self,
+        last_stream_id: int,
+        recipients: dict,
+    ) -> None:
+        """Handle an incoming GOAWAY: echo one back and signal all recipients."""
+        await self.send_frame(self.factory.goaway(last_stream_id))
+        _signal_recipients(recipients)
+
     async def _handle_push(self, event: dict, parent_stream_id: int) -> None:
         """Handle an 'http.response.push' ASGI event (RFC 7540 §8.2)."""
         from urllib.parse import urlparse as _urlparse  # noqa: PLC0415
@@ -426,7 +422,7 @@ class HTTP2Actor(Actor):
             b'localhost')
         authority = raw_authority.decode() if isinstance(raw_authority, bytes) else raw_authority
 
-        from ..protocol.frame import PseudoHeaders  # noqa: PLC0415
+        from ..protocol.frame_types import PseudoHeaders  # noqa: PLC0415
         pseudo = {
             PseudoHeaders.METHOD:    'GET',
             PseudoHeaders.PATH:      path,
@@ -468,21 +464,10 @@ class HTTP2Actor(Actor):
         capturing_send = _make_capturing_send(push_sender, log_record)
 
         if self._task_group is not None:
-            if self._aggregator is not None:
-                stream_actor = StreamActor(
-                    stream_id=push_stream_id,
-                    scope=pushed_scope,
-                    receive=push_recipient,
-                    send=capturing_send,
-                    app=self.app,
-                    aggregator=self._aggregator,
-                    http2_actor=self,
-                    log_record=log_record,
-                )
-                self._task_group.create_task(stream_actor.run())
-            else:
-                self._legacy_spawn(
-                    self._task_group, pushed_scope, push_recipient, capturing_send, log_record)
+            self._spawn_stream_task(
+                self._task_group, push_stream_id, pushed_scope,
+                push_recipient, capturing_send, log_record,
+            )
 
     async def _handle(self, msg: Message) -> None:  # never reached
         raise NotImplementedError

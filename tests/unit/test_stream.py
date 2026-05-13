@@ -64,7 +64,7 @@ def test_update_event_no_data_returns_existing():
 
 def test_update_scope_with_headers():
     from unittest.mock import MagicMock
-    from blackbull.protocol.frame import PseudoHeaders
+    from blackbull.protocol.frame_types import PseudoHeaders
     s = Stream(1)
     headers = MagicMock()
     headers.pseudo_headers = {

@@ -7,7 +7,8 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from blackbull.protocol.frame import FrameFactory, FrameTypes, DataFrameFlags
+from blackbull.protocol.frame import FrameFactory
+from blackbull.protocol.frame_types import FrameTypes, DataFrameFlags
 from .strategies import stream_id, ws_payload
 
 

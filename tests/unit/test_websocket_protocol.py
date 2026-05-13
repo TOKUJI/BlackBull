@@ -11,9 +11,9 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from blackbull.server.sender import WebSocketSender, AsyncioWriter
+from blackbull.server.sender import WebSocketSender, AsyncioWriter, AbstractWriter
 from blackbull.server.recipient import WebSocketRecipient, AsyncioReader, AbstractReader
-from blackbull.server.sender import AbstractWriter
+from blackbull.server.ws_codec import encode_frame, read_frame, WSOpcode
 
 
 # ---------------------------------------------------------------------------
@@ -129,7 +129,7 @@ class TestEncodeFrame:
            opcode=st.sampled_from([0x1, 0x2, 0x8]))
     def test_encode_frame_length_encoding(self, payload, opcode):
         """_encode_frame uses the correct RFC 6455 length encoding for all payload sizes."""
-        frame = WebSocketSender._encode_frame(payload, opcode=opcode)
+        frame = encode_frame(payload, opcode=opcode)
         length = len(payload)
         assert frame[0] == 0x80 | opcode
         if length < 126:
@@ -145,11 +145,11 @@ class TestEncodeFrame:
             assert frame[10:] == payload
 
     def test_binary_opcode(self):
-        frame = WebSocketSender._encode_frame(b'\x00\x01', opcode=0x2)
+        frame = encode_frame(b'\x00\x01', opcode=0x2)
         assert frame[0] & 0x0F == 0x2
 
     def test_close_frame_opcode(self):
-        frame = WebSocketSender._encode_frame(b'\x03\xe8', opcode=0x8)
+        frame = encode_frame(b'\x03\xe8', opcode=0x8)
         assert frame[0] & 0x0F == 0x8
 
 
@@ -166,7 +166,7 @@ class TestReadFrame:
         """_read_frame must round-trip any opcode+payload combination correctly."""
         async def _run():
             reader = _FakeReader(_make_client_frame(payload, opcode=opcode))
-            returned_opcode, got = await WebSocketSender._read_frame(reader)
+            returned_opcode, got = await read_frame(reader)
             assert returned_opcode == opcode
             assert got == payload
         asyncio.run(_run())
@@ -177,7 +177,7 @@ class TestReadFrame:
         raw_payload = b'ABCD'
         data = _make_client_frame(raw_payload, opcode=0x1)
         reader = _FakeReader(data)
-        _, got = await WebSocketSender._read_frame(reader)
+        _, got = await read_frame(reader)
         assert got == raw_payload
 
     @pytest.mark.asyncio
@@ -186,7 +186,7 @@ class TestReadFrame:
         payload = b'z' * 126
         data = _make_client_frame(payload, opcode=0x1)
         reader = _FakeReader(data)
-        opcode, got = await WebSocketSender._read_frame(reader)
+        opcode, got = await read_frame(reader)
         assert got == payload
 
     @pytest.mark.asyncio
@@ -194,7 +194,7 @@ class TestReadFrame:
         """Truncated stream must raise IncompleteReadError, not return partial data."""
         reader = _FakeReader(b'\x81')   # only 1 byte – header requires 2
         with pytest.raises(asyncio.IncompleteReadError):
-            await WebSocketSender._read_frame(reader)
+            await read_frame(reader)
 
 
 # ---------------------------------------------------------------------------
@@ -356,7 +356,7 @@ class TestPingPong:
         handler = self._make_handler(frames)
         await handler.receive()       # consume connect event
         await handler.receive()       # process ping, return next data frame
-        expected_pong = WebSocketSender._encode_frame(ping_payload, opcode=0xA)
+        expected_pong = encode_frame(ping_payload, opcode=0xA)
         assert handler.writer.written == expected_pong
 
     async def test_pong_payload_matches_ping_payload(self):
@@ -367,7 +367,7 @@ class TestPingPong:
         handler = self._make_handler(frames)
         await handler.receive()       # connect
         await handler.receive()       # ping → pong, then close → disconnect
-        pong = WebSocketSender._encode_frame(ping_payload, opcode=0xA)
+        pong = encode_frame(ping_payload, opcode=0xA)
         assert handler.writer.written == pong
 
     async def test_empty_ping_causes_empty_pong(self):
@@ -377,7 +377,7 @@ class TestPingPong:
         handler = self._make_handler(frames)
         await handler.receive()       # connect
         await handler.receive()       # empty ping → empty pong, then text
-        expected_pong = WebSocketSender._encode_frame(b'', opcode=0xA)
+        expected_pong = encode_frame(b'', opcode=0xA)
         assert handler.writer.written == expected_pong
 
     async def test_ping_is_transparent_to_app(self):
@@ -399,8 +399,8 @@ class TestPingPong:
         handler = self._make_handler(frames)
         await handler.receive()       # connect
         await handler.receive()       # two pings handled, text returned
-        pong1 = WebSocketSender._encode_frame(p1, opcode=0xA)
-        pong2 = WebSocketSender._encode_frame(p2, opcode=0xA)
+        pong1 = encode_frame(p1, opcode=0xA)
+        pong2 = encode_frame(p2, opcode=0xA)
         assert handler.writer.written == pong1 + pong2
 
     async def test_unsolicited_pong_is_silently_dropped(self):
@@ -458,7 +458,7 @@ class TestUnmaskedFrames:
 # Unknown opcode handling (P1 §5.2)
 # ---------------------------------------------------------------------------
 
-_CLOSE_1002 = WebSocketSender._encode_frame((1002).to_bytes(2, 'big'), opcode=0x8)
+_CLOSE_1002 = encode_frame((1002).to_bytes(2, 'big'), opcode=0x8)
 
 
 @pytest.mark.asyncio
@@ -741,7 +741,7 @@ class TestWebSocketFragmentation:
         assert event.get('text') == 'hello', (
             f"Expected reassembled text='hello' after interleaved ping; got {event!r}"
         )
-        expected_pong = WebSocketSender._encode_frame(ping_payload, opcode=0xA)
+        expected_pong = encode_frame(ping_payload, opcode=0xA)
         assert handler.writer.written == expected_pong, (
             f"Expected pong on wire after interleaved ping; got {handler.writer.written!r}"
         )

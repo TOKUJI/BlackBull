@@ -26,9 +26,10 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock
 from hpack import Encoder
 
-from blackbull.protocol.frame import (FrameFactory, FrameTypes, FrameFlags,
-                              HeaderFrameFlags, DataFrameFlags, SettingFrameFlags,
-                              Headers, PseudoHeaders)
+from blackbull.protocol.frame import FrameFactory
+from blackbull.protocol.frame_types import (FrameTypes, FrameFlags,
+                                            HeaderFrameFlags, DataFrameFlags,
+                                            SettingFrameFlags, Headers, PseudoHeaders)
 from blackbull.server.http2_actor import HTTP2Actor
 from blackbull.server.sender import AsyncioWriter
 
@@ -341,7 +342,7 @@ class TestFrameSavePayload:
 
     def test_window_update_save_includes_increment(self):
         """WindowUpdate.save() must produce a 13-byte frame (9 header + 4 payload)."""
-        from blackbull.protocol.frame import ErrorCodes
+        from blackbull.protocol.frame_types import ErrorCodes
         frame = FrameFactory().window_update(stream_id=3, increment=35)
         wire = frame.save()
         assert len(wire) == 13, (
@@ -358,7 +359,7 @@ class TestFrameSavePayload:
 
     def test_rst_stream_save_includes_error_code(self):
         """RstStream.save() must produce a 13-byte frame (9 header + 4 error code)."""
-        from blackbull.protocol.frame import ErrorCodes
+        from blackbull.protocol.frame_types import ErrorCodes
         frame = FrameFactory().rst_stream(stream_id=3,
                                           error_code=ErrorCodes.REFUSED_STREAM)
         wire = frame.save()

@@ -2,10 +2,11 @@ import asyncio
 import zlib
 from abc import ABC, abstractmethod
 
-from .sender import WebSocketSender, WSOpcode, AbstractWriter, AsyncioWriter
+from .sender import AbstractWriter, AsyncioWriter
+from .ws_codec import WSOpcode, encode_frame, read_frame_header, read_payload
 from .constants import ASGIEvent, WSCloseCode
 from .headers import Headers
-from ..protocol.frame import FrameBase, Data
+from ..protocol.frame_types import FrameBase, Data
 from ..event import Event, EventDispatcher
 import logging
 
@@ -284,9 +285,8 @@ class WebSocketRecipient(BaseRecipient):
         assert self._event_queue is not None
         try:
             while True:
-                h = await WebSocketSender._read_frame_header(self._reader)
-                payload = await WebSocketSender._read_payload(
-                    self._reader, h.masked, h.length)
+                h = await read_frame_header(self._reader)
+                payload = await read_payload(self._reader, h.masked, h.length)
 
                 if self._require_masked and not h.masked:
                     raise ValueError(
@@ -301,71 +301,86 @@ class WebSocketRecipient(BaseRecipient):
 
                 match h.opcode:
                     case WSOpcode.TEXT | WSOpcode.BINARY | WSOpcode.CONTINUATION:
-                        result = self._assembler.feed(h.opcode, payload, h.fin)
-                        if result is None:
+                        done = await self._handle_data_frame(h.opcode, payload, h.fin)
+                        if not done:
                             continue
-                        msg_opcode, full_payload = result
-                        if msg_opcode == WSOpcode.TEXT:
-                            asgi_event = {
-                                'type': ASGIEvent.WS_RECEIVE,
-                                'text': full_payload.decode('utf-8'),
-                                'bytes': None,
-                            }
-                        else:
-                            asgi_event = {
-                                'type': ASGIEvent.WS_RECEIVE,
-                                'text': None,
-                                'bytes': full_payload,
-                            }
-                        if self._dispatcher is not None and self._scope is not None:
-                            await self._dispatcher.emit(Event(
-                                'websocket_message',
-                                detail={
-                                    'scope': self._scope,
-                                    'text': asgi_event['text'],
-                                    'bytes': asgi_event['bytes'],
-                                },
-                            ))
-                        await self._event_queue.put(asgi_event)
-
-                    case WSOpcode.CLOSE:
-                        await self._emit_disconnected(WSCloseCode.NORMAL)
-                        await self._event_queue.put(
-                            {'type': ASGIEvent.WS_DISCONNECT, 'code': WSCloseCode.NORMAL})
-                        return
-
-                    case WSOpcode.PING:
-                        pong = WebSocketSender._encode_frame(
-                            payload, opcode=WSOpcode.PONG,
-                            mask=not self._require_masked)
-                        await self._writer.write(pong)
-
-                    case WSOpcode.PONG:
-                        pass  # unsolicited pong — silently drop
-
+                    case WSOpcode.CLOSE | WSOpcode.PING | WSOpcode.PONG:
+                        done = await self._handle_control_frame(h.opcode, payload)
+                        if done:
+                            return
                     case _:
-                        close = WebSocketSender._encode_frame(
-                            WSCloseCode.PROTOCOL_ERROR.to_bytes(2, 'big'), opcode=WSOpcode.CLOSE)
-                        try:
-                            await self._writer.write(close)
-                        except Exception:
-                            pass
-                        await self._emit_disconnected(WSCloseCode.PROTOCOL_ERROR)
-                        await self._event_queue.put(
-                            {'type': ASGIEvent.WS_DISCONNECT, 'code': WSCloseCode.PROTOCOL_ERROR})
+                        await self._handle_unknown_opcode()
                         return
 
         except (asyncio.IncompleteReadError, IncompleteReadError):
             await self._emit_disconnected(WSCloseCode.ABNORMAL)
             await self._event_queue.put({'type': ASGIEvent.WS_DISCONNECT, 'code': WSCloseCode.ABNORMAL})
         except Exception as exc:
-            close = WebSocketSender._encode_frame(
+            close = encode_frame(
                 (1002).to_bytes(2, 'big'), opcode=WSOpcode.CLOSE)
             try:
                 await self._writer.write(close)
             except Exception:
                 pass
             await self._event_queue.put(exc)
+
+    async def _handle_data_frame(self, opcode, payload: bytes, fin: bool) -> bool:
+        """Handle TEXT/BINARY/CONTINUATION frame; returns True if a complete message was queued."""
+        assert self._event_queue is not None
+        result = self._assembler.feed(opcode, payload, fin)
+        if result is None:
+            return False
+        msg_opcode, full_payload = result
+        if msg_opcode == WSOpcode.TEXT:
+            asgi_event = {
+                'type': ASGIEvent.WS_RECEIVE,
+                'text': full_payload.decode('utf-8'),
+                'bytes': None,
+            }
+        else:
+            asgi_event = {
+                'type': ASGIEvent.WS_RECEIVE,
+                'text': None,
+                'bytes': full_payload,
+            }
+        if self._dispatcher is not None and self._scope is not None:
+            await self._dispatcher.emit(Event(
+                'websocket_message',
+                detail={
+                    'scope': self._scope,
+                    'text': asgi_event['text'],
+                    'bytes': asgi_event['bytes'],
+                },
+            ))
+        await self._event_queue.put(asgi_event)
+        return True
+
+    async def _handle_control_frame(self, opcode, payload: bytes) -> bool:
+        """Handle CLOSE/PING/PONG frame; returns True if the connection should close."""
+        assert self._event_queue is not None
+        if opcode == WSOpcode.CLOSE:
+            await self._emit_disconnected(WSCloseCode.NORMAL)
+            await self._event_queue.put(
+                {'type': ASGIEvent.WS_DISCONNECT, 'code': WSCloseCode.NORMAL})
+            return True
+        if opcode == WSOpcode.PING:
+            pong = encode_frame(payload, opcode=WSOpcode.PONG, mask=not self._require_masked)
+            await self._writer.write(pong)
+        # PONG: unsolicited pong — silently drop
+        return False
+
+    async def _handle_unknown_opcode(self) -> None:
+        """Send a CLOSE frame and queue a disconnect event for an unknown opcode."""
+        assert self._event_queue is not None
+        close = encode_frame(
+            WSCloseCode.PROTOCOL_ERROR.to_bytes(2, 'big'), opcode=WSOpcode.CLOSE)
+        try:
+            await self._writer.write(close)
+        except Exception:
+            pass
+        await self._emit_disconnected(WSCloseCode.PROTOCOL_ERROR)
+        await self._event_queue.put(
+            {'type': ASGIEvent.WS_DISCONNECT, 'code': WSCloseCode.PROTOCOL_ERROR})
 
     async def _emit_disconnected(self, code: int) -> None:
         """Emit websocket_disconnected exactly once per connection."""

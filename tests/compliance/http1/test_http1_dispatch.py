@@ -630,7 +630,7 @@ class TestHTTP2Recipient:
     @pytest.mark.asyncio
     async def test_with_initial_frame_enqueues_event(self):
         from blackbull.server.recipient import HTTP2Recipient
-        from blackbull.protocol.frame import Data
+        from blackbull.protocol.frame_types import Data
         frame = MagicMock(spec=Data)
         frame.payload = b'body'
         frame.end_stream = True
@@ -644,7 +644,7 @@ class TestWebSocketRecipientUnsupportedOpcode:
     async def test_unknown_opcode_sends_close_and_disconnects(self):
         """RFC 6455 §5.2: unknown opcode must send CLOSE(1002) and return disconnect."""
         from blackbull.server.recipient import WebSocketRecipient
-        from blackbull.server.sender import WebSocketSender, WSFrameHeader
+        from blackbull.server.ws_codec import WSFrameHeader, encode_frame
 
         fake_header = WSFrameHeader(fin=True, rsv1=False, rsv2=False, rsv3=False,
                                     opcode=0x03, masked=False, length=2)
@@ -656,13 +656,13 @@ class TestWebSocketRecipientUnsupportedOpcode:
         r._connect_sent = True
 
         eof = asyncio.IncompleteReadError(b'', 2)
-        with patch.object(WebSocketSender, '_read_frame_header',
-                          AsyncMock(side_effect=[fake_header, eof])):
-            with patch.object(WebSocketSender, '_read_payload',
-                               AsyncMock(return_value=b'\x00\x00')):
+        with patch('blackbull.server.recipient.read_frame_header',
+                   AsyncMock(side_effect=[fake_header, eof])):
+            with patch('blackbull.server.recipient.read_payload',
+                       AsyncMock(return_value=b'\x00\x00')):
                 event = await r()
 
         assert event['type'] == 'websocket.disconnect'
         assert event['code'] == 1002
-        close_1002 = WebSocketSender._encode_frame((1002).to_bytes(2, 'big'), opcode=0x8)
+        close_1002 = encode_frame((1002).to_bytes(2, 'big'), opcode=0x8)
         writer.write.assert_called_once_with(close_1002)

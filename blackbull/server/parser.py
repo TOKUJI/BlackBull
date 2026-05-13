@@ -2,7 +2,7 @@ from functools import partial
 import traceback
 
 from ..protocol.stream import Stream
-from ..protocol.frame import FrameTypes, PseudoHeaders
+from ..protocol.frame_types import FrameTypes, PseudoHeaders
 import logging
 from .headers import Headers
 
