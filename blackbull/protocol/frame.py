@@ -52,10 +52,15 @@ class FrameFactory:
                            last_stream_id + 1,
                            data=payload)
 
-    def settings(self, *, ack: bool = False):
-        """Create a SETTINGS frame (INIT or ACK)."""
+    def settings(self, *, ack: bool = False, enable_connect_protocol: bool = False):
+        """Create a SETTINGS frame (INIT or ACK).
+
+        Pass ``enable_connect_protocol=True`` to include
+        SETTINGS_ENABLE_CONNECT_PROTOCOL=1 (RFC 8441 §3).
+        """
         flags = SettingFrameFlags.ACK if ack else SettingFrameFlags.INIT
-        return self.create(FrameTypes.SETTINGS, flags, 0)
+        data = b'\x00\x08\x00\x00\x00\x01' if (not ack and enable_connect_protocol) else b''
+        return self.create(FrameTypes.SETTINGS, flags, 0, data=data)
 
     def push_promise(self, parent_stream_id: int, promised_stream_id: int,
                      pseudo_headers: dict, headers: list) -> PushPromise:

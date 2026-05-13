@@ -26,6 +26,7 @@ def _make_scope():
         'headers': [],
         'client': [],
         'server': [],
+        'state': {},
     }
 
 
@@ -94,7 +95,27 @@ class HTTP2HEADParser(HTTP2ParserBase):
     def parse(self, payload=None):
         scope = _make_scope()
 
-        if method := self.frame.pseudo_headers.get(PseudoHeaders.METHOD):
+        method   = self.frame.pseudo_headers.get(PseudoHeaders.METHOD, '')
+        protocol = self.frame.pseudo_headers.get(PseudoHeaders.PROTOCOL, '')
+
+        if method == 'CONNECT' and protocol == 'websocket':
+            # RFC 8441 §4 — Extended CONNECT bootstrapping WebSocket over HTTP/2
+            scope['type'] = 'websocket'
+            scheme = self.frame.pseudo_headers.get(PseudoHeaders.SCHEME, 'https')
+            scope['scheme'] = 'wss' if scheme == 'https' else 'ws'
+            if path := self.frame.pseudo_headers.get(PseudoHeaders.PATH):
+                scope['path'] = path
+            scope['headers'] = Headers(
+                [(k.encode(), v.encode()) for k, v in self.frame.headers])
+            scope['root_path'] = scope['headers'].get(
+                b'x-forwarded-prefix', b'').decode('utf-8')
+            raw_sp = scope['headers'].get(b'sec-websocket-protocol', b'')
+            scope['subprotocols'] = (
+                [p.strip().decode('utf-8', errors='replace') for p in raw_sp.split(b',')]
+                if raw_sp else [])
+            return scope
+
+        if method:
             scope['method'] = method
 
         if path := self.frame.pseudo_headers.get(PseudoHeaders.PATH):

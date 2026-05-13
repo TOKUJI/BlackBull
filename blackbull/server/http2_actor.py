@@ -7,7 +7,7 @@ import asyncio
 import logging
 from collections.abc import Awaitable, Callable
 from http import HTTPStatus
-from typing import Any
+from typing import Any, Protocol, runtime_checkable
 from urllib.parse import urlparse
 
 from ..actor import Actor, Message
@@ -32,7 +32,13 @@ from .http1_actor import RequestActor
 logger = logging.getLogger(__name__)
 
 
-def _signal_recipients(recipients: dict[int, HTTP2Recipient]) -> None:
+@runtime_checkable
+class _StreamRecipient(Protocol):
+    """Duck-type interface shared by HTTP2Recipient and HTTP2WSReader."""
+    def put_disconnect(self) -> None: ...
+
+
+def _signal_recipients(recipients: dict[int, _StreamRecipient]) -> None:
     """Inject http.disconnect into every active stream recipient."""
     for recipient in recipients.values():
         recipient.put_disconnect()
@@ -213,10 +219,10 @@ class HTTP2Actor(Actor):
 
     async def run(self) -> None:
         """HTTP/2 connection state machine — process frames until connection closes."""
-        await self.send_frame(self.factory.settings())
-        logger.info(self.factory.settings())
+        await self.send_frame(self.factory.settings(enable_connect_protocol=True))
+        logger.info(self.factory.settings(enable_connect_protocol=True))
 
-        recipients: dict[int, HTTP2Recipient] = {}
+        recipients: dict[int, _StreamRecipient] = {}
 
         async with asyncio.TaskGroup() as tg:
             self._task_group = tg
@@ -227,7 +233,7 @@ class HTTP2Actor(Actor):
     async def _frame_loop(
         self,
         tg: asyncio.TaskGroup,
-        recipients: dict[int, HTTP2Recipient],
+        recipients: dict[int, _StreamRecipient],
     ) -> None:
         """Read frames and dispatch stream tasks until EOF or GOAWAY."""
         waiting_continuation = False
@@ -316,7 +322,7 @@ class HTTP2Actor(Actor):
         stream: 'Stream',
         send,
         tg: asyncio.TaskGroup,
-        recipients: dict,
+        recipients: dict[int, _StreamRecipient],
     ) -> bool:
         """Handle a HEADERS frame; return True if stream task spawned, False if awaiting CONTINUATION."""
         if len(self.root_stream.get_children()) >= self.max_concurrent_streams:
@@ -328,9 +334,17 @@ class HTTP2Actor(Actor):
 
         scope = ParserFactory.Get(frame, stream).parse()
         self._fill_scope_connection(scope)
+        stream.scope = scope
+
+        if scope.get('type') == 'websocket':
+            # RFC 8441 — Extended CONNECT bootstrapping WebSocket over HTTP/2
+            stream.on_headers_received(end_stream=False)
+            log_record = _make_log_record(scope)
+            await self._handle_h2_websocket(stream, tg, recipients, log_record)
+            return True
+
         scope['http2_priority'] = _resolve_priority(stream, scope)
         scope['extensions'] = {ASGIEvent.HTTP_RESPONSE_PUSH: {}}
-        stream.scope = scope
         stream_recipient = RecipientFactory.http2()
         recipients[stream.stream_id] = stream_recipient
         stream.on_headers_received(end_stream=bool(frame.end_stream))
@@ -348,7 +362,7 @@ class HTTP2Actor(Actor):
         stream: 'Stream',
         send,
         tg: asyncio.TaskGroup,
-        recipients: dict,
+        recipients: dict[int, _StreamRecipient],
         header_frame,
         waiting_continuation: bool,
     ) -> bool:
@@ -381,7 +395,7 @@ class HTTP2Actor(Actor):
         self,
         frame,
         stream: 'Stream',
-        recipients: dict,
+        recipients: dict[int, _StreamRecipient],
     ) -> None:
         """Handle a DATA frame: update flow-control window and deliver to the stream's recipient."""
         await self.send_frame(
@@ -400,11 +414,69 @@ class HTTP2Actor(Actor):
     async def _on_goaway_frame(
         self,
         last_stream_id: int,
-        recipients: dict,
+        recipients: dict[int, _StreamRecipient],
     ) -> None:
         """Handle an incoming GOAWAY: echo one back and signal all recipients."""
         await self.send_frame(self.factory.goaway(last_stream_id))
         _signal_recipients(recipients)
+
+    async def _handle_h2_websocket(
+        self,
+        stream: 'Stream',
+        tg: asyncio.TaskGroup,
+        recipients: dict[int, _StreamRecipient],
+        log_record,
+    ) -> None:
+        """Bootstrap a WebSocket connection over HTTP/2 per RFC 8441.
+
+        Stores a deferred _ws_send_200 callback under the same scope key
+        (_ws_send_101) that WebSocketActor._send() already reads, so that
+        WebSocketActor can be reused without modification.  The 200 HEADERS
+        response (and optional sec-websocket-protocol) is sent when the ASGI
+        app calls websocket.accept.
+        """
+        from uuid import uuid4  # noqa: PLC0415
+        from .websocket_actor import WebSocketActor  # noqa: PLC0415
+        from .http2_ws import HTTP2WSReader, HTTP2WSWriter  # noqa: PLC0415
+
+        scope = stream.scope
+        assert scope is not None
+        scope['_connection_id'] = str(uuid4())
+        stream_send = self.make_sender(stream.stream_id)
+
+        async def _ws_send_200(subprotocol=None):
+            headers = []
+            if subprotocol:
+                sp = subprotocol if isinstance(subprotocol, str) else subprotocol.decode()
+                headers = [(b'sec-websocket-protocol', sp.encode())]
+            await stream_send({'type': 'http.response.start', 'status': 200, 'headers': headers})
+
+        scope['_ws_send_101'] = _ws_send_200  # WebSocketActor calls this on websocket.accept
+
+        ws_reader = HTTP2WSReader()
+        ws_writer = HTTP2WSWriter(stream_send)
+        recipients[stream.stream_id] = ws_reader  # DATA frames routed here
+
+        aggregator = self._aggregator
+        if aggregator is None:
+            from ..event import EventDispatcher  # noqa: PLC0415
+            from ..event_aggregator import EventAggregator  # noqa: PLC0415
+            aggregator = EventAggregator(EventDispatcher())
+
+        log_record.status = 200
+        ws_actor = WebSocketActor(
+            ws_reader, ws_writer, scope, self.app, aggregator,
+            peername=self._peername, sockname=self._sockname, ssl=self._ssl,
+        )
+
+        async def _run_ws():
+            try:
+                await ws_actor.run()
+            finally:
+                log_record.close_code = ws_actor._disconnect_code
+                _access_logger.info(log_record.format(), extra=log_record.as_extra())
+
+        tg.create_task(_run_ws())
 
     async def _handle_push(self, event: dict, parent_stream_id: int) -> None:
         """Handle an 'http.response.push' ASGI event (RFC 7540 §8.2)."""

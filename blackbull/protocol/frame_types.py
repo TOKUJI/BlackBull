@@ -151,6 +151,7 @@ class SettingFrame(FrameBase):
     def __init__(self, length: int, type_, flags: int, stream_id: int, *, data=None, **kwds):
         super().__init__(length, type_, flags, stream_id)
         logger.debug('SettingFrame is called.')
+        self._payload = data or b''
 
         self.params = {b'\x00\x01': self.set_header_table_size,
                        b'\x00\x02': self.set_enable_push,
@@ -158,6 +159,7 @@ class SettingFrame(FrameBase):
                        b'\x00\x04': self.set_initial_window_size,
                        b'\x00\x05': self.set_max_frame_size,
                        b'\x00\x06': self.set_max_header_list_size,
+                       b'\x00\x08': self.set_enable_connect_protocol,
                        }
 
         payload = BytesIO(data or b'')
@@ -199,10 +201,13 @@ class SettingFrame(FrameBase):
         self.max_header_list_size = int.from_bytes(value, 'big', signed=False)
         logger.debug('max_header_list_size: {}'.format(self.max_header_list_size))
 
+    def set_enable_connect_protocol(self, value):
+        self.enable_connect_protocol = int.from_bytes(value, 'big', signed=False)
+        logger.debug('enable_connect_protocol: {}'.format(self.enable_connect_protocol))
+
     def save(self):
-        base = super().save()
-        # TODO: enable to alter settings parameters
-        return base
+        self.length = len(self._payload)
+        return super().save() + self._payload
 
 
 class WindowUpdate(FrameBase):
