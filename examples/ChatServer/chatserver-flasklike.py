@@ -5,10 +5,10 @@ Same functionality as chatserver.py, but uses the BlackBull class directly
 instead of ASGIServer.  HTTP routes are registered with @app.route() decorators.
 WebSocket is registered the same way using scheme=Scheme.websocket.
 
-Run (plain HTTP/1.1 + Long Polling / WebSocket only):
+Run (plain HTTP/1.1 — WebSocket and Long Polling; no SSE):
     python chatserver-flasklike.py
 
-Run (HTTPS + HTTP/2, enables SSE):
+Run (HTTPS + HTTP/2 — all three modes including SSE; WebSocket via RFC 8441):
     python chatserver-flasklike.py --cert server.crt --key server.key
 
 Generate a self-signed certificate for testing:

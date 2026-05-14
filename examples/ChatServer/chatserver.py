@@ -4,14 +4,14 @@ Chat Server
 Multi-user real-time chat supporting WebSocket, SSE, and Long Polling.
 
 Communication method ↔ HTTP version mapping:
-    WebSocket    → HTTP/1.1 (Upgrade mechanism)
+    WebSocket    → HTTP/1.1 (Upgrade) or HTTP/2 (RFC 8441 Extended CONNECT via TLS)
     SSE          → HTTP/2   (stream multiplexing; needs TLS)
-    Long Polling → HTTP/1.1
+    Long Polling → HTTP/1.1 or HTTP/2
 
-Run (plain HTTP/1.1 + Long Polling / WebSocket only):
+Run (plain HTTP/1.1 — WebSocket and Long Polling; no SSE):
     python chatserver.py
 
-Run (HTTPS + HTTP/2, enables SSE):
+Run (HTTPS + HTTP/2 — all three modes including SSE; WebSocket via RFC 8441):
     python chatserver.py --cert server.crt --key server.key
 
 Generate a self-signed certificate for testing:

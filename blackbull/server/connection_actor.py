@@ -61,7 +61,7 @@ class ConnectionActor(Actor):
     async def _dispatch(self) -> None:
         first_line = await self._reader.readuntil(b'\r\n')
         if first_line == _HTTP2_PREFACE_FIRST_LINE:
-            remainder = await self._reader.read(8)
+            remainder = await self._reader.readexactly(8)
             if first_line + remainder != _HTTP2_PREFACE_FIRST_LINE + _HTTP2_PREFACE_REMAINDER:
                 raise ValueError(
                     f'Invalid HTTP/2 preface continuation: {remainder!r}')

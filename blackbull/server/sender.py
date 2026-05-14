@@ -249,20 +249,28 @@ class HTTP2Sender(BaseSender):
         self._window_open.set()  # window starts open
 
     async def _write(self, data: bytes):
-        """Send *data* respecting HTTP/2 flow control (RFC 7540 §6.9).
+        """Write a frame to the transport.
 
-        Blocks on ``self._window_open`` until both the connection-level and
-        the stream-level windows have enough space; ``window_update()`` sets
-        the event to wake any blocked writer.  Both windows are decremented
-        by ``len(data)`` after the underlying transport write succeeds.
+        Per RFC 7540 §6.9.1, only DATA frames are subject to flow control;
+        HEADERS and control frames (SETTINGS, PING, WINDOW_UPDATE, RST_STREAM,
+        GOAWAY, CONTINUATION) are not.  Flow-controlled writes go through
+        :meth:`_write_data`.
         """
-        while (len(data) > self.connection_window_size or
-               len(data) > self.stream_window_size[self._stream_id]):
+        await super()._write(data)
+
+    async def _write_data(self, payload_len: int, frame_bytes: bytes):
+        """Write a DATA frame respecting HTTP/2 flow control (RFC 7540 §6.9).
+
+        ``payload_len`` is the DATA payload size (which counts against the
+        window); ``frame_bytes`` is the full serialized frame.
+        """
+        while (payload_len > self.connection_window_size or
+               payload_len > self.stream_window_size[self._stream_id]):
             await self._window_open.wait()
             self._window_open.clear()
-        await super()._write(data)
-        self.connection_window_size -= len(data)
-        self.stream_window_size[self._stream_id] -= len(data)
+        await super()._write(frame_bytes)
+        self.connection_window_size -= payload_len
+        self.stream_window_size[self._stream_id] -= payload_len
 
     def window_update(self, increment: int) -> None:
         self.connection_window_size += increment
@@ -299,7 +307,7 @@ class HTTP2Sender(BaseSender):
                 self._stream_id,
                 data=body,
             )
-            await self._write(d_frame.save())
+            await self._write_data(len(body), d_frame.save())
 
         elif isinstance(body, dict):
             event_type = body.get('type', '')
@@ -318,13 +326,14 @@ class HTTP2Sender(BaseSender):
 
             elif event_type == ASGIEvent.HTTP_RESPONSE_BODY:
                 flags = 0 if body.get('more_body', False) else DataFrameFlags.END_STREAM
+                payload = body.get('body', b'')
                 frame = self._factory.create(
                     FrameTypes.DATA,
                     flags,
                     self._stream_id,
-                    data=body.get('body', b''),
+                    data=payload,
                 )
-                await self._write(frame.save())
+                await self._write_data(len(payload), frame.save())
 
             elif event_type == ASGIEvent.HTTP_RESPONSE_PUSH:
                 if self._push_callback is not None:

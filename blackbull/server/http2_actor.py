@@ -22,7 +22,7 @@ from ..protocol.frame_types import ErrorCodes, FrameBase, FrameTypes
 from ..protocol.stream import Stream, StreamState
 from .headers import Headers
 from .parser import ParserFactory
-from .recipient import AbstractReader, HTTP2Recipient, RecipientFactory
+from .recipient import AbstractReader, HTTP2Recipient, IncompleteReadError, RecipientFactory
 from .response import ResponderFactory
 from .sender import AbstractWriter, SenderFactory
 from .access_log import AccessLogRecord, _make_capturing_send, _make_disconnect_detecting_receive
@@ -206,11 +206,16 @@ class HTTP2Actor(Actor):
     async def receive(self) -> bytes:
         """Read one HTTP/2 frame from the connection."""
         assert self._reader is not None, "receive() called with no reader"
-        data = await self._reader.read(9)
-        if not data:
+        try:
+            data = await self._reader.readexactly(9)
+        except (IncompleteReadError, asyncio.IncompleteReadError):
             return b''
         size = int.from_bytes(data[:3], 'big', signed=False)
-        data += await self._reader.read(size)
+        if size:
+            try:
+                data += await self._reader.readexactly(size)
+            except (IncompleteReadError, asyncio.IncompleteReadError):
+                return b''
         return data
 
     # ------------------------------------------------------------------

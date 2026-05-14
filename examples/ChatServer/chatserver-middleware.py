@@ -12,10 +12,10 @@ API to eliminate cross-cutting boilerplate from route handlers:
 Protected routes are registered through a ``RouteGroup`` (``app.group()``) so
 ``session_mw`` is applied automatically without listing it on every decorator.
 
-Run (plain HTTP/1.1 + Long Polling / WebSocket only):
+Run (plain HTTP/1.1 — WebSocket and Long Polling; no SSE):
     python chatserver-middleware.py
 
-Run (HTTPS + HTTP/2, enables SSE):
+Run (HTTPS + HTTP/2 — all three modes including SSE; WebSocket via RFC 8441):
     python chatserver-middleware.py --cert server.crt --key server.key
 
 Generate a self-signed certificate for testing:
@@ -469,9 +469,7 @@ if __name__ == '__main__':
     proto = 'https' if args.cert else 'http'
     logger.info('Listening on %s://localhost:%d', proto, args.port)
     if args.cert:
-        logger.warning('TLS active — browser negotiates HTTP/2 via ALPN; WebSocket upgrade '
-                       '(HTTP/1.1 only) will be blocked. Use SSE or Long Polling instead, '
-                       'or run without --cert to enable WebSocket.')
+        logger.info('TLS active — HTTP/2 via ALPN; WebSocket (RFC 8441), SSE, and Long Polling all work.')
     else:
         logger.info('TLS not configured — SSE (HTTP/2) unavailable; WebSocket and Long Polling work.')
 

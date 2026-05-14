@@ -76,7 +76,7 @@
 
       <label for="method">Communication method</label>
       <select id="method">
-        <option value="websocket">WebSocket (HTTP/1.1)</option>
+        <option value="websocket">WebSocket</option>
         <option value="sse">Server-Sent Events (HTTP/2)</option>
         <option value="poll">Long Polling (HTTP/1.1)</option>
       </select>
@@ -88,7 +88,7 @@
 
   <script>
     const notes = {
-      websocket: 'Real-time bidirectional; requires HTTP/1.1.',
+      websocket: 'Real-time bidirectional; works over HTTP/1.1 and HTTP/2 (TLS).',
       sse:       'Server-push stream; requires HTTP/2 (TLS).',
       poll:      'Compatible with plain HTTP/1.1; polls every ~25 s.',
     };

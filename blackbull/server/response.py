@@ -90,8 +90,10 @@ class SettingsResponder(Responder):
             if hasattr(self.frame, 'initial_window_size') and self.frame.initial_window_size is not None:
                 for sender in handler._senders.values():
                     sender.apply_settings(self.frame.initial_window_size)
-            if hasattr(self.frame, 'header_table_size') and self.frame.header_table_size is not None:
-                handler.factory.header_table_size = self.frame.header_table_size
+            # NOTE: per RFC 7540 §6.5.2, peer's SETTINGS_HEADER_TABLE_SIZE
+            # constrains OUR encoder's table, not OUR decoder's. Updating the
+            # decoder here would (and did) trip hpack's InvalidTableSizeError
+            # because the peer's encoder never asked us to resize.
             await handler.send_frame(handler.factory.settings(ack=True))
 
         elif self.frame.flags == SettingFrameFlags.ACK:
