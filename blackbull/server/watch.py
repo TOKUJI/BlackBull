@@ -205,7 +205,7 @@ class Watcher(object):
         os.close(self._fd)
 
 
-def force_reload(path):  # todo: should change to use functools.partial
+def force_reload(path):
     def reload(*args, **kwds):
         import sys
         _logger.debug('run {} {}'.format(sys.executable, path))

@@ -8,6 +8,7 @@ Provides:
 - `parse_post_data`: parses ``application/x-www-form-urlencoded`` bodies.
 - `EventEmitter`: lightweight async event-emitter backed by ``asyncio.create_task``.
 """
+from abc import ABC, abstractmethod
 from collections import defaultdict
 import asyncio
 import re
@@ -54,22 +55,21 @@ def pop_safe(key, source: dict, target: dict, *, new_key=None) -> dict:
     return target
 
 
-class serializable(object):
-    """ This is ABC of util.serializable classes. Any derived class of this class
-    should implement save and load method.
-    todo: use abstract base class
-    """
+class serializable(ABC):
+    """Abstract base for serializable classes. Subclasses must implement save() and load()."""
     re = r''
 
     def is_empty(self):
-        return NotImplementedError('serializable.is_empty()')
+        raise NotImplementedError('serializable.is_empty()')
 
+    @abstractmethod
     def save(self):
-        return NotImplementedError('serializable.save()')
+        ...
 
     @classmethod
+    @abstractmethod
     def load(cls, str_):  # must return a pair (serializable, remaining_text)
-        return NotImplementedError('serializable.load()')
+        ...
 
 
 # RFC 5322 Date and Time specification

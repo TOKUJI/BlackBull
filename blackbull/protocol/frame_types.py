@@ -281,7 +281,7 @@ class Headers(FrameBase):
         if self.padded:
             payload.read(1)
 
-        if self.priority:  # TODO: handle priority properly
+        if self.priority:
             self.stream_dependency = int.from_bytes(payload.read(4), 'big', signed=False)
             self.priority_weight = int.from_bytes(payload.read(1), 'big', signed=False)
             logger.debug(f'stream_id = {self.stream_id}, '
@@ -413,7 +413,9 @@ class Data(FrameBase):
 
         if self.padded:
             pad_length = int.from_bytes(payload.read(1), 'big', signed=False)
-            # TODO: add checking logic of pad_length.
+            if pad_length >= length:
+                raise ValueError(
+                    f'DATA pad_length ({pad_length}) >= frame length ({length}): PROTOCOL_ERROR')
             data_length = length - pad_length - 1
         else:
             data_length = length

@@ -90,9 +90,8 @@ class SettingsResponder(Responder):
             if hasattr(self.frame, 'initial_window_size') and self.frame.initial_window_size is not None:
                 for sender in handler._senders.values():
                     sender.apply_settings(self.frame.initial_window_size)
-            if hasattr(self.frame, 'header_table_size'):
-                # TODO: update header_table_size
-                pass
+            if hasattr(self.frame, 'header_table_size') and self.frame.header_table_size is not None:
+                handler.factory.header_table_size = self.frame.header_table_size
             await handler.send_frame(handler.factory.settings(ack=True))
 
         elif self.frame.flags == SettingFrameFlags.ACK:

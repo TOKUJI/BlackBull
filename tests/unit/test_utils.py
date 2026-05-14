@@ -61,21 +61,32 @@ def test_pop_safe_missing_key_is_noop():
 # serializable
 # ---------------------------------------------------------------------------
 
-def test_serializable_is_empty_returns_not_implemented():
-    s = serializable()
-    result = s.is_empty()
-    assert isinstance(result, NotImplementedError)
+class _ConcreteSerializable(serializable):
+    def save(self):
+        return b''
+
+    @classmethod
+    def load(cls, str_):
+        return cls(), str_
 
 
-def test_serializable_save_returns_not_implemented():
-    s = serializable()
-    result = s.save()
-    assert isinstance(result, NotImplementedError)
+def test_serializable_cannot_be_instantiated_directly():
+    import pytest
+    with pytest.raises(TypeError):
+        serializable()
 
 
-def test_serializable_load_returns_not_implemented():
-    result = serializable.load('anything')
-    assert isinstance(result, NotImplementedError)
+def test_serializable_is_empty_raises():
+    s = _ConcreteSerializable()
+    with pytest.raises(NotImplementedError):
+        s.is_empty()
+
+
+def test_serializable_concrete_subclass_is_instantiable():
+    s = _ConcreteSerializable()
+    assert s.save() == b''
+    obj, rest = _ConcreteSerializable.load('x')
+    assert isinstance(obj, _ConcreteSerializable)
 
 
 # ---------------------------------------------------------------------------
