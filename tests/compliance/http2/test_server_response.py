@@ -1,12 +1,24 @@
 """Tests for blackbull/server/response.py — Responder registry and respond() paths."""
 import pytest
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 from blackbull.server.response import (
     ResponderFactory, Responder, PingResponder,
     WindowUpdateResponder, PriorityResponder, PriorityUpdateResponder,
+    SettingsResponder,
 )
-from blackbull.protocol.frame_types import FrameTypes
+from blackbull.protocol.frame import FrameFactory
+from blackbull.protocol.frame_types import FrameTypes, SettingFrameFlags
+
+
+def _make_h2_frame(type_byte, flags, stream_id: int, payload: bytes) -> bytes:
+    length = len(payload)
+    return (length.to_bytes(3, 'big')
+            + type_byte
+            + bytes([flags])
+            + stream_id.to_bytes(4, 'big')
+            + payload)
 
 
 # ---------------------------------------------------------------------------
@@ -193,3 +205,41 @@ async def test_priority_update_new_stream_precreated():
 
     handler.root_stream.add_child.assert_called_once_with(7)
     assert new_stream.priority_hint == {'urgency': 1}
+
+
+# ---------------------------------------------------------------------------
+# RFC 7540 §6.5.2 — SettingsResponder must not mutate our HPACK decoder
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_settings_responder_does_not_mutate_decoder_table_size():
+    """Per RFC 7540 §6.5.2, peer's SETTINGS_HEADER_TABLE_SIZE bounds OUR encoder only.
+
+    Regression: the old SettingsResponder set handler.factory.header_table_size,
+    which mutated the decoder via FrameFactory.__setattr__.  Subsequent HEADERS
+    decoding raised hpack InvalidTableSizeError unless the peer's encoder also
+    sent a Dynamic Table Size Update — which browsers never do, causing a silent
+    connection failure.
+    """
+    factory = FrameFactory()
+    before = factory.decoder.header_table_size
+
+    wire = _make_h2_frame(
+        FrameTypes.SETTINGS,
+        SettingFrameFlags.INIT,
+        0,
+        (0x1).to_bytes(2, 'big') + (65536).to_bytes(4, 'big'),
+    )
+    frame = factory.load(wire)
+
+    handler = SimpleNamespace(
+        factory=factory,
+        _senders={},
+        send_frame=AsyncMock(),
+    )
+    await SettingsResponder(frame).respond(handler)
+
+    assert factory.decoder.header_table_size == before, (
+        f'SettingsResponder must NOT change factory.decoder.header_table_size; '
+        f'was {before}, now {factory.decoder.header_table_size}'
+    )

@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock, MagicMock
 from hpack import Encoder
 
 from blackbull.server.http2_actor import HTTP2Actor
+from blackbull.server.recipient import AbstractReader, IncompleteReadError
 from blackbull.server.sender import AsyncioWriter
 from blackbull.protocol.frame import FrameFactory
 from blackbull.protocol.frame_types import (FrameTypes, FrameFlags,
@@ -33,7 +34,8 @@ def _make_h2_frame(type_byte: FrameTypes, flags: FrameFlags | int,
 
 
 def _make_headers_frame(stream_id: int = 1, end_stream: bool = False,
-                        method: bytes = b'GET', path: bytes = b'/') -> bytes:
+                        method: bytes = b'GET', path: bytes = b'/',
+                        priority: tuple[int, int] | None = None) -> bytes:
     encoder = Encoder()
     block = encoder.encode([(b':method', method),
                              (b':path', path),
@@ -41,7 +43,49 @@ def _make_headers_frame(stream_id: int = 1, end_stream: bool = False,
     flags: FrameFlags = HeaderFrameFlags.END_HEADERS
     if end_stream:
         flags |= HeaderFrameFlags.END_STREAM
-    return _make_h2_frame(FrameTypes.HEADERS, flags, stream_id, block)
+    if priority is not None:
+        flags |= HeaderFrameFlags.PRIORITY
+        dep, weight = priority
+        payload = dep.to_bytes(4, 'big') + bytes([weight]) + block
+    else:
+        payload = block
+    return _make_h2_frame(FrameTypes.HEADERS, flags, stream_id, payload)
+
+
+class _ByteByByteReader(AbstractReader):
+    """Read buffer that returns at most 1 byte from read(), simulating TCP fragmentation.
+
+    readexactly(n) correctly accumulates n bytes from the internal buffer.
+    A production path that used read(n) instead of readexactly(n) would receive
+    only 1 byte and misparse the HTTP/2 frame header or preface remainder.
+    """
+
+    def __init__(self, data: bytes):
+        self._buf = bytearray(data)
+
+    async def read(self, n: int) -> bytes:
+        if not self._buf:
+            return b''
+        chunk = bytes(self._buf[:1])
+        del self._buf[:1]
+        return chunk
+
+    async def readuntil(self, sep: bytes) -> bytes:
+        result = bytearray()
+        while True:
+            if not self._buf:
+                raise IncompleteReadError()
+            result.append(self._buf[0])
+            del self._buf[:1]
+            if bytes(result).endswith(sep):
+                return bytes(result)
+
+    async def readexactly(self, n: int) -> bytes:
+        if len(self._buf) < n:
+            raise IncompleteReadError()
+        chunk = bytes(self._buf[:n])
+        del self._buf[:n]
+        return chunk
 
 
 def _make_h2_actor(app=None):
@@ -159,7 +203,7 @@ class TestHTTP2FlowControl:
 
         async def send_task():
             frame = factory.create(FrameTypes.DATA, DataFrameFlags.END_STREAM, 1, data=payload)
-            await sender._write(frame.save())
+            await sender._write_data(len(payload), frame.save())
 
         task = asyncio.create_task(send_task())
         await asyncio.sleep(0)
@@ -172,6 +216,44 @@ class TestHTTP2FlowControl:
         await task
 
         assert payload in bytes(written), 'DATA not written after window_update()'
+
+    async def test_zero_window_does_not_block_headers_send(self):
+        """RFC 7540 §6.9.1 — only DATA frames are flow-controlled.
+
+        HEADERS must be written immediately even when the stream window is 0.
+        Regression: the old _write() gated all frame types on flow control,
+        blocking HEADERS along with DATA.
+        """
+        from blackbull.server.sender import HTTP2Sender
+        from http import HTTPStatus
+
+        written = bytearray()
+        mock_writer = MagicMock()
+        mock_writer.write = MagicMock(side_effect=lambda d: written.extend(d))
+        mock_writer.drain = AsyncMock()
+        sender = HTTP2Sender(AsyncioWriter(mock_writer), FrameFactory(), stream_id=1)
+        sender.connection_window_size = 0
+        sender.stream_window_size[1] = 0
+        sender._window_open.clear()
+
+        body = b'x' * 100
+        task = asyncio.create_task(sender(body, HTTPStatus.OK, headers=[]))
+        await asyncio.sleep(0)
+
+        seen_headers = False
+        i = 0
+        while i + 9 <= len(written):
+            length = int.from_bytes(written[i:i+3], 'big')
+            if written[i+3] == 0x01:  # HEADERS frame type
+                seen_headers = True
+                break
+            i += 9 + length
+        assert seen_headers, 'HEADERS frame must be written even when stream window is 0'
+        assert body not in bytes(written), 'DATA must remain blocked at zero window'
+
+        sender.window_update(len(body) + 200)
+        await task
+        assert body in bytes(written), 'DATA must be written after window_update()'
 
 
 # ---------------------------------------------------------------------------
@@ -786,3 +868,104 @@ class TestSettingsMaxHeaderListSize:
             'SettingFrame must store max_header_list_size after parsing 0x6 setting'
         )
         assert frame.max_header_list_size == 262144
+
+
+# ---------------------------------------------------------------------------
+# RFC 7540 §6.5.2 — SETTINGS_HEADER_TABLE_SIZE must not mutate our decoder
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+class TestSettingsHeaderTableSize:
+    """SETTINGS_HEADER_TABLE_SIZE from the peer must NOT mutate our HPACK decoder.
+
+    RFC 7540 §6.5.2: the peer's HEADER_TABLE_SIZE value bounds OUR encoder's
+    table, not our decoder's.  Mutating the decoder causes hpack to raise
+    InvalidTableSizeError on the next HEADERS frame unless the peer's encoder
+    also sends a Dynamic Table Size Update instruction — which browsers never do.
+    """
+
+    async def test_settings_header_table_size_then_headers_dispatches(self):
+        """A SETTINGS(HEADER_TABLE_SIZE=65536) followed by HEADERS must dispatch normally.
+
+        Regression: the old SettingsResponder set handler.factory.header_table_size,
+        mutating the decoder and causing InvalidTableSizeError on the next HEADERS
+        frame decode.  This was the root cause of the browser-connection failure.
+        """
+        settings = TestSettingsMaxHeaderListSize._make_settings_frame({0x1: 65536})
+        h_frame = _make_headers_frame(stream_id=1, end_stream=True)
+        handler, app = _make_h2_actor()
+        handler.receive = AsyncMock(side_effect=[settings, h_frame, None])
+        await handler.run()
+        assert app.call_count == 1, (
+            f'HEADERS after SETTINGS(HEADER_TABLE_SIZE) must dispatch; '
+            f'got call_count={app.call_count}')
+
+
+# ---------------------------------------------------------------------------
+# TCP fragmentation — readexactly(n) must reassemble split frame headers
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+class TestHTTP2FragmentedRead:
+    """HTTP2Actor.receive() must use readexactly so TCP-fragmented frames parse correctly.
+
+    Regression: the old receive() used read(n) which returns up to n bytes.
+    On a byte-by-byte reader read(9) returns 1 byte, making the 9-byte frame
+    header unparseable.  readexactly(9) correctly waits for all 9 bytes.
+    """
+
+    async def test_fragmented_headers_frame_dispatches(self):
+        """A HEADERS frame delivered one byte at a time must still dispatch to the app."""
+        h_frame_bytes = _make_headers_frame(stream_id=1, end_stream=True)
+        reader = _ByteByByteReader(h_frame_bytes)
+
+        app = AsyncMock()
+        writer = MagicMock()
+        writer.drain = AsyncMock()
+        writer.close = MagicMock()
+
+        handler = HTTP2Actor(reader, AsyncioWriter(writer), app, aggregator=None)
+        handler.send_frame = AsyncMock()
+        await handler.run()
+
+        assert app.call_count == 1, (
+            f'App must be called once from byte-by-byte fragmented HEADERS; '
+            f'got call_count={app.call_count}')
+
+
+# ---------------------------------------------------------------------------
+# Browser-shaped frames (HEADERS with PRIORITY flag, flags=0x25)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+class TestHTTP2BrowserShapedFrames:
+    """HEADERS with PRIORITY flag (flags=0x25) must dispatch identically.
+
+    Firefox and Edge always set END_STREAM | END_HEADERS | PRIORITY on their
+    first request HEADERS frame.  curl does not.  This class ensures the test
+    corpus includes browser-shaped frames so regressions in PRIORITY-flagged
+    HEADERS decoding fail loudly.
+    """
+
+    async def test_headers_with_priority_flag_dispatches(self):
+        """HEADERS flags=0x25 (END_STREAM|END_HEADERS|PRIORITY) must dispatch normally."""
+        h_frame = _make_headers_frame(stream_id=1, end_stream=True, priority=(0, 42))
+        handler, app = _make_h2_actor()
+        handler.receive = AsyncMock(side_effect=[h_frame, None])
+        await handler.run()
+        assert app.call_count == 1, (
+            f'HEADERS with PRIORITY flag must dispatch to app; got call_count={app.call_count}')
+
+    async def test_headers_with_priority_and_settings_header_table_size(self):
+        """Browser-shaped: SETTINGS(HEADER_TABLE_SIZE) + HEADERS(PRIORITY) must dispatch.
+
+        This is the exact frame sequence Firefox/Edge send on first connection.
+        """
+        settings = TestSettingsMaxHeaderListSize._make_settings_frame({0x1: 65536})
+        h_frame = _make_headers_frame(stream_id=1, end_stream=True, priority=(0, 42))
+        handler, app = _make_h2_actor()
+        handler.receive = AsyncMock(side_effect=[settings, h_frame, None])
+        await handler.run()
+        assert app.call_count == 1, (
+            f'Browser-shaped SETTINGS+HEADERS(PRIORITY) must dispatch; '
+            f'got call_count={app.call_count}')
