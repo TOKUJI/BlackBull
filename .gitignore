@@ -112,3 +112,7 @@ CLAUDE_DEV.md
 .claude/design/
 .claude/phases/
 .claude/patterns/
+# benchmark result files (keep directory, ignore data)
+bench/results/*.json
+bench/results/*.txt
+bench/results/*.csv
