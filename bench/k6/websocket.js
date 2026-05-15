@@ -16,6 +16,7 @@ const wsMessages = new Counter('ws_messages');
 const wsErrors   = new Counter('ws_errors');
 
 export const options = {
+  insecureSkipTLSVerify: true,
   vus:      50,
   duration: '60s',
   thresholds: {
@@ -25,7 +26,7 @@ export const options = {
 };
 
 const URL    = 'wss://localhost:8443/ws';
-const PARAMS = { 'insecureSkipTLSVerify': true };
+const PARAMS = {};
 
 export default function () {
   const res = ws.connect(URL, PARAMS, function (socket) {

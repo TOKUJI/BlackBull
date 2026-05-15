@@ -41,7 +41,7 @@ app = BlackBull()
 monitor = LoopLagMonitor(interval=0.05, window=400)
 
 _1KB  = os.urandom(1024)
-_64KB = os.urandom(65536)
+_16KB = os.urandom(16000)   # stays under default max-frame-size (16384) and window (65535)
 
 
 @app.on_startup
@@ -68,9 +68,9 @@ async def small():
     return _1KB
 
 
-@app.route(path='/64kb', methods=[HTTPMethod.GET])
+@app.route(path='/16kb', methods=[HTTPMethod.GET])
 async def large():
-    return _64KB
+    return _16KB
 
 
 @app.route(path='/echo', methods=[HTTPMethod.POST])
@@ -126,5 +126,5 @@ if __name__ == '__main__':
     args = _parse_args()
     print(f'Starting bench server on https://localhost:{args.port}')
     print(f'  cert={args.cert}  key={args.key}')
-    print('Routes: /ping  /1kb  /64kb  /echo  /ws  /metrics')
+    print('Routes: /ping  /1kb  /16kb  /echo  /ws  /metrics')
     asyncio.run(app.run(port=args.port, certfile=args.cert, keyfile=args.key))

@@ -20,6 +20,7 @@ const errorRate = new Rate('errors');
 const TARGET = __ENV.TARGET || '/ping';
 
 export const options = {
+  insecureSkipTLSVerify: true,
   vus:      500,
   duration: '60s',
   thresholds: {
@@ -29,7 +30,7 @@ export const options = {
 };
 
 const BASE   = 'https://localhost:8443';
-const PARAMS = { insecureSkipTLSVerify: true };
+const PARAMS = {};
 
 export default function () {
   const res = http.get(`${BASE}${TARGET}`, PARAMS);

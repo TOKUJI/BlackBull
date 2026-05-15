@@ -17,6 +17,7 @@ const errorRate = new Rate('errors');
 const lagP99    = new Trend('loop_lag_p99_ms', true);
 
 export const options = {
+  insecureSkipTLSVerify: true,
   stages: [
     { duration: '30s', target: 50  },  // warm-up
     { duration: '60s', target: 200 },  // ramp to stress
@@ -30,7 +31,7 @@ export const options = {
 };
 
 const BASE = 'https://localhost:8443';
-const PARAMS = { insecureSkipTLSVerify: true };
+const PARAMS = {};
 
 export default function () {
   const res = http.get(`${BASE}/ping`, PARAMS);
