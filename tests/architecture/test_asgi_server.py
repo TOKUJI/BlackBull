@@ -728,3 +728,43 @@ class TestClientConnectedCbDispatch:
             await server.client_connected_cb(reader, writer)
 
         assert writer.closed
+
+    @pytest.mark.asyncio
+    async def test_connection_limit_rejects_when_full(self):
+        """When active connections reach max_connections, new ones are closed immediately.
+
+        Regression for Phase 0 item 1.2: without a limit, every incoming
+        connection is accepted and queued, causing unbounded memory growth under
+        overload before multi-worker support lands.
+        """
+        server = ASGIServer(_dispatch_noop_app, max_connections=2)
+
+        # Simulate two active connections by setting the counter directly.
+        server._active_connections = 2
+
+        raw = _dispatch_http_request()
+        reader = _DispatchReader(raw)
+        writer = _DispatchWriter()
+
+        await server.client_connected_cb(reader, writer)
+
+        assert writer.closed, 'New connection must be closed when the limit is reached'
+
+    @pytest.mark.asyncio
+    async def test_connection_counter_decrements_after_run(self):
+        """Active connection counter must decrement when a connection finishes."""
+        server = ASGIServer(_dispatch_noop_app, max_connections=10)
+
+        raw = _dispatch_http_request()
+        reader = _DispatchReader(raw)
+        writer = _DispatchWriter()
+
+        async def noop_run(self):
+            pass
+
+        with patch.object(_HTTP1Actor_dispatch, 'run', noop_run):
+            await server.client_connected_cb(reader, writer)
+
+        assert server._active_connections == 0, (
+            f'Counter should be 0 after connection closes, got {server._active_connections}'
+        )

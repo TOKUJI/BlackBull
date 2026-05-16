@@ -36,6 +36,7 @@ logger = logging.getLogger(__name__)
 class _StreamRecipient(Protocol):
     """Duck-type interface shared by HTTP2Recipient and HTTP2WSReader."""
     def put_disconnect(self) -> None: ...
+    def put_DATAFrame(self, frame) -> bool: ...
 
 
 def _signal_recipients(recipients: dict[int, _StreamRecipient]) -> None:
@@ -402,19 +403,28 @@ class HTTP2Actor(Actor):
         stream: 'Stream',
         recipients: dict[int, _StreamRecipient],
     ) -> None:
-        """Handle a DATA frame: update flow-control window and deliver to the stream's recipient."""
-        await self.send_frame(
-            self.factory.window_update(stream.stream_id, frame.length))
+        """Handle a DATA frame: deliver to the stream's recipient then issue WINDOW_UPDATE.
+
+        WINDOW_UPDATE is sent only after successful delivery so that a full
+        recipient queue withholds flow-control credit instead of silently
+        accepting data the app cannot process (RFC 7540 §6.9).
+        """
         if stream.state in (StreamState.HALF_CLOSED_REMOTE, StreamState.CLOSED):
             await self.send_frame(
                 self.factory.rst_stream(stream.stream_id, ErrorCodes.STREAM_CLOSED))
-        else:
-            stream.on_data_received(end_stream=bool(frame.end_stream))
-            if stream.stream_id in recipients:
-                recipients[stream.stream_id].put_DATAFrame(frame)
+            return
+
+        stream.on_data_received(end_stream=bool(frame.end_stream))
+        if stream.stream_id in recipients:
+            delivered = recipients[stream.stream_id].put_DATAFrame(frame)
+            if delivered:
+                await self.send_frame(
+                    self.factory.window_update(stream.stream_id, frame.length))
             else:
-                logger.warning(
-                    'DATA for stream %d but no recipient found', stream.stream_id)
+                await self.send_frame(
+                    self.factory.rst_stream(stream.stream_id, ErrorCodes.ENHANCE_YOUR_CALM))
+        else:
+            logger.warning('DATA for stream %d but no recipient found', stream.stream_id)
 
     async def _on_goaway_frame(
         self,

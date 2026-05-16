@@ -138,8 +138,11 @@ class ASGIServer:
     When ssl_context or certfile is set, this server runs as a HTTPS server.
     """
     def __init__(self, app, *,
-                 ssl_context=None, certfile=None, keyfile=None, password=None, **kwds):
+                 ssl_context=None, certfile=None, keyfile=None, password=None,
+                 max_connections: int = 500, **kwds):
         self.app = app
+        self._max_connections = max_connections
+        self._active_connections = 0
 
         # Create TLS context
         if ssl_context and (certfile or keyfile):
@@ -221,11 +224,23 @@ class ASGIServer:
         dispatcher = getattr(self.app, '_dispatcher', None)
         aggregator = EventAggregator(dispatcher) if dispatcher is not None else None
 
-        actor = ConnectionActor(
-            wrapped_reader, wrapped_writer, self.app, aggregator,
-            peername=peername, sockname=sockname, ssl=ssl_flag,
-        )
-        await actor.run()
+        if self._active_connections >= self._max_connections:
+            logger.warning(
+                'Connection limit reached (%d/%d) — rejecting %s',
+                self._active_connections, self._max_connections, peername,
+            )
+            await wrapped_writer.close()
+            return
+
+        self._active_connections += 1
+        try:
+            actor = ConnectionActor(
+                wrapped_reader, wrapped_writer, self.app, aggregator,
+                peername=peername, sockname=sockname, ssl=ssl_flag,
+            )
+            await actor.run()
+        finally:
+            self._active_connections -= 1
 
     def open_socket(self, port=0):
         if not check_port(port=port):

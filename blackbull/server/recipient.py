@@ -12,6 +12,11 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+# Per-stream and per-connection event queue depth limits.
+# These cap memory growth under overload; see Phase 0 in bench/README.md.
+_HTTP2_STREAM_QUEUE_DEPTH = 64
+_WS_EVENT_QUEUE_DEPTH = 256
+
 
 # ---------------------------------------------------------------------------
 # Reader abstraction — swap asyncio for trio/curio by implementing this ABC
@@ -220,7 +225,7 @@ class HTTP2Recipient(BaseRecipient):
 
     def __init__(self, frame: FrameBase | None = None):
         super().__init__(None)
-        self._queue: asyncio.Queue = asyncio.Queue()
+        self._queue: asyncio.Queue = asyncio.Queue(maxsize=_HTTP2_STREAM_QUEUE_DEPTH)
         if isinstance(frame, Data):
             self.put_DATAFrame(frame)
 
@@ -231,16 +236,32 @@ class HTTP2Recipient(BaseRecipient):
             'more_body': False if frame.end_stream else True,
         }
 
-    def put_DATAFrame(self, frame: Data) -> None:
-        self._queue.put_nowait(self.make_event(frame))
+    def put_DATAFrame(self, frame: Data) -> bool:
+        """Enqueue a DATA frame event. Returns False if the queue is full."""
+        try:
+            self._queue.put_nowait(self.make_event(frame))
+            return True
+        except asyncio.QueueFull:
+            logger.warning('HTTP2Recipient queue full on stream — dropping DATA frame')
+            return False
 
-    def put_event(self, event: dict) -> None:
-        """Enqueue a pre-built event dict (e.g. empty-body for HEADERS+END_STREAM)."""
-        self._queue.put_nowait(event)
+    def put_event(self, event: dict) -> bool:
+        """Enqueue a pre-built event dict. Returns False if the queue is full."""
+        try:
+            self._queue.put_nowait(event)
+            return True
+        except asyncio.QueueFull:
+            logger.warning('HTTP2Recipient queue full on stream — dropping event %r', event.get('type'))
+            return False
 
     def put_disconnect(self) -> None:
         """Unblock a waiting __call__() with an http.disconnect event."""
-        self._queue.put_nowait({'type': ASGIEvent.HTTP_DISCONNECT})
+        try:
+            self._queue.put_nowait({'type': ASGIEvent.HTTP_DISCONNECT})
+        except asyncio.QueueFull:
+            # If the queue is completely full the app task is hopelessly behind;
+            # TaskGroup cancellation will clean up the stream regardless.
+            logger.warning('HTTP2Recipient: could not deliver http.disconnect — queue full')
 
     async def __call__(self) -> dict:
         return await self._queue.get()
@@ -400,7 +421,7 @@ class WebSocketRecipient(BaseRecipient):
 
     def _ensure_reader_started(self) -> None:
         if self._event_queue is None:
-            self._event_queue = asyncio.Queue()
+            self._event_queue = asyncio.Queue(maxsize=_WS_EVENT_QUEUE_DEPTH)
             self._reader_task = asyncio.create_task(self._read_loop())
 
     async def __call__(self) -> dict:

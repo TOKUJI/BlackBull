@@ -37,12 +37,13 @@ class HTTP2WSReader(AbstractReader):
     # Push interface (called by HTTP2Actor)
     # ------------------------------------------------------------------
 
-    def put_DATAFrame(self, frame: Data) -> None:
-        """Feed raw payload bytes from an incoming DATA frame."""
+    def put_DATAFrame(self, frame: Data) -> bool:
+        """Feed raw payload bytes from an incoming DATA frame. Always returns True."""
         self._buffer.extend(frame.payload)
         if frame.end_stream:
             self._eof = True
         self._data_ready.set()
+        return True
 
     def put_disconnect(self) -> None:
         """Signal EOF (connection closed or GOAWAY received)."""
