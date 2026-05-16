@@ -2,7 +2,7 @@ import mimetypes
 from pathlib import Path
 from urllib.parse import unquote
 
-from blackbull.env import get_env, Environment
+from blackbull.env import get_settings, Environment
 from blackbull.server.constants import ASGIEvent
 
 
@@ -23,7 +23,7 @@ class StaticFiles:
                 await self._respond(send, 404)
             return
 
-        if get_env() == Environment.PRODUCTION:
+        if get_settings().env == Environment.PRODUCTION:
             if call_next:
                 await call_next(scope, receive, send)
             else:

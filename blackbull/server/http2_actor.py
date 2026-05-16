@@ -22,7 +22,8 @@ from ..protocol.frame_types import ErrorCodes, FrameBase, FrameTypes
 from ..protocol.stream import Stream, StreamState
 from .headers import Headers
 from .parser import ParserFactory
-from .recipient import AbstractReader, HTTP2Recipient, IncompleteReadError, RecipientFactory
+from .recipient import (AbstractReader, HTTP2Recipient, IncompleteReadError,
+                        RecipientFactory, _HTTP2_STREAM_QUEUE_DEPTH)
 from .response import ResponderFactory
 from .sender import AbstractWriter, SenderFactory
 from .access_log import AccessLogRecord, _make_capturing_send, _make_disconnect_detecting_receive
@@ -148,6 +149,7 @@ class HTTP2Actor(Actor):
         peername: tuple[str, int] | None = None,
         sockname: tuple[str, int] | None = None,
         ssl: bool = False,
+        stream_queue_depth: int = _HTTP2_STREAM_QUEUE_DEPTH,
     ) -> None:
         super().__init__()
         self._reader = reader
@@ -157,6 +159,7 @@ class HTTP2Actor(Actor):
         self._peername = peername
         self._sockname = sockname
         self._ssl = ssl
+        self._stream_queue_depth = stream_queue_depth
 
         self.app = app
         self.reader = reader
@@ -351,7 +354,7 @@ class HTTP2Actor(Actor):
 
         scope['http2_priority'] = _resolve_priority(stream, scope)
         scope['extensions'] = {ASGIEvent.HTTP_RESPONSE_PUSH: {}}
-        stream_recipient = RecipientFactory.http2()
+        stream_recipient = RecipientFactory.http2(queue_depth=self._stream_queue_depth)
         recipients[stream.stream_id] = stream_recipient
         stream.on_headers_received(end_stream=bool(frame.end_stream))
         if frame.end_stream:
@@ -390,7 +393,7 @@ class HTTP2Actor(Actor):
         scope['http2_priority'] = _resolve_priority(stream, scope)
         scope['extensions'] = {ASGIEvent.HTTP_RESPONSE_PUSH: {}}
         stream.scope = scope
-        stream_recipient = RecipientFactory.http2()
+        stream_recipient = RecipientFactory.http2(queue_depth=self._stream_queue_depth)
         recipients[stream.stream_id] = stream_recipient
         log_record = _make_log_record(scope)
         capturing_send = _make_capturing_send(send, log_record)
@@ -543,7 +546,7 @@ class HTTP2Actor(Actor):
             'http2_priority': _DEFAULT_PRIORITY,
         }
 
-        push_recipient = RecipientFactory.http2()
+        push_recipient = RecipientFactory.http2(queue_depth=self._stream_queue_depth)
         push_recipient.put_event({'type': ASGIEvent.HTTP_REQUEST, 'body': b'', 'more_body': False})
         push_sender = SenderFactory.http2(
             self._writer, self.factory, push_stream_id, push_callback=None)

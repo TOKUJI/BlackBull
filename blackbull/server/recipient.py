@@ -223,9 +223,10 @@ class HTTP2Recipient(BaseRecipient):
     hiding the concurrency from both sides.
     """
 
-    def __init__(self, frame: FrameBase | None = None):
+    def __init__(self, frame: FrameBase | None = None,
+                 queue_depth: int = _HTTP2_STREAM_QUEUE_DEPTH):
         super().__init__(None)
-        self._queue: asyncio.Queue = asyncio.Queue(maxsize=_HTTP2_STREAM_QUEUE_DEPTH)
+        self._queue: asyncio.Queue = asyncio.Queue(maxsize=queue_depth)
         if isinstance(frame, Data):
             self.put_DATAFrame(frame)
 
@@ -285,7 +286,8 @@ class WebSocketRecipient(BaseRecipient):
     def __init__(self, reader: AbstractReader, writer: AbstractWriter, *,
                  require_masked: bool = True,
                  dispatcher: EventDispatcher | None = None,
-                 scope: dict | None = None):
+                 scope: dict | None = None,
+                 ws_queue_depth: int = _WS_EVENT_QUEUE_DEPTH):
         super().__init__(reader)
         self._writer = writer
         self._connect_sent = False
@@ -298,6 +300,7 @@ class WebSocketRecipient(BaseRecipient):
         self._require_masked = require_masked
         self._dispatcher = dispatcher
         self._scope = scope
+        self._ws_queue_depth = ws_queue_depth
         self._event_queue: asyncio.Queue | None = None
         self._reader_task: asyncio.Task | None = None
 
@@ -421,7 +424,7 @@ class WebSocketRecipient(BaseRecipient):
 
     def _ensure_reader_started(self) -> None:
         if self._event_queue is None:
-            self._event_queue = asyncio.Queue(maxsize=_WS_EVENT_QUEUE_DEPTH)
+            self._event_queue = asyncio.Queue(maxsize=self._ws_queue_depth)
             self._reader_task = asyncio.create_task(self._read_loop())
 
     async def __call__(self) -> dict:
@@ -454,15 +457,18 @@ class RecipientFactory:
         return HTTP1Recipient(reader, scope)
 
     @staticmethod
-    def http2(frame: FrameBase | None = None) -> HTTP2Recipient:
-        return HTTP2Recipient(frame)
+    def http2(frame: FrameBase | None = None,
+              queue_depth: int = _HTTP2_STREAM_QUEUE_DEPTH) -> HTTP2Recipient:
+        return HTTP2Recipient(frame, queue_depth=queue_depth)
 
     @staticmethod
     def websocket(reader, writer, *,
                   dispatcher: EventDispatcher | None = None,
-                  scope: dict | None = None) -> WebSocketRecipient:
+                  scope: dict | None = None,
+                  ws_queue_depth: int = _WS_EVENT_QUEUE_DEPTH) -> WebSocketRecipient:
         if not isinstance(reader, AbstractReader):
             reader = AsyncioReader(reader)
         if not isinstance(writer, AbstractWriter):
             writer = AsyncioWriter(writer)
-        return WebSocketRecipient(reader, writer, dispatcher=dispatcher, scope=scope)
+        return WebSocketRecipient(reader, writer, dispatcher=dispatcher, scope=scope,
+                                  ws_queue_depth=ws_queue_depth)

@@ -7,7 +7,7 @@ from uuid import uuid4
 from ..actor import Actor, Message
 from ..event_aggregator import EventAggregator
 from .constants import ASGIEvent, WSCloseCode
-from .recipient import AbstractReader, RecipientFactory
+from .recipient import AbstractReader, RecipientFactory, _WS_EVENT_QUEUE_DEPTH
 from .sender import AbstractWriter, SenderFactory
 
 logger = logging.getLogger(__name__)
@@ -38,6 +38,7 @@ class WebSocketActor(Actor):
         peername: tuple[str, int] | None = None,
         sockname: tuple[str, int] | None = None,
         ssl: bool = False,
+        ws_queue_depth: int = _WS_EVENT_QUEUE_DEPTH,
     ) -> None:
         super().__init__()
         self._reader = reader
@@ -48,7 +49,8 @@ class WebSocketActor(Actor):
         self._peername = peername
         self._sockname = sockname
         self._ssl = ssl
-        self._ws_receive = RecipientFactory.websocket(reader, writer)
+        self._ws_receive = RecipientFactory.websocket(reader, writer,
+                                                      ws_queue_depth=ws_queue_depth)
         self._ws_send = SenderFactory.websocket(writer)
         self._disconnect_code: int = WSCloseCode.ABNORMAL
 

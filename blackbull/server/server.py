@@ -19,7 +19,8 @@ from ..protocol.frame_types import ErrorCodes, FrameTypes, FrameBase
 from .response import ResponderFactory
 from .parser import ParserFactory
 from .sender import SenderFactory, AbstractWriter
-from .recipient import RecipientFactory, HTTP2Recipient, AbstractReader, AsyncioReader, IncompleteReadError
+from .recipient import (RecipientFactory, HTTP2Recipient, AbstractReader, AsyncioReader,
+                        IncompleteReadError, _HTTP2_STREAM_QUEUE_DEPTH, _WS_EVENT_QUEUE_DEPTH)
 from .access_log import AccessLogRecord, _make_capturing_send
 from .constants import ASGIEvent
 from .headers import Headers
@@ -139,9 +140,14 @@ class ASGIServer:
     """
     def __init__(self, app, *,
                  ssl_context=None, certfile=None, keyfile=None, password=None,
-                 max_connections: int = 500, **kwds):
+                 max_connections: int = 500,
+                 stream_queue_depth: int = _HTTP2_STREAM_QUEUE_DEPTH,
+                 ws_queue_depth: int = _WS_EVENT_QUEUE_DEPTH,
+                 **kwds):
         self.app = app
         self._max_connections = max_connections
+        self._stream_queue_depth = stream_queue_depth
+        self._ws_queue_depth = ws_queue_depth
         self._active_connections = 0
 
         # Create TLS context
@@ -237,6 +243,8 @@ class ASGIServer:
             actor = ConnectionActor(
                 wrapped_reader, wrapped_writer, self.app, aggregator,
                 peername=peername, sockname=sockname, ssl=ssl_flag,
+                stream_queue_depth=self._stream_queue_depth,
+                ws_queue_depth=self._ws_queue_depth,
             )
             await actor.run()
         finally:

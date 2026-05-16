@@ -16,7 +16,7 @@ from ..actor import Actor, Message
 from ..event import Event
 from ..event_aggregator import EventAggregator
 from .headers import Headers
-from .recipient import AbstractReader, IncompleteReadError, RecipientFactory
+from .recipient import AbstractReader, IncompleteReadError, RecipientFactory, _WS_EVENT_QUEUE_DEPTH
 from .sender import AbstractWriter, SenderFactory
 from .access_log import AccessLogRecord as _AccessLogRecord, _make_capturing_send, _make_disconnect_detecting_receive
 from .constants import ASGIEvent, WSCloseCode
@@ -112,6 +112,7 @@ class HTTP1Actor(Actor):
         peername: tuple[str, int] | None = None,
         sockname: tuple[str, int] | None = None,
         ssl: bool = False,
+        ws_queue_depth: int = _WS_EVENT_QUEUE_DEPTH,
     ) -> None:
         super().__init__()
         self._reader = reader
@@ -122,6 +123,7 @@ class HTTP1Actor(Actor):
         self._peername = peername
         self._sockname = sockname
         self._ssl = ssl
+        self._ws_queue_depth = ws_queue_depth
 
     async def run(self) -> None:
         """Keep-alive loop — process requests until connection closes."""
@@ -236,6 +238,7 @@ class HTTP1Actor(Actor):
         ws_actor = WebSocketActor(
             self._reader, self._writer, scope, self._app, aggregator,
             peername=self._peername, sockname=self._sockname, ssl=self._ssl,
+            ws_queue_depth=self._ws_queue_depth,
         )
         try:
             await ws_actor.run()

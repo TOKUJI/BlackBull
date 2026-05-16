@@ -6,7 +6,8 @@ from typing import Any
 
 from ..actor import Actor, Message
 from ..event_aggregator import EventAggregator
-from .recipient import AbstractReader, IncompleteReadError
+from .recipient import (AbstractReader, IncompleteReadError,
+                        _HTTP2_STREAM_QUEUE_DEPTH, _WS_EVENT_QUEUE_DEPTH)
 from .sender import AbstractWriter
 
 logger = logging.getLogger(__name__)
@@ -36,6 +37,8 @@ class ConnectionActor(Actor):
         peername: tuple[str, int] | None = None,
         sockname: tuple[str, int] | None = None,
         ssl: bool = False,
+        stream_queue_depth: int = _HTTP2_STREAM_QUEUE_DEPTH,
+        ws_queue_depth: int = _WS_EVENT_QUEUE_DEPTH,
     ) -> None:
         super().__init__()
         self._reader = reader
@@ -45,6 +48,8 @@ class ConnectionActor(Actor):
         self._peername = peername
         self._sockname = sockname
         self._ssl = ssl
+        self._stream_queue_depth = stream_queue_depth
+        self._ws_queue_depth = ws_queue_depth
 
     async def run(self) -> None:
         if self._aggregator is not None:
@@ -70,6 +75,7 @@ class ConnectionActor(Actor):
                 self._reader, self._writer, self._app, self._aggregator,
                 peername=self._peername, sockname=self._sockname,
                 ssl=self._ssl,
+                stream_queue_depth=self._stream_queue_depth,
             )
         else:
             from .http1_actor import HTTP1Actor  # noqa: PLC0415
@@ -78,6 +84,7 @@ class ConnectionActor(Actor):
                 request=first_line,
                 peername=self._peername, sockname=self._sockname,
                 ssl=self._ssl,
+                ws_queue_depth=self._ws_queue_depth,
             )
         await actor.run()
 

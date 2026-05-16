@@ -121,10 +121,17 @@ async def ws_echo(scope, receive, send):
 # ---------------------------------------------------------------------------
 
 def _parse_args():
+    import os
     p = argparse.ArgumentParser(description='BlackBull benchmark server')
     p.add_argument('--port', type=int, default=8443)
     p.add_argument('--cert', default='cert.pem')
     p.add_argument('--key',  default='key.pem')
+    p.add_argument('--workers', type=int, default=None,
+                   help='Worker processes (default BB_WORKERS env or 1; 0 = cpu_count)')
+    p.add_argument('--stream-queue-depth', type=int, default=None,
+                   help='HTTP/2 per-stream queue depth (default BB_STREAM_QUEUE_DEPTH or 64)')
+    p.add_argument('--ws-queue-depth', type=int, default=None,
+                   help='WebSocket event queue depth (default BB_WS_QUEUE_DEPTH or 256)')
     return p.parse_args()
 
 
@@ -133,4 +140,11 @@ if __name__ == '__main__':
     print(f'Starting bench server on https://localhost:{args.port}')
     print(f'  cert={args.cert}  key={args.key}')
     print('Routes: /ping  /1kb  /16kb  /echo  /ws  /metrics')
-    asyncio.run(app.run(port=args.port, certfile=args.cert, keyfile=args.key))
+    app.serve(
+        port=args.port,
+        certfile=args.cert,
+        keyfile=args.key,
+        workers=args.workers,
+        stream_queue_depth=args.stream_queue_depth,
+        ws_queue_depth=args.ws_queue_depth,
+    )

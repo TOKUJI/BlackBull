@@ -469,9 +469,28 @@ class BlackBull:
         """Return the path for the named route with *params* substituted."""
         return self._router.url_path_for(name, **params)
 
-    async def run(self, certfile=None, keyfile=None, port=0, debug=False):
+    async def run(self, certfile=None, keyfile=None, port=0, debug=False,
+                  workers: int = 1):
+        """Run the server.
+
+        For ``workers=1`` (default) this runs in the current asyncio event loop.
+        For ``workers > 1`` the multi-worker master is run in a thread so the
+        async caller does not block the loop during the synchronous monitoring
+        phase; use :meth:`serve` if you want a synchronous entry point.
+        """
         self._logger.info('Run is called.')
         self._router.validate()
+
+        if workers > 1:
+            await asyncio.to_thread(
+                self.serve,
+                certfile=certfile,
+                keyfile=keyfile,
+                port=port,
+                workers=workers,
+            )
+            return
+
         tasks = []
 
         if not self.has_server():
@@ -499,6 +518,65 @@ class BlackBull:
 
         except* BaseException as eg:
             self._logger.error('Task error: %s', eg)
+
+    def serve(self, certfile=None, keyfile=None, port=0,
+              workers: int | None = None,
+              max_connections: int | None = None,
+              stream_queue_depth: int | None = None,
+              ws_queue_depth: int | None = None) -> None:
+        """Synchronous entry point — works for both single and multi-worker.
+
+        For ``workers=1`` this calls ``asyncio.run(self.run(...))``.
+        For ``workers > 1`` the master process binds sockets, forks *workers*
+        child processes, and blocks until SIGTERM or SIGINT is received.
+
+        All integer parameters default to their corresponding ``BB_*``
+        environment variables (see :mod:`blackbull.env`).
+
+        Example::
+
+            app.serve(port=8443, certfile='cert.pem', keyfile='key.pem', workers=4)
+        """
+        from .env import get_settings as _get_settings  # noqa: PLC0415
+        import os as _os  # noqa: PLC0415
+        _cfg = _get_settings()
+        workers = workers if workers is not None else _cfg.workers
+        workers = workers or (_os.cpu_count() or 1)
+        max_connections = max_connections if max_connections is not None else _cfg.max_connections
+        stream_queue_depth = (stream_queue_depth if stream_queue_depth is not None
+                              else _cfg.stream_queue_depth)
+        ws_queue_depth = ws_queue_depth if ws_queue_depth is not None else _cfg.ws_queue_depth
+
+        self._router.validate()
+
+        if workers == 1:
+            asyncio.run(self.run(certfile=certfile, keyfile=keyfile, port=port))
+            return
+
+        from .server import ASGIServer  # noqa: PLC0415
+        from .server.multiworker import MultiWorkerServer  # noqa: PLC0415
+
+        # Bind sockets in the master process; workers inherit them via fork.
+        master_server = ASGIServer(self, certfile=certfile, keyfile=keyfile,
+                                   max_connections=max_connections,
+                                   stream_queue_depth=stream_queue_depth,
+                                   ws_queue_depth=ws_queue_depth)
+        master_server.open_socket(port)
+        self._logger.info(
+            'Starting %d worker(s) on port %d', workers, master_server.port,
+        )
+
+        MultiWorkerServer(
+            self,
+            master_server.raw_sockets,
+            master_server.ssl_context,
+            workers=workers,
+            max_connections=max_connections,
+            stream_queue_depth=stream_queue_depth,
+            ws_queue_depth=ws_queue_depth,
+        ).run()
+
+        master_server.close_socket()
 
     def wait_for_port(self, timeout: float = 10.0, poll_interval: float = 0.1):
         self.server.wait_for_port(timeout=timeout, poll_interval=poll_interval)
