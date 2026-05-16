@@ -87,9 +87,11 @@ class WindowUpdateResponder(Responder):
 class SettingsResponder(Responder):
     async def respond(self, handler):
         if self.frame.flags == SettingFrameFlags.INIT:
-            if hasattr(self.frame, 'initial_window_size') and self.frame.initial_window_size is not None:
+            iws = getattr(self.frame, 'initial_window_size', None)
+            mfs = getattr(self.frame, 'max_frame_size', None)
+            if iws is not None or mfs is not None:
                 for sender in handler._senders.values():
-                    sender.apply_settings(self.frame.initial_window_size)
+                    sender.apply_settings(initial_window_size=iws, max_frame_size=mfs)
             # NOTE: per RFC 7540 §6.5.2, peer's SETTINGS_HEADER_TABLE_SIZE
             # constrains OUR encoder's table, not OUR decoder's. Updating the
             # decoder here would (and did) trip hpack's InvalidTableSizeError

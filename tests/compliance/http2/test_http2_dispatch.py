@@ -202,8 +202,7 @@ class TestHTTP2FlowControl:
         payload = b'x' * 100
 
         async def send_task():
-            frame = factory.create(FrameTypes.DATA, DataFrameFlags.END_STREAM, 1, data=payload)
-            await sender._write_data(len(payload), frame.save())
+            await sender._write_data(payload, end_stream=True)
 
         task = asyncio.create_task(send_task())
         await asyncio.sleep(0)

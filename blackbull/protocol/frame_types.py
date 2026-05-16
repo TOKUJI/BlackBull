@@ -20,6 +20,10 @@ logger = logging.getLogger(__name__)
 # at this value before any SETTINGS frame is exchanged.
 DEFAULT_INITIAL_WINDOW_SIZE = 65535
 
+# RFC 7540 §4.2 — DATA frames must not exceed this size unless the peer
+# advertises a larger SETTINGS_MAX_FRAME_SIZE.
+DEFAULT_MAX_FRAME_SIZE = 16384
+
 
 class FrameTypes(bytes, Enum):
     DATA = b'\x00'

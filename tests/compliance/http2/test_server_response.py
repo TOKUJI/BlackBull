@@ -1,4 +1,5 @@
 """Tests for blackbull/server/response.py — Responder registry and respond() paths."""
+import asyncio
 import pytest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -9,7 +10,9 @@ from blackbull.server.response import (
     SettingsResponder,
 )
 from blackbull.protocol.frame import FrameFactory
-from blackbull.protocol.frame_types import FrameTypes, SettingFrameFlags
+from blackbull.protocol.frame_types import (
+    FrameTypes, SettingFrameFlags, DataFrameFlags, DEFAULT_MAX_FRAME_SIZE,
+)
 
 
 def _make_h2_frame(type_byte, flags, stream_id: int, payload: bytes) -> bytes:
@@ -243,3 +246,130 @@ async def test_settings_responder_does_not_mutate_decoder_table_size():
         f'SettingsResponder must NOT change factory.decoder.header_table_size; '
         f'was {before}, now {factory.decoder.header_table_size}'
     )
+
+
+# ---------------------------------------------------------------------------
+# DATA frame splitting — RFC 7540 §6.9 and §4.2
+# ---------------------------------------------------------------------------
+
+def _collect_data_frames(written: bytearray, factory: FrameFactory) -> list:
+    """Parse all DATA frames from the accumulated wire bytes."""
+    frames = []
+    mv = memoryview(written)
+    offset = 0
+    while offset + 9 <= len(mv):
+        length = int.from_bytes(mv[offset:offset + 3], 'big')
+        ftype = bytes(mv[offset + 3:offset + 4])
+        if offset + 9 + length > len(mv):
+            break
+        frame_bytes = bytes(mv[offset:offset + 9 + length])
+        if ftype == FrameTypes.DATA:
+            frames.append(factory.load(frame_bytes))
+        offset += 9 + length
+    return frames
+
+
+@pytest.mark.asyncio
+async def test_large_body_split_into_multiple_data_frames():
+    """Bodies larger than max_frame_size must be split into multiple DATA frames.
+
+    Regression for the RFC 7540 §4.2 max-frame-size violation: the old
+    _write_data() sent the entire body as a single DATA frame, which exceeds
+    SETTINGS_MAX_FRAME_SIZE (16384) for large responses.
+    """
+    from blackbull.server.sender import HTTP2Sender, AsyncioWriter
+
+    written = bytearray()
+    mock_writer = MagicMock()
+    mock_writer.write = MagicMock(side_effect=lambda d: written.extend(d))
+    mock_writer.drain = AsyncMock()
+
+    factory = FrameFactory()
+    sender = HTTP2Sender(AsyncioWriter(mock_writer), factory, stream_id=1)
+    sender.max_frame_size = 100
+    body = b'x' * 350
+
+    await sender._write_data(body, end_stream=True)
+
+    frames = _collect_data_frames(written, factory)
+    assert len(frames) >= 2, f'Expected multiple DATA frames, got {len(frames)}'
+    for f in frames:
+        assert f.length <= 100, f'Frame payload {f.length} exceeds max_frame_size 100'
+    assert frames[-1].end_stream, 'END_STREAM must be set on the last DATA frame'
+    assert not any(f.end_stream for f in frames[:-1]), 'END_STREAM must only be on the last frame'
+    assert b''.join(bytes(f.payload) for f in frames) == body, 'Reassembled body does not match'
+
+
+@pytest.mark.asyncio
+async def test_body_exceeding_flow_control_window_is_chunked():
+    """Bodies larger than the flow-control window must wait for WINDOW_UPDATE.
+
+    Regression for the RFC 7540 §6.9 flow-control deadlock: the old
+    _write_data() blocked forever trying to send a body larger than the
+    connection window, because no data ever reached the client to trigger
+    a WINDOW_UPDATE.
+    """
+    from blackbull.server.sender import HTTP2Sender, AsyncioWriter
+
+    written = bytearray()
+    mock_writer = MagicMock()
+    mock_writer.write = MagicMock(side_effect=lambda d: written.extend(d))
+    mock_writer.drain = AsyncMock()
+
+    factory = FrameFactory()
+    sender = HTTP2Sender(AsyncioWriter(mock_writer), factory, stream_id=1)
+    sender.max_frame_size = 300
+    sender.connection_window_size = 200
+    sender.stream_window_size[1] = 200
+
+    body = b'y' * 500
+
+    task = asyncio.create_task(sender._write_data(body, end_stream=True))
+    await asyncio.sleep(0)  # let the first chunk send
+
+    frames_after_first_chunk = _collect_data_frames(written, factory)
+    assert len(frames_after_first_chunk) >= 1, 'First chunk must be sent without waiting'
+    assert not frames_after_first_chunk[-1].end_stream, 'END_STREAM must not be set mid-stream'
+
+    # Provide more credit so the rest can send
+    sender.connection_window_size += 400
+    sender.stream_window_size[1] += 400
+    sender._window_open.set()
+    await task
+
+    frames = _collect_data_frames(written, factory)
+    assert frames[-1].end_stream, 'END_STREAM must be set on the final frame'
+    assert b''.join(bytes(f.payload) for f in frames) == body
+
+
+@pytest.mark.asyncio
+async def test_settings_responder_propagates_max_frame_size_to_senders():
+    """SETTINGS_MAX_FRAME_SIZE from the peer must update sender.max_frame_size.
+
+    After applying the SETTINGS frame, future DATA frames must be split at
+    the new max_frame_size boundary.
+    """
+    from blackbull.server.sender import HTTP2Sender, AsyncioWriter
+
+    written = bytearray()
+    mock_writer = MagicMock()
+    mock_writer.write = MagicMock(side_effect=lambda d: written.extend(d))
+    mock_writer.drain = AsyncMock()
+
+    frame_factory = FrameFactory()
+    sender = HTTP2Sender(AsyncioWriter(mock_writer), frame_factory, stream_id=1)
+    assert sender.max_frame_size == DEFAULT_MAX_FRAME_SIZE
+
+    # Build a SETTINGS frame advertising MAX_FRAME_SIZE = 32768
+    settings_payload = (0x5).to_bytes(2, 'big') + (32768).to_bytes(4, 'big')
+    wire = _make_h2_frame(FrameTypes.SETTINGS, SettingFrameFlags.INIT, 0, settings_payload)
+    settings_frame = frame_factory.load(wire)
+
+    handler = SimpleNamespace(
+        factory=frame_factory,
+        _senders={1: sender},
+        send_frame=AsyncMock(),
+    )
+    await SettingsResponder(settings_frame).respond(handler)
+
+    assert sender.max_frame_size == 32768

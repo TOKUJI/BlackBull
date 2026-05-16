@@ -41,7 +41,8 @@ app = BlackBull()
 monitor = LoopLagMonitor(interval=0.05, window=400)
 
 _1KB  = os.urandom(1024)
-_16KB = os.urandom(16000)   # stays under default max-frame-size (16384) and window (65535)
+_16KB = os.urandom(16000)
+_64KB = os.urandom(65536)
 
 
 @app.on_startup
@@ -71,6 +72,11 @@ async def small():
 @app.route(path='/16kb', methods=[HTTPMethod.GET])
 async def large():
     return _16KB
+
+
+@app.route(path='/64kb', methods=[HTTPMethod.GET])
+async def extra_large():
+    return _64KB
 
 
 @app.route(path='/echo', methods=[HTTPMethod.POST])

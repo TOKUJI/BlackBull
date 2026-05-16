@@ -5,7 +5,7 @@ from email.utils import formatdate
 
 from ..protocol.frame_types import (FrameTypes, HeaderFrameFlags, DataFrameFlags,
                                     SettingFrameFlags, FrameBase, PseudoHeaders,
-                                    DEFAULT_INITIAL_WINDOW_SIZE)
+                                    DEFAULT_INITIAL_WINDOW_SIZE, DEFAULT_MAX_FRAME_SIZE)
 from .constants import ASGIEvent, WSCloseCode
 from .ws_codec import WSOpcode, WSFrameBits, WSFrameHeader, encode_frame
 import logging
@@ -245,6 +245,7 @@ class HTTP2Sender(BaseSender):
         self._push_callback = push_callback
         self.connection_window_size = DEFAULT_INITIAL_WINDOW_SIZE
         self.stream_window_size = {stream_id: DEFAULT_INITIAL_WINDOW_SIZE}
+        self.max_frame_size = DEFAULT_MAX_FRAME_SIZE
         self._window_open = asyncio.Event()
         self._window_open.set()  # window starts open
 
@@ -258,29 +259,58 @@ class HTTP2Sender(BaseSender):
         """
         await super()._write(data)
 
-    async def _write_data(self, payload_len: int, frame_bytes: bytes):
-        """Write a DATA frame respecting HTTP/2 flow control (RFC 7540 §6.9).
+    async def _write_data(self, body: bytes, end_stream: bool) -> None:
+        """Send *body* as one or more DATA frames, respecting flow control and max frame size.
 
-        ``payload_len`` is the DATA payload size (which counts against the
-        window); ``frame_bytes`` is the full serialized frame.
+        Splits the body into chunks of at most
+        ``min(connection_window_size, stream_window_size, max_frame_size)`` bytes
+        (RFC 7540 §6.9 and §4.2), waiting for WINDOW_UPDATE between chunks when
+        flow-control credit is exhausted.  END_STREAM is set only on the last frame.
         """
-        while (payload_len > self.connection_window_size or
-               payload_len > self.stream_window_size[self._stream_id]):
-            await self._window_open.wait()
-            self._window_open.clear()
-        await super()._write(frame_bytes)
-        self.connection_window_size -= payload_len
-        self.stream_window_size[self._stream_id] -= payload_len
+        total = len(body)
+
+        if total == 0:
+            flags = DataFrameFlags.END_STREAM if end_stream else 0
+            frame = self._factory.create(FrameTypes.DATA, flags, self._stream_id, data=b'')
+            await super()._write(frame.save())
+            return
+
+        offset = 0
+        while offset < total:
+            while (self.connection_window_size <= 0 or
+                   self.stream_window_size[self._stream_id] <= 0):
+                self._window_open.clear()
+                await self._window_open.wait()
+
+            chunk_size = min(
+                self.connection_window_size,
+                self.stream_window_size[self._stream_id],
+                self.max_frame_size,
+                total - offset,
+            )
+
+            is_last = (offset + chunk_size >= total)
+            flags = DataFrameFlags.END_STREAM if (is_last and end_stream) else 0
+            chunk = body[offset:offset + chunk_size]
+            frame = self._factory.create(FrameTypes.DATA, flags, self._stream_id, data=chunk)
+            await super()._write(frame.save())
+            self.connection_window_size -= chunk_size
+            self.stream_window_size[self._stream_id] -= chunk_size
+            offset += chunk_size
 
     def window_update(self, increment: int) -> None:
         self.connection_window_size += increment
         self.stream_window_size[self._stream_id] += increment
         self._window_open.set()  # wake any blocked _write()
 
-    def apply_settings(self, initial_window_size: int) -> None:
-        """Apply SETTINGS INITIAL_WINDOW_SIZE to the stream window."""
-        self.stream_window_size[self._stream_id] = initial_window_size
-        self._window_open.set()
+    def apply_settings(self, initial_window_size: int | None = None,
+                       max_frame_size: int | None = None) -> None:
+        """Apply SETTINGS parameters to this sender."""
+        if initial_window_size is not None:
+            self.stream_window_size[self._stream_id] = initial_window_size
+            self._window_open.set()
+        if max_frame_size is not None:
+            self.max_frame_size = max_frame_size
 
     async def __call__(self, body, status: HTTPStatus = HTTPStatus.OK, headers: HeaderList = []):
         # Control-plane: raw frame object (SETTINGS, PING ACK, WINDOW_UPDATE, …)
@@ -301,13 +331,7 @@ class HTTP2Sender(BaseSender):
                 h_frame.headers.append((k, v))
             await self._write(h_frame.save())
 
-            d_frame = self._factory.create(
-                FrameTypes.DATA,
-                DataFrameFlags.END_STREAM,
-                self._stream_id,
-                data=body,
-            )
-            await self._write_data(len(body), d_frame.save())
+            await self._write_data(body, end_stream=True)
 
         elif isinstance(body, dict):
             event_type = body.get('type', '')
@@ -325,15 +349,9 @@ class HTTP2Sender(BaseSender):
                 await self._write(frame.save())
 
             elif event_type == ASGIEvent.HTTP_RESPONSE_BODY:
-                flags = 0 if body.get('more_body', False) else DataFrameFlags.END_STREAM
                 payload = body.get('body', b'')
-                frame = self._factory.create(
-                    FrameTypes.DATA,
-                    flags,
-                    self._stream_id,
-                    data=payload,
-                )
-                await self._write_data(len(payload), frame.save())
+                end_stream = not body.get('more_body', False)
+                await self._write_data(payload, end_stream=end_stream)
 
             elif event_type == ASGIEvent.HTTP_RESPONSE_PUSH:
                 if self._push_callback is not None:

@@ -70,6 +70,10 @@ echo "--- /16kb  streams/conn=5  (larger responses) ---"
 h2load -n 500 -c 20 -m 5 "$BASE/16kb"
 
 echo ""
+echo "--- /64kb  streams/conn=5  (flow-control exercise) ---"
+h2load -n 200 -c 10 -m 5 "$BASE/64kb"
+
+echo ""
 echo "$SEP"
 echo "Columns: req/s | min/mean/sd/max latency (ms) | +/-sd | traffic"
 echo "$SEP"

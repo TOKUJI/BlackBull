@@ -28,7 +28,8 @@ bash bench/h2load_run.sh                     # HTTP/2 stream multiplexing
 |-------|--------|----------|-----------------|
 | `/ping` | GET | `pong` (4 B) | Framework overhead, latency baseline |
 | `/1kb` | GET | 1 KiB random | Small-response throughput |
-| `/64kb` | GET | 64 KiB random | Large response + HTTP/2 flow control |
+| `/16kb` | GET | 16 KiB random | Medium response, fits in one max-size DATA frame |
+| `/64kb` | GET | 64 KiB random | Large response, exercises DATA frame splitting |
 | `/echo` | POST | request body | Request parsing overhead |
 | `/ws` | WS | echo | WebSocket round-trip latency |
 | `/metrics` | GET | JSON | Event loop lag (in-process) |
@@ -87,29 +88,6 @@ After each run, fill in this baseline table:
 | h2load mux-50 | 50c | | | | | |
 | WS echo 50 VU | 50 | | | | | |
 
----
-
-## Known bugs and limitations
-
-### TODO: DATA frame splitting (deadlock on large responses)
-
-`HTTP2Sender._write_data()` sends the entire response body as a single DATA frame.
-Two RFC 7540 constraints are violated when responses are large:
-
-- **Flow-control deadlock**: if `len(body) > connection_window_size` (default 65535 bytes),
-  the server blocks waiting for a WINDOW_UPDATE that never arrives because the client
-  won't send one until it receives at least some data.  Observed: responses ≥ 65536 bytes
-  hang indefinitely under h2load.
-- **Max-frame-size violation**: frames > `SETTINGS_MAX_FRAME_SIZE` (default 16384 bytes)
-  must not be sent (RFC 7540 §4.2).
-
-**Fix required**: split large bodies into chunks of
-`min(connection_window_size, stream_window_size, max_frame_size)` bytes,
-sending each chunk as a separate DATA frame and awaiting WINDOW_UPDATE between
-chunks when flow-control is exhausted.
-
-**Affected file**: `blackbull/server/sender.py` — `HTTP2Sender._write_data()` and
-`HTTP2Sender.__call__()`.
 
 ## Interpreting results
 
