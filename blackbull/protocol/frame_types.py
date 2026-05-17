@@ -243,7 +243,7 @@ class PseudoHeaders(StrEnum):
 class Headers(FrameBase):
     FRAME_TYPE = FrameTypes.HEADERS
 
-    def __init__(self, length: int, type_, flags: int, stream_id: int, *, data=None, decoder=None):
+    def __init__(self, length: int, type_, flags: int, stream_id: int, *, data=None, decoder=None, encoder=None):
         super().__init__(length, type_, flags, stream_id)
         logger.debug('Headers is called.')
         # Read flags
@@ -257,8 +257,9 @@ class Headers(FrameBase):
                      f'padded = {self.padded > 0},'
                      f'priority = {self.priority > 0}, '
                      )
-        # set decoder
+        # set decoder and encoder (shared per-connection HPACK codec)
         self.decoder = decoder
+        self.encoder = encoder
 
         # Pseudo-headers (RFC 7540 §8.1.2): :method, :path, :scheme, :status, etc.
         self.pseudo_headers: dict[PseudoHeaders, str] = {}
@@ -304,7 +305,7 @@ class Headers(FrameBase):
 
     @log
     def save(self):
-        encoder = Encoder()
+        encoder = self.encoder if self.encoder is not None else Encoder()
         # Pseudo-headers MUST come before regular headers (RFC 7540 §8.1.2.1)
         all_headers = list(self.pseudo_headers.items()) + self.headers
         payload = encoder.encode(all_headers)
@@ -345,15 +346,16 @@ class PushPromise(FrameBase):
     FRAME_TYPE = FrameTypes.PUSH_PROMISE
 
     def __init__(self, length: int, type_, flags: int, stream_id: int,
-                 *, data: bytes = b'', **kwds):
+                 *, data: bytes = b'', encoder=None, **kwds):
         super().__init__(length, type_, flags, stream_id)
         buf = BytesIO(data)
         self.promised_stream_id = int.from_bytes(buf.read(4), 'big') & 0x7FFFFFFF
         self.pseudo_headers: dict[PseudoHeaders, str] = {}
         self.headers: list[tuple[str, str]] = []
+        self.encoder = encoder
 
     def save(self) -> bytes:
-        encoder = Encoder()
+        encoder = self.encoder if self.encoder is not None else Encoder()
         block = encoder.encode(list(self.pseudo_headers.items()) + self.headers)
         payload = (self.promised_stream_id & 0x7FFFFFFF).to_bytes(4, 'big') + block
         self.length = len(payload)

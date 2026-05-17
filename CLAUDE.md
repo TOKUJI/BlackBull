@@ -96,6 +96,11 @@ async def my_fn(x, y):   # logs call at DEBUG level using the caller module's lo
     ...
 ```
 
+`@log` checks the module logger level **at decoration time** (import).  When
+DEBUG is not enabled, the decorator is a zero-cost no-op — the original
+function is returned unwrapped.  Raising the log level to DEBUG after import
+will not activate logging for already-decorated functions.
+
 Framework internals use two separate logger hierarchies:
 - `blackbull.*` — DEBUG-level protocol/routing/TLS events
 - `blackbull.access` — INFO-level access log (one record per completed request)

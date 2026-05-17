@@ -3,7 +3,7 @@
 ``FrameFactory`` produces frames of the requested type and decodes raw bytes
 from the wire.  Frame-type definitions live in ``frame_types``.
 """
-from hpack import Decoder
+from hpack import Decoder, Encoder
 
 import logging
 from .frame_types import (
@@ -19,6 +19,7 @@ class FrameFactory:
     def __init__(self):
         super().__init__()
         self.decoder = Decoder()
+        self.encoder = Encoder()
 
     def create(self, type_: FrameTypes, flags: FrameFlags | int, stream_id: int, *, data: bytes = b'', **kwds):
         logger.info(f'type:{type_}, flags:{flags}, id:{stream_id}')
@@ -30,6 +31,7 @@ class FrameFactory:
             stream_id,
             data=data,
             decoder=self.decoder,
+            encoder=self.encoder,
             )
         return frame
 
@@ -52,14 +54,33 @@ class FrameFactory:
                            last_stream_id + 1,
                            data=payload)
 
-    def settings(self, *, ack: bool = False, enable_connect_protocol: bool = False):
+    def settings(self, *, ack: bool = False, enable_connect_protocol: bool = False,
+                 initial_window_size: int | None = None,
+                 max_concurrent_streams: int | None = None):
         """Create a SETTINGS frame (INIT or ACK).
 
-        Pass ``enable_connect_protocol=True`` to include
-        SETTINGS_ENABLE_CONNECT_PROTOCOL=1 (RFC 8441 §3).
+        Parameters
+        ----------
+        ack:
+            True → ACK frame (no payload).
+        enable_connect_protocol:
+            Include SETTINGS_ENABLE_CONNECT_PROTOCOL=1 (RFC 8441 §3).
+        initial_window_size:
+            Include SETTINGS_INITIAL_WINDOW_SIZE (identifier 0x4, RFC 7540 §6.5.2).
+        max_concurrent_streams:
+            Include SETTINGS_MAX_CONCURRENT_STREAMS (identifier 0x3, RFC 7540 §6.5.2).
+            Tells the peer the maximum number of concurrent streams we will accept.
         """
         flags = SettingFrameFlags.ACK if ack else SettingFrameFlags.INIT
-        data = b'\x00\x08\x00\x00\x00\x01' if (not ack and enable_connect_protocol) else b''
+        if ack:
+            return self.create(FrameTypes.SETTINGS, flags, 0, data=b'')
+        data = b''
+        if max_concurrent_streams is not None:
+            data += b'\x00\x03' + max_concurrent_streams.to_bytes(4, 'big')
+        if enable_connect_protocol:
+            data += b'\x00\x08\x00\x00\x00\x01'  # ENABLE_CONNECT_PROTOCOL = 1
+        if initial_window_size is not None:
+            data += b'\x00\x04' + initial_window_size.to_bytes(4, 'big')  # INITIAL_WINDOW_SIZE
         return self.create(FrameTypes.SETTINGS, flags, 0, data=data)
 
     def push_promise(self, parent_stream_id: int, promised_stream_id: int,

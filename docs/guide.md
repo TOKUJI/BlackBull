@@ -1926,6 +1926,32 @@ logging.getLogger('blackbull.server').setLevel(logging.DEBUG)
 This is separate from the access log so that production deployments can
 enable access logging without flooding logs with internal debug output.
 
+#### `@log` decorator
+
+The `@log` decorator from `blackbull.logger` annotates a function so that
+its call arguments are logged at `DEBUG` level using the caller module's
+logger:
+
+```python
+from blackbull.logger import log
+
+@log
+async def my_fn(x, y):
+    ...
+# logs: my_fn((x_val, y_val), {}) at DEBUG level
+```
+
+**Zero-overhead at non-DEBUG level.**  The check runs at decoration time
+(import), not on every call.  When the module logger is not enabled for
+`DEBUG` at import time, the decorator returns the original function
+unwrapped — there is no extra call frame or level-check overhead in
+production.
+
+The trade-off: setting the log level to `DEBUG` *after* modules have already
+been imported will not activate `@log` logging for already-decorated
+functions.  Configure `DEBUG` level before importing framework modules, or
+restart the process.
+
 ### 14.4  Forwarding access logs to a remote server
 
 `logging.Handler.emit()` is synchronous.  Calling a blocking HTTP request

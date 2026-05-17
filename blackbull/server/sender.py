@@ -269,10 +269,11 @@ class HTTP2Sender(BaseSender):
         """
         total = len(body)
 
+        sid_bytes = self._stream_id.to_bytes(4, 'big')
+
         if total == 0:
             flags = DataFrameFlags.END_STREAM if end_stream else 0
-            frame = self._factory.create(FrameTypes.DATA, flags, self._stream_id, data=b'')
-            await super()._write(frame.save())
+            await super()._write(b'\x00\x00\x00\x00' + flags.to_bytes(1, 'big') + sid_bytes)
             return
 
         offset = 0
@@ -292,16 +293,16 @@ class HTTP2Sender(BaseSender):
             is_last = (offset + chunk_size >= total)
             flags = DataFrameFlags.END_STREAM if (is_last and end_stream) else 0
             chunk = body[offset:offset + chunk_size]
-            frame = self._factory.create(FrameTypes.DATA, flags, self._stream_id, data=chunk)
-            await super()._write(frame.save())
+            await super()._write(
+                chunk_size.to_bytes(3, 'big') + b'\x00' + flags.to_bytes(1, 'big') + sid_bytes + chunk
+            )
             self.connection_window_size -= chunk_size
             self.stream_window_size[self._stream_id] -= chunk_size
             offset += chunk_size
 
     def window_update(self, increment: int) -> None:
-        self.connection_window_size += increment
         self.stream_window_size[self._stream_id] += increment
-        self._window_open.set()  # wake any blocked _write()
+        self._window_open.set()  # wake any blocked _write_data()
 
     def apply_settings(self, initial_window_size: int | None = None,
                        max_frame_size: int | None = None) -> None:
