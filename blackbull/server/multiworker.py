@@ -24,6 +24,7 @@ import signal
 import time
 
 from .worker import run_worker
+from ..protocol.rsock import create_dual_stack_sockets, REUSEPORT_SUPPORTED
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +60,6 @@ class MultiWorkerServer:
         if workers < 1:
             raise ValueError(f'workers must be >= 1, got {workers}')
         self._app = app
-        self._raw_sockets = raw_sockets
         self._ssl_context = ssl_context
         self._num_workers = workers
         self._max_connections = max_connections
@@ -71,6 +71,30 @@ class MultiWorkerServer:
         # pickling.  'spawn' would require the app and sockets to be picklable
         # and would re-import all modules from scratch.
         self._mp_ctx = multiprocessing.get_context('fork')
+
+        # Per-worker sockets via SO_REUSEPORT: each worker gets its own kernel
+        # accept queue so the kernel distributes connections evenly without
+        # thundering-herd.  Falls back to the shared inherited socket when
+        # SO_REUSEPORT is unavailable or disabled via BB_SOCKET_REUSEPORT=0.
+        from ..env import get_settings as _get_settings  # noqa: PLC0415
+        cfg = _get_settings()
+        if workers > 1 and REUSEPORT_SUPPORTED and cfg.socket_reuseport:
+            port = raw_sockets[0].getsockname()[1]
+            # Close the master sockets BEFORE creating worker sockets.
+            # Linux requires every socket co-binding on a port to have SO_REUSEPORT set;
+            # the master's sockets were bound without it so they must be gone first.
+            for s in raw_sockets:
+                s.close()
+            self._worker_sockets = [
+                create_dual_stack_sockets(port, backlog=cfg.socket_backlog, reuseport=True)
+                for _ in range(workers)
+            ]
+            logger.info('SO_REUSEPORT: created %d per-worker socket set(s) on port %d',
+                        workers, port)
+        else:
+            # Single-worker or SO_REUSEPORT unavailable: all workers share the
+            # master's pre-bound sockets (original behaviour).
+            self._worker_sockets = [raw_sockets] * workers
 
     # ------------------------------------------------------------------
     # Public API
@@ -101,7 +125,7 @@ class MultiWorkerServer:
     def _spawn_worker(self, worker_id: int):
         p = self._mp_ctx.Process(
             target=run_worker,
-            args=(self._app, self._raw_sockets, self._ssl_context,
+            args=(self._app, self._worker_sockets[worker_id], self._ssl_context,
                   worker_id, self._max_connections,
                   self._stream_queue_depth, self._ws_queue_depth),
             daemon=False,  # workers must be reaped explicitly on shutdown

@@ -49,6 +49,10 @@ docs = [
     "mkdocs-autorefs"
 ]
 
+speed = [
+    "uvloop",
+]
+
 benchmark = []  # k6 and h2load are installed via bench/install.sh (not pip packages)
 
 [tool.coverage.run]

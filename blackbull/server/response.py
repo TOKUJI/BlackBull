@@ -73,7 +73,11 @@ class WindowUpdateResponder(Responder):
     async def respond(self, handler):
         increment = self.frame.window_size
         if self.frame.stream_id == 0:
-            # Connection-level: credit all cached stream senders.
+            # Connection-level: credit all cached stream senders and update the
+            # running total so future senders start with the current budget.
+            handler._connection_window_size = (
+                getattr(handler, '_connection_window_size', 65535) + increment
+            )
             for sender in handler._senders.values():
                 sender.connection_window_size += increment
                 sender._window_open.set()
@@ -89,6 +93,9 @@ class SettingsResponder(Responder):
         if self.frame.flags == SettingFrameFlags.INIT:
             iws = getattr(self.frame, 'initial_window_size', None)
             mfs = getattr(self.frame, 'max_frame_size', None)
+            # Store peer's announced window so future stream senders start correctly.
+            if iws is not None:
+                handler._peer_initial_window_size = iws
             if iws is not None or mfs is not None:
                 for sender in handler._senders.values():
                     sender.apply_settings(initial_window_size=iws, max_frame_size=mfs)

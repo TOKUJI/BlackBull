@@ -10,7 +10,7 @@ next link.
 ``RouteGroup`` is defined in :mod:`blackbull.app` to avoid a circular
 import; this module re-exports it lazily through ``__getattr__``.
 """
-from collections import UserDict
+from collections import UserDict, OrderedDict
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Any, Callable, List, Tuple, Type, Optional
@@ -52,6 +52,131 @@ _SAMPLE_INPUTS: dict[str, str] = {
     'uuid': '00000000-0000-0000-0000-000000000000',
     'path': 'a/b/c',
 }
+
+
+# ---------------------------------------------------------------------------
+# Module-level route-matching helpers (reused by Router and _RouteTrie)
+# ---------------------------------------------------------------------------
+
+def _route_scheme_matches(key_scheme: 'Scheme', registered_scheme) -> bool:
+    if isinstance(registered_scheme, _AnyScheme):
+        return True
+    return key_scheme in registered_scheme
+
+
+def _route_method_matches(key_method, registered_methods: tuple) -> bool:
+    return key_method in registered_methods
+
+
+# ---------------------------------------------------------------------------
+# Routing trie — O(path-depth) lookup for string-path routes
+# ---------------------------------------------------------------------------
+
+@dataclass
+class _TrieNode:
+    children: dict[str, '_TrieNode'] = field(default_factory=dict)
+    param_child: Optional['_TrieNode'] = None   # matches any single segment
+    wildcard_child: Optional['_TrieNode'] = None  # matches rest of path ({name:path})
+    # list of (methods_tuple, scheme_key, handler, param_specs)
+    # param_specs: tuple of (param_name: str, converter: Callable, is_wildcard: bool)
+    entries: list = field(default_factory=list)
+
+
+class _RouteTrie:
+    """Radix trie for O(path-depth) string-path route lookup."""
+
+    def __init__(self) -> None:
+        self.root = _TrieNode()
+
+    def insert(self, path: str, methods: tuple, scheme_key: Any, handler: Any) -> None:
+        segments = [s for s in path.split('/') if s]
+        node = self.root
+        param_specs: list[tuple] = []
+
+        for seg in segments:
+            if seg.startswith('{') and seg.endswith('}'):
+                inner = seg[1:-1]
+                name, _, spec = inner.partition(':')
+                spec = spec or 'str'
+                _, converter = _CONVERTERS.get(spec, (None, str))
+                if spec == 'path':
+                    # {name:path} consumes all remaining segments
+                    param_specs.append((name, converter, True))
+                    if node.wildcard_child is None:
+                        node.wildcard_child = _TrieNode()
+                    node.wildcard_child.entries.append(
+                        (methods, scheme_key, handler, tuple(param_specs))
+                    )
+                    return
+                param_specs.append((name, converter, False))
+                if node.param_child is None:
+                    node.param_child = _TrieNode()
+                node = node.param_child
+            else:
+                if seg not in node.children:
+                    node.children[seg] = _TrieNode()
+                node = node.children[seg]
+
+        node.entries.append((methods, scheme_key, handler, tuple(param_specs)))
+
+    def lookup(self, path: str, method: Any, scheme: Any) -> tuple:
+        """Return (handler, params, allowed_methods).
+
+        handler is None on miss; allowed_methods is non-empty when the path
+        matched but the method was not registered (enables MethodNotApplicable).
+        """
+        segments = [s for s in path.split('/') if s]
+        return self._lookup(self.root, segments, 0, [], method, scheme)
+
+    def _lookup(self, node: _TrieNode, segments: list, idx: int,
+                raw_caps: list, method: Any, scheme: Any) -> tuple:
+        if idx == len(segments):
+            allowed: set = set()
+            for (ms, ss, handler, param_specs) in node.entries:
+                if not _route_scheme_matches(scheme, ss):
+                    continue
+                try:
+                    params = {name: conv(raw_caps[j])
+                              for j, (name, conv, _) in enumerate(param_specs)}
+                except (ValueError, TypeError):
+                    continue  # converter rejected this segment value
+                allowed.update(ms)
+                if _route_method_matches(method, ms):
+                    return (handler, params, set())
+            return (None, {}, allowed)
+
+        seg = segments[idx]
+        allowed_all: set = set()
+
+        # 1. Static child (most specific — checked first)
+        if seg in node.children:
+            h, p, a = self._lookup(
+                node.children[seg], segments, idx + 1, raw_caps, method, scheme
+            )
+            if h is not None:
+                return (h, p, set())
+            allowed_all.update(a)
+
+        # 2. Param child (single-segment wildcard)
+        if node.param_child is not None:
+            h, p, a = self._lookup(
+                node.param_child, segments, idx + 1, raw_caps + [seg], method, scheme
+            )
+            if h is not None:
+                return (h, p, set())
+            allowed_all.update(a)
+
+        # 3. Wildcard child ({name:path} — matches rest of path)
+        if node.wildcard_child is not None:
+            rest = '/'.join(segments[idx:])
+            h, p, a = self._lookup(
+                node.wildcard_child, segments, len(segments), raw_caps + [rest], method, scheme
+            )
+            if h is not None:
+                return (h, p, set())
+            allowed_all.update(a)
+
+        return (None, {}, allowed_all)
 
 
 class ConfigurationError(Exception):
@@ -235,6 +360,10 @@ class Router(UserDict, BaseRouter):
     f_string = re.compile(r'\{([a-zA-Z_]\w*?)\}', flags=re.ASCII)
     _param_pattern = re.compile(r'\{([a-zA-Z_]\w*?)(?::([a-zA-Z_]\w*?))?\}', flags=re.ASCII)
 
+    # Per-worker lookup cache: maps (path, method, scheme) → resolved handler.
+    # Bounded at 2048 entries; cleared whenever a route is registered.
+    _LOOKUP_CACHE_MAX: int = 2048
+
     def __init__(self, *args, **kwds):
         super(Router, self).__init__(*args, **kwds)
         self.regex_ = {}
@@ -242,6 +371,9 @@ class Router(UserDict, BaseRouter):
         self._route_info: list[_RouteInfo] = []
         self._named_routes: dict[str, tuple[str, dict[str, str]]] = {}
         self._frozen: bool = False
+        self._trie = _RouteTrie()
+        self._raw_regex: dict = {}  # raw re.Pattern routes (not compiled from string paths)
+        self._lookup_cache: OrderedDict = OrderedDict()
 
     def __setitem__(
         self,
@@ -265,6 +397,8 @@ class Router(UserDict, BaseRouter):
         if self._frozen:
             raise RuntimeError(
                 "Router is frozen — routes cannot be added after startup validation")
+
+        self._lookup_cache.clear()
 
         # Unpack key
         if len(key) == 3:
@@ -312,8 +446,11 @@ class Router(UserDict, BaseRouter):
             if converters:
                 self._param_converters[compiled] = converters
 
+            self._trie.insert(path, tuple(methods), scheme_key, value)
+
         elif isinstance(path, re.Pattern):
             self.regex_[(path, tuple(methods), scheme_key)] = value
+            self._raw_regex[(path, tuple(methods), scheme_key)] = value
 
         else:
             logger.error(f"Unexpected type for path: {key!r}")
@@ -327,38 +464,54 @@ class Router(UserDict, BaseRouter):
         """
         key: (path: str, method: HTTPMethod, scheme: Scheme)
 
-        1. Exact match against self.data, then pattern match against self.regex_.
-           Both passes collect allowed methods for any path+scheme hit regardless
-           of method, so we can distinguish:
-             - path+scheme found, method allowed  → return the handler
-             - path+scheme found, method not in registered set → MethodNotApplicable
-             - no path+scheme match at all → PathNotRegistered
+        Uses the routing trie for O(path-depth) lookup of string-path routes,
+        then falls back to a linear scan of raw re.Pattern routes.
+
+        Results are cached in ``_lookup_cache`` (up to ``_LOOKUP_CACHE_MAX``
+        entries) so repeated requests to the same (path, method, scheme) skip
+        the trie traversal entirely after the first hit.
         """
+        if key in self._lookup_cache:
+            if len(self._lookup_cache) >= self._LOOKUP_CACHE_MAX:
+                self._lookup_cache.move_to_end(key)  # maintain LRU order only when eviction is imminent
+            return self._lookup_cache[key]
+
+        result = self._resolve(key)
+
+        if len(self._lookup_cache) >= self._LOOKUP_CACHE_MAX:
+            self._lookup_cache.popitem(last=False)  # evict least-recently-used
+        self._lookup_cache[key] = result
+        return result
+
+    def _resolve(
+        self,
+        key: Tuple[str, HTTPMethod, Scheme],
+    ):
+        """Core route lookup — trie first, regex fallback.  Raises on miss."""
         key_path, key_method, key_scheme = key
         logger.debug("getitem key=%r", key)
 
-        allowed_methods: set = set()
+        # --- 1. Trie lookup (all string-path routes) ----------------------
+        h, params, trie_allowed = self._trie.lookup(key_path, key_method, key_scheme)
+        if h is not None:
+            logger.debug("trie hit: handler=%r params=%r", h, params)
+            if params:
+                _fn, _params = h, params
+                async def _inject(scope, receive, send,
+                                  _fn=_fn, _params=_params):
+                    scope.setdefault('path_params', {}).update(_params)
+                    return await _fn(scope, receive, send)
+                return _inject
+            return h
 
-        # --- 1. Exact match in self.data ---------------------------------
-        for (p, ms, ss), value in self.data.items():
-            if p != key_path:
-                continue
-            if not self._scheme_matches(key_scheme, ss):
-                continue
-            # Path + scheme match: record allowed methods
-            allowed_methods.update(ms)
-            if self._method_matches(key_method, ms):
-                logger.debug("data hit: value=%r", value)
-                return value
-
-        # --- 2. Pattern match in self.regex_ ------------------------------
+        # --- 2. Full regex scan (fallback: raw re.Pattern and regex-string paths) ---
+        allowed_methods: set = set(trie_allowed)
         for (pattern, ms, ss), fn in self.regex_.items():
             m = pattern.match(key_path)
             if not m:
                 continue
             if not self._scheme_matches(key_scheme, ss):
                 continue
-            # Path + scheme match: record allowed methods
             allowed_methods.update(ms)
             if self._method_matches(key_method, ms):
                 logger.debug("regex_ hit: pattern=%r fn=%r", pattern, fn)
@@ -374,7 +527,7 @@ class Router(UserDict, BaseRouter):
                     return _inject
                 return fn
 
-        # --- 3. Raise appropriate exception -------------------------------
+        # --- 3. Raise appropriate exception --------------------------------
         logger.debug("No match: key=%r allowed=%r", key, allowed_methods)
         if allowed_methods:
             raise MethodNotApplicable(allowed_methods)

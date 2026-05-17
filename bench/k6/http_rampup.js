@@ -15,6 +15,7 @@ import { Rate, Trend } from 'k6/metrics';
 
 const errorRate = new Rate('errors');
 const lagP99    = new Trend('loop_lag_p99_ms', true);
+const h2Rate    = new Rate('http2_ok');  // 1 when response was served over HTTP/2
 
 export const options = {
   insecureSkipTLSVerify: true,
@@ -27,6 +28,7 @@ export const options = {
   thresholds: {
     http_req_duration: ['p(95)<100', 'p(99)<200'],
     errors:            ['rate<0.01'],
+    http2_ok:          ['rate>0.99'],  // fail the run if less than 99% of requests used HTTP/2
   },
 };
 
@@ -38,8 +40,10 @@ export default function () {
   const ok = check(res, {
     'status 200': r => r.status === 200,
     'body pong':  r => r.body === 'pong',
+    'HTTP/2':     r => r.proto === 'HTTP/2.0',
   });
   errorRate.add(!ok);
+  h2Rate.add(res.proto === 'HTTP/2.0');
 }
 
 /** Poll /metrics once per iteration from VU 1 only, to avoid adding noise. */

@@ -196,6 +196,11 @@ class ASGIServer:
         context.load_cert_chain(certfile=self.certfile, keyfile=self.keyfile)
         context.minimum_version = ssl.TLSVersion.TLSv1_2
         context.options |= ssl.OP_NO_COMPRESSION
+        # Enable server-side session cache so reconnecting clients can resume
+        # without a full handshake (saves ~1 RTT and CPU on TLS 1.2 connections).
+        # TLS 1.3 uses its own 0-RTT ticket mechanism independently of this flag.
+        if hasattr(ssl, 'SESS_CACHE_SERVER'):
+            context.set_session_cache_mode(ssl.SESS_CACHE_SERVER)  # type: ignore[attr-defined]
         self.ssl_context = context
 
         if hasattr(self, 'raw_sockets'):
@@ -221,6 +226,27 @@ class ASGIServer:
         sockname = transport.get_extra_info('sockname') if transport else None
         ssl_flag = (transport.get_extra_info('ssl_object') is not None
                     if transport else False)
+
+        sock = transport.get_extra_info('socket') if transport else None
+        if sock is not None:
+            import socket as _socket  # noqa: PLC0415
+            from ..env import get_settings as _get_settings  # noqa: PLC0415
+            _cfg = _get_settings()
+            # TCP keep-alive: evict ghost connections after ~80 s of silence
+            # (60 s idle + 3 × 10 s probes) without an application-layer timeout.
+            sock.setsockopt(_socket.SOL_SOCKET, _socket.SO_KEEPALIVE, 1)
+            if hasattr(_socket, 'TCP_KEEPIDLE'):   # Linux
+                sock.setsockopt(_socket.IPPROTO_TCP, _socket.TCP_KEEPIDLE, 60)
+            if hasattr(_socket, 'TCP_KEEPINTVL'):
+                sock.setsockopt(_socket.IPPROTO_TCP, _socket.TCP_KEEPINTVL, 10)
+            if hasattr(_socket, 'TCP_KEEPCNT'):
+                sock.setsockopt(_socket.IPPROTO_TCP, _socket.TCP_KEEPCNT, 3)
+            # Enlarge kernel send/receive buffers (configurable via BB_SOCKET_SNDBUF/RCVBUF).
+            # The kernel doubles the requested value; 0 leaves the default unchanged.
+            if _cfg.socket_sndbuf:
+                sock.setsockopt(_socket.SOL_SOCKET, _socket.SO_SNDBUF, _cfg.socket_sndbuf)
+            if _cfg.socket_rcvbuf:
+                sock.setsockopt(_socket.SOL_SOCKET, _socket.SO_RCVBUF, _cfg.socket_rcvbuf)
 
         wrapped_reader = (reader if isinstance(reader, AbstractReader)
                           else AsyncioReader(reader))
@@ -255,7 +281,8 @@ class ASGIServer:
             logger.error(f'Port ({port}) is not available. Try another port.')
             raise RuntimeError(f'Port ({port}) is not available. Try another port.')
 
-        raw_sockets = create_dual_stack_sockets(port)
+        from ..env import get_settings as _get_settings  # noqa: PLC0415
+        raw_sockets = create_dual_stack_sockets(port, backlog=_get_settings().socket_backlog)
 
         if not raw_sockets:
             logger.error(f'Failed to open port ({port}). Try another port.')

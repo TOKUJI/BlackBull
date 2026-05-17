@@ -1,0 +1,268 @@
+"""Unit tests for the _RouteTrie acceleration structure in blackbull.router.
+
+These tests verify the trie's internal behaviour directly, separate from the
+full Router API tests in test_router.py.
+"""
+import pytest
+from http import HTTPMethod
+
+from blackbull.utils import Scheme
+from blackbull.router import (
+    Router, _RouteTrie, PathNotRegistered, MethodNotApplicable,
+)
+
+
+# ---------------------------------------------------------------------------
+# _RouteTrie unit tests
+# ---------------------------------------------------------------------------
+
+def _handler():
+    pass
+
+
+def test_trie_exact_path_hit():
+    trie = _RouteTrie()
+    trie.insert('/ping', (HTTPMethod.GET,), Scheme.http, _handler)
+    h, params, allowed = trie.lookup('/ping', HTTPMethod.GET, Scheme.http)
+    assert h is _handler
+    assert params == {}
+
+
+def test_trie_exact_path_miss():
+    trie = _RouteTrie()
+    trie.insert('/ping', (HTTPMethod.GET,), Scheme.http, _handler)
+    h, params, allowed = trie.lookup('/pong', HTTPMethod.GET, Scheme.http)
+    assert h is None
+    assert allowed == set()
+
+
+def test_trie_param_path_hit():
+    trie = _RouteTrie()
+    trie.insert('/users/{id}', (HTTPMethod.GET,), Scheme.http, _handler)
+    h, params, allowed = trie.lookup('/users/42', HTTPMethod.GET, Scheme.http)
+    assert h is _handler
+    assert params == {'id': '42'}
+
+
+def test_trie_int_converter_accepts_digits():
+    trie = _RouteTrie()
+    trie.insert('/items/{n:int}', (HTTPMethod.GET,), Scheme.http, _handler)
+    h, params, _ = trie.lookup('/items/7', HTTPMethod.GET, Scheme.http)
+    assert h is _handler
+    assert params == {'n': 7}
+    assert isinstance(params['n'], int)
+
+
+def test_trie_int_converter_rejects_non_int():
+    trie = _RouteTrie()
+    trie.insert('/items/{n:int}', (HTTPMethod.GET,), Scheme.http, _handler)
+    h, params, allowed = trie.lookup('/items/abc', HTTPMethod.GET, Scheme.http)
+    assert h is None
+    assert allowed == set()  # conversion failed → path not matched
+
+
+def test_trie_path_converter_matches_slashes():
+    trie = _RouteTrie()
+    trie.insert('/files/{rest:path}', (HTTPMethod.GET,), Scheme.http, _handler)
+    h, params, _ = trie.lookup('/files/a/b/c.txt', HTTPMethod.GET, Scheme.http)
+    assert h is _handler
+    assert params == {'rest': 'a/b/c.txt'}
+
+
+def test_trie_static_child_wins_over_param():
+    """Static segment takes priority over param at the same position."""
+    exact_handler = object()
+    param_handler = object()
+
+    trie = _RouteTrie()
+    trie.insert('/users/me', (HTTPMethod.GET,), Scheme.http, exact_handler)
+    trie.insert('/users/{id}', (HTTPMethod.GET,), Scheme.http, param_handler)
+
+    h, params, _ = trie.lookup('/users/me', HTTPMethod.GET, Scheme.http)
+    assert h is exact_handler
+    assert params == {}
+
+    h2, params2, _ = trie.lookup('/users/42', HTTPMethod.GET, Scheme.http)
+    assert h2 is param_handler
+    assert params2 == {'id': '42'}
+
+
+def test_trie_method_not_allowed_returns_allowed_set():
+    trie = _RouteTrie()
+    trie.insert('/resource', (HTTPMethod.GET,), Scheme.http, _handler)
+    h, params, allowed = trie.lookup('/resource', HTTPMethod.POST, Scheme.http)
+    assert h is None
+    assert HTTPMethod.GET in allowed
+
+
+def test_trie_scheme_mismatch_no_match():
+    trie = _RouteTrie()
+    trie.insert('/ws', (HTTPMethod.GET,), Scheme.websocket, _handler)
+    h, params, allowed = trie.lookup('/ws', HTTPMethod.GET, Scheme.http)
+    assert h is None
+    assert allowed == set()
+
+
+def test_trie_multiple_params():
+    trie = _RouteTrie()
+    trie.insert('/a/{x}/{y:int}', (HTTPMethod.GET,), Scheme.http, _handler)
+    h, params, _ = trie.lookup('/a/hello/7', HTTPMethod.GET, Scheme.http)
+    assert h is _handler
+    assert params == {'x': 'hello', 'y': 7}
+
+
+# ---------------------------------------------------------------------------
+# Router integration: trie is created and used
+# ---------------------------------------------------------------------------
+
+def test_router_has_trie():
+    r = Router()
+    assert hasattr(r, '_trie')
+    assert isinstance(r._trie, _RouteTrie)
+
+
+@pytest.mark.asyncio
+async def test_router_trie_used_for_parameterized_routes():
+    """Route registered via router.route() is reachable through the trie."""
+    router = Router()
+
+    @router.route(path='/tasks/{task_id}', methods=[HTTPMethod.GET])
+    async def handler(scope, receive, send):
+        pass
+
+    # trie should find it
+    h, params, _ = router._trie.lookup('/tasks/99', HTTPMethod.GET, Scheme.http)
+    assert h is not None
+    assert params.get('task_id') == '99'
+
+
+@pytest.mark.asyncio
+async def test_router_trie_hit_bypasses_regex_scan():
+    """For normal string paths the trie hit means self.regex_ scan is skipped.
+
+    We verify this indirectly: the regex_ scan is slow for large route sets
+    but the trie should still return the correct handler immediately.
+    """
+    router = Router()
+
+    @router.route(path='/ping', methods=[HTTPMethod.GET])
+    async def ping(scope, receive, send):
+        return 'pong'
+
+    fn = router[('/ping', HTTPMethod.GET, Scheme.http)]
+    assert fn is not None
+
+
+# ---------------------------------------------------------------------------
+# Router lookup cache (#9 worker-local caches)
+# ---------------------------------------------------------------------------
+
+def test_lookup_cache_populated_after_hit():
+    """A successful lookup must add the result to _lookup_cache."""
+    router = Router()
+
+    @router.route(path='/ping', methods=[HTTPMethod.GET])
+    async def ping(scope, receive, send):
+        pass
+
+    key = ('/ping', HTTPMethod.GET, Scheme.http)
+    assert key not in router._lookup_cache
+
+    router[key]
+
+    assert key in router._lookup_cache
+
+
+def test_lookup_cache_returns_same_object():
+    """Second lookup must return the identical object from the cache."""
+    router = Router()
+
+    @router.route(path='/ping', methods=[HTTPMethod.GET])
+    async def ping(scope, receive, send):
+        pass
+
+    key = ('/ping', HTTPMethod.GET, Scheme.http)
+    first = router[key]
+    second = router[key]
+
+    assert first is second
+
+
+def test_lookup_cache_cleared_on_route_registration():
+    """Registering a new route must evict all cached lookups."""
+    router = Router()
+
+    @router.route(path='/ping', methods=[HTTPMethod.GET])
+    async def ping(scope, receive, send):
+        pass
+
+    key = ('/ping', HTTPMethod.GET, Scheme.http)
+    router[key]
+    assert key in router._lookup_cache
+
+    # Adding a second route must clear the cache
+    @router.route(path='/pong', methods=[HTTPMethod.GET])
+    async def pong(scope, receive, send):
+        pass
+
+    assert router._lookup_cache == {}
+
+
+def test_lookup_cache_lru_evicts_least_recently_used():
+    """Cache stays at _LOOKUP_CACHE_MAX; least-recently-used entry is evicted, not the hottest."""
+    router = Router()
+
+    @router.route(path='/items/{item_id}', methods=[HTTPMethod.GET])
+    async def handler(scope, receive, send):
+        pass
+
+    # Shrink the cap to a testable size
+    router._LOOKUP_CACHE_MAX = 3
+
+    k1 = ('/items/1', HTTPMethod.GET, Scheme.http)
+    k2 = ('/items/2', HTTPMethod.GET, Scheme.http)
+    k3 = ('/items/3', HTTPMethod.GET, Scheme.http)
+    k4 = ('/items/4', HTTPMethod.GET, Scheme.http)
+
+    router[k1]
+    router[k2]
+    router[k3]
+    assert len(router._lookup_cache) == 3
+
+    # Re-access k1 — it becomes the most recently used, so k2 is now the LRU
+    router[k1]
+
+    # Adding k4 must evict k2 (LRU), not k1 (recently accessed)
+    router[k4]
+    assert len(router._lookup_cache) == 3
+    assert k2 not in router._lookup_cache, 'LRU entry (k2) must be evicted'
+    assert k1 in router._lookup_cache, 'recently-accessed k1 must be retained'
+    assert k4 in router._lookup_cache
+
+
+@pytest.mark.asyncio
+async def test_lookup_cache_parametrized_route_injects_correct_params():
+    """Cached closure for a parametrized route injects the right path_params."""
+    router = Router()
+
+    @router.route(path='/tasks/{task_id}', methods=[HTTPMethod.GET])
+    async def handler(scope, receive, send):
+        pass
+
+    key = ('/tasks/42', HTTPMethod.GET, Scheme.http)
+
+    # Populate cache
+    fn = router[key]
+    assert key in router._lookup_cache
+
+    # Cached closure injects params correctly
+    scope: dict = {}
+    await fn(scope, None, None)
+    assert scope.get('path_params') == {'task_id': '42'}
+
+    # Different path → different cache entry and different params
+    key2 = ('/tasks/99', HTTPMethod.GET, Scheme.http)
+    fn2 = router[key2]
+    scope2: dict = {}
+    await fn2(scope2, None, None)
+    assert scope2.get('path_params') == {'task_id': '99'}

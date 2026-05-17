@@ -128,6 +128,7 @@ class BlackBull:
         self._wsprotocols = None
         self._global_middlewares: list = []
         self._static_roots: list[tuple[str, Path]] = []
+        self._chain = None  # cached global middleware chain; rebuilt on first request
 
         if trusted_proxies is not None:
             from .middleware.proxy import TrustedProxyMiddleware  # noqa: PLC0415
@@ -389,18 +390,21 @@ class BlackBull:
             if handler is not None:
                 await handler(scope, receive, send)
 
+    def _build_chain(self):
+        chain = self._dispatch
+        for mw in reversed(self._global_middlewares):
+            chain = functools.partial(mw, call_next=chain)
+        self._chain = chain
+
     async def __call__(self, scope, receive, send):
         if scope.get('type') == 'lifespan':
             await self._handle_lifespan(scope, receive, send)
             return
 
-        wrapped = _wrap_send(send)
+        if self._chain is None:
+            self._build_chain()
 
-        endpoint = self._dispatch
-        for mw in reversed(self._global_middlewares):
-            endpoint = functools.partial(mw, call_next=endpoint)
-
-        await endpoint(scope, receive, wrapped)
+        await self._chain(scope, receive, _wrap_send(send))
 
     def route(self, methods: HTTPMethod | Iterable[HTTPMethod] = [HTTPMethod.GET],
               path: str = '/', scheme: Scheme | Iterable[Scheme] = Scheme.http,
@@ -423,6 +427,7 @@ class BlackBull:
     def use(self, mw) -> None:
         """Register a global middleware applied to every non-lifespan request."""
         self._global_middlewares.append(mw)
+        self._chain = None  # invalidate cached chain
 
     def static(self, url_prefix: str, root_dir: str | Path) -> None:
         """Serve static files from *root_dir* under *url_prefix* via global middleware."""
@@ -430,6 +435,7 @@ class BlackBull:
         root = Path(root_dir).resolve()
         self._static_roots.append((url_prefix, root))
         self._global_middlewares.append(StaticFiles(url_prefix=url_prefix, root_dir=root))
+        self._chain = None  # invalidate cached chain
 
     def on_error(self, key):
         """Register a custom error handler for an HTTPStatus or exception class.
@@ -550,7 +556,15 @@ class BlackBull:
         self._router.validate()
 
         if workers == 1:
-            asyncio.run(self.run(certfile=certfile, keyfile=keyfile, port=port))
+            from .logger import setup_async_logging, teardown_async_logging  # noqa: PLC0415
+            from .env import apply_event_loop_policy  # noqa: PLC0415
+            apply_event_loop_policy(_cfg)
+            if _cfg.async_logging:
+                setup_async_logging()
+            try:
+                asyncio.run(self.run(certfile=certfile, keyfile=keyfile, port=port))
+            finally:
+                teardown_async_logging()
             return
 
         from .server import ASGIServer  # noqa: PLC0415

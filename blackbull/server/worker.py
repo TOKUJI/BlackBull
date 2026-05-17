@@ -40,7 +40,27 @@ def run_worker(app, raw_sockets, ssl_context, worker_id: int,
     # signal and sends SIGTERM to every worker for a coordinated shutdown.
     signal.signal(signal.SIGINT, signal.SIG_IGN)
 
+    from ..env import apply_event_loop_policy, get_settings as _get_settings  # noqa: PLC0415
+    from ..logger import setup_async_logging, teardown_async_logging  # noqa: PLC0415
     from .server import ASGIServer  # noqa: PLC0415 — deferred to avoid import cycles
+
+    cfg = _get_settings()
+    apply_event_loop_policy(cfg)
+    if cfg.async_logging:
+        setup_async_logging()
+    if not cfg.access_log:
+        logging.getLogger('blackbull.access').setLevel(logging.WARNING)
+
+    # Pin this worker to a specific CPU core to improve L1/L2 cache locality
+    # and reduce context switching.  Only attempted on Linux (sched_setaffinity).
+    if hasattr(os, 'sched_setaffinity'):
+        cpu_count = os.cpu_count() or 1
+        cpu = worker_id % cpu_count
+        try:
+            os.sched_setaffinity(0, {cpu})
+            logger.debug('Worker %d pinned to CPU %d', worker_id, cpu)
+        except OSError as exc:
+            logger.debug('CPU affinity pinning unavailable: %s', exc)
 
     server = ASGIServer(app, ssl_context=ssl_context, max_connections=max_connections,
                         stream_queue_depth=stream_queue_depth,
@@ -54,4 +74,6 @@ def run_worker(app, raw_sockets, ssl_context, worker_id: int,
         asyncio.run(server.run())
     except KeyboardInterrupt:
         pass  # SIGINT is ignored, but guard against any race
-    logger.info('Worker %d exiting (PID %d)', worker_id, os.getpid())
+    finally:
+        logger.info('Worker %d exiting (PID %d)', worker_id, os.getpid())
+        teardown_async_logging()

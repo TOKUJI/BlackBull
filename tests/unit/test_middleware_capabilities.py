@@ -5,6 +5,7 @@ and act as capability documentation as well as regression protection.
 """
 import pytest
 from http import HTTPMethod
+from unittest.mock import AsyncMock
 
 from blackbull import BlackBull
 from blackbull.utils import Scheme
@@ -174,3 +175,77 @@ async def test_short_circuit_skips_outer_post_processing(app):
     # handler is never reached; outer_after still fires
     assert 'handler' not in log
     assert log == ['outer_before', 'blocker', 'outer_after']
+
+
+# ---------------------------------------------------------------------------
+# Middleware chain caching (5.2 optimisation)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_chain_built_once_across_requests(app):
+    """The global middleware chain must be compiled once and reused across requests."""
+    async def noop(scope, receive, send, call_next):
+        await call_next(scope, receive, send)
+
+    app.use(noop)
+
+    @app.route(methods=[HTTPMethod.GET], path='/c')
+    async def h():
+        return 'ok'
+
+    scope = {'type': 'http', 'method': 'GET', 'path': '/c', 'headers': {}}
+    await app(scope, None, AsyncMock())
+    chain_after_first = app._chain
+
+    await app(scope, None, AsyncMock())
+    assert app._chain is chain_after_first, (
+        'Chain must be the same object across requests — not rebuilt per call'
+    )
+
+
+@pytest.mark.asyncio
+async def test_chain_invalidated_when_middleware_added(app):
+    """Adding a middleware via use() must invalidate the cached chain."""
+    async def noop(scope, receive, send, call_next):
+        await call_next(scope, receive, send)
+
+    @app.route(methods=[HTTPMethod.GET], path='/inv')
+    async def h():
+        return 'ok'
+
+    scope = {'type': 'http', 'method': 'GET', 'path': '/inv', 'headers': {}}
+
+    await app(scope, None, AsyncMock())
+    assert app._chain is not None
+
+    app.use(noop)  # must invalidate
+    assert app._chain is None, 'use() must set _chain to None'
+
+    await app(scope, None, AsyncMock())
+    assert app._chain is not None, 'chain must be rebuilt on the next request'
+
+
+@pytest.mark.asyncio
+async def test_chain_includes_all_global_middlewares(app):
+    """Every middleware registered via use() must execute on each request."""
+    log = []
+
+    async def mw_a(scope, receive, send, call_next):
+        log.append('a')
+        await call_next(scope, receive, send)
+
+    async def mw_b(scope, receive, send, call_next):
+        log.append('b')
+        await call_next(scope, receive, send)
+
+    app.use(mw_a)
+    app.use(mw_b)
+
+    @app.route(methods=[HTTPMethod.GET], path='/all')
+    async def h():
+        log.append('handler')
+        return 'ok'
+
+    scope = {'type': 'http', 'method': 'GET', 'path': '/all', 'headers': {}}
+    await app(scope, None, AsyncMock())
+    assert log == ['a', 'b', 'handler']

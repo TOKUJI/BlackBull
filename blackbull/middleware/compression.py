@@ -1,3 +1,4 @@
+import asyncio
 import gzip as _gzip
 from collections.abc import Callable
 from ..server.constants import ASGIEvent
@@ -5,6 +6,7 @@ from ..server.headers import Headers
 from ..asgi import ResponseStart, ResponseBody, parse_response_event
 
 _MIN_SIZE = 100  # default minimum body size to bother compressing
+_EXECUTOR_THRESHOLD = 65536  # default body size above which compression is offloaded
 _SERVER_PREFERENCE = ['br', 'zstd', 'gzip']  # server-side priority order
 
 # Content-Type prefixes whose payloads are already compressed or binary and
@@ -75,8 +77,10 @@ class CompressionMiddleware:
         async def handler(scope, receive, send): ...
     """
 
-    def __init__(self, min_size: int = _MIN_SIZE):
+    def __init__(self, min_size: int = _MIN_SIZE,
+                 executor_threshold: int = _EXECUTOR_THRESHOLD):
         self._min_size = min_size
+        self._executor_threshold = executor_threshold
         self._available = _detect_codecs()
 
     @staticmethod
@@ -170,12 +174,29 @@ class CompressionMiddleware:
             await send({'type': ASGIEvent.HTTP_RESPONSE_BODY, 'body': body, 'more_body': False})
             return
 
-        compressed = compressor(body)
+        threshold = self._executor_threshold
+        if threshold > 0 and len(body) >= threshold:
+            loop = asyncio.get_running_loop()
+            compressed = await loop.run_in_executor(None, compressor, body)
+        else:
+            compressed = compressor(body)
         existing = list(start_event.get('headers', []))
         existing.append((b'content-encoding', codec_name.encode()))
         await send({**start_event, 'headers': existing})
         await send({'type': ASGIEvent.HTTP_RESPONSE_BODY, 'body': compressed, 'more_body': False})
 
 
+def _make_default_compress() -> 'CompressionMiddleware':
+    try:
+        from ..env import get_settings as _get_settings  # noqa: PLC0415
+        cfg = _get_settings()
+        return CompressionMiddleware(
+            min_size=cfg.compression_min_size,
+            executor_threshold=cfg.compression_executor_threshold,
+        )
+    except Exception:
+        return CompressionMiddleware()
+
+
 # Default instance — used as a plain middleware function
-compress = CompressionMiddleware()
+compress = _make_default_compress()

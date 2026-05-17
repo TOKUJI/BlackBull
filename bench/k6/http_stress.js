@@ -16,6 +16,7 @@ import { check } from 'k6';
 import { Rate } from 'k6/metrics';
 
 const errorRate = new Rate('errors');
+const h2Rate    = new Rate('http2_ok');  // 1 when response was served over HTTP/2
 
 const TARGET = __ENV.TARGET || '/ping';
 
@@ -26,6 +27,7 @@ export const options = {
   thresholds: {
     http_req_duration: ['p(99)<500'],
     errors:            ['rate<0.05'],
+    http2_ok:          ['rate>0.99'],
   },
 };
 
@@ -35,7 +37,11 @@ const PARAMS = {};
 export default function () {
   const res = http.get(`${BASE}${TARGET}`, PARAMS);
   errorRate.add(res.status !== 200);
-  check(res, { 'status 200': r => r.status === 200 });
+  check(res, {
+    'status 200': r => r.status === 200,
+    'HTTP/2':     r => r.proto === 'HTTP/2.0',
+  });
+  h2Rate.add(res.proto === 'HTTP/2.0');
 }
 
 export function teardown() {

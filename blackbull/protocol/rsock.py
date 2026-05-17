@@ -3,8 +3,15 @@ import socket
 import logging
 logger = logging.getLogger(__name__)
 
+_DEFAULT_BACKLOG = 1024
 
-def _bind_socket(family, host, port):
+#: True when the OS supports SO_REUSEPORT (Linux ≥ 3.9, macOS ≥ 10.6).
+REUSEPORT_SUPPORTED = hasattr(socket, 'SO_REUSEPORT')
+
+
+def _bind_socket(family, host, port,
+                 backlog: int = _DEFAULT_BACKLOG,
+                 reuseport: bool = False):
     """
     Create, configure, bind and listen on a single socket for the given
     address *family* (``socket.AF_INET`` or ``socket.AF_INET6``).
@@ -21,6 +28,9 @@ def _bind_socket(family, host, port):
     try:
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 
+        if reuseport and REUSEPORT_SUPPORTED:
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
+
         if family == socket.AF_INET6:
             # Disable the IPv4-mapped address feature so that the IPv6 socket
             # handles *only* IPv6 traffic.  This lets both sockets coexist on
@@ -28,8 +38,9 @@ def _bind_socket(family, host, port):
             sock.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
 
         sock.bind((host, port))
-        sock.listen()
-        logger.info('Bound %s socket on %s:%s', family.name, host, port)
+        sock.listen(backlog)
+        logger.info('Bound %s socket on %s:%s (backlog=%d reuseport=%s)',
+                    family.name, host, port, backlog, reuseport and REUSEPORT_SUPPORTED)
         return sock
 
     except OSError as msg:
@@ -38,7 +49,7 @@ def _bind_socket(family, host, port):
         return None
 
 
-def create_socket(address):
+def create_socket(address, backlog: int = _DEFAULT_BACKLOG):
     """
     Create a **single** socket (legacy helper).
 
@@ -57,10 +68,11 @@ def create_socket(address):
     except OSError:
         family = socket.AF_INET
 
-    return _bind_socket(family, host, port)
+    return _bind_socket(family, host, port, backlog=backlog)
 
 
-def create_dual_stack_sockets(port):
+def create_dual_stack_sockets(port, backlog: int = _DEFAULT_BACKLOG,
+                               reuseport: bool = False):
     """
     Create one IPv4 socket (``0.0.0.0``) **and** one IPv6 socket (``::``),
     both listening on *port*.
@@ -79,14 +91,16 @@ def create_dual_stack_sockets(port):
     """
     sockets = []
 
-    ipv4_sock = _bind_socket(socket.AF_INET, '0.0.0.0', port)
+    ipv4_sock = _bind_socket(socket.AF_INET, '0.0.0.0', port,
+                              backlog=backlog, reuseport=reuseport)
     if ipv4_sock is not None:
         sockets.append(ipv4_sock)
         if port == 0:
             # Learn the port the OS assigned so IPv6 uses the same one.
             port = ipv4_sock.getsockname()[1]
 
-    ipv6_sock = _bind_socket(socket.AF_INET6, '::', port)
+    ipv6_sock = _bind_socket(socket.AF_INET6, '::', port,
+                              backlog=backlog, reuseport=reuseport)
     if ipv6_sock is not None:
         sockets.append(ipv6_sock)
 

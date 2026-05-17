@@ -116,3 +116,5 @@ CLAUDE_DEV.md
 bench/results/*.json
 bench/results/*.txt
 bench/results/*.csv
+bench/results/*.md
+bench/results/*.svg

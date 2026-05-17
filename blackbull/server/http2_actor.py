@@ -18,11 +18,11 @@ from .http2_messages import (
 )
 from ..logger import log
 from ..protocol.frame import FrameFactory
-from ..protocol.frame_types import ErrorCodes, FrameBase, FrameTypes
+from ..protocol.frame_types import ErrorCodes, FrameBase, FrameTypes, DEFAULT_INITIAL_WINDOW_SIZE
 from ..protocol.stream import Stream, StreamState
 from .headers import Headers
 from .parser import ParserFactory
-from .recipient import (AbstractReader, HTTP2Recipient, IncompleteReadError,
+from .recipient import (AbstractReader, IncompleteReadError,
                         RecipientFactory, _HTTP2_STREAM_QUEUE_DEPTH)
 from .response import ResponderFactory
 from .sender import AbstractWriter, SenderFactory
@@ -112,7 +112,7 @@ class StreamActor(Actor):
                 self._scope, self._receive, self._send,
                 self._app, self._aggregator,
             ).run()
-        except BaseException:
+        except Exception:
             await self._http2_actor.send_frame(
                 self._http2_actor.factory.rst_stream(
                     self._stream_id, ErrorCodes.INTERNAL_ERROR)
@@ -169,9 +169,40 @@ class HTTP2Actor(Actor):
         self.factory = FrameFactory()
         self._control_sender = SenderFactory.http2(writer, self.factory, 0)
         self._senders: dict = {}
-        self.max_concurrent_streams: float = float('inf')
+        # Read from env at construction so tests can override before run().
+        from ..env import get_settings as _get_settings  # noqa: PLC0415
+        _cfg = _get_settings()
+        self.max_concurrent_streams: int = _cfg.h2_max_concurrent_streams
+        self._request_timeout: float = _cfg.request_timeout
+        # Per-connection semaphore: caps concurrently-running stream handlers to
+        # prevent a high-mux connection from starving other connections on the
+        # same worker.  None means no cap.
+        # Single-worker uses BB_H2_ACTIVE_STREAMS_1W (default 20) because one
+        # event loop can be overwhelmed by 2,500 tasks at -c50 -m50.
+        # Multi-worker uses BB_H2_ACTIVE_STREAMS (default 0 = no limit) because
+        # SO_REUSEPORT distributes connections across workers.
+        if _cfg.workers == 1:
+            _stream_cap = _cfg.h2_active_streams_1w
+        else:
+            _stream_cap = _cfg.h2_active_streams
+        self._stream_semaphore: asyncio.Semaphore | None = (
+            asyncio.Semaphore(_stream_cap) if _stream_cap > 0 else None
+        )
         self._next_push_stream_id = 2
         self._task_group: asyncio.TaskGroup | None = None
+
+        # Flow-control state — updated by SettingsResponder / WindowUpdateResponder
+        # so that new stream senders start with the current peer-granted windows.
+        self._peer_initial_window_size: int = DEFAULT_INITIAL_WINDOW_SIZE
+        self._connection_window_size: int = DEFAULT_INITIAL_WINDOW_SIZE
+
+        # Concurrent-stream counter — incremented when a stream task is spawned,
+        # decremented via Task.add_done_callback when the task finishes.
+        self._active_stream_count: int = 0
+
+        # Per-stream recipients, keyed by stream_id.  Stored on the actor so
+        # _make_done_cb can remove entries when streams complete.
+        self._recipients: dict[int, _StreamRecipient] = {}
 
     # ------------------------------------------------------------------
     # Public helpers (called by ResponderFactory duck-typing)
@@ -189,10 +220,16 @@ class HTTP2Actor(Actor):
 
     def make_sender(self, stream_id: int):
         if stream_id not in self._senders:
-            self._senders[stream_id] = SenderFactory.http2(
+            sender = SenderFactory.http2(
                 self._writer, self.factory, stream_id,
                 push_callback=self._handle_push,
             )
+            # Initialise with the windows the peer has currently granted us,
+            # rather than the RFC defaults, which may already have been exceeded
+            # by SETTINGS / WINDOW_UPDATE frames received before this stream opened.
+            sender.stream_window_size[stream_id] = self._peer_initial_window_size
+            sender.connection_window_size = self._connection_window_size
+            self._senders[stream_id] = sender
         return self._senders[stream_id]
 
     def _fill_scope_connection(self, scope: dict) -> None:
@@ -206,6 +243,15 @@ class HTTP2Actor(Actor):
     async def send_frame(self, frame: FrameBase) -> None:
         """Send a raw HTTP/2 frame via the control-plane sender."""
         await self._control_sender(frame)
+
+    def _make_done_cb(self, stream_id: int) -> Callable[[asyncio.Task], None]:
+        """Return a done-callback that cleans up all per-stream state on completion."""
+        def _cb(_task: asyncio.Task) -> None:
+            self._active_stream_count = max(0, self._active_stream_count - 1)
+            self._senders.pop(stream_id, None)
+            self.root_stream.children.pop(stream_id, None)
+            self._recipients.pop(stream_id, None)
+        return _cb
 
     async def receive(self) -> bytes:
         """Read one HTTP/2 frame from the connection."""
@@ -228,22 +274,33 @@ class HTTP2Actor(Actor):
 
     async def run(self) -> None:
         """HTTP/2 connection state machine — process frames until connection closes."""
-        await self.send_frame(self.factory.settings(enable_connect_protocol=True))
-        logger.info(self.factory.settings(enable_connect_protocol=True))
+        from ..env import get_settings as _get_settings  # noqa: PLC0415
+        cfg = _get_settings()
 
-        recipients: dict[int, _StreamRecipient] = {}
+        await self.send_frame(self.factory.settings(
+            enable_connect_protocol=True,
+            initial_window_size=cfg.h2_initial_window_size,
+            max_concurrent_streams=self.max_concurrent_streams,
+        ))
+        logger.info(
+            'HTTP/2 SETTINGS sent: initial_window_size=%d max_concurrent_streams=%d',
+            cfg.h2_initial_window_size, self.max_concurrent_streams,
+        )
+
+        # Expand the connection-level inbound window beyond the RFC default of 65535.
+        conn_increment = cfg.h2_connection_window_size - DEFAULT_INITIAL_WINDOW_SIZE
+        if conn_increment > 0:
+            await self.send_frame(self.factory.window_update(0, conn_increment))
+
+        self._recipients.clear()
 
         async with asyncio.TaskGroup() as tg:
             self._task_group = tg
-            await self._frame_loop(tg, recipients)
+            await self._frame_loop(tg)
 
         self._task_group = None
 
-    async def _frame_loop(
-        self,
-        tg: asyncio.TaskGroup,
-        recipients: dict[int, _StreamRecipient],
-    ) -> None:
+    async def _frame_loop(self, tg: asyncio.TaskGroup) -> None:
         """Read frames and dispatch stream tasks until EOF or GOAWAY."""
         waiting_continuation = False
         header_frame = None
@@ -260,44 +317,24 @@ class HTTP2Actor(Actor):
 
             match frame.FrameType():
                 case FrameTypes.HEADERS:
-                    spawned = await self._on_headers_frame(frame, stream, send, tg, recipients)
+                    spawned = await self._on_headers_frame(frame, stream, send, tg)
                     if not spawned:
                         waiting_continuation = True
                         header_frame = frame
                 case FrameTypes.CONTINUATION:
                     spawned = await self._on_continuation_frame(
-                        frame, stream, send, tg, recipients, header_frame, waiting_continuation)
+                        frame, stream, send, tg, header_frame, waiting_continuation)
                     if spawned:
                         waiting_continuation = False
                 case FrameTypes.DATA:
-                    await self._on_data_frame(frame, stream, recipients)
+                    await self._on_data_frame(frame, stream)
                 case FrameTypes.GOAWAY:
-                    await self._on_goaway_frame(last_stream_id, recipients)
+                    await self._on_goaway_frame(last_stream_id)
                     return
                 case _:
                     await ResponderFactory.create(frame).respond(self)
 
-        _signal_recipients(recipients)
-
-    def _legacy_spawn(
-        self,
-        tg: asyncio.TaskGroup,
-        scope: dict,
-        recipient: HTTP2Recipient,
-        send,
-        log_record,
-    ) -> None:
-        """Spawn ASGI app task via legacy _run_with_log path (aggregator=None)."""
-        from .server import _run_with_log  # noqa: PLC0415
-        dispatcher = getattr(self.app, '_dispatcher', None)
-        tg.create_task(
-            _run_with_log(
-                self.app(scope, recipient, send),
-                log_record,
-                dispatcher=dispatcher,
-                scope=scope,
-            )
-        )
+        _signal_recipients(self._recipients)
 
     def _spawn_stream_task(
         self,
@@ -308,7 +345,17 @@ class HTTP2Actor(Actor):
         send,
         log_record,
     ) -> None:
-        """Spawn a StreamActor (aggregator path) or legacy _run_with_log task."""
+        """Spawn a StreamActor (aggregator path) or legacy _run_with_log task.
+
+        Increments ``_active_stream_count`` and registers ``_on_stream_done``
+        so the counter is decremented when the task finishes.
+
+        When ``BB_REQUEST_TIMEOUT > 0``, the stream coroutine is wrapped with
+        ``asyncio.wait_for``; on expiry RST_STREAM CANCEL is sent and the task
+        completes normally (does not cancel the TaskGroup).
+        """
+        self._active_stream_count += 1
+
         if self._aggregator is not None:
             stream_actor = StreamActor(
                 stream_id=stream_id,
@@ -321,9 +368,40 @@ class HTTP2Actor(Actor):
                 http2_actor=self,
                 log_record=log_record,
             )
-            tg.create_task(stream_actor.run())
+            coro = stream_actor.run()
         else:
-            self._legacy_spawn(tg, scope, recipient, send, log_record)
+            from .server import _run_with_log  # noqa: PLC0415
+            dispatcher = getattr(self.app, '_dispatcher', None)
+            coro = _run_with_log(
+                self.app(scope, recipient, send),
+                log_record,
+                dispatcher=dispatcher,
+                scope=scope,
+            )
+
+        timeout = self._request_timeout
+        if timeout > 0:
+            async def _timed(c=coro, sid=stream_id, t=timeout):
+                try:
+                    await asyncio.wait_for(c, timeout=t)
+                except asyncio.TimeoutError:
+                    logger.warning(
+                        'Stream %d timed out after %.1fs — RST_STREAM CANCEL', sid, t)
+                    await self.send_frame(self.factory.rst_stream(sid, ErrorCodes.CANCEL))
+            final_coro = _timed()
+        else:
+            final_coro = coro
+
+        if self._stream_semaphore is not None:
+            _sem = self._stream_semaphore
+            async def _guarded(c=final_coro, s=_sem):
+                async with s:
+                    await c
+            task = tg.create_task(_guarded())
+        else:
+            task = tg.create_task(final_coro)
+
+        task.add_done_callback(self._make_done_cb(stream_id))
 
     async def _on_headers_frame(
         self,
@@ -331,12 +409,12 @@ class HTTP2Actor(Actor):
         stream: 'Stream',
         send,
         tg: asyncio.TaskGroup,
-        recipients: dict[int, _StreamRecipient],
     ) -> bool:
         """Handle a HEADERS frame; return True if stream task spawned, False if awaiting CONTINUATION."""
-        if len(self.root_stream.get_children()) >= self.max_concurrent_streams:
+        if self._active_stream_count >= self.max_concurrent_streams:
             await self.send_frame(
                 self.factory.rst_stream(stream.stream_id, ErrorCodes.REFUSED_STREAM))
+            return True  # refused — do not queue as waiting for CONTINUATION
 
         if not frame.end_headers:
             return False
@@ -349,13 +427,13 @@ class HTTP2Actor(Actor):
             # RFC 8441 — Extended CONNECT bootstrapping WebSocket over HTTP/2
             stream.on_headers_received(end_stream=False)
             log_record = _make_log_record(scope)
-            await self._handle_h2_websocket(stream, tg, recipients, log_record)
+            await self._handle_h2_websocket(stream, tg, log_record)
             return True
 
         scope['http2_priority'] = _resolve_priority(stream, scope)
         scope['extensions'] = {ASGIEvent.HTTP_RESPONSE_PUSH: {}}
         stream_recipient = RecipientFactory.http2(queue_depth=self._stream_queue_depth)
-        recipients[stream.stream_id] = stream_recipient
+        self._recipients[stream.stream_id] = stream_recipient
         stream.on_headers_received(end_stream=bool(frame.end_stream))
         if frame.end_stream:
             stream_recipient.put_event(
@@ -371,7 +449,6 @@ class HTTP2Actor(Actor):
         stream: 'Stream',
         send,
         tg: asyncio.TaskGroup,
-        recipients: dict[int, _StreamRecipient],
         header_frame,
         waiting_continuation: bool,
     ) -> bool:
@@ -390,22 +467,23 @@ class HTTP2Actor(Actor):
         header_frame.parse_payload()
         scope = ParserFactory.Get(header_frame, stream).parse()
         self._fill_scope_connection(scope)
+
+        if self._active_stream_count >= self.max_concurrent_streams:
+            await self.send_frame(
+                self.factory.rst_stream(stream.stream_id, ErrorCodes.REFUSED_STREAM))
+            return True
+
         scope['http2_priority'] = _resolve_priority(stream, scope)
         scope['extensions'] = {ASGIEvent.HTTP_RESPONSE_PUSH: {}}
         stream.scope = scope
         stream_recipient = RecipientFactory.http2(queue_depth=self._stream_queue_depth)
-        recipients[stream.stream_id] = stream_recipient
+        self._recipients[stream.stream_id] = stream_recipient
         log_record = _make_log_record(scope)
         capturing_send = _make_capturing_send(send, log_record)
         self._spawn_stream_task(tg, stream.stream_id, scope, stream_recipient, capturing_send, log_record)
         return True
 
-    async def _on_data_frame(
-        self,
-        frame,
-        stream: 'Stream',
-        recipients: dict[int, _StreamRecipient],
-    ) -> None:
+    async def _on_data_frame(self, frame, stream: 'Stream') -> None:
         """Handle a DATA frame: deliver to the stream's recipient then issue WINDOW_UPDATE.
 
         WINDOW_UPDATE is sent only after successful delivery so that a full
@@ -418,8 +496,8 @@ class HTTP2Actor(Actor):
             return
 
         stream.on_data_received(end_stream=bool(frame.end_stream))
-        if stream.stream_id in recipients:
-            delivered = recipients[stream.stream_id].put_DATAFrame(frame)
+        if stream.stream_id in self._recipients:
+            delivered = self._recipients[stream.stream_id].put_DATAFrame(frame)
             if delivered:
                 await self.send_frame(
                     self.factory.window_update(stream.stream_id, frame.length))
@@ -429,20 +507,15 @@ class HTTP2Actor(Actor):
         else:
             logger.warning('DATA for stream %d but no recipient found', stream.stream_id)
 
-    async def _on_goaway_frame(
-        self,
-        last_stream_id: int,
-        recipients: dict[int, _StreamRecipient],
-    ) -> None:
+    async def _on_goaway_frame(self, last_stream_id: int) -> None:
         """Handle an incoming GOAWAY: echo one back and signal all recipients."""
         await self.send_frame(self.factory.goaway(last_stream_id))
-        _signal_recipients(recipients)
+        _signal_recipients(self._recipients)
 
     async def _handle_h2_websocket(
         self,
         stream: 'Stream',
         tg: asyncio.TaskGroup,
-        recipients: dict[int, _StreamRecipient],
         log_record,
     ) -> None:
         """Bootstrap a WebSocket connection over HTTP/2 per RFC 8441.
@@ -473,7 +546,7 @@ class HTTP2Actor(Actor):
 
         ws_reader = HTTP2WSReader()
         ws_writer = HTTP2WSWriter(stream_send)
-        recipients[stream.stream_id] = ws_reader  # DATA frames routed here
+        self._recipients[stream.stream_id] = ws_reader  # DATA frames routed here
 
         aggregator = self._aggregator
         if aggregator is None:
@@ -494,7 +567,9 @@ class HTTP2Actor(Actor):
                 log_record.close_code = ws_actor._disconnect_code
                 _access_logger.info(log_record.format(), extra=log_record.as_extra())
 
-        tg.create_task(_run_ws())
+        self._active_stream_count += 1
+        task = tg.create_task(_run_ws())
+        task.add_done_callback(self._make_done_cb(stream.stream_id))
 
     async def _handle_push(self, event: dict, parent_stream_id: int) -> None:
         """Handle an 'http.response.push' ASGI event (RFC 7540 §8.2)."""
@@ -548,6 +623,7 @@ class HTTP2Actor(Actor):
 
         push_recipient = RecipientFactory.http2(queue_depth=self._stream_queue_depth)
         push_recipient.put_event({'type': ASGIEvent.HTTP_REQUEST, 'body': b'', 'more_body': False})
+        self._recipients[push_stream_id] = push_recipient
         push_sender = SenderFactory.http2(
             self._writer, self.factory, push_stream_id, push_callback=None)
         log_record = _make_log_record(pushed_scope)

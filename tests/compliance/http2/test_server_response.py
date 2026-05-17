@@ -121,6 +121,54 @@ async def test_window_update_connection_level_credits_all_senders():
     sender_b._window_open.set.assert_called_once()
 
 
+@pytest.mark.asyncio
+async def test_window_update_connection_level_updates_handler_tracking():
+    """Connection-level WINDOW_UPDATE must update handler._connection_window_size
+    so that stream senders created after the update inherit the correct budget."""
+    frame = MagicMock()
+    frame.stream_id = 0
+    frame.window_size = 4128769  # default startup increment (4 MiB - 65535)
+
+    handler = MagicMock()
+    handler._senders = {}
+    handler._connection_window_size = 65535
+
+    responder = WindowUpdateResponder(frame)
+    await responder.respond(handler)
+
+    assert handler._connection_window_size == 65535 + 4128769
+
+
+# ---------------------------------------------------------------------------
+# WindowUpdateResponder — stream-level (stream_id > 0)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_window_update_stream_level_only_credits_stream_window():
+    """Stream-level WINDOW_UPDATE must not inflate the connection window.
+
+    Regression: sender.window_update() previously incremented both
+    connection_window_size and stream_window_size, over-crediting the
+    connection-level flow-control budget on every stream-level update.
+    """
+    from blackbull.server.sender import HTTP2Sender, AsyncioWriter
+
+    mock_writer = MagicMock()
+    mock_writer.write = MagicMock()
+    mock_writer.drain = AsyncMock()
+    factory = FrameFactory()
+
+    sender = HTTP2Sender(AsyncioWriter(mock_writer), factory, stream_id=1)
+    original_conn_window = sender.connection_window_size
+
+    sender.window_update(512)
+
+    assert sender.stream_window_size[1] == 65535 + 512
+    assert sender.connection_window_size == original_conn_window, (
+        "stream-level WINDOW_UPDATE must not change connection_window_size"
+    )
+
+
 # ---------------------------------------------------------------------------
 # PriorityResponder — existing stream and new stream branches
 # ---------------------------------------------------------------------------

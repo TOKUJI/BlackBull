@@ -43,6 +43,7 @@ monitor = LoopLagMonitor(interval=0.05, window=400)
 _1KB  = os.urandom(1024)
 _16KB = os.urandom(16000)
 _64KB = os.urandom(65536)
+_1MB  = os.urandom(1024 * 1024)
 
 
 @app.on_startup
@@ -79,6 +80,11 @@ async def extra_large():
     return _64KB
 
 
+@app.route(path='/1mb', methods=[HTTPMethod.GET])
+async def one_mb():
+    return _1MB
+
+
 @app.route(path='/echo', methods=[HTTPMethod.POST])
 async def echo(scope, receive, send):
     body = await read_body(receive)
@@ -90,6 +96,22 @@ async def echo(scope, receive, send):
 @app.route(path='/metrics', methods=[HTTPMethod.GET])
 async def metrics():
     return json.dumps(monitor.snapshot()).encode()
+
+
+@app.route(path='/config', methods=[HTTPMethod.GET])
+async def config():
+    from blackbull.env import get_settings
+    cfg = get_settings()
+    import multiprocessing
+    workers = cfg.workers if cfg.workers != 0 else multiprocessing.cpu_count()
+    return json.dumps({
+        'workers': workers,
+        'uvloop': cfg.use_uvloop,
+        'h2_active_streams_1w': cfg.h2_active_streams_1w,
+        'h2_active_streams': cfg.h2_active_streams,
+        'h2_initial_window_size': cfg.h2_initial_window_size,
+        'h2_connection_window_size': cfg.h2_connection_window_size,
+    }).encode()
 
 
 # ---------------------------------------------------------------------------

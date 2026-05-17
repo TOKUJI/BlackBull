@@ -126,19 +126,22 @@ class TestHTTP2FlowControl:
 
         await handler.run()
 
-        sender = handler._senders.get(1)
-        assert sender is not None, 'Sender for stream 1 must be cached after HEADERS'
-        assert sender.connection_window_size >= 65535, (
-            f'Expected connection_window_size >= 65535 after WINDOW_UPDATE, '
-            f'got {sender.connection_window_size}'
+        # _senders is pruned on stream completion (memory-leak fix); assert the
+        # actor-level source of truth used to seed new senders instead.
+        assert handler._connection_window_size >= 65535, (
+            f'Expected handler._connection_window_size >= 65535 after WINDOW_UPDATE, '
+            f'got {handler._connection_window_size}'
         )
 
     @staticmethod
     def _wu_increments(handler) -> list[int]:
+        # Only stream-level WINDOW_UPDATEs (stream_id > 0) reflect DATA consumption.
+        # Connection-level ones (stream_id == 0) are sent at startup for flow-control tuning.
         return [call.args[0].window_size
                 for call in handler.send_frame.call_args_list
                 if hasattr(call.args[0], 'FrameType')
-                and call.args[0].FrameType() == FrameTypes.WINDOW_UPDATE]
+                and call.args[0].FrameType() == FrameTypes.WINDOW_UPDATE
+                and call.args[0].stream_id > 0]
 
     async def test_single_data_frame_window_update_increment(self):
         """Receiving one DATA frame must produce WINDOW_UPDATE with increment
@@ -211,6 +214,9 @@ class TestHTTP2FlowControl:
             'DATA written while window was 0 — flow control not enforced.'
         )
 
+        # Credit both windows: connection-level (simulates WU stream_id=0) and
+        # stream-level (simulates WU stream_id=1).
+        sender.connection_window_size = len(payload) + 200
         sender.window_update(len(payload) + 200)
         await task
 
@@ -250,6 +256,9 @@ class TestHTTP2FlowControl:
         assert seen_headers, 'HEADERS frame must be written even when stream window is 0'
         assert body not in bytes(written), 'DATA must remain blocked at zero window'
 
+        # Credit both windows: connection-level (simulates WU stream_id=0) and
+        # stream-level (simulates WU stream_id=1).
+        sender.connection_window_size = len(body) + 200
         sender.window_update(len(body) + 200)
         await task
         assert body in bytes(written), 'DATA must be written after window_update()'
@@ -300,7 +309,18 @@ class TestHTTP2MaxConcurrentStreams:
 
         handler, app = _make_h2_actor()
         handler.max_concurrent_streams = 1
-        handler.receive = AsyncMock(side_effect=[h1, h3, None])
+
+        frames = iter([h1, h3, b''])
+
+        async def _yielding_receive():
+            # Two yields are required before h3:
+            # 1st sleep(0): stream 1's task step runs and schedules done_callback via call_soon
+            # 2nd sleep(0): done_callback fires, decrementing _active_stream_count to 0
+            await asyncio.sleep(0)
+            await asyncio.sleep(0)
+            return next(frames)
+
+        handler.receive = _yielding_receive
 
         await handler.run()
 
