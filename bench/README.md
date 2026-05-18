@@ -10,7 +10,6 @@ bash bench/install.sh
 pip install "blackbull[speed]"      # uvloop (optional, recommended)
 
 # 2. Start the benchmark server
-#    Set the same env vars for both the server and the bench script.
 BB_WORKERS=12 BB_UVLOOP=1 python bench/app.py --port 8443 \
     --cert tests/cert.pem --key tests/key.pem
 
@@ -18,16 +17,30 @@ BB_WORKERS=12 BB_UVLOOP=1 python bench/app.py --port 8443 \
 curl -sk https://localhost:8443/ping          # → pong
 curl -sk https://localhost:8443/metrics | python -m json.tool
 
-# 4. Run scenarios (in a second terminal — no env vars needed; server config is queried live)
+# 4. Run the full benchmark suite (in a second terminal)
+bash bench/benchmark.sh               # → bench/results/YYYYMMDD-HHMMSS.md
+bash bench/benchmark.sh --quick       # RUNS=1, K6_RUNS=1 (smoke-check, ~3 min)
+bash bench/benchmark.sh --no-profile  # skip py-spy
+```
+
+`benchmark.sh` is the recommended entry point.  It queries `/config` to record the actual
+worker count, runs a global warmup, calls `h2load_run.sh` and `k6_run.sh`, appends the event
+loop lag snapshot from `/metrics`, and writes everything to a single dated markdown file.
+
+**Env overrides** (applied to both server and bench script):
+
+| Var | Default | Effect |
+|---|---|---|
+| `RUNS` | `3` | h2load passes per scenario (median used; spread flagged if > 10%) |
+| `K6_RUNS` | `3` | k6 stress repetitions (median p50/p99 reported) |
+
+**Standalone use** (without `benchmark.sh`):
+
+```bash
 bash bench/h2load_run.sh                             # → bench/results/YYYYMMDD-HHMMSS.md
 bash bench/k6_run.sh bench/results/YYYYMMDD-HHMMSS.md  # appends k6 section to same file
 k6 run bench/k6/websocket.js
 ```
-
-`h2load_run.sh` saves raw output to `bench/results/raw_YYYYMMDD-HHMMSS.txt` and generates a
-markdown summary at `bench/results/YYYYMMDD-HHMMSS.md` automatically.
-`k6_run.sh` runs the 200-VU rampup and 500-VU stress scenarios and appends a k6 section to the
-same summary file.  Pass the md path as the first argument; omit it to create a standalone file.
 
 To regenerate a summary from an existing raw log:
 

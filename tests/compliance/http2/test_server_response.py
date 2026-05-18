@@ -117,8 +117,8 @@ async def test_window_update_connection_level_credits_all_senders():
 
     assert sender_a.connection_window_size == 1024
     assert sender_b.connection_window_size == 1124
-    sender_a._window_open.set.assert_called_once()
-    sender_b._window_open.set.assert_called_once()
+    sender_a.wake_window.assert_called_once()
+    sender_b.wake_window.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -381,8 +381,7 @@ async def test_body_exceeding_flow_control_window_is_chunked():
 
     # Provide more credit so the rest can send
     sender.connection_window_size += 400
-    sender.stream_window_size[1] += 400
-    sender._window_open.set()
+    sender.window_update(400)
     await task
 
     frames = _collect_data_frames(written, factory)

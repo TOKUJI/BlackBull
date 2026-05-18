@@ -21,7 +21,7 @@ from ..protocol.frame import FrameFactory
 from ..protocol.frame_types import ErrorCodes, FrameBase, FrameTypes, DEFAULT_INITIAL_WINDOW_SIZE
 from ..protocol.stream import Stream, StreamState
 from .headers import Headers
-from .parser import ParserFactory
+from .parser import ParserFactory, parse_headers
 from .recipient import (AbstractReader, IncompleteReadError,
                         RecipientFactory, _HTTP2_STREAM_QUEUE_DEPTH)
 from .response import ResponderFactory
@@ -51,6 +51,12 @@ def _make_log_record(scope):
 _access_logger = logging.getLogger('blackbull.access')
 
 _DEFAULT_PRIORITY: dict[str, int | bool] = {'urgency': 3, 'incremental': False}
+_HTTP2_EXTENSIONS: dict = {ASGIEvent.HTTP_RESPONSE_PUSH: {}}
+
+
+async def _run_guarded(coro, sem):
+    async with sem:
+        await coro
 
 
 # ---------------------------------------------------------------------------
@@ -174,6 +180,7 @@ class HTTP2Actor(Actor):
         _cfg = _get_settings()
         self.max_concurrent_streams: int = _cfg.h2_max_concurrent_streams
         self._request_timeout: float = _cfg.request_timeout
+        self._frame_yield_every: int = _cfg.frame_yield_every
         # Per-connection semaphore: caps concurrently-running stream handlers to
         # prevent a high-mux connection from starving other connections on the
         # same worker.  None means no cap.
@@ -304,6 +311,8 @@ class HTTP2Actor(Actor):
         """Read frames and dispatch stream tasks until EOF or GOAWAY."""
         waiting_continuation = False
         header_frame = None
+        _tasks_since_yield = 0
+        _yield_every = self._frame_yield_every
 
         while data := await self.receive():
             frame = self.factory.load(data)
@@ -312,16 +321,18 @@ class HTTP2Actor(Actor):
                 logger.error('Stream %d not found.', frame.stream_id)
                 raise Exception('Unused stream identifier')
 
-            send = self.make_sender(stream.stream_id)
             last_stream_id = self.root_stream.max_stream_id()
 
+            spawned = False
             match frame.FrameType():
                 case FrameTypes.HEADERS:
+                    send = self.make_sender(stream.stream_id)
                     spawned = await self._on_headers_frame(frame, stream, send, tg)
                     if not spawned:
                         waiting_continuation = True
                         header_frame = frame
                 case FrameTypes.CONTINUATION:
+                    send = self.make_sender(stream.stream_id)
                     spawned = await self._on_continuation_frame(
                         frame, stream, send, tg, header_frame, waiting_continuation)
                     if spawned:
@@ -333,6 +344,12 @@ class HTTP2Actor(Actor):
                     return
                 case _:
                     await ResponderFactory.create(frame).respond(self)
+
+            if spawned and _yield_every > 0:
+                _tasks_since_yield += 1
+                if _tasks_since_yield >= _yield_every:
+                    await asyncio.sleep(0)
+                    _tasks_since_yield = 0
 
         _signal_recipients(self._recipients)
 
@@ -393,11 +410,7 @@ class HTTP2Actor(Actor):
             final_coro = coro
 
         if self._stream_semaphore is not None:
-            _sem = self._stream_semaphore
-            async def _guarded(c=final_coro, s=_sem):
-                async with s:
-                    await c
-            task = tg.create_task(_guarded())
+            task = tg.create_task(_run_guarded(final_coro, self._stream_semaphore))
         else:
             task = tg.create_task(final_coro)
 
@@ -419,7 +432,7 @@ class HTTP2Actor(Actor):
         if not frame.end_headers:
             return False
 
-        scope = ParserFactory.Get(frame, stream).parse()
+        scope = parse_headers(frame)
         self._fill_scope_connection(scope)
         stream.scope = scope
 
@@ -431,13 +444,14 @@ class HTTP2Actor(Actor):
             return True
 
         scope['http2_priority'] = _resolve_priority(stream, scope)
-        scope['extensions'] = {ASGIEvent.HTTP_RESPONSE_PUSH: {}}
+        scope['extensions'] = _HTTP2_EXTENSIONS
         stream_recipient = RecipientFactory.http2(queue_depth=self._stream_queue_depth)
         self._recipients[stream.stream_id] = stream_recipient
         stream.on_headers_received(end_stream=bool(frame.end_stream))
         if frame.end_stream:
-            stream_recipient.put_event(
-                {'type': ASGIEvent.HTTP_REQUEST, 'body': b'', 'more_body': False})
+            # No body to deliver — skip queue allocation; recipient synthesizes
+            # the empty http.request event on first receive() call if needed.
+            stream_recipient.mark_end_of_stream_on_headers()
         log_record = _make_log_record(scope)
         capturing_send = _make_capturing_send(send, log_record)
         self._spawn_stream_task(tg, stream.stream_id, scope, stream_recipient, capturing_send, log_record)
@@ -465,7 +479,7 @@ class HTTP2Actor(Actor):
             return False
 
         header_frame.parse_payload()
-        scope = ParserFactory.Get(header_frame, stream).parse()
+        scope = parse_headers(header_frame)
         self._fill_scope_connection(scope)
 
         if self._active_stream_count >= self.max_concurrent_streams:
@@ -474,7 +488,7 @@ class HTTP2Actor(Actor):
             return True
 
         scope['http2_priority'] = _resolve_priority(stream, scope)
-        scope['extensions'] = {ASGIEvent.HTTP_RESPONSE_PUSH: {}}
+        scope['extensions'] = _HTTP2_EXTENSIONS
         stream.scope = scope
         stream_recipient = RecipientFactory.http2(queue_depth=self._stream_queue_depth)
         self._recipients[stream.stream_id] = stream_recipient
@@ -617,12 +631,13 @@ class HTTP2Actor(Actor):
             'headers': Headers([(k.encode() if isinstance(k, str) else k,
                                   v.encode() if isinstance(v, str) else v)
                                  for k, v in regular]),
-            'extensions': {ASGIEvent.HTTP_RESPONSE_PUSH: {}},
+            'extensions': _HTTP2_EXTENSIONS,
             'http2_priority': _DEFAULT_PRIORITY,
         }
 
         push_recipient = RecipientFactory.http2(queue_depth=self._stream_queue_depth)
-        push_recipient.put_event({'type': ASGIEvent.HTTP_REQUEST, 'body': b'', 'more_body': False})
+        # Pushed requests have no body — same lazy-queue path as GETs with END_STREAM on HEADERS.
+        push_recipient.mark_end_of_stream_on_headers()
         self._recipients[push_stream_id] = push_recipient
         push_sender = SenderFactory.http2(
             self._writer, self.factory, push_stream_id, push_callback=None)

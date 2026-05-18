@@ -80,7 +80,7 @@ class WindowUpdateResponder(Responder):
             )
             for sender in handler._senders.values():
                 sender.connection_window_size += increment
-                sender._window_open.set()
+                sender.wake_window()
         else:
             sender = handler.make_sender(self.frame.stream_id)
             sender.window_update(increment)

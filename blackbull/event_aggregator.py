@@ -41,6 +41,8 @@ class EventAggregator:
 
     async def on_request_received(self, scope: dict[str, Any]) -> None:
         """Fire Level B ``request_received``."""
+        if not self._dispatcher.has_listeners('request_received'):
+            return
         client = scope.get('client') or ['-']
         await self._dispatcher.emit(Event("request_received", {
             'scope':        scope,
@@ -55,23 +57,28 @@ class EventAggregator:
         self, scope: dict[str, Any], receive: Any, send: Any, call_next: Any
     ) -> None:
         """Fire Level B ``before_handler`` then invoke the next handler."""
-        await self._dispatcher.emit(Event("before_handler", {
-            'scope':  scope,
-            'method': scope.get('method', '-'),
-            'path':   scope.get('path', '-'),
-        }))
+        if self._dispatcher.has_listeners('before_handler'):
+            await self._dispatcher.emit(Event("before_handler", {
+                'scope':  scope,
+                'method': scope.get('method', '-'),
+                'path':   scope.get('path', '-'),
+            }))
         await call_next(scope, receive, send)
 
     async def on_after_handler(
         self, scope: dict[str, Any], exception: BaseException | None = None
     ) -> None:
         """Fire Level B ``after_handler``."""
+        if not self._dispatcher.has_listeners('after_handler'):
+            return
         await self._dispatcher.emit(
             Event("after_handler", {"scope": scope, "exception": exception})
         )
 
     async def on_request_completed(self, scope: dict[str, Any]) -> None:
         """Fire Level B ``request_completed``."""
+        if not self._dispatcher.has_listeners('request_completed'):
+            return
         log = scope.get('state', {}).get('access_log')
         client = scope.get('client') or ['-']
         await self._dispatcher.emit(Event("request_completed", {
@@ -87,6 +94,8 @@ class EventAggregator:
 
     async def on_request_disconnected(self, scope: dict[str, Any]) -> None:
         """Fire Level B ``request_disconnected``."""
+        if not self._dispatcher.has_listeners('request_disconnected'):
+            return
         client = scope.get('client') or ['-']
         await self._dispatcher.emit(Event("request_disconnected", {
             'scope':        scope,
@@ -100,6 +109,8 @@ class EventAggregator:
         self, scope: dict[str, Any], exception: BaseException
     ) -> None:
         """Fire Level B ``error``."""
+        if not self._dispatcher.has_listeners('error'):
+            return
         await self._dispatcher.emit(
             Event("error", {"scope": scope, "exception": exception})
         )

@@ -26,7 +26,13 @@ class Actor:
     """
 
     def __init__(self) -> None:
-        self._inbox: asyncio.Queue[Message] = asyncio.Queue()
+        self.__inbox: asyncio.Queue[Message] | None = None
+
+    @property
+    def _inbox(self) -> asyncio.Queue[Message]:
+        if self.__inbox is None:
+            self.__inbox = asyncio.Queue()
+        return self.__inbox
 
     async def run(self) -> None:
         """Consume the inbox until the task is cancelled."""

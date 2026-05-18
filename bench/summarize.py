@@ -7,7 +7,9 @@ Writes:
     bench/results/20260517-201141.md
 """
 import re
+import statistics
 import sys
+from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -45,6 +47,10 @@ class ScenarioResult:
     # TLS
     tls_proto: str = ""
     cipher: str = ""
+
+    # multi-run aggregation fields
+    run_count: int = 1
+    spread_pct: float | None = None  # (max-min)/median req/s × 100
 
     @property
     def tls_pct(self) -> float:
@@ -192,6 +198,39 @@ def parse(text: str) -> tuple[dict[str, str], list[ScenarioResult]]:
 
 
 # ---------------------------------------------------------------------------
+# Multi-run aggregation
+# ---------------------------------------------------------------------------
+
+def aggregate_runs(results: list[ScenarioResult]) -> list[ScenarioResult]:
+    """Group same-label runs; return one median-representative result per label."""
+    if not results:
+        return results
+
+    groups: dict[str, list[ScenarioResult]] = defaultdict(list)
+    order: list[str] = []
+    for r in results:
+        if r.label not in groups:
+            order.append(r.label)
+        groups[r.label].append(r)
+
+    agg: list[ScenarioResult] = []
+    for label in order:
+        runs = groups[label]
+        if len(runs) == 1:
+            runs[0].run_count = 1
+            agg.append(runs[0])
+            continue
+        rates = [r.req_s for r in runs]
+        med = statistics.median(rates)
+        spread = (max(rates) - min(rates)) / med * 100 if med > 0 else 0.0
+        rep = min(runs, key=lambda r: abs(r.req_s - med))
+        rep.run_count = len(runs)
+        rep.spread_pct = spread
+        agg.append(rep)
+    return agg
+
+
+# ---------------------------------------------------------------------------
 # Formatting helpers
 # ---------------------------------------------------------------------------
 
@@ -242,26 +281,56 @@ def render(env: dict[str, str], results: list[ScenarioResult], stem: str) -> str
         out.append("_(no environment header found in raw log)_")
 
     # ---- summary table ----
-    out += [
-        "",
-        "## Summary",
-        "",
-        "| Scenario | req/s | mean lat | ±sd | max lat | throughput | run s | TLS% | failed |",
-        "|---|---|---|---|---|---|---|---|---|",
-    ]
+    multi_run = any(r.run_count > 1 for r in results)
+    if multi_run:
+        out += [
+            "",
+            "## Summary",
+            "",
+            "| Scenario | req/s | spread | mean lat | ±sd | max lat | throughput | run s | TLS% | failed |",
+            "|---|---|---|---|---|---|---|---|---|---|",
+        ]
+    else:
+        out += [
+            "",
+            "## Summary",
+            "",
+            "| Scenario | req/s | mean lat | ±sd | max lat | throughput | run s | TLS% | failed |",
+            "|---|---|---|---|---|---|---|---|---|",
+        ]
     for r in results:
         flag = _tls_flag(r)
-        out.append(
-            f"| {r.label} "
-            f"| {_fmt_rps(r.req_s)} "
-            f"| {_fmt_ms(r.latency.mean)} "
-            f"| {_fmt_ms(r.latency.sd)} "
-            f"| {_fmt_ms(r.latency.max)} "
-            f"| {_fmt_mbs(r.tput_mbs)} "
-            f"| {r.run_s:.2f} "
-            f"| {r.tls_pct:.1f}%{flag} "
-            f"| {'⚠ ' + str(r.failed) if r.failed else '0'} |"
-        )
+        if multi_run:
+            if r.spread_pct is not None:
+                spread_str = f"{r.spread_pct:.1f}% ({r.run_count}×)"
+                if r.spread_pct > 10:
+                    spread_str += " ⚠"
+            else:
+                spread_str = "—"
+            out.append(
+                f"| {r.label} "
+                f"| {_fmt_rps(r.req_s)} "
+                f"| {spread_str} "
+                f"| {_fmt_ms(r.latency.mean)} "
+                f"| {_fmt_ms(r.latency.sd)} "
+                f"| {_fmt_ms(r.latency.max)} "
+                f"| {_fmt_mbs(r.tput_mbs)} "
+                f"| {r.run_s:.2f} "
+                f"| {r.tls_pct:.1f}%{flag} "
+                f"| {'⚠ ' + str(r.failed) if r.failed else '0'} |"
+            )
+        else:
+            out.append(
+                f"| {r.label} "
+                f"| {_fmt_rps(r.req_s)} "
+                f"| {_fmt_ms(r.latency.mean)} "
+                f"| {_fmt_ms(r.latency.sd)} "
+                f"| {_fmt_ms(r.latency.max)} "
+                f"| {_fmt_mbs(r.tput_mbs)} "
+                f"| {r.run_s:.2f} "
+                f"| {r.tls_pct:.1f}%{flag} "
+                f"| {'⚠ ' + str(r.failed) if r.failed else '0'} |"
+            )
 
     # ---- per-scenario detail ----
     out += ["", "## Detailed results", ""]
@@ -345,6 +414,8 @@ class K6ScenarioResult:
     error_rate: float = 0.0
     total_reqs: int = 0
     h2_rate: float | None = None  # fraction of requests served over HTTP/2 (None = not tracked)
+    run_count: int = 1
+    spread_pct: float | None = None  # (max-min)/median req/s × 100 across stress runs
 
 
 def parse_k6_summary(path: Path, label: str) -> K6ScenarioResult:
@@ -380,47 +451,77 @@ def parse_k6_summary(path: Path, label: str) -> K6ScenarioResult:
     return r
 
 
+def aggregate_k6_stress(runs: list[K6ScenarioResult]) -> K6ScenarioResult:
+    """Return a single K6ScenarioResult with median metrics across stress runs."""
+    if len(runs) == 1:
+        r = runs[0]
+        r.label = "stress (500 VU, /ping)"
+        r.run_count = 1
+        return r
+    rates = [r.req_s for r in runs]
+    med = statistics.median(rates)
+    spread = (max(rates) - min(rates)) / med * 100 if med > 0 else 0.0
+    h2_vals = [r.h2_rate for r in runs if r.h2_rate is not None]
+    return K6ScenarioResult(
+        label="stress (500 VU, /ping)",
+        req_s=med,
+        p50_ms=statistics.median([r.p50_ms for r in runs]),
+        p95_ms=statistics.median([r.p95_ms for r in runs]),
+        p99_ms=statistics.median([r.p99_ms for r in runs]),
+        max_ms=statistics.median([r.max_ms for r in runs]),
+        error_rate=statistics.median([r.error_rate for r in runs]),
+        total_reqs=int(statistics.median([r.total_reqs for r in runs])),
+        h2_rate=statistics.median(h2_vals) if h2_vals else None,
+        run_count=len(runs),
+        spread_pct=spread,
+    )
+
+
 def render_k6(results: list[K6ScenarioResult]) -> str:
     """Return a markdown section to append to an existing summary file."""
     has_h2 = any(r.h2_rate is not None for r in results)
-    header = "| Scenario | proto | req/s | p50 | p95 | p99 | max | errors | requests |"
-    sep    = "|---|---|---|---|---|---|---|---|---|"
-    if not has_h2:
-        header = "| Scenario | req/s | p50 | p95 | p99 | max | errors | requests |"
-        sep    = "|---|---|---|---|---|---|---|---|"
+    has_spread = any(r.run_count > 1 for r in results)
+
+    def _spread_str(r: K6ScenarioResult) -> str:
+        if r.spread_pct is None:
+            return "—"
+        s = f"{r.spread_pct:.1f}% ({r.run_count}×)"
+        return s + " ⚠" if r.spread_pct > 10 else s
+
+    cols = ["Scenario"]
+    if has_h2:
+        cols.append("proto")
+    cols += ["req/s"]
+    if has_spread:
+        cols.append("spread")
+    cols += ["p50", "p95", "p99", "max", "errors", "requests"]
+
+    header = "| " + " | ".join(cols) + " |"
+    sep    = "|" + "|".join("---" for _ in cols) + "|"
 
     out: list[str] = ["", "---", "", "## k6 results", "", header, sep]
     for r in results:
         err_str = f"{r.error_rate * 100:.2f}%" if r.error_rate > 0 else "0%"
+        cells = [r.label]
         if has_h2:
             if r.h2_rate is None:
-                h2_str = "—"
+                cells.append("—")
             elif r.h2_rate >= 0.999:
-                h2_str = "HTTP/2 ✓"
+                cells.append("HTTP/2 ✓")
             else:
-                h2_str = f"HTTP/2 {r.h2_rate * 100:.1f}% ⚠"
-            out.append(
-                f"| {r.label} "
-                f"| {h2_str} "
-                f"| {_fmt_rps(r.req_s)} "
-                f"| {_fmt_ms(r.p50_ms)} "
-                f"| {_fmt_ms(r.p95_ms)} "
-                f"| {_fmt_ms(r.p99_ms)} "
-                f"| {_fmt_ms(r.max_ms)} "
-                f"| {err_str} "
-                f"| {r.total_reqs:,} |"
-            )
-        else:
-            out.append(
-                f"| {r.label} "
-                f"| {_fmt_rps(r.req_s)} "
-                f"| {_fmt_ms(r.p50_ms)} "
-                f"| {_fmt_ms(r.p95_ms)} "
-                f"| {_fmt_ms(r.p99_ms)} "
-                f"| {_fmt_ms(r.max_ms)} "
-                f"| {err_str} "
-                f"| {r.total_reqs:,} |"
-            )
+                cells.append(f"HTTP/2 {r.h2_rate * 100:.1f}% ⚠")
+        cells.append(_fmt_rps(r.req_s))
+        if has_spread:
+            cells.append(_spread_str(r))
+        cells += [
+            _fmt_ms(r.p50_ms),
+            _fmt_ms(r.p95_ms),
+            _fmt_ms(r.p99_ms),
+            _fmt_ms(r.max_ms),
+            err_str,
+            f"{r.total_reqs:,}",
+        ]
+        out.append("| " + " | ".join(cells) + " |")
     out.append("")
     return "\n".join(out)
 
@@ -443,7 +544,7 @@ def _usage() -> None:
     print(
         "Usage:\n"
         "  python bench/summarize.py <raw_h2load_log>\n"
-        "  python bench/summarize.py k6 <rampup.json> <stress.json> <summary.md>",
+        "  python bench/summarize.py k6 <rampup.json> <stress1.json> [stress2.json ...] <summary.md>",
         file=sys.stderr,
     )
     sys.exit(1)
@@ -452,6 +553,7 @@ def _usage() -> None:
 def _main_h2load() -> None:
     raw = Path(sys.argv[1])
     env, results = parse(raw.read_text())
+    results = aggregate_runs(results)
     stem = raw.stem.replace("raw_", "")
     out = raw.parent / f"{stem}.md"
     out.write_text(render(env, results, stem))
@@ -459,15 +561,22 @@ def _main_h2load() -> None:
 
 
 def _main_k6() -> None:
+    # argv: k6 <rampup.json> <stress1.json> [stress2.json ...] <summary.md>
     if len(sys.argv) < 5:
         _usage()
     rampup_json = Path(sys.argv[2])
-    stress_json  = Path(sys.argv[3])
-    md_file      = Path(sys.argv[4])
+    md_file     = Path(sys.argv[-1])          # last arg is the .md output file
+    stress_paths = [Path(p) for p in sys.argv[3:-1]]
+
+    stress_runs = [
+        parse_k6_summary(p, f"stress run {i+1}")
+        for i, p in enumerate(stress_paths)
+    ]
+    stress_agg = aggregate_k6_stress(stress_runs)
 
     k6_results = [
         parse_k6_summary(rampup_json, "rampup (0→200 VU, /ping)"),
-        parse_k6_summary(stress_json,  "stress (500 VU, /ping)"),
+        stress_agg,
     ]
 
     md_file.write_text(md_file.read_text() + render_k6(k6_results))

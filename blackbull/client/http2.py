@@ -340,7 +340,7 @@ class HTTP2Client:
             self.connection_window_size += increment
             for sender in self._senders.values():
                 sender.connection_window_size += increment
-                sender._window_open.set()
+                sender.wake_window()
         else:
             self.stream_window_size[frame.stream_id] = (
                 self.stream_window_size.get(frame.stream_id, self.initial_window_size)

@@ -98,7 +98,7 @@ class TestHeaderNameNormalization:
         raw = _make_h2_frame(FrameTypes.HEADERS, HeaderFrameFlags.END_HEADERS, 1, block)
         frame = factory.load(raw)
         names = [k for k, _ in frame.headers]
-        assert 'content-type' in names
+        assert b'content-type' in names
 
     def test_mixed_case_header_name_is_lowercased(self):
         """Mixed-case header name from a non-conformant peer must be lowercased.
@@ -111,8 +111,8 @@ class TestHeaderNameNormalization:
                      + bytes([0x0a]) + b'text/plain')
         frame = self._frame_with_raw_block(raw_block)
         names = [k for k, _ in frame.headers]
-        assert 'content-type' in names
-        assert 'Content-Type' not in names
+        assert b'content-type' in names
+        assert b'Content-Type' not in names
 
     def test_all_uppercase_header_name_is_lowercased(self):
         """All-uppercase header name must be stored as lowercase."""
@@ -120,8 +120,8 @@ class TestHeaderNameNormalization:
                      + bytes([0x09]) + b'localhost')
         frame = self._frame_with_raw_block(raw_block)
         names = [k for k, _ in frame.headers]
-        assert 'host' in names
-        assert 'HOST' not in names
+        assert b'host' in names
+        assert b'HOST' not in names
 
     def test_pseudo_header_with_wrong_case_is_lowercased(self):
         """:Method (wrong case) must be stored as :method in pseudo_headers.
@@ -142,7 +142,7 @@ class TestHeaderNameNormalization:
                      + bytes([0x11]) + b'Text/Plain; q=1.0')
         frame = self._frame_with_raw_block(raw_block)
         values = [v for _, v in frame.headers]
-        assert 'Text/Plain; q=1.0' in values
+        assert b'Text/Plain; q=1.0' in values
 
 
 # ---------------------------------------------------------------------------

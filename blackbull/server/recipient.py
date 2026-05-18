@@ -221,14 +221,38 @@ class HTTP2Recipient(BaseRecipient):
     The server loop feeds frames via ``put_DATAFrame()`` (non-blocking).
     The ASGI app calls ``__call__()`` which suspends until an event is available,
     hiding the concurrency from both sides.
+
+    For GET-style requests (END_STREAM on HEADERS, no DATA frames), the caller
+    invokes :meth:`mark_end_of_stream_on_headers` instead of pre-queuing an empty
+    ``http.request`` event.  The Queue is then never allocated — the empty event
+    is synthesized lazily in :meth:`__call__` only if the handler reads it.
     """
 
     def __init__(self, frame: FrameBase | None = None,
                  queue_depth: int = _HTTP2_STREAM_QUEUE_DEPTH):
         super().__init__(None)
-        self._queue: asyncio.Queue = asyncio.Queue(maxsize=queue_depth)
+        self._queue: asyncio.Queue | None = None
+        self._queue_depth = queue_depth
+        # When True, HEADERS carried END_STREAM — request has no body.
+        # __call__() returns one empty http.request event without allocating a queue.
+        self._end_of_stream_on_headers: bool = False
+        # Set once the synthetic empty event has been delivered.
+        self._initial_consumed: bool = False
         if isinstance(frame, Data):
             self.put_DATAFrame(frame)
+
+    def _ensure_queue(self) -> asyncio.Queue:
+        if self._queue is None:
+            self._queue = asyncio.Queue(maxsize=self._queue_depth)
+        return self._queue
+
+    def mark_end_of_stream_on_headers(self) -> None:
+        """Mark this stream as ended on HEADERS (no body to deliver).
+
+        Replaces ``put_event({type: http.request, body: b'', more_body: False})``
+        with a flag — saves one ``asyncio.Queue`` allocation per body-less request.
+        """
+        self._end_of_stream_on_headers = True
 
     def make_event(self, frame: Data) -> dict:
         return {
@@ -240,7 +264,7 @@ class HTTP2Recipient(BaseRecipient):
     def put_DATAFrame(self, frame: Data) -> bool:
         """Enqueue a DATA frame event. Returns False if the queue is full."""
         try:
-            self._queue.put_nowait(self.make_event(frame))
+            self._ensure_queue().put_nowait(self.make_event(frame))
             return True
         except asyncio.QueueFull:
             logger.warning('HTTP2Recipient queue full on stream — dropping DATA frame')
@@ -249,23 +273,38 @@ class HTTP2Recipient(BaseRecipient):
     def put_event(self, event: dict) -> bool:
         """Enqueue a pre-built event dict. Returns False if the queue is full."""
         try:
-            self._queue.put_nowait(event)
+            self._ensure_queue().put_nowait(event)
             return True
         except asyncio.QueueFull:
             logger.warning('HTTP2Recipient queue full on stream — dropping event %r', event.get('type'))
             return False
 
     def put_disconnect(self) -> None:
-        """Unblock a waiting __call__() with an http.disconnect event."""
+        """Unblock a waiting __call__() with an http.disconnect event.
+
+        Skipped when end-of-stream-on-headers has been delivered and no queue
+        was ever created — no consumer can be waiting.
+        """
+        if (self._queue is None
+                and self._end_of_stream_on_headers
+                and self._initial_consumed):
+            return
         try:
-            self._queue.put_nowait({'type': ASGIEvent.HTTP_DISCONNECT})
+            self._ensure_queue().put_nowait({'type': ASGIEvent.HTTP_DISCONNECT})
         except asyncio.QueueFull:
             # If the queue is completely full the app task is hopelessly behind;
             # TaskGroup cancellation will clean up the stream regardless.
             logger.warning('HTTP2Recipient: could not deliver http.disconnect — queue full')
 
     async def __call__(self) -> dict:
-        return await self._queue.get()
+        # Fast path: GET with END_STREAM on HEADERS and no body — synthesize the
+        # empty http.request event without allocating a queue.
+        if (self._end_of_stream_on_headers
+                and not self._initial_consumed
+                and self._queue is None):
+            self._initial_consumed = True
+            return {'type': ASGIEvent.HTTP_REQUEST, 'body': b'', 'more_body': False}
+        return await self._ensure_queue().get()
 
 
 class WebSocketRecipient(BaseRecipient):

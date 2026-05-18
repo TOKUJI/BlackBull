@@ -57,11 +57,12 @@ pytest
 
 ### P3 — Features and enhancements
 
-- [ ] Worker processes / multiprocessing
- 
+- [x] Worker processes — pre-fork **multiprocessing** (not threads); each worker runs its own asyncio event loop. `BB_WORKERS=N` or `0` for cpu_count. SO_REUSEPORT gives each worker its own kernel accept queue.
+
 ### P4 — Application framework
 
-- [ ] Caching
+- [x] Route lookup cache — internal per-worker LRU cache (transparent, no user API)
+- [ ] Response/application caching middleware — cache-control, ETags, user-configurable TTL
 - [ ] Built-in session middleware (server-side sessions)
 - [ ] OpenAPI / interactive API docs (Swagger UI)
 - [ ] beartype for startup type checking on route handlers

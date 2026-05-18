@@ -8,14 +8,13 @@ from .headers import Headers
 
 logger = logging.getLogger(__name__)
 
+_ASGI_VERSION: dict = {'version': '3.0', 'spec_version': '2.2'}
+
 
 def _make_scope():
     return {
         'type': 'http',
-        'asgi': {
-            'version': '3.0',
-            'spec_version': '2.2',
-        },
+        'asgi': _ASGI_VERSION,
         'http_version': '2',
         'method': 'HEAD',
         'scheme': 'https',
@@ -80,6 +79,52 @@ class HTTP2ParserBase:
         raise NotImplementedError()
 
 
+def parse_headers(frame) -> dict:
+    """Build an ASGI ``http`` (or ``websocket``) scope from a HEADERS frame.
+
+    Hot path on every request — kept as a module-level function so that
+    callers avoid the dict-lookup + parser allocation that ``ParserFactory``
+    requires.
+    """
+    scope = _make_scope()
+
+    method   = frame.pseudo_headers.get(PseudoHeaders.METHOD, '')
+    protocol = frame.pseudo_headers.get(PseudoHeaders.PROTOCOL, '')
+
+    if method == 'CONNECT' and protocol == 'websocket':
+        # RFC 8441 §4 — Extended CONNECT bootstrapping WebSocket over HTTP/2
+        scope['type'] = 'websocket'
+        scheme = frame.pseudo_headers.get(PseudoHeaders.SCHEME, 'https')
+        scope['scheme'] = 'wss' if scheme == 'https' else 'ws'
+        if path := frame.pseudo_headers.get(PseudoHeaders.PATH):
+            scope['path'] = path
+        scope['headers'] = Headers(frame.headers)
+        scope['root_path'] = scope['headers'].get(
+            b'x-forwarded-prefix', b'').decode('utf-8')
+        raw_sp = scope['headers'].get(b'sec-websocket-protocol', b'')
+        scope['subprotocols'] = (
+            [p.strip().decode('utf-8', errors='replace') for p in raw_sp.split(b',')]
+            if raw_sp else [])
+        return scope
+
+    if method:
+        scope['method'] = method
+
+    if path := frame.pseudo_headers.get(PseudoHeaders.PATH):
+        scope['path'] = path
+
+    if scheme := frame.pseudo_headers.get(PseudoHeaders.SCHEME):
+        scope['scheme'] = scheme
+
+    scope['headers'] = Headers(frame.headers)
+
+    scope['root_path'] = scope['headers'].get(
+        b'x-forwarded-prefix', b''
+    ).decode('utf-8')
+
+    return scope
+
+
 class HTTP2HEADParser(HTTP2ParserBase):
     """Parses an HTTP/2 HEADERS frame into an ASGI ``http`` scope dict.
 
@@ -93,46 +138,7 @@ class HTTP2HEADParser(HTTP2ParserBase):
         super().__init__(frame, stream)
 
     def parse(self, payload=None):
-        scope = _make_scope()
-
-        method   = self.frame.pseudo_headers.get(PseudoHeaders.METHOD, '')
-        protocol = self.frame.pseudo_headers.get(PseudoHeaders.PROTOCOL, '')
-
-        if method == 'CONNECT' and protocol == 'websocket':
-            # RFC 8441 §4 — Extended CONNECT bootstrapping WebSocket over HTTP/2
-            scope['type'] = 'websocket'
-            scheme = self.frame.pseudo_headers.get(PseudoHeaders.SCHEME, 'https')
-            scope['scheme'] = 'wss' if scheme == 'https' else 'ws'
-            if path := self.frame.pseudo_headers.get(PseudoHeaders.PATH):
-                scope['path'] = path
-            scope['headers'] = Headers(
-                [(k.encode(), v.encode()) for k, v in self.frame.headers])
-            scope['root_path'] = scope['headers'].get(
-                b'x-forwarded-prefix', b'').decode('utf-8')
-            raw_sp = scope['headers'].get(b'sec-websocket-protocol', b'')
-            scope['subprotocols'] = (
-                [p.strip().decode('utf-8', errors='replace') for p in raw_sp.split(b',')]
-                if raw_sp else [])
-            return scope
-
-        if method:
-            scope['method'] = method
-
-        if path := self.frame.pseudo_headers.get(PseudoHeaders.PATH):
-            scope['path'] = path
-
-        if scheme := self.frame.pseudo_headers.get(PseudoHeaders.SCHEME):
-            scope['scheme'] = scheme
-
-        scope['headers'] = Headers(
-            [(k.encode(), v.encode()) for k, v in self.frame.headers]
-        )
-
-        scope['root_path'] = scope['headers'].get(
-            b'x-forwarded-prefix', b''
-        ).decode('utf-8')
-
-        return scope
+        return parse_headers(self.frame)
 
 
 class HTTP2DATAParser(HTTP2ParserBase):

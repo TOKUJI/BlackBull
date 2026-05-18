@@ -11,19 +11,19 @@ set -e
 BASE="https://localhost:8443"
 RESULT_DIR="bench/results"
 mkdir -p "$RESULT_DIR"
+K6_RUNS="${K6_RUNS:-3}"
 
 # Use the supplied md file or create a new one
 if [ -n "$1" ] && [ -f "$1" ]; then
     MD_FILE="$1"
     TIMESTAMP=$(basename "$MD_FILE" .md)
 else
-    TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
+    TIMESTAMP="${TIMESTAMP:-$(date +%Y%m%d-%H%M%S)}"
     MD_FILE="$RESULT_DIR/${TIMESTAMP}.md"
     echo "# k6 results — ${TIMESTAMP}" > "$MD_FILE"
 fi
 
 RAMPUP_JSON="$RESULT_DIR/k6_rampup_${TIMESTAMP}.json"
-STRESS_JSON="$RESULT_DIR/k6_stress_${TIMESTAMP}.json"
 
 SEP="$(printf '=%.0s' {1..60})"
 
@@ -40,11 +40,16 @@ k6 run \
     bench/k6/http_rampup.js
 
 echo ""
-echo "--- stress: 500 VU × 60 s, /ping ---"
-k6 run \
-    --summary-export="$STRESS_JSON" \
-    --summary-trend-stats="p(50),p(95),p(99),max" \
-    bench/k6/http_stress.js
+STRESS_JSONS=()
+for i in $(seq 1 "$K6_RUNS"); do
+    STRESS_JSON="$RESULT_DIR/k6_stress_${TIMESTAMP}_${i}.json"
+    STRESS_JSONS+=("$STRESS_JSON")
+    echo "--- stress run $i/$K6_RUNS: 500 VU × 60 s, /ping ---"
+    k6 run \
+        --summary-export="$STRESS_JSON" \
+        --summary-trend-stats="p(50),p(95),p(99),max" \
+        bench/k6/http_stress.js
+    echo ""
+done
 
-echo ""
-python bench/summarize.py k6 "$RAMPUP_JSON" "$STRESS_JSON" "$MD_FILE"
+python bench/summarize.py k6 "$RAMPUP_JSON" "${STRESS_JSONS[@]}" "$MD_FILE"

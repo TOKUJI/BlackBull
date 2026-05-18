@@ -96,6 +96,15 @@ BB_COMPRESSION_EXECUTOR_THRESHOLD
     executor so the event loop can continue processing other requests during
     the (CPU-heavy) compress call.  ``0`` always compresses on the event loop
     (disables offloading).  Default: ``65536`` (64 KiB).
+BB_FRAME_YIELD_EVERY
+    Number of stream tasks spawned per connection before the frame loop
+    inserts ``await asyncio.sleep(0)`` to let the event loop dispatch the
+    queued tasks.  Under burst traffic (e.g. 500 VUs all sending at once)
+    the frame loop can process many HEADERS frames without yielding, which
+    stalls all waiting tasks and inflates p99 latency.  Yielding every N
+    spawns caps the maximum synchronous run to N × ~50 µs regardless of
+    burst size.  ``0`` disables cooperative yielding (legacy behaviour).
+    Default: ``8``.
 """
 import dataclasses
 import os
@@ -247,6 +256,12 @@ class Settings:
     #: executor so the event loop stays responsive.  0 = always on event loop (disable offloading).
     compression_executor_threshold: int = 65536  # 64 KiB
 
+    #: Cooperative yield interval for the HTTP/2 frame loop.  After this many
+    #: stream tasks are spawned without a natural yield, ``asyncio.sleep(0)``
+    #: is inserted so the event loop can dispatch queued tasks.
+    #: 0 = disabled (legacy behaviour).
+    frame_yield_every: int = 8
+
 
 def get_settings() -> Settings:
     """Read environment variables and return an immutable :class:`Settings`."""
@@ -277,6 +292,7 @@ def get_settings() -> Settings:
         h2_active_streams=_int_env_nonneg('BB_H2_ACTIVE_STREAMS', 20),
         compression_min_size=_int_env('BB_COMPRESSION_MIN_SIZE', 100),
         compression_executor_threshold=_int_env_nonneg('BB_COMPRESSION_EXECUTOR_THRESHOLD', 65536),
+        frame_yield_every=_int_env_nonneg('BB_FRAME_YIELD_EVERY', 8),
     )
 
 

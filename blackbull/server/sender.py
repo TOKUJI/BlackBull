@@ -246,8 +246,7 @@ class HTTP2Sender(BaseSender):
         self.connection_window_size = DEFAULT_INITIAL_WINDOW_SIZE
         self.stream_window_size = {stream_id: DEFAULT_INITIAL_WINDOW_SIZE}
         self.max_frame_size = DEFAULT_MAX_FRAME_SIZE
-        self._window_open = asyncio.Event()
-        self._window_open.set()  # window starts open
+        self._window_open: asyncio.Event | None = None  # created lazily on first stall
 
     async def _write(self, data: bytes):
         """Write a frame to the transport.
@@ -280,6 +279,8 @@ class HTTP2Sender(BaseSender):
         while offset < total:
             while (self.connection_window_size <= 0 or
                    self.stream_window_size[self._stream_id] <= 0):
+                if self._window_open is None:
+                    self._window_open = asyncio.Event()
                 self._window_open.clear()
                 await self._window_open.wait()
 
@@ -302,14 +303,19 @@ class HTTP2Sender(BaseSender):
 
     def window_update(self, increment: int) -> None:
         self.stream_window_size[self._stream_id] += increment
-        self._window_open.set()  # wake any blocked _write_data()
+        self.wake_window()
+
+    def wake_window(self) -> None:
+        """Wake any blocked _write_data() after a window credit change."""
+        if self._window_open is not None:
+            self._window_open.set()
 
     def apply_settings(self, initial_window_size: int | None = None,
                        max_frame_size: int | None = None) -> None:
         """Apply SETTINGS parameters to this sender."""
         if initial_window_size is not None:
             self.stream_window_size[self._stream_id] = initial_window_size
-            self._window_open.set()
+            self.wake_window()
         if max_frame_size is not None:
             self.max_frame_size = max_frame_size
 
@@ -330,9 +336,25 @@ class HTTP2Sender(BaseSender):
             h_frame.pseudo_headers[PseudoHeaders.STATUS] = str(status)
             for k, v in headers:
                 h_frame.headers.append((k, v))
-            await self._write(h_frame.save())
+            h_bytes = h_frame.save()
 
-            await self._write_data(body, end_stream=True)
+            total = len(body)
+            sid_bytes = self._stream_id.to_bytes(4, 'big')
+            if (total <= self.connection_window_size and
+                    total <= self.stream_window_size[self._stream_id] and
+                    total <= self.max_frame_size):
+                # Fast path: body fits in one DATA frame — single write + drain
+                end_flag = DataFrameFlags.END_STREAM.to_bytes(1, 'big')
+                if total == 0:
+                    d_bytes = b'\x00\x00\x00\x00' + end_flag + sid_bytes
+                else:
+                    d_bytes = total.to_bytes(3, 'big') + b'\x00' + end_flag + sid_bytes + body
+                await super()._write(h_bytes + d_bytes)
+                self.connection_window_size -= total
+                self.stream_window_size[self._stream_id] -= total
+            else:
+                await super()._write(h_bytes)
+                await self._write_data(body, end_stream=True)
 
         elif isinstance(body, dict):
             event_type = body.get('type', '')

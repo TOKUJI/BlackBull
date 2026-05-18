@@ -20,7 +20,8 @@ BASE="https://localhost:8443"
 # Create results directory and tee all output to a timestamped raw log
 RESULT_DIR="bench/results"
 mkdir -p "$RESULT_DIR"
-TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
+TIMESTAMP="${TIMESTAMP:-$(date +%Y%m%d-%H%M%S)}"
+RUNS="${RUNS:-3}"
 RAW_LOG="$RESULT_DIR/raw_${TIMESTAMP}.txt"
 exec > >(tee "$RAW_LOG") 2>&1
 
@@ -51,6 +52,20 @@ need() {
 }
 need h2load
 
+# Run one scenario: one suppressed warmup pass then RUNS measured passes.
+# Usage: run_h2 LABEL -n N -c C -m M URL
+run_h2() {
+    local label="$1"; shift
+    local url="${@: -1}"
+    h2load -n 1000 -c 10 -m 10 "$url" >/dev/null 2>&1 || true
+    local i
+    for i in $(seq 1 "$RUNS"); do
+        echo ""
+        echo "--- $label ---"
+        h2load "$@"
+    done
+}
+
 echo "$SEP"
 echo "h2load benchmark — BlackBull"
 echo "$(date)"
@@ -78,33 +93,13 @@ echo "uvloop     : $_uvloop"
 echo "Streams 1w : $_streams_1w"
 echo "Streams Nw : $_streams_nw"
 
-echo ""
-echo "--- /ping  streams/conn=1  (comparable to HTTP/1.1) ---"
-h2load -n 50000 -c 50 -m 1 "$BASE/ping"
-
-echo ""
-echo "--- /ping  streams/conn=10  (browser-like) ---"
-h2load -n 90000 -c 50 -m 10 "$BASE/ping"
-
-echo ""
-echo "--- /ping  streams/conn=50  (heavy multiplexing) ---"
-h2load -n 90000 -c 50 -m 50 "$BASE/ping"
-
-echo ""
-echo "--- /1kb   streams/conn=10 ---"
-h2load -n 90000 -c 50 -m 10 "$BASE/1kb"
-
-echo ""
-echo "--- /16kb  streams/conn=5  (larger responses) ---"
-h2load -n 50000 -c 20 -m 5 "$BASE/16kb"
-
-echo ""
-echo "--- /64kb  streams/conn=5  (flow-control exercise) ---"
-h2load -n 15000 -c 10 -m 5 "$BASE/64kb"
-
-echo ""
-echo "--- /1mb   streams/conn=3  (large response, 1 MiB window) ---"
-h2load -n 600 -c 5 -m 3 "$BASE/1mb"
+run_h2 "/ping  streams/conn=1  (comparable to HTTP/1.1)" -n 50000 -c 50 -m 1 "$BASE/ping"
+run_h2 "/ping  streams/conn=10  (browser-like)" -n 90000 -c 50 -m 10 "$BASE/ping"
+run_h2 "/ping  streams/conn=50  (heavy multiplexing)" -n 90000 -c 50 -m 50 "$BASE/ping"
+run_h2 "/1kb   streams/conn=10" -n 90000 -c 50 -m 10 "$BASE/1kb"
+run_h2 "/16kb  streams/conn=5  (larger responses)" -n 50000 -c 20 -m 5 "$BASE/16kb"
+run_h2 "/64kb  streams/conn=5  (flow-control exercise)" -n 15000 -c 10 -m 5 "$BASE/64kb"
+run_h2 "/1mb   streams/conn=3  (large response, 1 MiB window)" -n 600 -c 5 -m 3 "$BASE/1mb"
 
 echo ""
 echo "$SEP"

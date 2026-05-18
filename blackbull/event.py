@@ -64,6 +64,16 @@ class EventDispatcher:
         """Register an interception handler for ``event_name``."""
         self._interceptors[event_name].append(handler)
 
+    def has_listeners(self, event_name: str) -> bool:
+        """Return True if any interceptor or observer is registered for ``event_name``.
+
+        Hot path: callers use this to skip detail-dict / ``Event`` construction
+        when no one will receive the event.  ``defaultdict.get`` returns ``None``
+        for missing keys without inserting an empty list.
+        """
+        return bool(self._interceptors.get(event_name)) or bool(
+            self._observers.get(event_name))
+
     async def emit(self, event: Event) -> None:
         """Dispatch ``event`` to all registered handlers.
 

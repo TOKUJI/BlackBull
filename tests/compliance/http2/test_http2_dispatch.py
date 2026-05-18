@@ -200,7 +200,6 @@ class TestHTTP2FlowControl:
 
         sender.connection_window_size = 0
         sender.stream_window_size[1] = 0
-        sender._window_open.clear()
 
         payload = b'x' * 100
 
@@ -239,7 +238,6 @@ class TestHTTP2FlowControl:
         sender = HTTP2Sender(AsyncioWriter(mock_writer), FrameFactory(), stream_id=1)
         sender.connection_window_size = 0
         sender.stream_window_size[1] = 0
-        sender._window_open.clear()
 
         body = b'x' * 100
         task = asyncio.create_task(sender(body, HTTPStatus.OK, headers=[]))

@@ -9,6 +9,7 @@ pulling in the codec.
 """
 from enum import Enum, IntEnum, StrEnum
 from io import BytesIO
+from itertools import chain
 from hpack import Encoder, Decoder
 
 import logging
@@ -245,26 +246,27 @@ class Headers(FrameBase):
 
     def __init__(self, length: int, type_, flags: int, stream_id: int, *, data=None, decoder=None, encoder=None):
         super().__init__(length, type_, flags, stream_id)
-        logger.debug('Headers is called.')
         # Read flags
         self.end_stream = HeaderFrameFlags.END_STREAM & self.flags
         self.end_headers = HeaderFrameFlags.END_HEADERS & self.flags
         self.padded = HeaderFrameFlags.PADDED & self.flags
         self.priority = HeaderFrameFlags.PRIORITY & self.flags
-        logger.debug(f'stream_id = {stream_id}, '
-                     f'end_stream = {self.end_stream > 0}, '
-                     f'end_header = {self.end_headers > 0}, '
-                     f'padded = {self.padded > 0},'
-                     f'priority = {self.priority > 0}, '
-                     )
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug('Headers: stream_id=%d end_stream=%s end_headers=%s padded=%s priority=%s',
+                         stream_id, bool(self.end_stream), bool(self.end_headers),
+                         bool(self.padded), bool(self.priority))
         # set decoder and encoder (shared per-connection HPACK codec)
         self.decoder = decoder
         self.encoder = encoder
 
         # Pseudo-headers (RFC 7540 §8.1.2): :method, :path, :scheme, :status, etc.
+        # Values stored as str so they can flow directly into the ASGI scope
+        # (which requires str for method/path/scheme).
         self.pseudo_headers: dict[PseudoHeaders, str] = {}
-        # Regular headers as an ordered list of (name, value) tuples
-        self.headers: list[tuple[str, str]] = []
+        # Regular headers stored as bytes — ASGI requires bytes pairs and hpack
+        # returns bytes when decoded with raw=True (avoids the ~4% CPU cost of
+        # hpack's _unicode_if_needed bytes→str→bytes round-trip).
+        self.headers: list[tuple[bytes, bytes]] = []
 
         self.raw_block: bytes = b''
 
@@ -289,26 +291,36 @@ class Headers(FrameBase):
         if self.priority:
             self.stream_dependency = int.from_bytes(payload.read(4), 'big', signed=False)
             self.priority_weight = int.from_bytes(payload.read(1), 'big', signed=False)
-            logger.debug(f'stream_id = {self.stream_id}, '
-                         f'stream_dependency: {self.stream_dependency}, '
-                         f'priority_weight: {self.priority_weight}')
+            logger.debug('stream_id=%d stream_dependency=%d priority_weight=%d',
+                         self.stream_id, self.stream_dependency, self.priority_weight)
 
-        fields = self.decoder.decode(payload.read())
+        # raw=True keeps hpack output as bytes-bytes tuples and bypasses
+        # hpack's _unicode_if_needed UTF-8 decode (~4% CPU under load).
+        fields = self.decoder.decode(payload.read(), raw=True)
+        debug = logger.isEnabledFor(logging.DEBUG)
         for k, v in fields:
-            k_str = k.decode().lower() if isinstance(k, bytes) else k.lower()
-            v_str = v.decode() if isinstance(v, bytes) else v
-            if k_str in PseudoHeaders._value2member_map_:
-                self.pseudo_headers[PseudoHeaders(k_str)] = v_str
-            else:
-                self.headers.append((k_str, v_str))
-            logger.debug('%r: %r', k_str, v_str)
+            kb = bytes(k).lower()  # bytes(...) normalizes memoryview/bytearray
+            if kb[:1] == b':':
+                # Pseudo-headers (small fixed set) — decode key+value to str
+                # for PseudoHeaders enum lookup and ASGI scope storage.
+                k_str = kb.decode('ascii')
+                if k_str in PseudoHeaders._value2member_map_:
+                    self.pseudo_headers[PseudoHeaders(k_str)] = bytes(v).decode('utf-8')
+                    if debug:
+                        logger.debug('%r: %r', k_str, self.pseudo_headers[PseudoHeaders(k_str)])
+                    continue
+                # Unknown pseudo-header — fall through (RFC 7540 §8.1.2.1
+                # forbids this, but preserve the byte representation for now)
+            vb = v if isinstance(v, bytes) else bytes(v)
+            self.headers.append((kb, vb))
+            if debug:
+                logger.debug('%r: %r', kb, vb)
 
     @log
     def save(self):
         encoder = self.encoder if self.encoder is not None else Encoder()
         # Pseudo-headers MUST come before regular headers (RFC 7540 §8.1.2.1)
-        all_headers = list(self.pseudo_headers.items()) + self.headers
-        payload = encoder.encode(all_headers)
+        payload = encoder.encode(chain(self.pseudo_headers.items(), self.headers))
         self.length = len(payload)
 
         base = super().save()
