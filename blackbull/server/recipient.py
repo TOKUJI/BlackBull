@@ -31,7 +31,57 @@ class IncompleteReadError(EOFError):
 
 
 class ProtocolError(Exception):
-    """Raised when a WebSocket protocol violation is detected (RFC 6455)."""
+    """Raised when a WebSocket protocol violation is detected (RFC 6455).
+
+    ``close_code`` is the RFC 6455 §7.4 status code that should appear in
+    the CLOSE frame sent to the peer.  Defaults to 1002 (PROTOCOL_ERROR);
+    UTF-8 violations use 1007.
+    """
+    def __init__(self, message: str, close_code: int = 1002):
+        super().__init__(message)
+        self.close_code = close_code
+
+
+def _is_valid_close_code(code: int) -> bool:
+    """RFC 6455 §7.4 — which close codes may appear on the wire.
+
+    Allowed: 1000–1011 (defined), 3000–4999 (registered + private use).
+    Disallowed even though numerically in 1000-range: 1004 (reserved),
+    1005 (no status), 1006 (abnormal — TCP-only marker), 1015 (TLS-only
+    marker).  1012-1014 are defined but accepting them is fine.
+    """
+    if code in (1004, 1005, 1006, 1015):
+        return False
+    if 1000 <= code <= 1015:
+        return True
+    if 3000 <= code <= 4999:
+        return True
+    return False
+
+
+def _parse_close_payload(payload: bytes) -> tuple[int, bool]:
+    """Decode a CLOSE frame payload.
+
+    Returns ``(code, ok)`` where ``ok`` is False when the payload violates
+    RFC 6455 §5.5.1 — length 1 (truncated code), disallowed code value, or
+    non-UTF-8 reason text.  Empty payload is permitted and maps to code
+    1000 (NORMAL).
+    """
+    if not payload:
+        return 1000, True
+    if len(payload) == 1:
+        # RFC §5.5.1: when a Close frame contains a status code, the code
+        # MUST be 2 octets; a 1-octet payload is malformed.
+        return 1002, False
+    code = int.from_bytes(payload[:2], 'big', signed=False)
+    if not _is_valid_close_code(code):
+        return 1002, False
+    if len(payload) > 2:
+        try:
+            payload[2:].decode('utf-8')
+        except UnicodeDecodeError:
+            return 1002, False
+    return code, True
 
 
 class AbstractReader(ABC):
@@ -346,21 +396,33 @@ class WebSocketRecipient(BaseRecipient):
     async def _read_loop(self) -> None:
         """Eagerly read frames from the wire, emit events, and queue ASGI events."""
         assert self._event_queue is not None
+        _CONTROL_OPS = (WSOpcode.CLOSE, WSOpcode.PING, WSOpcode.PONG)
         try:
             while True:
                 h = await read_frame_header(self._reader)
+
+                # RFC 6455 §5.5 — control frames MUST have payload ≤125 and
+                # MUST NOT be fragmented.  Reject without reading the body.
+                if h.opcode in _CONTROL_OPS:
+                    if not h.fin:
+                        raise ProtocolError('fragmented control frame')
+                    if h.length > 125:
+                        raise ProtocolError(
+                            f'control frame payload {h.length} > 125')
+
+                # RFC 6455 §5.2 — reserved RSV bits MUST be 0 when no
+                # extension defines their meaning.  BlackBull doesn't
+                # advertise any extensions (no Sec-WebSocket-Extensions
+                # response header), so any RSV bit set is a protocol error.
+                if h.rsv1 or h.rsv2 or h.rsv3:
+                    raise ProtocolError(
+                        f'RSV bits set without negotiated extension '
+                        f'(rsv1={h.rsv1} rsv2={h.rsv2} rsv3={h.rsv3})')
+
                 payload = await read_payload(self._reader, h.masked, h.length)
 
                 if self._require_masked and not h.masked:
-                    raise ValueError(
-                        'Received unmasked frame from client, which is a protocol violation.'
-                    )
-
-                if h.opcode in (WSOpcode.CLOSE, WSOpcode.PING, WSOpcode.PONG) and not h.fin:
-                    raise ProtocolError('Control frame with FIN=0 is a protocol violation')
-
-                if h.rsv1:
-                    payload = zlib.decompress(payload + b'\x00\x00\xff\xff', wbits=-15)
+                    raise ProtocolError('unmasked client frame')
 
                 match h.opcode:
                     case WSOpcode.TEXT | WSOpcode.BINARY | WSOpcode.CONTINUATION:
@@ -378,9 +440,27 @@ class WebSocketRecipient(BaseRecipient):
         except (asyncio.IncompleteReadError, IncompleteReadError):
             await self._emit_disconnected(WSCloseCode.ABNORMAL)
             await self._event_queue.put({'type': ASGIEvent.WS_DISCONNECT, 'code': WSCloseCode.ABNORMAL})
+        except ProtocolError as exc:
+            close = encode_frame(
+                exc.close_code.to_bytes(2, 'big'),
+                opcode=WSOpcode.CLOSE,
+                mask=not self._require_masked,
+            )
+            try:
+                await self._writer.write(close)
+            except Exception:
+                pass
+            await self._emit_disconnected(exc.close_code)
+            # Surface the violation on the next app-side receive() (matches
+            # the legacy contract that any exception in the read loop is
+            # raised back to the app); the close frame has already gone out.
+            await self._event_queue.put(exc)
         except Exception as exc:
             close = encode_frame(
-                (1002).to_bytes(2, 'big'), opcode=WSOpcode.CLOSE)
+                (1011).to_bytes(2, 'big'),  # INTERNAL_ERROR
+                opcode=WSOpcode.CLOSE,
+                mask=not self._require_masked,
+            )
             try:
                 await self._writer.write(close)
             except Exception:
@@ -395,9 +475,16 @@ class WebSocketRecipient(BaseRecipient):
             return False
         msg_opcode, full_payload = result
         if msg_opcode == WSOpcode.TEXT:
+            try:
+                text = full_payload.decode('utf-8')
+            except UnicodeDecodeError as e:
+                # RFC 6455 §8.1 — invalid UTF-8 in a TEXT message MUST be
+                # treated as a CLOSE with status code 1007.
+                raise ProtocolError(f'invalid UTF-8 in TEXT message: {e}',
+                                    close_code=1007)
             asgi_event = {
                 'type': ASGIEvent.WS_RECEIVE,
-                'text': full_payload.decode('utf-8'),
+                'text': text,
                 'bytes': None,
             }
         else:
@@ -422,11 +509,29 @@ class WebSocketRecipient(BaseRecipient):
         """Handle CLOSE/PING/PONG frame; returns True if the connection should close."""
         assert self._event_queue is not None
         if opcode == WSOpcode.CLOSE:
-            await self._emit_disconnected(WSCloseCode.NORMAL)
+            # RFC 6455 §5.5.1 — when an endpoint receives a Close frame and
+            # has not yet sent one, it MUST send a Close frame in response,
+            # echoing the peer's status code if present.  Validate the code
+            # and the reason text first; on any violation, send 1002 instead.
+            code, reason_ok = _parse_close_payload(payload)
+            echo_code = code if reason_ok else WSCloseCode.PROTOCOL_ERROR
+            event_code = code if reason_ok else WSCloseCode.PROTOCOL_ERROR
+            close = encode_frame(
+                echo_code.to_bytes(2, 'big'),
+                opcode=WSOpcode.CLOSE,
+                mask=not self._require_masked,
+            )
+            try:
+                await self._writer.write(close)
+            except Exception:
+                pass
+            await self._emit_disconnected(event_code)
             await self._event_queue.put(
-                {'type': ASGIEvent.WS_DISCONNECT, 'code': WSCloseCode.NORMAL})
+                {'type': ASGIEvent.WS_DISCONNECT, 'code': event_code})
             return True
         if opcode == WSOpcode.PING:
+            # RFC 6455 §5.5 — control-frame payload MUST be ≤125 bytes; the
+            # frame-header reader catches that case before we get here.
             pong = encode_frame(payload, opcode=WSOpcode.PONG, mask=not self._require_masked)
             await self._writer.write(pong)
         # PONG: unsolicited pong — silently drop

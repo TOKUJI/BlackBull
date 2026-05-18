@@ -360,7 +360,11 @@ class TestPingPong:
         assert handler.writer.written == expected_pong
 
     async def test_pong_payload_matches_ping_payload(self):
-        """Pong payload must be identical to ping payload (RFC 6455 §5.5.2)."""
+        """Pong payload must be identical to ping payload (RFC 6455 §5.5.2).
+
+        The server also echoes a CLOSE frame in reply to the trailing CLOSE
+        (RFC §5.5.1), so the wire is ``pong + close_echo``.
+        """
         ping_payload = b'\x01\x02\x03\x04'
         frames = (_make_client_frame(ping_payload, opcode=0x9)
                   + _make_client_frame(b'', opcode=0x8))  # close to end loop
@@ -368,7 +372,8 @@ class TestPingPong:
         await handler.receive()       # connect
         await handler.receive()       # ping → pong, then close → disconnect
         pong = encode_frame(ping_payload, opcode=0xA)
-        assert handler.writer.written == pong
+        close_echo = encode_frame((1000).to_bytes(2, 'big'), opcode=0x8)
+        assert handler.writer.written == pong + close_echo
 
     async def test_empty_ping_causes_empty_pong(self):
         """Ping with empty payload must produce a pong with empty payload."""
@@ -784,17 +789,17 @@ class TestWebSocketDeflate:
             header += bytes([0x80 | 127]) + length.to_bytes(8, 'big')
         return header + mask + masked
 
-    async def test_deflate_frame_decompressed(self):
-        """RSV1=1 text frame must be decompressed before the app sees it."""
+    async def test_deflate_frame_rejected_without_negotiated_extension(self):
+        """RSV1=1 frame MUST be rejected when permessage-deflate wasn't negotiated.
+
+        BlackBull does not advertise Sec-WebSocket-Extensions, so any RSV
+        bit set on an incoming frame is a protocol error per RFC 6455 §5.2.
+        """
         payload = b'Hello, compressed world!'
         handler = _RecipientWrapper(self._deflate_frame(payload))
         await handler.receive()  # websocket.connect
-        event = await handler.receive()
-
-        assert event['type'] == 'websocket.receive'
-        assert event.get('text') == payload.decode(), (
-            f"Expected decompressed text={payload!r}; got {event!r}"
-        )
+        with pytest.raises(Exception):
+            await handler.receive()
 
     async def test_uncompressed_frame_unaffected_by_deflate_support(self):
         """A normal (RSV1=0) frame must pass through unchanged."""
