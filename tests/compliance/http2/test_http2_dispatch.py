@@ -346,7 +346,10 @@ class TestHTTP2GoAway:
         for call in handler.send_frame.call_args_list:
             frame = call.args[0]
             if hasattr(frame, 'FrameType') and frame.FrameType() == FrameTypes.GOAWAY:
-                ids.append(getattr(frame, 'stream_id', -1))
+                # last_stream_id is a separate payload field; frame.stream_id
+                # of a GOAWAY MUST be 0 (RFC 9113 §6.8) and is therefore not
+                # the value to compare here.
+                ids.append(getattr(frame, 'last_stream_id', -1))
         return ids
 
     async def test_goaway_response_carries_last_stream_id(self):

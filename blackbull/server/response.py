@@ -1,8 +1,10 @@
 from functools import partial
 import traceback
 
-from ..protocol.stream import Stream
-from ..protocol.frame_types import FrameTypes, SettingFrameFlags
+from ..protocol.stream import Stream, StreamState
+from ..protocol.frame_types import (
+    ErrorCodes, FrameTypes, PingFrameFlags, SettingFrameFlags,
+)
 import logging
 from ..logger import log
 
@@ -58,9 +60,21 @@ class Responder:
 
 class PingResponder(Responder):
     async def respond(self, handler):
+        # RFC 9113 §6.7 — PING with non-zero stream identifier is a connection
+        # error of type PROTOCOL_ERROR.
+        if self.frame.stream_id != 0:
+            await handler._connection_error(
+                ErrorCodes.PROTOCOL_ERROR,
+                f'PING with stream_id={self.frame.stream_id}')
+            return
+        # RFC 9113 §6.7 — a PING with ACK set is a response to our PING;
+        # we MUST NOT respond with another ACK.  Just drop it.
+        if self.frame.flags & PingFrameFlags.ACK:
+            logger.debug('PING ACK received — no response sent')
+            return
         res = handler.factory.create(
             FrameTypes.PING,
-            SettingFrameFlags.ACK,
+            PingFrameFlags.ACK,
             self.frame.stream_id,
             data=self.frame.payload,
             )
@@ -70,19 +84,57 @@ class PingResponder(Responder):
 
 
 class WindowUpdateResponder(Responder):
+    # RFC 9113 §6.9.1 — flow-control windows are 31-bit; values above this
+    # cause a FLOW_CONTROL_ERROR.
+    _MAX_FLOW_WINDOW = 2**31 - 1
+
     async def respond(self, handler):
+        # RFC 9113 §6.9 — a WINDOW_UPDATE frame with a length other than 4
+        # octets is a connection error of type FRAME_SIZE_ERROR.
+        if self.frame.length != 4:
+            await handler._connection_error(
+                ErrorCodes.FRAME_SIZE_ERROR,
+                f'WINDOW_UPDATE length={self.frame.length}')
+            return
+
         increment = self.frame.window_size
+        # RFC 9113 §6.9 — increment of 0 is a PROTOCOL_ERROR.  On stream 0 it
+        # is a connection error; on a stream it is a stream error.
+        if increment == 0:
+            if self.frame.stream_id == 0:
+                await handler._connection_error(
+                    ErrorCodes.PROTOCOL_ERROR,
+                    'WINDOW_UPDATE increment 0 on connection')
+            else:
+                await handler.send_frame(handler.factory.rst_stream(
+                    self.frame.stream_id, ErrorCodes.PROTOCOL_ERROR))
+            return
+
         if self.frame.stream_id == 0:
             # Connection-level: credit all cached stream senders and update the
             # running total so future senders start with the current budget.
-            handler._connection_window_size = (
-                getattr(handler, '_connection_window_size', 65535) + increment
-            )
+            new_window = getattr(handler, '_connection_window_size', 65535) + increment
+            # RFC 9113 §6.9.1 — exceeding 2^31-1 is a connection-level
+            # FLOW_CONTROL_ERROR with GOAWAY.
+            if new_window > self._MAX_FLOW_WINDOW:
+                await handler._connection_error(
+                    ErrorCodes.FLOW_CONTROL_ERROR,
+                    f'connection flow window overflow: {new_window}')
+                return
+            handler._connection_window_size = new_window
             for sender in handler._senders.values():
                 sender.connection_window_size += increment
                 sender.wake_window()
         else:
             sender = handler.make_sender(self.frame.stream_id)
+            sid = self.frame.stream_id
+            current = sender.stream_window_size.get(sid, 65535)
+            if current + increment > self._MAX_FLOW_WINDOW:
+                # RFC 9113 §6.9.1 — stream-level flow window overflow is a
+                # stream error of type FLOW_CONTROL_ERROR.
+                await handler.send_frame(handler.factory.rst_stream(
+                    sid, ErrorCodes.FLOW_CONTROL_ERROR))
+                return
             sender.window_update(increment)
 
     FRAME_TYPE = FrameTypes.WINDOW_UPDATE
@@ -157,14 +209,30 @@ class RstStreamResponder(Responder):
 
     @log
     async def respond(self, handler):
-        """
-        To terminate current stream and record the reason in the log
-        """
-        logger.debug(self.frame)
-        stream_id = self.frame.stream_id  # to be shorten the description
-        stream = handler.find_stream(stream_id)  # to be shorten the description
+        """Terminate the named stream and log the reason.
 
-        logger.warning(f'stream_id = {stream_id}, {self.frame.error_code}')
+        RFC 9113 §6.4 validation:
+          - RST_STREAM with stream_id 0 is a connection PROTOCOL_ERROR.
+          - RST_STREAM on a stream in the IDLE state is a connection
+            PROTOCOL_ERROR.
+        """
+        stream_id = self.frame.stream_id
+        if stream_id == 0:
+            await handler._connection_error(
+                ErrorCodes.PROTOCOL_ERROR,
+                'RST_STREAM with stream_id 0')
+            return
+
+        stream = handler.find_stream(stream_id)
+        # A stream that we have never seen HEADERS/PUSH_PROMISE on is in
+        # the IDLE state (or doesn't exist in our tree yet — same thing).
+        if stream is None or stream.state == StreamState.IDLE:
+            await handler._connection_error(
+                ErrorCodes.PROTOCOL_ERROR,
+                f'RST_STREAM on idle stream {stream_id}')
+            return
+
+        logger.warning('stream_id=%d %s', stream_id, self.frame.error_code)
         stream.close()
 
     FRAME_TYPE = FrameTypes.RST_STREAM

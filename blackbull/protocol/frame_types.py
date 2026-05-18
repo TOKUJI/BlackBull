@@ -311,7 +311,14 @@ class Headers(FrameBase):
         assert self.decoder is not None
         payload = BytesIO(self.raw_block)
         if self.padded:
-            payload.read(1)
+            # RFC 9113 §6.2 — padding length must be smaller than the frame
+            # payload length (otherwise pad would cover the pad-length octet
+            # itself and there'd be no room for the header block).
+            pad_length = int.from_bytes(payload.read(1), 'big', signed=False)
+            if pad_length >= self.length:
+                self._mark_malformed(
+                    f'HEADERS pad_length ({pad_length}) >= frame length ({self.length})')
+                return
 
         if self.priority:
             self.stream_dependency = int.from_bytes(payload.read(4), 'big', signed=False)
@@ -442,23 +449,32 @@ class PushPromise(FrameBase):
 
 
 class GoAway(FrameBase):
+    """RFC 9113 §6.8 — GOAWAY frame.
+
+    The frame's stream identifier (set by ``FrameBase``) MUST be 0; this is a
+    connection-level frame.  The first 4 bytes of the payload are the
+    ``last_stream_id`` (a separate field) and the next 4 bytes are the error
+    code.  Earlier revisions of this class assigned the payload's
+    last_stream_id back into ``self.stream_id``, which made every outgoing
+    GOAWAY ship with the wrong frame header — h2spec saw a malformed GOAWAY
+    and reported "Error: connection error: PROTOCOL_ERROR" instead of
+    accepting the GOAWAY for the connection-error tests.
+    """
     FRAME_TYPE = FrameTypes.GOAWAY
     def __init__(self, length: int, type_, flags: int, stream_id: int, *, data=None, **kwds):
         super().__init__(length, type_, flags, stream_id)
-        logger.debug('GoAway is called.')
 
         payload = BytesIO(data or b'')
-        self.stream_id = int.from_bytes(payload.read(4), 'big', signed=False)
+        self.last_stream_id = int.from_bytes(payload.read(4), 'big', signed=False)
         self.error_code = int.from_bytes(payload.read(4), 'big', signed=False)
         self.append_data = payload.read()
-        logger.debug('stream_id: {}'.format(self.stream_id))
-        logger.debug('error_code: {}'.format(self.error_code))
-        logger.debug('append_data: {}'.format(self.append_data))
+        logger.debug('GoAway last_stream_id=%d error_code=%d append_data=%r',
+                     self.last_stream_id, self.error_code, self.append_data)
 
     def save(self):
         base = super().save()
         return (base
-                + self.stream_id.to_bytes(4, 'big')
+                + self.last_stream_id.to_bytes(4, 'big')
                 + self.error_code.to_bytes(4, 'big')
                 + self.append_data)
 

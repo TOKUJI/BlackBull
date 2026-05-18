@@ -81,6 +81,7 @@ def test_frame_type_not_implemented():
 async def test_ping_responder_sends_ack():
     frame = MagicMock()
     frame.stream_id = 0
+    frame.flags = 0  # not a PING-ACK; we must echo it back
     frame.payload = b'\x00' * 8
 
     ack_frame = MagicMock()
@@ -102,6 +103,7 @@ async def test_ping_responder_sends_ack():
 async def test_window_update_connection_level_credits_all_senders():
     frame = MagicMock()
     frame.stream_id = 0
+    frame.length = 4  # valid frame length
     frame.window_size = 1024
 
     sender_a = MagicMock()
@@ -111,6 +113,7 @@ async def test_window_update_connection_level_credits_all_senders():
 
     handler = MagicMock()
     handler._senders = {'a': sender_a, 'b': sender_b}
+    handler._connection_window_size = 65535
 
     responder = WindowUpdateResponder(frame)
     await responder.respond(handler)
@@ -127,6 +130,7 @@ async def test_window_update_connection_level_updates_handler_tracking():
     so that stream senders created after the update inherit the correct budget."""
     frame = MagicMock()
     frame.stream_id = 0
+    frame.length = 4  # valid frame length
     frame.window_size = 4128769  # default startup increment (4 MiB - 65535)
 
     handler = MagicMock()

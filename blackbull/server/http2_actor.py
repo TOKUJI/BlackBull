@@ -211,6 +211,11 @@ class HTTP2Actor(Actor):
         # _make_done_cb can remove entries when streams complete.
         self._recipients: dict[int, _StreamRecipient] = {}
 
+        # Set when we have sent a GOAWAY for a connection-level protocol error.
+        # The frame loop exits cleanly on the next iteration, giving the GOAWAY
+        # time to flush before the connection closes.
+        self._goaway_sent: bool = False
+
     # ------------------------------------------------------------------
     # Public helpers (called by ResponderFactory duck-typing)
     # ------------------------------------------------------------------
@@ -250,6 +255,24 @@ class HTTP2Actor(Actor):
     async def send_frame(self, frame: FrameBase) -> None:
         """Send a raw HTTP/2 frame via the control-plane sender."""
         await self._control_sender(frame)
+
+    async def _connection_error(
+        self, error_code: 'ErrorCodes', reason: str = '',
+    ) -> None:
+        """Send GOAWAY with ``error_code`` then mark the loop for clean exit.
+
+        h2spec expects to see the GOAWAY frame before the connection closes;
+        flushing it first and then exiting the frame loop on the next iteration
+        satisfies that ordering.  Idempotent — a second call is a no-op.
+        """
+        if self._goaway_sent:
+            return
+        logger.warning(
+            'HTTP/2 connection error %s: %s', error_code.name, reason)
+        last_stream_id = self.root_stream.max_stream_id()
+        await self.send_frame(
+            self.factory.goaway(last_stream_id, error_code))
+        self._goaway_sent = True
 
     def _make_done_cb(self, stream_id: int) -> Callable[[asyncio.Task], None]:
         """Return a done-callback that cleans up all per-stream state on completion."""
@@ -315,7 +338,29 @@ class HTTP2Actor(Actor):
         _yield_every = self._frame_yield_every
 
         while data := await self.receive():
+            if self._goaway_sent:
+                # A previous frame triggered a connection error and the GOAWAY
+                # has been flushed.  Exit cleanly so the writer can close.
+                return
             frame = self.factory.load(data)
+
+            # RFC 9113 §6.10 — while awaiting CONTINUATION after a HEADERS or
+            # PUSH_PROMISE without END_HEADERS, any frame other than a matching
+            # CONTINUATION is a connection error of type PROTOCOL_ERROR.
+            if waiting_continuation and frame.FrameType() != FrameTypes.CONTINUATION:
+                await self._connection_error(
+                    ErrorCodes.PROTOCOL_ERROR,
+                    f'expected CONTINUATION, got {frame.FrameType().name}')
+                continue  # let h2spec read the GOAWAY before we close
+
+            # RFC 9113 §6.2 — HEADERS MUST be associated with a non-zero
+            # stream identifier (PROTOCOL_ERROR at the connection level).
+            if frame.FrameType() == FrameTypes.HEADERS and frame.stream_id == 0:
+                await self._connection_error(
+                    ErrorCodes.PROTOCOL_ERROR,
+                    'HEADERS with stream_id 0')
+                continue  # let h2spec read the GOAWAY before we close
+
             self.root_stream.add_child(frame.stream_id)
             if (stream := self.root_stream.find_child(frame.stream_id)) is None:
                 logger.error('Stream %d not found.', frame.stream_id)

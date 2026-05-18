@@ -46,12 +46,17 @@ class FrameFactory:
                            data=int(error_code).to_bytes(4, 'big', signed=False))
 
     def goaway(self, last_stream_id: int = 0, error_code: ErrorCodes | int = 0):
-        """Create a GOAWAY frame (always on stream 0)."""
+        """Create a GOAWAY frame.
+
+        RFC 9113 §6.8 — GOAWAY MUST be associated with the connection
+        (stream identifier 0).  The ``last_stream_id`` argument is the
+        last-stream-id payload field, not the frame's stream identifier.
+        """
         payload = (last_stream_id.to_bytes(4, 'big', signed=False)
                    + int(error_code).to_bytes(4, 'big', signed=False))
         return self.create(FrameTypes.GOAWAY,
                            SettingFrameFlags.INIT,
-                           last_stream_id + 1,
+                           0,
                            data=payload)
 
     def settings(self, *, ack: bool = False, enable_connect_protocol: bool = False,
