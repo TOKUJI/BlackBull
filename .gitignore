@@ -126,3 +126,8 @@ bench/peers/compare.sh
 
 # peer benchmark harness — private development notes
 *.private.md
+
+# RFC conformance test output (kept directory, ignore data files)
+bench/conformance/results/*.txt
+bench/conformance/results/*.xml
+bench/conformance/results/*.json
