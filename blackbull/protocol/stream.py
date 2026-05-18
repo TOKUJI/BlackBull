@@ -58,6 +58,10 @@ class Stream:
         self.end_stream = False
         self.state = StreamState.IDLE
         self.priority_hint: dict[str, int | bool] | None = None
+        # RFC 9113 §5.1 — distinguishes closed-via-END_STREAM (normal close)
+        # from closed-via-RST_STREAM.  Influences whether late frames are
+        # treated as connection or stream errors.
+        self.closed_via_rst: bool = False
 
     def on_headers_received(self, end_stream: bool) -> None:
         """Transition state on HEADERS frame (RFC 7540 §5.1)."""
@@ -70,6 +74,26 @@ class Stream:
         """Transition state on DATA frame (RFC 7540 §5.1)."""
         if end_stream:
             self.state = StreamState.CLOSED
+
+    def on_rst_received(self) -> None:
+        """Transition on incoming RST_STREAM (RFC 9113 §5.1).
+
+        Marks the stream CLOSED and remembers that it was closed via
+        RST_STREAM (vs END_STREAM).  The state is retained so later
+        frames arriving on the same identifier can be detected and the
+        right error type returned.
+        """
+        self.state = StreamState.CLOSED
+        self.closed_via_rst = True
+
+    def mark_locally_closed(self) -> None:
+        """Mark this stream CLOSED after the server-side response is done.
+
+        Called from the stream task's done-callback so that late frames
+        from the peer on this identifier hit the CLOSED branch of the
+        state-machine validation.
+        """
+        self.state = StreamState.CLOSED
 
     def add_child(self, stream_id):
         existing = self.find_child(stream_id)

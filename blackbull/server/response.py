@@ -165,6 +165,13 @@ class SettingsResponder(Responder):
 
 class PriorityResponder(Responder):
     async def respond(self, handler):
+        # RFC 9113 §5.3.1 — a stream cannot depend on itself; this is a
+        # stream error of type PROTOCOL_ERROR.
+        if self.frame.dependent_stream == self.frame.stream_id:
+            await handler.send_frame(handler.factory.rst_stream(
+                self.frame.stream_id, ErrorCodes.PROTOCOL_ERROR))
+            return
+
         if self.frame.exclusion:
             for x in handler.root_stream.get_children():
                 if x.parent == self.frame.dependent_stream:
@@ -233,7 +240,11 @@ class RstStreamResponder(Responder):
             return
 
         logger.warning('stream_id=%d %s', stream_id, self.frame.error_code)
-        stream.close()
+        # Keep the stream node in the tree but mark it closed-via-RST.  Later
+        # frames from the peer on this identifier are detected by the
+        # frame-loop state check and trigger STREAM_CLOSED (vs PROTOCOL_ERROR
+        # for streams closed via END_STREAM).
+        stream.on_rst_received()
 
     FRAME_TYPE = FrameTypes.RST_STREAM
 

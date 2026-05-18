@@ -14,6 +14,27 @@ from .frame_types import (
 logger = logging.getLogger(__name__)
 
 
+class _UnknownFrame:
+    """Sentinel for frames of unknown type (RFC 9113 §5.5 — MUST be ignored).
+
+    Exposes the minimal duck-typed interface the frame loop relies on so the
+    dispatcher can detect the unknown type and skip processing without
+    closing the connection.
+    """
+    __slots__ = ('length', 'flags', 'stream_id', '_type_byte', '_payload')
+
+    def __init__(self, length: int, type_byte: bytes, flags: int,
+                 stream_id: int, payload: bytes):
+        self.length = length
+        self.flags = flags
+        self.stream_id = stream_id
+        self._type_byte = type_byte
+        self._payload = payload
+
+    def FrameType(self):
+        return None  # signals "unknown" to the frame loop
+
+
 class FrameFactory:
     """docstring for FrameFactory"""
     def __init__(self):
@@ -114,7 +135,17 @@ class FrameFactory:
         stream_id = int.from_bytes(data[5:9], 'big', signed=False)
         payload = data[9: 9 + length]
 
-        return self.create(FrameTypes(type_), flags, stream_id, data=payload)
+        try:
+            frame_type = FrameTypes(type_)
+        except ValueError:
+            # RFC 9113 §5.5 — implementations MUST ignore frames of unknown
+            # type.  Return a sentinel so the frame loop skips dispatch but
+            # the connection stays alive.
+            logger.debug('Unknown frame type %r (length=%d, flags=%#x, stream_id=%d) — ignoring',
+                         type_, length, flags, stream_id)
+            return _UnknownFrame(length, type_, flags, stream_id, payload)
+
+        return self.create(frame_type, flags, stream_id, data=payload)
 
     def __setattr__(self, key, value):
         if key == 'header_table_size':

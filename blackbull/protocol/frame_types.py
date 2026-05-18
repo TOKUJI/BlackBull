@@ -321,10 +321,17 @@ class Headers(FrameBase):
                 return
 
         if self.priority:
-            self.stream_dependency = int.from_bytes(payload.read(4), 'big', signed=False)
+            sd_raw = int.from_bytes(payload.read(4), 'big', signed=False)
+            # Top bit is the exclusive-dependency flag; mask it off.
+            self.stream_dependency = sd_raw & 0x7fffffff
             self.priority_weight = int.from_bytes(payload.read(1), 'big', signed=False)
             logger.debug('stream_id=%d stream_dependency=%d priority_weight=%d',
                          self.stream_id, self.stream_dependency, self.priority_weight)
+            # RFC 9113 §5.3.1 — a stream cannot depend on itself.
+            if self.stream_dependency == self.stream_id:
+                self._mark_malformed(
+                    f'HEADERS priority self-dependency on stream {self.stream_id}')
+                return
 
         # raw=True keeps hpack output as bytes-bytes tuples and bypasses
         # hpack's _unicode_if_needed UTF-8 decode (~4% CPU under load).

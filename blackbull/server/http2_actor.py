@@ -216,6 +216,9 @@ class HTTP2Actor(Actor):
         # time to flush before the connection closes.
         self._goaway_sent: bool = False
 
+        # RFC 9113 §5.1.1 — peer-initiated stream IDs must strictly increase.
+        self._last_peer_stream_id: int = 0
+
     # ------------------------------------------------------------------
     # Public helpers (called by ResponderFactory duck-typing)
     # ------------------------------------------------------------------
@@ -256,14 +259,57 @@ class HTTP2Actor(Actor):
         """Send a raw HTTP/2 frame via the control-plane sender."""
         await self._control_sender(frame)
 
+    def _validate_stream_state(
+        self, stream: Stream, frame_type: FrameTypes,
+    ) -> tuple[ErrorCodes, str] | None:
+        """Return (error_code, level) if frame_type is not allowed in stream.state.
+
+        Per RFC 9113 §5.1.  Returns ``None`` when the frame is allowed.
+        ``level`` is ``'connection'`` or ``'stream'``.
+        """
+        state = stream.state
+
+        # IDLE: only HEADERS, PRIORITY, PUSH_PROMISE allowed.  Anything else
+        # is a connection PROTOCOL_ERROR (§5.1 #1 and #3 — DATA / WINDOW_UPDATE
+        # arriving before HEADERS).
+        if state == StreamState.IDLE:
+            if frame_type in (FrameTypes.HEADERS, FrameTypes.PRIORITY,
+                              FrameTypes.CONTINUATION, FrameTypes.PUSH_PROMISE):
+                return None
+            return (ErrorCodes.PROTOCOL_ERROR, 'connection')
+
+        # HALF_CLOSED (remote) — the peer has signaled END_STREAM.  Only
+        # PRIORITY, WINDOW_UPDATE, and RST_STREAM are permitted from them.
+        if state == StreamState.HALF_CLOSED_REMOTE:
+            if frame_type in (FrameTypes.PRIORITY, FrameTypes.WINDOW_UPDATE,
+                              FrameTypes.RST_STREAM):
+                return None
+            return (ErrorCodes.STREAM_CLOSED, 'stream')
+
+        # CLOSED — only PRIORITY is unconditionally allowed.  Attempting to
+        # send HEADERS or CONTINUATION on a closed stream is a connection
+        # error (would otherwise reopen the stream — the peer can't recover
+        # by retrying on the same stream id).  DATA / WINDOW_UPDATE on a
+        # closed stream are stream errors (the peer may simply be racing
+        # against our RST_STREAM / END_STREAM).
+        if state == StreamState.CLOSED:
+            if frame_type == FrameTypes.PRIORITY:
+                return None
+            if frame_type in (FrameTypes.HEADERS, FrameTypes.CONTINUATION):
+                return (ErrorCodes.STREAM_CLOSED, 'connection')
+            return (ErrorCodes.STREAM_CLOSED, 'stream')
+
+        return None
+
     async def _connection_error(
         self, error_code: 'ErrorCodes', reason: str = '',
     ) -> None:
-        """Send GOAWAY with ``error_code`` then mark the loop for clean exit.
+        """Send GOAWAY with ``error_code``, half-close the writer, mark exit.
 
-        h2spec expects to see the GOAWAY frame before the connection closes;
-        flushing it first and then exiting the frame loop on the next iteration
-        satisfies that ordering.  Idempotent — a second call is a no-op.
+        h2spec's VerifyConnectionClose only succeeds on a real TCP close,
+        so after flushing the GOAWAY we close our write half (sending FIN)
+        and let the frame loop drain on the next iteration via EOF.
+        Idempotent — a second call is a no-op.
         """
         if self._goaway_sent:
             return
@@ -273,14 +319,30 @@ class HTTP2Actor(Actor):
         await self.send_frame(
             self.factory.goaway(last_stream_id, error_code))
         self._goaway_sent = True
+        # Close the writer half so the peer sees FIN after the GOAWAY.
+        try:
+            await self._writer.close()
+        except Exception:
+            # The writer may already be closed (e.g. peer hung up).  We
+            # have done our part; let the frame loop drain.
+            logger.debug('writer.close raised on connection-error path',
+                         exc_info=True)
 
     def _make_done_cb(self, stream_id: int) -> Callable[[asyncio.Task], None]:
-        """Return a done-callback that cleans up all per-stream state on completion."""
+        """Return a done-callback that releases per-stream resources on completion.
+
+        Keeps the Stream node in the tree (marked CLOSED) so that the
+        frame-loop state validation can detect late frames arriving on the
+        same identifier and respond with the appropriate STREAM_CLOSED
+        error (RFC 9113 §5.1).
+        """
         def _cb(_task: asyncio.Task) -> None:
             self._active_stream_count = max(0, self._active_stream_count - 1)
             self._senders.pop(stream_id, None)
-            self.root_stream.children.pop(stream_id, None)
             self._recipients.pop(stream_id, None)
+            stream = self.root_stream.children.get(stream_id)
+            if stream is not None:
+                stream.mark_locally_closed()
         return _cb
 
     async def receive(self) -> bytes:
@@ -343,28 +405,72 @@ class HTTP2Actor(Actor):
                 # has been flushed.  Exit cleanly so the writer can close.
                 return
             frame = self.factory.load(data)
+            frame_type = frame.FrameType()
 
             # RFC 9113 §6.10 — while awaiting CONTINUATION after a HEADERS or
             # PUSH_PROMISE without END_HEADERS, any frame other than a matching
-            # CONTINUATION is a connection error of type PROTOCOL_ERROR.
-            if waiting_continuation and frame.FrameType() != FrameTypes.CONTINUATION:
+            # CONTINUATION (including unknown frame types) is a connection
+            # error of type PROTOCOL_ERROR.
+            if waiting_continuation and frame_type != FrameTypes.CONTINUATION:
+                name = frame_type.name if frame_type is not None else 'unknown'
                 await self._connection_error(
                     ErrorCodes.PROTOCOL_ERROR,
-                    f'expected CONTINUATION, got {frame.FrameType().name}')
+                    f'expected CONTINUATION, got {name}')
                 continue  # let h2spec read the GOAWAY before we close
+
+            # RFC 9113 §5.5 — outside a header block, frames of unknown type
+            # are silently ignored.
+            if frame_type is None:
+                continue
 
             # RFC 9113 §6.2 — HEADERS MUST be associated with a non-zero
             # stream identifier (PROTOCOL_ERROR at the connection level).
-            if frame.FrameType() == FrameTypes.HEADERS and frame.stream_id == 0:
+            if frame_type == FrameTypes.HEADERS and frame.stream_id == 0:
                 await self._connection_error(
                     ErrorCodes.PROTOCOL_ERROR,
                     'HEADERS with stream_id 0')
-                continue  # let h2spec read the GOAWAY before we close
+                continue
+
+            # RFC 9113 §5.1.1 — new peer-initiated streams MUST use odd
+            # identifiers and MUST be numerically greater than every previous
+            # peer-initiated stream.  Apply this only when HEADERS arrives on
+            # a stream we have not previously seen.
+            if (frame_type == FrameTypes.HEADERS
+                    and frame.stream_id > 0
+                    and self.root_stream.find_child(frame.stream_id) is None):
+                if frame.stream_id % 2 == 0:
+                    await self._connection_error(
+                        ErrorCodes.PROTOCOL_ERROR,
+                        f'peer used even stream_id={frame.stream_id}')
+                    continue
+                if frame.stream_id <= self._last_peer_stream_id:
+                    await self._connection_error(
+                        ErrorCodes.PROTOCOL_ERROR,
+                        f'peer stream_id={frame.stream_id} <= last={self._last_peer_stream_id}')
+                    continue
+                self._last_peer_stream_id = frame.stream_id
 
             self.root_stream.add_child(frame.stream_id)
             if (stream := self.root_stream.find_child(frame.stream_id)) is None:
                 logger.error('Stream %d not found.', frame.stream_id)
                 raise Exception('Unused stream identifier')
+
+            # RFC 9113 §5.1 — validate the frame against the stream state.
+            # Skip stream-id 0 (connection-level frames don't have stream state).
+            if frame.stream_id != 0:
+                err = self._validate_stream_state(stream, frame_type)
+                if err is not None:
+                    error_code, level = err
+                    if level == 'connection':
+                        await self._connection_error(
+                            error_code,
+                            f'frame {frame_type.name} on stream {frame.stream_id} '
+                            f'in {stream.state.name} state')
+                        continue
+                    # stream-level error
+                    await self.send_frame(
+                        self.factory.rst_stream(frame.stream_id, error_code))
+                    continue
 
             last_stream_id = self.root_stream.max_stream_id()
 
