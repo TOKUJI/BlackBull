@@ -127,16 +127,30 @@ class Stream:
         return max([c.max_stream_id() for c in self.get_children()])
 
     def find_child(self, stream_id):
+        """Locate a node by stream_id.
+
+        BlackBull only nests streams under their priority parent in the rare
+        case where PRIORITY arrives for a stream whose dependent_stream is
+        another peer stream rather than root.  h2 in the wild — and h2load
+        in particular — never exercises this; every peer-initiated stream
+        ends up as a direct child of root.  Walking the entire subtree on a
+        miss therefore wasted O(N) per lookup once we stopped pruning closed
+        streams for §5.1 state validation.  Keep the fast path flat; recurse
+        only when the priority tree actually has depth.
+        """
         if self.stream_id == stream_id:
             return self
 
-        if stream_id in self.children:
-            return self.children[stream_id]
+        child = self.children.get(stream_id)
+        if child is not None:
+            return child
 
-        for k, v in self.children.items():
-            r = v.find_child(stream_id)
-            if r:
-                return r
+        # Slow path: only descend if at least one child has children of its own.
+        for v in self.children.values():
+            if v.children:
+                r = v.find_child(stream_id)
+                if r is not None:
+                    return r
 
         return None
 

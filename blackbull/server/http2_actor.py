@@ -241,6 +241,14 @@ class HTTP2Actor(Actor):
         # RFC 9113 §5.1.1 — peer-initiated stream IDs must strictly increase.
         self._last_peer_stream_id: int = 0
 
+        # RFC 9113 §5.1 — closed-stream state, separate from the priority tree.
+        # Maps stream_id → True if closed via RST_STREAM, False if closed via
+        # END_STREAM / local completion.  This lets us drop closed nodes from
+        # root_stream.children (keeping that dict O(active-streams) and so
+        # find_child stays O(1)) while still recognizing late frames on
+        # already-closed identifiers and choosing the right error code.
+        self._closed_streams: dict[int, bool] = {}
+
     # ------------------------------------------------------------------
     # Public helpers (called by ResponderFactory duck-typing)
     # ------------------------------------------------------------------
@@ -337,9 +345,8 @@ class HTTP2Actor(Actor):
             return
         logger.warning(
             'HTTP/2 connection error %s: %s', error_code.name, reason)
-        last_stream_id = self.root_stream.max_stream_id()
         await self.send_frame(
-            self.factory.goaway(last_stream_id, error_code))
+            self.factory.goaway(self._last_peer_stream_id, error_code))
         self._goaway_sent = True
         # Close the writer half so the peer sees FIN after the GOAWAY.
         try:
@@ -362,9 +369,12 @@ class HTTP2Actor(Actor):
             self._active_stream_count = max(0, self._active_stream_count - 1)
             self._senders.pop(stream_id, None)
             self._recipients.pop(stream_id, None)
-            stream = self.root_stream.children.get(stream_id)
-            if stream is not None:
-                stream.mark_locally_closed()
+            # Prune the stream node from the tree and remember it as closed-
+            # via-END_STREAM (closed_via_rst=False) so late frames hit the
+            # CLOSED branch of §5.1 validation without keeping a Stream
+            # object around for every completed request.
+            if self.root_stream.children.pop(stream_id, None) is not None:
+                self._closed_streams[stream_id] = False
         return _cb
 
     async def receive(self) -> bytes:
@@ -515,33 +525,58 @@ class HTTP2Actor(Actor):
                     frame.stream_id, ErrorCodes.FRAME_SIZE_ERROR))
                 continue
 
-            # RFC 9113 §5.1.1 — new peer-initiated streams MUST use odd
-            # identifiers and MUST be numerically greater than every previous
-            # peer-initiated stream.  Apply this only when HEADERS arrives on
-            # a stream we have not previously seen.
-            if (frame_type == FrameTypes.HEADERS
-                    and frame.stream_id > 0
-                    and self.root_stream.find_child(frame.stream_id) is None):
-                if frame.stream_id % 2 == 0:
-                    await self._connection_error(
-                        ErrorCodes.PROTOCOL_ERROR,
-                        f'peer used even stream_id={frame.stream_id}')
-                    continue
-                if frame.stream_id <= self._last_peer_stream_id:
-                    await self._connection_error(
-                        ErrorCodes.PROTOCOL_ERROR,
-                        f'peer stream_id={frame.stream_id} <= last={self._last_peer_stream_id}')
-                    continue
-                self._last_peer_stream_id = frame.stream_id
+            # Fast lookup: live streams live directly under root.  Closed
+            # streams have already been pruned from the tree; their identifier
+            # lives in self._closed_streams so we can still distinguish CLOSED
+            # from IDLE for §5.1 validation.
+            stream = self.root_stream.children.get(frame.stream_id)
 
-            self.root_stream.add_child(frame.stream_id)
-            if (stream := self.root_stream.find_child(frame.stream_id)) is None:
-                logger.error('Stream %d not found.', frame.stream_id)
-                raise Exception('Unused stream identifier')
+            if frame.stream_id != 0 and stream is None:
+                if frame.stream_id in self._closed_streams:
+                    # Late frame on a CLOSED stream (§5.1).
+                    if frame_type == FrameTypes.PRIORITY:
+                        pass  # PRIORITY is always allowed; let it through
+                    elif frame_type in (FrameTypes.HEADERS, FrameTypes.CONTINUATION):
+                        await self._connection_error(
+                            ErrorCodes.STREAM_CLOSED,
+                            f'{frame_type.name} on closed stream {frame.stream_id}')
+                        continue
+                    else:
+                        await self.send_frame(self.factory.rst_stream(
+                            frame.stream_id, ErrorCodes.STREAM_CLOSED))
+                        continue
+                else:
+                    # Stream not seen before — must be a stream-creating frame
+                    # (HEADERS or PRIORITY).  Anything else is IDLE-state error.
+                    if frame_type == FrameTypes.HEADERS:
+                        # RFC 9113 §5.1.1 — peer streams MUST use odd
+                        # identifiers strictly greater than every previous
+                        # peer-initiated stream.
+                        if frame.stream_id % 2 == 0:
+                            await self._connection_error(
+                                ErrorCodes.PROTOCOL_ERROR,
+                                f'peer used even stream_id={frame.stream_id}')
+                            continue
+                        if frame.stream_id <= self._last_peer_stream_id:
+                            await self._connection_error(
+                                ErrorCodes.PROTOCOL_ERROR,
+                                f'peer stream_id={frame.stream_id} '
+                                f'<= last={self._last_peer_stream_id}')
+                            continue
+                        self._last_peer_stream_id = frame.stream_id
+                        stream = self.root_stream.add_child(frame.stream_id)
+                    elif frame_type == FrameTypes.PRIORITY:
+                        stream = self.root_stream.add_child(frame.stream_id)
+                    else:
+                        await self._connection_error(
+                            ErrorCodes.PROTOCOL_ERROR,
+                            f'frame {frame_type.name} on idle stream '
+                            f'{frame.stream_id}')
+                        continue
 
             # RFC 9113 §5.1 — validate the frame against the stream state.
             # Skip stream-id 0 (connection-level frames don't have stream state).
-            if frame.stream_id != 0:
+            if stream is not None and frame.stream_id != 0:
                 err = self._validate_stream_state(stream, frame_type)
                 if err is not None:
                     error_code, level = err
@@ -555,8 +590,6 @@ class HTTP2Actor(Actor):
                     await self.send_frame(
                         self.factory.rst_stream(frame.stream_id, error_code))
                     continue
-
-            last_stream_id = self.root_stream.max_stream_id()
 
             spawned = False
             match frame.FrameType():
@@ -575,7 +608,7 @@ class HTTP2Actor(Actor):
                 case FrameTypes.DATA:
                     await self._on_data_frame(frame, stream)
                 case FrameTypes.GOAWAY:
-                    await self._on_goaway_frame(last_stream_id)
+                    await self._on_goaway_frame(self._last_peer_stream_id)
                     return
                 case _:
                     await ResponderFactory.create(frame).respond(self)

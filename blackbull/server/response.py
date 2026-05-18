@@ -297,11 +297,13 @@ class RstStreamResponder(Responder):
             return
 
         logger.warning('stream_id=%d %s', stream_id, self.frame.error_code)
-        # Keep the stream node in the tree but mark it closed-via-RST.  Later
-        # frames from the peer on this identifier are detected by the
-        # frame-loop state check and trigger STREAM_CLOSED (vs PROTOCOL_ERROR
-        # for streams closed via END_STREAM).
-        stream.on_rst_received()
+        # Prune the stream node and record it as closed-via-RST.  Later frames
+        # from the peer on this identifier are detected by the frame-loop's
+        # _closed_streams check and trigger STREAM_CLOSED.
+        handler.root_stream.children.pop(stream_id, None)
+        handler._closed_streams[stream_id] = True
+        handler._senders.pop(stream_id, None)
+        handler._recipients.pop(stream_id, None)
 
     FRAME_TYPE = FrameTypes.RST_STREAM
 
