@@ -431,6 +431,25 @@ class HTTP2Actor(Actor):
                     'HEADERS with stream_id 0')
                 continue
 
+            # RFC 9113 §6.10 — CONTINUATION MUST be associated with a non-zero
+            # stream identifier (PROTOCOL_ERROR at the connection level).
+            if frame_type == FrameTypes.CONTINUATION and frame.stream_id == 0:
+                await self._connection_error(
+                    ErrorCodes.PROTOCOL_ERROR,
+                    'CONTINUATION with stream_id 0')
+                continue
+
+            # RFC 9113 §6.10 — CONTINUATION outside an open header block is a
+            # connection PROTOCOL_ERROR, independent of stream state.  This
+            # check must precede stream-state validation, otherwise a stray
+            # CONTINUATION on a half-closed/closed stream would be rejected
+            # with the wrong error type (STREAM_CLOSED / RST_STREAM).
+            if frame_type == FrameTypes.CONTINUATION and not waiting_continuation:
+                await self._connection_error(
+                    ErrorCodes.PROTOCOL_ERROR,
+                    'unexpected CONTINUATION without preceding HEADERS')
+                continue
+
             # RFC 9113 §5.1.1 — new peer-initiated streams MUST use odd
             # identifiers and MUST be numerically greater than every previous
             # peer-initiated stream.  Apply this only when HEADERS arrives on
@@ -629,12 +648,15 @@ class HTTP2Actor(Actor):
         waiting_continuation: bool,
     ) -> bool:
         """Handle a CONTINUATION frame; return True if stream task spawned, False if still accumulating."""
-        if not waiting_continuation:
-            logger.error('Unexpected CONTINUATION without preceding HEADERS.')
-            await self.send_frame(
-                self.factory.goaway(self.root_stream.max_stream_id()))
+        # RFC 9113 §6.10 — CONTINUATION outside an unterminated header block
+        # (i.e. not preceded by HEADERS/CONTINUATION without END_HEADERS) is a
+        # connection error of type PROTOCOL_ERROR.
+        if not waiting_continuation or header_frame is None:
+            await self._connection_error(
+                ErrorCodes.PROTOCOL_ERROR,
+                'unexpected CONTINUATION without preceding HEADERS')
+            return True
 
-        assert header_frame is not None
         header_frame.raw_block += frame.payload
 
         if not frame.end_headers:
