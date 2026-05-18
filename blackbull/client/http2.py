@@ -350,9 +350,14 @@ class HTTP2Client:
                 sender.window_update(increment)
 
     def _on_initial_window_size(self, value: int) -> None:
+        # RFC 9113 §6.9.2 — when SETTINGS_INITIAL_WINDOW_SIZE changes,
+        # adjust every active stream's send-window by the delta rather than
+        # overwriting it (overwriting loses bytes already sent / received).
+        delta = value - self.initial_window_size
         self.initial_window_size = value
-        for sender in self._senders.values():
-            sender.apply_settings(value)
+        if delta != 0:
+            for sender in self._senders.values():
+                sender.adjust_initial_window(delta)
 
     def _on_goaway(self, frame) -> None:
         self._goaway_received = True

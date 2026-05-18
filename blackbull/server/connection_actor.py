@@ -37,6 +37,7 @@ class ConnectionActor(Actor):
         peername: tuple[str, int] | None = None,
         sockname: tuple[str, int] | None = None,
         ssl: bool = False,
+        alpn: str | None = None,
         stream_queue_depth: int = _HTTP2_STREAM_QUEUE_DEPTH,
         ws_queue_depth: int = _WS_EVENT_QUEUE_DEPTH,
     ) -> None:
@@ -48,6 +49,7 @@ class ConnectionActor(Actor):
         self._peername = peername
         self._sockname = sockname
         self._ssl = ssl
+        self._alpn = alpn
         self._stream_queue_depth = stream_queue_depth
         self._ws_queue_depth = ws_queue_depth
 
@@ -64,6 +66,40 @@ class ConnectionActor(Actor):
             await self._writer.close()
 
     async def _dispatch(self) -> None:
+        # ALPN-negotiated HTTP/2: the peer is committed to HTTP/2, so the
+        # first 24 bytes MUST be the connection preface (RFC 9113 §3.4).
+        # Read exactly 24 bytes rather than scanning for CRLF so an invalid
+        # preface is detected and rejected promptly instead of hanging the
+        # reader (h2spec §3.5 #2 exercises this with a non-preface byte
+        # sequence and times out otherwise).
+        if self._alpn == 'h2':
+            preface = await self._reader.readexactly(24)
+            expected = _HTTP2_PREFACE_FIRST_LINE + _HTTP2_PREFACE_REMAINDER
+            if preface != expected:
+                # Best-effort: send GOAWAY before closing so a peer that did
+                # implement HTTP/2 gets a clean diagnosis.  We do not bother
+                # framing the goaway via the factory — the connection is
+                # already doomed and we want to close before timing out.
+                from ..protocol.frame_types import ErrorCodes  # noqa: PLC0415
+                goaway = (b'\x00\x00\x08\x07\x00\x00\x00\x00\x00'
+                          + b'\x00\x00\x00\x00'
+                          + int(ErrorCodes.PROTOCOL_ERROR).to_bytes(4, 'big'))
+                try:
+                    await self._writer.write(goaway)
+                except Exception:
+                    pass
+                raise ValueError(f'Invalid HTTP/2 preface: {preface!r}')
+            from .http2_actor import HTTP2Actor  # noqa: PLC0415
+            actor = HTTP2Actor(
+                self._reader, self._writer, self._app, self._aggregator,
+                peername=self._peername, sockname=self._sockname,
+                ssl=self._ssl,
+                stream_queue_depth=self._stream_queue_depth,
+            )
+            await actor.run()
+            return
+
+        # No ALPN (cleartext) or ALPN didn't pick h2 — sniff the first line.
         first_line = await self._reader.readuntil(b'\r\n')
         if first_line == _HTTP2_PREFACE_FIRST_LINE:
             remainder = await self._reader.readexactly(8)

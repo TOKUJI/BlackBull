@@ -224,8 +224,9 @@ class ASGIServer:
         transport = getattr(writer, 'transport', None)
         peername = transport.get_extra_info('peername') if transport else None
         sockname = transport.get_extra_info('sockname') if transport else None
-        ssl_flag = (transport.get_extra_info('ssl_object') is not None
-                    if transport else False)
+        ssl_object = transport.get_extra_info('ssl_object') if transport else None
+        ssl_flag = ssl_object is not None
+        alpn = ssl_object.selected_alpn_protocol() if ssl_object else None
 
         sock = transport.get_extra_info('socket') if transport else None
         if sock is not None:
@@ -269,6 +270,7 @@ class ASGIServer:
             actor = ConnectionActor(
                 wrapped_reader, wrapped_writer, self.app, aggregator,
                 peername=peername, sockname=sockname, ssl=ssl_flag,
+                alpn=alpn,
                 stream_queue_depth=self._stream_queue_depth,
                 ws_queue_depth=self._ws_queue_depth,
             )

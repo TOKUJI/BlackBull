@@ -194,12 +194,23 @@ class SettingsResponder(Responder):
                 f'SETTINGS_MAX_FRAME_SIZE out of range: {mfs}')
             return
 
-        # Store peer's announced window so future stream senders start correctly.
+        # RFC 9113 §6.9.2 — when SETTINGS_INITIAL_WINDOW_SIZE changes mid-
+        # connection, adjust every active stream's send-window by the delta
+        # (new − old).  This can drive an already-drained window negative,
+        # which is required behaviour: subsequent WINDOW_UPDATE credits add
+        # to the negative value before any further DATA may be sent.  New
+        # streams (created after this SETTINGS) start at the new IWS, so we
+        # update the handler-level value after applying the delta.
         if iws is not None:
+            old_iws = handler._peer_initial_window_size
+            delta = iws - old_iws
             handler._peer_initial_window_size = iws
-        if iws is not None or mfs is not None:
+            if delta != 0:
+                for sender in handler._senders.values():
+                    sender.adjust_initial_window(delta)
+        if mfs is not None:
             for sender in handler._senders.values():
-                sender.apply_settings(initial_window_size=iws, max_frame_size=mfs)
+                sender.apply_settings(max_frame_size=mfs)
         # NOTE: per RFC 7540 §6.5.2, peer's SETTINGS_HEADER_TABLE_SIZE
         # constrains OUR encoder's table, not OUR decoder's. Updating the
         # decoder here would (and did) trip hpack's InvalidTableSizeError

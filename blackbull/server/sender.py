@@ -310,14 +310,19 @@ class HTTP2Sender(BaseSender):
         if self._window_open is not None:
             self._window_open.set()
 
-    def apply_settings(self, initial_window_size: int | None = None,
-                       max_frame_size: int | None = None) -> None:
-        """Apply SETTINGS parameters to this sender."""
-        if initial_window_size is not None:
-            self.stream_window_size[self._stream_id] = initial_window_size
-            self.wake_window()
+    def apply_settings(self, max_frame_size: int | None = None) -> None:
+        """Apply SETTINGS parameters that do not require delta tracking."""
         if max_frame_size is not None:
             self.max_frame_size = max_frame_size
+
+    def adjust_initial_window(self, delta: int) -> None:
+        """RFC 9113 §6.9.2 — adjust this sender's stream flow-control window
+        by the change in SETTINGS_INITIAL_WINDOW_SIZE since the peer's last
+        announcement.  The window may legitimately become negative.
+        """
+        self.stream_window_size[self._stream_id] += delta
+        if delta > 0:
+            self.wake_window()
 
     async def __call__(self, body, status: HTTPStatus = HTTPStatus.OK, headers: HeaderList = []):
         # Control-plane: raw frame object (SETTINGS, PING ACK, WINDOW_UPDATE, …)
