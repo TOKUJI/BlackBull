@@ -1,0 +1,30 @@
+# Hypercorn config for peer benchmarks — aligned with BlackBull defaults
+# where the setting is exposed by Hypercorn.
+#
+# Hypercorn defaults that needed adjustment:
+#   keep_alive_max_requests = 1000   -> we raise to 10M (effectively unlimited;
+#                                       matches BlackBull which has no per-conn cap)
+#   keep_alive_timeout      = 5s     -> raise to 60s so idle conns survive between scenarios
+#   max_app_queue_size      = 10     -> raise to 1000 to avoid ASGI backpressure
+#   backlog                 = 100    -> raise to 1024 to match BlackBull's defaults
+#
+# Kept at Hypercorn default to match BlackBull's default:
+#   h2_max_concurrent_streams = 100
+#
+# Not exposed by Hypercorn (h2 library defaults are used):
+#   h2 stream window  = 65 535 bytes (RFC default) — BlackBull aligned to this
+#                                                    via BB_H2_INITIAL_WINDOW_SIZE
+#   h2 connection window = 65 535 bytes (RFC default) — BlackBull aligned via
+#                                                       BB_H2_CONNECTION_WINDOW_SIZE
+
+bind = "127.0.0.1:8443"
+workers = 1
+worker_class = "uvloop"
+certfile = "tests/cert.pem"
+keyfile = "tests/key.pem"
+
+keep_alive_timeout = 60
+keep_alive_max_requests = 10_000_000
+h2_max_concurrent_streams = 100
+max_app_queue_size = 1000
+backlog = 1024

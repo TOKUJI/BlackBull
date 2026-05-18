@@ -118,3 +118,11 @@ bench/results/*.txt
 bench/results/*.csv
 bench/results/*.md
 bench/results/*.svg
+
+# peer benchmark harness — work-in-progress automated runner.
+# Kept on disk for future development; not committed until the socket-state
+# contamination is solved cleanly.
+bench/peers/compare.sh
+
+# peer benchmark harness — private development notes
+*.private.md
