@@ -241,6 +241,25 @@ class PseudoHeaders(StrEnum):
     PROTOCOL  = ':protocol'
 
 
+# RFC 9113 §8.3 — known pseudo-header field names.  At the frame parser
+# level we accept any of these (a HEADERS frame is parsed identically for
+# requests and responses).  The request-vs-response distinction (e.g.
+# ":status" is response-only, ":method"/":scheme"/":path" are request-only)
+# is enforced one layer up by ``parse_headers`` on the server side and by
+# the HTTP/2 client on the client side.
+_KNOWN_PSEUDO: frozenset[bytes] = frozenset((
+    b':method', b':scheme', b':path', b':authority', b':protocol',
+    b':status',
+))
+
+# RFC 9113 §8.2.2 — connection-specific header fields MUST NOT appear in
+# HTTP/2.  Receiving any of these is a stream error of type PROTOCOL_ERROR.
+_HOP_BY_HOP_HEADERS: frozenset[bytes] = frozenset((
+    b'connection', b'keep-alive', b'proxy-connection',
+    b'transfer-encoding', b'upgrade',
+))
+
+
 class Headers(FrameBase):
     FRAME_TYPE = FrameTypes.HEADERS
 
@@ -267,6 +286,12 @@ class Headers(FrameBase):
         # returns bytes when decoded with raw=True (avoids the ~4% CPU cost of
         # hpack's _unicode_if_needed bytes→str→bytes round-trip).
         self.headers: list[tuple[bytes, bytes]] = []
+
+        # Set by parse_payload when the header block violates RFC 9113 §8.1.2 /
+        # §8.2.  The actor checks this flag and sends RST_STREAM PROTOCOL_ERROR
+        # rather than dispatching the malformed request.
+        self.malformed: bool = False
+        self.malformed_reason: str | None = None
 
         self.raw_block: bytes = b''
 
@@ -298,23 +323,64 @@ class Headers(FrameBase):
         # hpack's _unicode_if_needed UTF-8 decode (~4% CPU under load).
         fields = self.decoder.decode(payload.read(), raw=True)
         debug = logger.isEnabledFor(logging.DEBUG)
+
+        seen_regular = False
         for k, v in fields:
-            kb = bytes(k).lower()  # bytes(...) normalizes memoryview/bytearray
+            kb_raw = bytes(k)  # bytes(...) normalizes memoryview/bytearray
+            # RFC 9113 §8.2.1 — header field names MUST be lowercase; uppercase
+            # in incoming headers makes the message malformed.
+            if any(0x41 <= b <= 0x5A for b in kb_raw):
+                self._mark_malformed(f'uppercase in header field name: {kb_raw!r}')
+                return
+            kb = kb_raw  # already lowercase per the check above
+
             if kb[:1] == b':':
-                # Pseudo-headers (small fixed set) — decode key+value to str
-                # for PseudoHeaders enum lookup and ASGI scope storage.
+                # RFC 9113 §8.3 — pseudo-header fields MUST appear before any
+                # regular header field in a header block.
+                if seen_regular:
+                    self._mark_malformed(f'pseudo-header after regular: {kb!r}')
+                    return
+                # RFC 9113 §8.3 — pseudo-header name must be one of the
+                # defined fields (rejects unknown ":foo").  The
+                # request-vs-response check (e.g. ":status" not on requests)
+                # is enforced one layer up.
+                if kb not in _KNOWN_PSEUDO:
+                    self._mark_malformed(f'unknown pseudo-header: {kb!r}')
+                    return
                 k_str = kb.decode('ascii')
-                if k_str in PseudoHeaders._value2member_map_:
-                    self.pseudo_headers[PseudoHeaders(k_str)] = bytes(v).decode('utf-8')
-                    if debug:
-                        logger.debug('%r: %r', k_str, self.pseudo_headers[PseudoHeaders(k_str)])
-                    continue
-                # Unknown pseudo-header — fall through (RFC 7540 §8.1.2.1
-                # forbids this, but preserve the byte representation for now)
+                pseudo_key = PseudoHeaders(k_str)
+                # RFC 9113 §8.3.1 — each defined request pseudo-header field
+                # MUST NOT appear more than once.
+                if pseudo_key in self.pseudo_headers:
+                    self._mark_malformed(f'duplicate pseudo-header: {kb!r}')
+                    return
+                self.pseudo_headers[pseudo_key] = bytes(v).decode('utf-8')
+                if debug:
+                    logger.debug('%r: %r', k_str, self.pseudo_headers[pseudo_key])
+                continue
+
+            seen_regular = True
+            # RFC 9113 §8.2.2 — connection-specific header fields are forbidden.
+            if kb in _HOP_BY_HOP_HEADERS:
+                self._mark_malformed(f'connection-specific header: {kb!r}')
+                return
+            # RFC 9113 §8.2.2 — the "TE" header is allowed only with value
+            # "trailers".
             vb = v if isinstance(v, bytes) else bytes(v)
+            if kb == b'te' and vb != b'trailers':
+                self._mark_malformed(f'invalid TE value: {vb!r}')
+                return
             self.headers.append((kb, vb))
             if debug:
                 logger.debug('%r: %r', kb, vb)
+
+    def _mark_malformed(self, reason: str) -> None:
+        """Tag the header block as malformed.  Called from validation in
+        parse_payload; the actor checks this flag and sends RST_STREAM
+        PROTOCOL_ERROR rather than dispatching the request."""
+        self.malformed = True
+        self.malformed_reason = reason
+        logger.debug('Headers stream_id=%d malformed: %s', self.stream_id, reason)
 
     @log
     def save(self):

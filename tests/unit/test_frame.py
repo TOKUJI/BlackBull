@@ -100,47 +100,49 @@ class TestHeaderNameNormalization:
         names = [k for k, _ in frame.headers]
         assert b'content-type' in names
 
-    def test_mixed_case_header_name_is_lowercased(self):
-        """Mixed-case header name from a non-conformant peer must be lowercased.
+    def test_mixed_case_header_name_is_malformed(self):
+        """Mixed-case header field name must be flagged malformed.
 
-        P1 bug: without normalization, the name is stored as ``'Content-Type'``.
+        RFC 9113 §8.2.1: header field names MUST be lowercase; a message
+        with an uppercase name MUST be treated as malformed (PROTOCOL_ERROR
+        at the actor level).
         """
-        # Craft raw HPACK bytes for 'Content-Type: text/plain' without indexing
-        # Literal header field without indexing: 0x00, then name length + name, value length + value
         raw_block = (bytes([0x00, 0x0c]) + b'Content-Type'
                      + bytes([0x0a]) + b'text/plain')
         frame = self._frame_with_raw_block(raw_block)
-        names = [k for k, _ in frame.headers]
-        assert b'content-type' in names
-        assert b'Content-Type' not in names
+        assert frame.malformed
+        assert 'Content-Type' in frame.malformed_reason
 
-    def test_all_uppercase_header_name_is_lowercased(self):
-        """All-uppercase header name must be stored as lowercase."""
+    def test_all_uppercase_header_name_is_malformed(self):
+        """All-uppercase header field name must be flagged malformed."""
         raw_block = (bytes([0x00, 0x04]) + b'HOST'
                      + bytes([0x09]) + b'localhost')
         frame = self._frame_with_raw_block(raw_block)
-        names = [k for k, _ in frame.headers]
-        assert b'host' in names
-        assert b'HOST' not in names
+        assert frame.malformed
+        assert 'HOST' in frame.malformed_reason
 
-    def test_pseudo_header_with_wrong_case_is_lowercased(self):
-        """:Method (wrong case) must be stored as :method in pseudo_headers.
+    def test_pseudo_header_with_wrong_case_is_malformed(self):
+        """:Method (mixed case) must be flagged malformed.
 
-        P1 bug: without normalization, ``:Method`` would not match
-        ``PseudoHeaders.METHOD`` and would fall into ``frame.headers`` instead.
+        Pseudo-header names share the lowercase requirement.  Receiving
+        ``:Method`` is a PROTOCOL_ERROR, not silently normalized.
         """
-        # :Method is NOT in the HPACK static table, so use a literal representation
         raw_block = (bytes([0x00, 0x07]) + b':Method'
                      + bytes([0x03]) + b'GET')
         frame = self._frame_with_raw_block(raw_block)
-        assert PseudoHeaders.METHOD in frame.pseudo_headers
-        assert frame.pseudo_headers[PseudoHeaders.METHOD] == 'GET'
+        assert frame.malformed
+        assert ':Method' in frame.malformed_reason
 
     def test_header_value_is_not_lowercased(self):
-        """Header *values* must be preserved exactly — only names are normalized."""
-        raw_block = (bytes([0x00, 0x0c]) + b'Content-Type'
+        """Header *values* must be preserved exactly — only names are restricted.
+
+        Name is lowercase ``content-type`` so the frame passes validation;
+        the value contains mixed case and punctuation that must be preserved.
+        """
+        raw_block = (bytes([0x00, 0x0c]) + b'content-type'
                      + bytes([0x11]) + b'Text/Plain; q=1.0')
         frame = self._frame_with_raw_block(raw_block)
+        assert not frame.malformed
         values = [v for _, v in frame.headers]
         assert b'Text/Plain; q=1.0' in values
 

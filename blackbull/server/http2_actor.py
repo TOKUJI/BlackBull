@@ -433,6 +433,17 @@ class HTTP2Actor(Actor):
             return False
 
         scope = parse_headers(frame)
+        # RFC 9113 §8.1.2 / §8.2 — malformed HEADERS must be rejected with
+        # a stream error of type PROTOCOL_ERROR rather than dispatched.
+        # parse_payload sets the flag for field-level violations; parse_headers
+        # sets it for missing/empty required pseudo-headers.
+        if getattr(frame, 'malformed', False):
+            logger.debug('Stream %d malformed HEADERS — %s',
+                         stream.stream_id, frame.malformed_reason)
+            await self.send_frame(
+                self.factory.rst_stream(stream.stream_id, ErrorCodes.PROTOCOL_ERROR))
+            return True
+
         self._fill_scope_connection(scope)
         stream.scope = scope
 
@@ -479,7 +490,17 @@ class HTTP2Actor(Actor):
             return False
 
         header_frame.parse_payload()
+
         scope = parse_headers(header_frame)
+        # RFC 9113 §8.1.2 / §8.2 — same malformed-HEADERS check as the direct
+        # HEADERS path; reject with RST_STREAM PROTOCOL_ERROR.
+        if getattr(header_frame, 'malformed', False):
+            logger.debug('Stream %d malformed HEADERS (via CONTINUATION) — %s',
+                         stream.stream_id, header_frame.malformed_reason)
+            await self.send_frame(
+                self.factory.rst_stream(stream.stream_id, ErrorCodes.PROTOCOL_ERROR))
+            return True
+
         self._fill_scope_connection(scope)
 
         if self._active_stream_count >= self.max_concurrent_streams:

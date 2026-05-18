@@ -85,10 +85,46 @@ def parse_headers(frame) -> dict:
     Hot path on every request — kept as a module-level function so that
     callers avoid the dict-lookup + parser allocation that ``ParserFactory``
     requires.
+
+    Also performs request-level pseudo-header presence checks (RFC 9113
+    §8.3.1).  Field-level checks already happened in ``parse_payload``; if
+    that flagged ``frame.malformed`` we still build a scope to keep the
+    contract simple but the actor will discard it before dispatch.  If
+    parse_headers itself finds a missing or empty required pseudo, it sets
+    ``frame.malformed`` so the same actor check rejects the request.
     """
+    # Short-circuit if the frame parser already flagged this malformed.
+    if getattr(frame, 'malformed', False):
+        return _make_scope()
+
+    # RFC 9113 §8.3.1 — ":status" is a response pseudo-header and MUST NOT
+    # appear in a request.  ``parse_payload`` accepted it as a known pseudo-
+    # header; we reject it here at the request layer.
+    if PseudoHeaders.STATUS in frame.pseudo_headers:
+        frame._mark_malformed('response pseudo-header in request: :status')
+        return _make_scope()
+
+    # RFC 9113 §8.3.1 — required request pseudo-headers.
+    # CONNECT (RFC 9113 §8.5) omits :scheme and :path; the WebSocket
+    # extension (RFC 8441) is detected below.
+    method = frame.pseudo_headers.get(PseudoHeaders.METHOD)
+    if method is None:
+        frame._mark_malformed('missing :method')
+        return _make_scope()
+    if method != 'CONNECT':
+        if PseudoHeaders.SCHEME not in frame.pseudo_headers:
+            frame._mark_malformed('missing :scheme')
+            return _make_scope()
+        path = frame.pseudo_headers.get(PseudoHeaders.PATH)
+        if path is None:
+            frame._mark_malformed('missing :path')
+            return _make_scope()
+        if path == '':
+            frame._mark_malformed('empty :path')
+            return _make_scope()
+
     scope = _make_scope()
 
-    method   = frame.pseudo_headers.get(PseudoHeaders.METHOD, '')
     protocol = frame.pseudo_headers.get(PseudoHeaders.PROTOCOL, '')
 
     if method == 'CONNECT' and protocol == 'websocket':
