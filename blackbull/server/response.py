@@ -141,24 +141,70 @@ class WindowUpdateResponder(Responder):
 
 
 class SettingsResponder(Responder):
-    async def respond(self, handler):
-        if self.frame.flags == SettingFrameFlags.INIT:
-            iws = getattr(self.frame, 'initial_window_size', None)
-            mfs = getattr(self.frame, 'max_frame_size', None)
-            # Store peer's announced window so future stream senders start correctly.
-            if iws is not None:
-                handler._peer_initial_window_size = iws
-            if iws is not None or mfs is not None:
-                for sender in handler._senders.values():
-                    sender.apply_settings(initial_window_size=iws, max_frame_size=mfs)
-            # NOTE: per RFC 7540 §6.5.2, peer's SETTINGS_HEADER_TABLE_SIZE
-            # constrains OUR encoder's table, not OUR decoder's. Updating the
-            # decoder here would (and did) trip hpack's InvalidTableSizeError
-            # because the peer's encoder never asked us to resize.
-            await handler.send_frame(handler.factory.settings(ack=True))
+    # RFC 9113 §6.5.2 — SETTINGS parameter ranges.
+    _MAX_FLOW_WINDOW = 2**31 - 1           # SETTINGS_INITIAL_WINDOW_SIZE
+    _MIN_MAX_FRAME_SIZE = 16384            # SETTINGS_MAX_FRAME_SIZE lower bound
+    _MAX_MAX_FRAME_SIZE = 16777215         # SETTINGS_MAX_FRAME_SIZE upper bound (2^24-1)
 
-        elif self.frame.flags == SettingFrameFlags.ACK:
+    async def respond(self, handler):
+        # RFC 9113 §6.5 — SETTINGS MUST be sent on stream 0.
+        if self.frame.stream_id != 0:
+            await handler._connection_error(
+                ErrorCodes.PROTOCOL_ERROR,
+                f'SETTINGS with stream_id={self.frame.stream_id}')
+            return
+
+        if self.frame.flags & SettingFrameFlags.ACK:
+            # RFC 9113 §6.5 — SETTINGS ACK MUST have a length of 0.
+            if self.frame.length != 0:
+                await handler._connection_error(
+                    ErrorCodes.FRAME_SIZE_ERROR,
+                    f'SETTINGS ACK with length={self.frame.length}')
+                return
             logger.debug('Got ACK. Do nothing.')
+            return
+
+        # INIT branch
+        # RFC 9113 §6.5 — length MUST be a multiple of 6 octets.
+        if self.frame.length % 6 != 0:
+            await handler._connection_error(
+                ErrorCodes.FRAME_SIZE_ERROR,
+                f'SETTINGS length not multiple of 6: {self.frame.length}')
+            return
+
+        # RFC 9113 §6.5.2 — parameter range validation.
+        ep = getattr(self.frame, 'enable_push', None)
+        if ep is not None and ep not in (0, 1):
+            await handler._connection_error(
+                ErrorCodes.PROTOCOL_ERROR,
+                f'SETTINGS_ENABLE_PUSH invalid value {ep}')
+            return
+
+        iws = getattr(self.frame, 'initial_window_size', None)
+        if iws is not None and iws > self._MAX_FLOW_WINDOW:
+            await handler._connection_error(
+                ErrorCodes.FLOW_CONTROL_ERROR,
+                f'SETTINGS_INITIAL_WINDOW_SIZE overflow: {iws}')
+            return
+
+        mfs = getattr(self.frame, 'max_frame_size', None)
+        if mfs is not None and (mfs < self._MIN_MAX_FRAME_SIZE or mfs > self._MAX_MAX_FRAME_SIZE):
+            await handler._connection_error(
+                ErrorCodes.PROTOCOL_ERROR,
+                f'SETTINGS_MAX_FRAME_SIZE out of range: {mfs}')
+            return
+
+        # Store peer's announced window so future stream senders start correctly.
+        if iws is not None:
+            handler._peer_initial_window_size = iws
+        if iws is not None or mfs is not None:
+            for sender in handler._senders.values():
+                sender.apply_settings(initial_window_size=iws, max_frame_size=mfs)
+        # NOTE: per RFC 7540 §6.5.2, peer's SETTINGS_HEADER_TABLE_SIZE
+        # constrains OUR encoder's table, not OUR decoder's. Updating the
+        # decoder here would (and did) trip hpack's InvalidTableSizeError
+        # because the peer's encoder never asked us to resize.
+        await handler.send_frame(handler.factory.settings(ack=True))
 
     FRAME_TYPE = FrameTypes.SETTINGS
 
