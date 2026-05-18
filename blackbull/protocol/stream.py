@@ -62,6 +62,12 @@ class Stream:
         # from closed-via-RST_STREAM.  Influences whether late frames are
         # treated as connection or stream errors.
         self.closed_via_rst: bool = False
+        # RFC 9113 §8.1.2.6 — content-length tracking.  ``expected_content_length``
+        # is parsed from the request's content-length header (None if absent);
+        # ``received_data_bytes`` accumulates DATA-frame payload lengths so the
+        # peer's declared length can be checked at END_STREAM.
+        self.expected_content_length: int | None = None
+        self.received_data_bytes: int = 0
 
     def on_headers_received(self, end_stream: bool) -> None:
         """Transition state on HEADERS frame (RFC 7540 §5.1)."""

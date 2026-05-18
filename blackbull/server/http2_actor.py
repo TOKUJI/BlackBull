@@ -18,7 +18,10 @@ from .http2_messages import (
 )
 from ..logger import log
 from ..protocol.frame import FrameFactory
-from ..protocol.frame_types import ErrorCodes, FrameBase, FrameTypes, DEFAULT_INITIAL_WINDOW_SIZE
+from ..protocol.frame_types import (
+    ErrorCodes, FrameBase, FrameTypes,
+    DEFAULT_INITIAL_WINDOW_SIZE, DEFAULT_MAX_FRAME_SIZE,
+)
 from ..protocol.stream import Stream, StreamState
 from .headers import Headers
 from .parser import ParserFactory, parse_headers
@@ -38,6 +41,25 @@ class _StreamRecipient(Protocol):
     """Duck-type interface shared by HTTP2Recipient and HTTP2WSReader."""
     def put_disconnect(self) -> None: ...
     def put_DATAFrame(self, frame) -> bool: ...
+
+
+def _extract_content_length(scope: dict) -> int | None:
+    """Return the int value of the request's content-length, or None.
+
+    Returns None when the header is absent OR when the value does not parse
+    as a non-negative integer (parse_headers may have already rejected the
+    request as malformed in the latter case).  RFC 9113 §8.1.2.6 covers the
+    "must equal sum of DATA payloads" semantics enforced by the caller.
+    """
+    for name, value in scope.get('headers', []):
+        nb = name if isinstance(name, bytes) else bytes(name)
+        if nb == b'content-length':
+            try:
+                n = int(value if isinstance(value, bytes) else bytes(value))
+            except (ValueError, TypeError):
+                return None
+            return n if n >= 0 else None
+    return None
 
 
 def _signal_recipients(recipients: dict[int, _StreamRecipient]) -> None:
@@ -423,6 +445,26 @@ class HTTP2Actor(Actor):
             if frame_type is None:
                 continue
 
+            # RFC 9113 §4.2 — a frame whose payload exceeds the receiver's
+            # advertised SETTINGS_MAX_FRAME_SIZE is a FRAME_SIZE_ERROR.  When
+            # the frame could alter connection state (carries a header block,
+            # is SETTINGS, or targets stream 0), it is a connection error;
+            # otherwise it is a stream error.
+            if frame.length > DEFAULT_MAX_FRAME_SIZE:
+                _state_altering = frame_type in (
+                    FrameTypes.HEADERS, FrameTypes.CONTINUATION,
+                    FrameTypes.PUSH_PROMISE, FrameTypes.SETTINGS,
+                )
+                if _state_altering or frame.stream_id == 0:
+                    await self._connection_error(
+                        ErrorCodes.FRAME_SIZE_ERROR,
+                        f'{frame_type.name} length {frame.length} > '
+                        f'{DEFAULT_MAX_FRAME_SIZE}')
+                else:
+                    await self.send_frame(self.factory.rst_stream(
+                        frame.stream_id, ErrorCodes.FRAME_SIZE_ERROR))
+                continue
+
             # RFC 9113 §6.2 — HEADERS MUST be associated with a non-zero
             # stream identifier (PROTOCOL_ERROR at the connection level).
             if frame_type == FrameTypes.HEADERS and frame.stream_id == 0:
@@ -448,6 +490,29 @@ class HTTP2Actor(Actor):
                 await self._connection_error(
                     ErrorCodes.PROTOCOL_ERROR,
                     'unexpected CONTINUATION without preceding HEADERS')
+                continue
+
+            # RFC 9113 §6.1 — DATA MUST be associated with a non-zero stream
+            # identifier (PROTOCOL_ERROR at the connection level).
+            if frame_type == FrameTypes.DATA and frame.stream_id == 0:
+                await self._connection_error(
+                    ErrorCodes.PROTOCOL_ERROR,
+                    'DATA with stream_id 0')
+                continue
+
+            # RFC 9113 §6.3 — PRIORITY MUST be associated with a non-zero
+            # stream identifier (PROTOCOL_ERROR at the connection level).
+            if frame_type == FrameTypes.PRIORITY and frame.stream_id == 0:
+                await self._connection_error(
+                    ErrorCodes.PROTOCOL_ERROR,
+                    'PRIORITY with stream_id 0')
+                continue
+
+            # RFC 9113 §6.3 — PRIORITY frame payload MUST be 5 octets;
+            # otherwise it is a stream error of type FRAME_SIZE_ERROR.
+            if frame_type == FrameTypes.PRIORITY and frame.length != 5:
+                await self.send_frame(self.factory.rst_stream(
+                    frame.stream_id, ErrorCodes.FRAME_SIZE_ERROR))
                 continue
 
             # RFC 9113 §5.1.1 — new peer-initiated streams MUST use odd
@@ -614,6 +679,7 @@ class HTTP2Actor(Actor):
                 self.factory.rst_stream(stream.stream_id, ErrorCodes.PROTOCOL_ERROR))
             return True
 
+        stream.expected_content_length = _extract_content_length(scope)
         self._fill_scope_connection(scope)
         stream.scope = scope
 
@@ -674,6 +740,7 @@ class HTTP2Actor(Actor):
                 self.factory.rst_stream(stream.stream_id, ErrorCodes.PROTOCOL_ERROR))
             return True
 
+        stream.expected_content_length = _extract_content_length(scope)
         self._fill_scope_connection(scope)
 
         if self._active_stream_count >= self.max_concurrent_streams:
@@ -702,6 +769,20 @@ class HTTP2Actor(Actor):
             await self.send_frame(
                 self.factory.rst_stream(stream.stream_id, ErrorCodes.STREAM_CLOSED))
             return
+
+        # RFC 9113 §8.1.2.6 — validate the sum of DATA payload lengths
+        # against the declared content-length.  Excess is detected on each
+        # frame; deficit is detected when END_STREAM arrives.  Padding bytes
+        # are not counted in the payload length per §8.1.2.6.
+        stream.received_data_bytes += len(frame.payload)
+        expected = stream.expected_content_length
+        if expected is not None:
+            if stream.received_data_bytes > expected or (
+                frame.end_stream and stream.received_data_bytes != expected
+            ):
+                await self.send_frame(self.factory.rst_stream(
+                    stream.stream_id, ErrorCodes.PROTOCOL_ERROR))
+                return
 
         stream.on_data_received(end_stream=bool(frame.end_stream))
         if stream.stream_id in self._recipients:

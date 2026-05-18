@@ -310,6 +310,10 @@ class Headers(FrameBase):
     def parse_payload(self):
         assert self.decoder is not None
         payload = BytesIO(self.raw_block)
+        # Track how many bytes of self.raw_block belong to the HPACK block;
+        # start with the full payload and subtract pad-length octet, padding,
+        # and the priority field as we go.
+        remaining = len(self.raw_block)
         if self.padded:
             # RFC 9113 §6.2 — padding length must be smaller than the frame
             # payload length (otherwise pad would cover the pad-length octet
@@ -319,6 +323,7 @@ class Headers(FrameBase):
                 self._mark_malformed(
                     f'HEADERS pad_length ({pad_length}) >= frame length ({self.length})')
                 return
+            remaining -= 1 + pad_length
 
         if self.priority:
             sd_raw = int.from_bytes(payload.read(4), 'big', signed=False)
@@ -332,10 +337,11 @@ class Headers(FrameBase):
                 self._mark_malformed(
                     f'HEADERS priority self-dependency on stream {self.stream_id}')
                 return
+            remaining -= 5
 
         # raw=True keeps hpack output as bytes-bytes tuples and bypasses
         # hpack's _unicode_if_needed UTF-8 decode (~4% CPU under load).
-        fields = self.decoder.decode(payload.read(), raw=True)
+        fields = self.decoder.decode(payload.read(remaining), raw=True)
         debug = logger.isEnabledFor(logging.DEBUG)
 
         seen_regular = False
@@ -495,7 +501,14 @@ class RstStream(FrameBase):
         if len(data) != 4:
             raise Exception('Frame size error')
 
-        self.error_code = ErrorCodes(int.from_bytes(data, 'big', signed=False))
+        # RFC 9113 §7 — unknown or unsupported error codes MUST NOT trigger
+        # any special behaviour.  Keep the raw integer when it does not match
+        # a known enum value rather than raising.
+        raw = int.from_bytes(data, 'big', signed=False)
+        try:
+            self.error_code = ErrorCodes(raw)
+        except ValueError:
+            self.error_code = raw
         logger.debug(f'error_code: {self.error_code}')
 
     def save(self):

@@ -132,7 +132,9 @@ class FrameFactory:
         length = int.from_bytes(data[:3], 'big', signed=False)
         type_ = data[3:4]
         flags = int.from_bytes(data[4:5], 'big', signed=False)
-        stream_id = int.from_bytes(data[5:9], 'big', signed=False)
+        # RFC 9113 §4.1 — the high bit of the 32-bit stream identifier is
+        # reserved (R) and MUST be ignored on receipt.
+        stream_id = int.from_bytes(data[5:9], 'big', signed=False) & 0x7fffffff
         payload = data[9: 9 + length]
 
         try:
