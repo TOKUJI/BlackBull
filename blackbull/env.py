@@ -228,6 +228,13 @@ class Settings:
     #: Maximum concurrent HTTP/2 streams per connection (SETTINGS_MAX_CONCURRENT_STREAMS).
     h2_max_concurrent_streams: int = 100
 
+    #: Advertise SETTINGS_ENABLE_CONNECT_PROTOCOL=1 (RFC 8441 §3) so peers may
+    #: bootstrap WebSocket over HTTP/2 via Extended CONNECT.  Off by default —
+    #: this path has fewer conformance tests than the HTTP/1.1 upgrade path,
+    #: and few clients use it in practice (Cloudflare's edge stack is the
+    #: main consumer).  Set ``BB_H2_ENABLE_WEBSOCKET=1`` to turn it on.
+    h2_enable_websocket: bool = False
+
     #: Per-connection asyncio.Semaphore cap on running stream handlers when
     #: running with a single worker (0 = disabled).  Defaults to 20 so that
     #: high-mux connections (e.g. -m 50) do not saturate the single event loop
@@ -287,6 +294,7 @@ def get_settings() -> Settings:
         h2_initial_window_size=_int_env('BB_H2_INITIAL_WINDOW_SIZE', 1048576),
         h2_connection_window_size=_int_env('BB_H2_CONNECTION_WINDOW_SIZE', 4194304),
         h2_max_concurrent_streams=_int_env('BB_H2_MAX_CONCURRENT_STREAMS', 100),
+        h2_enable_websocket=_bool_env('BB_H2_ENABLE_WEBSOCKET', False),
         use_uvloop=_bool_env('BB_UVLOOP', False),
         h2_active_streams_1w=_int_env_nonneg('BB_H2_ACTIVE_STREAMS_1W', 20),
         h2_active_streams=_int_env_nonneg('BB_H2_ACTIVE_STREAMS', 20),

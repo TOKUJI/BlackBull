@@ -241,6 +241,10 @@ class HTTP2Actor(Actor):
         # RFC 9113 §5.1.1 — peer-initiated stream IDs must strictly increase.
         self._last_peer_stream_id: int = 0
 
+        # RFC 8441 — set by run() from BB_H2_ENABLE_WEBSOCKET.  When False,
+        # any incoming :method=CONNECT with :protocol=websocket is refused.
+        self._ws_over_h2_enabled: bool = False
+
         # RFC 9113 §5.1 — closed-stream state, separate from the priority tree.
         # Maps stream_id → True if closed via RST_STREAM, False if closed via
         # END_STREAM / local completion.  This lets us drop closed nodes from
@@ -401,11 +405,16 @@ class HTTP2Actor(Actor):
         from ..env import get_settings as _get_settings  # noqa: PLC0415
         cfg = _get_settings()
 
+        # RFC 8441 §3 — only advertise SETTINGS_ENABLE_CONNECT_PROTOCOL when
+        # the operator has opted in (BB_H2_ENABLE_WEBSOCKET=1).  Without the
+        # bit set, peers MUST NOT send :protocol pseudo-headers or use
+        # Extended CONNECT, so disabling it is the safe default.
         await self.send_frame(self.factory.settings(
-            enable_connect_protocol=True,
+            enable_connect_protocol=cfg.h2_enable_websocket,
             initial_window_size=cfg.h2_initial_window_size,
             max_concurrent_streams=self.max_concurrent_streams,
         ))
+        self._ws_over_h2_enabled = cfg.h2_enable_websocket
         logger.info(
             'HTTP/2 SETTINGS sent: initial_window_size=%d max_concurrent_streams=%d',
             cfg.h2_initial_window_size, self.max_concurrent_streams,
@@ -717,7 +726,15 @@ class HTTP2Actor(Actor):
         stream.scope = scope
 
         if scope.get('type') == 'websocket':
-            # RFC 8441 — Extended CONNECT bootstrapping WebSocket over HTTP/2
+            # RFC 8441 — Extended CONNECT bootstrapping WebSocket over HTTP/2.
+            # Off by default (BB_H2_ENABLE_WEBSOCKET): when the operator has
+            # not opted in we never advertised ENABLE_CONNECT_PROTOCOL, so a
+            # conforming peer would not send :protocol=websocket.  A
+            # non-conforming one is rejected here with PROTOCOL_ERROR.
+            if not self._ws_over_h2_enabled:
+                await self.send_frame(self.factory.rst_stream(
+                    stream.stream_id, ErrorCodes.PROTOCOL_ERROR))
+                return True
             stream.on_headers_received(end_stream=False)
             log_record = _make_log_record(scope)
             await self._handle_h2_websocket(stream, tg, log_record)

@@ -20,6 +20,13 @@ from blackbull.protocol.frame_types import (
 from blackbull.server.ws_codec import encode_frame, WSOpcode
 
 
+# RFC 8441 support is opt-in (BB_H2_ENABLE_WEBSOCKET).  These tests exercise
+# the path, so enable it for every test in this module.
+@pytest.fixture(autouse=True)
+def _enable_ws_over_h2(monkeypatch):
+    monkeypatch.setenv('BB_H2_ENABLE_WEBSOCKET', '1')
+
+
 # ---------------------------------------------------------------------------
 # Wire-format helpers
 # ---------------------------------------------------------------------------
@@ -564,3 +571,47 @@ class TestNegativeCases:
         assert len(scopes) == 2, f'Expected 2 WS streams; got scopes={scopes}'
         assert '/ws/a' in scopes
         assert '/ws/b' in scopes
+
+
+@pytest.mark.asyncio
+class TestOptInGating:
+    """BB_H2_ENABLE_WEBSOCKET gates the entire RFC 8441 path."""
+
+    async def test_settings_omits_enable_connect_when_disabled(self, monkeypatch):
+        """With BB_H2_ENABLE_WEBSOCKET unset, the initial SETTINGS frame
+        MUST NOT carry SETTINGS_ENABLE_CONNECT_PROTOCOL=1."""
+        monkeypatch.setenv('BB_H2_ENABLE_WEBSOCKET', '0')
+        handler, _, _ = _make_h2_actor()
+        handler.receive = AsyncMock(return_value=None)
+        await handler.run()
+
+        first_frame = handler.send_frame.call_args_list[0].args[0]
+        assert first_frame.FrameType() == FrameTypes.SETTINGS
+        raw = first_frame.save()
+        assert b'\x00\x08\x00\x00\x00\x01' not in raw, (
+            'SETTINGS must not advertise ENABLE_CONNECT_PROTOCOL when disabled')
+
+    async def test_extended_connect_rejected_with_rst_when_disabled(self, monkeypatch):
+        """An Extended CONNECT request received while RFC 8441 support is off
+        MUST be answered with RST_STREAM(PROTOCOL_ERROR); the app handler
+        MUST NOT be invoked."""
+        monkeypatch.setenv('BB_H2_ENABLE_WEBSOCKET', '0')
+        called = []
+
+        async def app(scope, receive, send):
+            called.append(scope)
+
+        handler, _, _ = _make_h2_actor(app)
+        handler.receive = AsyncMock(side_effect=[
+            _client_settings(),
+            _make_extended_connect_frame(),
+            None,
+        ])
+        await handler.run()
+
+        assert called == [], 'app handler must not be invoked when WS-over-h2 is off'
+        rst_seen = any(
+            getattr(call.args[0], 'FrameType', lambda: None)() == FrameTypes.RST_STREAM
+            for call in handler.send_frame.call_args_list
+        )
+        assert rst_seen, 'Server must send RST_STREAM in response to disallowed Extended CONNECT'
