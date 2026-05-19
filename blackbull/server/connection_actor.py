@@ -66,6 +66,19 @@ class ConnectionActor(Actor):
             await self._writer.close()
 
     async def _dispatch(self) -> None:
+        import asyncio  # noqa: PLC0415
+        from ..env import get_settings as _get_settings  # noqa: PLC0415
+        cfg = _get_settings()
+
+        # Slowloris defence at protocol-detection: a connected peer that
+        # never sends a first line / preface would otherwise hold a slot
+        # forever waiting on readuntil / readexactly here.  We use the
+        # same ``header_timeout`` setting HTTP1Actor uses for its own
+        # header-completion deadline — the practical worst case is two
+        # timeouts back-to-back (protocol-detect + first request headers),
+        # still bounded.  ``header_timeout=0`` disables both halves.
+        deadline = cfg.header_timeout if cfg.header_timeout > 0 else None
+
         # ALPN-negotiated HTTP/2: the peer is committed to HTTP/2, so the
         # first 24 bytes MUST be the connection preface (RFC 9113 §3.4).
         # Read exactly 24 bytes rather than scanning for CRLF so an invalid
@@ -73,7 +86,17 @@ class ConnectionActor(Actor):
         # reader (h2spec §3.5 #2 exercises this with a non-preface byte
         # sequence and times out otherwise).
         if self._alpn == 'h2':
-            preface = await self._reader.readexactly(24)
+            try:
+                if deadline is not None:
+                    async with asyncio.timeout(deadline):
+                        preface = await self._reader.readexactly(24)
+                else:
+                    preface = await self._reader.readexactly(24)
+            except (asyncio.TimeoutError, TimeoutError):
+                # Peer connected via ALPN h2 but never sent the preface.
+                # Close — no GOAWAY since we don't have a SETTINGS exchange.
+                logger.warning('slowloris: ALPN-h2 peer sent no preface within %.1fs', deadline)
+                return
             expected = _HTTP2_PREFACE_FIRST_LINE + _HTTP2_PREFACE_REMAINDER
             if preface != expected:
                 # Best-effort: send GOAWAY before closing so a peer that did
@@ -100,7 +123,28 @@ class ConnectionActor(Actor):
             return
 
         # No ALPN (cleartext) or ALPN didn't pick h2 — sniff the first line.
-        first_line = await self._reader.readuntil(b'\r\n')
+        try:
+            if deadline is not None:
+                async with asyncio.timeout(deadline):
+                    first_line = await self._reader.readuntil(b'\r\n')
+            else:
+                first_line = await self._reader.readuntil(b'\r\n')
+        except (asyncio.TimeoutError, TimeoutError):
+            # Slowloris during protocol-detect: best-effort 408 then close.
+            # We don't yet know the protocol; the bytes are HTTP/1.1-compatible
+            # so a 408 will be parseable by an h1 client and ignored by an
+            # h2 client (which would have been on the ALPN path anyway).
+            logger.warning(
+                'slowloris: peer sent no first line within %.1fs', deadline)
+            try:
+                await self._writer.write(
+                    b'HTTP/1.1 408 Request Timeout\r\n'
+                    b'connection: close\r\n'
+                    b'content-length: 0\r\n\r\n')
+            except Exception:
+                pass
+            return
+
         if first_line == _HTTP2_PREFACE_FIRST_LINE:
             remainder = await self._reader.readexactly(8)
             if first_line + remainder != _HTTP2_PREFACE_FIRST_LINE + _HTTP2_PREFACE_REMAINDER:

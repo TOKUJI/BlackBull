@@ -185,11 +185,38 @@ class HTTP1Actor(Actor):
 
     async def run(self) -> None:
         """Keep-alive loop — process requests until connection closes."""
+        import asyncio  # noqa: PLC0415
+        from ..env import get_settings as _get_settings  # noqa: PLC0415
+        cfg = _get_settings()
         send = SenderFactory.http1(self._writer)
         try:
             while True:
-                while not self._request.endswith(_REQ_END):
-                    self._request += await self._reader.readuntil(_REQ_END)
+                # Slowloris defence (RFC 9110 §15.5.9 — 408 Request Timeout).
+                # The peer has a bounded window to send the complete header
+                # block; if it elapses we close the connection with 408 so a
+                # well-behaved monitoring client can tell us apart from a
+                # peer-side disconnect.  ``header_timeout=0`` disables the
+                # deadline (legacy behaviour for trusted local use).
+                try:
+                    if cfg.header_timeout > 0:
+                        async with asyncio.timeout(cfg.header_timeout):
+                            while not self._request.endswith(_REQ_END):
+                                self._request += await self._reader.readuntil(_REQ_END)
+                    else:
+                        while not self._request.endswith(_REQ_END):
+                            self._request += await self._reader.readuntil(_REQ_END)
+                except (asyncio.TimeoutError, TimeoutError):
+                    logger.warning(
+                        '408 Request Timeout (slowloris defence) — peer=%r '
+                        'sent %d bytes in %.1fs without completing headers',
+                        self._peername, len(self._request), cfg.header_timeout)
+                    await send(
+                        b'408 Request Timeout',
+                        HTTPStatus.REQUEST_TIMEOUT,
+                        [(b'connection', b'close'),
+                         (b'content-type', b'text/plain')],
+                    )
+                    return
 
                 try:
                     scope = self._parse(self._request)

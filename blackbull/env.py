@@ -219,6 +219,14 @@ class Settings:
     #: Per-request timeout in seconds for HTTP/2 streams (0 = disabled).
     request_timeout: float = 0.0
 
+    #: Maximum seconds an HTTP/1.1 client has to send the complete header
+    #: block (request-line + headers + CRLFCRLF).  When the deadline
+    #: elapses, the server answers with 408 Request Timeout and closes.
+    #: Primary defence against slowloris — an attacker can otherwise hold
+    #: a connection open indefinitely by dripping bytes.  0 = disabled
+    #: (legacy behaviour; only recommended for trusted local clients).
+    header_timeout: float = 10.0
+
     #: Per-stream HTTP/2 flow-control window advertised in the server's SETTINGS.
     h2_initial_window_size: int = 1048576  # 1 MiB
 
@@ -297,6 +305,7 @@ def get_settings() -> Settings:
         socket_rcvbuf=_int_env_nonneg('BB_SOCKET_RCVBUF', 262144),
         socket_reuseport=_bool_env('BB_SOCKET_REUSEPORT', True),
         request_timeout=_float_env_nonneg('BB_REQUEST_TIMEOUT', 0.0),
+        header_timeout=_float_env_nonneg('BB_HEADER_TIMEOUT', 10.0),
         h2_initial_window_size=_int_env('BB_H2_INITIAL_WINDOW_SIZE', 1048576),
         h2_connection_window_size=_int_env('BB_H2_CONNECTION_WINDOW_SIZE', 4194304),
         h2_max_concurrent_streams=_int_env('BB_H2_MAX_CONCURRENT_STREAMS', 100),
