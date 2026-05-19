@@ -645,6 +645,77 @@ A cookie whose signature fails to verify (tampering, wrong secret, replay with
 a different `cookie_name`) is silently dropped — the handler sees an empty
 session, no error is propagated.
 
+#### CacheMiddleware
+
+Per-worker in-memory response cache for `GET` and `HEAD`.  The middleware
+captures the handler's response on the first hit, stores it under
+`(method, path, query_string)`, and replays it directly on subsequent
+matching requests until the entry expires.
+
+```python
+from blackbull.middleware.cache import CacheMiddleware
+
+app.use(CacheMiddleware(max_age=600))   # 10-minute TTL by default
+
+@app.route(path='/feed')
+async def feed(scope, receive, send):
+    items = await fetch_news()  # expensive
+    body = render(items).encode()
+    await send({'type': 'http.response.start', 'status': 200,
+                'headers': [(b'content-type', b'text/html')]})
+    await send({'type': 'http.response.body', 'body': body})
+```
+
+A weak ETag (`W/"<sha256-prefix>"`) is generated automatically when the
+handler doesn't supply one.  Subsequent requests that send a matching
+`If-None-Match` header receive a `304 Not Modified` with no body:
+
+```bash
+$ curl -i http://localhost:8000/feed
+HTTP/1.1 200 OK
+content-type: text/html
+etag: W/"a1b2c3d4e5f60718"
+...
+
+$ curl -i -H 'If-None-Match: W/"a1b2c3d4e5f60718"' http://localhost:8000/feed
+HTTP/1.1 304 Not Modified
+etag: W/"a1b2c3d4e5f60718"
+```
+
+Standard `Cache-Control` directives are honoured.  Responses carrying
+`no-store`, `private`, or `no-cache` are passed through and never
+stored.  Requests with `Cache-Control: no-store` bypass the cache too.
+Response `Cache-Control: max-age=N` (and `s-maxage=N`, which takes
+precedence) shortens the cache lifetime below the middleware's default.
+
+Constructor arguments:
+
+| Argument               | Default                | Notes                                                                  |
+|------------------------|------------------------|------------------------------------------------------------------------|
+| `max_age`              | `300`                  | TTL in seconds when the response does not specify its own.            |
+| `max_entries`          | `1024`                 | LRU cap on the number of cached responses.  Oldest evicted first.     |
+| `cacheable_methods`    | `{'GET', 'HEAD'}`      | Methods eligible for caching.                                          |
+| `cacheable_statuses`   | `{200, 203, 300, 301, 308, 404, 410, 414, 451}` | Status codes eligible for caching.       |
+| `cache_authenticated`  | `False`                | When `False`, requests with `Authorization` bypass the cache (RFC 9111 §3.5). |
+| `generate_etag`        | `True`                 | Auto-generate `ETag` when the handler omits it.                        |
+
+Streaming responses (any body chunk sent with `more_body=True`) are
+forwarded straight to the client without caching — the body size is
+unknown ahead of time and hashing it post-hoc would defeat the
+streaming.
+
+Limitations to know:
+
+* **Per-worker.**  Multi-worker deployments hold a separate cache in
+  each process; a refresh in one worker doesn't propagate to the others.
+* **No cross-restart persistence.**  In-memory only; a worker restart
+  drops everything.
+* **No `Vary` matching.**  Requests that differ only by `Accept-Encoding`
+  or `Accept-Language` share the same cache slot — the first response
+  cached wins.  Don't use `CacheMiddleware` for content-negotiated
+  routes unless the negotiation is path/query-string-driven.
+* **No explicit invalidation API.**  Wait for TTL or restart the worker.
+
 ### 4.5  Injecting values into scope
 
 Middleware may add any key to `scope` for inner layers to consume:

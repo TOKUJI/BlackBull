@@ -62,7 +62,7 @@ pytest
 ### P4 — Application framework
 
 - [x] Route lookup cache — internal per-worker LRU cache (transparent, no user API)
-- [ ] Response/application caching middleware — cache-control, ETags, user-configurable TTL
+- [x] Response/application caching middleware — `CacheMiddleware`; per-worker LRU, ETag + If-None-Match → 304, `Cache-Control: no-store/private/no-cache` respected, `max-age` / `s-maxage` honoured, opt-out for authenticated requests
 - [x] Cookie-based session middleware (signed cookie) — `SessionMiddleware`; HMAC-SHA256, `BB_SESSION_SECRET` or explicit secret
 - [ ] OpenAPI / interactive API docs (Swagger UI)
 - [x] beartype for startup type checking on route handlers — `Router.validate()` runs at `app.run()` / `app.serve()` boot and checks every path-converter output against the handler's annotation; the same package powers the test-suite's `--beartype-packages=blackbull` import hook
