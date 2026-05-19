@@ -63,6 +63,6 @@ pytest
 
 - [x] Route lookup cache — internal per-worker LRU cache (transparent, no user API)
 - [ ] Response/application caching middleware — cache-control, ETags, user-configurable TTL
-- [ ] Built-in session middleware (server-side sessions)
+- [x] Cookie-based session middleware (signed cookie) — `SessionMiddleware`; HMAC-SHA256, `BB_SESSION_SECRET` or explicit secret
 - [ ] OpenAPI / interactive API docs (Swagger UI)
 - [ ] beartype for startup type checking on route handlers

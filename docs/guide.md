@@ -28,7 +28,7 @@ BlackBull is a **routing and middleware layer**.  It does not include:
 - An ORM or database layer — bring your own (SQLite, SQLAlchemy, asyncpg, …)
 - A template engine — render HTML with Jinja2, Mako, or plain f-strings
 - A request-validation library — validate with Pydantic, marshmallow, or manually
-- A session store — implement session middleware using a dict, Redis, or a signed cookie
+- A server-side session store — for cookie-based sessions, see [SessionMiddleware](#sessionmiddleware) (§4.4); for server-side state bring your own (dict, Redis, …)
 
 This keeps the framework small and lets you swap any of these concerns independently.
 
@@ -580,6 +580,70 @@ compress_big = CompressionMiddleware(min_size=4096)
 async def large(scope, receive, send):
     ...
 ```
+
+#### SessionMiddleware
+
+Signed-cookie sessions: the session data lives entirely in a cookie HMAC-signed
+by the server.  No server-side store, no DB, no Redis — every worker can read
+any cookie as long as it shares the secret.  Trade-off: cookie size is bounded
+(browsers cap to ~4 KiB) and you can't revoke a session early without rotating
+the secret.
+
+```python
+from blackbull.middleware.session import SessionMiddleware
+
+# Operator sets BB_SESSION_SECRET=<32-byte random> in the deployment env
+app.use(SessionMiddleware())
+
+# Or pass the secret explicitly (handy for tests):
+app.use(SessionMiddleware(secret=b'<long-random-bytes>'))
+
+@app.route(path='/')
+async def index(scope, receive, send):
+    scope['session']['user'] = 'alice'           # any JSON-serializable value
+    await send(Response('signed in'))
+
+@app.route(path='/whoami')
+async def whoami(scope, receive, send):
+    await send(Response(scope['session'].get('user', 'anonymous')))
+```
+
+`scope['session']` is a `dict` subclass that tracks whether you mutated it.
+The middleware only emits `Set-Cookie` when a request handler changed the
+session — read-only handlers leave the response cache-friendly.
+
+Setting/missing secret:
+
+* The constructor accepts `secret=` directly.
+* When `secret` is `None`, the middleware reads `BB_SESSION_SECRET` from the
+  environment.
+* If neither is set, construction raises — there is no insecure default.
+  Generate one with `python -c "import secrets; print(secrets.token_urlsafe(32))"`.
+
+Cookie attributes (all keyword arguments, with sensible defaults):
+
+| Argument        | Default  | Notes                                                                  |
+|-----------------|----------|------------------------------------------------------------------------|
+| `cookie_name`   | `'session'` | Name of the cookie carrying the payload.                            |
+| `max_age`       | `None`   | Seconds the cookie is valid.  When set, a server-signed timestamp is included; older cookies are rejected.  `None` ⇒ session cookie (lives until the browser closes). |
+| `secure`        | `True`   | Send the `Secure` attribute (cookie only over HTTPS).  Disable for local-only dev. |
+| `httponly`      | `True`   | Send the `HttpOnly` attribute (JS can't read the cookie).             |
+| `samesite`      | `'Lax'`  | `'Strict'`, `'Lax'`, `'None'`, or `None` (omit the attribute).        |
+| `path`          | `'/'`    | Cookie `Path`.                                                        |
+
+Clearing the session emits a tombstone cookie with `Max-Age=0`, telling the
+browser to drop it:
+
+```python
+@app.route(path='/logout')
+async def logout(scope, receive, send):
+    scope['session'].clear()
+    await send(Response('signed out'))
+```
+
+A cookie whose signature fails to verify (tampering, wrong secret, replay with
+a different `cookie_name`) is silently dropped — the handler sees an empty
+session, no error is propagated.
 
 ### 4.5  Injecting values into scope
 
