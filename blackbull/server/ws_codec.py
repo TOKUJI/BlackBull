@@ -47,7 +47,7 @@ class WSFrameHeader(NamedTuple):
 
 
 def encode_frame(payload: bytes, opcode: WSOpcode | int = WSOpcode.TEXT,
-                 *, mask: bool = False) -> bytes:
+                 *, mask: bool = False, rsv1: bool = False) -> bytes:
     """Encode *payload* as a WebSocket data frame (RFC 6455 §5).
 
     ``opcode`` defaults to ``WSOpcode.TEXT``; pass ``WSOpcode.BINARY`` for
@@ -57,9 +57,16 @@ def encode_frame(payload: bytes, opcode: WSOpcode | int = WSOpcode.TEXT,
     - Server → client frames MUST NOT be masked: keep ``mask=False`` (default).
     - Client → server frames MUST be masked: pass ``mask=True``, which prepends
       a random 4-byte masking key and XORs the payload with it.
+
+    RSV1 (RFC 7692 §7): pass ``rsv1=True`` on the FIRST frame of a message
+    whose payload has been compressed with permessage-deflate.  Continuation
+    frames in the same message keep ``rsv1=False``.
     """
     length = len(payload)
-    header = bytes([WSFrameBits.FIN | opcode])
+    first_byte = WSFrameBits.FIN | opcode
+    if rsv1:
+        first_byte |= WSFrameBits.RSV1
+    header = bytes([first_byte])
     mask_bit = WSFrameBits.MASK_BIT if mask else 0
     if length < 126:
         header += bytes([mask_bit | length])
@@ -105,12 +112,24 @@ async def read_payload(reader, masked: bool, length: int) -> bytes:
     elif length == 127:
         length = int.from_bytes(await reader.readexactly(8), 'big')
 
-    if masked:
-        mask = await reader.readexactly(4)
-        raw = await reader.readexactly(length)
-        return bytes(b ^ mask[i % 4] for i, b in enumerate(raw))
-    else:
+    if not masked:
         return await reader.readexactly(length)
+
+    mask = await reader.readexactly(4)
+    raw = await reader.readexactly(length)
+    if length == 0:
+        return raw
+    # XOR via int arithmetic — does the work at C speed via CPython's
+    # bignum routines.  Equivalent to ``bytes(b ^ mask[i % 4] ...)`` but
+    # ~20× faster on real payload sizes; with Autobahn 12/13 fragmenting
+    # large compressed messages into hundreds of small frames, the slow
+    # comprehension dominated the read loop.
+    extended_mask = mask * ((length + 3) // 4)
+    if len(extended_mask) > length:
+        extended_mask = extended_mask[:length]
+    return (int.from_bytes(raw, 'big')
+            ^ int.from_bytes(extended_mask, 'big')
+            ).to_bytes(length, 'big')
 
 
 async def read_frame(reader) -> tuple[int, bytes]:

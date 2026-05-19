@@ -155,25 +155,37 @@ class FragmentAssembler:
     def __init__(self) -> None:
         self._opcode: int | None = None
         self._buf: bytearray | None = None
+        # Tracks the RSV1 bit of the message-opener frame (RFC 7692: only the
+        # first frame of a compressed message carries RSV1=1; continuation
+        # frames keep it clear).  Reported back from ``feed()`` so the caller
+        # knows whether the assembled bytes need decompression.
+        self._compressed: bool = False
 
     @property
     def in_progress(self) -> bool:
         return self._opcode is not None
 
-    def feed(self, opcode: int, payload: bytes, fin: bool) -> tuple[int, bytes] | None:
-        """Feed one frame; return ``(message_opcode, full_payload)`` on completion, else ``None``."""
+    def feed(self, opcode: int, payload: bytes, fin: bool, rsv1: bool = False
+             ) -> tuple[int, bytes, bool] | None:
+        """Feed one frame; return ``(message_opcode, full_payload, compressed)`` on completion, else ``None``."""
         if opcode == WSOpcode.CONTINUATION:
             if not self.in_progress:
                 raise ProtocolError(
                     'CONTINUATION frame received with no fragmentation in progress'
                 )
+            if rsv1:
+                # RFC 7692 §6: RSV1 MUST be clear on continuation frames.
+                raise ProtocolError(
+                    'CONTINUATION frame with RSV1 set is a protocol violation'
+                )
             assert self._buf is not None
             assert self._opcode is not None
             self._buf += payload
             if fin:
-                result = (self._opcode, bytes(self._buf))
+                result = (self._opcode, bytes(self._buf), self._compressed)
                 self._opcode = None
                 self._buf = None
+                self._compressed = False
                 return result
             return None
         else:
@@ -183,9 +195,10 @@ class FragmentAssembler:
                     'New data frame received while a fragmented message is in progress'
                 )
             if fin:
-                return (opcode, payload)  # unfragmented — pass through immediately
+                return (opcode, payload, rsv1)  # unfragmented — pass through immediately
             self._opcode = opcode
             self._buf = bytearray(payload)
+            self._compressed = rsv1
             return None
 
 
@@ -376,7 +389,8 @@ class WebSocketRecipient(BaseRecipient):
                  require_masked: bool = True,
                  dispatcher: EventDispatcher | None = None,
                  scope: dict | None = None,
-                 ws_queue_depth: int = _WS_EVENT_QUEUE_DEPTH):
+                 ws_queue_depth: int = _WS_EVENT_QUEUE_DEPTH,
+                 decompressor=None):
         super().__init__(reader)
         self._writer = writer
         self._connect_sent = False
@@ -392,6 +406,11 @@ class WebSocketRecipient(BaseRecipient):
         self._ws_queue_depth = ws_queue_depth
         self._event_queue: asyncio.Queue | None = None
         self._reader_task: asyncio.Task | None = None
+        # When permessage-deflate is negotiated, an
+        # :class:`InboundDecompressor` is supplied here.  None means
+        # compression is disabled for this connection and any inbound RSV1=1
+        # frame is treated as a protocol violation (handled by the read loop).
+        self._decompressor = decompressor
 
     async def _read_loop(self) -> None:
         """Eagerly read frames from the wire, emit events, and queue ASGI events."""
@@ -410,14 +429,20 @@ class WebSocketRecipient(BaseRecipient):
                         raise ProtocolError(
                             f'control frame payload {h.length} > 125')
 
-                # RFC 6455 §5.2 — reserved RSV bits MUST be 0 when no
-                # extension defines their meaning.  BlackBull doesn't
-                # advertise any extensions (no Sec-WebSocket-Extensions
-                # response header), so any RSV bit set is a protocol error.
-                if h.rsv1 or h.rsv2 or h.rsv3:
+                # RFC 6455 §5.2 — reserved RSV bits MUST be 0 unless an
+                # extension defining them was negotiated in the handshake.
+                # RSV1 is owned by permessage-deflate (RFC 7692); RSV2 / RSV3
+                # are not defined by any extension we negotiate, so they are
+                # always a protocol error.  RSV1 on a control frame is
+                # likewise always a violation per RFC 7692 §6.
+                if h.rsv2 or h.rsv3:
                     raise ProtocolError(
-                        f'RSV bits set without negotiated extension '
-                        f'(rsv1={h.rsv1} rsv2={h.rsv2} rsv3={h.rsv3})')
+                        f'RSV2/RSV3 set without negotiated extension '
+                        f'(rsv2={h.rsv2} rsv3={h.rsv3})')
+                if h.rsv1 and (self._decompressor is None or h.opcode in _CONTROL_OPS):
+                    raise ProtocolError(
+                        f'RSV1 set on frame (opcode={h.opcode}) without '
+                        f'negotiated permessage-deflate')
 
                 payload = await read_payload(self._reader, h.masked, h.length)
 
@@ -426,7 +451,8 @@ class WebSocketRecipient(BaseRecipient):
 
                 match h.opcode:
                     case WSOpcode.TEXT | WSOpcode.BINARY | WSOpcode.CONTINUATION:
-                        done = await self._handle_data_frame(h.opcode, payload, h.fin)
+                        done = await self._handle_data_frame(
+                            h.opcode, payload, h.fin, h.rsv1)
                         if not done:
                             continue
                     case WSOpcode.CLOSE | WSOpcode.PING | WSOpcode.PONG:
@@ -467,13 +493,25 @@ class WebSocketRecipient(BaseRecipient):
                 pass
             await self._event_queue.put(exc)
 
-    async def _handle_data_frame(self, opcode, payload: bytes, fin: bool) -> bool:
+    async def _handle_data_frame(self, opcode, payload: bytes, fin: bool,
+                                 rsv1: bool = False) -> bool:
         """Handle TEXT/BINARY/CONTINUATION frame; returns True if a complete message was queued."""
         assert self._event_queue is not None
-        result = self._assembler.feed(opcode, payload, fin)
+        result = self._assembler.feed(opcode, payload, fin, rsv1)
         if result is None:
             return False
-        msg_opcode, full_payload = result
+        msg_opcode, full_payload, compressed = result
+        if compressed:
+            assert self._decompressor is not None  # frame loop enforced this
+            try:
+                full_payload = self._decompressor.decompress(full_payload)
+            except Exception as exc:
+                # RFC 7692 §7.1 — a payload that fails to decompress is a
+                # connection error.  Treat as PROTOCOL_ERROR (1002).
+                raise ProtocolError(
+                    f'permessage-deflate decompression failed: {exc}',
+                    close_code=1002,
+                ) from exc
         if msg_opcode == WSOpcode.TEXT:
             try:
                 text = full_payload.decode('utf-8')
@@ -609,10 +647,12 @@ class RecipientFactory:
     def websocket(reader, writer, *,
                   dispatcher: EventDispatcher | None = None,
                   scope: dict | None = None,
-                  ws_queue_depth: int = _WS_EVENT_QUEUE_DEPTH) -> WebSocketRecipient:
+                  ws_queue_depth: int = _WS_EVENT_QUEUE_DEPTH,
+                  decompressor=None) -> WebSocketRecipient:
         if not isinstance(reader, AbstractReader):
             reader = AsyncioReader(reader)
         if not isinstance(writer, AbstractWriter):
             writer = AsyncioWriter(writer)
         return WebSocketRecipient(reader, writer, dispatcher=dispatcher, scope=scope,
-                                  ws_queue_depth=ws_queue_depth)
+                                  ws_queue_depth=ws_queue_depth,
+                                  decompressor=decompressor)

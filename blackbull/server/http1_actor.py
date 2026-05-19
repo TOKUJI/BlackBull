@@ -283,6 +283,18 @@ class HTTP1Actor(Actor):
         auto_subprotocol = next((p for p in client_protos if p in available), None)
         scope['_ws_auto_subprotocol'] = auto_subprotocol
 
+        # RFC 7692 permessage-deflate negotiation.  Cached on the scope so
+        # WebSocketActor can pick it up after the handshake commits, and
+        # echoed back as ``Sec-WebSocket-Extensions`` in the 101 response.
+        from ..env import get_settings as _get_settings  # noqa: PLC0415
+        from .permessage_deflate import negotiate as _negotiate_deflate  # noqa: PLC0415
+        deflate_params = None
+        deflate_response = None
+        if _get_settings().ws_permessage_deflate:
+            offer = headers.get(b'sec-websocket-extensions', b'')
+            deflate_params, deflate_response = _negotiate_deflate(offer or None)
+        scope['_ws_deflate'] = deflate_params
+
         async def _send_101(subprotocol=None):
             hs_headers = Headers([
                 (b'upgrade', b'websocket'),
@@ -292,6 +304,8 @@ class HTTP1Actor(Actor):
             if subprotocol:
                 sp = subprotocol.encode() if isinstance(subprotocol, str) else subprotocol
                 hs_headers.append(b'sec-websocket-protocol', sp)
+            if deflate_response is not None:
+                hs_headers.append(b'sec-websocket-extensions', deflate_response)
             await send(b'', HTTPStatus.SWITCHING_PROTOCOLS, hs_headers)
 
         scope['_ws_send_101'] = _send_101

@@ -98,3 +98,30 @@ async def test_websocket_clean_close(ws_app):
     async with websockets.connect(uri) as ws:
         await ws.send('ping')
         await ws.recv()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_websocket_permessage_deflate_negotiated(ws_app):
+    """When the client offers permessage-deflate, the server must accept it
+    and echo a compressed message through the same connection."""
+    uri = f'ws://localhost:{ws_app.port}/echo'
+    # websockets.connect enables permessage-deflate by default and refuses
+    # to fall back silently — if the handshake didn't negotiate the
+    # extension, the message would still pass uncompressed.  We assert the
+    # negotiation explicitly via the extensions attribute.
+    async with websockets.connect(uri) as ws:
+        # `websockets >= 13` exposes negotiated extensions on the inner
+        # protocol object; older versions had them on the connection.
+        ext_objs = (
+            getattr(ws, 'extensions', None)
+            or getattr(getattr(ws, 'protocol', None), 'extensions', None)
+            or []
+        )
+        ext_names = [type(e).__name__ for e in ext_objs]
+        assert any('Deflate' in n for n in ext_names), (
+            f'permessage-deflate must be negotiated; got extensions={ext_names}')
+        msg = 'compress me ' * 100
+        await ws.send(msg)
+        reply = await ws.recv()
+    assert reply == msg

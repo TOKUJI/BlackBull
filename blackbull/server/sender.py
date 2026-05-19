@@ -407,9 +407,13 @@ class WebSocketSender(BaseSender):
     The ``status`` and ``headers`` parameters are accepted for interface
     consistency but are unused for WebSocket connections.
     """
-    def __init__(self, writer: AbstractWriter):
+    def __init__(self, writer: AbstractWriter, *, compressor=None):
         super().__init__(writer)
         self.has_received_closed = False
+        # When permessage-deflate is negotiated, an
+        # :class:`OutboundCompressor` is supplied here.  ``None`` means
+        # outbound frames are sent verbatim (RSV1=0).
+        self._compressor = compressor
 
     async def __call__(self, body, _status: HTTPStatus | None = None, _headers: HeaderList = []):
         if not isinstance(body, dict):
@@ -418,12 +422,19 @@ class WebSocketSender(BaseSender):
         event_type = body.get('type', '')
 
         match event_type:
-                
+
             case ASGIEvent.WS_SEND:
                 if 'text' in body and body['text'] is not None:
-                    frame = encode_frame(body['text'].encode('utf-8'), opcode=WSOpcode.TEXT)
+                    raw = body['text'].encode('utf-8')
+                    opcode = WSOpcode.TEXT
                 else:
-                    frame = encode_frame(body.get('bytes', b''), opcode=WSOpcode.BINARY)
+                    raw = body.get('bytes', b'')
+                    opcode = WSOpcode.BINARY
+                if self._compressor is not None:
+                    raw = self._compressor.compress(raw)
+                    frame = encode_frame(raw, opcode=opcode, rsv1=True)
+                else:
+                    frame = encode_frame(raw, opcode=opcode)
                 await self._write(frame)
 
             case ASGIEvent.WS_CLOSE:
@@ -466,7 +477,7 @@ class SenderFactory:
                            stream_id, push_callback)
 
     @staticmethod
-    def websocket(stream_writer) -> WebSocketSender:
+    def websocket(stream_writer, *, compressor=None) -> WebSocketSender:
         if isinstance(stream_writer, AbstractWriter):
-            return WebSocketSender(stream_writer)
-        return WebSocketSender(AsyncioWriter(stream_writer))
+            return WebSocketSender(stream_writer, compressor=compressor)
+        return WebSocketSender(AsyncioWriter(stream_writer), compressor=compressor)

@@ -235,6 +235,12 @@ class Settings:
     #: main consumer).  Set ``BB_H2_ENABLE_WEBSOCKET=1`` to turn it on.
     h2_enable_websocket: bool = False
 
+    #: Negotiate ``permessage-deflate`` (RFC 7692) on incoming WebSocket
+    #: handshakes when the peer offers it.  On by default — matches modern
+    #: browsers and the major library defaults (`ws` for Node, Python
+    #: `websockets`, aiohttp).  Set ``BB_WS_PERMESSAGE_DEFLATE=0`` to disable.
+    ws_permessage_deflate: bool = True
+
     #: Per-connection asyncio.Semaphore cap on running stream handlers when
     #: running with a single worker (0 = disabled).  Defaults to 20 so that
     #: high-mux connections (e.g. -m 50) do not saturate the single event loop
@@ -295,6 +301,7 @@ def get_settings() -> Settings:
         h2_connection_window_size=_int_env('BB_H2_CONNECTION_WINDOW_SIZE', 4194304),
         h2_max_concurrent_streams=_int_env('BB_H2_MAX_CONCURRENT_STREAMS', 100),
         h2_enable_websocket=_bool_env('BB_H2_ENABLE_WEBSOCKET', False),
+        ws_permessage_deflate=_bool_env('BB_WS_PERMESSAGE_DEFLATE', True),
         use_uvloop=_bool_env('BB_UVLOOP', False),
         h2_active_streams_1w=_int_env_nonneg('BB_H2_ACTIVE_STREAMS_1W', 20),
         h2_active_streams=_int_env_nonneg('BB_H2_ACTIVE_STREAMS', 20),

@@ -7,6 +7,9 @@ from uuid import uuid4
 from ..actor import Actor, Message
 from ..event_aggregator import EventAggregator
 from .constants import ASGIEvent, WSCloseCode
+from .permessage_deflate import (
+    DeflateParams, InboundDecompressor, OutboundCompressor,
+)
 from .recipient import AbstractReader, RecipientFactory, _WS_EVENT_QUEUE_DEPTH
 from .sender import AbstractWriter, SenderFactory
 
@@ -49,9 +52,29 @@ class WebSocketActor(Actor):
         self._peername = peername
         self._sockname = sockname
         self._ssl = ssl
-        self._ws_receive = RecipientFactory.websocket(reader, writer,
-                                                      ws_queue_depth=ws_queue_depth)
-        self._ws_send = SenderFactory.websocket(writer)
+        # permessage-deflate (RFC 7692) — when the handshake negotiated it,
+        # the scope carries a :class:`DeflateParams`.  Instantiate the
+        # streaming inflater + deflater so the recipient/sender don't need
+        # to know about negotiation logic.
+        deflate: DeflateParams | None = scope.pop('_ws_deflate', None) if scope else None
+        decompressor = (
+            InboundDecompressor(
+                wbits=deflate.client_max_window_bits,
+                reset_per_message=deflate.client_no_context_takeover,
+            ) if deflate else None
+        )
+        compressor = (
+            OutboundCompressor(
+                wbits=deflate.server_max_window_bits,
+                reset_per_message=deflate.server_no_context_takeover,
+            ) if deflate else None
+        )
+        self._ws_receive = RecipientFactory.websocket(
+            reader, writer,
+            ws_queue_depth=ws_queue_depth,
+            decompressor=decompressor,
+        )
+        self._ws_send = SenderFactory.websocket(writer, compressor=compressor)
         self._disconnect_code: int = WSCloseCode.ABNORMAL
 
     async def run(self) -> None:
