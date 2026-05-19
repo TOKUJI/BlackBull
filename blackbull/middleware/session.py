@@ -31,8 +31,10 @@ cache-friendly.
 
 Usage::
 
-    app.use(SessionMiddleware())                       # reads BB_SESSION_SECRET
-    app.use(SessionMiddleware(secret=b'\\x...'))       # explicit secret
+    from blackbull.middleware import Session
+
+    app.use(Session())                       # reads BB_SESSION_SECRET
+    app.use(Session(secret=b'\\x...'))       # explicit secret
 
     @app.route(path='/')
     async def index(scope, receive, send):
@@ -52,6 +54,7 @@ import time
 from typing import Any
 
 from ..server.constants import ASGIEvent
+from .utils import middleware
 
 logger = logging.getLogger(__name__)
 
@@ -110,7 +113,8 @@ class _SessionDict(dict):
 _VALID_SAMESITE = ('Strict', 'Lax', 'None')
 
 
-class SessionMiddleware:
+@middleware
+class Session:
     """ASGI middleware that maintains a signed-cookie session.
 
     Parameters
@@ -158,7 +162,7 @@ class SessionMiddleware:
             secret = os.environ.get('BB_SESSION_SECRET')
         if not secret:
             raise RuntimeError(
-                'SessionMiddleware requires a secret.  Either pass '
+                'Session middleware requires a secret.  Either pass '
                 'secret=... to the constructor or set the BB_SESSION_SECRET '
                 'environment variable.  Generate one with e.g. '
                 '``python -c "import secrets; print(secrets.token_urlsafe(32))"``.'
@@ -195,8 +199,10 @@ class SessionMiddleware:
             return
 
         async def wrapped_send(event):
-            if (isinstance(event, dict)
-                    and event.get('type') == ASGIEvent.HTTP_RESPONSE_START
+            # The ``@middleware`` class decorator normalises ``call_next`` so
+            # any Response / JSONResponse from the handler arrives here as a
+            # plain dict event.
+            if (event.get('type') == ASGIEvent.HTTP_RESPONSE_START
                     and session._modified):
                 headers = list(event.get('headers', []))
                 cookie = self._make_cookie(session)

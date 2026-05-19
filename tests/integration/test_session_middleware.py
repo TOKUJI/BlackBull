@@ -13,12 +13,12 @@ import pytest
 import pytest_asyncio
 
 from blackbull import BlackBull
-from blackbull.middleware.session import SessionMiddleware
+from blackbull.middleware.session import Session
 
 
 def _make_app() -> BlackBull:
     app = BlackBull()
-    app.use(SessionMiddleware(secret=b'test-secret', secure=False))
+    app.use(Session(secret=b'test-secret', secure=False))
 
     @app.route(path='/set')
     async def set_view(scope, receive, send):

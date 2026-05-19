@@ -65,7 +65,7 @@ import asyncio
 import json
 from http import HTTPMethod
 
-from blackbull import CORS, BlackBull, JSONResponse, TrustedProxyMiddleware
+from blackbull import CORS, BlackBull, JSONResponse, TrustedProxy
 from blackbull.request import read_body
 
 # ---------------------------------------------------------------------------
@@ -201,7 +201,7 @@ if __name__ == '__main__':
 
     # When running behind nginx, trust the loopback proxy so that
     # scope['scheme'] reflects the client's HTTPS (not plain HTTP).
-    app.use(TrustedProxyMiddleware(['127.0.0.1', '::1']))
+    app.use(TrustedProxy(['127.0.0.1', '::1']))
 
     app.use(CORS(
         allow_origins=origins,

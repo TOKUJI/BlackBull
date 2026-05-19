@@ -87,7 +87,7 @@ BB_H2_ACTIVE_STREAMS
     ``BB_H2_MAX_CONCURRENT_STREAMS``).  Default: ``0`` (disabled).
 BB_COMPRESSION_MIN_SIZE
     Minimum response body size in bytes below which
-    :class:`~blackbull.middleware.compression.CompressionMiddleware` skips
+    :class:`~blackbull.middleware.compression.Compression` skips
     compression entirely.  Raising this threshold under load reduces CPU
     pressure at the cost of slightly larger small responses.
     Default: ``100``.

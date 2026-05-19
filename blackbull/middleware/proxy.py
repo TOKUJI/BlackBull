@@ -17,7 +17,7 @@ def _parse_forwarded(value: str) -> dict[str, str]:
     return result
 
 
-class TrustedProxyMiddleware:
+class TrustedProxy:
     """Rewrite ``scope['client']`` and ``scope['scheme']`` from proxy headers.
 
     Applied only when the direct TCP peer matches the configured trusted set,

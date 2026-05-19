@@ -21,4 +21,4 @@ from .event import Event, EventHandler
 from .asgi import ResponseStart, ResponseBody, parse_response_event
 from .middleware.cors import CORS
 from .middleware.utils import middleware
-from .middleware.proxy import TrustedProxyMiddleware
+from .middleware.proxy import TrustedProxy

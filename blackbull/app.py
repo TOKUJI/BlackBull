@@ -131,8 +131,8 @@ class BlackBull:
         self._chain = None  # cached global middleware chain; rebuilt on first request
 
         if trusted_proxies is not None:
-            from .middleware.proxy import TrustedProxyMiddleware  # noqa: PLC0415
-            self.use(TrustedProxyMiddleware(trusted_proxies))
+            from .middleware.proxy import TrustedProxy  # noqa: PLC0415
+            self.use(TrustedProxy(trusted_proxies))
 
     @property
     def loop(self):

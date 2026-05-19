@@ -33,9 +33,9 @@ The cache key is ``(method, path, query_string)``.
 
 Usage::
 
-    from blackbull.middleware.cache import CacheMiddleware
+    from blackbull.middleware import Cache
 
-    app.use(CacheMiddleware(max_age=600))     # 10-minute TTL
+    app.use(Cache(max_age=600))     # 10-minute TTL
 
     @app.route(path='/feed')
     async def feed(scope, receive, send):
@@ -50,6 +50,7 @@ from collections import OrderedDict
 from typing import Any
 
 from ..server.constants import ASGIEvent
+from .utils import middleware
 
 logger = logging.getLogger(__name__)
 
@@ -81,7 +82,8 @@ class _Entry:
         return (now if now is not None else time.monotonic()) >= self.expires_at
 
 
-class CacheMiddleware:
+@middleware
+class Cache:
     """Per-worker in-memory response cache."""
 
     def __init__(
@@ -164,17 +166,9 @@ class CacheMiddleware:
 
         async def cap_send(event):
             nonlocal status, response_headers, streaming, flushed
-            if not isinstance(event, dict):
-                # Non-dict (legacy bytes-body) — give up on caching for
-                # this request and just forward.
-                streaming = True
-                if not flushed:
-                    for buf in captured:
-                        await send(buf)
-                    flushed = True
-                await send(event)
-                return
-
+            # The ``@middleware`` class decorator normalises ``call_next`` so
+            # Response/JSONResponse objects from the handler arrive here as
+            # plain start+body dict events.
             t = event.get('type')
             if t == ASGIEvent.HTTP_RESPONSE_START:
                 status = event.get('status')

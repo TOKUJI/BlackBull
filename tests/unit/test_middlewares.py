@@ -22,7 +22,12 @@ import gzip
 import pytest
 from unittest.mock import AsyncMock
 from blackbull.middleware import websocket
-from blackbull.middleware.compression import CompressionMiddleware, compress
+from blackbull.middleware.compression import Compression
+
+# The legacy ``compress`` module-level instance was retired with the
+# *Middleware-suffix rename — tests construct a fresh ``Compression``
+# here, which is the same shape (pre-built, no args).
+compress = Compression()
 from blackbull.server.headers import Headers
 
 try:
@@ -208,11 +213,11 @@ class TestWebsocketMiddleware:
 # ---------------------------------------------------------------------------
 
 class TestAcceptEncodingParsing:
-    """CompressionMiddleware._parse_accept_encoding must return codec names
+    """Compression._parse_accept_encoding must return codec names
     sorted by descending q-value."""
 
     def _parse(self, header: str) -> list[str]:
-        return CompressionMiddleware._parse_accept_encoding(header.encode())
+        return Compression._parse_accept_encoding(header.encode())
 
     def test_single_codec(self):
         assert self._parse('gzip') == ['gzip']
@@ -240,13 +245,13 @@ class TestAcceptEncodingParsing:
 
 
 class TestCodecSelection:
-    """CompressionMiddleware._select_codec must prefer br > zstd > gzip
+    """Compression._select_codec must prefer br > zstd > gzip
     among codecs that are both accepted by the client and available on
     the server."""
 
-    def _mw(self, available: list[str]) -> CompressionMiddleware:
+    def _mw(self, available: list[str]) -> Compression:
         import gzip as _gz
-        mw = CompressionMiddleware()
+        mw = Compression()
         mw._available = {name: _gz.compress for name in available}
         return mw
 

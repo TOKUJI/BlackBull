@@ -1,4 +1,4 @@
-"""Integration tests for TrustedProxyMiddleware — X-Forwarded-* header rewriting."""
+"""Integration tests for TrustedProxy — X-Forwarded-* header rewriting."""
 import asyncio
 from multiprocessing import Process
 
@@ -6,13 +6,13 @@ import httpx
 import pytest
 
 from blackbull import BlackBull, JSONResponse
-from blackbull.middleware.proxy import TrustedProxyMiddleware
+from blackbull.middleware.proxy import TrustedProxy
 
 
 def _make_app_trusted() -> BlackBull:
     """App that trusts 127.0.0.1 (the loopback default)."""
     app = BlackBull()
-    app.use(TrustedProxyMiddleware(['127.0.0.1', '::1']))
+    app.use(TrustedProxy(['127.0.0.1', '::1']))
 
     @app.route(path='/client-ip')
     async def client_ip(scope):
@@ -28,7 +28,7 @@ def _make_app_trusted() -> BlackBull:
 def _make_app_untrusted() -> BlackBull:
     """App that trusts only 10.0.0.1 — so 127.0.0.1 is NOT trusted."""
     app = BlackBull()
-    app.use(TrustedProxyMiddleware(['10.0.0.1']))
+    app.use(TrustedProxy(['10.0.0.1']))
 
     @app.route(path='/client-ip')
     async def client_ip(scope):

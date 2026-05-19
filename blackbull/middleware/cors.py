@@ -1,8 +1,9 @@
 from ..server.constants import ASGIEvent
 from ..server.headers import Headers
-from .utils import _normalize_send
+from .utils import middleware
 
 
+@middleware
 class CORS:
     """Cross-Origin Resource Sharing (CORS) middleware.
 
@@ -101,10 +102,10 @@ class CORS:
         cors_hdrs = self._cors_headers(origin)
 
         async def cors_send(event):
-            if isinstance(event, dict) and event.get('type') == ASGIEvent.HTTP_RESPONSE_START:
+            if event.get('type') == ASGIEvent.HTTP_RESPONSE_START:
                 existing = list(event.get('headers', []))
                 existing.extend(cors_hdrs)
                 event = {**event, 'headers': existing}
             await send(event)
 
-        await call_next(scope, receive, _normalize_send(cors_send))
+        await call_next(scope, receive, cors_send)

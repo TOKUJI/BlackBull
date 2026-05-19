@@ -1,6 +1,6 @@
 """
 Tests for HTTP/1.1 chunked Transfer-Encoding, StreamingResponse,
-CompressionMiddleware streaming safety, and app.use() registration.
+Compression streaming safety, and app.use() registration.
 """
 import functools
 import warnings
@@ -9,7 +9,7 @@ import pytest
 
 from blackbull.server.sender import HTTP1Sender, AbstractWriter
 from blackbull.response import StreamingResponse
-from blackbull.middleware.compression import CompressionMiddleware
+from blackbull.middleware.compression import Compression
 from blackbull.app import BlackBull
 
 
@@ -169,13 +169,13 @@ class TestStreamingResponse:
 
 
 # ---------------------------------------------------------------------------
-# TestCompressionMiddlewareStreaming
+# TestCompressionStreaming
 # ---------------------------------------------------------------------------
 
-class TestCompressionMiddlewareStreaming:
+class TestCompressionStreaming:
     @pytest.mark.asyncio
     async def test_streaming_not_compressed(self):
-        mw = CompressionMiddleware(min_size=1)
+        mw = Compression(min_size=1)
         scope = {
             'type': 'http',
             'headers': [(b'accept-encoding', b'gzip')],
@@ -199,7 +199,7 @@ class TestCompressionMiddlewareStreaming:
     @pytest.mark.asyncio
     async def test_single_body_still_compressed(self):
         import gzip
-        mw = CompressionMiddleware(min_size=1)
+        mw = Compression(min_size=1)
         scope = {
             'type': 'http',
             'headers': [(b'accept-encoding', b'gzip')],

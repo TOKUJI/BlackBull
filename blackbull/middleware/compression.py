@@ -4,6 +4,7 @@ from collections.abc import Callable
 from ..server.constants import ASGIEvent
 from ..server.headers import Headers
 from ..asgi import ResponseStart, ResponseBody, parse_response_event
+from .utils import middleware
 
 _MIN_SIZE = 100  # default minimum body size to bother compressing
 _EXECUTOR_THRESHOLD = 65536  # default body size above which compression is offloaded
@@ -59,7 +60,8 @@ def _is_compressible_content_type(headers: Headers) -> bool:
 # Middleware
 # ---------------------------------------------------------------------------
 
-class CompressionMiddleware:
+@middleware
+class Compression:
     """ASGI middleware: compress the response body using the best codec the
     client accepts (br > zstd > gzip, in server-preference order).
 
@@ -71,9 +73,9 @@ class CompressionMiddleware:
 
     BlackBull middleware convention::
 
-        compress = CompressionMiddleware()
+        from blackbull.middleware import Compression
 
-        @app.route(path='/', middlewares=[compress])
+        @app.route(path='/', middlewares=[Compression()])
         async def handler(scope, receive, send): ...
     """
 
@@ -186,17 +188,19 @@ class CompressionMiddleware:
         await send({'type': ASGIEvent.HTTP_RESPONSE_BODY, 'body': compressed, 'more_body': False})
 
 
-def _make_default_compress() -> 'CompressionMiddleware':
+def _make_default_compress() -> 'Compression':
+    """Build a Compression instance pre-configured from BB_COMPRESSION_*.
+
+    Kept as a module-level helper so the legacy ``from blackbull.middleware
+    import compress`` import (which exposes a pre-built instance) keeps
+    working through the deprecation alias in :mod:`blackbull.middleware`.
+    """
     try:
         from ..env import get_settings as _get_settings  # noqa: PLC0415
         cfg = _get_settings()
-        return CompressionMiddleware(
+        return Compression(
             min_size=cfg.compression_min_size,
             executor_threshold=cfg.compression_executor_threshold,
         )
     except Exception:
-        return CompressionMiddleware()
-
-
-# Default instance — used as a plain middleware function
-compress = _make_default_compress()
+        return Compression()

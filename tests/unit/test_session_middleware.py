@@ -10,7 +10,7 @@ from unittest.mock import patch
 import pytest
 
 from blackbull.middleware.session import (
-    SessionMiddleware,
+    Session,
     _SessionDict,
     _parse_cookie_header,
 )
@@ -25,36 +25,36 @@ SECRET = b'test-secret-32-bytes-of-random-x' * 1
 
 class TestConstruction:
     def test_explicit_secret_accepted(self):
-        mw = SessionMiddleware(secret=SECRET)
+        mw = Session(secret=SECRET)
         assert mw._secret == SECRET
 
     def test_str_secret_encoded(self):
-        mw = SessionMiddleware(secret='hello')
+        mw = Session(secret='hello')
         assert mw._secret == b'hello'
 
     def test_secret_from_env(self):
         with patch.dict(os.environ, {'BB_SESSION_SECRET': 'env-secret'}, clear=False):
-            mw = SessionMiddleware()
+            mw = Session()
             assert mw._secret == b'env-secret'
 
     def test_missing_secret_raises(self):
         env = {k: v for k, v in os.environ.items() if k != 'BB_SESSION_SECRET'}
         with patch.dict(os.environ, env, clear=True):
             with pytest.raises(RuntimeError, match='requires a secret'):
-                SessionMiddleware()
+                Session()
 
     def test_empty_string_secret_raises(self):
         env = {k: v for k, v in os.environ.items() if k != 'BB_SESSION_SECRET'}
         with patch.dict(os.environ, env, clear=True):
             with pytest.raises(RuntimeError):
-                SessionMiddleware(secret='')
+                Session(secret='')
 
     def test_invalid_samesite_raises(self):
         with pytest.raises(ValueError):
-            SessionMiddleware(secret=SECRET, samesite='Bogus')
+            Session(secret=SECRET, samesite='Bogus')
 
     def test_samesite_none_allowed(self):
-        SessionMiddleware(secret=SECRET, samesite=None)  # no exception
+        Session(secret=SECRET, samesite=None)  # no exception
 
 
 # ---------------------------------------------------------------------------
@@ -63,17 +63,17 @@ class TestConstruction:
 
 class TestEncodeDecode:
     def test_round_trip_simple_payload(self):
-        mw = SessionMiddleware(secret=SECRET)
+        mw = Session(secret=SECRET)
         encoded = mw._encode({'user': 'alice', 'count': 3})
         assert mw._decode(encoded) == {'user': 'alice', 'count': 3}
 
     def test_round_trip_empty_dict(self):
-        mw = SessionMiddleware(secret=SECRET)
+        mw = Session(secret=SECRET)
         encoded = mw._encode({})
         assert mw._decode(encoded) == {}
 
     def test_tampered_payload_returns_empty(self):
-        mw = SessionMiddleware(secret=SECRET)
+        mw = Session(secret=SECRET)
         encoded = mw._encode({'user': 'alice'})
         # Flip the first byte of the payload portion.
         payload_b64, _, mac = encoded.partition(b'.')
@@ -81,20 +81,20 @@ class TestEncodeDecode:
         assert mw._decode(tampered) == {}
 
     def test_tampered_mac_returns_empty(self):
-        mw = SessionMiddleware(secret=SECRET)
+        mw = Session(secret=SECRET)
         encoded = mw._encode({'user': 'alice'})
         payload_b64, _, mac = encoded.partition(b'.')
         tampered = payload_b64 + b'.' + b'0' * len(mac)
         assert mw._decode(tampered) == {}
 
     def test_wrong_secret_returns_empty(self):
-        a = SessionMiddleware(secret=b'one')
-        b = SessionMiddleware(secret=b'two')
+        a = Session(secret=b'one')
+        b = Session(secret=b'two')
         encoded = a._encode({'user': 'alice'})
         assert b._decode(encoded) == {}
 
     def test_malformed_cookie_returns_empty(self):
-        mw = SessionMiddleware(secret=SECRET)
+        mw = Session(secret=SECRET)
         assert mw._decode(b'not-a-valid-cookie') == {}
         assert mw._decode(b'') == {}
         assert mw._decode(b'.') == {}
@@ -104,7 +104,7 @@ class TestEncodeDecode:
     def test_non_dict_payload_rejected(self):
         """A signed cookie carrying a JSON list (not dict) should not crash."""
         import base64, hmac, hashlib, json
-        mw = SessionMiddleware(secret=SECRET)
+        mw = Session(secret=SECRET)
         payload = json.dumps([1, 2, 3]).encode()
         mac = hmac.new(SECRET, payload, hashlib.sha256).hexdigest().encode()
         payload_b64 = base64.urlsafe_b64encode(payload).rstrip(b'=')
@@ -114,13 +114,13 @@ class TestEncodeDecode:
 
 class TestMaxAge:
     def test_max_age_includes_ts_in_payload(self):
-        mw = SessionMiddleware(secret=SECRET, max_age=60)
+        mw = Session(secret=SECRET, max_age=60)
         encoded = mw._encode({'k': 'v'})
         # _ts should be stripped on decode but signed in.
         assert mw._decode(encoded) == {'k': 'v'}
 
     def test_expired_cookie_returns_empty(self):
-        mw = SessionMiddleware(secret=SECRET, max_age=60)
+        mw = Session(secret=SECRET, max_age=60)
         # Build a cookie with an old timestamp by patching time.time on encode.
         with patch('blackbull.middleware.session.time.time', return_value=1_000_000.0):
             encoded = mw._encode({'k': 'v'})
@@ -129,7 +129,7 @@ class TestMaxAge:
             assert mw._decode(encoded) == {}
 
     def test_fresh_cookie_within_window_accepted(self):
-        mw = SessionMiddleware(secret=SECRET, max_age=60)
+        mw = Session(secret=SECRET, max_age=60)
         with patch('blackbull.middleware.session.time.time', return_value=2_000_000.0):
             encoded = mw._encode({'k': 'v'})
         with patch('blackbull.middleware.session.time.time', return_value=2_000_000.0 + 30):
@@ -261,7 +261,7 @@ def _make_scope(cookie: bytes = b'', type_: str = 'http') -> dict:
 @pytest.mark.asyncio
 class TestMiddlewareCall:
     async def test_no_cookie_yields_empty_session(self):
-        mw = SessionMiddleware(secret=SECRET)
+        mw = Session(secret=SECRET)
         captured = {}
 
         async def app(scope, receive, send):
@@ -273,7 +273,7 @@ class TestMiddlewareCall:
         assert captured['session'] == {}
 
     async def test_unmodified_session_does_not_set_cookie(self):
-        mw = SessionMiddleware(secret=SECRET)
+        mw = Session(secret=SECRET)
 
         async def app(scope, receive, send):
             _ = scope['session']        # read only
@@ -287,7 +287,7 @@ class TestMiddlewareCall:
         assert set_cookies == [], 'unmodified session must NOT emit Set-Cookie'
 
     async def test_modified_session_sets_cookie(self):
-        mw = SessionMiddleware(secret=SECRET)
+        mw = Session(secret=SECRET)
 
         async def app(scope, receive, send):
             scope['session']['user'] = 'alice'
@@ -306,7 +306,7 @@ class TestMiddlewareCall:
 
     async def test_round_trip_via_cookie(self):
         """First request sets session, second request reads it back."""
-        mw = SessionMiddleware(secret=SECRET)
+        mw = Session(secret=SECRET)
 
         async def writer(scope, receive, send):
             scope['session']['count'] = 7
@@ -331,7 +331,7 @@ class TestMiddlewareCall:
 
     async def test_emptying_session_emits_tombstone(self):
         """Clearing the session must emit a deletion cookie (Max-Age=0)."""
-        mw = SessionMiddleware(secret=SECRET)
+        mw = Session(secret=SECRET)
 
         # Build a cookie first.
         encoded = mw._encode({'user': 'alice'})
@@ -349,7 +349,7 @@ class TestMiddlewareCall:
             f'cleared session must emit deletion cookie; got {set_cookie!r}')
 
     async def test_websocket_scope_gets_session_but_no_cookie_write(self):
-        mw = SessionMiddleware(secret=SECRET)
+        mw = Session(secret=SECRET)
         captured = {}
 
         async def app(scope, receive, send):
@@ -363,7 +363,7 @@ class TestMiddlewareCall:
 
     async def test_lifespan_scope_skips_middleware(self):
         """Lifespan events MUST NOT have ``scope['session']`` injected."""
-        mw = SessionMiddleware(secret=SECRET)
+        mw = Session(secret=SECRET)
         captured = {}
 
         async def app(scope, receive, send):
@@ -376,7 +376,7 @@ class TestMiddlewareCall:
 @pytest.mark.asyncio
 class TestSecureFlagDefaults:
     async def test_secure_false_does_not_emit_secure(self):
-        mw = SessionMiddleware(secret=SECRET, secure=False)
+        mw = Session(secret=SECRET, secure=False)
 
         async def app(scope, receive, send):
             scope['session']['k'] = 'v'
@@ -388,7 +388,7 @@ class TestSecureFlagDefaults:
         assert b'Secure' not in cookie
 
     async def test_httponly_false_does_not_emit_httponly(self):
-        mw = SessionMiddleware(secret=SECRET, httponly=False)
+        mw = Session(secret=SECRET, httponly=False)
 
         async def app(scope, receive, send):
             scope['session']['k'] = 'v'

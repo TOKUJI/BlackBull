@@ -1,7 +1,7 @@
-"""Tests for TrustedProxyMiddleware."""
+"""Tests for TrustedProxy."""
 import pytest
 
-from blackbull.middleware.proxy import TrustedProxyMiddleware
+from blackbull.middleware.proxy import TrustedProxy
 from blackbull.server.headers import Headers
 
 
@@ -31,7 +31,7 @@ async def _call(mw, scope):
 
 @pytest.mark.asyncio
 async def test_trusted_xff_updates_client():
-    mw = TrustedProxyMiddleware('127.0.0.1')
+    mw = TrustedProxy('127.0.0.1')
     scope = _make_scope('127.0.0.1', {b'x-forwarded-for': b'203.0.113.5'})
     scope, _ = await _call(mw, scope)
     assert scope['client'] == ['203.0.113.5', 0]
@@ -39,7 +39,7 @@ async def test_trusted_xff_updates_client():
 
 @pytest.mark.asyncio
 async def test_untrusted_peer_ignored():
-    mw = TrustedProxyMiddleware('127.0.0.1')
+    mw = TrustedProxy('127.0.0.1')
     scope = _make_scope('1.2.3.4', {b'x-forwarded-for': b'203.0.113.5'})
     scope, _ = await _call(mw, scope)
     assert scope['client'] == ['1.2.3.4', 12345]   # unchanged
@@ -48,7 +48,7 @@ async def test_untrusted_peer_ignored():
 @pytest.mark.asyncio
 async def test_xff_chain_skips_trusted_hops():
     """Leftmost non-trusted IP is the real client, not the intermediate proxy."""
-    mw = TrustedProxyMiddleware(['127.0.0.1', '10.0.0.1'])
+    mw = TrustedProxy(['127.0.0.1', '10.0.0.1'])
     scope = _make_scope('127.0.0.1', {b'x-forwarded-for': b'203.0.113.5, 10.0.0.1'})
     scope, _ = await _call(mw, scope)
     assert scope['client'] == ['203.0.113.5', 0]
@@ -60,7 +60,7 @@ async def test_xff_chain_skips_trusted_hops():
 
 @pytest.mark.asyncio
 async def test_trusted_xfp_updates_scheme():
-    mw = TrustedProxyMiddleware('127.0.0.1')
+    mw = TrustedProxy('127.0.0.1')
     scope = _make_scope('127.0.0.1', {b'x-forwarded-proto': b'https'})
     scope, _ = await _call(mw, scope)
     assert scope['scheme'] == 'https'
@@ -68,7 +68,7 @@ async def test_trusted_xfp_updates_scheme():
 
 @pytest.mark.asyncio
 async def test_untrusted_xfp_ignored():
-    mw = TrustedProxyMiddleware('127.0.0.1')
+    mw = TrustedProxy('127.0.0.1')
     scope = _make_scope('9.9.9.9', {b'x-forwarded-proto': b'https'})
     scope, _ = await _call(mw, scope)
     assert scope['scheme'] == 'http'
@@ -80,7 +80,7 @@ async def test_untrusted_xfp_ignored():
 
 @pytest.mark.asyncio
 async def test_cidr_range_trusted():
-    mw = TrustedProxyMiddleware('10.0.0.0/8')
+    mw = TrustedProxy('10.0.0.0/8')
     scope = _make_scope('10.42.0.1', {b'x-forwarded-for': b'203.0.113.7'})
     scope, _ = await _call(mw, scope)
     assert scope['client'] == ['203.0.113.7', 0]
@@ -88,7 +88,7 @@ async def test_cidr_range_trusted():
 
 @pytest.mark.asyncio
 async def test_cidr_range_outside_not_trusted():
-    mw = TrustedProxyMiddleware('10.0.0.0/8')
+    mw = TrustedProxy('10.0.0.0/8')
     scope = _make_scope('192.168.1.1', {b'x-forwarded-for': b'203.0.113.7'})
     scope, _ = await _call(mw, scope)
     assert scope['client'] == ['192.168.1.1', 12345]
@@ -101,7 +101,7 @@ async def test_cidr_range_outside_not_trusted():
 @pytest.mark.asyncio
 async def test_forwarded_header_precedence():
     """RFC 7239 Forwarded wins over X-Forwarded-* when both present."""
-    mw = TrustedProxyMiddleware('127.0.0.1')
+    mw = TrustedProxy('127.0.0.1')
     scope = _make_scope('127.0.0.1', {
         b'forwarded':        b'for=203.0.113.9;proto=https',
         b'x-forwarded-for':  b'1.1.1.1',
@@ -114,7 +114,7 @@ async def test_forwarded_header_precedence():
 
 @pytest.mark.asyncio
 async def test_forwarded_header_for_only():
-    mw = TrustedProxyMiddleware('127.0.0.1')
+    mw = TrustedProxy('127.0.0.1')
     scope = _make_scope('127.0.0.1', {b'forwarded': b'for=203.0.113.1'})
     scope, _ = await _call(mw, scope)
     assert scope['client'] == ['203.0.113.1', 0]
@@ -127,7 +127,7 @@ async def test_forwarded_header_for_only():
 
 @pytest.mark.asyncio
 async def test_websocket_scope_updated():
-    mw = TrustedProxyMiddleware('127.0.0.1')
+    mw = TrustedProxy('127.0.0.1')
     scope = _make_scope('127.0.0.1', {b'x-forwarded-for': b'203.0.113.3'}, type_='websocket')
     scope, _ = await _call(mw, scope)
     assert scope['client'] == ['203.0.113.3', 0]
@@ -135,7 +135,7 @@ async def test_websocket_scope_updated():
 
 @pytest.mark.asyncio
 async def test_non_http_scope_passthrough():
-    mw = TrustedProxyMiddleware('127.0.0.1')
+    mw = TrustedProxy('127.0.0.1')
     scope = {'type': 'lifespan'}
     called = []
 

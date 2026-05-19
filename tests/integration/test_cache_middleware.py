@@ -1,6 +1,6 @@
 """Integration test for the response-cache middleware.
 
-Drives a real BlackBull server with ``CacheMiddleware`` installed and a
+Drives a real BlackBull server with ``Cache`` installed and a
 handler that increments a counter on every invocation.  Two requests
 to the same path must hit the handler only once (cache HIT on the
 second).  Adds an ``If-None-Match`` round-trip against the auto-
@@ -14,12 +14,12 @@ import pytest
 import pytest_asyncio
 
 from blackbull import BlackBull
-from blackbull.middleware.cache import CacheMiddleware
+from blackbull.middleware.cache import Cache
 
 
 def _make_app() -> BlackBull:
     app = BlackBull()
-    app.use(CacheMiddleware(max_age=60))
+    app.use(Cache(max_age=60))
 
     state = {'count': 0}
 

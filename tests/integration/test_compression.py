@@ -1,4 +1,4 @@
-"""Integration tests for CompressionMiddleware — Accept-Encoding negotiation over TCP.
+"""Integration tests for Compression — Accept-Encoding negotiation over TCP.
 
 Content-Encoding negotiation is invisible to unit tests; these are the first
 tests that send a real Accept-Encoding header over a TCP connection.
@@ -11,7 +11,7 @@ import httpx
 import pytest
 
 from blackbull import BlackBull
-from blackbull.middleware.compression import CompressionMiddleware
+from blackbull.middleware.compression import Compression
 
 
 _LARGE_BODY = b'x' * 500   # > 100-byte threshold
@@ -20,7 +20,7 @@ _LARGE_BODY = b'x' * 500   # > 100-byte threshold
 def _make_app() -> BlackBull:
     app = BlackBull()
 
-    compress = CompressionMiddleware()
+    compress = Compression()
 
     @app.route(path='/large', middlewares=[compress])
     async def large(scope, receive, send):
