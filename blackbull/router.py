@@ -679,18 +679,19 @@ class Router(UserDict, BaseRouter):
         """Check all route definitions for consistency, then freeze the router.
 
         Checks performed:
+
         - Every converter spec names a known converter.
         - Every path param appears in the handler signature (simplified handlers).
-        - Converter output type matches the handler's annotation (requires typeguard).
+        - Converter output type matches the handler's annotation.
 
-        Raises ConfigurationError listing all violations found.
-        Sets self._frozen = True on success so no further routes can be added.
+        Raises :class:`ConfigurationError` listing all violations found.
+        Sets ``self._frozen = True`` on success so no further routes can
+        be added.  Called once at app boot from :meth:`BlackBull.run` /
+        :meth:`BlackBull.serve` — handler bugs that violate the contract
+        surface before the first request is served, not after.
         """
-        try:
-            from typeguard import check_type as _check_type
-            _has_typeguard = True
-        except ImportError:
-            _has_typeguard = False
+        from beartype.door import die_if_unbearable
+        from beartype.roar import BeartypeDoorHintViolation
 
         errors: list[str] = []
 
@@ -711,16 +712,15 @@ class Router(UserDict, BaseRouter):
                 if p is None or p.annotation is inspect.Parameter.empty:
                     continue
 
-                if _has_typeguard:
-                    _regex_str, converter_fn = _CONVERTERS[spec]
-                    sample = converter_fn(_SAMPLE_INPUTS[spec])
-                    try:
-                        _check_type(sample, p.annotation)
-                    except Exception as exc:
-                        errors.append(
-                            f"Route {info.template!r} param {param_name!r}: "
-                            f"converter {spec!r} yields {type(sample).__name__!r} "
-                            f"but annotation is {p.annotation!r}: {exc}")
+                _regex_str, converter_fn = _CONVERTERS[spec]
+                sample = converter_fn(_SAMPLE_INPUTS[spec])
+                try:
+                    die_if_unbearable(sample, p.annotation)
+                except BeartypeDoorHintViolation as exc:
+                    errors.append(
+                        f"Route {info.template!r} param {param_name!r}: "
+                        f"converter {spec!r} yields {type(sample).__name__!r} "
+                        f"but annotation is {p.annotation!r}: {exc}")
 
         if errors:
             raise ConfigurationError('\n'.join(errors))

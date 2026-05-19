@@ -283,7 +283,7 @@ class TestHTTP11KeepAlive:
     async def test_incomplete_read_on_first_request_closes_silently(self):
         req = _http_request(method='GET', path='/', headers={'Host': 'localhost:8000'})
         first_line, _ = req.split(b'\r\n', 1)
-        reader = MagicMock()
+        reader = MagicMock(spec=AbstractReader)
         reader.readuntil = AsyncMock(side_effect=IncompleteReadError(b'Host: localh'))
 
         actor = HTTP1Actor(reader, _FakeWriter(), _noop_app, None,
@@ -300,7 +300,7 @@ class TestHTTP11KeepAlive:
             nonlocal call_count
             call_count += 1
 
-        reader = MagicMock()
+        reader = MagicMock(spec=AbstractReader)
         reader.readuntil = AsyncMock(side_effect=[
             rest,
             IncompleteReadError(b'GET /two HTTP'),
@@ -329,9 +329,15 @@ class TestHTTPDisconnect:
             event = await receive()
             disconnect_received.append(event)
 
-        reader = MagicMock()
-        reader.readuntil = AsyncMock(return_value=b'\r\n\r\n')
-        reader.readexactly = AsyncMock(side_effect=asyncio.IncompleteReadError(b'', 10))
+        # Wrap the MagicMock in AsyncioReader: that's the production path
+        # (the recipient factory does the same when it sees a non-AbstractReader),
+        # and it converts asyncio.IncompleteReadError → blackbull's
+        # IncompleteReadError that HTTP1Recipient catches.
+        from blackbull.server.recipient import AsyncioReader as _AsyncioReader
+        backing = MagicMock()
+        backing.readuntil = AsyncMock(return_value=b'\r\n\r\n')
+        backing.readexactly = AsyncMock(side_effect=asyncio.IncompleteReadError(b'', 10))
+        reader = _AsyncioReader(backing)
 
         actor = HTTP1Actor(reader, _FakeWriter(), app, None,
                            request=b'GET / HTTP/1.1\r\n')
@@ -347,9 +353,11 @@ class TestHTTPDisconnect:
         async def app(scope, receive, send):
             events.append(await receive())
 
-        reader = MagicMock()
-        reader.readuntil = AsyncMock(return_value=b'\r\n\r\n')
-        reader.readexactly = AsyncMock(side_effect=asyncio.IncompleteReadError(b'hel', 5))
+        from blackbull.server.recipient import AsyncioReader as _AsyncioReader
+        backing = MagicMock()
+        backing.readuntil = AsyncMock(return_value=b'\r\n\r\n')
+        backing.readexactly = AsyncMock(side_effect=asyncio.IncompleteReadError(b'hel', 5))
+        reader = _AsyncioReader(backing)
 
         actor = HTTP1Actor(reader, _FakeWriter(), app, None,
                            request=b'GET / HTTP/1.1\r\n')
@@ -390,7 +398,7 @@ class TestHTTP11Expect100Continue:
             body_read_position = bytes(writer.written)
             await receive()
 
-        reader = MagicMock()
+        reader = MagicMock(spec=AbstractReader)
         reader.readuntil = AsyncMock(return_value=b'\r\n\r\n')
         reader.readexactly = AsyncMock(return_value=body)
 
@@ -412,7 +420,7 @@ class TestHTTP11Expect100Continue:
             event = await receive()
             received_body = event.get('body')
 
-        reader = MagicMock()
+        reader = MagicMock(spec=AbstractReader)
         reader.readuntil = AsyncMock(return_value=b'\r\n\r\n')
         reader.readexactly = AsyncMock(return_value=body)
 
@@ -433,7 +441,7 @@ class TestHTTP11Expect100Continue:
         async def noop_app(scope, receive, send):
             await receive()
 
-        reader = MagicMock()
+        reader = MagicMock(spec=AbstractReader)
         reader.readuntil = AsyncMock(return_value=b'\r\n\r\n')
         reader.readexactly = AsyncMock(return_value=body)
 
@@ -453,7 +461,7 @@ class TestHTTP11Expect100Continue:
         async def app(scope, receive, send):
             await receive()
 
-        reader = MagicMock()
+        reader = MagicMock(spec=AbstractReader)
         reader.readuntil = AsyncMock(return_value=b'\r\n\r\n')
         reader.readexactly = AsyncMock(return_value=b'hello')
 
@@ -474,7 +482,7 @@ class TestHTTP11Expect100Continue:
             await send({'type': 'http.response.start', 'status': 200, 'headers': []})
             await send({'type': 'http.response.body', 'body': b'ok'})
 
-        reader = MagicMock()
+        reader = MagicMock(spec=AbstractReader)
         reader.readuntil = AsyncMock(return_value=b'\r\n\r\n')
         reader.readexactly = AsyncMock(return_value=body)
 

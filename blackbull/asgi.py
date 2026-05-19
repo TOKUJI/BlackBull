@@ -3,7 +3,7 @@
 Provides dict-subclass wrappers for the two response event shapes so
 middleware can dispatch on Python type rather than string comparison.
 Both subclass ``dict`` so ``isinstance(e, dict)`` remains True — required
-for typeguard and any ASGI send callable annotated ``event: dict``.
+for beartype and any ASGI send callable annotated ``event: dict``.
 """
 from .server.constants import ASGIEvent
 from .server.headers import Headers

@@ -3,12 +3,13 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
 
 from .constants import ASGIEvent
-
-if TYPE_CHECKING:
-    from ..event_aggregator import EventAggregator
+# Imported at runtime (not under TYPE_CHECKING) so beartype can resolve
+# the ``'EventAggregator'`` forward reference on
+# ``_make_disconnect_detecting_receive``.  No circular-import risk —
+# ``event_aggregator`` does not import anything back from this module.
+from ..event_aggregator import EventAggregator  # noqa: TC002
 
 
 @dataclass

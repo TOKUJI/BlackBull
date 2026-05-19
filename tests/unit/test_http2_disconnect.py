@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from blackbull.event_aggregator import EventAggregator
 from blackbull.server.recipient import HTTP2Recipient
 from blackbull.server.http2_actor import _signal_recipients
 from blackbull.server.access_log import _make_disconnect_detecting_receive as _make_h2_disconnect_receiver
@@ -66,7 +67,7 @@ async def test_h2_disconnect_receiver_passes_through_normal_events():
     async def raw_receive():
         return {'type': 'http.request', 'body': b'x', 'more_body': False}
 
-    aggregator = MagicMock()
+    aggregator = MagicMock(spec=EventAggregator)
     scope = {}
     wrapped = _make_h2_disconnect_receiver(raw_receive, scope, aggregator)
     event = await wrapped()
@@ -79,7 +80,7 @@ async def test_h2_disconnect_receiver_emits_request_disconnected():
     async def raw_receive():
         return {'type': 'http.disconnect'}
 
-    aggregator = MagicMock()
+    aggregator = MagicMock(spec=EventAggregator)
     aggregator.on_request_disconnected = AsyncMock()
     scope = {}
     wrapped = _make_h2_disconnect_receiver(raw_receive, scope, aggregator)
@@ -100,7 +101,7 @@ async def test_h2_disconnect_receiver_idempotent():
         calls += 1
         return {'type': 'http.disconnect'}
 
-    aggregator = MagicMock()
+    aggregator = MagicMock(spec=EventAggregator)
     aggregator.on_request_disconnected = AsyncMock()
     scope = {}
     wrapped = _make_h2_disconnect_receiver(raw_receive, scope, aggregator)

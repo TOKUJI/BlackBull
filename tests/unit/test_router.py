@@ -5,12 +5,16 @@ from unittest.mock import AsyncMock
 # import asyncio
 import pytest
 
+# Runtime type checks come from beartype's import-hook (claw); violations
+# of an annotation raise BeartypeCallHintParamViolation, a TypeError subclass.
+# We keep the optional-import dance so this file still runs when beartype
+# isn't installed (e.g. minimal-deps smoke runs).
 try:
-    from typeguard import TypeCheckError as _TypeCheckError
+    from beartype.roar import BeartypeCallHintParamViolation as _BeartypeViolation
 except ImportError:
-    _TypeCheckError = None  # type: ignore[assignment,misc]
+    _BeartypeViolation = None  # type: ignore[assignment,misc]
 
-_TYPE_ERRORS = (TypeError,) if _TypeCheckError is None else (TypeError, _TypeCheckError)
+_TYPE_ERRORS = (TypeError,) if _BeartypeViolation is None else (TypeError, _BeartypeViolation)
 
 # Test targets
 from blackbull.utils import Scheme
@@ -884,8 +888,16 @@ class TestRouterEdgeCases:
         assert 'Router' in r
 
     def test_route_fn_invalid_method_type_raises(self):
+        """``methods=['GET']`` is wrong — items must be HTTPMethod values.
+
+        Under the test-time beartype hook the wrong element type is
+        caught at function entry (raises a TypeError subclass) before
+        ``route_fn``'s own ValueError check fires.  Both outcomes mean
+        the misuse was rejected, which is what the test exists to
+        guarantee.
+        """
         router = Router()
-        with pytest.raises(ValueError):
+        with pytest.raises(_TYPE_ERRORS + (ValueError,)):
             router.route_fn(methods=['GET'], path='/x')
 
     def test_register_chain_non_middleware_in_middle_raises(self):

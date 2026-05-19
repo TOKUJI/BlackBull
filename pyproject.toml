@@ -27,7 +27,7 @@ compression = [
 ]
 
 validation = [
-    "typeguard",
+    "beartype",
 ]
 
 testing = [
@@ -35,7 +35,8 @@ testing = [
     "pytest-asyncio",
     "pytest-timeout",
     "pytest-cov",
-    "typeguard",
+    "beartype",
+    "pytest-beartype",
     "httpx[http2]",
     "websockets",
     "hypothesis",

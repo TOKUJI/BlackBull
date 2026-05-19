@@ -65,4 +65,4 @@ pytest
 - [ ] Response/application caching middleware — cache-control, ETags, user-configurable TTL
 - [x] Cookie-based session middleware (signed cookie) — `SessionMiddleware`; HMAC-SHA256, `BB_SESSION_SECRET` or explicit secret
 - [ ] OpenAPI / interactive API docs (Swagger UI)
-- [ ] beartype for startup type checking on route handlers
+- [x] beartype for startup type checking on route handlers — `Router.validate()` runs at `app.run()` / `app.serve()` boot and checks every path-converter output against the handler's annotation; the same package powers the test-suite's `--beartype-packages=blackbull` import hook
