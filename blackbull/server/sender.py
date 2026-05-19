@@ -123,6 +123,10 @@ class HTTP1Sender(BaseSender):
         self._buffered_headers: Headers | None = None
         self._chunked: bool = False
         self._expect_trailers: bool = False
+        # RFC 9110 §9.3.2 — when the request was HEAD, the response must
+        # have the same headers (including Content-Length) as a GET would
+        # but no body.  HTTP1Actor sets this before dispatch.
+        self._head_mode: bool = False
 
     async def __call__(self, body,
                        status: HTTPStatus = HTTPStatus.OK,
@@ -165,6 +169,9 @@ class HTTP1Sender(BaseSender):
                     self._buffered_status = None
                     self._buffered_headers = None
                 else:
+                    if self._head_mode:
+                        # already wrote headers; HEAD response carries no body
+                        return
                     if self._chunked:
                         if content:
                             await self._write(f'{len(content):x}\r\n'.encode() + content + b'\r\n')
@@ -198,6 +205,12 @@ class HTTP1Sender(BaseSender):
             headers.append(b'Date', formatdate(timeval=None, localtime=False, usegmt=True).encode())
 
         await self._write_start(status, headers)
+
+        # RFC 9110 §9.3.2 — HEAD response carries no body.  Headers (and
+        # the Content-Length we just computed from the GET body) still go
+        # out so caches and proxies remain accurate.
+        if self._head_mode:
+            return
 
         if self._chunked:
             if body:

@@ -218,10 +218,30 @@ class HTTP1Actor(Actor):
                 log_record = _AccessLogRecord.from_scope(scope)
                 scope['state']['access_log'] = log_record
                 capturing_send = _make_capturing_send(send, log_record)
+                # RFC 9110 §9.3.2 — a HEAD response must be identical to the
+                # GET response except for the absence of the body.  We
+                # synthesise that by dispatching to the GET handler and
+                # stripping body bytes from outgoing events.  ``method`` on
+                # the scope is rewritten so the router (and any handler that
+                # inspects scope['method']) sees ``GET``; the access log
+                # records the original ``HEAD`` from the request line.
+                # RFC 9110 §9.3.2 — reset HEAD mode per request and set when
+                # the method on this request is HEAD.  The sender uses the
+                # flag in _flush to skip body bytes while keeping the
+                # framing headers a GET would have emitted.
+                send._head_mode = (scope['method'] == 'HEAD')
+                if send._head_mode:
+                    scope['method'] = 'GET'
                 inner_receive = RecipientFactory.http1(self._reader, scope)
 
                 if not await self._dispatch_request(scope, inner_receive, capturing_send, log_record):
                     break  # unhandled error — close connection
+
+                # RFC 9112 §9.1 — honour Connection: close.  HTTP/1.0
+                # connections without ``Connection: keep-alive`` likewise
+                # default to non-persistent.
+                if not self._should_keep_alive(scope):
+                    break
 
                 self._request = b''
                 next_chunk = await self._reader.readuntil(_REQ_END)
