@@ -30,6 +30,27 @@ class IncompleteReadError(EOFError):
     """
 
 
+_HEXDIG_SET = frozenset(b'0123456789abcdefABCDEF')
+
+
+def _parse_chunk_size(line: bytes) -> int:
+    """RFC 9112 §7.1.1 — ``chunk-size = 1*HEXDIG``, optionally followed
+    by ``chunk-ext`` (everything from the first ``;``).  Reject anything
+    that isn't a non-empty hexadecimal string in the size portion.
+
+    Raises :class:`ValueError` on malformed input; the caller turns that
+    into a connection-closing failure (the request body is now
+    unframeable).
+    """
+    # Drop trailing CRLF and optional chunk-ext.
+    line = line.rstrip(b'\r\n')
+    size_part, _, _ext = line.partition(b';')
+    size_part = size_part.rstrip(b' \t')  # OWS between size and ';' is allowed
+    if not size_part or any(c not in _HEXDIG_SET for c in size_part):
+        raise ValueError(f'invalid chunk-size {size_part!r}')
+    return int(size_part, 16)
+
+
 class ProtocolError(Exception):
     """Raised when a WebSocket protocol violation is detected (RFC 6455).
 
@@ -259,9 +280,15 @@ class HTTP1Recipient(BaseRecipient):
         try:
             if self._chunked:
                 size_line = await self._reader.readuntil(b'\r\n')
-                chunk_size = int(size_line.strip(), 16)
+                chunk_size = _parse_chunk_size(size_line)
                 if chunk_size == 0:
-                    await self._reader.readuntil(b'\r\n')   # consume trailing CRLF
+                    # RFC 9112 §7.1.2 — last-chunk is followed by an
+                    # optional trailer-part and then a final CRLF.  Read
+                    # lines until we hit the terminator.
+                    while True:
+                        line = await self._reader.readuntil(b'\r\n')
+                        if line == b'\r\n':
+                            break
                     self._done = True
                     return {'type': ASGIEvent.HTTP_REQUEST, 'body': b'', 'more_body': False}
                 data = await self._reader.read(chunk_size)

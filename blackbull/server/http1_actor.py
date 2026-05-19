@@ -51,6 +51,43 @@ class BadRequestError(Exception):
     """
 
 
+def _validate_message_framing(headers: 'Headers') -> None:
+    """RFC 9112 §6 — reject framing-header combinations that are unsafe.
+
+    These are the rules every smuggling-class incident I'm aware of has
+    exploited.  Specifically:
+
+    * §6.2 — ``Content-Length`` value MUST be ``1*DIGIT`` (no signs, no
+      whitespace, non-empty).
+    * §6.2 — multiple ``Content-Length`` headers MUST all have the same
+      single integer value.  Different values are a CL.CL vector.
+    * §6.1 — if both ``Content-Length`` and ``Transfer-Encoding`` are
+      present, the message is anomalous.  We reject (the spec also
+      allows "ignore CL, use TE"; rejecting is the safer policy).
+    """
+    cls = headers.getlist(b'content-length')
+    tes = headers.getlist(b'transfer-encoding')
+
+    if cls and tes:
+        raise BadRequestError(
+            'Content-Length and Transfer-Encoding both present '
+            '(smuggling vector)')
+
+    if cls:
+        # Collapse comma-combined and multi-header into a single set of values.
+        values: set[bytes] = set()
+        for _, value in cls:
+            for v in value.split(b','):
+                v = v.strip()
+                if not v or not v.isdigit():
+                    raise BadRequestError(f'invalid Content-Length value {v!r}')
+                # Strip leading zeros so "00005" and "5" compare equal.
+                values.add(v.lstrip(b'0') or b'0')
+        if len(values) > 1:
+            raise BadRequestError(
+                f'conflicting Content-Length values: {sorted(values)!r}')
+
+
 # ---------------------------------------------------------------------------
 # RequestActor — single HTTP request lifetime
 # ---------------------------------------------------------------------------
@@ -276,6 +313,10 @@ class HTTP1Actor(Actor):
                     f'{key!r}: {value!r}')
             raw.append((key.lower(), value))
         headers = Headers(raw)
+
+        # RFC 9112 §6 — message framing validation.  Done here so a bad
+        # framing header is rejected before any body bytes are read.
+        _validate_message_framing(headers)
 
         scope = {
             'type': 'http',
