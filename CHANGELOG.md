@@ -61,8 +61,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `AbstractReader` / `AbstractWriter` used throughout — no implicit
   `asyncio.StreamWriter` dependency anywhere.
 - Test suite reorganised into `tests/unit/` (parsing, framing, data structures),
-  `tests/architecture/` (actor + event contracts), and `tests/compliance/http1/`
-  and `tests/compliance/http2/` (full round-trip tests against a real `ASGIServer`).
+  `tests/architecture/` (actor + event contracts), and `tests/conformance/http1/`
+  and `tests/conformance/http2/` (full round-trip tests against a real `ASGIServer`).
 
 ### Fixed
 
