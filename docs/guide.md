@@ -28,7 +28,7 @@ BlackBull is a **routing and middleware layer**.  It does not include:
 - An ORM or database layer — bring your own (SQLite, SQLAlchemy, asyncpg, …)
 - A template engine — render HTML with Jinja2, Mako, or plain f-strings
 - A request-validation library — validate with Pydantic, marshmallow, or manually
-- A server-side session store — for cookie-based sessions, see [SessionMiddleware](#sessionmiddleware) (§4.4); for server-side state bring your own (dict, Redis, …)
+- A server-side session store — for cookie-based sessions, see [Session](#session) (§4.4); for server-side state bring your own (dict, Redis, …)
 
 This keeps the framework small and lets you swap any of these concerns independently.
 
@@ -569,19 +569,19 @@ pip install 'blackbull[compression]'   # installs brotli + zstandard
 ```
 
 `compress` skips compression when the response body is smaller than 100 bytes.
-To change the threshold, construct `CompressionMiddleware` directly:
+To change the threshold, construct `Compression` directly:
 
 ```python
-from blackbull.middleware.compression import CompressionMiddleware
+from blackbull.middleware.compression import Compression
 
-compress_big = CompressionMiddleware(min_size=4096)
+compress_big = Compression(min_size=4096)
 
 @app.route(path='/large', middlewares=[compress_big])
 async def large(scope, receive, send):
     ...
 ```
 
-#### SessionMiddleware
+#### Session
 
 Signed-cookie sessions: the session data lives entirely in a cookie HMAC-signed
 by the server.  No server-side store, no DB, no Redis — every worker can read
@@ -590,13 +590,13 @@ any cookie as long as it shares the secret.  Trade-off: cookie size is bounded
 the secret.
 
 ```python
-from blackbull.middleware.session import SessionMiddleware
+from blackbull.middleware.session import Session
 
 # Operator sets BB_SESSION_SECRET=<32-byte random> in the deployment env
-app.use(SessionMiddleware())
+app.use(Session())
 
 # Or pass the secret explicitly (handy for tests):
-app.use(SessionMiddleware(secret=b'<long-random-bytes>'))
+app.use(Session(secret=b'<long-random-bytes>'))
 
 @app.route(path='/')
 async def index(scope, receive, send):
@@ -645,7 +645,7 @@ A cookie whose signature fails to verify (tampering, wrong secret, replay with
 a different `cookie_name`) is silently dropped — the handler sees an empty
 session, no error is propagated.
 
-#### CacheMiddleware
+#### Cache
 
 Per-worker in-memory response cache for `GET` and `HEAD`.  The middleware
 captures the handler's response on the first hit, stores it under
@@ -653,9 +653,9 @@ captures the handler's response on the first hit, stores it under
 matching requests until the entry expires.
 
 ```python
-from blackbull.middleware.cache import CacheMiddleware
+from blackbull.middleware.cache import Cache
 
-app.use(CacheMiddleware(max_age=600))   # 10-minute TTL by default
+app.use(Cache(max_age=600))   # 10-minute TTL by default
 
 @app.route(path='/feed')
 async def feed(scope, receive, send):
@@ -712,7 +712,7 @@ Limitations to know:
   drops everything.
 * **No `Vary` matching.**  Requests that differ only by `Accept-Encoding`
   or `Accept-Language` share the same cache slot — the first response
-  cached wins.  Don't use `CacheMiddleware` for content-negotiated
+  cached wins.  Don't use `Cache` for content-negotiated
   routes unless the negotiation is path/query-string-driven.
 * **No explicit invalidation API.**  Wait for TTL or restart the worker.
 
@@ -1460,15 +1460,15 @@ server {
 
 By default, `scope['client']` is the raw TCP peer (Nginx's loopback address) and
 `scope['scheme']` is `'http'` even when the client connected via HTTPS.  Enable
-`TrustedProxyMiddleware` to rewrite them from the proxy headers:
+`TrustedProxy` to rewrite them from the proxy headers:
 
 ```python
-# Shortcut on BlackBull — registers TrustedProxyMiddleware automatically
+# Shortcut on BlackBull — registers TrustedProxy automatically
 app = BlackBull(trusted_proxies=['127.0.0.1', '::1'])
 
 # Or register explicitly for more control (e.g. private subnet):
-from blackbull import TrustedProxyMiddleware
-app.use(TrustedProxyMiddleware(['127.0.0.1', '::1', '10.0.0.0/8']))
+from blackbull import TrustedProxy
+app.use(TrustedProxy(['127.0.0.1', '::1', '10.0.0.0/8']))
 ```
 
 With trusted-proxy support active:
@@ -1717,6 +1717,11 @@ if __name__ == '__main__':
 
 The working implementation of this skeleton is
 [`examples/SimpleTaskManager/app.py`](https://github.com/TOKUJI/BlackBull/blob/master/examples/SimpleTaskManager/app.py).
+The same application written without middleware or event hooks — auth and
+JSON parsing inlined into every handler via helper calls — is in
+[`examples/SimpleTaskManager/app-simple.py`](https://github.com/TOKUJI/BlackBull/blob/master/examples/SimpleTaskManager/app-simple.py).
+Compare them to see why factoring cross-cutting concerns into middleware and
+event observers pays off as the route count and feature set grow.
 
 ---
 

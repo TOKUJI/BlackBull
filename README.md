@@ -27,7 +27,7 @@ Handlers also accept `(scope, receive, send)` for full ASGI control.
 | Example | Demonstrates |
 |---|---|
 | [`examples/SimpleTaskManager/`](examples/SimpleTaskManager/) | REST API + HTML UI, middleware pipeline, route groups, SQLite, Bearer token auth |
-| [`examples/ChatServer/`](examples/ChatServer/) | WebSocket, SSE, long polling — three implementation styles (raw ASGI → Flask-like → middleware) |
+| [`examples/ChatServer/`](examples/ChatServer/) | WebSocket, SSE, long polling — three real-time transports side-by-side, built on the middleware pipeline (Session, Compression, custom auth) |
 | [`examples/typed_routes_ok.py`](examples/typed_routes_ok.py) | `{param:converter}` syntax, `url_path_for` — validation passes |
 | [`examples/typed_routes_fail.py`](examples/typed_routes_fail.py) | Same routes with annotation mismatch — `ConfigurationError` at startup |
 
@@ -62,7 +62,7 @@ pytest
 ### P4 — Application framework
 
 - [x] Route lookup cache — internal per-worker LRU cache (transparent, no user API)
-- [x] Response/application caching middleware — `CacheMiddleware`; per-worker LRU, ETag + If-None-Match → 304, `Cache-Control: no-store/private/no-cache` respected, `max-age` / `s-maxage` honoured, opt-out for authenticated requests
-- [x] Cookie-based session middleware (signed cookie) — `SessionMiddleware`; HMAC-SHA256, `BB_SESSION_SECRET` or explicit secret
+- [x] Response/application caching middleware — `Cache`; per-worker LRU, ETag + If-None-Match → 304, `Cache-Control: no-store/private/no-cache` respected, `max-age` / `s-maxage` honoured, opt-out for authenticated requests
+- [x] Cookie-based session middleware (signed cookie) — `Session`; HMAC-SHA256, `BB_SESSION_SECRET` or explicit secret
 - [ ] OpenAPI / interactive API docs (Swagger UI)
 - [x] beartype for startup type checking on route handlers — `Router.validate()` runs at `app.run()` / `app.serve()` boot and checks every path-converter output against the handler's annotation; the same package powers the test-suite's `--beartype-packages=blackbull` import hook
