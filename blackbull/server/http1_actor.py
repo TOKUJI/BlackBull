@@ -29,6 +29,27 @@ _WS_GUID = b'258EAFA5-E914-47DA-95CA-C5AB0DC85B11'  # RFC 6455 §1.3
 _HTTP_PORT  = 80
 _HTTPS_PORT = 443
 
+# RFC 9110 §5.6.2 — token = 1*tchar
+# RFC 9110 §5.5  — field-value disallows CTLs (0x00-0x1F, 0x7F) except HTAB
+# RFC 9112 §4   — method = token, HTTP-version = "HTTP/" DIGIT "." DIGIT
+_TOKEN_CHARS = (
+    b"!#$%&'*+-.^_`|~"
+    + bytes(range(0x30, 0x3A))   # 0-9
+    + bytes(range(0x41, 0x5B))   # A-Z
+    + bytes(range(0x61, 0x7B))   # a-z
+)
+_TOKEN_SET = frozenset(_TOKEN_CHARS)
+_HTTP_VERSION_RE = re.compile(rb'^HTTP/\d\.\d$')
+
+
+class BadRequestError(Exception):
+    """Raised by :meth:`HTTP1Actor._parse` on an RFC 9112 framing violation.
+
+    The actor's keep-alive loop catches this and sends a 400 Bad Request
+    before closing the connection — never tries to dispatch the malformed
+    request to the app.
+    """
+
 
 # ---------------------------------------------------------------------------
 # RequestActor — single HTTP request lifetime
@@ -133,7 +154,21 @@ class HTTP1Actor(Actor):
                 while not self._request.endswith(_REQ_END):
                     self._request += await self._reader.readuntil(_REQ_END)
 
-                scope = self._parse(self._request)
+                try:
+                    scope = self._parse(self._request)
+                except BadRequestError as exc:
+                    # RFC 9112 §3 / §5 violation — answer with 400 and close.
+                    # A malformed request is a smuggling vector candidate, so
+                    # we always terminate the connection rather than try to
+                    # find the next message boundary.
+                    logger.warning('400 Bad Request: %s', exc)
+                    await send(
+                        b'400 Bad Request',
+                        HTTPStatus.BAD_REQUEST,
+                        [(b'connection', b'close'),
+                         (b'content-type', b'text/plain')],
+                    )
+                    return
                 self._fill_connection_info(scope)
 
                 if scope.get('type') == 'websocket':
@@ -165,17 +200,81 @@ class HTTP1Actor(Actor):
     # ------------------------------------------------------------------
 
     def _parse(self, data: bytes) -> dict:
-        """Parse raw HTTP/1.1 request bytes into an ASGI scope dict."""
+        """Parse raw HTTP/1.1 request bytes into an ASGI scope dict.
+
+        Raises :class:`BadRequestError` on any RFC 9112 framing violation
+        the caller should answer with 400.  Validation rules:
+
+        * request-line: exactly ``method SP request-target SP HTTP-version``;
+          method/version are validated against the token / HTTP-version
+          grammar (§4, RFC 9110 §5.6.2).
+        * field-line: ``name ':' OWS value OWS``; no whitespace between
+          name and colon (§5.1); no obs-fold (§5.2); no CTLs in value
+          except HTAB (RFC 9110 §5.5); name must be a valid token.
+        """
         lines = data.split(b'\r\n')
-        method, path, version = lines[0].split(b' ')
+
+        # RFC 9112 §2.2 — recipients MAY skip a stray empty line before the
+        # request.  We tolerate one to be polite to HTTP/1.0 clients.
+        idx = 0
+        if lines and lines[0] == b'':
+            idx = 1
+        if idx >= len(lines):
+            raise BadRequestError('empty request')
+
+        request_line = lines[idx]
+        parts = request_line.split(b' ')
+        if len(parts) != 3:
+            raise BadRequestError(
+                f'request line must have exactly 3 SP-separated parts, '
+                f'got {len(parts)}: {request_line!r}')
+        method, path, version = parts
+
+        # Method (§4 / RFC 9110 §9.1) — case-sensitive token of 1+ tchar.
+        if not method or any(c not in _TOKEN_SET for c in method):
+            raise BadRequestError(f'invalid method {method!r}')
+
+        # HTTP-version (§2.5) — exactly ``HTTP/d.d``.
+        if not _HTTP_VERSION_RE.match(version):
+            raise BadRequestError(f'invalid HTTP-version {version!r}')
+
+        # Request-target — for origin-form, leading slash; reject CTLs.
+        if not path or any(b < 0x21 or b == 0x7F for b in path):
+            raise BadRequestError(f'invalid request-target {path!r}')
+
         path_parsed = urlparse(path)
 
         raw: list[tuple[bytes, bytes]] = []
-        for line in lines[1:]:
-            line = line.strip()
-            if b':' in line:
-                key, value = line.split(b':', 1)
-                raw.append((key.lower(), value.strip()))
+        for line in lines[idx + 1:]:
+            if not line:
+                # Empty line = end of headers; anything after is body (already
+                # split off upstream because we read until CRLFCRLF).
+                continue
+            # RFC 9112 §5.2 — obs-fold (leading SP/HTAB on a header line)
+            # MUST be rejected in requests.
+            if line[:1] in (b' ', b'\t'):
+                raise BadRequestError(
+                    f'obsolete line folding rejected: {line!r}')
+            colon = line.find(b':')
+            if colon < 1:
+                raise BadRequestError(f'malformed header line: {line!r}')
+            key = line[:colon]
+            value = line[colon + 1:]
+            # §5.1 — no whitespace between field-name and ':'.
+            if key[-1:] in (b' ', b'\t'):
+                raise BadRequestError(
+                    f'whitespace before colon (smuggling vector): {line!r}')
+            # field-name must be a valid token (§5.1 / RFC 9110 §5.6.2).
+            if any(c not in _TOKEN_SET for c in key):
+                raise BadRequestError(f'invalid header name {key!r}')
+            # Strip the OWS surrounding the value (§5).
+            value = value.strip(b' \t')
+            # field-value MUST NOT contain CTLs except HTAB.
+            if any((b < 0x20 or b == 0x7F) and b != 0x09 for b in value):
+                raise BadRequestError(
+                    f'CTL in header value (smuggling / log-injection): '
+                    f'{key!r}: {value!r}')
+            raw.append((key.lower(), value))
         headers = Headers(raw)
 
         scope = {

@@ -324,7 +324,11 @@ class BlackBull:
             return
 
         try:
-            method = HTTPMethod(scope['method'].upper())
+            # RFC 9110 §9.1 — methods are case-sensitive.  Looking up
+            # ``scope['method'].upper()`` would silently fold a lowercase
+            # ``get`` to ``GET`` and dispatch to the wrong handler.  Use
+            # the value verbatim; HTTPMethod() rejects non-uppercase forms.
+            method = HTTPMethod(scope['method'])
         except ValueError:
             self._logger.debug("Unknown HTTP method: %r", scope['method'])
             scope.setdefault('state', {})['error_status'] = HTTPStatus.METHOD_NOT_ALLOWED

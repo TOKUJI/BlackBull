@@ -368,9 +368,16 @@ class TestHTTP11Expect100Continue:
     """Server must send 100 Continue before reading body when Expect header present."""
 
     def _make_expect_request(self, body: bytes = b'hello') -> bytes:
+        """Return only the header bytes (terminated by CRLFCRLF).
+
+        The real reader returns headers via ``readuntil(\\r\\n\\r\\n)`` and
+        the body separately via ``readexactly(N)``, so the request-bytes
+        the actor parses MUST NOT contain the body.  The body is supplied
+        to the per-test ``reader.readexactly`` mock.
+        """
         lines = ['POST /upload HTTP/1.1', 'Host: localhost:8000',
                  f'Content-Length: {len(body)}', 'Expect: 100-continue', '', '']
-        return '\r\n'.join(lines).encode() + body
+        return '\r\n'.join(lines).encode()
 
     async def test_100_continue_sent_before_body(self):
         body = b'hello'
