@@ -51,6 +51,16 @@ class BadRequestError(Exception):
     """
 
 
+class HeaderTooLargeError(Exception):
+    """Raised when a request header line or the whole header block exceeds
+    the configured limit (``BB_HEADER_MAX_LINE`` / ``BB_HEADER_MAX_TOTAL``).
+
+    The actor answers with 431 Request Header Fields Too Large (RFC 6585
+    §5) and closes the connection.  Distinct from :class:`BadRequestError`
+    because the response status differs.
+    """
+
+
 def _validate_message_framing(headers: 'Headers') -> None:
     """RFC 9112 §6 — reject framing-header combinations that are unsafe.
 
@@ -200,11 +210,21 @@ class HTTP1Actor(Actor):
                 try:
                     if cfg.header_timeout > 0:
                         async with asyncio.timeout(cfg.header_timeout):
-                            while not self._request.endswith(_REQ_END):
-                                self._request += await self._reader.readuntil(_REQ_END)
+                            await self._read_headers(cfg.header_max_total)
                     else:
-                        while not self._request.endswith(_REQ_END):
-                            self._request += await self._reader.readuntil(_REQ_END)
+                        await self._read_headers(cfg.header_max_total)
+                except HeaderTooLargeError as exc:
+                    # RFC 6585 §5 — 431 Request Header Fields Too Large.
+                    # The buffer is over the configured budget; close so an
+                    # attacker can't keep feeding us bytes after the reply.
+                    logger.warning('431 Request Header Fields Too Large: %s', exc)
+                    await send(
+                        b'431 Request Header Fields Too Large',
+                        HTTPStatus.REQUEST_HEADER_FIELDS_TOO_LARGE,
+                        [(b'connection', b'close'),
+                         (b'content-type', b'text/plain')],
+                    )
+                    return
                 except (asyncio.TimeoutError, TimeoutError):
                     logger.warning(
                         '408 Request Timeout (slowloris defence) — peer=%r '
@@ -220,6 +240,17 @@ class HTTP1Actor(Actor):
 
                 try:
                     scope = self._parse(self._request)
+                except HeaderTooLargeError as exc:
+                    # Per-line limit hit during parse.  Same response as the
+                    # total-block check in _read_headers.
+                    logger.warning('431 Request Header Fields Too Large: %s', exc)
+                    await send(
+                        b'431 Request Header Fields Too Large',
+                        HTTPStatus.REQUEST_HEADER_FIELDS_TOO_LARGE,
+                        [(b'connection', b'close'),
+                         (b'content-type', b'text/plain')],
+                    )
+                    return
                 except BadRequestError as exc:
                     # RFC 9112 §3 / §5 violation — answer with 400 and close.
                     # A malformed request is a smuggling vector candidate, so
@@ -295,8 +326,21 @@ class HTTP1Actor(Actor):
         * field-line: ``name ':' OWS value OWS``; no whitespace between
           name and colon (§5.1); no obs-fold (§5.2); no CTLs in value
           except HTAB (RFC 9110 §5.5); name must be a valid token.
+
+        Raises :class:`HeaderTooLargeError` when any request-line or
+        header line exceeds ``BB_HEADER_MAX_LINE`` (default 8 KiB).  The
+        whole-block limit (``BB_HEADER_MAX_TOTAL``) is enforced in
+        ``run()`` because it sees the accumulating buffer; per-line is
+        cheaper to check here, post-split.
         """
+        from ..env import get_settings as _get_settings  # noqa: PLC0415
+        max_line = _get_settings().header_max_line
         lines = data.split(b'\r\n')
+        if max_line > 0:
+            for ln in lines:
+                if len(ln) > max_line:
+                    raise HeaderTooLargeError(
+                        f'header line {len(ln)} bytes > BB_HEADER_MAX_LINE={max_line}')
 
         # RFC 9112 §2.2 — recipients MAY skip a stray empty line before the
         # request.  We tolerate one to be polite to HTTP/1.0 clients.
@@ -583,6 +627,30 @@ class HTTP1Actor(Actor):
                         },
                     ))
         return True
+
+    async def _read_headers(self, max_total: int) -> None:
+        """Drain bytes from the reader until ``\\r\\n\\r\\n`` is at the end of
+        ``self._request``.  Enforces the configured total-block size limit;
+        raises :class:`HeaderTooLargeError` when the buffer overshoots.
+
+        asyncio's StreamReader has its own buffer limit (default 64 KiB,
+        triggering ``LimitOverrunError``) which is converted into the same
+        :class:`HeaderTooLargeError` here so callers can handle one
+        exception class regardless of which side caught the overflow.
+        """
+        import asyncio  # noqa: PLC0415
+        while not self._request.endswith(_REQ_END):
+            try:
+                chunk = await self._reader.readuntil(_REQ_END)
+            except asyncio.LimitOverrunError as exc:
+                raise HeaderTooLargeError(
+                    f'asyncio buffer overflow ({exc.consumed} bytes) '
+                    f'while reading headers') from exc
+            self._request += chunk
+            if max_total > 0 and len(self._request) > max_total:
+                raise HeaderTooLargeError(
+                    f'header block {len(self._request)} bytes > '
+                    f'BB_HEADER_MAX_TOTAL={max_total}')
 
     def _should_keep_alive(self, scope: dict) -> bool:
         """Return True if the connection should persist after this request."""

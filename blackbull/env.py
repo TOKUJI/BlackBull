@@ -227,6 +227,18 @@ class Settings:
     #: (legacy behaviour; only recommended for trusted local clients).
     header_timeout: float = 10.0
 
+    #: Maximum bytes in a single HTTP/1.1 request-line or header line.
+    #: A pathological 1 GB ``X-foo: ...`` header would otherwise live in
+    #: ``readuntil``'s internal buffer.  Enforced before parsing so an
+    #: attacker cannot exhaust memory.  Default 8 KiB matches Apache
+    #: ``LimitRequestLine`` / nginx ``large_client_header_buffers``.
+    header_max_line: int = 8192
+
+    #: Maximum total bytes in the entire request header block
+    #: (request-line + all headers + CRLFCRLF).  Default 64 KiB matches
+    #: typical reverse-proxy defaults.
+    header_max_total: int = 65536
+
     #: Per-stream HTTP/2 flow-control window advertised in the server's SETTINGS.
     h2_initial_window_size: int = 1048576  # 1 MiB
 
@@ -306,6 +318,8 @@ def get_settings() -> Settings:
         socket_reuseport=_bool_env('BB_SOCKET_REUSEPORT', True),
         request_timeout=_float_env_nonneg('BB_REQUEST_TIMEOUT', 0.0),
         header_timeout=_float_env_nonneg('BB_HEADER_TIMEOUT', 10.0),
+        header_max_line=_int_env_nonneg('BB_HEADER_MAX_LINE', 8192),
+        header_max_total=_int_env_nonneg('BB_HEADER_MAX_TOTAL', 65536),
         h2_initial_window_size=_int_env('BB_H2_INITIAL_WINDOW_SIZE', 1048576),
         h2_connection_window_size=_int_env('BB_H2_CONNECTION_WINDOW_SIZE', 4194304),
         h2_max_concurrent_streams=_int_env('BB_H2_MAX_CONCURRENT_STREAMS', 100),
