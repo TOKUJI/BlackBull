@@ -520,6 +520,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#blackbull.app.BlackBull.enable_openapi" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        enable_openapi
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.app.BlackBull.group" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1413,6 +1424,34 @@
   
   
   
+    <li class="md-nav__item">
+      <a href="../openapi/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    openapi
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
     
     
     
@@ -1422,10 +1461,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_1_11" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_1_12" >
         
           
-          <label class="md-nav__link" for="__nav_3_1_11" id="__nav_3_1_11_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_3_1_12" id="__nav_3_1_12_label" tabindex="0">
             
   
   
@@ -1443,8 +1482,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_3_1_11_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_3_1_11">
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_3_1_12_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_1_12">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -1701,10 +1740,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_1_15" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_1_16" >
         
           
-          <label class="md-nav__link" for="__nav_3_1_15" id="__nav_3_1_15_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_3_1_16" id="__nav_3_1_16_label" tabindex="0">
             
   
   
@@ -1722,8 +1761,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_3_1_15_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_3_1_15">
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_3_1_16_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_1_16">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -2395,6 +2434,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#blackbull.app.BlackBull.enable_openapi" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        enable_openapi
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.app.BlackBull.group" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2653,6 +2703,34 @@ HTTP / WebSocket scopes through the global-middleware chain ending in
 
 
 
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.app.BlackBull.enable_openapi" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">enable_openapi</span><span class="p">(</span><span class="o">*</span><span class="p">,</span> <span class="n">title</span><span class="o">=</span><span class="s1">&#39;BlackBull API&#39;</span><span class="p">,</span> <span class="n">version</span><span class="o">=</span><span class="s1">&#39;0.1.0&#39;</span><span class="p">,</span> <span class="n">description</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">spec_path</span><span class="o">=</span><span class="s1">&#39;/openapi.json&#39;</span><span class="p">,</span> <span class="n">docs_path</span><span class="o">=</span><span class="s1">&#39;/docs&#39;</span><span class="p">)</span></code>
+
+</h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Auto-publish an OpenAPI 3.1 spec and Swagger UI for the app.</p>
+<p>Registers two routes:</p>
+<ul>
+<li><code>spec_path</code> (default <code>/openapi.json</code>) returns the spec as JSON.
+  The spec is regenerated on every request so new routes added after
+  this call are reflected.</li>
+<li><code>docs_path</code> (default <code>/docs</code>) returns an HTML page hosting
+  Swagger UI pointed at <code>spec_path</code>.  Pass <code>docs_path=None</code> to
+  skip the UI route and serve only the JSON spec.</li>
+</ul>
+<p>Call once, after the rest of the app's routes have been registered.</p>
+
+
+    </div>
+
+</div>
 
 <div class="doc doc-object doc-function">
 
