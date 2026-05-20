@@ -3065,17 +3065,102 @@ registered.  Routes added later will not appear in the spec returned by
 already-issued requests (the spec is rebuilt on each request, but new
 registrations after the validator has frozen the router will raise).
 
-### 20.3  What v1 does not (yet) do
+### 20.3  Schemas from dataclasses
 
-* **Request-body schemas.**  Handlers do not yet declare body models.
-  Until a model layer (Pydantic or dataclass-with-schema) is added, write
-  endpoints emit `{"type": "object"}` — any JSON document validates.  See
-  the Todo in `README.md` P4 for the v2 follow-up.
+Annotate a handler parameter with a Python `dataclass` and the spec gains a
+real request-body schema; annotate the return type and the spec gains a
+real response schema.  No extra dependency — `dataclasses` is in the
+standard library.
+
+```python
+from dataclasses import dataclass, field
+
+@dataclass
+class CreateTask:
+    title: str
+    completed: bool = False
+    tags: list[str] = field(default_factory=list)
+
+@dataclass
+class Task:
+    id: int
+    title: str
+    completed: bool
+
+@app.route(methods=HTTPMethod.POST, path='/tasks')
+async def create_task(body: CreateTask) -> Task:
+    ...
+```
+
+Produces, in the spec:
+
+```json
+"/tasks": {
+  "post": {
+    "requestBody": {
+      "content": {"application/json": {"schema": {
+        "type": "object",
+        "title": "CreateTask",
+        "properties": {
+          "title":     {"type": "string"},
+          "completed": {"type": "boolean", "default": false},
+          "tags":      {"type": "array", "items": {"type": "string"}, "default": []}
+        },
+        "required": ["title"]
+      }}}
+    },
+    "responses": {
+      "200": {
+        "description": "OK",
+        "content": {"application/json": {"schema": {
+          "type": "object", "title": "Task",
+          "properties": {
+            "id":        {"type": "integer"},
+            "title":     {"type": "string"},
+            "completed": {"type": "boolean"}
+          },
+          "required": ["id", "title", "completed"]
+        }}}
+      }
+    }
+  }
+}
+```
+
+Supported in field annotations and return types:
+
+| Python annotation | OpenAPI schema |
+|---|---|
+| `str` / `int` / `float` / `bool` / `bytes` | `{"type": "string"}` etc. |
+| `T \| None`, `Optional[T]` | `{"anyOf": [<T>, {"type": "null"}]}` |
+| `T \| U` (PEP 604 union) | `{"anyOf": [<T>, <U>]}` |
+| `list[T]`, `tuple[T, ...]` | `{"type": "array", "items": <T>}` |
+| `dict[str, V]` | `{"type": "object", "additionalProperties": <V>}` |
+| Nested `@dataclass` | recursive object schema |
+| Field default | `default:` attached when JSON-serializable |
+| Field without default | added to `required:` |
+
+Anything not in this list (TypedDict, NamedTuple, generic dataclasses with
+TypeVars, Pydantic models, etc.) falls through to `{}` — OpenAPI 3.1 treats
+that as "no constraint", which is the right default rather than a wrong
+guess.
+
+> **Note on body delivery**: this v2 work is *documentation-only*.  The
+> router still passes the raw JSON body to your handler via
+> `body: bytes` / `read_body(receive)`; the dataclass annotation is a hint
+> for the spec generator.  A future v3 may instantiate the dataclass for
+> you.
+
+### 20.4  What is still on the v3 list
+
+* **Body deserialization.**  Today the dataclass annotation is for the
+  spec only — your handler must still parse JSON itself.  v3 will wire
+  the annotation through to actual instantiation.
 * **Security schemes.**  Auth is application-defined here, so no global
   `securitySchemes` are emitted.  Add them post-hoc by editing the spec
   returned by `generate_spec()` and serving the result yourself.
 * **Tags / grouping.**  Operations are flat under their path; tag-based
   grouping in Swagger UI requires manual annotation today.
-* **Response schemas.**  Every operation emits a stub `200: OK` response.
-  The simplified-handler return form gives us enough static information
-  to do better here — a v2 enhancement.
+* **Status-code variants.**  Every operation emits a single `200: OK`
+  response.  Distinguishing `201 Created` for POST, `204 No Content` for
+  DELETE, etc. needs more cues than the return annotation alone.

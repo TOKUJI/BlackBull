@@ -1,9 +1,16 @@
 """Tests for blackbull.openapi — spec generation and Swagger UI host page."""
 import json
 import pytest
+from dataclasses import dataclass, field
+from typing import Optional
 
 from blackbull import BlackBull
-from blackbull.openapi import generate_spec, swagger_ui_html
+from blackbull.openapi import (
+    _dataclass_to_schema,
+    _type_to_schema,
+    generate_spec,
+    swagger_ui_html,
+)
 from http import HTTPMethod
 
 
@@ -158,3 +165,210 @@ def test_spec_is_json_serializable(app_with_routes):
     spec = generate_spec(app_with_routes)
     # Round-trip through json — no non-serializable types should leak.
     assert json.loads(json.dumps(spec)) == spec
+
+
+# ---------------------------------------------------------------------------
+# v2 — type → JSON schema synthesis
+# ---------------------------------------------------------------------------
+
+class TestTypeToSchema:
+    def test_primitives(self):
+        assert _type_to_schema(str)   == {'type': 'string'}
+        assert _type_to_schema(int)   == {'type': 'integer'}
+        assert _type_to_schema(float) == {'type': 'number'}
+        assert _type_to_schema(bool)  == {'type': 'boolean'}
+        assert _type_to_schema(bytes) == {'type': 'string', 'format': 'binary'}
+
+    def test_none(self):
+        assert _type_to_schema(None) == {'type': 'null'}
+        assert _type_to_schema(type(None)) == {'type': 'null'}
+
+    def test_list(self):
+        assert _type_to_schema(list[int]) == {
+            'type': 'array', 'items': {'type': 'integer'},
+        }
+
+    def test_dict(self):
+        assert _type_to_schema(dict[str, int]) == {
+            'type': 'object', 'additionalProperties': {'type': 'integer'},
+        }
+
+    def test_optional(self):
+        assert _type_to_schema(Optional[int]) == {
+            'anyOf': [{'type': 'integer'}, {'type': 'null'}],
+        }
+        # PEP 604 union form
+        assert _type_to_schema(int | None) == {
+            'anyOf': [{'type': 'integer'}, {'type': 'null'}],
+        }
+
+    def test_union_multiple(self):
+        result = _type_to_schema(int | str)
+        assert result == {'anyOf': [{'type': 'integer'}, {'type': 'string'}]}
+
+    def test_unknown_falls_back_to_open(self):
+        class Random: pass
+        assert _type_to_schema(Random) == {}
+
+
+class TestDataclassSchema:
+    def test_simple(self):
+        @dataclass
+        class Item:
+            name: str
+            count: int
+
+        assert _dataclass_to_schema(Item) == {
+            'type': 'object',
+            'title': 'Item',
+            'properties': {
+                'name':  {'type': 'string'},
+                'count': {'type': 'integer'},
+            },
+            'required': ['name', 'count'],
+        }
+
+    def test_defaults_become_optional(self):
+        @dataclass
+        class Pet:
+            name: str
+            breed: str = 'unknown'
+            tags: list[str] = field(default_factory=list)
+
+        schema = _dataclass_to_schema(Pet)
+        assert schema['required'] == ['name']
+        assert schema['properties']['breed'] == {'type': 'string', 'default': 'unknown'}
+        assert schema['properties']['tags'] == {
+            'type': 'array', 'items': {'type': 'string'}, 'default': [],
+        }
+
+    def test_nested_dataclass(self):
+        @dataclass
+        class Address:
+            street: str
+            zip: str
+
+        @dataclass
+        class Person:
+            name: str
+            home: Address
+
+        schema = _dataclass_to_schema(Person)
+        assert schema['properties']['home'] == {
+            'type': 'object',
+            'title': 'Address',
+            'properties': {
+                'street': {'type': 'string'},
+                'zip':    {'type': 'string'},
+            },
+            'required': ['street', 'zip'],
+        }
+
+    def test_optional_field(self):
+        @dataclass
+        class Maybe:
+            value: int | None = None
+
+        schema = _dataclass_to_schema(Maybe)
+        assert schema['properties']['value']['anyOf'] == [
+            {'type': 'integer'}, {'type': 'null'},
+        ]
+
+
+class TestHandlerIntrospection:
+    def test_dataclass_body_emits_schema(self):
+        @dataclass
+        class CreateTask:
+            title: str
+            done: bool = False
+
+        app = BlackBull()
+
+        @app.route(methods=HTTPMethod.POST, path='/tasks')
+        async def create(body: CreateTask):  # noqa: ARG001
+            return {}
+
+        op = generate_spec(app)['paths']['/tasks']['post']
+        body_schema = op['requestBody']['content']['application/json']['schema']
+        assert body_schema['type'] == 'object'
+        assert body_schema['title'] == 'CreateTask'
+        assert body_schema['properties']['title'] == {'type': 'string'}
+        assert body_schema['required'] == ['title']
+
+    def test_body_without_annotation_falls_back_to_object(self):
+        app = BlackBull()
+
+        @app.route(methods=HTTPMethod.POST, path='/raw')
+        async def raw(body: bytes):  # noqa: ARG001
+            return {}
+
+        op = generate_spec(app)['paths']['/raw']['post']
+        assert op['requestBody']['content']['application/json']['schema'] == {
+            'type': 'object',
+        }
+
+    def test_dataclass_response_emits_schema(self):
+        @dataclass
+        class Task:
+            id: int
+            title: str
+
+        app = BlackBull()
+
+        @app.route(methods=HTTPMethod.GET, path='/tasks/{tid:int}')
+        async def get(tid: int) -> Task:  # noqa: ARG001
+            return Task(id=tid, title='x')
+
+        op = generate_spec(app)['paths']['/tasks/{tid}']['get']
+        resp = op['responses']['200']
+        assert 'content' in resp
+        schema = resp['content']['application/json']['schema']
+        assert schema['title'] == 'Task'
+        assert set(schema['properties']) == {'id', 'title'}
+
+    def test_list_of_dataclass_response(self):
+        @dataclass
+        class Tag:
+            name: str
+
+        app = BlackBull()
+
+        @app.route(methods=HTTPMethod.GET, path='/tags')
+        async def list_tags() -> list[Tag]:
+            return []
+
+        op = generate_spec(app)['paths']['/tags']['get']
+        schema = op['responses']['200']['content']['application/json']['schema']
+        assert schema['type'] == 'array'
+        assert schema['items']['title'] == 'Tag'
+
+    def test_no_annotation_keeps_v1_response_stub(self):
+        app = BlackBull()
+
+        @app.route(methods=HTTPMethod.GET, path='/ping')
+        async def ping(scope, receive, send):  # noqa: ARG001
+            pass
+
+        op = generate_spec(app)['paths']['/ping']['get']
+        assert op['responses'] == {'200': {'description': 'OK'}}
+
+    def test_path_param_not_treated_as_body(self):
+        """A dataclass-typed handler parameter that *is* a path param
+        must not be misread as the request body."""
+        @dataclass
+        class NotABody:
+            x: int
+
+        app = BlackBull()
+
+        # 'tid' is in the URL; if introspection wrongly considered every
+        # dataclass annotation a body, this POST would carry a body schema.
+        # It doesn't — path params are excluded from body candidacy.
+        @app.route(methods=HTTPMethod.POST, path='/things/{tid:int}')
+        async def write(tid: int):  # noqa: ARG001
+            return {}
+
+        op = generate_spec(app)['paths']['/things/{tid}']['post']
+        assert op['requestBody']['content']['application/json']['schema'] == {
+            'type': 'object',
+        }

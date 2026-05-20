@@ -65,5 +65,5 @@ pytest
 - [x] Route lookup cache — internal per-worker LRU cache (transparent, no user API)
 - [x] Response/application caching middleware — `Cache`; per-worker LRU, ETag + If-None-Match → 304, `Cache-Control: no-store/private/no-cache` respected, `max-age` / `s-maxage` honoured, opt-out for authenticated requests
 - [x] Cookie-based session middleware (signed cookie) — `Session`; HMAC-SHA256, `BB_SESSION_SECRET` or explicit secret
-- [x] OpenAPI / interactive API docs (Swagger UI) — `app.enable_openapi()` publishes a 3.1 spec at `/openapi.json` and Swagger UI at `/docs`.  v1: routes, methods, path-param schemas from converters, docstring → summary/description; request-body schemas are a v2 follow-up.
+- [x] OpenAPI / interactive API docs (Swagger UI) — `app.enable_openapi()` publishes a 3.1 spec at `/openapi.json` and Swagger UI at `/docs`.  Covers routes, methods, path-param schemas from converters, docstring → summary/description, and **request/response schemas synthesized from `@dataclass` annotations** on handler params/returns.
 - [x] beartype for startup type checking on route handlers — `Router.validate()` runs at `app.run()` / `app.serve()` boot and checks every path-converter output against the handler's annotation; the same package powers the test-suite's `--beartype-packages=blackbull` import hook

@@ -33,7 +33,11 @@ Swagger UI at ``/docs``.
 """
 from __future__ import annotations
 
+import dataclasses
 import inspect
+import json
+import types
+import typing
 from http import HTTPMethod
 from typing import Any
 
@@ -95,6 +99,171 @@ def _path_parameters(param_specs: dict[str, str]) -> list[dict]:
     return out
 
 
+# ---------------------------------------------------------------------------
+# Type → JSON-schema synthesis (v2)
+#
+# Supported:
+#   - primitives           — str / int / float / bool / bytes
+#   - container generics   — list[X], dict[str, X], tuple[X, ...]
+#   - union types          — X | None, Optional[X], X | Y, Union[X, Y]
+#   - Python dataclasses   — including nested dataclasses and forward refs
+# Unsupported (emits {}):
+#   - TypedDict / NamedTuple
+#   - Pydantic models      — out of scope; users may post-process the spec
+#   - Generic dataclasses with TypeVars
+# ---------------------------------------------------------------------------
+
+_PRIMITIVE_SCHEMAS: dict[type, dict] = {
+    str:   {'type': 'string'},
+    int:   {'type': 'integer'},
+    float: {'type': 'number'},
+    bool:  {'type': 'boolean'},
+    bytes: {'type': 'string', 'format': 'binary'},
+}
+
+
+def _type_to_schema(tp: Any) -> dict:
+    """Convert a Python annotation to an OpenAPI 3.1 / JSON-schema dict.
+
+    Unknown types fall through to an empty ``{}`` — OpenAPI 3.1 treats this
+    as "no constraint", which is the right default rather than guessing.
+    """
+    if tp is None or tp is type(None):
+        return {'type': 'null'}
+
+    primitive = _PRIMITIVE_SCHEMAS.get(tp)
+    if primitive is not None:
+        return dict(primitive)
+
+    origin = typing.get_origin(tp)
+    args = typing.get_args(tp)
+
+    # X | Y, Union[X, Y], Optional[X]
+    if origin is typing.Union or origin is types.UnionType:
+        non_none = [a for a in args if a is not type(None)]
+        has_none = len(non_none) != len(args)
+        if len(non_none) == 1:
+            schema = _type_to_schema(non_none[0])
+            if has_none:
+                # Cleanest OpenAPI 3.1 expression of "T or null".
+                return {'anyOf': [schema, {'type': 'null'}]}
+            return schema
+        sub = [_type_to_schema(a) for a in non_none]
+        if has_none:
+            sub.append({'type': 'null'})
+        return {'anyOf': sub}
+
+    # list[X], tuple[X, ...]
+    if origin is list or origin is tuple:
+        item = args[0] if args else None
+        items_schema = _type_to_schema(item) if item is not None else {}
+        return {'type': 'array', 'items': items_schema}
+
+    # dict[K, V] — JSON keys are always strings; we describe the value type.
+    if origin is dict:
+        v = args[1] if len(args) == 2 else None
+        return {
+            'type': 'object',
+            'additionalProperties': _type_to_schema(v) if v is not None else True,
+        }
+
+    if dataclasses.is_dataclass(tp):
+        return _dataclass_to_schema(tp)
+
+    return {}
+
+
+def _dataclass_to_schema(cls: Any) -> dict:
+    """Synthesize an OpenAPI schema object for *cls*, a Python dataclass."""
+    # Resolve forward references and string-form annotations once, here, so
+    # field.type may be either a real class or a `from __future__ import
+    # annotations`-style string.
+    try:
+        hints = typing.get_type_hints(cls)
+    except Exception:
+        hints = {}
+
+    props: dict[str, dict] = {}
+    required: list[str] = []
+    for f in dataclasses.fields(cls):
+        annotation = hints.get(f.name, f.type)
+        field_schema = _type_to_schema(annotation)
+        if f.default is not dataclasses.MISSING:
+            default = f.default
+        elif f.default_factory is not dataclasses.MISSING:  # type: ignore[misc]
+            try:
+                default = f.default_factory()  # type: ignore[misc]
+            except Exception:
+                default = dataclasses.MISSING
+        else:
+            default = dataclasses.MISSING
+        if default is dataclasses.MISSING:
+            required.append(f.name)
+        else:
+            # Only attach the default if it round-trips through JSON.
+            try:
+                field_schema['default'] = json.loads(json.dumps(default))
+            except (TypeError, ValueError):
+                pass
+        props[f.name] = field_schema
+
+    schema: dict[str, Any] = {
+        'type': 'object',
+        'title': cls.__name__,
+        'properties': props,
+    }
+    if required:
+        schema['required'] = required
+    return schema
+
+
+# ---------------------------------------------------------------------------
+# Handler introspection — find dataclass-annotated request body / response
+# ---------------------------------------------------------------------------
+
+def _resolved_hints(handler) -> dict[str, Any]:
+    """Resolve a handler's annotations, including forward refs.  Returns ``{}`` on failure."""
+    try:
+        return typing.get_type_hints(handler)
+    except Exception:
+        return {}
+
+
+def _find_body_type(handler, param_specs: dict[str, str]) -> Any:
+    """Return the annotation of the first dataclass-typed handler parameter
+    that is *not* one of the route's path parameters, or ``None``.
+    """
+    try:
+        sig = inspect.signature(handler)
+    except (TypeError, ValueError):
+        return None
+    hints = _resolved_hints(handler)
+    for name, param in sig.parameters.items():
+        if name in param_specs:
+            continue
+        if name in ('scope', 'receive', 'send', 'call_next', 'inner', 'self'):
+            continue
+        ann = hints.get(name, param.annotation)
+        if ann is inspect.Parameter.empty:
+            continue
+        if dataclasses.is_dataclass(ann):
+            return ann
+    return None
+
+
+def _find_response_type(handler) -> Any:
+    """Return the handler's return annotation when it carries schema-able information."""
+    try:
+        sig = inspect.signature(handler)
+    except (TypeError, ValueError):
+        return None
+    hints = _resolved_hints(handler)
+    ann = hints.get('return', sig.return_annotation)
+    if ann is inspect.Signature.empty or ann is None or ann is type(None):
+        return None
+    return ann
+
+
 def _docstring_split(handler) -> tuple[str, str]:
     """Return (summary, description) extracted from the handler's docstring."""
     doc = inspect.getdoc(handler)
@@ -110,24 +279,40 @@ def _operation(handler, param_specs: dict[str, str],
                method: HTTPMethod) -> dict:
     """Build one OpenAPI ``Operation Object`` for the given handler + method."""
     summary, description = _docstring_split(handler)
-    op: dict[str, Any] = {
-        'responses': {
-            '200': {'description': 'OK'},
-        },
-    }
+    op: dict[str, Any] = {}
+
     if summary:
         op['summary'] = summary
     if description:
         op['description'] = description
+
     params = _path_parameters(param_specs)
     if params:
         op['parameters'] = params
+
     if method in _BODY_METHODS:
-        # Placeholder schema — handlers do not yet declare body models.
-        # See v2 of the docs work; for now we just say "some JSON, please".
+        # Prefer a synthesized schema from a dataclass-typed handler param.
+        # When no annotation is present we fall back to the opaque object
+        # schema from v1 so a JSON body is still required.
+        body_type = _find_body_type(handler, param_specs)
+        body_schema = _type_to_schema(body_type) if body_type is not None else {'type': 'object'}
         op['requestBody'] = {
-            'content': {'application/json': {'schema': {'type': 'object'}}},
+            'content': {'application/json': {'schema': body_schema}},
         }
+
+    # Response schema from the return annotation, when one is given.
+    return_type = _find_response_type(handler)
+    response_schema = _type_to_schema(return_type) if return_type is not None else None
+    if response_schema:
+        op['responses'] = {
+            '200': {
+                'description': 'OK',
+                'content': {'application/json': {'schema': response_schema}},
+            },
+        }
+    else:
+        op['responses'] = {'200': {'description': 'OK'}}
+
     return op
 
 
