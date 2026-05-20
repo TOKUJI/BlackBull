@@ -1,10 +1,10 @@
 """Utilities for middleware authors.
 
 Public API:
-- ``middleware``: decorator that normalises the ``send`` callable so inner send
-  wrappers defined by the middleware always receive plain ASGI event dicts,
-  never ``Response`` objects.  Works on both async middleware functions and
-  middleware classes (decorates ``__call__``).
+- ``as_middleware``: decorator that normalises the ``send`` callable so inner
+  send wrappers defined by the middleware always receive plain ASGI event
+  dicts, never ``Response`` objects.  Works on both async middleware functions
+  and middleware classes (decorates ``__call__``).
 """
 from functools import wraps
 
@@ -40,8 +40,8 @@ def _normalize_send(inner_send):
     return normalized
 
 
-def middleware(target):
-    """Decorator for middleware functions **or** classes.
+def as_middleware(target):
+    """Decorator that marks an async function **or** class as BlackBull middleware.
 
     Wraps ``call_next`` so any ``send`` callable the middleware passes to it is
     automatically normalised — Response/JSONResponse objects are expanded into
@@ -51,7 +51,7 @@ def middleware(target):
 
     Applied to an async function (signature ``(scope, receive, send, call_next)``)::
 
-        @middleware
+        @as_middleware
         async def timing_mw(scope, receive, send, call_next):
             async def timed_send(event):
                 # event is always a dict here
@@ -60,7 +60,7 @@ def middleware(target):
 
     Applied to a class whose ``__call__`` is the middleware coroutine::
 
-        @middleware
+        @as_middleware
         class Cache:
             async def __call__(self, scope, receive, send, call_next):
                 async def cap_send(event):

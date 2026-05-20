@@ -1,7 +1,7 @@
-"""Tests for the @middleware decorator and _normalize_send utility."""
+"""Tests for the @as_middleware decorator and _normalize_send utility."""
 import pytest
 
-from blackbull.middleware.utils import _normalize_send, middleware
+from blackbull.middleware.utils import _normalize_send, as_middleware
 from blackbull.response import JSONResponse, Response
 
 
@@ -56,15 +56,15 @@ async def test_normalize_dict_passthrough():
 
 
 # ---------------------------------------------------------------------------
-# @middleware decorator — normalisation guarantee
+# @as_middleware decorator — normalisation guarantee
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
 async def test_decorated_inner_send_receives_dicts_for_response():
-    """Inner send wrapper inside a @middleware-decorated function sees only dicts."""
+    """Inner send wrapper inside an @as_middleware-decorated function sees only dicts."""
     received = []
 
-    @middleware
+    @as_middleware
     async def mw(scope, receive, send, call_next):
         async def inner_send(event):
             received.append(event)
@@ -90,7 +90,7 @@ async def test_decorated_inner_send_receives_dicts_for_response():
 async def test_decorated_inner_send_receives_dicts_for_json_response():
     received = []
 
-    @middleware
+    @as_middleware
     async def mw(scope, receive, send, call_next):
         async def inner_send(event):
             received.append(event)
@@ -133,7 +133,7 @@ async def test_undecorated_call_next_is_not_wrapped():
 # ---------------------------------------------------------------------------
 
 def test_marker_attribute_is_set():
-    @middleware
+    @as_middleware
     async def mw(scope, receive, send, call_next):
         pass
 
@@ -141,7 +141,7 @@ def test_marker_attribute_is_set():
 
 
 def test_wraps_preserves_name_and_doc():
-    @middleware
+    @as_middleware
     async def my_middleware(scope, receive, send, call_next):
         """My doc."""
         pass

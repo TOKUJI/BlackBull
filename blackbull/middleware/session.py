@@ -54,7 +54,7 @@ import time
 from typing import Any
 
 from ..server.constants import ASGIEvent
-from .utils import middleware
+from .utils import as_middleware
 
 logger = logging.getLogger(__name__)
 
@@ -113,7 +113,7 @@ class _SessionDict(dict):
 _VALID_SAMESITE = ('Strict', 'Lax', 'None')
 
 
-@middleware
+@as_middleware
 class Session:
     """ASGI middleware that maintains a signed-cookie session.
 
@@ -199,7 +199,7 @@ class Session:
             return
 
         async def wrapped_send(event):
-            # The ``@middleware`` class decorator normalises ``call_next`` so
+            # The ``@as_middleware`` class decorator normalises ``call_next`` so
             # any Response / JSONResponse from the handler arrives here as a
             # plain dict event.
             if (event.get('type') == ASGIEvent.HTTP_RESPONSE_START

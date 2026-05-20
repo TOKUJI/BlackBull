@@ -50,7 +50,7 @@ from collections import OrderedDict
 from typing import Any
 
 from ..server.constants import ASGIEvent
-from .utils import middleware
+from .utils import as_middleware
 
 logger = logging.getLogger(__name__)
 
@@ -82,7 +82,7 @@ class _Entry:
         return (now if now is not None else time.monotonic()) >= self.expires_at
 
 
-@middleware
+@as_middleware
 class Cache:
     """Per-worker in-memory response cache."""
 
@@ -166,7 +166,7 @@ class Cache:
 
         async def cap_send(event):
             nonlocal status, response_headers, streaming, flushed
-            # The ``@middleware`` class decorator normalises ``call_next`` so
+            # The ``@as_middleware`` class decorator normalises ``call_next`` so
             # Response/JSONResponse objects from the handler arrive here as
             # plain start+body dict events.
             t = event.get('type')

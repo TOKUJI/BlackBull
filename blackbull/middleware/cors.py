@@ -1,9 +1,9 @@
 from ..server.constants import ASGIEvent
 from ..server.headers import Headers
-from .utils import middleware
+from .utils import as_middleware
 
 
-@middleware
+@as_middleware
 class CORS:
     """Cross-Origin Resource Sharing (CORS) middleware.
 

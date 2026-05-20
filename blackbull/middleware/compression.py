@@ -4,7 +4,7 @@ from collections.abc import Callable
 from ..server.constants import ASGIEvent
 from ..server.headers import Headers
 from ..asgi import ResponseStart, ResponseBody, parse_response_event
-from .utils import middleware
+from .utils import as_middleware
 
 _MIN_SIZE = 100  # default minimum body size to bother compressing
 _EXECUTOR_THRESHOLD = 65536  # default body size above which compression is offloaded
@@ -60,7 +60,7 @@ def _is_compressible_content_type(headers: Headers) -> bool:
 # Middleware
 # ---------------------------------------------------------------------------
 
-@middleware
+@as_middleware
 class Compression:
     """ASGI middleware: compress the response body using the best codec the
     client accepts (br > zstd > gzip, in server-preference order).

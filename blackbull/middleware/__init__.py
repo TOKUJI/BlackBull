@@ -16,7 +16,7 @@ from .cors import CORS
 from .proxy import TrustedProxy
 from .session import Session
 from .static import StaticFiles
-from .utils import middleware
+from .utils import as_middleware
 from .websocket import websocket
 
 __all__ = [
@@ -26,7 +26,7 @@ __all__ = [
     'Session',
     'StaticFiles',
     'TrustedProxy',
-    'middleware',
+    'as_middleware',
     'websocket',
 ]
 

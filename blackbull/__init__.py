@@ -8,8 +8,8 @@ Public API exports:
 - `read_body`: reads and buffers the full request body from the ASGI receive channel.
 - `parse_cookies`: parses the ``Cookie`` header into a plain ``dict``.
 - `CORS`: adds ``Access-Control-*`` headers; handles preflight OPTIONS requests.
-- `middleware`: decorator for middleware functions; normalises ``send`` so inner wrappers see only ASGI event dicts.
-- `TrustedProxyMiddleware`: rewrites ``scope['client']`` / ``scope['scheme']`` from proxy headers.
+- `as_middleware`: decorator that marks an async function or class as middleware; normalises ``send`` so inner wrappers see only ASGI event dicts.
+- `TrustedProxy`: rewrites ``scope['client']`` / ``scope['scheme']`` from proxy headers.
 """
 import logging
 logging.getLogger('blackbull').addHandler(logging.NullHandler())
@@ -20,5 +20,5 @@ from .response import Response, JSONResponse, StreamingResponse, WebSocketRespon
 from .event import Event, EventHandler
 from .asgi import ResponseStart, ResponseBody, parse_response_event
 from .middleware.cors import CORS
-from .middleware.utils import middleware
+from .middleware.utils import as_middleware
 from .middleware.proxy import TrustedProxy
