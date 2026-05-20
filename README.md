@@ -54,6 +54,7 @@ pytest
 ### P2 — Important protocol features
 
 - [x] RFC 8441 — WebSocket over HTTP/2 (Extended CONNECT). Currently WebSocket requires HTTP/1.1; when TLS is active the browser negotiates HTTP/2 via ALPN and WebSocket upgrade is blocked.
+- [ ] Conformance to RFC 8441 — a dedicated test harness (analogous to h2spec for RFC 9113 and Autobahn for RFC 6455) that walks the Extended CONNECT handshake, settings, and stream lifecycle to confirm the implementation matches the spec.
 
 ### P3 — Features and enhancements
 

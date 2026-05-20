@@ -153,8 +153,43 @@ async def ws_handler(scope, receive, send):
 The built-in `blackbull.middleware.websocket` handles the connect/accept handshake
 automatically; include it in `middlewares=[websocket, ...]` on the route.
 
-BlackBull validates `Sec-WebSocket-Version: 13` and supports per-message deflate
-(RFC 7692) automatically when the client negotiates it.
+BlackBull validates `Sec-WebSocket-Version: 13`.
+
+#### permessage-deflate (RFC 7692)
+
+`permessage-deflate` compression is negotiated automatically when the client
+offers it on the handshake.  The server replies with `Sec-WebSocket-Extensions:
+permessage-deflate; server_no_context_takeover; client_no_context_takeover` —
+the no-context-takeover flags trade a small compression-ratio penalty for bounded
+per-connection memory (each side resets its deflate state between messages
+instead of keeping it for the whole connection).
+
+| Aspect | Behaviour |
+|---|---|
+| Default | On — matches modern browsers, Node `ws`, Python `websockets`, aiohttp. |
+| Disable | `BB_WS_PERMESSAGE_DEFLATE=0` (see §18.6).  The handshake still succeeds; just no extension is negotiated. |
+| Per-message-deflate strategy | Both `server_no_context_takeover` and `client_no_context_takeover` always advertised by the server. |
+| RSV1 bit | Set on compressed data frames per §7 of the RFC; clients without the negotiated extension that send RSV1 are rejected as protocol violations. |
+
+#### Transport: HTTP/1.1 Upgrade and HTTP/2 Extended CONNECT (RFC 8441)
+
+WebSocket is always available over the HTTP/1.1 `Upgrade` handshake (RFC 6455 §4).
+Over HTTP/2 it is **opt-in** via Extended CONNECT (RFC 8441):
+
+```bash
+BB_H2_ENABLE_WEBSOCKET=1 python app.py --port 8443 --cert cert.pem --key key.pem
+```
+
+When enabled the server advertises `SETTINGS_ENABLE_CONNECT_PROTOCOL=1` in its
+initial SETTINGS frame, after which an HTTP/2 peer may open a WebSocket by
+sending `:method = CONNECT`, `:protocol = websocket`, and the usual
+`Sec-WebSocket-*` pseudo-headers on a single stream.  The bidirectional DATA
+frames on that stream then carry WebSocket frames.
+
+This path is off by default because it has fewer conformance tests than the
+HTTP/1.1 Upgrade path and few clients use it in practice — Cloudflare's edge
+stack is the main consumer.  Browsers that negotiate HTTP/2 via ALPN normally
+still use HTTP/1.1 for WebSocket, so most apps do not need to enable RFC 8441.
 
 #### Subprotocol negotiation
 
@@ -483,6 +518,49 @@ Signature: `async def mw(scope, receive, send, call_next)`.
 - Call `await call_next(scope, receive, send)` to pass control to the next layer.
 - The legacy parameter name `inner` is accepted as an alias for `call_next`.
 - Sending a response without calling `call_next` **short-circuits** all inner layers.
+
+#### The `@as_middleware` decorator
+
+Handlers may return a `Response` / `JSONResponse` object instead of calling
+`send(...)` with raw ASGI events.  A middleware that wraps `send` would
+otherwise have to guard each event with `isinstance(event, Response)`.  Decorate
+the middleware with `@as_middleware` and the inner wrapper sees only plain
+dict events — Response objects are expanded into `http.response.start` +
+`http.response.body` for you:
+
+```python
+from blackbull import as_middleware
+
+@as_middleware
+async def add_header_mw(scope, receive, send, call_next):
+    async def wrapped(event):
+        # event is always a dict here, never a Response object
+        if event['type'] == 'http.response.start':
+            event = {**event,
+                     'headers': list(event.get('headers', [])) + [(b'x-custom', b'1')]}
+        await send(event)
+    await call_next(scope, receive, wrapped)
+```
+
+`@as_middleware` also works on classes (it wraps `__call__`).  All BlackBull's
+built-in middlewares (`Cache`, `Session`, `Compression`, `CORS`) use the
+class form:
+
+```python
+from blackbull import as_middleware
+
+@as_middleware
+class TimingMiddleware:
+    def __init__(self, threshold_ms: float = 100.0):
+        self._threshold = threshold_ms
+    async def __call__(self, scope, receive, send, call_next):
+        ...   # inner wrappers see dict events
+```
+
+Omit the decorator when you need raw `send` arguments — e.g. middleware used
+in a deployment that never registers simplified-return handlers.  Without
+`@as_middleware`, `call_next` is wired directly to the next layer with no
+extra wrapping.
 
 > **See also**: §9 Events covers the underlying hook API. 
 > Middleware in this section is in fact a sugar layer over `@app.intercept('before_handler')`; for purely observational concerns (logging, metrics, tracing) prefer `@app.on(...)` from §9 — middleware semantics force every observer to run on the request critical path, and one slow observer can degrade every response.
@@ -1362,6 +1440,45 @@ asyncio.run(app.run(port=8000, debug=True))
 async def run(port=0, certfile=None, keyfile=None, debug=False)
 ```
 
+### §10.1  Workers and the event loop
+
+By default `app.run()` runs one worker process with the standard asyncio
+event loop.  Two environment variables let you change that:
+
+```bash
+# Pre-fork N worker processes, each with its own event loop.
+# 0 → os.cpu_count() workers.
+BB_WORKERS=8 python app.py
+
+# Install uvloop's faster asyncio policy (requires pip install "blackbull[speed]").
+BB_UVLOOP=1 python app.py
+
+# Both together (production default).
+BB_WORKERS=0 BB_UVLOOP=1 python app.py
+```
+
+Multi-worker uses **pre-fork multiprocessing** — each worker is a separate OS
+process, not a thread.  The master process binds the socket, forks workers,
+and then sleeps until SIGTERM/SIGINT.  On Linux/modern BSDs the workers also
+share the listening port via `SO_REUSEPORT` (`BB_SOCKET_REUSEPORT=1` by default)
+so the kernel hashes incoming connections across workers' accept queues —
+eliminates thundering-herd and gives per-connection CPU affinity for free.
+
+The workers share **nothing** mutable: no shared dict, no shared cache, no
+shared lock.  Anything that would otherwise need cross-worker coordination
+(session storage, response cache, rate-limit counters) belongs in an external
+store — Redis, Postgres, or a sticky-session reverse proxy.  See §4.4 — the
+built-in `Cache` and `Session` middlewares state their per-worker limits.
+
+| Setting | Use case |
+|---|---|
+| `BB_WORKERS=1` (default) | Development, tests, debugging.  Easiest to reason about; everything in one process. |
+| `BB_WORKERS=N` (`N > 1`) | Production CPU-bound workload — each worker saturates one core. |
+| `BB_WORKERS=0` | Production "use whatever the box has" — resolves to `os.cpu_count()` at start. |
+| `BB_UVLOOP=1` | Always worth it once you've installed `blackbull[speed]`.  1.5–2× throughput on HTTP/2 hot paths in our benchmarks. |
+
+See §18 for the full list of runtime tunables.
+
 ### Generating a self-signed certificate for local HTTPS
 
 ```bash
@@ -1548,6 +1665,77 @@ openssl req -newkey rsa:4096 -keyout client.key -out client.csr \
 openssl x509 -req -in client.csr -CA ca.pem -CAkey ca.key \
   -CAcreateserial -out client.pem -days 365
 ```
+
+### §10.4  Abuse defences
+
+Three independent limits protect a worker from misbehaving or malicious clients.
+All three apply *before* the application is reached, and all three are on by
+default — production deployments should leave them on and only tune the numbers.
+
+#### Slowloris — partial-headers attack
+
+A slowloris attack keeps a TCP connection open by sending the request header
+block one byte at a time, indefinitely.  Without a deadline, every such
+connection holds one worker slot forever — a single attacker can exhaust the
+server's connection pool with no abnormal traffic volume.
+
+BlackBull enforces a deadline on the HTTP/1.1 header read.  When the client has
+not delivered the complete header block (request-line + headers + `CRLFCRLF`)
+within `BB_HEADER_TIMEOUT` seconds (default `10`), the server answers
+`408 Request Timeout` and closes the socket.
+
+```bash
+# Default — already on
+python app.py
+
+# Tighten to 3 seconds (recommended behind a reverse proxy that already buffers).
+BB_HEADER_TIMEOUT=3 python app.py
+
+# Disable (only safe on a trusted local socket).
+BB_HEADER_TIMEOUT=0 python app.py
+```
+
+HTTP/2 has no equivalent header timeout because the protocol does not allow
+a peer to drip header bytes one at a time — `HEADERS` and `CONTINUATION`
+frames carry their length in the frame header, and the `MAX_HEADER_LIST_SIZE`
+SETTING bounds the total.
+
+#### Oversized headers — memory exhaustion
+
+A 1 GB `X-Foo: <random bytes>` header would otherwise sit in `readuntil`'s
+buffer until the line terminator arrived.  Two limits stop this:
+
+| Limit | Default | Triggered when |
+|---|---|---|
+| `BB_HEADER_MAX_LINE` | `8192` | A single header line (or the request line) exceeds this. |
+| `BB_HEADER_MAX_TOTAL` | `65536` | The full header block exceeds this. |
+
+A request that exceeds either limit gets `431 Request Header Fields Too Large`
+and the connection is closed.  The defaults match Apache's
+`LimitRequestLine` / `LimitRequestFieldsize` and nginx's
+`large_client_header_buffers`.
+
+#### Connection cap and per-request timeout
+
+| Limit | Default | Behaviour |
+|---|---|---|
+| `BB_MAX_CONNECTIONS` | `500` per worker | Connections beyond the cap are refused at accept time (the kernel handles the SYN; the application never sees it).  Combine with `BB_SOCKET_BACKLOG` for graceful overload. |
+| `BB_REQUEST_TIMEOUT` | `0` (off) | Per-HTTP/2-stream deadline in seconds.  Set in production (e.g. `30`) so that an ASGI handler hung on an upstream call can't keep its stream slot indefinitely.  Stream is cancelled via `RST_STREAM CANCEL`. |
+
+#### Production checklist
+
+```bash
+BB_WORKERS=0 \
+BB_UVLOOP=1 \
+BB_HEADER_TIMEOUT=3 \
+BB_REQUEST_TIMEOUT=30 \
+BB_MAX_CONNECTIONS=1000 \
+BB_ACCESS_LOG=0 \
+python app.py --cert /etc/ssl/site.pem --key /etc/ssl/site.key
+```
+
+`BB_ACCESS_LOG=0` assumes a separate log aggregator is consuming structured logs;
+without one, leave it at `1` so the access log keeps going to stderr.
 
 ---
 
@@ -2647,3 +2835,175 @@ async def prefix_mw(scope, receive, send, call_next):
 
 For most use cases (header injection, logging) the middleware does not touch
 the body at all and streaming safety is not a concern.
+
+---
+
+## §18  Environment Variables
+
+Every runtime knob is read from an environment variable on startup.  Defaults
+are conservative for development; raise the limits and tune the sockets in
+production.  Source of truth: [`blackbull/env.py`](https://github.com/TOKUJI/BlackBull/blob/master/blackbull/env.py).
+
+### 18.1  Runtime and processes
+
+| Variable | Default | Controls |
+|---|---|---|
+| `BLACKBULL_ENV` | `development` | `production` \| `development` \| `test`.  In `production`, `StaticFiles` declines to serve files (production should sit behind nginx/Caddy for static assets). |
+| `BB_WORKERS` | `1` | Pre-fork worker count.  `0` resolves to `os.cpu_count()`.  Each worker runs its own asyncio event loop; combine with `BB_SOCKET_REUSEPORT=1` so the kernel load-balances accepts across workers. |
+| `BB_UVLOOP` | `0` | Install `uvloop`'s asyncio policy at startup.  Requires `pip install "blackbull[speed]"`; falls back to the standard loop with a warning when uvloop is missing.  Typical win is 1.5–2× throughput on HTTP/2 hot paths. |
+
+### 18.2  Connection limits and timeouts
+
+| Variable | Default | Controls |
+|---|---|---|
+| `BB_MAX_CONNECTIONS` | `500` | Maximum simultaneous TCP connections **per worker**.  New connections beyond the cap are rejected before TLS / handshake to keep memory and FD use bounded. |
+| `BB_REQUEST_TIMEOUT` | `0` (off) | Per-HTTP/2-stream deadline in seconds.  When the deadline elapses the stream is forcibly cancelled with `RST_STREAM CANCEL`.  Use a positive value (e.g. `30`) in production to evict stalled handlers from stream slots. |
+| `BB_HEADER_TIMEOUT` | `10.0` | Seconds an HTTP/1.1 client has to deliver the complete header block (request-line + headers + `CRLFCRLF`).  Primary slowloris defence — without it an attacker can hold a connection open indefinitely by dripping bytes.  Server answers `408 Request Timeout` and closes.  `0` disables. |
+| `BB_HEADER_MAX_LINE` | `8192` | Maximum bytes in a single HTTP/1.1 request-line or header line.  Matches Apache `LimitRequestLine` / nginx `large_client_header_buffers`.  Exceeded → `431 Request Header Fields Too Large`. |
+| `BB_HEADER_MAX_TOTAL` | `65536` | Maximum total bytes in the entire HTTP/1.1 header block.  Exceeded → `431`. |
+| `BB_STREAM_QUEUE_DEPTH` | `64` | `asyncio.Queue` depth for HTTP/2 per-stream request-body events.  Caps memory growth when an ASGI handler is slower than the client uploading data. |
+| `BB_WS_QUEUE_DEPTH` | `256` | `asyncio.Queue` depth for inbound WebSocket events per connection. |
+
+### 18.3  Socket tuning
+
+| Variable | Default | Controls |
+|---|---|---|
+| `BB_SOCKET_BACKLOG` | `1024` | `listen()` backlog depth.  Reduces silent connection drops during burst traffic.  Linux caps the effective value at `net.core.somaxconn`. |
+| `BB_SOCKET_REUSEPORT` | `1` | When supported by the OS (Linux, modern BSDs), bind each worker to its own listening socket so the kernel hashes incoming connections across workers — eliminates the thundering-herd accept pattern.  No effect with one worker. |
+| `BB_SOCKET_SNDBUF` | `262144` | `SO_SNDBUF` (bytes) on each accepted socket.  Linux doubles the requested value internally.  Larger helps throughput for responses ≥ 64 kB.  `0` keeps the kernel default. |
+| `BB_SOCKET_RCVBUF` | `262144` | `SO_RCVBUF` (bytes) on each accepted socket.  Same doubling rule.  `0` keeps the kernel default. |
+
+### 18.4  Logging
+
+| Variable | Default | Controls |
+|---|---|---|
+| `BB_ACCESS_LOG` | `1` | Emit one record on the `blackbull.access` logger per completed request.  Set to `0` in production when a separate log aggregator already consumes structured logs and the per-request formatting cost is undesirable. |
+| `BB_ASYNC_LOGGING` | `1` | Install a `QueueHandler` on the `blackbull` logger so `logger.debug/info` calls from the event loop are non-blocking.  See §14.3 for the rationale. |
+
+### 18.5  HTTP/2 internals
+
+| Variable | Default | Controls |
+|---|---|---|
+| `BB_H2_INITIAL_WINDOW_SIZE` | `1048576` (1 MiB) | Per-stream flow-control window advertised in the server's initial `SETTINGS` frame.  Larger lets peers send more data per stream before waiting for `WINDOW_UPDATE`. |
+| `BB_H2_CONNECTION_WINDOW_SIZE` | `4194304` (4 MiB) | Connection-level flow-control window advertised via an initial `WINDOW_UPDATE` on stream 0.  Must be ≥ 65535 (the RFC default); smaller values are silently ignored. |
+| `BB_H2_MAX_CONCURRENT_STREAMS` | `100` | `SETTINGS_MAX_CONCURRENT_STREAMS` (RFC 9113 §6.5.2 id `0x3`).  Streams beyond the cap receive `RST_STREAM REFUSED_STREAM` and are not dispatched. |
+| `BB_H2_ACTIVE_STREAMS` | `20` | Per-connection `asyncio.Semaphore` cap on stream handlers actually running concurrently, under multi-worker.  Prevents one high-mux connection from saturating a single event loop.  `0` disables (no cap beyond `BB_H2_MAX_CONCURRENT_STREAMS`). |
+| `BB_H2_ACTIVE_STREAMS_1W` | `20` | Same as above, but used when `BB_WORKERS=1`. |
+| `BB_FRAME_YIELD_EVERY` | `8` | Number of stream tasks spawned per connection before the frame loop inserts `await asyncio.sleep(0)`.  Caps the maximum synchronous run between yields under burst traffic; reduces p99 tail latency.  `0` disables the cooperative yield (legacy behaviour). |
+
+### 18.6  WebSocket
+
+| Variable | Default | Controls |
+|---|---|---|
+| `BB_WS_PERMESSAGE_DEFLATE` | `1` | Negotiate `permessage-deflate` (RFC 7692) on the inbound handshake when the peer offers it.  Matches modern browsers and major client libraries (Node `ws`, Python `websockets`, aiohttp). |
+| `BB_H2_ENABLE_WEBSOCKET` | `0` | Advertise `SETTINGS_ENABLE_CONNECT_PROTOCOL=1` (RFC 8441 §3) so peers may bootstrap WebSocket over HTTP/2 via Extended CONNECT.  Off by default — this path has fewer conformance tests than the HTTP/1.1 Upgrade path and few clients use it (Cloudflare's edge stack is the main consumer). |
+
+### 18.7  Compression
+
+| Variable | Default | Controls |
+|---|---|---|
+| `BB_COMPRESSION_MIN_SIZE` | `100` | Minimum body size in bytes below which the `Compression` middleware skips compression entirely. |
+| `BB_COMPRESSION_EXECUTOR_THRESHOLD` | `65536` (64 KiB) | Body size above which compression is offloaded to a thread-pool executor so the event loop stays responsive during the (CPU-bound) compress call.  `0` always compresses on the event loop. |
+
+### 18.8  Sessions
+
+| Variable | Default | Controls |
+|---|---|---|
+| `BB_SESSION_SECRET` | *(unset)* | HMAC secret used by the `Session` middleware (§4.4) to sign cookies.  Either pass `secret=` to the constructor or set this env var; if neither is set, construction raises (no insecure default).  Generate one with `python -c "import secrets; print(secrets.token_urlsafe(32))"`. |
+
+---
+
+## §19  Conformance
+
+BlackBull is exercised against three published RFC conformance suites in
+addition to the in-tree pytest tests under `tests/conformance/`.  None of the
+external suites runs in CI yet — they are local harnesses kept under
+`bench/conformance/`.  Re-run them after any protocol-level change and inspect
+the report before claiming RFC compliance.
+
+### 19.1  HTTP/1.1 — `tests/conformance/http1/`
+
+In-tree pytest suite, runs as part of `pytest`.  Covers RFC 9110 (HTTP
+Semantics) and RFC 9112 (HTTP/1.1 message framing), including:
+
+- request-line syntax, header folding, chunked transfer encoding;
+- HEAD / GET disagreement (RFC 9110 §9.3);
+- 1xx / 204 / 304 body suppression (RFC 9110 §15);
+- pipelining with-and-without bodies;
+- the `408` / `431` paths from the abuse defences in §10.4.
+
+```bash
+pytest tests/conformance/http1/ -q
+```
+
+### 19.2  HTTP/2 — `h2spec` (RFC 9113 + RFC 7541)
+
+[h2spec](https://github.com/summerwind/h2spec) is the de-facto external
+conformance suite for HTTP/2 and HPACK; ~146 numbered cases covering frame
+format, stream state, flow control, error codes, and header-block decoding.
+
+**Install** (one-time):
+
+```bash
+curl -L -sS https://github.com/summerwind/h2spec/releases/download/v2.6.0/h2spec_linux_amd64.tar.gz \
+    | tar -xz -C ~/.local/bin h2spec
+chmod +x ~/.local/bin/h2spec
+```
+
+**Run** against a locally-running TLS server on `:8443`:
+
+```bash
+# Start any BlackBull HTTPS server, then:
+bash bench/conformance/h2spec_run.sh                 # full suite (~2-5 min)
+bash bench/conformance/h2spec_run.sh hpack          # HPACK section only
+bash bench/conformance/h2spec_run.sh http2/6.5      # specific section
+```
+
+Output is teed to `bench/conformance/results/h2spec_<timestamp>.{txt,xml}`
+(both gitignored).  The XML is JUnit-format and machine-readable; the TXT
+ends with a `N tests, P passed, S skipped, F failed` line you can grep for
+the headline number.
+
+In-tree pytest tests under `tests/conformance/http2/` cover BlackBull-specific
+behaviour h2spec does not exercise (RFC 8441 Extended CONNECT, CONTINUATION
+boundary cases, server-response shapes), and run in normal `pytest` runs.
+
+### 19.3  WebSocket — Autobahn|Testsuite (RFC 6455 + RFC 7692)
+
+[Autobahn|Testsuite](https://github.com/crossbario/autobahn-testsuite) is the
+de-facto external conformance suite for WebSocket; ~500 numbered cases over
+framing, control frames, UTF-8 validation, close codes, fragmentation, and
+permessage-deflate.
+
+The harness drives the suite from a Docker image against a plaintext
+WebSocket echo server.  Docker is required.
+
+**Run:**
+
+```bash
+# Terminal 1 — start the echo server BlackBull provides for the test
+python bench/conformance/autobahn_app.py --port 9001
+
+# Terminal 2 — run Autobahn against it
+bash bench/conformance/autobahn_run.sh               # full fuzzingclient run
+CASES='1.*' bash bench/conformance/autobahn_run.sh   # subset (e.g. all of §1.x)
+```
+
+Reports land in `bench/conformance/results/autobahn_<timestamp>/` with an
+HTML index — open `index.html` in a browser for the case-by-case breakdown.
+
+### 19.4  Filing a non-conformance
+
+If a conformance run regresses (a case that previously passed starts failing),
+re-run the latest harness, attach the failing case's verbatim transcript to
+the report, and file under the appropriate RFC bucket in `README.md`'s Todo
+section:
+
+- HTTP/2 regressions → P1 / P2 with the §x.y.z citation from RFC 9113.
+- HTTP/1.1 regressions → P1 with the §x.y citation from RFC 9112 / 9110.
+- WebSocket regressions → P2 with the case ID from the Autobahn report.
+
+RFC 8441 (WebSocket over HTTP/2) does not yet have a dedicated external
+harness; the in-tree pytest tests under `tests/conformance/http2/test_rfc8441.py`
+are the current source of truth.  Bringing up a real h2spec-style harness for
+it is tracked in `README.md` Todo P2.
