@@ -12,12 +12,16 @@ import; this module re-exports it lazily through ``__getattr__``.
 """
 from collections import UserDict, OrderedDict
 from collections.abc import Iterable
+import dataclasses
 from dataclasses import dataclass, field
-from typing import Any, Callable, List, Tuple, Type, Optional
+import typing
+from typing import Any, Callable, List, Tuple, Type, Optional, Union, get_args, get_origin
 from functools import wraps, partial
 from http import HTTPStatus, HTTPMethod
+import json
 import re
 import inspect
+import types
 import uuid as _uuid
 from .utils import Scheme, do_nothing
 
@@ -250,13 +254,131 @@ def _is_simplified_handler(fn) -> bool:
     return not _ASGI_PARAMS.issubset(params)
 
 
+def _to_jsonable(value: Any) -> Any:
+    """Recursively turn dataclass instances into dicts so ``json.dumps`` works.
+
+    Lists and dicts of dataclasses are also walked.  Anything that's already
+    JSON-friendly is returned unchanged.
+    """
+    if dataclasses.is_dataclass(value) and not isinstance(value, type):
+        return dataclasses.asdict(value)
+    if isinstance(value, list):
+        return [_to_jsonable(v) for v in value]
+    if isinstance(value, tuple):
+        return [_to_jsonable(v) for v in value]
+    if isinstance(value, dict):
+        return {k: _to_jsonable(v) for k, v in value.items()}
+    return value
+
+
+def _is_body_dataclass_annotation(ann: Any) -> bool:
+    """``True`` when *ann* is a Python dataclass (the deserialization target)."""
+    return ann is not inspect.Parameter.empty and dataclasses.is_dataclass(ann)
+
+
+def _coerce_value(ann: Any, value: Any) -> Any:
+    """Recursively coerce JSON-parsed *value* to match the Python annotation *ann*.
+
+    Handles dataclasses (constructed from dicts), ``list[T]`` / ``tuple[T, ...]``
+    (each element coerced), ``T | None`` (None passes through, otherwise coerced
+    to the non-None branch), and primitives (passed through verbatim — JSON's
+    own types align with Python's).
+
+    Anything not recognised is passed through; the caller may rely on the
+    dataclass's ``__init__`` to validate further.
+    """
+    if value is None:
+        return None
+    if dataclasses.is_dataclass(ann):
+        if not isinstance(value, dict):
+            raise TypeError(
+                f"Expected JSON object for {ann.__name__!r}, got "
+                f"{type(value).__name__}")
+        return _instantiate_dataclass(ann, value)
+
+    origin = get_origin(ann)
+    args = get_args(ann)
+
+    # T | None / Optional[T]
+    if origin is Union or origin is types.UnionType:
+        non_none = [a for a in args if a is not type(None)]
+        if len(non_none) == 1:
+            return _coerce_value(non_none[0], value)
+        # Multiple non-None branches: try each in order, keep the first
+        # that constructs cleanly.  Dataclass branches are tried first so
+        # that ``Cat | Dog`` doesn't get short-circuited by a primitive.
+        ordered = sorted(non_none, key=lambda a: 0 if dataclasses.is_dataclass(a) else 1)
+        for branch in ordered:
+            try:
+                return _coerce_value(branch, value)
+            except (TypeError, ValueError):
+                continue
+        raise TypeError(
+            f"Value {value!r} matches no branch of union {ann!r}")
+
+    if origin is list:
+        item_t = args[0] if args else None
+        if not isinstance(value, list):
+            raise TypeError(
+                f"Expected JSON array, got {type(value).__name__}")
+        return [_coerce_value(item_t, v) if item_t is not None else v for v in value]
+
+    if origin is tuple:
+        item_t = args[0] if args else None
+        if not isinstance(value, list):
+            raise TypeError(
+                f"Expected JSON array for tuple, got {type(value).__name__}")
+        return tuple(_coerce_value(item_t, v) if item_t is not None else v for v in value)
+
+    if origin is dict:
+        v_t = args[1] if len(args) == 2 else None
+        if not isinstance(value, dict):
+            raise TypeError(
+                f"Expected JSON object, got {type(value).__name__}")
+        return {k: (_coerce_value(v_t, v) if v_t is not None else v)
+                for k, v in value.items()}
+
+    return value
+
+
+def _instantiate_dataclass(cls: Any, data: dict) -> Any:
+    """Construct *cls* (a dataclass) from a JSON-parsed ``dict``.
+
+    Resolves forward references via ``typing.get_type_hints`` and recurses
+    into dataclass / generic-container fields via :func:`_coerce_value`.
+    Unknown keys raise ``TypeError`` rather than being silently dropped —
+    if a client sends ``{"titel": ...}`` we want them to know.
+    """
+    try:
+        hints = typing.get_type_hints(cls)
+    except Exception:
+        hints = {}
+
+    field_names = {f.name for f in dataclasses.fields(cls)}
+    unknown = set(data) - field_names
+    if unknown:
+        raise TypeError(
+            f"Unknown field(s) for {cls.__name__}: {sorted(unknown)}")
+
+    kwargs: dict = {}
+    for f in dataclasses.fields(cls):
+        if f.name not in data:
+            continue
+        annotation = hints.get(f.name, f.type)
+        kwargs[f.name] = _coerce_value(annotation, data[f.name])
+    return cls(**kwargs)
+
+
 def _adapt_handler(fn, path: str):
     """Wrap a simplified handler in an ASGI (scope, receive, send) coroutine.
 
     Parameter resolution:
     - Name matches a {param} in the path pattern → scope['path_params'][name],
       coerced to the annotated type if one is given.
-    - 'body' → await read_body(receive)
+    - Annotation is a Python ``@dataclass`` → request body parsed as JSON and
+      instantiated; nested dataclasses, ``list[T]``, and ``T | None`` are
+      handled recursively.  ``body: SomeDataclass`` also works.
+    - 'body' (un-annotated, or annotated as ``bytes``) → await read_body(receive)
     - 'scope' → the raw scope dict
     - Anything else → TypeError raised at registration time (fail fast).
 
@@ -271,12 +393,43 @@ def _adapt_handler(fn, path: str):
     params = inspect.signature(fn).parameters
     annotations = {n: p.annotation for n, p in params.items()}
 
+    # Resolve PEP 563 / string-form annotations once, here, so the wrapper
+    # below can rely on real types in its isinstance / get_origin calls.
+    try:
+        resolved_hints = typing.get_type_hints(fn)
+        for n in annotations:
+            if n in resolved_hints:
+                annotations[n] = resolved_hints[n]
+    except Exception:
+        pass
+
+    # A handler may have **at most one** body parameter — either a literal
+    # name ``body`` or a dataclass-typed parameter (or both, if they're the
+    # same parameter).  Trying to consume the body twice would hang the
+    # second ``read_body`` call indefinitely.
+    body_param_count = sum(
+        1 for n, p in params.items()
+        if n not in path_param_names and n != 'scope' and (
+            n == 'body' or _is_body_dataclass_annotation(annotations.get(n))
+        )
+    )
+
     for name in params:
         if name in path_param_names or name in ('body', 'scope'):
             continue
+        if _is_body_dataclass_annotation(annotations.get(name)):
+            continue
         raise TypeError(
             f"Simplified handler {fn.__name__!r}: cannot resolve parameter {name!r}. "
-            f"Expected path params {sorted(path_param_names)!r}, 'body', or 'scope'."
+            f"Expected path params {sorted(path_param_names)!r}, 'body', "
+            f"'scope', or a parameter annotated with a dataclass."
+        )
+
+    if body_param_count > 1:
+        raise TypeError(
+            f"Simplified handler {fn.__name__!r}: more than one parameter would "
+            f"consume the request body.  Pick one of 'body' or a dataclass-typed "
+            f"parameter, not both."
         )
 
     is_async = inspect.iscoroutinefunction(fn)
@@ -285,13 +438,20 @@ def _adapt_handler(fn, path: str):
     async def _wrapper(scope, receive, send):
         kwargs: dict = {}
         for name in params:
+            ann = annotations.get(name, inspect.Parameter.empty)
             if name == 'scope':
                 kwargs[name] = scope
             elif name == 'body':
-                kwargs[name] = await _read_body(receive)
+                raw = await _read_body(receive)
+                if _is_body_dataclass_annotation(ann):
+                    kwargs[name] = _instantiate_dataclass(ann, json.loads(raw))
+                else:
+                    kwargs[name] = raw
+            elif _is_body_dataclass_annotation(ann) and name not in path_param_names:
+                raw = await _read_body(receive)
+                kwargs[name] = _instantiate_dataclass(ann, json.loads(raw))
             else:
                 raw = scope.get('path_params', {}).get(name, '')
-                ann = annotations.get(name, inspect.Parameter.empty)
                 if (ann is not inspect.Parameter.empty and isinstance(ann, type)
                         and not isinstance(raw, ann)):
                     try:
@@ -313,8 +473,11 @@ def _adapt_handler(fn, path: str):
             await send(_Response(result))
         elif isinstance(result, str):
             await send(_Response(result.encode()))
+        elif dataclasses.is_dataclass(result) and not isinstance(result, type):
+            # Dataclass instance → recurse so nested dataclasses serialise too.
+            await send(_JSONResponse(_to_jsonable(result)))
         elif isinstance(result, (dict, list)):
-            await send(_JSONResponse(result))
+            await send(_JSONResponse(_to_jsonable(result)))
         else:
             raise TypeError(
                 f"Simplified handler {fn.__name__!r} returned unsupported type "

@@ -41,6 +41,7 @@ import json
 import logging
 import pathlib
 import secrets
+from dataclasses import dataclass
 from http import HTTPMethod, HTTPStatus
 
 import db
@@ -50,6 +51,30 @@ from blackbull import (
     Response,
     read_body,
 )
+
+
+# ---------------------------------------------------------------------------
+# API models — drive both runtime deserialization and the OpenAPI schema
+# ---------------------------------------------------------------------------
+
+@dataclass
+class Credentials:
+    """Login / registration payload."""
+    username: str
+    password: str
+
+
+@dataclass
+class TaskCreate:
+    """Request body for POST /tasks."""
+    title: str
+
+
+@dataclass
+class AuthSuccess:
+    """Response body for /login and /register."""
+    ok: bool
+    token: str
 
 _TEMPLATES = pathlib.Path(__file__).parent / 'templates'
 
@@ -195,26 +220,28 @@ async def handle_register(scope, receive, send):  # noqa: ARG001
     await send(JSONResponse({'ok': True, 'token': token}))
 
 
-@app.route(methods=[HTTPMethod.POST], path='/login',
-           middlewares=[json_body_mw])
-async def handle_login(scope, receive, send):  # noqa: ARG001
-    data = scope['json']
-    username = str(data.get('username', '')).strip()
-    password = str(data.get('password', ''))
+@app.route(methods=[HTTPMethod.POST], path='/login')
+async def handle_login(body: Credentials) -> AuthSuccess:
+    """Authenticate a user and issue a session token.
+
+    Body and response are both declared via dataclasses — the framework reads
+    JSON into ``Credentials`` and serialises ``AuthSuccess`` back, and both
+    appear as full schemas in the OpenAPI spec.
+    """
+    username = body.username.strip()
+    password = body.password
 
     if not username or not password:
-        await send(JSONResponse({'error': 'username and password required'},
-                                status=HTTPStatus.BAD_REQUEST))
-        return
+        return JSONResponse({'error': 'username and password required'},
+                            status=HTTPStatus.BAD_REQUEST)
 
     if not await db.verify_user(username, password):
-        await send(JSONResponse({'error': 'Invalid credentials'},
-                                status=HTTPStatus.UNAUTHORIZED))
-        return
+        return JSONResponse({'error': 'Invalid credentials'},
+                            status=HTTPStatus.UNAUTHORIZED)
 
     token = secrets.token_urlsafe(32)
     SESSIONS[token] = username
-    await send(JSONResponse({'ok': True, 'token': token}))
+    return AuthSuccess(ok=True, token=token)
 
 
 # /app — always public; the page JS checks auth via GET /tasks on load
@@ -232,16 +259,15 @@ async def handle_get_tasks(scope, receive, send):  # noqa: ARG001
     await send(JSONResponse(tasks))
 
 
-@app.route(methods=[HTTPMethod.POST], path='/tasks',
-           middlewares=[json_body_mw])
-async def handle_create_task(scope, receive, send):
-    title = str(scope['json'].get('title', '')).strip()
+@app.route(methods=[HTTPMethod.POST], path='/tasks')
+async def handle_create_task(scope, body: TaskCreate):
+    """Create a new task for the authenticated user."""
+    title = body.title.strip()
     if not title:
-        await send(JSONResponse({'error': 'title is required'},
-                                status=HTTPStatus.BAD_REQUEST))
-        return
+        return JSONResponse({'error': 'title is required'},
+                            status=HTTPStatus.BAD_REQUEST)
     task = await db.create_task(scope['user'], title)
-    await send(JSONResponse(task, status=HTTPStatus.CREATED))
+    return JSONResponse(task, status=HTTPStatus.CREATED)
 
 
 @app.route(methods=[HTTPMethod.PUT], path='/tasks/{task_id}',
@@ -286,6 +312,22 @@ async def handle_delete_task(scope, receive, send):
 async def handle_logout(scope, receive, send):
     SESSIONS.pop(scope.get('token', ''), None)
     await send(JSONResponse({'ok': True}))
+
+
+# ---------------------------------------------------------------------------
+# OpenAPI / Swagger UI — must be wired after every other route is registered.
+# Open http://localhost:8000/docs to browse the spec interactively, or
+# http://localhost:8000/openapi.json for the raw JSON.
+# ---------------------------------------------------------------------------
+
+app.enable_openapi(
+    title='Simple Task Manager',
+    version='1.0.0',
+    description='Reference REST + HTML demo for BlackBull.  '
+                'POST /login uses the dataclass-body shape (real schemas '
+                'in the spec); /register and /tasks use the middleware '
+                'shape (opaque object schemas) — compare them at /docs.',
+)
 
 # ---------------------------------------------------------------------------
 # Entry point

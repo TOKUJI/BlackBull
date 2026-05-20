@@ -1,3 +1,4 @@
+import json
 import re
 from logging import getLogger
 from http import HTTPStatus, HTTPMethod
@@ -817,6 +818,207 @@ class TestSimplifiedHandlerRegistration:
         router.route(path='/full', methods=[HTTPMethod.GET])(full)
         fn = router[('/full', HTTPMethod.GET, Scheme.http)]
         assert fn is not None
+
+
+# ---------------------------------------------------------------------------
+# Simplified handler — dataclass body deserialization (v3)
+# ---------------------------------------------------------------------------
+
+from dataclasses import dataclass, field as _dc_field
+
+
+@dataclass
+class _Item:
+    name: str
+    qty: int = 1
+
+
+@dataclass
+class _Address:
+    street: str
+    zip: str
+
+
+@dataclass
+class _Person:
+    name: str
+    home: _Address
+    tags: list[str] = _dc_field(default_factory=list)
+
+
+class TestDataclassBodyDeserialization:
+    """When a handler parameter is annotated with a dataclass, the router
+    reads the request body, parses it as JSON, and constructs an instance.
+    """
+
+    def _receive_with(self, body: bytes):
+        """Build an ASGI ``receive`` coroutine that delivers ``body`` once,
+        then a disconnect.
+        """
+        events = iter([
+            {'type': 'http.request', 'body': body, 'more_body': False},
+            {'type': 'http.disconnect'},
+        ])
+        async def receive():
+            return next(events)
+        return receive
+
+    @pytest.mark.asyncio
+    async def test_simple_dataclass_body(self):
+        captured = {}
+        async def fn(body: _Item):
+            captured['body'] = body
+        wrapper = _adapt_handler(fn, '/items')
+        await wrapper({}, self._receive_with(b'{"name":"widget","qty":3}'), AsyncMock())
+        assert captured['body'] == _Item(name='widget', qty=3)
+
+    @pytest.mark.asyncio
+    async def test_parameter_name_other_than_body(self):
+        """The dataclass annotation — not the parameter name — drives
+        body detection.  ``item: _Item`` works as well as ``body: _Item``."""
+        captured = {}
+        async def fn(item: _Item):
+            captured['item'] = item
+        wrapper = _adapt_handler(fn, '/items')
+        await wrapper({}, self._receive_with(b'{"name":"x","qty":7}'), AsyncMock())
+        assert captured['item'] == _Item(name='x', qty=7)
+
+    @pytest.mark.asyncio
+    async def test_missing_optional_field_uses_default(self):
+        captured = {}
+        async def fn(body: _Item):
+            captured['body'] = body
+        wrapper = _adapt_handler(fn, '/items')
+        await wrapper({}, self._receive_with(b'{"name":"only-name"}'), AsyncMock())
+        assert captured['body'] == _Item(name='only-name', qty=1)
+
+    @pytest.mark.asyncio
+    async def test_missing_required_field_raises(self):
+        async def fn(body: _Item): pass
+        wrapper = _adapt_handler(fn, '/items')
+        with pytest.raises(TypeError):
+            await wrapper({}, self._receive_with(b'{"qty":3}'), AsyncMock())
+
+    @pytest.mark.asyncio
+    async def test_unknown_field_raises(self):
+        async def fn(body: _Item): pass
+        wrapper = _adapt_handler(fn, '/items')
+        with pytest.raises(TypeError, match='Unknown field'):
+            await wrapper({}, self._receive_with(b'{"name":"x","extra":1}'), AsyncMock())
+
+    @pytest.mark.asyncio
+    async def test_nested_dataclass(self):
+        captured = {}
+        async def fn(body: _Person):
+            captured['body'] = body
+        wrapper = _adapt_handler(fn, '/people')
+        await wrapper({}, self._receive_with(
+            b'{"name":"alice","home":{"street":"1 Main","zip":"00000"},"tags":["a","b"]}'
+        ), AsyncMock())
+        assert captured['body'] == _Person(
+            name='alice',
+            home=_Address(street='1 Main', zip='00000'),
+            tags=['a', 'b'],
+        )
+
+    @pytest.mark.asyncio
+    async def test_list_of_dataclass_field(self):
+        @dataclass
+        class Cart:
+            items: list[_Item]
+
+        captured = {}
+        async def fn(body: Cart):
+            captured['body'] = body
+        wrapper = _adapt_handler(fn, '/cart')
+        await wrapper({}, self._receive_with(
+            b'{"items":[{"name":"a","qty":1},{"name":"b","qty":2}]}'
+        ), AsyncMock())
+        assert captured['body'] == Cart(items=[_Item('a', 1), _Item('b', 2)])
+
+    @pytest.mark.asyncio
+    async def test_optional_field(self):
+        @dataclass
+        class Maybe:
+            value: int | None = None
+
+        captured = {}
+        async def fn(body: Maybe):
+            captured['body'] = body
+        wrapper = _adapt_handler(fn, '/maybe')
+        await wrapper({}, self._receive_with(b'{"value":null}'), AsyncMock())
+        assert captured['body'] == Maybe(value=None)
+
+        await wrapper({}, self._receive_with(b'{"value":42}'), AsyncMock())
+        assert captured['body'] == Maybe(value=42)
+
+    @pytest.mark.asyncio
+    async def test_two_body_params_rejected_at_registration(self):
+        async def fn(a: _Item, b: _Item): pass
+        with pytest.raises(TypeError, match='more than one parameter'):
+            _adapt_handler(fn, '/x')
+
+    @pytest.mark.asyncio
+    async def test_invalid_json_raises(self):
+        async def fn(body: _Item): pass
+        wrapper = _adapt_handler(fn, '/items')
+        with pytest.raises(json.JSONDecodeError):
+            await wrapper({}, self._receive_with(b'not json'), AsyncMock())
+
+    @pytest.mark.asyncio
+    async def test_bytes_body_still_works(self):
+        """The pre-v3 behaviour — ``body: bytes`` — keeps delivering raw bytes."""
+        captured = {}
+        async def fn(body: bytes):
+            captured['body'] = body
+        wrapper = _adapt_handler(fn, '/raw')
+        await wrapper({}, self._receive_with(b'{"name":"x"}'), AsyncMock())
+        assert captured['body'] == b'{"name":"x"}'
+
+    @pytest.mark.asyncio
+    async def test_handler_returns_dataclass_serialized_as_json(self):
+        sent = []
+        async def fake_send(event):
+            sent.append(event)
+
+        async def fn() -> _Item:
+            return _Item(name='widget', qty=5)
+        wrapper = _adapt_handler(fn, '/')
+        await wrapper({}, AsyncMock(), fake_send)
+        # The simplified-handler adapter forwards the JSONResponse object to
+        # send() — the next layer (server / framework) is what splits it into
+        # ASGI events.  Just check the Response payload.
+        assert len(sent) == 1
+        resp = sent[0]
+        from blackbull import JSONResponse
+        assert isinstance(resp, JSONResponse)
+        assert resp.body == b'{"name": "widget", "qty": 5}'
+
+    @pytest.mark.asyncio
+    async def test_handler_returns_list_of_dataclasses(self):
+        sent = []
+        async def fake_send(event):
+            sent.append(event)
+
+        async def fn() -> list[_Item]:
+            return [_Item('a', 1), _Item('b', 2)]
+        wrapper = _adapt_handler(fn, '/')
+        await wrapper({}, AsyncMock(), fake_send)
+        assert json.loads(sent[0].body) == [
+            {'name': 'a', 'qty': 1},
+            {'name': 'b', 'qty': 2},
+        ]
+
+    @pytest.mark.asyncio
+    async def test_path_param_takes_precedence_over_body(self):
+        """A parameter whose name matches a {placeholder} in the path is a
+        path param, even if it happens to be annotated as a dataclass."""
+        captured = {}
+        async def fn(item: int):
+            captured['item'] = item
+        wrapper = _adapt_handler(fn, '/items/{item}')
+        await wrapper({'path_params': {'item': '7'}}, AsyncMock(), AsyncMock())
+        assert captured['item'] == 7
 
 
 # ---------------------------------------------------------------------------

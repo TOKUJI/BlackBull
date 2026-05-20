@@ -3145,17 +3145,66 @@ TypeVars, Pydantic models, etc.) falls through to `{}` — OpenAPI 3.1 treats
 that as "no constraint", which is the right default rather than a wrong
 guess.
 
-> **Note on body delivery**: this v2 work is *documentation-only*.  The
-> router still passes the raw JSON body to your handler via
-> `body: bytes` / `read_body(receive)`; the dataclass annotation is a hint
-> for the spec generator.  A future v3 may instantiate the dataclass for
-> you.
+### 20.4  Body deserialization
 
-### 20.4  What is still on the v3 list
+When a simplified handler's parameter is annotated with a dataclass, the
+router reads the request body, parses it as JSON, and constructs an
+instance for you.  No `read_body` / `json.loads` boilerplate in the
+handler:
 
-* **Body deserialization.**  Today the dataclass annotation is for the
-  spec only — your handler must still parse JSON itself.  v3 will wire
-  the annotation through to actual instantiation.
+```python
+@dataclass
+class CreateTask:
+    title: str
+    completed: bool = False
+    tags: list[str] = field(default_factory=list)
+
+@app.route(methods=HTTPMethod.POST, path='/tasks')
+async def create_task(body: CreateTask) -> Task:
+    new = Task(id=next_id(), title=body.title, completed=body.completed)
+    ...
+    return new
+```
+
+The annotation drives detection — the parameter name does not have to be
+`body`.  ``async def create_task(item: CreateTask): ...`` works the same
+way.  A handler may have at most one body parameter (a literal
+``body: bytes`` parameter and a dataclass-typed parameter both consume the
+request body); the router rejects two-body signatures at registration.
+
+Coercion rules mirror the schema synthesis in §20.3:
+
+| JSON shape | Constructs |
+|---|---|
+| `{"field": ...}` matching a `@dataclass` | the dataclass with that field populated |
+| nested `{...}` inside a field typed as another `@dataclass` | recursive construction |
+| array inside a field typed `list[T]` / `tuple[T, ...]` | each element coerced to ``T`` |
+| `null` inside a field typed `T \| None` | ``None`` |
+| primitive into `T \| U` | first union branch that constructs cleanly (dataclass branches tried first) |
+
+Unknown JSON keys raise ``TypeError`` rather than being silently dropped —
+a client typo like ``{"titel": ...}`` should surface, not vanish.
+
+Handlers may also **return** a dataclass (or a list of dataclasses).  The
+adapter serializes it via ``dataclasses.asdict`` recursively, so the same
+``Task`` model works on both ends of the wire.
+
+**Errors** propagate to the framework's error router:
+
+* Malformed JSON → ``json.JSONDecodeError``
+* Missing required field / unknown field / type mismatch → ``TypeError``
+
+Register handlers via ``@app.on_error(json.JSONDecodeError)`` and
+``@app.on_error(TypeError)`` to convert them to 400 / 422 responses if
+the default 500 isn't what you want.
+
+> **No external model library required.**  This works with the standard
+> library's `dataclasses`.  Pydantic, attrs, msgspec, etc. are not
+> supported in v3 — if you want one of those, parse the body yourself
+> from a ``body: bytes`` parameter.
+
+### 20.5  What is still on the future list
+
 * **Security schemes.**  Auth is application-defined here, so no global
   `securitySchemes` are emitted.  Add them post-hoc by editing the spec
   returned by `generate_spec()` and serving the result yourself.
