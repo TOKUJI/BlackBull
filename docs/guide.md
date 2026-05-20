@@ -3007,3 +3007,75 @@ RFC 8441 (WebSocket over HTTP/2) does not yet have a dedicated external
 harness; the in-tree pytest tests under `tests/conformance/http2/test_rfc8441.py`
 are the current source of truth.  Bringing up a real h2spec-style harness for
 it is tracked in `README.md` Todo P2.
+
+---
+
+## §20  OpenAPI and Swagger UI
+
+A single call publishes a machine-readable spec and an interactive UI:
+
+```python
+from blackbull import BlackBull
+
+app = BlackBull()
+
+@app.route(path='/items/{item_id:int}')
+async def get_item(item_id: int):
+    """Get one item.
+
+    Returns the item with the given numeric id.
+    """
+    return {'id': item_id}
+
+app.enable_openapi(title='Items API', version='1.0.0')
+```
+
+Browse to:
+
+* `http://localhost:8000/openapi.json` — OpenAPI 3.1 JSON
+* `http://localhost:8000/docs` — Swagger UI (loads from CDN)
+
+Both routes are GET-only and self-documenting: the spec describes every
+HTTP route the app exposes but *excludes itself* and the docs page.
+
+### 20.1  What ends up in the spec
+
+| Source | Mapped to |
+|---|---|
+| Route template (`/items/{item_id:int}`) | OpenAPI path (`/items/{item_id}`) with a `parameters` entry |
+| Path-param converter (`int` / `str` / `uuid` / `path`) | Path-parameter `schema` (see §3.5) |
+| HTTP methods on the route | Operation objects under the path |
+| Handler docstring — first line | Operation `summary` |
+| Handler docstring — rest | Operation `description` |
+| HTTP-only (no `scheme=Scheme.websocket`) | Included.  WebSocket routes are skipped. |
+| `POST` / `PUT` / `PATCH` route | A placeholder `requestBody: {type: object}` — see §20.3. |
+
+### 20.2  `app.enable_openapi(...)` parameters
+
+| Parameter | Default | Notes |
+|---|---|---|
+| `title` | `'BlackBull API'` | Spec `info.title` and the Swagger UI page title. |
+| `version` | `'0.1.0'` | Spec `info.version`. |
+| `description` | `None` | Spec `info.description` (Markdown — Swagger UI renders it). |
+| `spec_path` | `'/openapi.json'` | Route that returns the JSON.  Regenerated on every request. |
+| `docs_path` | `'/docs'` | Route that returns the Swagger UI host page.  Pass `None` to skip the UI and serve only the JSON. |
+
+Call `enable_openapi()` once, **after** the rest of your routes are
+registered.  Routes added later will not appear in the spec returned by
+already-issued requests (the spec is rebuilt on each request, but new
+registrations after the validator has frozen the router will raise).
+
+### 20.3  What v1 does not (yet) do
+
+* **Request-body schemas.**  Handlers do not yet declare body models.
+  Until a model layer (Pydantic or dataclass-with-schema) is added, write
+  endpoints emit `{"type": "object"}` — any JSON document validates.  See
+  the Todo in `README.md` P4 for the v2 follow-up.
+* **Security schemes.**  Auth is application-defined here, so no global
+  `securitySchemes` are emitted.  Add them post-hoc by editing the spec
+  returned by `generate_spec()` and serving the result yourself.
+* **Tags / grouping.**  Operations are flat under their path; tag-based
+  grouping in Swagger UI requires manual annotation today.
+* **Response schemas.**  Every operation emits a stub `200: OK` response.
+  The simplified-handler return form gives us enough static information
+  to do better here — a v2 enhancement.

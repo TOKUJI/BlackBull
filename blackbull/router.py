@@ -188,6 +188,8 @@ class _RouteInfo:
     template: str
     handler: Callable
     param_specs: dict[str, str]    # {param_name: converter_spec}
+    methods: tuple = ()            # tuple of HTTPMethod values
+    scheme: Any = None             # Scheme | tuple[Scheme, ...] | _AnyScheme | None
     name: str | None = None
 
 
@@ -611,7 +613,8 @@ class Router(UserDict, BaseRouter):
             logger.debug((path, methods, scheme))
             self[(path, methods, scheme)] = wrapper
 
-            self._record_route(path, original, name)
+            self._record_route(path, original, name,
+                               methods=_to_tuple(methods), scheme=scheme)
             return wrapper
 
         return register
@@ -644,10 +647,12 @@ class Router(UserDict, BaseRouter):
             return await _ic(scope, receive, send)
 
         self[(path, methods, scheme)] = _chain_wrapper
-        self._record_route(path, original_handler or fns[-1], name)
+        self._record_route(path, original_handler or fns[-1], name,
+                           methods=_to_tuple(methods), scheme=scheme)
 
-    def _record_route(self, path: str, handler: Callable, name: str | None) -> None:
-        """Store route metadata for validation and url_path_for."""
+    def _record_route(self, path: str, handler: Callable, name: str | None,
+                      methods: tuple = (), scheme: Any = None) -> None:
+        """Store route metadata for validation, url_path_for, and OpenAPI."""
         param_specs = {m.group(1): (m.group(2) or 'str')
                        for m in self._param_pattern.finditer(path)}
         if name is not None:
@@ -658,6 +663,8 @@ class Router(UserDict, BaseRouter):
             template=path,
             handler=handler,
             param_specs=param_specs,
+            methods=methods,
+            scheme=scheme,
             name=name,
         ))
 

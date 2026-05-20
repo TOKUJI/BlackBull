@@ -479,6 +479,48 @@ class BlackBull:
         """Return the path for the named route with *params* substituted."""
         return self._router.url_path_for(name, **params)
 
+    def enable_openapi(self, *,
+                       title: str = 'BlackBull API',
+                       version: str = '0.1.0',
+                       description: str | None = None,
+                       spec_path: str = '/openapi.json',
+                       docs_path: str | None = '/docs') -> None:
+        """Auto-publish an OpenAPI 3.1 spec and Swagger UI for the app.
+
+        Registers two routes:
+
+        * ``spec_path`` (default ``/openapi.json``) returns the spec as JSON.
+          The spec is regenerated on every request so new routes added after
+          this call are reflected.
+        * ``docs_path`` (default ``/docs``) returns an HTML page hosting
+          Swagger UI pointed at ``spec_path``.  Pass ``docs_path=None`` to
+          skip the UI route and serve only the JSON spec.
+
+        Call once, after the rest of the app's routes have been registered.
+        """
+        from .openapi import generate_spec, swagger_ui_html  # noqa: PLC0415
+        from .response import Response, JSONResponse  # noqa: PLC0415
+
+        async def _openapi_spec(scope, receive, send):  # noqa: ARG001
+            spec = generate_spec(self, title=title, version=version,
+                                 description=description)
+            await send(JSONResponse(spec))
+        # Mark before registration so the original handler stored in
+        # ``Router._route_info`` carries the flag (functools.wraps does not
+        # copy arbitrary attributes onto the wrapper, so setting it post-hoc
+        # on the decorated form would not propagate back to the original).
+        _openapi_spec.__blackbull_openapi_internal__ = True
+        self.route(methods=HTTPMethod.GET, path=spec_path)(_openapi_spec)
+
+        if docs_path is not None:
+            ui_title = f'{title} — Swagger UI'
+
+            async def _swagger_ui(scope, receive, send):  # noqa: ARG001
+                html = swagger_ui_html(spec_path, title=ui_title)
+                await send(Response(html))
+            _swagger_ui.__blackbull_openapi_internal__ = True
+            self.route(methods=HTTPMethod.GET, path=docs_path)(_swagger_ui)
+
     async def run(self, certfile=None, keyfile=None, port=0, debug=False,
                   workers: int = 1):
         """Run the server.
