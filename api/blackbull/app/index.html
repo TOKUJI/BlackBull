@@ -597,6 +597,28 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.app.BlackBull.run" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        run
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.app.BlackBull.serve" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        serve
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.app.BlackBull.static" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1160,6 +1182,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../middleware/cache/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    cache
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../middleware/compression/" class="md-nav__link">
         
   
@@ -1224,6 +1274,34 @@
     
   
     proxy
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../middleware/session/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    session
   
 
     
@@ -1419,6 +1497,34 @@
     
   
     frame
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../protocol/frame_types/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    frame_types
   
 
     
@@ -1830,6 +1936,90 @@
   
   
     <li class="md-nav__item">
+      <a href="../server/http2_messages/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    http2_messages
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../server/http2_ws/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    http2_ws
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../server/multiworker/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    multiworker
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../server/parser/" class="md-nav__link">
         
   
@@ -1838,6 +2028,34 @@
     
   
     parser
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../server/permessage_deflate/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    permessage_deflate
   
 
     
@@ -2006,6 +2224,62 @@
     
   
     websocket_actor
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../server/worker/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    worker
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../server/ws_codec/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ws_codec
   
 
     
@@ -2191,6 +2465,28 @@
     <span class="md-ellipsis">
       
         route
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.app.BlackBull.run" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        run
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.app.BlackBull.serve" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        serve
       
     </span>
   </a>
@@ -2796,6 +3092,58 @@ async def open_db():
     <div class="doc doc-contents ">
 
         <p>Register a route handler, optionally wrapping it in middlewares.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.app.BlackBull.run" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">run</span><span class="p">(</span><span class="n">certfile</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">keyfile</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">port</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">debug</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">workers</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-async"><code>async</code></small>
+  </span>
+
+</h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Run the server.</p>
+<p>For <code>workers=1</code> (default) this runs in the current asyncio event loop.
+For <code>workers &gt; 1</code> the multi-worker master is run in a thread so the
+async caller does not block the loop during the synchronous monitoring
+phase; use :meth:<code>serve</code> if you want a synchronous entry point.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.app.BlackBull.serve" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">serve</span><span class="p">(</span><span class="n">certfile</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">keyfile</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">port</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">workers</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">max_connections</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">stream_queue_depth</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">ws_queue_depth</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
+
+</h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Synchronous entry point — works for both single and multi-worker.</p>
+<p>For <code>workers=1</code> this calls <code>asyncio.run(self.run(...))</code>.
+For <code>workers &gt; 1</code> the master process binds sockets, forks <em>workers</em>
+child processes, and blocks until SIGTERM or SIGINT is received.</p>
+<p>All integer parameters default to their corresponding <code>BB_*</code>
+environment variables (see :mod:<code>blackbull.env</code>).</p>
+<p>Example::</p>
+<pre><code>app.serve(port=8443, certfile='cert.pem', keyfile='key.pem', workers=4)
+</code></pre>
 
 
     </div>

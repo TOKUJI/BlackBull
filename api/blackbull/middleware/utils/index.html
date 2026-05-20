@@ -960,6 +960,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../cache/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    cache
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../compression/" class="md-nav__link">
         
   
@@ -1024,6 +1052,34 @@
     
   
     proxy
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../session/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    session
   
 
     
@@ -1144,10 +1200,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#blackbull.middleware.utils.middleware" class="md-nav__link">
+  <a href="#blackbull.middleware.utils.as_middleware" class="md-nav__link">
     <span class="md-ellipsis">
       
-        middleware
+        as_middleware
       
     </span>
   </a>
@@ -1294,6 +1350,34 @@
     
   
     frame
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../protocol/frame_types/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    frame_types
   
 
     
@@ -1705,6 +1789,90 @@
   
   
     <li class="md-nav__item">
+      <a href="../../server/http2_messages/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    http2_messages
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../server/http2_ws/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    http2_ws
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../server/multiworker/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    multiworker
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../server/parser/" class="md-nav__link">
         
   
@@ -1713,6 +1881,34 @@
     
   
     parser
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../server/permessage_deflate/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    permessage_deflate
   
 
     
@@ -1894,6 +2090,62 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../server/worker/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    worker
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../server/ws_codec/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ws_codec
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -1984,10 +2236,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#blackbull.middleware.utils.middleware" class="md-nav__link">
+  <a href="#blackbull.middleware.utils.as_middleware" class="md-nav__link">
     <span class="md-ellipsis">
       
-        middleware
+        as_middleware
       
     </span>
   </a>
@@ -2036,11 +2288,10 @@
 
         <p>Utilities for middleware authors.</p>
 <p>Public API:
-- <code>middleware</code>: decorator that normalises the <code>send</code> callable so inner send
-  wrappers defined by the middleware always receive plain ASGI event dicts,
-  never <code>Response</code> objects.
-- <code>_normalize_send</code>: the underlying normaliser; available as an escape hatch
-  for class-based middleware that cannot use the decorator directly.</p>
+- <code>as_middleware</code>: decorator that normalises the <code>send</code> callable so inner
+  send wrappers defined by the middleware always receive plain ASGI event
+  dicts, never <code>Response</code> objects.  Works on both async middleware functions
+  and middleware classes (decorates <code>__call__</code>).</p>
 
 
 
@@ -2065,33 +2316,41 @@
 <div class="doc doc-object doc-function">
 
 
-<h3 id="blackbull.middleware.utils.middleware" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">middleware</span><span class="p">(</span><span class="n">fn</span><span class="p">)</span></code>
+<h3 id="blackbull.middleware.utils.as_middleware" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">as_middleware</span><span class="p">(</span><span class="n">target</span><span class="p">)</span></code>
 
 </h3>
 
 
     <div class="doc doc-contents ">
 
-        <p>Decorator for middleware functions.</p>
+        <p>Decorator that marks an async function <strong>or</strong> class as BlackBull middleware.</p>
 <p>Wraps <code>call_next</code> so any <code>send</code> callable the middleware passes to it is
-automatically normalised via <code>_normalize_send</code>.  The middleware's own
-inner <code>send</code> wrapper therefore only receives plain ASGI event dicts and
-does not need <code>isinstance</code> guards for <code>Response</code> objects.</p>
-<p>Power users who need to handle raw <code>send</code> arguments (e.g. because their
-middleware is used in a context where no simplified handlers are registered)
-should omit this decorator — their <code>call_next</code> is then wired directly to
-the next handler with no extra wrapping.</p>
-<p>Usage::</p>
-<pre><code>from blackbull import middleware
-
-@middleware
+automatically normalised — Response/JSONResponse objects are expanded into
+ASGI event dicts before reaching the middleware's inner <code>send</code> wrapper.
+The wrapper therefore only ever sees plain dict events and does not need
+<code>isinstance</code> guards.</p>
+<p>Applied to an async function (signature <code>(scope, receive, send, call_next)</code>)::</p>
+<pre><code>@as_middleware
 async def timing_mw(scope, receive, send, call_next):
     async def timed_send(event):
         # event is always a dict here
         await send(event)
     await call_next(scope, receive, timed_send)
 </code></pre>
+<p>Applied to a class whose <code>__call__</code> is the middleware coroutine::</p>
+<pre><code>@as_middleware
+class Cache:
+    async def __call__(self, scope, receive, send, call_next):
+        async def cap_send(event):
+            # event is always a dict here
+            ...
+        await call_next(scope, receive, cap_send)
+</code></pre>
+<p>Power users who need to handle raw <code>send</code> arguments (e.g. because their
+middleware is used in a context where no simplified handlers are registered)
+should omit this decorator — their <code>call_next</code> is then wired directly to
+the next handler with no extra wrapping.</p>
 
 
     </div>

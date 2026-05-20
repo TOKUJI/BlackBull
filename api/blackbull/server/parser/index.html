@@ -13,10 +13,10 @@
         <link rel="canonical" href="https://TOKUJI.github.io/BlackBull/api/blackbull/server/parser/">
       
       
-        <link rel="prev" href="../http2_actor/">
+        <link rel="prev" href="../multiworker/">
       
       
-        <link rel="next" href="../recipient/">
+        <link rel="next" href="../permessage_deflate/">
       
       
         
@@ -958,6 +958,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../middleware/cache/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    cache
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../middleware/compression/" class="md-nav__link">
         
   
@@ -1022,6 +1050,34 @@
     
   
     proxy
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../middleware/session/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    session
   
 
     
@@ -1217,6 +1273,34 @@
     
   
     frame
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../protocol/frame_types/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    frame_types
   
 
     
@@ -1627,6 +1711,90 @@
                 
   
   
+  
+  
+    <li class="md-nav__item">
+      <a href="../http2_messages/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    http2_messages
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../http2_ws/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    http2_ws
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../multiworker/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    multiworker
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
     
   
   
@@ -1745,6 +1913,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#blackbull.server.parser.parse_headers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        parse_headers
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1754,6 +1933,34 @@
   
 </nav>
       
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../permessage_deflate/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    permessage_deflate
+  
+
+    
+  </span>
+  
+  
+
+      </a>
     </li>
   
 
@@ -1927,6 +2134,62 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../worker/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    worker
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ws_codec/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ws_codec
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -2054,6 +2317,17 @@
     <span class="md-ellipsis">
       
         ParserFactory
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.parser.parse_headers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        parse_headers
       
     </span>
   </a>
@@ -2319,6 +2593,33 @@ parser bound to the given stream.</p>
 
 </div>
 
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="blackbull.server.parser.parse_headers" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">parse_headers</span><span class="p">(</span><span class="n">frame</span><span class="p">)</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Build an ASGI <code>http</code> (or <code>websocket</code>) scope from a HEADERS frame.</p>
+<p>Hot path on every request — kept as a module-level function so that
+callers avoid the dict-lookup + parser allocation that <code>ParserFactory</code>
+requires.</p>
+<p>Also performs request-level pseudo-header presence checks (RFC 9113
+§8.3.1).  Field-level checks already happened in <code>parse_payload</code>; if
+that flagged <code>frame.malformed</code> we still build a scope to keep the
+contract simple but the actor will discard it before dispatch.  If
+parse_headers itself finds a missing or empty required pseudo, it sets
+<code>frame.malformed</code> so the same actor check rejects the request.</p>
+
+
+    </div>
+
+</div>
 
 
 

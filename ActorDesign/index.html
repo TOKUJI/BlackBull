@@ -950,6 +950,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../api/blackbull/middleware/cache/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    cache
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../api/blackbull/middleware/compression/" class="md-nav__link">
         
   
@@ -1014,6 +1042,34 @@
     
   
     proxy
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/blackbull/middleware/session/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    session
   
 
     
@@ -1209,6 +1265,34 @@
     
   
     frame
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/blackbull/protocol/frame_types/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    frame_types
   
 
     
@@ -1620,6 +1704,90 @@
   
   
     <li class="md-nav__item">
+      <a href="../api/blackbull/server/http2_messages/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    http2_messages
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/blackbull/server/http2_ws/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    http2_ws
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/blackbull/server/multiworker/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    multiworker
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../api/blackbull/server/parser/" class="md-nav__link">
         
   
@@ -1628,6 +1796,34 @@
     
   
     parser
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/blackbull/server/permessage_deflate/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    permessage_deflate
   
 
     
@@ -1796,6 +1992,62 @@
     
   
     websocket_actor
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/blackbull/server/worker/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    worker
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/blackbull/server/ws_codec/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ws_codec
   
 
     
@@ -2100,7 +2352,7 @@
 
 
 <h1 id="blackbull-level-a-actor-model-design">BlackBull — Level A Actor Model Design</h1>
-<p><strong>Status</strong>: Implemented — Phase 6 complete (commit 7da77a6)<br />
+<p><strong>Status</strong>: Implemented — Phase 6 complete (commit 7da77a6); refactored (packaging, codec, frame split, method decomposition)<br />
 <strong>Prerequisite completed</strong>: Phase 3 (examples migration), Phase 4 (docs), Phase 6 (Actor model)</p>
 <hr />
 <h2 id="goal">Goal</h2>
@@ -2328,12 +2580,13 @@ It must not be exported from the package's public <code>__init__.py</code>.</p>
 <hr />
 <h2 id="message-protocol">Message Protocol</h2>
 <p>All messages are <code>dataclass</code> instances (not dicts) for type safety.
-A base class provides the actor-source reference for reply routing:</p>
+A base class provides the actor-source reference for reply routing.
+HTTP/2 message types are defined in <code>blackbull/server/http2_messages.py</code>:</p>
 <pre><code class="language-python">@dataclass
 class Message:
     sender: Actor | None = None  # None for externally-originated messages
 
-# Example Level A messages
+# HTTP/2 Level A messages (blackbull/server/http2_messages.py)
 @dataclass
 class ConnectionAccepted(Message):
     reader: AbstractReader
@@ -2406,6 +2659,14 @@ class WindowUpdate(Message):       # ask-pattern reply
 <li>✅ <code>ServerActor</code> role absorbed by <code>ASGIServer</code> + <code>ConnectionActor</code> (no separate class needed).</li>
 <li>✅ Deleted <code>HTTP11Handler</code>, <code>HTTP2Handler</code>, <code>WebSocketHandler</code>.</li>
 </ol>
+<p>Post-Phase-6 refactoring (all steps kept 721-test suite green):</p>
+<ul>
+<li>✅ Fixed packaging: <code>pyproject.toml</code> requires Python <code>&gt;=3.11</code>; <code>Pipfile</code> aligned to <code>3.11</code>; <code>h2</code> added to <code>pyproject.toml</code> dependencies; <code>hpack</code> added to <code>Pipfile</code>.</li>
+<li>✅ Extracted WebSocket frame codec into <code>blackbull/server/ws_codec.py</code> (<code>WSOpcode</code>, <code>WSFrameBits</code>, <code>WSFrameHeader</code>, <code>encode_frame</code>, <code>read_frame_header</code>, <code>read_payload</code>, <code>read_frame</code>).</li>
+<li>✅ Split <code>blackbull/protocol/frame.py</code>: frame-type definitions and enums moved to <code>blackbull/protocol/frame_types.py</code>; <code>frame.py</code> now contains only <code>FrameFactory</code>.</li>
+<li>✅ Extracted HTTP/2 actor message types into <code>blackbull/server/http2_messages.py</code>.</li>
+<li>✅ Decomposed long methods: <code>HTTP2Actor._frame_loop()</code> → <code>_on_headers_frame</code>, <code>_on_continuation_frame</code>, <code>_on_data_frame</code>, <code>_on_goaway_frame</code>, <code>_spawn_stream_task</code>; <code>HTTP1Actor.run()</code> → <code>_dispatch_request</code>; <code>WebSocketRecipient._read_loop()</code> → <code>_handle_data_frame</code>, <code>_handle_control_frame</code>, <code>_handle_unknown_opcode</code>.</li>
+</ul>
 <hr />
 <h2 id="resolved-questions">Resolved Questions</h2>
 <ol>

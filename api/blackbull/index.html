@@ -1016,6 +1016,34 @@
   
   
     <li class="md-nav__item">
+      <a href="middleware/cache/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    cache
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="middleware/compression/" class="md-nav__link">
         
   
@@ -1080,6 +1108,34 @@
     
   
     proxy
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="middleware/session/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    session
   
 
     
@@ -1275,6 +1331,34 @@
     
   
     frame
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="protocol/frame_types/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    frame_types
   
 
     
@@ -1686,6 +1770,90 @@
   
   
     <li class="md-nav__item">
+      <a href="server/http2_messages/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    http2_messages
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="server/http2_ws/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    http2_ws
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="server/multiworker/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    multiworker
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="server/parser/" class="md-nav__link">
         
   
@@ -1694,6 +1862,34 @@
     
   
     parser
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="server/permessage_deflate/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    permessage_deflate
   
 
     
@@ -1875,6 +2071,62 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="server/worker/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    worker
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="server/ws_codec/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ws_codec
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -2007,8 +2259,8 @@
 <li><code>read_body</code>: reads and buffers the full request body from the ASGI receive channel.</li>
 <li><code>parse_cookies</code>: parses the <code>Cookie</code> header into a plain <code>dict</code>.</li>
 <li><code>CORS</code>: adds <code>Access-Control-*</code> headers; handles preflight OPTIONS requests.</li>
-<li><code>middleware</code>: decorator for middleware functions; normalises <code>send</code> so inner wrappers see only ASGI event dicts.</li>
-<li><code>TrustedProxyMiddleware</code>: rewrites <code>scope['client']</code> / <code>scope['scheme']</code> from proxy headers.</li>
+<li><code>as_middleware</code>: decorator that marks an async function or class as middleware; normalises <code>send</code> so inner wrappers see only ASGI event dicts.</li>
+<li><code>TrustedProxy</code>: rewrites <code>scope['client']</code> / <code>scope['scheme']</code> from proxy headers.</li>
 </ul>
 
 

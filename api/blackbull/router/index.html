@@ -958,6 +958,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../middleware/cache/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    cache
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../middleware/compression/" class="md-nav__link">
         
   
@@ -1022,6 +1050,34 @@
     
   
     proxy
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../middleware/session/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    session
   
 
     
@@ -1217,6 +1273,34 @@
     
   
     frame
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../protocol/frame_types/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    frame_types
   
 
     
@@ -1847,6 +1931,90 @@
   
   
     <li class="md-nav__item">
+      <a href="../server/http2_messages/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    http2_messages
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../server/http2_ws/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    http2_ws
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../server/multiworker/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    multiworker
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../server/parser/" class="md-nav__link">
         
   
@@ -1855,6 +2023,34 @@
     
   
     parser
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../server/permessage_deflate/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    permessage_deflate
   
 
     
@@ -2023,6 +2219,62 @@
     
   
     websocket_actor
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../server/worker/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    worker
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../server/ws_codec/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ws_codec
   
 
     
@@ -2651,16 +2903,11 @@ Search both self.data and self.regex_.</p>
     <div class="doc doc-contents ">
 
         <p>key: (path: str, method: HTTPMethod, scheme: Scheme)</p>
-<ol>
-<li>Exact match against self.data, then pattern match against self.regex_.
-   Both passes collect allowed methods for any path+scheme hit regardless
-   of method, so we can distinguish:<ul>
-<li>path+scheme found, method allowed  → return the handler</li>
-<li>path+scheme found, method not in registered set → MethodNotApplicable</li>
-<li>no path+scheme match at all → PathNotRegistered</li>
-</ul>
-</li>
-</ol>
+<p>Uses the routing trie for O(path-depth) lookup of string-path routes,
+then falls back to a linear scan of raw re.Pattern routes.</p>
+<p>Results are cached in <code>_lookup_cache</code> (up to <code>_LOOKUP_CACHE_MAX</code>
+entries) so repeated requests to the same (path, method, scheme) skip
+the trie traversal entirely after the first hit.</p>
 
 
     </div>
@@ -2750,12 +2997,17 @@ are missing.</p>
     <div class="doc doc-contents ">
 
         <p>Check all route definitions for consistency, then freeze the router.</p>
-<p>Checks performed:
-- Every converter spec names a known converter.
-- Every path param appears in the handler signature (simplified handlers).
-- Converter output type matches the handler's annotation (requires typeguard).</p>
-<p>Raises ConfigurationError listing all violations found.
-Sets self._frozen = True on success so no further routes can be added.</p>
+<p>Checks performed:</p>
+<ul>
+<li>Every converter spec names a known converter.</li>
+<li>Every path param appears in the handler signature (simplified handlers).</li>
+<li>Converter output type matches the handler's annotation.</li>
+</ul>
+<p>Raises :class:<code>ConfigurationError</code> listing all violations found.
+Sets <code>self._frozen = True</code> on success so no further routes can
+be added.  Called once at app boot from :meth:<code>BlackBull.run</code> /
+:meth:<code>BlackBull.serve</code> — handler bugs that violate the contract
+surface before the first request is served, not after.</p>
 
 
     </div>

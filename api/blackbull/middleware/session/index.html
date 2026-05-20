@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://TOKUJI.github.io/BlackBull/api/blackbull/client/response/">
+        <link rel="canonical" href="https://TOKUJI.github.io/BlackBull/api/blackbull/middleware/session/">
       
       
-        <link rel="prev" href="../http2/">
+        <link rel="prev" href="../proxy/">
       
       
-        <link rel="next" href="../websocket/">
+        <link rel="next" href="../static/">
       
       
         
@@ -27,7 +27,7 @@
     
     
       
-        <title>response - BlackBull</title>
+        <title>session - BlackBull</title>
       
     
     
@@ -72,7 +72,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#blackbullclientresponse" class="md-skip">
+        <a href="#blackbullmiddlewaresession" class="md-skip">
           Skip to content
         </a>
       
@@ -108,7 +108,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              response
+              session
             
           </span>
         </div>
@@ -489,20 +489,18 @@
                 
   
   
-    
   
   
-  
     
     
     
     
     
-    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_1_5" checked>
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_1_5" >
         
           
           <label class="md-nav__link" for="__nav_3_1_5" id="__nav_3_1_5_label" tabindex="0">
@@ -523,7 +521,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_3_1_5_label" aria-expanded="true">
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_3_1_5_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_3_1_5">
             <span class="md-nav__icon md-icon"></span>
             
@@ -541,7 +539,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../" class="md-nav__link">
+      <a href="../../client/" class="md-nav__link">
         
   
   
@@ -569,7 +567,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../client/" class="md-nav__link">
+      <a href="../../client/client/" class="md-nav__link">
         
   
   
@@ -597,7 +595,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../exceptions/" class="md-nav__link">
+      <a href="../../client/exceptions/" class="md-nav__link">
         
   
   
@@ -625,7 +623,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../http1/" class="md-nav__link">
+      <a href="../../client/http1/" class="md-nav__link">
         
   
   
@@ -653,7 +651,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../http2/" class="md-nav__link">
+      <a href="../../client/http2/" class="md-nav__link">
         
   
   
@@ -678,37 +676,10 @@
                 
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    response
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../../client/response/" class="md-nav__link">
         
   
   
@@ -724,65 +695,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#blackbull.client.response" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        response
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="response">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.client.response.Responder" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Responder
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.client.response.ResponderFactory" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        ResponderFactory
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -795,7 +707,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../websocket/" class="md-nav__link">
+      <a href="../../client/websocket/" class="md-nav__link">
         
   
   
@@ -940,18 +852,20 @@
                 
   
   
+    
   
   
+  
     
     
     
     
     
-    <li class="md-nav__item md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_1_10" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_1_10" checked>
         
           
           <label class="md-nav__link" for="__nav_3_1_10" id="__nav_3_1_10_label" tabindex="0">
@@ -972,7 +886,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_3_1_10_label" aria-expanded="false">
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_3_1_10_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_3_1_10">
             <span class="md-nav__icon md-icon"></span>
             
@@ -990,7 +904,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/" class="md-nav__link">
+      <a href="../" class="md-nav__link">
         
   
   
@@ -1018,7 +932,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/base/" class="md-nav__link">
+      <a href="../base/" class="md-nav__link">
         
   
   
@@ -1046,7 +960,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/cache/" class="md-nav__link">
+      <a href="../cache/" class="md-nav__link">
         
   
   
@@ -1074,7 +988,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/compression/" class="md-nav__link">
+      <a href="../compression/" class="md-nav__link">
         
   
   
@@ -1102,7 +1016,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/cors/" class="md-nav__link">
+      <a href="../cors/" class="md-nav__link">
         
   
   
@@ -1130,7 +1044,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/proxy/" class="md-nav__link">
+      <a href="../proxy/" class="md-nav__link">
         
   
   
@@ -1155,10 +1069,37 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../../middleware/session/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    session
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -1174,6 +1115,82 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#blackbull.middleware.session" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        session
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="session">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.middleware.session.Session" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Session
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Session">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.middleware.session.Session--parameters" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Parameters
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.middleware.session.binascii_error_class" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        binascii_error_class
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -1186,7 +1203,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/static/" class="md-nav__link">
+      <a href="../static/" class="md-nav__link">
         
   
   
@@ -1214,7 +1231,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/utils/" class="md-nav__link">
+      <a href="../utils/" class="md-nav__link">
         
   
   
@@ -1242,7 +1259,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/websocket/" class="md-nav__link">
+      <a href="../websocket/" class="md-nav__link">
         
   
   
@@ -2235,33 +2252,50 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#blackbull.client.response" class="md-nav__link">
+  <a href="#blackbull.middleware.session" class="md-nav__link">
     <span class="md-ellipsis">
       
-        response
+        session
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="response">
+    <nav class="md-nav" aria-label="session">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#blackbull.client.response.Responder" class="md-nav__link">
+  <a href="#blackbull.middleware.session.Session" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Responder
+        Session
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Session">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.middleware.session.Session--parameters" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Parameters
       
     </span>
   </a>
   
 </li>
         
+      </ul>
+    </nav>
+  
+</li>
+        
           <li class="md-nav__item">
-  <a href="#blackbull.client.response.ResponderFactory" class="md-nav__link">
+  <a href="#blackbull.middleware.session.binascii_error_class" class="md-nav__link">
     <span class="md-ellipsis">
       
-        ResponderFactory
+        binascii_error_class
       
     </span>
   </a>
@@ -2293,29 +2327,61 @@
   
 
 
-<h1 id="blackbullclientresponse"><code>blackbull.client.response</code></h1>
+<h1 id="blackbullmiddlewaresession"><code>blackbull.middleware.session</code></h1>
 
 
 <div class="doc doc-object doc-module">
 
 
 
-<h2 id="blackbull.client.response" class="doc doc-heading">
-            <code>blackbull.client.response</code>
+<h2 id="blackbull.middleware.session" class="doc doc-heading">
+            <code>blackbull.middleware.session</code>
 
 
 </h2>
 
     <div class="doc doc-contents first">
 
-        <p>Client-side responders: react to incoming HTTP/2 frames.</p>
-<p>Each <code>Responder</code> subclass handles one <code>FrameTypes</code> value.  <code>respond()</code>
-delegates the protocol-level state mutation back to the owning
-<code>HTTP2Client</code> via underscore-prefixed callbacks (<code>_on_response_headers</code>,
-<code>_on_response_data</code>, …) so the client owns its state and the responders
-stay thin dispatchers.</p>
-<p>The dispatch table is built once via <code>__init_subclass__</code> so
-<code>ResponderFactory.create(frame)</code> is O(1).</p>
+        <p>Signed-cookie session middleware (HMAC-SHA256).</p>
+<p>The session payload lives entirely in the cookie sent to the client; the
+server keeps no per-session state.  Every value the client could otherwise
+tamper with is HMAC-signed by a secret the server alone knows, so:</p>
+<ul>
+<li>a client that modifies the cookie sees the next request treated as a
+  fresh empty session (signature check fails),</li>
+<li>the server never reads, writes, or replays anything else — no DB hit,
+  no Redis round-trip, no in-process dict to keep consistent across
+  workers,</li>
+<li>sessions survive worker restarts / horizontal scaling for free
+  (any worker that knows the secret can validate any cookie).</li>
+</ul>
+<p>The trade-offs compared with server-side session stores:</p>
+<ul>
+<li>Cookie size is bounded (browsers cap to ~4 KiB, often less in
+  practice).  Sessions storing large objects don't fit.</li>
+<li>No server-side invalidation: revoking a cookie before it expires
+  requires either rotating the secret (kills every session) or a
+  separate revocation list.  Acceptable for many apps.</li>
+</ul>
+<p>Wire format (Base64URL-encoded payload + "." + hex MAC)::</p>
+<pre><code>&lt;urlsafe-b64-no-padding(json-bytes)&gt;.&lt;hex-hmac-sha256(json-bytes)&gt;
+</code></pre>
+<p>The cookie is dispatched on every response that touched <code>scope['session']</code>
+in a way that modified it (see :class:<code>_SessionDict</code>); unmodified sessions
+trigger no Set-Cookie header, so a 304 / cache-friendly response stays
+cache-friendly.</p>
+<p>Usage::</p>
+<pre><code>from blackbull.middleware import Session
+
+app.use(Session())                       # reads BB_SESSION_SECRET
+app.use(Session(secret=b'\x...'))       # explicit secret
+
+@app.route(path='/')
+async def index(scope, receive, send):
+    scope['session']['user'] = 'alice'             # writes Set-Cookie
+    await send({'type': 'http.response.start', ...})
+    await send({'type': 'http.response.body', ...})
+</code></pre>
 
 
 
@@ -2340,8 +2406,8 @@ stay thin dispatchers.</p>
 
 
 
-<h3 id="blackbull.client.response.Responder" class="doc doc-heading">
-            <code>Responder</code>
+<h3 id="blackbull.middleware.session.Session" class="doc doc-heading">
+            <code>Session</code>
 
 
 </h3>
@@ -2351,10 +2417,30 @@ stay thin dispatchers.</p>
 
 
 
-        <p>Base class for client-side reactions to an incoming HTTP/2 frame.</p>
-<p>Subclasses set <code>FRAME_TYPE</code> and implement <code>respond(client)</code>.
-<code>__init_subclass__</code> registers each concrete subclass keyed on its
-<code>FRAME_TYPE</code> so <code>ResponderFactory.create</code> can dispatch by type.</p>
+        <p>ASGI middleware that maintains a signed-cookie session.</p>
+<h5 id="blackbull.middleware.session.Session--parameters">Parameters</h5>
+<p>secret:
+    The HMAC key.  Bytes or str.  When omitted, <code>BB_SESSION_SECRET</code>
+    is read from the environment.  A missing / empty secret raises at
+    construction — no insecure default.
+cookie_name:
+    Name of the cookie carrying the session payload.  Default
+    <code>'session'</code>.
+max_age:
+    Cookie <code>Max-Age</code> in seconds.  When set, the cookie is signed
+    with a server-side timestamp; values older than <code>max_age</code>
+    seconds are treated as expired (empty session).  <code>None</code> means
+    a session cookie that lives only as long as the browser is open.
+secure:
+    Set the <code>Secure</code> attribute so the cookie is only sent over
+    HTTPS.  Default <code>True</code>; set <code>False</code> for local-only dev.
+httponly:
+    Set the <code>HttpOnly</code> attribute (JavaScript can't read the
+    cookie).  Default <code>True</code>.
+samesite:
+    <code>Strict</code> / <code>Lax</code> / <code>None</code>.  Default <code>'Lax'</code>.
+path:
+    Cookie <code>Path</code>.  Default <code>/</code>.</p>
 
 
 
@@ -2385,52 +2471,24 @@ stay thin dispatchers.</p>
 
 </div>
 
-<div class="doc doc-object doc-class">
+
+<div class="doc doc-object doc-function">
 
 
-
-<h3 id="blackbull.client.response.ResponderFactory" class="doc doc-heading">
-            <code>ResponderFactory</code>
-
+<h3 id="blackbull.middleware.session.binascii_error_class" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">binascii_error_class</span><span class="p">()</span></code>
 
 </h3>
 
 
     <div class="doc doc-contents ">
 
+        <p>Return <code>binascii.Error</code> lazily — avoids a top-level import.</p>
 
-
-        <p>Looks up the <code>Responder</code> for an incoming frame type and instantiates it.</p>
-
-
-
-
-
-
-
-
-
-
-
-<div class="doc doc-children">
-
-
-
-
-
-
-
-
-
-
-
-
-  </div>
 
     </div>
 
 </div>
-
 
 
 

@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://TOKUJI.github.io/BlackBull/api/blackbull/client/response/">
+        <link rel="canonical" href="https://TOKUJI.github.io/BlackBull/api/blackbull/middleware/cache/">
       
       
-        <link rel="prev" href="../http2/">
+        <link rel="prev" href="../base/">
       
       
-        <link rel="next" href="../websocket/">
+        <link rel="next" href="../compression/">
       
       
         
@@ -27,7 +27,7 @@
     
     
       
-        <title>response - BlackBull</title>
+        <title>cache - BlackBull</title>
       
     
     
@@ -72,7 +72,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#blackbullclientresponse" class="md-skip">
+        <a href="#blackbullmiddlewarecache" class="md-skip">
           Skip to content
         </a>
       
@@ -108,7 +108,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              response
+              cache
             
           </span>
         </div>
@@ -489,20 +489,18 @@
                 
   
   
-    
   
   
-  
     
     
     
     
     
-    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_1_5" checked>
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_1_5" >
         
           
           <label class="md-nav__link" for="__nav_3_1_5" id="__nav_3_1_5_label" tabindex="0">
@@ -523,7 +521,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_3_1_5_label" aria-expanded="true">
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_3_1_5_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_3_1_5">
             <span class="md-nav__icon md-icon"></span>
             
@@ -541,7 +539,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../" class="md-nav__link">
+      <a href="../../client/" class="md-nav__link">
         
   
   
@@ -569,7 +567,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../client/" class="md-nav__link">
+      <a href="../../client/client/" class="md-nav__link">
         
   
   
@@ -597,7 +595,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../exceptions/" class="md-nav__link">
+      <a href="../../client/exceptions/" class="md-nav__link">
         
   
   
@@ -625,7 +623,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../http1/" class="md-nav__link">
+      <a href="../../client/http1/" class="md-nav__link">
         
   
   
@@ -653,7 +651,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../http2/" class="md-nav__link">
+      <a href="../../client/http2/" class="md-nav__link">
         
   
   
@@ -678,37 +676,10 @@
                 
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    response
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../../client/response/" class="md-nav__link">
         
   
   
@@ -724,65 +695,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#blackbull.client.response" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        response
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="response">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.client.response.Responder" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Responder
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.client.response.ResponderFactory" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        ResponderFactory
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -795,7 +707,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../websocket/" class="md-nav__link">
+      <a href="../../client/websocket/" class="md-nav__link">
         
   
   
@@ -940,18 +852,20 @@
                 
   
   
+    
   
   
+  
     
     
     
     
     
-    <li class="md-nav__item md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_1_10" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_1_10" checked>
         
           
           <label class="md-nav__link" for="__nav_3_1_10" id="__nav_3_1_10_label" tabindex="0">
@@ -972,7 +886,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_3_1_10_label" aria-expanded="false">
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_3_1_10_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_3_1_10">
             <span class="md-nav__icon md-icon"></span>
             
@@ -990,7 +904,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/" class="md-nav__link">
+      <a href="../" class="md-nav__link">
         
   
   
@@ -1018,7 +932,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/base/" class="md-nav__link">
+      <a href="../base/" class="md-nav__link">
         
   
   
@@ -1043,10 +957,37 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../../middleware/cache/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    cache
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -1062,6 +1003,54 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#blackbull.middleware.cache" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        cache
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="cache">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.middleware.cache.Cache" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cache
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -1074,7 +1063,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/compression/" class="md-nav__link">
+      <a href="../compression/" class="md-nav__link">
         
   
   
@@ -1102,7 +1091,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/cors/" class="md-nav__link">
+      <a href="../cors/" class="md-nav__link">
         
   
   
@@ -1130,7 +1119,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/proxy/" class="md-nav__link">
+      <a href="../proxy/" class="md-nav__link">
         
   
   
@@ -1158,7 +1147,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/session/" class="md-nav__link">
+      <a href="../session/" class="md-nav__link">
         
   
   
@@ -1186,7 +1175,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/static/" class="md-nav__link">
+      <a href="../static/" class="md-nav__link">
         
   
   
@@ -1214,7 +1203,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/utils/" class="md-nav__link">
+      <a href="../utils/" class="md-nav__link">
         
   
   
@@ -1242,7 +1231,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/websocket/" class="md-nav__link">
+      <a href="../websocket/" class="md-nav__link">
         
   
   
@@ -2235,33 +2224,22 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#blackbull.client.response" class="md-nav__link">
+  <a href="#blackbull.middleware.cache" class="md-nav__link">
     <span class="md-ellipsis">
       
-        response
+        cache
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="response">
+    <nav class="md-nav" aria-label="cache">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#blackbull.client.response.Responder" class="md-nav__link">
+  <a href="#blackbull.middleware.cache.Cache" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Responder
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.client.response.ResponderFactory" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        ResponderFactory
+        Cache
       
     </span>
   </a>
@@ -2293,29 +2271,61 @@
   
 
 
-<h1 id="blackbullclientresponse"><code>blackbull.client.response</code></h1>
+<h1 id="blackbullmiddlewarecache"><code>blackbull.middleware.cache</code></h1>
 
 
 <div class="doc doc-object doc-module">
 
 
 
-<h2 id="blackbull.client.response" class="doc doc-heading">
-            <code>blackbull.client.response</code>
+<h2 id="blackbull.middleware.cache" class="doc doc-heading">
+            <code>blackbull.middleware.cache</code>
 
 
 </h2>
 
     <div class="doc doc-contents first">
 
-        <p>Client-side responders: react to incoming HTTP/2 frames.</p>
-<p>Each <code>Responder</code> subclass handles one <code>FrameTypes</code> value.  <code>respond()</code>
-delegates the protocol-level state mutation back to the owning
-<code>HTTP2Client</code> via underscore-prefixed callbacks (<code>_on_response_headers</code>,
-<code>_on_response_data</code>, …) so the client owns its state and the responders
-stay thin dispatchers.</p>
-<p>The dispatch table is built once via <code>__init_subclass__</code> so
-<code>ResponderFactory.create(frame)</code> is O(1).</p>
+        <p>Response caching middleware (RFC 9111 — HTTP Caching).</p>
+<p>Caches successful GET/HEAD responses in a per-worker, in-memory LRU.
+Subsequent matching requests are served directly from the cache without
+running the handler.  Supports:</p>
+<ul>
+<li><strong>TTL</strong> — server-side <code>max_age</code> (default 300 s), overridable by the
+  response's <code>Cache-Control: max-age=…</code> directive (or, when present,
+  <code>s-maxage=…</code> which takes precedence for shared caches).</li>
+<li><strong>ETag</strong> — auto-generated as <code>W/"&lt;sha256-prefix&gt;"</code> over the response
+  body when the application does not supply one.  The client's
+  <code>If-None-Match</code> header is honoured: a match yields a 304 Not
+  Modified with no body, regardless of the cached entry's TTL.</li>
+<li><strong>Cache-Control respect</strong> — responses carrying <code>no-store</code>, <code>private</code>,
+  or <code>no-cache</code> are passed through and not stored.  Requests carrying
+  <code>no-store</code> skip the cache lookup too.</li>
+<li><strong>Authorization header</strong> — by default, requests with an
+  <code>Authorization</code> header are NOT served from cache and their
+  responses are NOT stored (RFC 9111 §3.5).  Override with
+  <code>cache_authenticated=True</code>.</li>
+</ul>
+<p>What it doesn't do (yet):</p>
+<ul>
+<li>No <code>Vary</code> header support beyond identity matching.  A request that
+  differs only by <code>Accept-Encoding</code> or <code>Accept-Language</code> will get
+  the first variant cached.</li>
+<li>No server-side invalidation API.  Restart the worker (or wait for
+  TTL) to clear.</li>
+<li>No cross-worker sharing.  The cache is per-process — each worker has
+  its own.  Documented limitation.</li>
+</ul>
+<p>The cache key is <code>(method, path, query_string)</code>.</p>
+<p>Usage::</p>
+<pre><code>from blackbull.middleware import Cache
+
+app.use(Cache(max_age=600))     # 10-minute TTL
+
+@app.route(path='/feed')
+async def feed(scope, receive, send):
+    ...   # served from cache for 10 min after first hit
+</code></pre>
 
 
 
@@ -2340,8 +2350,8 @@ stay thin dispatchers.</p>
 
 
 
-<h3 id="blackbull.client.response.Responder" class="doc doc-heading">
-            <code>Responder</code>
+<h3 id="blackbull.middleware.cache.Cache" class="doc doc-heading">
+            <code>Cache</code>
 
 
 </h3>
@@ -2351,56 +2361,7 @@ stay thin dispatchers.</p>
 
 
 
-        <p>Base class for client-side reactions to an incoming HTTP/2 frame.</p>
-<p>Subclasses set <code>FRAME_TYPE</code> and implement <code>respond(client)</code>.
-<code>__init_subclass__</code> registers each concrete subclass keyed on its
-<code>FRAME_TYPE</code> so <code>ResponderFactory.create</code> can dispatch by type.</p>
-
-
-
-
-
-
-
-
-
-
-
-<div class="doc doc-children">
-
-
-
-
-
-
-
-
-
-
-
-
-  </div>
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-class">
-
-
-
-<h3 id="blackbull.client.response.ResponderFactory" class="doc doc-heading">
-            <code>ResponderFactory</code>
-
-
-</h3>
-
-
-    <div class="doc doc-contents ">
-
-
-
-        <p>Looks up the <code>Responder</code> for an incoming frame type and instantiates it.</p>
+        <p>Per-worker in-memory response cache.</p>
 
 
 

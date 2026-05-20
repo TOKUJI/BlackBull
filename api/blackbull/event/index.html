@@ -888,6 +888,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.event.EventDispatcher.has_listeners" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        has_listeners
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.event.EventDispatcher.intercept" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1094,6 +1105,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../middleware/cache/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    cache
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../middleware/compression/" class="md-nav__link">
         
   
@@ -1158,6 +1197,34 @@
     
   
     proxy
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../middleware/session/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    session
   
 
     
@@ -1353,6 +1420,34 @@
     
   
     frame
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../protocol/frame_types/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    frame_types
   
 
     
@@ -1764,6 +1859,90 @@
   
   
     <li class="md-nav__item">
+      <a href="../server/http2_messages/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    http2_messages
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../server/http2_ws/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    http2_ws
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../server/multiworker/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    multiworker
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../server/parser/" class="md-nav__link">
         
   
@@ -1772,6 +1951,34 @@
     
   
     parser
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../server/permessage_deflate/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    permessage_deflate
   
 
     
@@ -1953,6 +2160,62 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../server/worker/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    worker
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../server/ws_codec/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ws_codec
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -2081,6 +2344,17 @@
     <span class="md-ellipsis">
       
         emit
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.event.EventDispatcher.has_listeners" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        has_listeners
       
     </span>
   </a>
@@ -2365,6 +2639,27 @@ exceptions propagate.  Observation handlers are scheduled as
 independent tasks and their exceptions are isolated.
 Tasks are tracked so they can be drained at shutdown via 
 :meth:<code>aclose</code>.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.event.EventDispatcher.has_listeners" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">has_listeners</span><span class="p">(</span><span class="n">event_name</span><span class="p">)</span></code>
+
+</h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Return True if any interceptor or observer is registered for <code>event_name</code>.</p>
+<p>Hot path: callers use this to skip detail-dict / <code>Event</code> construction
+when no one will receive the event.  <code>defaultdict.get</code> returns <code>None</code>
+for missing keys without inserting an empty list.</p>
 
 
     </div>
