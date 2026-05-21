@@ -1,5 +1,5 @@
 import asyncio
-import gzip as _gzip
+import gzip
 from collections.abc import Callable
 from ..server.constants import ASGIEvent
 from ..server.headers import Headers
@@ -45,7 +45,7 @@ def _detect_codecs() -> dict[str, Callable[[bytes], bytes]]:
         available['zstd'] = cctx.compress
     except ImportError:
         pass
-    available['gzip'] = _gzip.compress
+    available['gzip'] = gzip.compress
     return available
 
 
