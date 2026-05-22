@@ -33,6 +33,19 @@ def _http_date() -> bytes:
     return _HTTP_DATE
 
 
+def _has_header(items, name: bytes) -> bool:
+    """Case-insensitive membership check over ``(key, value)`` tuples.
+
+    HTTP/2 field names are lowercase ASCII per RFC 9113 §8.2.1, but the
+    ASGI app may still hand us ``b'Date'`` or ``b'DATE'`` — its problem
+    to surface, ours to honour.  Used by HTTP2Sender to avoid
+    duplicating the auto-emitted ``date`` header when the app already
+    set one.
+    """
+    needle = name.lower()
+    return any(k.lower() == needle for k, _ in items)
+
+
 # ---------------------------------------------------------------------------
 # Writer abstraction — swap asyncio for trio/curio by implementing this ABC
 # ---------------------------------------------------------------------------
@@ -426,6 +439,12 @@ class HTTP2Sender(BaseSender):
             h_frame.pseudo_headers[PseudoHeaders.STATUS] = str(status)
             for k, v in headers:
                 h_frame.headers.append((k, v))
+            # RFC 9110 §6.6.1 — Date SHOULD be present.  HTTP/1.1 sender
+            # already injects it in ``_flush``; mirror that here so the
+            # wire shape matches across protocols.  Lowercase per RFC
+            # 9113 §8.2.1 (HTTP/2 field names are lowercase ASCII).
+            if not _has_header(h_frame.headers, b'date'):
+                h_frame.headers.append((b'date', _http_date()))
             h_bytes = h_frame.save()
 
             total = len(body)
@@ -459,6 +478,8 @@ class HTTP2Sender(BaseSender):
                 frame.pseudo_headers[PseudoHeaders.STATUS] = str(body.get('status', 200))
                 for k, v in body.get('headers', []):
                     frame.headers.append((k, v))
+                if not _has_header(frame.headers, b'date'):
+                    frame.headers.append((b'date', _http_date()))
                 await self._write(frame.save())
 
             elif event_type == ASGIEvent.HTTP_RESPONSE_BODY:

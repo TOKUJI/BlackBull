@@ -36,12 +36,19 @@ case "$server" in
         # access_log off).  Match by setting BB_ACCESS_LOG=0 here.
         # Production defaults (BB_ACCESS_LOG=1, BB_ASYNC_LOGGING=1)
         # remain unchanged in env.py — only this harness overrides.
+        #
+        # Sprint 11: the BlackBull console-script CLI lets us point at the
+        # *same* shared peer app (bench.peers.asgi_app:app) that uvicorn /
+        # hypercorn / granian / daphne load — no BlackBull-only bench/app.py
+        # path any more.
         exec env BB_UVLOOP=1 BB_WORKERS=1 \
             BB_H2_INITIAL_WINDOW_SIZE=65535 \
             BB_H2_CONNECTION_WINDOW_SIZE=65535 \
             BB_H2_MAX_CONCURRENT_STREAMS=100 \
             BB_ACCESS_LOG=0 \
-            python bench/app.py --port "$port" --cert "$cert" --key "$key"
+            blackbull bench.peers.asgi_app:app \
+                --bind "127.0.0.1:${port}" \
+                --certfile "$cert" --keyfile "$key"
         ;;
     uvicorn)
         # --http auto picks httptools if installed, else h11.

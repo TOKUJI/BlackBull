@@ -3,6 +3,7 @@
 Public API exports:
 
 - `BlackBull`: the main application object; wraps routing, middleware, and lifespan hooks.
+- `serve`: synchronous entry point that runs any ASGI 3.0 callable (also used by the ``blackbull`` console script).
 - `Response`, `JSONResponse`, `StreamingResponse`, `WebSocketResponse`: response helpers.
 - `cookie_header`: builds a ``Set-Cookie`` header tuple.
 - `read_body`: reads and buffers the full request body from the ASGI receive channel.
@@ -14,7 +15,7 @@ Public API exports:
 import logging
 logging.getLogger('blackbull').addHandler(logging.NullHandler())
 
-from .app import BlackBull
+from .app import BlackBull, serve
 from .request import read_body, parse_cookies
 from .response import Response, JSONResponse, StreamingResponse, WebSocketResponse, cookie_header
 from .event import Event, EventHandler

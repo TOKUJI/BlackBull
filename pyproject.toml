@@ -20,6 +20,9 @@ dependencies = [
 Homepage = "https://github.com/TOKUJI/BlackBull"
 Repository = "https://github.com/TOKUJI/BlackBull"
 
+[project.scripts]
+blackbull = "blackbull.cli:main"
+
 [project.optional-dependencies]
 compression = [
     "brotli",

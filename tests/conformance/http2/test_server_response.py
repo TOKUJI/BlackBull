@@ -147,6 +147,106 @@ async def test_window_update_connection_level_updates_handler_tracking():
 # WindowUpdateResponder — stream-level (stream_id > 0)
 # ---------------------------------------------------------------------------
 
+def _decode_h2_headers(written: bytes, factory: FrameFactory) -> list[tuple[bytes, bytes]]:
+    """Decode the HEADERS-frame payload in ``written`` via the factory's HPACK decoder.
+
+    Returns the decoded header list (including the ``:status`` pseudo-header
+    as a regular entry).  Assumes a single HEADERS frame at offset 0 and
+    raises if no HEADERS frame is present.
+    """
+    from blackbull.protocol.frame_types import FrameTypes
+    if not written:
+        raise AssertionError('no bytes were written')
+    length = int.from_bytes(written[0:3], 'big')
+    type_byte = written[3:4]
+    if type_byte != FrameTypes.HEADERS.value:
+        raise AssertionError(
+            f'expected HEADERS frame, got type byte {type_byte!r}'
+        )
+    payload = written[9:9 + length]
+    return factory.decoder.decode(payload)
+
+
+# ---------------------------------------------------------------------------
+# RFC 9110 §6.6.1 — Date SHOULD be present in HTTP responses.
+# Sprint 11 brought HTTP/2 to parity with HTTP/1.1 here; the cache lives
+# in _http_date() so the per-response cost is one int comparison.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_http2_sender_auto_emits_date_on_bytes_path():
+    """Bytes-payload responses get a ``date`` header even when the app sent none."""
+    from blackbull.server.sender import HTTP2Sender, AsyncioWriter
+
+    written = bytearray()
+    mock_writer = MagicMock()
+    mock_writer.write = MagicMock(side_effect=lambda d: written.extend(d))
+    mock_writer.drain = AsyncMock()
+
+    factory = FrameFactory()
+    sender = HTTP2Sender(AsyncioWriter(mock_writer), factory, stream_id=1)
+
+    await sender(b'pong')
+
+    decoded = _decode_h2_headers(bytes(written), factory)
+    names = [k.lower() if isinstance(k, (bytes, bytearray)) else k.lower().encode()
+             for k, _ in decoded]
+    assert b'date' in names, f'expected auto-emitted date header; got {names!r}'
+
+
+@pytest.mark.asyncio
+async def test_http2_sender_auto_emits_date_on_asgi_event_path():
+    """ASGI streaming path (``http.response.start``) also gets the auto-date."""
+    from blackbull.server.sender import HTTP2Sender, AsyncioWriter
+    from blackbull.server.constants import ASGIEvent
+
+    written = bytearray()
+    mock_writer = MagicMock()
+    mock_writer.write = MagicMock(side_effect=lambda d: written.extend(d))
+    mock_writer.drain = AsyncMock()
+
+    factory = FrameFactory()
+    sender = HTTP2Sender(AsyncioWriter(mock_writer), factory, stream_id=1)
+
+    await sender({'type': ASGIEvent.HTTP_RESPONSE_START, 'status': 200, 'headers': []})
+
+    decoded = _decode_h2_headers(bytes(written), factory)
+    names = [k.lower() if isinstance(k, (bytes, bytearray)) else k.lower().encode()
+             for k, _ in decoded]
+    assert b'date' in names, f'expected auto-emitted date header; got {names!r}'
+
+
+@pytest.mark.asyncio
+async def test_http2_sender_does_not_duplicate_app_provided_date():
+    """If the app already sent a Date header, the auto-emit must not duplicate it.
+
+    Case-insensitive check (RFC 9110 §5.1): ``Date``, ``date``, ``DATE`` all match.
+    """
+    from blackbull.server.sender import HTTP2Sender, AsyncioWriter
+
+    written = bytearray()
+    mock_writer = MagicMock()
+    mock_writer.write = MagicMock(side_effect=lambda d: written.extend(d))
+    mock_writer.drain = AsyncMock()
+
+    factory = FrameFactory()
+    sender = HTTP2Sender(AsyncioWriter(mock_writer), factory, stream_id=1)
+
+    custom_date = b'Wed, 01 Jan 2025 00:00:00 GMT'
+    await sender(b'pong', headers=[(b'Date', custom_date)])
+
+    decoded = _decode_h2_headers(bytes(written), factory)
+    date_values = [
+        (v if isinstance(v, (bytes, bytearray)) else v.encode())
+        for k, v in decoded
+        if (k.lower() if isinstance(k, (bytes, bytearray)) else k.lower().encode()) == b'date'
+    ]
+    assert len(date_values) == 1, f'expected exactly one date header; got {date_values!r}'
+    assert bytes(date_values[0]) == custom_date, (
+        f'app-provided Date must win; got {date_values[0]!r}'
+    )
+
+
 @pytest.mark.asyncio
 async def test_window_update_stream_level_only_credits_stream_window():
     """Stream-level WINDOW_UPDATE must not inflate the connection window.

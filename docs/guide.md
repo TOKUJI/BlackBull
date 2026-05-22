@@ -1421,20 +1421,40 @@ Observers therefore have a *conditional* fire-and-forget guarantee: during norma
 
 ## §10  Running the Server
 
+BlackBull exposes three entry points, in increasing order of how
+"production-shaped" they are:
+
 ```python
 import asyncio
+from blackbull import serve  # module-level function; works with any ASGI app
 
-# HTTP/1.1
+# 1. In-Python, async — useful inside notebooks, test harnesses, embedded callers
 asyncio.run(app.run(port=8000))
-
-# HTTPS + HTTP/2 (negotiated via TLS ALPN)
 asyncio.run(app.run(port=8443, certfile='cert.pem', keyfile='key.pem'))
+
+# 2. In-Python, sync — typical for `python myapp.py` style scripts
+app.serve(port=8443, certfile='cert.pem', keyfile='key.pem', workers=4)
 
 # Development: hot-reload when *.py files change.
 # Uses watchfiles + master-keeps-listening-sockets across worker recycles.
 # Requires the [reload] extra: pip install -e '.[reload]'
 app.serve(port=8000, reload=True)
 ```
+
+```bash
+# 3. Console script — same flags work for any ASGI 3.0 callable.
+#    Useful for systemd / Docker / PaaS where a CLI is the deployment surface.
+blackbull myapp:app --bind 0.0.0.0:8443 \
+    --certfile cert.pem --keyfile key.pem --workers 4
+
+# Auto-reload via the CLI:
+blackbull myapp:app --bind 127.0.0.1:8000 --reload
+```
+
+The CLI accepts any ``module:attribute`` import path; the attribute may
+be a :class:`BlackBull` instance *or* a plain ASGI callable (which is
+how the benchmark harness loads ``bench/peers/asgi_app.py`` against
+every peer server including BlackBull).
 
 `app.run()` signature:
 
@@ -1446,7 +1466,11 @@ async def run(port=0, certfile=None, keyfile=None,
 
 `app.serve()` is the synchronous counterpart; pass ``reload=True`` to
 enable auto-reload (only available via ``serve()`` because it needs a
-long-lived supervisor process around the event loop).
+long-lived supervisor process around the event loop).  All three
+entry points ultimately call :func:`blackbull.serve`, which is the
+module-level function the CLI dispatches to — embedded users can
+import it directly to serve a raw ASGI callable without instantiating
+a :class:`BlackBull`.
 
 ### §10.1  Workers and the event loop
 
