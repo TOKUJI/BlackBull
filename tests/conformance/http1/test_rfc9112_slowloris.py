@@ -27,6 +27,11 @@ def _run_with_short_timeout(app, env_overrides):
     """Subprocess entry point — apply env overrides before running."""
     for k, v in env_overrides.items():
         os.environ[k] = v
+    # The parent may have already populated the get_settings() cache before
+    # forking; the child inherits that stale snapshot.  Reset so the next
+    # call re-reads the overridden env vars.
+    from blackbull.env import reset_settings_cache
+    reset_settings_cache()
     asyncio.run(app.run())
 
 
