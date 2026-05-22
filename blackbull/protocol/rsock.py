@@ -149,6 +149,149 @@ def create_socket(address, backlog: int = _DEFAULT_BACKLOG):
     return _bind_socket(family, host, port, backlog=backlog)
 
 
+#: Systemd LISTEN_FDS protocol — first inherited fd starts at SD_LISTEN_FDS_START.
+_SD_LISTEN_FDS_START = 3
+
+
+def adopt_listening_fd(fd: int) -> socket.socket:
+    """Build a :class:`socket.socket` from an already-bound listening fd.
+
+    Used for systemd socket-activation (``--bind fd://N``) and any other
+    out-of-process socket hand-off where the supervisor binds and listens
+    on the user's behalf.
+
+    Validates the sd_listen_fds(3) contract when ``$LISTEN_PID`` and
+    ``$LISTEN_FDS`` are present:
+
+    * ``LISTEN_PID`` MUST equal our pid — if it points at someone else we
+      raise rather than steal another process's fds.
+    * ``LISTEN_FDS`` defines the inclusive window
+      ``[SD_LISTEN_FDS_START, SD_LISTEN_FDS_START + LISTEN_FDS)`` — we
+      reject fds outside that window.
+
+    When neither env var is set we trust the caller and build the socket
+    object anyway (useful for non-systemd handoff and for tests).
+
+    The fd is *not* unset CLOEXEC — workers inherit it via fork, the
+    multiworker path already handles set_inheritable as needed.
+    """
+    pid_env = os.environ.get('LISTEN_PID')
+    if pid_env is not None:
+        try:
+            expected_pid = int(pid_env)
+        except ValueError:
+            raise RuntimeError(
+                f"LISTEN_PID={pid_env!r} is not an integer"
+            ) from None
+        if expected_pid != os.getpid():
+            raise RuntimeError(
+                f'LISTEN_PID={expected_pid} does not match this process '
+                f'({os.getpid()}) — refusing to adopt fd {fd}'
+            )
+
+    n_env = os.environ.get('LISTEN_FDS')
+    if n_env is not None:
+        try:
+            n = int(n_env)
+        except ValueError:
+            raise RuntimeError(
+                f"LISTEN_FDS={n_env!r} is not an integer"
+            ) from None
+        if not (_SD_LISTEN_FDS_START <= fd < _SD_LISTEN_FDS_START + n):
+            raise RuntimeError(
+                f'fd {fd} is outside the systemd LISTEN_FDS window '
+                f'[{_SD_LISTEN_FDS_START}, {_SD_LISTEN_FDS_START + n})'
+            )
+
+    try:
+        sock = socket.socket(fileno=fd)
+    except OSError as exc:
+        raise RuntimeError(f'Could not adopt fd {fd}: {exc}') from exc
+    logger.info('Adopted listening fd %d %s (family=%s)',
+                fd, sock.getsockname(), sock.family.name)
+    return sock
+
+
+def create_unix_socket(path: str, backlog: int = _DEFAULT_BACKLOG,
+                       sndbuf: int = 0, rcvbuf: int = 0,
+                       mode: int | None = 0o660) -> "socket.socket | None":
+    """Bind and listen on an ``AF_UNIX`` socket at *path*.
+
+    Returns the bound socket on success, ``None`` on any bind/listen failure.
+
+    *path* is taken verbatim — no expanduser, no normalisation; the caller
+    is responsible for placing the socket where their reverse proxy
+    expects it.
+
+    *mode* sets the socket-file permissions after bind (``chmod`` on the
+    inode).  Defaults to ``0o660`` so a reverse proxy (nginx) running in
+    the same group can connect; pass ``None`` to skip the chmod and
+    inherit umask behaviour.
+
+    A stale leftover socket file at *path* is unlinked before bind
+    (matching the systemd / hypercorn / nginx behaviour).  We refuse to
+    unlink if *path* is a regular file or directory — the user almost
+    certainly didn't mean to point us at one.
+
+    TCP-only socket options (``SO_REUSEPORT``, ``TCP_USER_TIMEOUT``,
+    ``IPV6_V6ONLY``) are deliberately skipped — ``AF_UNIX`` doesn't carry
+    them.  ``SO_SNDBUF`` / ``SO_RCVBUF`` *are* honoured when supplied.
+    """
+    import errno  # noqa: PLC0415
+    import stat   # noqa: PLC0415
+
+    try:
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    except OSError as msg:
+        logger.error('Could not create AF_UNIX socket: %s', msg)
+        return None
+
+    # Unlink stale socket file — but only when it actually is a socket,
+    # so we don't silently destroy unrelated user files.
+    try:
+        st_mode = os.stat(path).st_mode
+    except FileNotFoundError:
+        pass
+    except OSError as msg:
+        logger.error('Could not stat %s: %s', path, msg)
+        sock.close()
+        return None
+    else:
+        if stat.S_ISSOCK(st_mode):
+            try:
+                os.unlink(path)
+            except OSError as msg:
+                logger.error('Could not unlink stale UDS at %s: %s', path, msg)
+                sock.close()
+                return None
+        else:
+            logger.error('Refusing to bind UDS at %s: path exists and is not a socket', path)
+            sock.close()
+            return None
+
+    try:
+        if sndbuf:
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, sndbuf)
+        if rcvbuf:
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, rcvbuf)
+        sock.bind(path)
+        if mode is not None:
+            try:
+                os.chmod(path, mode)
+            except OSError as msg:
+                # chmod failure isn't fatal for binding; warn and keep going.
+                logger.warning('Could not chmod %s to %o: %s', path, mode, msg)
+        sock.listen(backlog)
+        logger.info('Bound AF_UNIX socket on %s (backlog=%d mode=%s)',
+                    path, backlog,
+                    'unchanged' if mode is None else f'0o{mode:o}')
+        return sock
+    except OSError as msg:
+        logger.error('Could not bind AF_UNIX socket on %s: %s', path, msg)
+        sock.close()
+        return None
+
+
 def create_dual_stack_sockets(port, backlog: int = _DEFAULT_BACKLOG,
                                reuseport: bool = False,
                                sndbuf: int = 0, rcvbuf: int = 0,

@@ -18,7 +18,10 @@ Dual-stack support – original ``create_socket`` bound only to ``'::1'``
 import socket
 import pytest
 
-from blackbull.protocol.rsock import _bind_socket, create_socket, create_dual_stack_sockets
+from blackbull.protocol.rsock import (
+    _bind_socket, create_socket, create_dual_stack_sockets, create_unix_socket,
+    adopt_listening_fd, _SD_LISTEN_FDS_START,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -276,3 +279,169 @@ class TestCreateDualStackSockets:
             assert isinstance(socks, list)
         finally:
             _close_all(socks)
+
+
+# ---------------------------------------------------------------------------
+# create_unix_socket — Sprint 12a
+# ---------------------------------------------------------------------------
+
+class TestCreateUnixSocket:
+    """Tests for the AF_UNIX bind helper added in Sprint 12a."""
+
+    def test_binds_listens_and_returns_socket(self, tmp_path):
+        path = str(tmp_path / 'bb.sock')
+        sock = create_unix_socket(path)
+        try:
+            assert sock is not None
+            assert sock.family == socket.AF_UNIX
+            assert sock.getsockname() == path
+        finally:
+            if sock is not None:
+                sock.close()
+
+    def test_unlinks_stale_socket_file(self, tmp_path):
+        """A leftover socket file at the target path is unlinked before bind."""
+        path = str(tmp_path / 'stale.sock')
+        # Create a stale socket by binding+closing without listening.
+        stale = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        stale.bind(path)
+        stale.close()
+        # File should exist now.
+        import os
+        assert os.path.exists(path)
+        # create_unix_socket must succeed despite the leftover.
+        sock = create_unix_socket(path)
+        try:
+            assert sock is not None
+            assert sock.getsockname() == path
+        finally:
+            if sock is not None:
+                sock.close()
+
+    def test_refuses_to_unlink_regular_file(self, tmp_path):
+        """If the target path is a regular file, refuse to overwrite it."""
+        path = tmp_path / 'not-a-socket'
+        path.write_text('important user data\n')
+        result = create_unix_socket(str(path))
+        assert result is None
+        # File must be untouched.
+        assert path.read_text() == 'important user data\n'
+
+    def test_applies_chmod_for_group_access(self, tmp_path):
+        """Default mode 0o660 lets a same-group reverse proxy connect."""
+        import os, stat
+        path = str(tmp_path / 'mode.sock')
+        sock = create_unix_socket(path, mode=0o660)
+        try:
+            assert sock is not None
+            mode = os.stat(path).st_mode
+            assert stat.S_IMODE(mode) == 0o660
+        finally:
+            if sock is not None:
+                sock.close()
+
+    def test_mode_none_skips_chmod(self, tmp_path):
+        """``mode=None`` leaves the umask-derived bind() mode untouched."""
+        import os, stat
+        path = str(tmp_path / 'umask.sock')
+        sock = create_unix_socket(path, mode=None)
+        try:
+            assert sock is not None
+            # Whatever the umask gave us; just verify the socket is usable.
+            assert stat.S_ISSOCK(os.stat(path).st_mode)
+        finally:
+            if sock is not None:
+                sock.close()
+
+
+# ---------------------------------------------------------------------------
+# adopt_listening_fd — Sprint 12b
+# ---------------------------------------------------------------------------
+
+class TestAdoptListeningFd:
+    """Tests for adopt_listening_fd() added in Sprint 12b."""
+
+    @pytest.fixture()
+    def listening_sock(self):
+        """Pre-bound listening socket; cleaned up after the test."""
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        s.bind(('127.0.0.1', 0))
+        s.listen(8)
+        yield s
+        s.close()
+
+    def test_adopts_fd_without_env_vars(self, monkeypatch, listening_sock):
+        """When neither LISTEN_PID nor LISTEN_FDS is set, accept the fd as-is."""
+        monkeypatch.delenv('LISTEN_PID', raising=False)
+        monkeypatch.delenv('LISTEN_FDS', raising=False)
+        fd = listening_sock.fileno()
+        port = listening_sock.getsockname()[1]
+        adopted = adopt_listening_fd(fd)
+        try:
+            assert adopted.getsockname()[1] == port
+        finally:
+            adopted.detach()
+
+    def test_adopts_fd_when_listen_pid_matches(self, monkeypatch, listening_sock):
+        """LISTEN_PID == our PID must allow adoption."""
+        import os
+        monkeypatch.setenv('LISTEN_PID', str(os.getpid()))
+        monkeypatch.delenv('LISTEN_FDS', raising=False)
+        adopted = adopt_listening_fd(listening_sock.fileno())
+        adopted.detach()
+
+    def test_rejects_listen_pid_mismatch(self, monkeypatch, listening_sock):
+        """LISTEN_PID pointing at a different PID must raise RuntimeError."""
+        monkeypatch.setenv('LISTEN_PID', '1')  # PID 1 (init) is never ours
+        monkeypatch.delenv('LISTEN_FDS', raising=False)
+        with pytest.raises(RuntimeError, match='LISTEN_PID'):
+            adopt_listening_fd(listening_sock.fileno())
+
+    def test_rejects_non_integer_listen_pid(self, monkeypatch, listening_sock):
+        """LISTEN_PID that is not an integer must raise RuntimeError."""
+        monkeypatch.setenv('LISTEN_PID', 'bogus')
+        monkeypatch.delenv('LISTEN_FDS', raising=False)
+        with pytest.raises(RuntimeError, match='LISTEN_PID'):
+            adopt_listening_fd(listening_sock.fileno())
+
+    def test_adopts_fd_inside_listen_fds_window(self, monkeypatch):
+        """An fd that falls inside [SD_LISTEN_FDS_START, SD_LISTEN_FDS_START+LISTEN_FDS) passes."""
+        monkeypatch.delenv('LISTEN_PID', raising=False)
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        s.bind(('127.0.0.1', 0))
+        s.listen(8)
+        fd = s.fileno()
+        # Set LISTEN_FDS large enough to cover this fd: window is [3, 3+N).
+        n = fd - _SD_LISTEN_FDS_START + 1
+        try:
+            monkeypatch.setenv('LISTEN_FDS', str(n))
+            adopted = adopt_listening_fd(fd)
+            adopted.detach()
+        finally:
+            s.close()
+
+    def test_rejects_fd_outside_listen_fds_window(self, monkeypatch, listening_sock):
+        """fd outside [SD_LISTEN_FDS_START, SD_LISTEN_FDS_START+LISTEN_FDS) raises."""
+        monkeypatch.delenv('LISTEN_PID', raising=False)
+        monkeypatch.setenv('LISTEN_FDS', '1')
+        with pytest.raises(RuntimeError, match='LISTEN_FDS'):
+            adopt_listening_fd(100)
+
+    def test_rejects_non_integer_listen_fds(self, monkeypatch, listening_sock):
+        """LISTEN_FDS that is not an integer must raise RuntimeError."""
+        monkeypatch.delenv('LISTEN_PID', raising=False)
+        monkeypatch.setenv('LISTEN_FDS', 'bad')
+        with pytest.raises(RuntimeError, match='LISTEN_FDS'):
+            adopt_listening_fd(listening_sock.fileno())
+
+    def test_raises_on_closed_fd(self, monkeypatch):
+        """Adopting a closed fd must raise RuntimeError (not bubble OSError)."""
+        monkeypatch.delenv('LISTEN_PID', raising=False)
+        monkeypatch.delenv('LISTEN_FDS', raising=False)
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        fd = s.fileno()
+        s.close()
+        with pytest.raises(RuntimeError, match='adopt'):
+            adopt_listening_fd(fd)

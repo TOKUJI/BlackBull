@@ -573,6 +573,8 @@ class BlackBull:
         await self.server.run(port=port)
 
     def serve(self, certfile=None, keyfile=None, port=0,
+              unix_path: str | None = None,
+              inherited_fd: int | None = None,
               workers: int | None = None,
               max_connections: int | None = None,
               stream_queue_depth: int | None = None,
@@ -590,10 +592,13 @@ class BlackBull:
 
             app.serve(port=8443, certfile='cert.pem', keyfile='key.pem', workers=4)
             app.serve(port=8443, certfile='cert.pem', keyfile='key.pem', reload=True)
+            app.serve(unix_path='/run/blackbull.sock')
         """
         serve(
             self,
             certfile=certfile, keyfile=keyfile, port=port,
+            unix_path=unix_path,
+            inherited_fd=inherited_fd,
             workers=workers,
             max_connections=max_connections,
             stream_queue_depth=stream_queue_depth,
@@ -615,6 +620,8 @@ class BlackBull:
 
 def serve(app, *,
           certfile=None, keyfile=None, port=0,
+          unix_path: str | None = None,
+          inherited_fd: int | None = None,
           workers: int | None = None,
           max_connections: int | None = None,
           stream_queue_depth: int | None = None,
@@ -674,6 +681,8 @@ def serve(app, *,
             asyncio.run(_run_single(
                 app,
                 certfile=certfile, keyfile=keyfile, port=port,
+                unix_path=unix_path,
+                inherited_fd=inherited_fd,
                 max_connections=max_connections,
                 stream_queue_depth=stream_queue_depth,
                 ws_queue_depth=ws_queue_depth,
@@ -692,9 +701,12 @@ def serve(app, *,
                                max_connections=max_connections,
                                stream_queue_depth=stream_queue_depth,
                                ws_queue_depth=ws_queue_depth)
-    master_server.open_socket(port)
+    master_server.open_socket(port, unix_path=unix_path, inherited_fd=inherited_fd)
+    addr = (f'unix:{master_server.unix_path}'
+            if master_server.unix_path else
+            f'port {master_server.port}')
     logger.info(
-        'Starting %d worker(s) on port %d%s', workers, master_server.port,
+        'Starting %d worker(s) on %s%s', workers, addr,
         ' [auto-reload]' if reload else '',
     )
 
@@ -713,7 +725,7 @@ def serve(app, *,
     master_server.close_socket()
 
 
-async def _run_single(app, *, certfile, keyfile, port,
+async def _run_single(app, *, certfile, keyfile, port, unix_path, inherited_fd,
                       max_connections, stream_queue_depth, ws_queue_depth):
     """Single-worker server loop — invoked from :func:`serve`."""
     from .server import ASGIServer  # noqa: PLC0415
@@ -721,5 +733,5 @@ async def _run_single(app, *, certfile, keyfile, port,
                         max_connections=max_connections,
                         stream_queue_depth=stream_queue_depth,
                         ws_queue_depth=ws_queue_depth)
-    server.open_socket(port)
+    server.open_socket(port, unix_path=unix_path, inherited_fd=inherited_fd)
     await server.run(port=port)

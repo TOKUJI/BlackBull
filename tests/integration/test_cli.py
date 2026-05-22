@@ -112,6 +112,88 @@ def test_cli_serves_blackbull_app(tmp_path: Path):
 
 
 @pytest.mark.timeout(45)
+def test_cli_serves_over_unix_domain_socket(tmp_path: Path):
+    """``blackbull module:app --bind unix:/path`` serves traffic through AF_UNIX.
+
+    Sprint 12a — nginx → BlackBull deployments use UDS to avoid exposing
+    a TCP port.  Verify the CLI parses the spec, ASGIServer binds AF_UNIX,
+    and a client can complete a request through the socket file.
+    """
+    blackbull = shutil.which('blackbull')
+    assert blackbull, "'blackbull' console script is not on PATH"
+
+    sock_path = tmp_path / 'bb.sock'
+    script = tmp_path / 'uds_app.py'
+    script.write_text(textwrap.dedent('''
+        from blackbull import BlackBull
+        app = BlackBull()
+        @app.route(path='/version')
+        async def version():
+            return b'uds-v1'
+    ''').lstrip())
+
+    env = os.environ.copy()
+    env['BB_ACCESS_LOG'] = '0'
+    env['PYTHONUNBUFFERED'] = '1'
+
+    log_path = tmp_path / 'subprocess.log'
+    log_fh = open(log_path, 'w', buffering=1)
+
+    proc = subprocess.Popen(
+        [blackbull, 'uds_app:app', '--bind', f'unix:{sock_path}'],
+        env=env,
+        cwd=str(tmp_path),
+        stdout=log_fh,
+        stderr=subprocess.STDOUT,
+        text=True,
+        start_new_session=True,
+    )
+
+    def _get_via_uds() -> bytes | None:
+        if not sock_path.exists():
+            return None
+        try:
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sk:
+                sk.settimeout(_REQ_TIMEOUT_SEC)
+                sk.connect(str(sock_path))
+                sk.sendall(b'GET /version HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n')
+                chunks: list[bytes] = []
+                while True:
+                    chunk = sk.recv(4096)
+                    if not chunk:
+                        break
+                    chunks.append(chunk)
+                raw = b''.join(chunks)
+            head, _, body = raw.partition(b'\r\n\r\n')
+            return body if b' 200 ' in head.split(b'\r\n', 1)[0] else None
+        except OSError:
+            return None
+
+    try:
+        body = _wait_until(
+            _get_via_uds,
+            deadline=time.monotonic() + _STARTUP_DEADLINE_SEC,
+        )
+        assert body == b'uds-v1', f'expected b"uds-v1", got {body!r}'
+        # Socket file should exist on disk (real bind, not stub).
+        assert sock_path.exists()
+        # And it must be a socket — not a regular file overwritten by accident.
+        import stat as _stat
+        assert _stat.S_ISSOCK(sock_path.stat().st_mode)
+    finally:
+        proc.terminate()
+        try:
+            proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait(timeout=5)
+        log_fh.close()
+        if log_path.exists() and log_path.stat().st_size > 0:
+            print(f'--- subprocess log ({log_path.stat().st_size} bytes) ---')
+            print(log_path.read_text()[-4000:])
+
+
+@pytest.mark.timeout(45)
 def test_cli_serves_raw_asgi_callable(tmp_path: Path):
     """``blackbull`` can serve a plain ASGI callable (no BlackBull instance).
 

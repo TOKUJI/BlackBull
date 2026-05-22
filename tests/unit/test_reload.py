@@ -75,27 +75,30 @@ def test_default_filter_accepts_only_py():
 
 
 def test_watcher_fires_callback_on_py_change(tmp_path: Path):
-    """Touching a .py file inside the watched dir must invoke the callback."""
+    """Touching a .py file inside the watched dir must invoke the callback.
+
+    Robustness note: watchfiles' Rust backend has a startup window where
+    its inotify install races with our first write; on WSL2 we have seen
+    the very first event lost.  Instead of a single fixed sleep we keep
+    rewriting the file at a slow cadence until the callback fires or the
+    test deadline expires — the real reload path has the same shape
+    (user mashes Save until they see effect).
+    """
     target = tmp_path / 'app.py'
     target.write_text('print("v1")\n')
 
     fired = threading.Event()
-
-    def _on_change():
-        fired.set()
-
-    watcher = FileChangeWatcher([str(tmp_path)], _on_change)
+    watcher = FileChangeWatcher([str(tmp_path)], fired.set)
     watcher.start()
     try:
-        # Give the watchfiles thread time to install its inotify watch
-        # before we start mutating files.  The first call also has to
-        # load watchfiles' Rust extension, which is slower than steady-state.
-        time.sleep(0.8)
-        target.write_text('print("v2")\n')
-        # watchfiles default debounce is ~50 ms; allow 2 s to be safe.
-        assert fired.wait(timeout=2.0), (
-            'FileChangeWatcher did not fire on .py edit within 2 s'
-        )
+        deadline = time.monotonic() + 5.0
+        i = 2
+        while time.monotonic() < deadline:
+            target.write_text(f'print("v{i}")\n')
+            if fired.wait(timeout=0.4):
+                return
+            i += 1
+        pytest.fail('FileChangeWatcher did not fire on .py edit within 5 s')
     finally:
         watcher.stop()
 

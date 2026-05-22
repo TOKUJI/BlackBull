@@ -13,7 +13,10 @@ import socket
 # private library
 from ..utils import HTTP2, pop_safe, check_port
 from ..event import Event
-from ..protocol.rsock import create_dual_stack_sockets, adopt_inherited_sockets
+from ..protocol.rsock import (
+    create_dual_stack_sockets, create_unix_socket,
+    adopt_inherited_sockets, adopt_listening_fd,
+)
 from ..protocol.frame import FrameFactory
 from ..protocol.frame_types import ErrorCodes, FrameTypes, FrameBase
 from .response import ResponderFactory
@@ -118,14 +121,17 @@ class LifespanManager:
 async def SocketManager(cb, raw_sockets, ssl_context):
     """Async context manager that creates asyncio servers from already-bound sockets.
 
-    On enter: wraps each raw socket in asyncio.start_server and yields the list.
+    On enter: wraps each raw socket in asyncio.start_server (TCP) or
+    asyncio.start_unix_server (AF_UNIX) and yields the list.
     On exit: closes all asyncio servers.
+
+    Dispatches by ``sock.family``: AF_INET / AF_INET6 take the TCP
+    server, AF_UNIX takes the unix server.  Both honour the configured
+    ``socket_backlog`` (asyncio's default of 100 is silently re-applied
+    via ``sock.listen(backlog)`` otherwise — caused wrk c=1024 connect
+    errors in Sprint 9c).
     """
-    # asyncio.start_server() defaults backlog=100 and re-calls
-    # ``sock.listen(backlog)`` on the supplied socket, silently overriding
-    # whatever sock.listen() we set during bind.  Re-apply the configured
-    # backlog so connection bursts beyond 100 don't get dropped at the
-    # kernel accept queue (was the cause of wrk c=1024 connect errors).
+    import socket as _socket  # noqa: PLC0415
     from ..env import get_settings as _get_settings  # noqa: PLC0415
     _backlog = _get_settings().socket_backlog
     servers = []
@@ -134,7 +140,13 @@ async def SocketManager(cb, raw_sockets, ssl_context):
         kwargs = {'sock': sock, 'ssl': ssl_context, 'backlog': _backlog}
         if ssl_context is not None:
             kwargs['ssl_handshake_timeout'] = 60.0
-        srv = await asyncio.start_server(cb, **kwargs)
+        if sock.family == _socket.AF_UNIX:
+            # AF_UNIX needs the dedicated unix-server entry point — the
+            # TCP create_server() rejects non-INET families at family-
+            # validation time.
+            srv = await asyncio.start_unix_server(cb, **kwargs)
+        else:
+            srv = await asyncio.start_server(cb, **kwargs)
         servers.append(srv)
     try:
         yield servers
@@ -178,6 +190,7 @@ class ASGIServer:
         self.make_ssl_context()
         self.socket = None
         self.port = None
+        self.unix_path: str | None = None
 
     @property
     def keyfile(self):
@@ -241,6 +254,16 @@ class ASGIServer:
         transport = getattr(writer, 'transport', None)
         peername = transport.get_extra_info('peername') if transport else None
         sockname = transport.get_extra_info('sockname') if transport else None
+        # AF_UNIX sockname is the path string; AF_INET[6] is a tuple.
+        # ASGI 3.0 expects ``scope['server']`` to be an iterable of
+        # ``(host, port)`` — encode UDS as ``(path, None)`` here so the
+        # actor layer doesn't have to special-case.  Peername on a UDS
+        # is typically an empty string; surface it as ``(path, None)``
+        # for symmetry.
+        if isinstance(sockname, str):
+            sockname = (sockname, None)
+        if isinstance(peername, str):
+            peername = (peername or '', None)
         ssl_object = transport.get_extra_info('ssl_object') if transport else None
         ssl_flag = ssl_object is not None
         alpn = ssl_object.selected_alpn_protocol() if ssl_object else None
@@ -285,7 +308,8 @@ class ASGIServer:
         finally:
             self._active_connections -= 1
 
-    def open_socket(self, port=0):
+    def open_socket(self, port=0, unix_path: str | None = None,
+                    inherited_fd: int | None = None):
         # When the master re-execs itself for an auto-reload, it hands
         # off the bound listening sockets via fd inheritance + the
         # BB_INHERIT_FDS env var.  Adopt them instead of binding so the
@@ -294,15 +318,64 @@ class ASGIServer:
         raw_sockets = adopt_inherited_sockets()
         if raw_sockets:
             self.raw_sockets = raw_sockets
-            self.port = raw_sockets[0].getsockname()[1]
+            sockname = raw_sockets[0].getsockname()
+            # AF_UNIX getsockname() returns the bound path string; TCP
+            # returns ``(host, port)``.  Store both so downstream callers
+            # (workers, integration tests) don't have to special-case.
+            if isinstance(sockname, str):
+                self.port = None
+                self.unix_path = sockname
+            else:
+                self.port = sockname[1]
+                self.unix_path = None
+            return
+
+        from ..env import get_settings as _get_settings  # noqa: PLC0415
+        _cfg = _get_settings()
+
+        if inherited_fd is not None:
+            # Systemd-style socket activation.  Bind / listen already
+            # happened in the supervisor; just adopt the fd and capture
+            # its sockname for ``port`` / ``unix_path`` so downstream
+            # code paths (lifespan, workers) see the same shape as
+            # a normal bind.
+            sock = adopt_listening_fd(inherited_fd)
+            self.raw_sockets = [sock]
+            sockname = sock.getsockname()
+            if isinstance(sockname, str):
+                self.port = None
+                self.unix_path = sockname
+            else:
+                # AF_INET sockname is ``(host, port)``; AF_INET6 is
+                # ``(host, port, flowinfo, scopeid)`` — port is always [1].
+                self.port = sockname[1]
+                self.unix_path = None
+            return
+
+        if unix_path is not None:
+            # AF_UNIX path: no port check, no dual-stack pairing, no TCP
+            # sockopts.  ``create_unix_socket`` handles stale-file cleanup
+            # and chmod for the typical reverse-proxy-runs-in-same-group
+            # deployment.
+            sock = create_unix_socket(
+                unix_path,
+                backlog=_cfg.socket_backlog,
+                sndbuf=_cfg.socket_sndbuf,
+                rcvbuf=_cfg.socket_rcvbuf,
+            )
+            if sock is None:
+                raise RuntimeError(
+                    f'Failed to bind AF_UNIX socket on {unix_path!r}.'
+                )
+            self.raw_sockets = [sock]
+            self.port = None
+            self.unix_path = unix_path
             return
 
         if not check_port(port=port):
             logger.error(f'Port ({port}) is not available. Try another port.')
             raise RuntimeError(f'Port ({port}) is not available. Try another port.')
 
-        from ..env import get_settings as _get_settings  # noqa: PLC0415
-        _cfg = _get_settings()
         raw_sockets = create_dual_stack_sockets(
             port,
             backlog=_cfg.socket_backlog,
@@ -321,6 +394,7 @@ class ASGIServer:
         # Derive the actual port from the first successfully bound socket
         # (matters when port=0 was requested, i.e. the OS picks a free port).
         self.port = self.raw_sockets[0].getsockname()[1]
+        self.unix_path = None
 
         # Do NOT wrap sockets with ssl_context here.
         # asyncio.start_server() accepts raw TCP sockets via sockets= and

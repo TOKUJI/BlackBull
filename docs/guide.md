@@ -1769,6 +1769,119 @@ python app.py --cert /etc/ssl/site.pem --key /etc/ssl/site.key
 `BB_ACCESS_LOG=0` assumes a separate log aggregator is consuming structured logs;
 without one, leave it at `1` so the access log keeps going to stderr.
 
+### §10.5  Advanced deployment: Unix sockets, fd inheritance, and TOML config
+
+#### Unix domain socket binding
+
+When BlackBull runs behind a local reverse proxy (nginx, Caddy), using an
+`AF_UNIX` socket eliminates TCP overhead and avoids exposing a port on
+`0.0.0.0`:
+
+```bash
+# CLI
+blackbull myapp:app --bind unix:/run/blackbull.sock
+
+# nginx upstream
+upstream blackbull { server unix:/run/blackbull.sock; }
+```
+
+The socket file is created with mode `0660` so a reverse proxy running
+in the same group can connect without a `chmod`.  A leftover socket file
+at the path is removed automatically before bind; BlackBull refuses to
+unlink a regular file or directory at that path (safety check).
+
+TCP-only socket options (`SO_REUSEPORT`, `TCP_USER_TIMEOUT`,
+`IPV6_V6ONLY`) are skipped for `AF_UNIX` sockets — they carry no
+meaning on a domain socket.
+
+#### fd inheritance — systemd socket activation
+
+Systemd can pre-bind the port as root and then start BlackBull
+unprivileged, handing the bound socket as an open file descriptor:
+
+```ini
+# /etc/systemd/system/blackbull.socket
+[Socket]
+ListenStream = 443
+
+[Install]
+WantedBy = sockets.target
+```
+
+```ini
+# /etc/systemd/system/blackbull.service
+[Service]
+User            = www-data
+ExecStart       = blackbull myapp:app --bind fd://3
+```
+
+BlackBull validates the `$LISTEN_PID` / `$LISTEN_FDS` environment
+variables according to the `sd_listen_fds(3)` protocol:
+
+* `LISTEN_PID` must equal the current process PID — if it points
+  elsewhere BlackBull refuses to adopt the fd (prevents accidentally
+  stealing another process's socket).
+* `LISTEN_FDS` defines the valid fd window `[3, 3 + LISTEN_FDS)`.
+  Fds outside that window are rejected.
+
+When neither variable is set (non-systemd handoff, tests) BlackBull
+accepts the fd unconditionally.
+
+Benefits of systemd socket activation:
+- Server can bind port 443 without running as root.
+- Zero-downtime restarts: systemd keeps the socket open while the old
+  service stops and the new one starts.
+- Lazy activation: the socket is ready before BlackBull starts; the
+  first connection wakes the service.
+
+#### TOML configuration file
+
+The `--config` flag loads a TOML file whose keys mirror the `BB_*`
+environment variables.  CLI flags and environment variables always take
+precedence over the file (env vars are the source of truth in
+containers / PaaS).
+
+```bash
+blackbull myapp:app --config blackbull.toml
+```
+
+Example `blackbull.toml`:
+
+```toml
+[server]
+workers             = 4
+stream_queue_depth  = 64
+ws_queue_depth      = 256
+socket_backlog      = 1024
+socket_reuseport    = true
+keep_alive_timeout  = 60.0
+frame_yield_every   = 8
+
+[tls]
+cert = "/etc/ssl/myapp.pem"
+key  = "/etc/ssl/myapp.key"
+
+[limits]
+max_connections  = 1000
+request_timeout  = 30.0
+header_timeout   = 5.0
+
+[logging]
+access_log   = true
+async_logging = true
+```
+
+**Priority order** (highest first):
+
+1. CLI flags (`--workers`, `--certfile`, …)
+2. Environment variables (`BB_WORKERS`, …)
+3. `blackbull.toml` (lowest — sets env vars with `setdefault`)
+
+The `[tls] cert` and `[tls] key` keys map to `--certfile` and
+`--keyfile` respectively; they apply only when neither CLI flag was
+passed.  All other keys set the corresponding `BB_*` environment
+variable before `get_settings()` is called.
+
 ---
 
 ## §11  Complete Example — SimpleTaskManager Skeleton
