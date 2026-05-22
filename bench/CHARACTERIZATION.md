@@ -170,6 +170,28 @@ Python version, server version, load-gen version, kernel TCP settings
 | uvicorn and daphne can't run lane A | Marked as N/A in the matrix; cross-protocol comparison handled by lane C |
 | `/echo` payload not standardized across HTTP/1.1 vs HTTP/2 lanes | Same 4 KiB body in both lanes; differences are protocol overhead, not body cost |
 
+### WSL baseline of record (as of 2026-05-23)
+
+The current BlackBull WSL2 baseline is
+[`bench/results/compare_servers_20260523-014828.md`](results/compare_servers_20260523-014828.md),
+taken at HEAD = `638f56c`.  Approximate single-run shape on the
+reference WSL host:
+
+| Lane | BlackBull req/s | Notes |
+|---|---|---|
+| A1 mux=1 (h2load) | 16.5–16.8 k | HTTP/2 |
+| B1 plaintext c=256 (wrk) | 19.7–21.6 k | HTTP/1.1 |
+| B3 json c=256 (wrk) | 22–24 k | HTTP/1.1 |
+| B6 echo-1k (wrk) | 19.8–23.4 k | HTTP/1.1 |
+| C2 500-VU (k6) | 12.1 k | p99 ~72 ms (host-noise-dependent) |
+| D WebSocket avg RTT | 0.21 ms | k6 ws |
+
+Runs in [`bench/results/baselines/pre_sprint9d/`](results/baselines/pre_sprint9d/)
+**pre-date the Sprint 9c/9d hot-path landing (commit `4e28116`,
+2026-05-22 13:47 JST)** and should not be used for comparisons
+against current code — the post-9d B1/B3/B6 numbers are ~25–40 %
+higher than the pre-9d baseline.  See the README in that directory.
+
 ## File layout (target)
 
 ```

@@ -11,9 +11,20 @@ changes.
 
 ## Prerequisites
 
-- `aws configure` with credentials that can `ec2:Run/Terminate/Describe*`,
-  `ec2:*KeyPair`, `ec2:*SecurityGroup`.  An IAM user dedicated to bench
-  runs is recommended.
+- Working AWS credentials in the standard CLI resolution chain.  The
+  scripts call `aws sts get-caller-identity` as a preflight, so any
+  authenticated session works — pick whichever fits your account:
+  - **`aws login`** *(recommended)* — IAM Identity Center / Builder ID
+    SSO.  Short-lived auto-expiring session tokens, no static secret
+    on disk.  Re-run if the session expires mid-pass (rare — a full
+    pass is ~70 min, comfortably inside a default 1-hour session).
+  - `aws sso login --profile <name>` — same mechanism if you have a
+    named SSO profile configured.
+  - `aws configure` — long-lived static IAM keys.  Works but
+    discouraged for human users; fine for a dedicated bench IAM user.
+- IAM permissions: `ec2:Run/Terminate/Describe*`, `ec2:*KeyPair`,
+  `ec2:*SecurityGroup*`.  Any role/policy granting these (e.g.
+  `AmazonEC2FullAccess`) suffices.
 - `aws`, `ssh`, `rsync`, `jq`, `curl` on the local machine.
 - Outbound port 22 from this machine (for SSH).  The instance's SG only
   permits ingress 22/tcp from this host's current public IP.

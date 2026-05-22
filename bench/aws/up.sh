@@ -79,7 +79,7 @@ else
     echo "Creating security group $SG_NAME ..."
     SG_ID=$("${AWS_BASE[@]}" ec2 create-security-group \
         --group-name "$SG_NAME" \
-        --description "BlackBull bench harness — temporary" \
+        --description "BlackBull bench harness (temporary)" \
         --tag-specifications "ResourceType=security-group,Tags=[{Key=$TAG_KEY,Value=$TAG_VALUE}]" \
         --query 'GroupId' --output text)
     echo "  group id: $SG_ID"

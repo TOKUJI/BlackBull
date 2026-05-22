@@ -63,7 +63,7 @@ _bench_aws_check_env() {
 
     # Confirm caller credentials work before we try to spend money.
     if ! "${AWS_BASE[@]}" sts get-caller-identity >/dev/null 2>&1; then
-        echo "bench/aws: aws CLI cannot reach AWS — run 'aws configure' first" >&2
+        echo "bench/aws: aws CLI cannot reach AWS — run 'aws login' (or 'aws sso login' / 'aws configure') first" >&2
         return 1
     fi
 }
