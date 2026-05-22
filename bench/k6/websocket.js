@@ -28,14 +28,22 @@ export const options = {
 const URL    = 'wss://localhost:8443/ws';
 const PARAMS = {};
 
+// Sequence counter for unique message IDs (the old Date.now()-as-id
+// collides when two pings land in the same millisecond — frequent on a
+// loopback). RTT is still measured in ms; k6's WS VM does not expose
+// performance.now() (ReferenceError), and there is no high-resolution
+// timer in this context. On WSL2 loopback most RTTs are <1 ms so p50
+// usually reports 0 — interpret this lane as throughput first
+// (msg/s) and tail second.
+let _seq = 0;
+
 export default function () {
   const res = ws.connect(URL, PARAMS, function (socket) {
-    let pending = {};  // id → sent timestamp
+    let pending = {};  // id → sent timestamp (ms)
 
     socket.on('open', () => {
-      // Send a ping every 200 ms for the duration of the connection
       socket.setInterval(() => {
-        const id  = Date.now().toString();
+        const id = '' + (++_seq);
         pending[id] = Date.now();
         socket.send(id);
       }, 200);

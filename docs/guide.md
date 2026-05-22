@@ -1430,15 +1430,23 @@ asyncio.run(app.run(port=8000))
 # HTTPS + HTTP/2 (negotiated via TLS ALPN)
 asyncio.run(app.run(port=8443, certfile='cert.pem', keyfile='key.pem'))
 
-# Development: hot-reload when source files change
-asyncio.run(app.run(port=8000, debug=True))
+# Development: hot-reload when *.py files change.
+# Uses watchfiles + master-keeps-listening-sockets across worker recycles.
+# Requires the [reload] extra: pip install -e '.[reload]'
+app.serve(port=8000, reload=True)
 ```
 
 `app.run()` signature:
 
 ```python
-async def run(port=0, certfile=None, keyfile=None, debug=False)
+async def run(port=0, certfile=None, keyfile=None,
+              workers=1, max_connections=None,
+              stream_queue_depth=None, ws_queue_depth=None)
 ```
+
+`app.serve()` is the synchronous counterpart; pass ``reload=True`` to
+enable auto-reload (only available via ``serve()`` because it needs a
+long-lived supervisor process around the event loop).
 
 ### §10.1  Workers and the event loop
 

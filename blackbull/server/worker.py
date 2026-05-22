@@ -39,6 +39,14 @@ def run_worker(app, raw_sockets, ssl_context, worker_id: int,
     # Workers should not respond to Ctrl+C directly — the master handles the
     # signal and sends SIGTERM to every worker for a coordinated shutdown.
     signal.signal(signal.SIGINT, signal.SIG_IGN)
+    # ``fork`` inherits any SIGTERM handler the master installed (eg the
+    # one that flips ``_stopped`` to break the supervision loop).  That
+    # handler is a no-op inside the worker — it does not stop the
+    # asyncio loop — and prevents the default-terminate behaviour from
+    # firing.  Restore the default disposition so master.terminate()
+    # actually exits the worker promptly; without this the master has
+    # to SIGKILL every recycle, which makes auto-reload glacial.
+    signal.signal(signal.SIGTERM, signal.SIG_DFL)
 
     from ..env import apply_event_loop_policy, get_settings as _get_settings  # noqa: PLC0415
     from ..logger import setup_async_logging, teardown_async_logging  # noqa: PLC0415

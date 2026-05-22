@@ -18,11 +18,10 @@ from ..event_aggregator import EventAggregator
 from .headers import Headers
 from .recipient import AbstractReader, IncompleteReadError, RecipientFactory, _WS_EVENT_QUEUE_DEPTH
 from .sender import AbstractWriter, SenderFactory
-from .access_log import AccessLogRecord as _AccessLogRecord, _make_capturing_send, _make_disconnect_detecting_receive
+from .access_log import AccessLogRecord as _AccessLogRecord, _make_capturing_send, _make_disconnect_detecting_receive, emit_access_log as _emit_access_log
 from .constants import ASGIEvent, WSCloseCode
 
 logger = logging.getLogger(__name__)
-_access_logger = logging.getLogger('blackbull.access')
 
 _REQ_END = b'\r\n\r\n'
 _WS_GUID = b'258EAFA5-E914-47DA-95CA-C5AB0DC85B11'  # RFC 6455 §1.3
@@ -275,7 +274,14 @@ class HTTP1Actor(Actor):
 
                 log_record = _AccessLogRecord.from_scope(scope)
                 scope['state']['access_log'] = log_record
-                capturing_send = _make_capturing_send(send, log_record)
+                # Inline access-log capture into the sender itself —
+                # avoids the per-event coroutine dispatch through a
+                # wrapper (which was 622 samples / 7% of CPU in the
+                # py-spy profile).  The sender's existing match arms
+                # already pattern-match on the event types we care
+                # about; updating ``log_record`` there is free.
+                send._log_record = log_record
+                capturing_send = send
                 # RFC 9110 §9.3.2 — a HEAD response must be identical to the
                 # GET response except for the absence of the body.  We
                 # synthesise that by dispatching to the GET handler and
@@ -302,7 +308,19 @@ class HTTP1Actor(Actor):
                     break
 
                 self._request = b''
-                next_chunk = await self._reader.readuntil(_REQ_END)
+                # Idle keep-alive timeout (replaces per-accept SO_KEEPALIVE).
+                # The first request used header_timeout above; *subsequent*
+                # requests are bounded by keep_alive_timeout so a peer
+                # that has vanished silently (process crash, NAT drop,
+                # mobile network change) doesn't hold a ghost connection.
+                try:
+                    if cfg.keep_alive_timeout > 0:
+                        async with asyncio.timeout(cfg.keep_alive_timeout):
+                            next_chunk = await self._reader.readuntil(_REQ_END)
+                    else:
+                        next_chunk = await self._reader.readuntil(_REQ_END)
+                except TimeoutError:
+                    break  # idle too long — drop the connection
                 if next_chunk == _REQ_END:
                     break
                 self._request = next_chunk
@@ -475,7 +493,7 @@ class HTTP1Actor(Actor):
             await ws_actor.run()
         finally:
             log_record.close_code = ws_actor._disconnect_code
-            _access_logger.info(log_record.format(), extra=log_record.as_extra())
+            _emit_access_log(log_record)
 
     async def _do_ws_handshake(self, scope: dict) -> bool:
         """Validate the WebSocket upgrade and store a deferred 101 callback.
@@ -586,7 +604,7 @@ class HTTP1Actor(Actor):
             except BaseException:
                 return False
             finally:
-                _access_logger.info(log_record.format(), extra=log_record.as_extra())
+                _emit_access_log(log_record)
         else:
             _dispatcher = getattr(self._app, '_dispatcher', None)
             if _dispatcher is not None:
@@ -609,7 +627,7 @@ class HTTP1Actor(Actor):
                     ))
                 await self._app(scope, detecting_receive, capturing_send)
             finally:
-                _access_logger.info(log_record.format(), extra=log_record.as_extra())
+                _emit_access_log(log_record)
                 if (_dispatcher is not None
                         and scope.get('type') == 'http'
                         and not scope.get('_disconnected')):

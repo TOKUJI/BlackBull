@@ -54,7 +54,15 @@ speed = [
     "uvloop",
 ]
 
+reload = [
+    "watchfiles",
+]
+
 benchmark = []  # k6 and h2load are installed via bench/install.sh (not pip packages)
+
+profiling = [
+    "py-spy",
+]
 
 [tool.coverage.run]
 source = ["blackbull"]

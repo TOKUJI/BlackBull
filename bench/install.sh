@@ -1,18 +1,98 @@
 #!/usr/bin/env bash
-# Install k6 and h2load on Debian/Ubuntu (including WSL2)
+# Install benchmark tooling on Debian/Ubuntu (including WSL2)
 #
 # Run once:
 #   bash bench/install.sh
+#
+# Installs:
+#   - h2load (nghttp2-client)     HTTP/2 load gen
+#   - wrk                         HTTP/1.1 load gen (TechEmpower-style)
+#   - wrk2 (built from source)    Constant-rate, CO-corrected HdrHistogram
+#   - oha                         HTTP/1.1 load gen (granian-style)
+#   - k6                          VU-based load gen + WebSocket
+#   - nginx                       reference floor (static plaintext/json)
+#   - uvicorn, hypercorn, granian, daphne, starlette  peer ASGI servers
 
 set -e
 
-echo "=== Installing h2load (nghttp2-client) ==="
+echo "=== Installing h2load (nghttp2-client) + wrk + nginx ==="
 sudo apt-get update -qq
-sudo apt-get install -y nghttp2-client
+sudo apt-get install -y nghttp2-client wrk nginx libssl-dev build-essential
+
+echo ""
+echo "=== Building wrk2 (Gil Tene's CO-corrected fork) ==="
+# Local patch: upstream sample_rate() divides by elapsed_ms without guarding
+# against 0, which on fast servers (sub-ms first sample) yields +Inf and a
+# garbage uint64 that aborts the HDR histogram with
+# `bucket_index < h->bucket_count`. Patch the divisor guard before build.
+if [ ! -x "$HOME/.local/bin/wrk2" ]; then
+    mkdir -p "$HOME/.local/src" "$HOME/.local/bin"
+    cd "$HOME/.local/src"
+    [ -d wrk2 ] || git clone --depth=1 https://github.com/giltene/wrk2.git
+    cd wrk2
+    if ! grep -q 'elapsed_ms ? (thread->requests' src/wrk.c; then
+        sed -i 's|uint64_t requests = (thread->requests / (double) elapsed_ms) \* 1000;|uint64_t requests = elapsed_ms ? (thread->requests / (double) elapsed_ms) * 1000 : 0;|' src/wrk.c
+        echo "Patched sample_rate() divide-by-zero in src/wrk.c"
+    fi
+    # Patch 2: response_complete() records expected_latency_timing into the
+    # HDR histogram unguarded. When the timing is negative (early start of
+    # the batch logic — the author even left a 'we are about to crash and
+    # die' printf in the path), the negative int64 gets reinterpreted as a
+    # huge uint64 and aborts on bucket_index. Guard the record calls.
+    if ! grep -q 'expected_latency_timing >= 0' src/wrk.c; then
+        python3 - <<'PYEOF'
+import pathlib
+p = pathlib.Path('src/wrk.c')
+src = p.read_text()
+needle = ("if (cfg.record_all_responses || !c->has_pending) {\n"
+          "        hdr_record_value(thread->latency_histogram, expected_latency_timing);\n"
+          "\n"
+          "        uint64_t actual_latency_timing = now - c->actual_latency_start;\n"
+          "        hdr_record_value(thread->u_latency_histogram, actual_latency_timing);\n"
+          "    }")
+replacement = ("if (cfg.record_all_responses || !c->has_pending) {\n"
+               "        if (expected_latency_timing >= 0) {\n"
+               "            hdr_record_value(thread->latency_histogram, expected_latency_timing);\n"
+               "        }\n"
+               "\n"
+               "        int64_t actual_latency_timing = now - c->actual_latency_start;\n"
+               "        if (actual_latency_timing >= 0) {\n"
+               "            hdr_record_value(thread->u_latency_histogram, actual_latency_timing);\n"
+               "        }\n"
+               "    }")
+assert needle in src, 'response_complete pattern not found — wrk2 source layout changed'
+p.write_text(src.replace(needle, replacement))
+PYEOF
+        echo "Patched response_complete() negative-latency record in src/wrk.c"
+    fi
+    make clean >/dev/null 2>&1 || true
+    make
+    cp wrk "$HOME/.local/bin/wrk2"
+    cd - >/dev/null
+    echo "wrk2 installed at $HOME/.local/bin/wrk2"
+else
+    echo "wrk2 already installed at $HOME/.local/bin/wrk2 (run 'rm \$HOME/.local/bin/wrk2' to force a patched rebuild)"
+fi
+
+echo ""
+echo "=== Installing oha (Rust HTTP load tool, granian-style) ==="
+if ! command -v oha >/dev/null 2>&1; then
+    # Prefer apt; fall back to cargo if available
+    if apt-cache show oha >/dev/null 2>&1; then
+        sudo apt-get install -y oha
+    elif command -v cargo >/dev/null 2>&1; then
+        cargo install oha
+    else
+        echo "  oha not packaged and cargo not installed."
+        echo "  Manual install: download a release binary from"
+        echo "    https://github.com/hatoo/oha/releases"
+    fi
+else
+    echo "oha already installed, skipping."
+fi
 
 echo ""
 echo "=== Installing k6 ==="
-# Official Grafana k6 APT repository
 if ! command -v k6 >/dev/null 2>&1; then
   sudo apt-get install -y gnupg curl
   curl -fsSL https://dl.k6.io/key.gpg \
@@ -27,12 +107,28 @@ else
 fi
 
 echo ""
+echo "=== Installing peer ASGI servers ==="
+pip install --upgrade \
+    uvicorn[standard] \
+    hypercorn \
+    granian \
+    daphne \
+    starlette
+
+echo ""
 echo "=== Versions ==="
-k6 version
 h2load --version | head -1
+wrk --version 2>&1 | head -1 || true
+oha --version 2>/dev/null || echo "oha: not installed"
+k6 version
+python3 -c "import uvicorn;  print('uvicorn   ', uvicorn.__version__)"
+python3 -c "import hypercorn; print('hypercorn ', getattr(hypercorn, '__version__', '(no __version__)'))"
+python3 -c "import granian;   print('granian   ', granian.__version__)"
+python3 -c "import daphne;    print('daphne    ', daphne.__version__)"
+python3 -c "import starlette; print('starlette ', starlette.__version__)"
 
 echo ""
 echo "=== Setup complete ==="
-echo "Start the bench server:  python bench/app.py"
-echo "Then run:                k6 run bench/k6/http_rampup.js"
-echo "                         bash bench/h2load_run.sh"
+echo "Start a peer server:    bash bench/peers/run_peer.sh blackbull"
+echo "Run BlackBull suite:    bash bench/benchmark.sh"
+echo "Run peer comparison:    bash bench/peers/compare.sh"

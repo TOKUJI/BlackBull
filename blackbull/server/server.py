@@ -13,7 +13,7 @@ import socket
 # private library
 from ..utils import HTTP2, pop_safe, check_port
 from ..event import Event
-from ..protocol.rsock import create_dual_stack_sockets
+from ..protocol.rsock import create_dual_stack_sockets, adopt_inherited_sockets
 from ..protocol.frame import FrameFactory
 from ..protocol.frame_types import ErrorCodes, FrameTypes, FrameBase
 from .response import ResponderFactory
@@ -21,12 +21,11 @@ from .parser import ParserFactory
 from .sender import SenderFactory, AbstractWriter
 from .recipient import (RecipientFactory, HTTP2Recipient, AbstractReader, AsyncioReader,
                         IncompleteReadError, _HTTP2_STREAM_QUEUE_DEPTH, _WS_EVENT_QUEUE_DEPTH)
-from .access_log import AccessLogRecord, _make_capturing_send
+from .access_log import AccessLogRecord, _make_capturing_send, emit_access_log as _emit_access_log
 from .constants import ASGIEvent
 from .headers import Headers
 from .http2_actor import HTTP2Actor
 logger = logging.getLogger(__name__)
-_access_logger = logging.getLogger('blackbull.access')
 
 async def _run_with_log(coro, record: AccessLogRecord,
                         dispatcher=None, scope: dict | None = None) -> None:
@@ -55,7 +54,7 @@ async def _run_with_log(coro, record: AccessLogRecord,
     except Exception:
         logger.exception('HTTP/2 stream raised an unhandled exception')
     finally:
-        _access_logger.info(record.format(), extra=record.as_extra())
+        _emit_access_log(record)
         if (dispatcher is not None and scope is not None
                 and scope.get('type') == 'http'
                 and not scope.get('_disconnected')):
@@ -122,9 +121,20 @@ async def SocketManager(cb, raw_sockets, ssl_context):
     On enter: wraps each raw socket in asyncio.start_server and yields the list.
     On exit: closes all asyncio servers.
     """
+    # asyncio.start_server() defaults backlog=100 and re-calls
+    # ``sock.listen(backlog)`` on the supplied socket, silently overriding
+    # whatever sock.listen() we set during bind.  Re-apply the configured
+    # backlog so connection bursts beyond 100 don't get dropped at the
+    # kernel accept queue (was the cause of wrk c=1024 connect errors).
+    from ..env import get_settings as _get_settings  # noqa: PLC0415
+    _backlog = _get_settings().socket_backlog
     servers = []
     for sock in raw_sockets:
-        srv = await asyncio.start_server(cb, sock=sock, ssl=ssl_context)
+        # ssl_handshake_timeout is meaningful only when SSL is enabled.
+        kwargs = {'sock': sock, 'ssl': ssl_context, 'backlog': _backlog}
+        if ssl_context is not None:
+            kwargs['ssl_handshake_timeout'] = 60.0
+        srv = await asyncio.start_server(cb, **kwargs)
         servers.append(srv)
     try:
         yield servers
@@ -140,7 +150,7 @@ class ASGIServer:
     """
     def __init__(self, app, *,
                  ssl_context=None, certfile=None, keyfile=None, password=None,
-                 max_connections: int = 500,
+                 max_connections: int = 0,
                  stream_queue_depth: int = _HTTP2_STREAM_QUEUE_DEPTH,
                  ws_queue_depth: int = _WS_EVENT_QUEUE_DEPTH,
                  **kwds):
@@ -149,6 +159,14 @@ class ASGIServer:
         self._stream_queue_depth = stream_queue_depth
         self._ws_queue_depth = ws_queue_depth
         self._active_connections = 0
+        # Cache the dispatcher + aggregator pair once — both are
+        # process-wide singletons.  Looking them up per accept is wasted
+        # work on the hot connection-burst path.
+        from ..event_aggregator import EventAggregator as _EA  # noqa: PLC0415
+        self._cached_dispatcher = getattr(self.app, '_dispatcher', None)
+        self._cached_aggregator = (_EA(self._cached_dispatcher)
+                                    if self._cached_dispatcher is not None
+                                    else None)
 
         # Create TLS context
         if ssl_context and (certfile or keyfile):
@@ -217,7 +235,6 @@ class ASGIServer:
     async def client_connected_cb(self, reader, writer):
         """Called when the server receives a new TCP connection."""
         from .connection_actor import ConnectionActor  # noqa: PLC0415
-        from ..event_aggregator import EventAggregator  # noqa: PLC0415
         from .sender import AsyncioWriter  # noqa: PLC0415
         from .recipient import AsyncioReader  # noqa: PLC0415
 
@@ -228,36 +245,26 @@ class ASGIServer:
         ssl_flag = ssl_object is not None
         alpn = ssl_object.selected_alpn_protocol() if ssl_object else None
 
-        sock = transport.get_extra_info('socket') if transport else None
-        if sock is not None:
-            import socket as _socket  # noqa: PLC0415
-            from ..env import get_settings as _get_settings  # noqa: PLC0415
-            _cfg = _get_settings()
-            # TCP keep-alive: evict ghost connections after ~80 s of silence
-            # (60 s idle + 3 × 10 s probes) without an application-layer timeout.
-            sock.setsockopt(_socket.SOL_SOCKET, _socket.SO_KEEPALIVE, 1)
-            if hasattr(_socket, 'TCP_KEEPIDLE'):   # Linux
-                sock.setsockopt(_socket.IPPROTO_TCP, _socket.TCP_KEEPIDLE, 60)
-            if hasattr(_socket, 'TCP_KEEPINTVL'):
-                sock.setsockopt(_socket.IPPROTO_TCP, _socket.TCP_KEEPINTVL, 10)
-            if hasattr(_socket, 'TCP_KEEPCNT'):
-                sock.setsockopt(_socket.IPPROTO_TCP, _socket.TCP_KEEPCNT, 3)
-            # Enlarge kernel send/receive buffers (configurable via BB_SOCKET_SNDBUF/RCVBUF).
-            # The kernel doubles the requested value; 0 leaves the default unchanged.
-            if _cfg.socket_sndbuf:
-                sock.setsockopt(_socket.SOL_SOCKET, _socket.SO_SNDBUF, _cfg.socket_sndbuf)
-            if _cfg.socket_rcvbuf:
-                sock.setsockopt(_socket.SOL_SOCKET, _socket.SO_RCVBUF, _cfg.socket_rcvbuf)
+        # Defense against dead/stuck peers — moved off the hot accept path:
+        #   SO_SNDBUF / SO_RCVBUF / TCP_USER_TIMEOUT are on the LISTENING
+        #     socket and inherited (set once at open_socket time).
+        #   Idle keep-alive ghosts are evicted by an app-level timer in
+        #     HTTP1Actor (``BB_KEEP_ALIVE_TIMEOUT``, default 60 s) — the
+        #     hypercorn pattern.
+        # Net cost: 0 setsockopt syscalls per accept (was 6, then 4).
 
         wrapped_reader = (reader if isinstance(reader, AbstractReader)
                           else AsyncioReader(reader))
         wrapped_writer = (writer if isinstance(writer, AbstractWriter)
                           else AsyncioWriter(writer))
 
-        dispatcher = getattr(self.app, '_dispatcher', None)
-        aggregator = EventAggregator(dispatcher) if dispatcher is not None else None
+        aggregator = self._cached_aggregator
 
-        if self._active_connections >= self._max_connections:
+        # max_connections == 0 disables the cap entirely (rely on OS fd
+        # limits and per-stream backpressure — the hypercorn/granian
+        # default).  Otherwise reject the new connection only when we're
+        # at the cap.
+        if self._max_connections and self._active_connections >= self._max_connections:
             logger.warning(
                 'Connection limit reached (%d/%d) — rejecting %s',
                 self._active_connections, self._max_connections, peername,
@@ -279,12 +286,31 @@ class ASGIServer:
             self._active_connections -= 1
 
     def open_socket(self, port=0):
+        # When the master re-execs itself for an auto-reload, it hands
+        # off the bound listening sockets via fd inheritance + the
+        # BB_INHERIT_FDS env var.  Adopt them instead of binding so the
+        # listener stays continuous across the reload (no port-release
+        # race, no missed SYNs).
+        raw_sockets = adopt_inherited_sockets()
+        if raw_sockets:
+            self.raw_sockets = raw_sockets
+            self.port = raw_sockets[0].getsockname()[1]
+            return
+
         if not check_port(port=port):
             logger.error(f'Port ({port}) is not available. Try another port.')
             raise RuntimeError(f'Port ({port}) is not available. Try another port.')
 
         from ..env import get_settings as _get_settings  # noqa: PLC0415
-        raw_sockets = create_dual_stack_sockets(port, backlog=_get_settings().socket_backlog)
+        _cfg = _get_settings()
+        raw_sockets = create_dual_stack_sockets(
+            port,
+            backlog=_cfg.socket_backlog,
+            sndbuf=_cfg.socket_sndbuf,
+            rcvbuf=_cfg.socket_rcvbuf,
+            user_timeout_ms=_cfg.tcp_user_timeout_ms,
+            keepalive=False,  # replaced by app-level keep_alive_timeout
+        )
 
         if not raw_sockets:
             logger.error(f'Failed to open port ({port}). Try another port.')

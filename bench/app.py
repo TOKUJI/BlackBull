@@ -3,14 +3,21 @@
 Exposes minimal-overhead routes so load tests measure the framework's
 request/response pipeline, not application logic.
 
-Routes
-------
+Routes — internal characterization
+----------------------------------
 GET  /ping     4-byte pong — latency baseline
 GET  /1kb      1 KiB response — small-response throughput
+GET  /16kb     16 KiB response — medium response
 GET  /64kb     64 KiB response — large-response / flow-control
+GET  /1mb      1 MiB response — exercises flow-control window
 POST /echo     echo back the request body — input processing
 GET  /ws       WebSocket echo — RTT benchmark
 GET  /metrics  JSON event loop lag stats from the in-process monitor
+
+Routes — public-comparable (TechEmpower / granian)
+--------------------------------------------------
+GET  /plaintext  "Hello, World!" text/plain — TechEmpower Plaintext
+GET  /json       {"message":"Hello, World!"} application/json — TechEmpower JSON
 
 Start (HTTPS + HTTP/2 via ALPN)::
 
@@ -29,7 +36,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from http import HTTPMethod
 
-from blackbull import BlackBull, read_body
+from blackbull import BlackBull, Response, read_body
 from blackbull.utils import Scheme
 from bench.lag_monitor import LoopLagMonitor
 
@@ -40,6 +47,8 @@ from bench.lag_monitor import LoopLagMonitor
 app = BlackBull()
 monitor = LoopLagMonitor(interval=0.05, window=400)
 
+_PLAINTEXT = b'Hello, World!'
+_JSON      = b'{"message":"Hello, World!"}'
 _1KB  = os.urandom(1024)
 _16KB = os.urandom(16000)
 _64KB = os.urandom(65536)
@@ -63,6 +72,16 @@ async def _stop_monitor():
 @app.route(path='/ping', methods=[HTTPMethod.GET])
 async def ping():
     return b'pong'
+
+
+@app.route(path='/plaintext', methods=[HTTPMethod.GET])
+async def plaintext():
+    return Response(_PLAINTEXT, content_type='text/plain; charset=utf-8')
+
+
+@app.route(path='/json', methods=[HTTPMethod.GET])
+async def json_hello():
+    return Response(_JSON, content_type='application/json')
 
 
 @app.route(path='/1kb', methods=[HTTPMethod.GET])

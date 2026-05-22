@@ -1,6 +1,7 @@
 """Per-request access-log helpers shared by the HTTP/1.1 and HTTP/2 paths."""
 from __future__ import annotations
 
+import logging
 import time
 from dataclasses import dataclass, field
 
@@ -10,6 +11,22 @@ from .constants import ASGIEvent
 # ``_make_disconnect_detecting_receive``.  No circular-import risk —
 # ``event_aggregator`` does not import anything back from this module.
 from ..event_aggregator import EventAggregator  # noqa: TC002
+
+_access_logger = logging.getLogger('blackbull.access')
+
+
+def emit_access_log(record: 'AccessLogRecord') -> None:
+    """Emit *record* on the access logger if INFO is enabled.
+
+    The isEnabledFor gate matters: ``record.format()`` and
+    ``record.as_extra()`` are evaluated before ``logger.info`` decides to
+    discard the call.  Profiling at -R 5000 with BB_ACCESS_LOG=0 showed
+    these two calls still costing ~1.2% of CPU.  Peers (uvicorn / granian /
+    daphne) skip the work entirely when access logging is disabled; gating
+    here matches that behaviour.
+    """
+    if _access_logger.isEnabledFor(logging.INFO):
+        _access_logger.info(record.format(), extra=record.as_extra())
 
 
 @dataclass

@@ -29,7 +29,7 @@ from .recipient import (AbstractReader, IncompleteReadError,
                         RecipientFactory, _HTTP2_STREAM_QUEUE_DEPTH)
 from .response import ResponderFactory
 from .sender import AbstractWriter, SenderFactory
-from .access_log import AccessLogRecord, _make_capturing_send, _make_disconnect_detecting_receive
+from .access_log import AccessLogRecord, _make_capturing_send, _make_disconnect_detecting_receive, emit_access_log as _emit_access_log
 from .constants import ASGIEvent
 from .http1_actor import RequestActor
 
@@ -70,7 +70,6 @@ def _signal_recipients(recipients: dict[int, _StreamRecipient]) -> None:
 
 def _make_log_record(scope):
     return AccessLogRecord.from_scope(scope)
-_access_logger = logging.getLogger('blackbull.access')
 
 _DEFAULT_PRIORITY: dict[str, int | bool] = {'urgency': 3, 'incremental': False}
 _HTTP2_EXTENSIONS: dict = {ASGIEvent.HTTP_RESPONSE_PUSH: {}}
@@ -146,8 +145,7 @@ class StreamActor(Actor):
                     self._stream_id, ErrorCodes.INTERNAL_ERROR)
             )
         finally:
-            _access_logger.info(
-                self._log_record.format(), extra=self._log_record.as_extra())
+            _emit_access_log(self._log_record)
 
     async def _handle(self, msg: Message) -> None:  # never reached
         raise NotImplementedError
@@ -904,7 +902,7 @@ class HTTP2Actor(Actor):
                 await ws_actor.run()
             finally:
                 log_record.close_code = ws_actor._disconnect_code
-                _access_logger.info(log_record.format(), extra=log_record.as_extra())
+                _emit_access_log(log_record)
 
         self._active_stream_count += 1
         task = tg.create_task(_run_ws())

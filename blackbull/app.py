@@ -22,7 +22,6 @@ from collections.abc import Awaitable, Callable, Iterable
 from http import HTTPStatus, HTTPMethod
 from pathlib import Path
 import asyncio
-import sys
 import traceback
 
 # import from this package
@@ -30,7 +29,6 @@ import logging
 from .event import Event, EventDispatcher, EventHandler
 from .utils import Scheme
 from .router import Router, ErrorRouter, MethodNotApplicable, PathNotRegistered, ConfigurationError, has_middleware_param
-from .server.watch import Watcher, force_reload
 logger = logging.getLogger(__name__)
 
 
@@ -465,13 +463,26 @@ class BlackBull:
     def has_server(self):
         return hasattr(self, 'server')
 
-    def create_server(self, certfile=None, keyfile=None, port=0, ):
+    def create_server(self, certfile=None, keyfile=None, port=0,
+                      max_connections: int | None = None,
+                      stream_queue_depth: int | None = None,
+                      ws_queue_depth: int | None = None):
         from .server import ASGIServer
-        self.server = ASGIServer(
-            self,
-            certfile=certfile,
-            keyfile=keyfile,
-            loop=self.loop)
+        from .env import get_settings as _get_settings  # noqa: PLC0415
+        _cfg = _get_settings()
+        kwargs = {
+            'certfile': certfile,
+            'keyfile':  keyfile,
+            'loop':     self.loop,
+        }
+        # Honour explicit args; fall back to env-derived settings so
+        # BB_MAX_CONNECTIONS / BB_STREAM_QUEUE_DEPTH / BB_WS_QUEUE_DEPTH
+        # actually reach ASGIServer in single-worker mode (multi-worker
+        # already did this via serve()).
+        kwargs['max_connections']    = max_connections    if max_connections    is not None else _cfg.max_connections
+        kwargs['stream_queue_depth'] = stream_queue_depth if stream_queue_depth is not None else _cfg.stream_queue_depth
+        kwargs['ws_queue_depth']     = ws_queue_depth     if ws_queue_depth     is not None else _cfg.ws_queue_depth
+        self.server = ASGIServer(self, **kwargs)
         self.server.open_socket(port)
         self._logger.info(self.server)
 
@@ -521,8 +532,11 @@ class BlackBull:
             _swagger_ui.__blackbull_openapi_internal__ = True
             self.route(methods=HTTPMethod.GET, path=docs_path)(_swagger_ui)
 
-    async def run(self, certfile=None, keyfile=None, port=0, debug=False,
-                  workers: int = 1):
+    async def run(self, certfile=None, keyfile=None, port=0,
+                  workers: int = 1,
+                  max_connections: int | None = None,
+                  stream_queue_depth: int | None = None,
+                  ws_queue_depth: int | None = None):
         """Run the server.
 
         For ``workers=1`` (default) this runs in the current asyncio event loop.
@@ -540,47 +554,43 @@ class BlackBull:
                 keyfile=keyfile,
                 port=port,
                 workers=workers,
+                max_connections=max_connections,
+                stream_queue_depth=stream_queue_depth,
+                ws_queue_depth=ws_queue_depth,
             )
             return
-
-        tasks = []
 
         if not self.has_server():
             self.create_server(
                 certfile=certfile,
                 keyfile=keyfile,
                 port=port,
-                )
+                max_connections=max_connections,
+                stream_queue_depth=stream_queue_depth,
+                ws_queue_depth=ws_queue_depth,
+            )
 
-        if debug:
-            watcher = Watcher(loop=self.loop)
-            watcher.add_watch(sys.argv[0], self.reload)
-            watcher.add_watch('blackbull', self.reload)
-            tasks.append(watcher.watch())
-
-        tasks.append(self.server.run(port=port))
-
-        try:
-            async with asyncio.TaskGroup() as tg:
-                for coro in tasks:
-                    tg.create_task(coro)
-
-        except* asyncio.CancelledError:
-            self._logger.info('Tasks cancelled.')
-
-        except* BaseException as eg:
-            self._logger.error('Task error: %s', eg)
+        await self.server.run(port=port)
 
     def serve(self, certfile=None, keyfile=None, port=0,
               workers: int | None = None,
               max_connections: int | None = None,
               stream_queue_depth: int | None = None,
-              ws_queue_depth: int | None = None) -> None:
+              ws_queue_depth: int | None = None,
+              reload: bool = False,
+              reload_paths: list | None = None) -> None:
         """Synchronous entry point — works for both single and multi-worker.
 
-        For ``workers=1`` this calls ``asyncio.run(self.run(...))``.
-        For ``workers > 1`` the master process binds sockets, forks *workers*
-        child processes, and blocks until SIGTERM or SIGINT is received.
+        For ``workers=1`` *without* reload this calls ``asyncio.run(self.run(...))``.
+        For ``workers > 1`` *or* ``reload=True`` the master process binds
+        sockets, forks *workers* child processes, and blocks until SIGTERM
+        or SIGINT is received.
+
+        When ``reload=True`` the master also watches ``*.py`` files under
+        ``reload_paths`` (default: the current working directory) and
+        recycles workers in place on any change.  The listening sockets
+        are preserved across the reload via fd inheritance so clients
+        never see a port-close window.
 
         All integer parameters default to their corresponding ``BB_*``
         environment variables (see :mod:`blackbull.env`).
@@ -588,6 +598,7 @@ class BlackBull:
         Example::
 
             app.serve(port=8443, certfile='cert.pem', keyfile='key.pem', workers=4)
+            app.serve(port=8443, certfile='cert.pem', keyfile='key.pem', reload=True)
         """
         from .env import get_settings as _get_settings  # noqa: PLC0415
         import os as _os  # noqa: PLC0415
@@ -601,14 +612,24 @@ class BlackBull:
 
         self._router.validate()
 
-        if workers == 1:
+        # Reload requires the master+worker structure so a long-lived
+        # supervisor can hold the listening sockets across worker recycles.
+        # Single-worker reload is supported by promoting to workers=1
+        # under the multi-worker path.
+        if workers == 1 and not reload:
+            import logging as _logging  # noqa: PLC0415
             from .logger import setup_async_logging, teardown_async_logging  # noqa: PLC0415
             from .env import apply_event_loop_policy  # noqa: PLC0415
             apply_event_loop_policy(_cfg)
             if _cfg.async_logging:
                 setup_async_logging()
+            if not _cfg.access_log:
+                _logging.getLogger('blackbull.access').setLevel(_logging.WARNING)
             try:
-                asyncio.run(self.run(certfile=certfile, keyfile=keyfile, port=port))
+                asyncio.run(self.run(certfile=certfile, keyfile=keyfile, port=port,
+                                     max_connections=max_connections,
+                                     stream_queue_depth=stream_queue_depth,
+                                     ws_queue_depth=ws_queue_depth))
             finally:
                 teardown_async_logging()
             return
@@ -617,13 +638,16 @@ class BlackBull:
         from .server.multiworker import MultiWorkerServer  # noqa: PLC0415
 
         # Bind sockets in the master process; workers inherit them via fork.
+        # When a reload re-execed us, ASGIServer.open_socket adopts the
+        # inherited fds instead of binding.
         master_server = ASGIServer(self, certfile=certfile, keyfile=keyfile,
                                    max_connections=max_connections,
                                    stream_queue_depth=stream_queue_depth,
                                    ws_queue_depth=ws_queue_depth)
         master_server.open_socket(port)
         self._logger.info(
-            'Starting %d worker(s) on port %d', workers, master_server.port,
+            'Starting %d worker(s) on port %d%s', workers, master_server.port,
+            ' [auto-reload]' if reload else '',
         )
 
         MultiWorkerServer(
@@ -634,16 +658,14 @@ class BlackBull:
             max_connections=max_connections,
             stream_queue_depth=stream_queue_depth,
             ws_queue_depth=ws_queue_depth,
+            reload=reload,
+            reload_paths=reload_paths,
         ).run()
 
         master_server.close_socket()
 
     def wait_for_port(self, timeout: float = 10.0, poll_interval: float = 0.1):
         self.server.wait_for_port(timeout=timeout, poll_interval=poll_interval)
-
-    def reload(self):
-        self.stop()
-        force_reload(sys.argv[0])
 
     def stop(self):
         self.server.close()

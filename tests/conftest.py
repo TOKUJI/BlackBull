@@ -70,6 +70,20 @@ def pytest_collection_modifyitems(config, items):
             )
 
 
+@pytest.fixture(autouse=True)
+def _reset_settings_cache():
+    """Clear ``blackbull.env.get_settings`` cache around each test.
+
+    ``get_settings()`` is ``@functools.cache``-decorated for performance;
+    tests that mutate env via ``monkeypatch.setenv`` or ``os.environ[...]``
+    need a fresh parse, so clear before and after each test.
+    """
+    from blackbull.env import reset_settings_cache
+    reset_settings_cache()
+    yield
+    reset_settings_cache()
+
+
 @pytest_asyncio.fixture(scope="session", autouse=True)
 def manage_cert_and_key():
     cert_path = pathlib.Path(__file__).parent / "cert.pem"

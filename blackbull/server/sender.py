@@ -1,4 +1,5 @@
 import asyncio
+import time
 from abc import ABC, abstractmethod
 from http import HTTPStatus
 from email.utils import formatdate
@@ -14,6 +15,22 @@ from .headers import Headers, HeaderList
 logger = logging.getLogger(__name__)
 
 _CRLF = b'\r\n'
+
+
+# RFC 7231 Date header is whole-second resolution, so re-formatting it
+# per response is wasted work — email.utils.formatdate shows ~2.6% of
+# CPU on a B2r profile.  Cache for the current integer second.
+_HTTP_DATE_TS: int = 0
+_HTTP_DATE: bytes = b''
+
+
+def _http_date() -> bytes:
+    global _HTTP_DATE_TS, _HTTP_DATE
+    now = int(time.time())
+    if now != _HTTP_DATE_TS:
+        _HTTP_DATE = formatdate(timeval=now, localtime=False, usegmt=True).encode('ascii')
+        _HTTP_DATE_TS = now
+    return _HTTP_DATE
 
 
 # ---------------------------------------------------------------------------
@@ -96,8 +113,26 @@ class BaseSender(ABC):
     async def __call__(self, body, status: HTTPStatus = HTTPStatus.OK, headers: HeaderList = []): ...
 
     async def _write(self, data: bytes):
-        """Flush *data* through the writer."""
-        await self._writer.write(data)
+        """Flush *data* through the writer.
+
+        Tolerant of peer-closed transports: once a write hits
+        ``ConnectionResetError`` / ``BrokenPipeError`` / SSL EOF, the
+        sender marks itself closed and subsequent writes silently drop.
+        These exceptions used to propagate out as tracebacks under
+        wrk c=1024 sustained load — 22 per 30 s in the 141848 run.
+        """
+        if getattr(self, '_closed', False):
+            return
+        try:
+            await self._writer.write(data)
+        except (ConnectionResetError, BrokenPipeError) as exc:
+            self._closed = True
+            logger.debug('sender: peer closed write side (%s)', exc.__class__.__name__)
+        except OSError as exc:
+            # SSLEOFError / SSLZeroReturnError land here on TLS connections
+            # whose peer dropped without a proper close-notify.
+            self._closed = True
+            logger.debug('sender: write failed on closed TLS transport (%s)', exc.__class__.__name__)
 
 
 class HTTP1Sender(BaseSender):
@@ -127,6 +162,16 @@ class HTTP1Sender(BaseSender):
         # have the same headers (including Content-Length) as a GET would
         # but no body.  HTTP1Actor sets this before dispatch.
         self._head_mode: bool = False
+        # Set once an http.disconnect arrives or a write hits broken-pipe.
+        # All subsequent writes silently drop — the peer is gone, there's
+        # nothing useful to do with the bytes.
+        self._closed: bool = False
+        # Optional access-log record; set by the actor before dispatch.
+        # When non-None, ``__call__`` updates ``status`` and
+        # ``response_bytes`` inline as events flow through — this saves
+        # the per-event coroutine dispatch through ``_make_capturing_send``
+        # (~7% of HTTP/1.1 CPU in the profile).  When None, no capture.
+        self._log_record = None
 
     async def __call__(self, body,
                        status: HTTPStatus = HTTPStatus.OK,
@@ -153,16 +198,23 @@ class HTTP1Sender(BaseSender):
         match body:
             case bytes():
                 h = headers if isinstance(headers, Headers) else Headers(headers)
+                if self._log_record is not None:
+                    self._log_record.status = int(status)
+                    self._log_record.response_bytes += len(body)
                 await self._flush(status, h, body)
 
             case {'type': ASGIEvent.HTTP_RESPONSE_START}:
                 self._buffered_status = HTTPStatus(body.get('status', HTTPStatus.OK))
                 self._buffered_headers = Headers(list(body.get('headers', [])))
                 self._expect_trailers = bool(body.get('trailers', False))
+                if self._log_record is not None:
+                    self._log_record.status = body.get('status', '-')
 
             case {'type': ASGIEvent.HTTP_RESPONSE_BODY}:
                 content = body.get('body', b'')
                 more_body = body.get('more_body', False)
+                if self._log_record is not None and content:
+                    self._log_record.response_bytes += len(content)
                 if self._buffered_status is not None:
                     assert self._buffered_headers is not None
                     await self._flush(self._buffered_status, self._buffered_headers, content, more_body)
@@ -174,11 +226,13 @@ class HTTP1Sender(BaseSender):
                         return
                     if self._chunked:
                         if content:
-                            await self._write(f'{len(content):x}\r\n'.encode() + content + b'\r\n')
-                        if not more_body and not self._expect_trailers:
+                            chunk = f'{len(content):x}\r\n'.encode() + content + b'\r\n'
+                            if not more_body and not self._expect_trailers:
+                                chunk += b'0\r\n\r\n'
+                            await self._write(chunk)
+                        elif not more_body and not self._expect_trailers:
                             await self._write(b'0\r\n\r\n')
                     elif content:
-                        logger.debug('HTTP1Sender body: %r', content)
                         await self._write(content)
 
             case {'type': ASGIEvent.HTTP_RESPONSE_TRAILERS}:
@@ -186,6 +240,14 @@ class HTTP1Sender(BaseSender):
                 for name, value in body.get('headers', []):
                     await self._write(name + b': ' + value + b'\r\n')
                 await self._write(b'\r\n')
+
+            case {'type': ASGIEvent.HTTP_DISCONNECT}:
+                # http1_actor.py sends this on IncompleteReadError; the
+                # canonical channel for disconnect is receive(), but
+                # accommodating the actor's signal here makes future
+                # writes no-ops so the broken pipe doesn't surface as
+                # a traceback in _write.
+                self._closed = True
 
             case {'type': str() as event_type}:
                 logger.warning('HTTP1Sender: unknown event type %r', event_type)
@@ -202,34 +264,44 @@ class HTTP1Sender(BaseSender):
             headers.append(b'content-length', str(len(body)).encode())
 
         if b'Date' not in headers:
-            headers.append(b'Date', formatdate(timeval=None, localtime=False, usegmt=True).encode())
+            headers.append(b'Date', _http_date())
 
-        await self._write_start(status, headers)
+        # Coalesce status line + headers + body into a single write so the
+        # response is emitted as one TLS record / one drain.  Before this,
+        # each header line was a separate `_write` (= a separate
+        # `await drain()` yield); a 3-header response did ~6 yields per
+        # request and showed in py-spy as ~33% of HTTP/1.1 CPU spread
+        # across `_write_start` / `_write` / `streams.write`.
+        head = self._render_start(status, headers)
 
         # RFC 9110 §9.3.2 — HEAD response carries no body.  Headers (and
         # the Content-Length we just computed from the GET body) still go
         # out so caches and proxies remain accurate.
         if self._head_mode:
+            await self._write(head)
             return
 
         if self._chunked:
             if body:
-                await self._write(f'{len(body):x}\r\n'.encode() + body + b'\r\n')
+                chunk = head + f'{len(body):x}\r\n'.encode() + body + b'\r\n'
+            else:
+                chunk = head
             if not more_body and not self._expect_trailers:
-                await self._write(b'0\r\n\r\n')
-        elif body:
-            logger.debug('HTTP1Sender body: %r', body)
-            await self._write(body)
-
-    async def _write_start(self, status: HTTPStatus, headers: HeaderList):
-        chunks: list[bytes] = []
-        chunks.append(f'HTTP/1.1 {status} {status.phrase}'.encode() + _CRLF)
-        for k, v in headers:
-            chunks.append(k + b': ' + v + _CRLF)
-        chunks.append(_CRLF)
-        for chunk in chunks:
-            logger.debug('HTTP1Sender: %r', chunk)
+                chunk += b'0\r\n\r\n'
             await self._write(chunk)
+        else:
+            await self._write(head + body if body else head)
+
+    def _render_start(self, status: HTTPStatus, headers: HeaderList) -> bytes:
+        """Build the status line + headers + blank-line as a single bytes blob."""
+        parts: list[bytes] = [f'HTTP/1.1 {status} {status.phrase}'.encode(), _CRLF]
+        for k, v in headers:
+            parts.append(k)
+            parts.append(b': ')
+            parts.append(v)
+            parts.append(_CRLF)
+        parts.append(_CRLF)
+        return b''.join(parts)
 
 
 class HTTP2Sender(BaseSender):

@@ -107,6 +107,7 @@ BB_FRAME_YIELD_EVERY
     Default: ``8``.
 """
 import dataclasses
+import functools as _functools
 import os
 from enum import StrEnum
 
@@ -189,8 +190,13 @@ class Settings:
     #: caller; stored as-is here).
     workers: int = 1
 
-    #: Maximum simultaneous TCP connections per worker.
-    max_connections: int = 500
+    #: Maximum simultaneous TCP connections per worker.  ``0`` (the
+    #: default) disables the application-level cap and relies on the OS
+    #: file-descriptor limit and per-stream backpressure — matching the
+    #: hypercorn / granian defaults.  Set ``BB_MAX_CONNECTIONS`` to a
+    #: positive integer to opt into a hard cap (e.g. for shared hosts
+    #: where one process must not exhaust the global fd table).
+    max_connections: int = 0
 
     #: asyncio.Queue depth for HTTP/2 per-stream request-body events.
     stream_queue_depth: int = 64
@@ -204,8 +210,11 @@ class Settings:
     #: Emit one access log record per completed request on blackbull.access.
     access_log: bool = True
 
-    #: listen() backlog depth for the server socket.
-    socket_backlog: int = 1024
+    #: listen() backlog depth for the server socket.  4096 matches the
+    #: Linux >=5.4 default for ``net.core.somaxconn`` (the kernel silently
+    #: caps to that anyway).  Raised from 1024 because a c=1024 wrk burst
+    #: was overflowing the queue and producing connect-RSTs.
+    socket_backlog: int = 4096
 
     #: SO_SNDBUF for accepted sockets (0 = leave kernel default).
     socket_sndbuf: int = 262144  # 256 kB requested → ~512 kB effective
@@ -215,6 +224,22 @@ class Settings:
 
     #: Use SO_REUSEPORT to give each worker its own kernel accept queue.
     socket_reuseport: bool = True
+
+    #: Idle timeout (seconds) on a keep-alive connection that is awaiting
+    #: the *next* request.  Replaces per-accept ``SO_KEEPALIVE`` syscalls
+    #: with an application-level timer — same ghost-eviction guarantee,
+    #: zero syscall cost per accept (which was a measurable contributor
+    #: to wrk c=1024-burst connect-RST errors).  Combined with
+    #: ``TCP_USER_TIMEOUT`` on the listening socket (inherits to accepted)
+    #: which handles the *active-but-stuck* case.  0 disables the timer.
+    keep_alive_timeout: float = 60.0
+
+    #: ``TCP_USER_TIMEOUT`` value in **milliseconds** for accepted sockets.
+    #: Linux-only; set on the listening socket and inherited by accepted.
+    #: Forces a connection-level error if a peer fails to ACK in this
+    #: window — protects against dead-mid-write peers that ``SO_KEEPALIVE``
+    #: misses.  0 leaves the kernel default unchanged.
+    tcp_user_timeout_ms: int = 60_000
 
     #: Per-request timeout in seconds for HTTP/2 streams (0 = disabled).
     request_timeout: float = 0.0
@@ -296,8 +321,20 @@ class Settings:
     frame_yield_every: int = 8
 
 
+@_functools.cache
 def get_settings() -> Settings:
-    """Read environment variables and return an immutable :class:`Settings`."""
+    """Read environment variables and return an immutable :class:`Settings`.
+
+    Cached: first call parses env vars and builds the dataclass; subsequent
+    calls return the same instance.  Settings are server-process-wide
+    configuration, not per-request data — there's no reason to re-parse
+    ``os.environ`` on every request.  Profile showed ``_int_env`` and
+    ``_int_env_nonneg`` consuming ~5–6% of CPU in the HTTP/1.1 hot path
+    before this cache.
+
+    Tests that mutate environment between cases must call
+    :func:`reset_settings_cache` in their teardown.
+    """
     raw_env = _str_env('BLACKBULL_ENV', 'development').lower()
     try:
         env = Environment(raw_env)
@@ -307,15 +344,17 @@ def get_settings() -> Settings:
     return Settings(
         env=env,
         workers=_int_env('BB_WORKERS', 1),
-        max_connections=_int_env('BB_MAX_CONNECTIONS', 500),
+        max_connections=_int_env_nonneg('BB_MAX_CONNECTIONS', 0),
         stream_queue_depth=_int_env('BB_STREAM_QUEUE_DEPTH', 64),
         ws_queue_depth=_int_env('BB_WS_QUEUE_DEPTH', 256),
         async_logging=_bool_env('BB_ASYNC_LOGGING', True),
         access_log=_bool_env('BB_ACCESS_LOG', True),
-        socket_backlog=_int_env('BB_SOCKET_BACKLOG', 1024),
+        socket_backlog=_int_env('BB_SOCKET_BACKLOG', 4096),
         socket_sndbuf=_int_env_nonneg('BB_SOCKET_SNDBUF', 262144),
         socket_rcvbuf=_int_env_nonneg('BB_SOCKET_RCVBUF', 262144),
         socket_reuseport=_bool_env('BB_SOCKET_REUSEPORT', True),
+        keep_alive_timeout=_float_env_nonneg('BB_KEEP_ALIVE_TIMEOUT', 60.0),
+        tcp_user_timeout_ms=_int_env_nonneg('BB_TCP_USER_TIMEOUT_MS', 60_000),
         request_timeout=_float_env_nonneg('BB_REQUEST_TIMEOUT', 0.0),
         header_timeout=_float_env_nonneg('BB_HEADER_TIMEOUT', 10.0),
         header_max_line=_int_env_nonneg('BB_HEADER_MAX_LINE', 8192),
@@ -332,6 +371,17 @@ def get_settings() -> Settings:
         compression_executor_threshold=_int_env_nonneg('BB_COMPRESSION_EXECUTOR_THRESHOLD', 65536),
         frame_yield_every=_int_env_nonneg('BB_FRAME_YIELD_EVERY', 8),
     )
+
+
+def reset_settings_cache() -> None:
+    """Clear the cached :class:`Settings`.
+
+    Call this in test teardown if the test mutated env vars that
+    :func:`get_settings` reads.  Without this, the cached settings reflect
+    whatever environment was visible the first time ``get_settings()`` ran
+    in the process.
+    """
+    get_settings.cache_clear()
 
 
 def apply_event_loop_policy(cfg: Settings | None = None) -> None:
