@@ -118,6 +118,10 @@ CLAUDE_DEV.md
 .claude/patterns/
 # benchmark result files (keep directory, ignore data)
 bench/results/*
+# bench/aws — runtime state and SSH private keys created by up.sh
+bench/aws/.state
+bench/aws/.known_hosts
+bench/aws/*.pem
 # peer benchmark harness — work-in-progress automated runner.
 # Kept on disk for future development; not committed until the socket-state
 # contamination is solved cleanly.
