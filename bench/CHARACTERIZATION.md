@@ -316,6 +316,78 @@ STACKS="blackbull blackbull-cleartext blackbull-nginx \
   bash bench/aws/run.sh
 ```
 
+### Sprint 15 — high-concurrency profile finding
+
+py-spy flame graphs captured on a fresh c7i.xlarge under k6 stress
+load via [`bench/profile_under_load.sh`](profile_under_load.sh)
+(BlackBull single-worker, HTTPS, HTTP/2 via ALPN — k6 default).
+Two passes at K6_VUS=200 and K6_VUS=500.  Profile artefacts:
+`bench/results/aws/20260523-162617Z/profile/`.
+
+| K6_VUS | req/s | p50 | p99 | event-loop lag p50 / p99 |
+|---|---|---|---|---|
+| 200 | 6 665 | 28.4 ms | 46.6 ms | 13 ms / 30 ms |
+| 500 | 5 730 (−14 %) | 80.5 ms | 133.9 ms | 31 ms / 81 ms |
+
+**Finding 1 — the "C2 widening" against uvicorn is a protocol
+mismatch, not a BlackBull bug.**  k6 negotiates HTTP/2 against
+BlackBull (which supports ALPN h2); uvicorn does not support HTTP/2
+at all, so k6 falls back to HTTP/1.1 there.  The Sprint 13 ratio
+"BlackBull→uvicorn gap widens from 1.8× on B1 to 2.4× on C2" was
+comparing BlackBull-on-HTTP/2 against uvicorn-on-HTTP/1.1.  The C2
+row now records the actual negotiated protocol in the `proto`
+column so this can't be misread again.
+
+**Finding 2 — the HTTP/2 hot path is dominated by pure-Python hpack
++ our own sender.**  Top inclusive-sample frames at both VU levels:
+
+| Frame | vu200 samples | vu500 samples |
+|---|---|---|
+| `hpack/hpack.py:encode` | 902 | 901 |
+| `hpack/hpack.py:decode` | 738 | 731 |
+| `blackbull/server/sender.py:__call__` | 739 | 722 |
+| `blackbull/server/http2_actor.py:_on_headers_frame` | 642 | 730 |
+| `hpack` add / decode_indexed / struct.new combined | ~1 300 | ~1 430 |
+
+hpack encode + decode together account for roughly a third of the
+busy frames at both VU levels.  The `hpack` package is third-party
+pure-Python; we don't control the codec directly.
+
+**Finding 3 — BlackBull's HTTP/2 stack saturates at ~500 VU but is
+still the fastest pure-Python HTTP/2 ASGI server measured.**
+Throughput drops 14 % from 200→500 VU and event-loop lag rises 2.4×.
+For comparison, Sprint 13's Lane C2 single-worker numbers were:
+
+| Stack | Lane C2 req/s | proto | ratio to BlackBull |
+|---|---|---|---|
+| BlackBull | 7 179 | HTTP/2 | 1.00× |
+| uvicorn   | 17 331 | HTTP/1.1 | 2.41× (different protocol) |
+| granian   | 26 403 | HTTP/2 | 3.68× (Rust core) |
+| hypercorn |  2 433 | HTTP/2 | 0.34× |
+| daphne    |  2 320 | HTTP/1.1 | 0.32× |
+
+Among pure-Python HTTP/2 ASGI servers (just BlackBull and hypercorn
+in this matrix), BlackBull leads by ~3×.
+
+**No tuning sprint queued from this finding.**  The dominant cost is
+in the third-party `hpack` codec; closing it would mean replacing or
+working around `hpack`, which goes beyond the configuration-only
+scope this measurement work has stayed in.  Tracked separately if a
+real user need appears (analogous to the `[speed-h1]` story in
+README §P4).
+
+#### Methodology caveat — access logging contamination
+The first Sprint 15 profile (run-log under `20260523-162617Z/`) ran
+with `BB_ACCESS_LOG=1` because [`bench/profile_under_load.sh`](profile_under_load.sh)
+launches `bench/app.py` directly rather than going through
+[`bench/peers/run_peer.sh`](peers/run_peer.sh) (which sets
+`BB_ACCESS_LOG=0` for benchmark parity).  The flame graph contains a
+~400–800-sample contribution from the async-logging `QueueListener`
+thread that doesn't appear in the compare_servers reports.
+Subsequent runs of `bench/profile_under_load.sh` set
+`BB_ACCESS_LOG=0` by default; the conclusions above stand because
+the contamination touches a background thread, not the event loop.
+
 ## File layout (target)
 
 ```

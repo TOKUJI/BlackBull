@@ -60,7 +60,14 @@ PY_SPY_DURATION=$(( _k6_secs + 25 ))
 
 echo "Starting server under py-spy (duration=${PY_SPY_DURATION}s, rate=200 Hz) ..."
 echo "  SVG → $SVG"
+# BB_ACCESS_LOG=0 mirrors bench/peers/run_peer.sh's blackbull case
+# (set at run_peer.sh line ~148): the bench harness disables per-request
+# access logging across all peers so the profile is apples-to-apples with
+# the compare_servers report.  Without this, py-spy catches the async
+# logging QueueListener thread in the flame graph, which dilutes the
+# hot-path picture.
 BB_WORKERS="${BB_WORKERS:-1}" BB_UVLOOP="${BB_UVLOOP:-1}" \
+BB_ACCESS_LOG="${BB_ACCESS_LOG:-0}" \
 py-spy record \
     --duration "$PY_SPY_DURATION" \
     --rate 200 \

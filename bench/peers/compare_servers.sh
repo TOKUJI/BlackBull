@@ -255,8 +255,14 @@ run_lane_c_k6() {
         echo ""
         echo "### $label — Lane C (k6 stress)"
         echo ""
-        echo "| Scenario | VUs | req/s | p50 | p95 | p99 | max | err% |"
-        echo "|---|---|---|---|---|---|---|---|"
+        echo "_The \`proto\` column reads HTTP/2 when ≥99% of responses"
+        echo "were served over h2 (k6 negotiates via ALPN), HTTP/1.1 when"
+        echo "≤1%, otherwise mixed.  Stacks without h2 support fall back"
+        echo "to HTTP/1.1; stacks without TLS (cleartext) can't negotiate"
+        echo "ALPN and stay on HTTP/1.1._"
+        echo ""
+        echo "| Scenario | VUs | proto | req/s | p50 | p95 | p99 | max | err% |"
+        echo "|---|---|---|---|---|---|---|---|---|"
         for entry in "C1 200 $json_c1" "C2 500 $json_c2"; do
             read -r sname vu file <<< "$entry"
             python3 - "$file" "$sname" "$vu" <<'PYEOF'
@@ -267,11 +273,22 @@ try:
     dur = m['http_req_duration']
     reqs = m['http_reqs']['rate']
     errs = m.get('http_req_failed', {}).get('value', 0) * 100
-    print(f"| {sys.argv[2]} | {sys.argv[3]} | {reqs:.0f} | "
+    # http_stress.js logs h2Rate = 1 when res.proto == 'HTTP/2.0'.
+    # Read the fraction and label the row.
+    h2 = m.get('http2_ok', {}).get('value', None)
+    if h2 is None:
+        proto = '?'
+    elif h2 >= 0.99:
+        proto = 'HTTP/2'
+    elif h2 <= 0.01:
+        proto = 'HTTP/1.1'
+    else:
+        proto = f'mixed ({h2*100:.0f}%h2)'
+    print(f"| {sys.argv[2]} | {sys.argv[3]} | {proto} | {reqs:.0f} | "
           f"{dur['p(50)']:.2f} | {dur['p(95)']:.2f} | "
           f"{dur['p(99)']:.2f} | {dur['max']:.2f} | {errs:.2f}% |")
 except Exception as e:
-    print(f"| {sys.argv[2]} | {sys.argv[3]} | err | err | err | err | err | err | ({e})")
+    print(f"| {sys.argv[2]} | {sys.argv[3]} | err | err | err | err | err | err | err | ({e})")
 PYEOF
         done
     } >> "$OUT"
