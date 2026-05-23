@@ -6,6 +6,10 @@
 #
 # Usage:
 #   BB_WORKERS=1 BB_UVLOOP=1 bash bench/profile_under_load.sh
+#
+# Env overrides:
+#   K6_VUS=N         virtual users (default 500; honoured by bench/k6/http_stress.js)
+#   K6_DURATION=Ns   k6 constant-load window (default '60s')
 
 set -e
 
@@ -13,8 +17,17 @@ BASE="https://localhost:8443"
 RESULT_DIR="bench/results"
 mkdir -p "$RESULT_DIR"
 TS="$(date +%Y%m%d-%H%M%S)"
-SVG="$RESULT_DIR/profile_stress_${TS}.svg"
-K6_JSON="$RESULT_DIR/k6_stress_profile_${TS}.json"
+
+# Default to 500 VU / 60 s — these match the C2 lane in Sprint 13's matrix.
+# Sprint 15 calls this script twice with K6_VUS=200 (B1-like) and K6_VUS=500
+# (C2) to capture the high-vs-low concurrency comparison.
+K6_VUS="${K6_VUS:-500}"
+K6_DURATION="${K6_DURATION:-60s}"
+export K6_VUS K6_DURATION
+
+# Embed the VU count in output filenames so multiple passes don't collide.
+SVG="$RESULT_DIR/profile_stress_${TS}_vu${K6_VUS}.svg"
+K6_JSON="$RESULT_DIR/k6_stress_profile_${TS}_vu${K6_VUS}.json"
 
 CERT="${CERT:-tests/cert.pem}"
 KEY="${KEY:-tests/key.pem}"
@@ -39,8 +52,11 @@ if [ -n "$EXISTING" ]; then
     sleep 1
 fi
 
-# py-spy duration: 15s warmup window + 90s stress = 105s total
-PY_SPY_DURATION=105
+# py-spy duration: server-startup (~5s) + warmup (~5s) + K6_DURATION
+# seconds of stress + ~15s buffer for graceful py-spy SVG write.
+# Expects K6_DURATION in 'Ns' seconds form (e.g. '60s').
+_k6_secs="${K6_DURATION%s}"
+PY_SPY_DURATION=$(( _k6_secs + 25 ))
 
 echo "Starting server under py-spy (duration=${PY_SPY_DURATION}s, rate=200 Hz) ..."
 echo "  SVG → $SVG"
@@ -66,7 +82,7 @@ curl -sk --max-time 3 "$BASE/ping" >/dev/null || { echo "ERROR: server not ready
 # --- warmup ---
 echo "Warmup (5000 reqs) ..."
 h2load -n 5000 -c 10 -m 10 "$BASE/ping" >/dev/null 2>&1 || true
-echo "Warmup done. Starting k6 stress now (500 VU, 90 s) ..."
+echo "Warmup done. Starting k6 stress now (${K6_VUS} VU, ${K6_DURATION}) ..."
 
 # --- k6 stress ---
 k6 run \

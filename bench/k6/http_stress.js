@@ -1,15 +1,18 @@
 /**
  * Scenario 2 — Constant-load stress test
  *
- * Applies a constant 500 VUs for 60 seconds.  Use this to find the
- * hard failure point: error rate, memory growth, and whether the server
- * recovers after the load ends.
+ * Applies a constant `K6_VUS` virtual users (default 500) for
+ * `K6_DURATION` (default 60s).  Use this to find the hard failure
+ * point: error rate, memory growth, and whether the server recovers
+ * after the load ends.
  *
  * Run:
  *   k6 run bench/k6/http_stress.js
  *
- * To compare endpoints, override TARGET via env:
- *   k6 run -e TARGET=/64kb bench/k6/http_stress.js
+ * Env overrides (all optional):
+ *   K6_VUS=N         number of virtual users (default 500)
+ *   K6_DURATION=Ns   constant-load window (default '60s')
+ *   TARGET=/path     endpoint to hit (default '/ping')
  */
 import http from 'k6/http';
 import { check } from 'k6';
@@ -18,12 +21,14 @@ import { Rate } from 'k6/metrics';
 const errorRate = new Rate('errors');
 const h2Rate    = new Rate('http2_ok');  // 1 when response was served over HTTP/2
 
-const TARGET = __ENV.TARGET || '/ping';
+const TARGET   = __ENV.TARGET      || '/ping';
+const VUS      = __ENV.K6_VUS      ? parseInt(__ENV.K6_VUS, 10) : 500;
+const DURATION = __ENV.K6_DURATION || '60s';
 
 export const options = {
   insecureSkipTLSVerify: true,
-  vus:      500,
-  duration: '60s',
+  vus:      VUS,
+  duration: DURATION,
   thresholds: {
     http_req_duration: ['p(99)<500'],
     errors:            ['rate<0.05'],

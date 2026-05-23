@@ -9,7 +9,7 @@
 #   1. rsync the working tree from local to ~/BlackBull on the instance
 #      (skips .venv, bench/results, __pycache__, dot-state files).
 #   2. apt-get install python3-pip python3-venv build-essential …
-#   3. Create a venv, pip install -e .[testing,speed].
+#   3. Create a venv, pip install -e .[testing,speed,compression,profiling].
 #   4. Run bench/install.sh (h2load / wrk / wrk2 / oha / k6 / peer ASGI servers).
 #   5. Install tests/cert.pem into the system CA store so h2load/k6 trust the
 #      self-signed cert that bench/peers/run_peer.sh uses.
@@ -62,7 +62,7 @@ fi
 # shellcheck disable=SC1091
 source .venv/bin/activate
 pip install --upgrade pip
-pip install -e '.[testing,speed,compression]'
+pip install -e '.[testing,speed,compression,profiling]'
 
 echo "=== Bench toolchain (h2load, wrk, wrk2, oha, k6, peer ASGI servers) ==="
 bash bench/install.sh
