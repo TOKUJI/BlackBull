@@ -77,15 +77,30 @@ fi
 echo ""
 echo "=== Installing oha (Rust HTTP load tool, granian-style) ==="
 if ! command -v oha >/dev/null 2>&1; then
-    # Prefer apt; fall back to cargo if available
+    # Prefer apt (Debian ≥13, some PPAs); fall back to the upstream GitHub
+    # release binary (single static x86_64 ELF, works on Ubuntu 22.04/24.04);
+    # last resort cargo if a Rust toolchain is around.
     if apt-cache show oha >/dev/null 2>&1; then
         sudo apt-get install -y oha
+    elif [ "$(uname -s)-$(uname -m)" = "Linux-x86_64" ] && command -v curl >/dev/null 2>&1; then
+        echo "  apt has no 'oha' package; downloading static binary from GitHub releases ..."
+        tmp_oha=$(mktemp)
+        if curl -fsSL -o "$tmp_oha" \
+                "https://github.com/hatoo/oha/releases/latest/download/oha-linux-amd64"; then
+            sudo install -m 0755 "$tmp_oha" /usr/local/bin/oha
+            rm -f "$tmp_oha"
+        else
+            rm -f "$tmp_oha"
+            echo "  failed to download oha from GitHub releases" >&2
+            exit 1
+        fi
     elif command -v cargo >/dev/null 2>&1; then
         cargo install oha
     else
-        echo "  oha not packaged and cargo not installed."
-        echo "  Manual install: download a release binary from"
-        echo "    https://github.com/hatoo/oha/releases"
+        echo "  oha not packaged, no x86_64 release binary path, and cargo not installed." >&2
+        echo "  Install Rust (curl https://sh.rustup.rs | sh) or fetch manually from" >&2
+        echo "    https://github.com/hatoo/oha/releases" >&2
+        exit 1
     fi
 else
     echo "oha already installed, skipping."

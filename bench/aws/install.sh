@@ -25,6 +25,10 @@ _bench_aws_load_state
 REMOTE="$SSH_USER@$PUBLIC_IP"
 REMOTE_REPO="/home/$SSH_USER/BlackBull"
 
+# Capture local HEAD so we can echo it from the remote (we exclude .git/ from
+# the rsync, so the remote has no way to look this up itself).
+LOCAL_HEAD="$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || echo unknown)"
+
 echo "Deploying to $REMOTE:$REMOTE_REPO ..."
 rsync -az --delete \
     --exclude '.venv/' \
@@ -41,7 +45,7 @@ rsync -az --delete \
 
 echo "Running remote install on $REMOTE ..."
 # Heredoc with quoted EOF so $ expansions happen on the remote.
-ssh "${SSH_OPTS[@]}" "$REMOTE" bash -se <<'REMOTE_EOF'
+ssh "${SSH_OPTS[@]}" "$REMOTE" "LOCAL_HEAD=$LOCAL_HEAD bash -se" <<'REMOTE_EOF'
 set -euo pipefail
 
 cd "$HOME/BlackBull"
@@ -72,7 +76,8 @@ echo "=== Smoke test ==="
 
 echo "=== Versions ==="
 .venv/bin/python --version
-.venv/bin/python -c 'import blackbull; print("blackbull HEAD:", end=" "); import subprocess; print(subprocess.check_output(["git","rev-parse","HEAD"]).decode().strip())'
+.venv/bin/python -c 'import blackbull; print("blackbull module OK")'
+echo "blackbull HEAD (from local rsync source): ${LOCAL_HEAD:-unknown}"
 REMOTE_EOF
 
 echo

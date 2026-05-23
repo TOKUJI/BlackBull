@@ -116,8 +116,16 @@ CLAUDE_DEV.md
 .claude/design/
 .claude/phases/
 .claude/patterns/
-# benchmark result files (keep directory, ignore data)
+# benchmark result files (keep directory + READMEs, ignore data)
 bench/results/*
+!bench/results/aws/
+!bench/results/baselines/
+bench/results/aws/*
+bench/results/baselines/*
+!bench/results/aws/README.md
+!bench/results/baselines/pre_sprint9d/
+bench/results/baselines/pre_sprint9d/*
+!bench/results/baselines/pre_sprint9d/README.md
 # bench/aws — runtime state and SSH private keys created by up.sh
 bench/aws/.state
 bench/aws/.known_hosts

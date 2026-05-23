@@ -192,6 +192,90 @@ Runs in [`bench/results/baselines/pre_sprint9d/`](results/baselines/pre_sprint9d
 against current code — the post-9d B1/B3/B6 numbers are ~25–40 %
 higher than the pre-9d baseline.  See the README in that directory.
 
+### EC2 baseline of record (Sprint 13, 2026-05-23)
+
+First off-WSL measurement pass.  Canonical AWS report:
+[`bench/results/aws/20260523-095507Z/results/compare_servers_20260523-095508.md`](results/aws/20260523-095507Z/results/compare_servers_20260523-095508.md).
+The earlier partial run (`20260523-064323Z/`) is kept for archaeology
+only — it lacks oha (install bug) and nginx (omitted from STACKS).
+The later run (`20260523-111726Z/`) is the targeted nginx Lane C re-run
+that verified the `/ping` fix; for nginx C1/C2, prefer those rows over
+the 095507Z values.
+
+| Hardware  | Single `c7i.xlarge` in `us-east-1`, Ubuntu 24.04 LTS, kernel 6.17 |
+|---|---|
+| CPU       | Intel Xeon Platinum 8488C (Sapphire Rapids), 4 vCPU |
+| Topology  | Loopback only — server + load gen on the same instance |
+| Methodology | Identical to WSL: same lane matrix, `RUNS=5`, `DURATION=30s` |
+
+Approximate single-run shape on EC2 (HEAD = `638f56c`):
+
+| Lane | BlackBull req/s | Notes |
+|---|---|---|
+| A1 mux=1 (h2load) | ~10–11 k | HTTP/2 |
+| B1 plaintext c=256 (wrk) | ~12.6–16.5 k | HTTP/1.1, 2 runs |
+| B3 json c=256 (wrk) | ~11.4–13.5 k | HTTP/1.1 |
+| B6 echo-1k (wrk) | ~12.6–13.2 k | HTTP/1.1 |
+| C2 500-VU (k6) | ~6.6–7.2 k | p99 ~100 ms |
+| D WebSocket avg RTT | ~0.35 ms | k6 ws |
+
+### WSL → EC2 delta (Sprint 13 finding)
+
+The off-WSL pass answered both questions the sprint was scoped to ask.
+
+**Q1 — how distorted are WSL numbers?** Answer: the *ranking* is, at
+the top end.  WSL loopback acts as a syscall-floor ceiling that caps
+fast servers and leaves slow ones alone.
+
+Lane B1 plaintext c=256 (single run from each environment, blackbull
+HEAD = `638f56c`):
+
+| Stack | WSL post-9d | EC2 (095507Z) | EC2 / WSL |
+|---|---|---|---|
+| blackbull | ~20.7 k | 16.5 k | **0.80×** |
+| uvicorn   | ~22 k   | 30.4 k | 1.38× |
+| hypercorn | ~5 k    | 5.8 k  | 1.16× |
+| granian   | ~26 k   | 91.4 k | **3.52×** |
+| daphne    | ~5 k    | 6.2 k  | 1.24× |
+| nginx     | n/a (not in WSL baseline) | 103 k (B1 wrk) | — |
+
+Pure-Python ASGI servers (BlackBull/hypercorn/daphne) move ±20 % on
+EC2; the C/Rust peers (granian especially) gain 1.5–3.5×.  BlackBull
+moves *down* on EC2.  Likely reason: pure-Python ASGI throughput is
+clock-bound per request, and a c7i.xlarge vCPU runs at ~3.0 GHz base
+(~3.8 GHz turbo) — lower than typical desktop single-core clocks where
+the WSL host sits.  Granian/nginx are I/O-bound, not clock-bound, so
+they win the better syscall path on real Linux.
+
+**Q2 — apples-to-apples ranking?** On EC2 B1 the order is
+**granian ≫ uvicorn > blackbull > daphne ≈ hypercorn**, with nginx
+above all four as the static-file reference.  This contradicts the
+WSL-only view that had BlackBull within 25 % of granian.
+
+### EC2 noise floor (Sprint 13 finding)
+
+Two full AWS passes on the same instance class, same scripts:
+
+| Stack | B1 run-1 (064323Z) | B1 run-2 (095507Z) | run-to-run delta |
+|---|---|---|---|
+| blackbull | 12.6 k | 16.5 k | **+31 %** |
+| uvicorn   | 28.3 k | 30.4 k | +8 % |
+| hypercorn | 5.1 k  | 5.8 k  | +13 % |
+| granian   | 87.5 k | 91.4 k | +4.5 % |
+| daphne    | 5.6 k  | 6.2 k  | +11 % |
+
+Median-of-5 inside `compare_servers.sh` did not tame the inter-run
+variance — same instance class, different physical hosts (each
+`up.sh` lands on a fresh instance).  Until a 3rd+ data point lands,
+**treat the EC2 noise band as ~±15 %** for the slow-Python stacks
+(BlackBull's spread was the worst at +31 %, partly because its
+absolute numbers are smaller so each ms swing reads bigger).
+
+Implication for future tuning A/Bs: a sub-15 % win on EC2 is below
+the current noise floor and not citeable.  Either tighten the noise
+(more medians, placement groups, BB-pinned CPU sets) or look for
+≥20 % deltas.
+
 ## File layout (target)
 
 ```
