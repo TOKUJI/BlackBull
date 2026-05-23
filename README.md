@@ -62,6 +62,7 @@ pytest
 
 ### P4 — Application framework
 
+- [ ] Optional `[speed-h1]` extra — opt-in C-based HTTP/1.1 parser (`httptools` / `llhttp`) for users who want to make it faster.
 - [x] Route lookup cache — internal per-worker LRU cache (transparent, no user API)
 - [x] Response/application caching middleware — `Cache`; per-worker LRU, ETag + If-None-Match → 304, `Cache-Control: no-store/private/no-cache` respected, `max-age` / `s-maxage` honoured, opt-out for authenticated requests
 - [x] Cookie-based session middleware (signed cookie) — `Session`; HMAC-SHA256, `BB_SESSION_SECRET` or explicit secret
