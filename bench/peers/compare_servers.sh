@@ -42,10 +42,23 @@ LANES="${LANES:-$LANES_ALL}"
 # (*-cleartext, *-nginx, *-h11) are intentionally NOT listed — Lane A
 # would either not negotiate (cleartext) or measure nginx-frontend H2
 # (which isn't apples-to-apples with the standalone H2 numbers).
+# Sprint 16 *-w<N> variants are checked against the base name via
+# strip_worker_suffix() below, so multi-worker stacks inherit capabilities.
 SUPPORTS_H2="blackbull hypercorn granian nginx"
 # Servers that DO NOT support /echo POST or /ws — those scenarios are skipped
 # automatically by the orchestrator's health check (server returns 405 / no WS).
 NO_POST_NO_WS="nginx"
+
+# Sprint 16: strip the -w<N> worker-count suffix so blackbull-w2 etc. match
+# the SUPPORTS_H2 / NO_POST_NO_WS lists exactly like plain "blackbull".
+# Other suffixes (-cleartext, -nginx, -h11) are intentionally NOT stripped —
+# those variants have different capability semantics by design (Sprint 14).
+strip_worker_suffix() {
+    case "$1" in
+        *-w[0-9]|*-w[0-9][0-9]) echo "${1%-w*}" ;;
+        *)                       echo "$1" ;;
+    esac
+}
 
 # Per-stack BASE URL.  Sprint 14 introduces three suffix conventions;
 # Sprint 16 adds a fourth (multi-worker):
@@ -202,7 +215,7 @@ run_lane_a_h2load() {
 run_lane_b_wrk() {
     local label="$1"
     local skip_post=0
-    contains_word "$label" $NO_POST_NO_WS && skip_post=1
+    contains_word "$(strip_worker_suffix "$label")" $NO_POST_NO_WS && skip_post=1
     {
         echo ""
         echo "### $label — Lane B-wrk (HTTP/1.1, wrk + wrk2)"
@@ -223,7 +236,7 @@ run_lane_b_wrk() {
 run_lane_b_oha() {
     local label="$1"
     local skip_post=0
-    contains_word "$label" $NO_POST_NO_WS && skip_post=1
+    contains_word "$(strip_worker_suffix "$label")" $NO_POST_NO_WS && skip_post=1
     {
         echo ""
         echo "### $label — Lane B-oha (HTTP/1.1, oha)"
@@ -393,7 +406,14 @@ bench_stack() {
         return 0
     }
 
-    if contains_word "A" $LANES && contains_word "$stack" $SUPPORTS_H2; then
+    # Capability checks against SUPPORTS_H2 / NO_POST_NO_WS use the
+    # worker-suffix-stripped base name so blackbull-w<N> inherits from
+    # blackbull.  Sprint 14 suffixes (-cleartext / -nginx / -h11) are NOT
+    # stripped — their capability semantics differ from the base by design.
+    local stack_base
+    stack_base="$(strip_worker_suffix "$stack")"
+
+    if contains_word "A" $LANES && contains_word "$stack_base" $SUPPORTS_H2; then
         echo "  Lane A (h2load HTTP/2) ..."
         run_lane_a_h2load "$stack"
         health_check || { kill_existing; return 0; }
@@ -413,7 +433,7 @@ bench_stack() {
         run_lane_c_k6 "$stack"
         health_check || { kill_existing; return 0; }
     fi
-    if contains_word "D" $LANES && ! contains_word "$stack" $NO_POST_NO_WS; then
+    if contains_word "D" $LANES && ! contains_word "$stack_base" $NO_POST_NO_WS; then
         echo "  Lane D (WebSocket) ..."
         run_lane_d_ws "$stack"
     elif contains_word "D" $LANES; then

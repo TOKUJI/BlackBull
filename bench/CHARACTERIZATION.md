@@ -388,6 +388,89 @@ Subsequent runs of `bench/profile_under_load.sh` set
 `BB_ACCESS_LOG=0` by default; the conclusions above stand because
 the contamination touches a background thread, not the event loop.
 
+### Sprint 16 — multi-worker scaling finding
+
+Single-worker BlackBull was the entire Sprint 13/14/15 baseline.
+Sprint 16 measured **BlackBull with `BB_WORKERS=1/2/4` on the same
+c7i.xlarge (4 vCPU)** to characterise production-shape scaling.
+**BlackBull-only — no peer comparison in this matrix.**
+
+Stack-name convention: `blackbull-w<N>` (see
+[`bench/peers/run_peer.sh`](peers/run_peer.sh) suffix parser).
+Canonical artefact:
+[`bench/results/aws/20260523-163317Z/results/compare_servers_20260523-163319.md`](results/aws/20260523-163317Z/results/compare_servers_20260523-163319.md).
+
+#### Throughput at w=1 / w=2 / w=4
+
+| Lane | w1 req/s | w2 req/s | w4 req/s | w2/w1 | w4/w1 | w4/w2 |
+|---|---|---|---|---|---|---|
+| B1 plaintext c=256 (HTTP/1.1) | 15 636 | 31 606 | 37 092 | **2.02×** | 2.37× | 1.17× |
+| B3 json c=256       (HTTP/1.1) | 14 639 | 30 454 | 36 384 | 2.08× | 2.49× | 1.19× |
+| B4 16 KB c=100      (HTTP/1.1) | 14 767 | 27 376 | 32 755 | 1.85× | 2.22× | 1.20× |
+| B6 echo-1k c=100    (HTTP/1.1) | 13 918 | 26 599 | 31 253 | 1.91× | 2.25× | 1.18× |
+| C2 500-VU           (HTTP/2)   |  8 784 | 14 441 | 14 775 | **1.64×** | **1.68×** | **1.02×** |
+
+#### p99 latency at w=1 / w=2 / w=4
+
+| Lane | w1 p99 | w2 p99 | w4 p99 |
+|---|---|---|---|
+| B1 (HTTP/1.1) | 30.0 ms | 15.6 ms | 13.7 ms |
+| C2 (HTTP/2)   | 76.6 ms | 75.1 ms | 86.4 ms |
+
+#### Findings
+
+1. **HTTP/1.1 scales near-linearly from w=1 to w=2.**  Every Lane B
+   scenario hits ~2× throughput at w=2 vs w=1.  B1 lands at 2.02×,
+   B3 at 2.08× — within the EC2 noise band of ideal.
+
+2. **HTTP/1.1 saturates between w=2 and w=4.**  w=4 only adds ~17 %
+   over w=2 for HTTP/1.1.  This is partly real saturation and partly
+   a single-instance-loopback artefact: load gen (wrk) shares the
+   4 vCPUs with the server, so at w=4 the box is genuinely
+   over-subscribed.
+
+3. **HTTP/2 (Lane C) saturates earlier and worse.**  w=2 buys 1.64×
+   throughput; w=4 buys *essentially nothing* (1.02× over w=2).
+   Consistent with the Sprint 15 finding that HTTP/2 in BlackBull
+   is CPU-bound on pure-Python `hpack` — workers hit the per-worker
+   GIL ceiling sooner.  C2 p99 at w=4 (86 ms) is **higher** than
+   w=2 (75 ms) — CPU contention with k6 dominates.
+
+4. **More workers cut HTTP/1.1 tail latency by half.**  B1 p99
+   drops from 30 ms (w=1) to 14 ms (w=4) at the same client-side
+   concurrency (c=256).  Per-worker queueing shrinks as work is
+   distributed.
+
+5. **Headline production data point.**  At w=2 BlackBull's
+   HTTP/1.1 throughput (31.6 k req/s B1) is in the same range as
+   Sprint 13's single-worker uvicorn (30.4 k req/s, recorded on
+   the same instance class with the same script).  No comparative
+   claim — just a useful sizing reference.
+
+#### Deployment-sizing implication
+
+On a c7i.xlarge (4 vCPU) with load gen on the same box:
+- **`BB_WORKERS=2` is the sweet spot for HTTP/1.1**: 2× throughput
+  and half the p99 latency vs w=1.
+- **`BB_WORKERS=4` adds little throughput on HTTP/1.1** and nothing
+  on HTTP/2; it does keep tail latency low under load.
+- The natural rule-of-thumb is **`BB_WORKERS = N_vCPU / 2`** when the
+  load generator shares the box.  A two-instance topology (load gen
+  separate) would probably let w=4 scale further; we don't have
+  that data.
+
+#### Methodology caveat — Lane A was silently skipped
+The Sprint 16 run requested `LANES="A B-wrk C D"` but Lane A
+(h2load HTTP/2) was skipped for all three w-variants.  Cause: the
+`SUPPORTS_H2` capability check at
+[`bench/peers/compare_servers.sh`](peers/compare_servers.sh) did not
+strip the `-w<N>` suffix before matching against the base list, so
+`blackbull-w2` didn't match `blackbull` and Lane A was bypassed.
+A `strip_worker_suffix()` helper now sits at the same call site so
+future Sprint-16-shape runs include Lane A.  The Lane C2 column
+above already covers the HTTP/2 multi-worker story; no re-run is
+queued just to backfill Lane A.
+
 ## File layout (target)
 
 ```
