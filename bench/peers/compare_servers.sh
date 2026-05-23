@@ -47,11 +47,13 @@ SUPPORTS_H2="blackbull hypercorn granian nginx"
 # automatically by the orchestrator's health check (server returns 405 / no WS).
 NO_POST_NO_WS="nginx"
 
-# Per-stack BASE URL.  Sprint 14 introduces three suffix conventions:
-#   *-cleartext  → http  on $BASE_PORT (no TLS on the server)
-#   *-nginx      → https on $BASE_PORT (TLS terminated by nginx, HTTP upstream)
-#   *-h11        → https on $BASE_PORT (uvicorn with --http h11)
-#   (no suffix)  → https on $BASE_PORT (standalone TLS — current default)
+# Per-stack BASE URL.  Sprint 14 introduces three suffix conventions;
+# Sprint 16 adds a fourth (multi-worker):
+#   *-cleartext     → http  on $BASE_PORT (no TLS on the server)
+#   *-nginx         → https on $BASE_PORT (TLS terminated by nginx, HTTP upstream)
+#   *-h11           → https on $BASE_PORT (uvicorn with --http h11)
+#   blackbull-w<N>  → https on $BASE_PORT (BlackBull with N workers, e.g. -w4)
+#   (no suffix)     → https on $BASE_PORT (standalone TLS — current default)
 compute_base() {
     case "$1" in
         *-cleartext) echo "http://localhost:${BASE_PORT}" ;;

@@ -18,6 +18,10 @@
 #                      via nginx_proxy.conf; isolates TLS+accept-loop offload
 #   uvicorn-h11        TLS as default but force the pure-Python h11 parser
 #
+# Sprint 16 — multi-worker variants (blackbull only):
+#   blackbull-w<N>     N worker processes (BB_WORKERS=N), SO_REUSEPORT
+#                      single TLS port.  e.g. blackbull-w2, blackbull-w4.
+#
 # Defaults: port=8443, cert=tests/cert.pem, key=tests/key.pem
 #
 # Tuning: 1 worker, uvloop where available, h2 flow-control windows
@@ -34,15 +38,27 @@ if [ -z "$stack" ]; then
     echo "Usage: $0 <stack> [port] [cert] [key]" >&2
     echo "Bases: blackbull, uvicorn, hypercorn, granian, daphne, nginx" >&2
     echo "Variants (Sprint 14): <base>-cleartext, <base>-nginx, uvicorn-h11" >&2
+    echo "Variants (Sprint 16): blackbull-w<N> (N workers, e.g. blackbull-w4)" >&2
     exit 1
 fi
 
 # --- Parse stack name: <base>[-<variant>] ---------------------------------
+# Variants are mutually exclusive (one suffix per stack name).  workers
+# defaults to 1; *-w<N> overrides it.
+workers=1
 case "$stack" in
-    *-cleartext) base="${stack%-cleartext}"; variant="cleartext" ;;
-    *-nginx)     base="${stack%-nginx}";     variant="nginx" ;;
-    *-h11)       base="${stack%-h11}";       variant="h11" ;;
-    *)           base="$stack";              variant="tls" ;;
+    *-cleartext)
+        base="${stack%-cleartext}"; variant="cleartext" ;;
+    *-nginx)
+        base="${stack%-nginx}";     variant="nginx" ;;
+    *-h11)
+        base="${stack%-h11}";       variant="h11" ;;
+    *-w[0-9]|*-w[0-9][0-9])
+        base="${stack%-w*}"
+        workers="${stack##*-w}"
+        variant="workers" ;;
+    *)
+        base="$stack";              variant="tls" ;;
 esac
 
 # When the stack is fronted by nginx, the base server binds one port up
@@ -55,9 +71,10 @@ else
 fi
 
 # Per-server cert/key arrays.  Empty for cleartext / nginx-fronted.  For
-# h11 we keep TLS on (same as the default uvicorn) — only the parser swaps.
+# h11 and multi-worker we keep TLS on (same as the default uvicorn /
+# blackbull) — only the parser / worker count varies.
 case "$variant" in
-    tls|h11)
+    tls|h11|workers)
         bb_tls_args=(--certfile "$cert" --keyfile "$key")
         uv_tls_args=(--ssl-certfile "$cert" --ssl-keyfile "$key")
         gr_tls_args=(--ssl-certificate "$cert" --ssl-keyfile "$key")
@@ -129,7 +146,7 @@ case "$base" in
         # hypercorn / granian / daphne load — no BlackBull-only bench/app.py
         # path any more.
         LAUNCH_CMD=(
-            env BB_UVLOOP=1 BB_WORKERS=1
+            env BB_UVLOOP=1 "BB_WORKERS=$workers"
                 BB_H2_INITIAL_WINDOW_SIZE=65535
                 BB_H2_CONNECTION_WINDOW_SIZE=65535
                 BB_H2_MAX_CONCURRENT_STREAMS=100
@@ -264,6 +281,7 @@ json.dump(cfg, open(sys.argv[2], 'w'))
         echo "Valid bases: blackbull, uvicorn, hypercorn, granian, daphne, nginx" >&2
         echo "Variants (blackbull|uvicorn|granian only): -cleartext, -nginx" >&2
         echo "Variants (uvicorn only): -h11" >&2
+        echo "Variants (blackbull only):  -w<N>  (e.g. blackbull-w4)" >&2
         exit 1
         ;;
 esac
