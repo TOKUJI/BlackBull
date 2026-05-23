@@ -2,14 +2,21 @@
 # bench/peers/run_peer.sh — start one peer server for benchmarking.
 #
 # Usage:
-#   bash bench/peers/run_peer.sh <server> [port] [cert] [key]
+#   bash bench/peers/run_peer.sh <stack> [port] [cert] [key]
 #
-# Servers:
+# Base stacks:
 #   blackbull   BlackBull (HTTP/1.1 + HTTP/2 + WS)
 #   uvicorn     uvicorn   (HTTP/1.1 + WS)             — no HTTP/2
 #   hypercorn   hypercorn (HTTP/1.1 + HTTP/2 + WS)
 #   granian     granian   (HTTP/1.1 + HTTP/2 + WS)
 #   daphne      daphne    (HTTP/1.1 + WS)             — no HTTP/2
+#   nginx       reference floor (static GETs, HTTP/2, no upstream)
+#
+# Sprint 14 — topology / parser variants (blackbull, uvicorn, granian only):
+#   <base>-cleartext   plain HTTP on $port (no TLS); isolates TLS cost
+#   <base>-nginx       nginx HTTPS on $port + base on $((port+1)) cleartext
+#                      via nginx_proxy.conf; isolates TLS+accept-loop offload
+#   uvicorn-h11        TLS as default but force the pure-Python h11 parser
 #
 # Defaults: port=8443, cert=tests/cert.pem, key=tests/key.pem
 #
@@ -18,17 +25,97 @@
 
 set -e
 
-server="$1"
+stack="$1"
 port="${2:-8443}"
 cert="${3:-tests/cert.pem}"
 key="${4:-tests/key.pem}"
 
-if [ -z "$server" ]; then
-    echo "Usage: $0 <blackbull|uvicorn|hypercorn|granian|daphne> [port] [cert] [key]" >&2
+if [ -z "$stack" ]; then
+    echo "Usage: $0 <stack> [port] [cert] [key]" >&2
+    echo "Bases: blackbull, uvicorn, hypercorn, granian, daphne, nginx" >&2
+    echo "Variants (Sprint 14): <base>-cleartext, <base>-nginx, uvicorn-h11" >&2
     exit 1
 fi
 
-case "$server" in
+# --- Parse stack name: <base>[-<variant>] ---------------------------------
+case "$stack" in
+    *-cleartext) base="${stack%-cleartext}"; variant="cleartext" ;;
+    *-nginx)     base="${stack%-nginx}";     variant="nginx" ;;
+    *-h11)       base="${stack%-h11}";       variant="h11" ;;
+    *)           base="$stack";              variant="tls" ;;
+esac
+
+# When the stack is fronted by nginx, the base server binds one port up
+# (8444 by default) and nginx listens on $port (8443).  Otherwise the base
+# server binds directly on $port.
+if [ "$variant" = "nginx" ]; then
+    upstream_port=$((port + 1))
+else
+    upstream_port="$port"
+fi
+
+# Per-server cert/key arrays.  Empty for cleartext / nginx-fronted.  For
+# h11 we keep TLS on (same as the default uvicorn) — only the parser swaps.
+case "$variant" in
+    tls|h11)
+        bb_tls_args=(--certfile "$cert" --keyfile "$key")
+        uv_tls_args=(--ssl-certfile "$cert" --ssl-keyfile "$key")
+        gr_tls_args=(--ssl-certificate "$cert" --ssl-keyfile "$key")
+        ;;
+    cleartext|nginx)
+        bb_tls_args=()
+        uv_tls_args=()
+        gr_tls_args=()
+        ;;
+esac
+
+# --- Helpers --------------------------------------------------------------
+
+# Block until the upstream binds (only used in nginx-fronted mode).
+wait_for_upstream() {
+    local p="$1"
+    for _ in $(seq 1 60); do
+        if ss -ltn 2>/dev/null | grep -q ":$p "; then
+            return 0
+        fi
+        sleep 0.5
+    done
+    echo "run_peer.sh: upstream did not bind on port $p" >&2
+    return 1
+}
+
+# Finalize launch.  In nginx-fronted mode, background the base server and
+# exec nginx; otherwise exec the base server directly.  LAUNCH_CMD must be
+# set before calling.  When this script is itself backgrounded by the
+# orchestrator (compare_servers.sh), the exec'd process becomes the
+# "spawn pid" the orchestrator tracks.
+finalize() {
+    if [ "$variant" = "nginx" ]; then
+        "${LAUNCH_CMD[@]}" &
+        upstream_pid=$!
+        if ! wait_for_upstream "$upstream_port"; then
+            kill "$upstream_pid" 2>/dev/null || true
+            exit 1
+        fi
+        local cert_abs key_abs conf
+        cert_abs="$(readlink -f "$cert")"
+        key_abs="$(readlink -f "$key")"
+        conf="/tmp/bench-nginx-proxy.$$.conf"
+        sed -e "s|__BB_CERT__|$cert_abs|" \
+            -e "s|__BB_KEY__|$key_abs|" \
+            -e "s|__BB_UPSTREAM_PORT__|$upstream_port|" \
+            -e "s|__BB_LISTEN_PORT__|$port|" \
+            bench/peers/nginx_proxy.conf > "$conf"
+        nginx -c "$conf" -t 2>&1 || exit 1
+        exec nginx -c "$conf"
+    else
+        exec "${LAUNCH_CMD[@]}"
+    fi
+}
+
+# --- Dispatch -------------------------------------------------------------
+
+case "$base" in
     blackbull)
         # Apples-to-apples logging: all peers disable per-request access
         # logging during benchmarks (uvicorn --no-access-log, hypercorn
@@ -41,31 +128,50 @@ case "$server" in
         # *same* shared peer app (bench.peers.asgi_app:app) that uvicorn /
         # hypercorn / granian / daphne load — no BlackBull-only bench/app.py
         # path any more.
-        exec env BB_UVLOOP=1 BB_WORKERS=1 \
-            BB_H2_INITIAL_WINDOW_SIZE=65535 \
-            BB_H2_CONNECTION_WINDOW_SIZE=65535 \
-            BB_H2_MAX_CONCURRENT_STREAMS=100 \
-            BB_ACCESS_LOG=0 \
-            blackbull bench.peers.asgi_app:app \
-                --bind "127.0.0.1:${port}" \
-                --certfile "$cert" --keyfile "$key"
+        LAUNCH_CMD=(
+            env BB_UVLOOP=1 BB_WORKERS=1
+                BB_H2_INITIAL_WINDOW_SIZE=65535
+                BB_H2_CONNECTION_WINDOW_SIZE=65535
+                BB_H2_MAX_CONCURRENT_STREAMS=100
+                BB_ACCESS_LOG=0
+            blackbull bench.peers.asgi_app:app
+                --bind "127.0.0.1:${upstream_port}"
+                "${bb_tls_args[@]}"
+        )
+        finalize
         ;;
     uvicorn)
         # --http auto picks httptools if installed, else h11.
         # --loop auto picks uvloop if installed, else asyncio.
         # For best numbers install uvicorn[standard] (httptools + uvloop).
-        exec uvicorn bench.peers.asgi_app:app \
-            --host 127.0.0.1 --port "$port" \
-            --ssl-certfile "$cert" --ssl-keyfile "$key" \
-            --loop auto --http auto --workers 1 \
-            --log-level warning --no-access-log
+        # Sprint 14: uvicorn-h11 forces the pure-Python h11 parser to
+        # isolate the C-parser advantage.
+        if [ "$variant" = "h11" ]; then
+            uv_http=h11
+        else
+            uv_http=auto
+        fi
+        LAUNCH_CMD=(
+            uvicorn bench.peers.asgi_app:app
+                --host 127.0.0.1 --port "$upstream_port"
+                "${uv_tls_args[@]}"
+                --loop auto --http "$uv_http" --workers 1
+                --log-level warning --no-access-log
+        )
+        finalize
         ;;
     hypercorn)
         # bench/peers/hypercorn.toml carries the tuning; --bind on the CLI
         # overrides the toml's bind so we share $port with the other peers.
-        exec hypercorn --config bench/peers/hypercorn.toml \
-            --bind "127.0.0.1:${port}" \
-            bench.peers.asgi_app:app
+        # Sprint 14: hypercorn intentionally has no cleartext/nginx variants
+        # (Sprint 13 ranked it well behind the matrix; the layer-attribution
+        # A/B would not be informative).
+        LAUNCH_CMD=(
+            hypercorn --config bench/peers/hypercorn.toml
+                --bind "127.0.0.1:${upstream_port}"
+                bench.peers.asgi_app:app
+        )
+        finalize
         ;;
     granian)
         # GRANIAN_LOG_TARGET (optional): absolute path for granian's
@@ -91,35 +197,48 @@ cfg = {
   }}
 json.dump(cfg, open(sys.argv[2], 'w'))
 " "$GRANIAN_LOG_TARGET" "$cfg"
-            exec env PYTHONUNBUFFERED=1 \
-                granian --interface asgi \
-                --host 127.0.0.1 --port "$port" \
-                --ssl-certificate "$cert" --ssl-keyfile "$key" \
-                --workers 1 --loop uvloop \
-                --http auto \
-                --log-level warning --no-access-log \
-                --log-config "$cfg" \
-                bench.peers.asgi_app:app
+            LAUNCH_CMD=(
+                env PYTHONUNBUFFERED=1
+                granian --interface asgi
+                    --host 127.0.0.1 --port "$upstream_port"
+                    "${gr_tls_args[@]}"
+                    --workers 1 --loop uvloop
+                    --http auto
+                    --log-level warning --no-access-log
+                    --log-config "$cfg"
+                    bench.peers.asgi_app:app
+            )
         else
-            exec env PYTHONUNBUFFERED=1 stdbuf -oL -eL \
-                granian --interface asgi \
-                --host 127.0.0.1 --port "$port" \
-                --ssl-certificate "$cert" --ssl-keyfile "$key" \
-                --workers 1 --loop uvloop \
-                --http auto \
-                --log-level warning --no-access-log \
-                bench.peers.asgi_app:app
+            LAUNCH_CMD=(
+                env PYTHONUNBUFFERED=1 stdbuf -oL -eL
+                granian --interface asgi
+                    --host 127.0.0.1 --port "$upstream_port"
+                    "${gr_tls_args[@]}"
+                    --workers 1 --loop uvloop
+                    --http auto
+                    --log-level warning --no-access-log
+                    bench.peers.asgi_app:app
+            )
         fi
+        finalize
         ;;
     daphne)
         # daphne endpoint spec: ssl:<port>:privateKey=<key>:certKey=<cert>
-        exec daphne --bind 127.0.0.1 \
-            -e "ssl:${port}:privateKey=${key}:certKey=${cert}" \
-            --access-log /dev/null \
-            bench.peers.asgi_app:app
+        # Sprint 14: daphne intentionally has no cleartext/nginx variants
+        # (same rationale as hypercorn).
+        LAUNCH_CMD=(
+            daphne --bind 127.0.0.1
+                -e "ssl:${upstream_port}:privateKey=${key}:certKey=${cert}"
+                --access-log /dev/null
+                bench.peers.asgi_app:app
+        )
+        finalize
         ;;
     nginx)
-        # Reference floor — pure C, static content only.
+        # Reference floor — pure C, static content only.  This is the
+        # standalone-nginx peer (Sprint 13).  Sprint 14's nginx-fronted
+        # variants use the same nginx binary but a different config
+        # (nginx_proxy.conf) via the *-nginx suffix on other base stacks.
         if [ "$port" != "8443" ]; then
             echo "WARNING: nginx peer config is hardcoded to 8443; ignoring port=$port" >&2
         fi
@@ -141,8 +260,10 @@ json.dump(cfg, open(sys.argv[2], 'w'))
         exec nginx -c "$conf"
         ;;
     *)
-        echo "Unknown server: $server" >&2
-        echo "Valid: blackbull, uvicorn, hypercorn, granian, daphne, nginx" >&2
+        echo "Unknown base stack: $base (from input '$stack')" >&2
+        echo "Valid bases: blackbull, uvicorn, hypercorn, granian, daphne, nginx" >&2
+        echo "Variants (blackbull|uvicorn|granian only): -cleartext, -nginx" >&2
+        echo "Variants (uvicorn only): -h11" >&2
         exit 1
         ;;
 esac

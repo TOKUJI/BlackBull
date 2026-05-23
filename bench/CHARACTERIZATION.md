@@ -276,6 +276,46 @@ the current noise floor and not citeable.  Either tighten the noise
 (more medians, placement groups, BB-pinned CPU sets) or look for
 ≥20 % deltas.
 
+### Sprint 14 — layer-attribution topologies
+
+Sprint 14 augments the existing stack list with **topology variants**
+that hold the server constant and vary the deployment shape.  The goal
+is to attribute the HTTP/1.1 gap (BlackBull at ~½ uvicorn, ~⅙ granian)
+to a specific layer of the ASGI stack — TLS termination, accept/conn
+management, HTTP/1.1 parsing, or ASGI dispatch — by **configuration
+only** (no BlackBull code changes).
+
+Stack-name suffix convention (recognised by
+[`bench/peers/run_peer.sh`](peers/run_peer.sh) and
+[`bench/peers/compare_servers.sh`](peers/compare_servers.sh)):
+
+| Suffix | Topology | Client target | What `T1 − Tn` isolates |
+|---|---|---|---|
+| (none) | **T1** — standalone HTTPS (Sprint 13 default) | `https://localhost:8443` | (baseline) |
+| `-cleartext` | **T2** — standalone HTTP, no TLS | `http://localhost:8443` | TLS termination cost |
+| `-nginx` | **T3** — nginx HTTPS frontend + cleartext HTTP upstream | `https://localhost:8443` (nginx) | TLS+accept-loop offload (upstream on `:8444`) |
+| `-h11` (uvicorn only) | **T1** with `--http h11` instead of `--http auto` | `https://localhost:8443` | C-parser advantage (httptools vs h11) |
+
+Topology variants are defined for **blackbull, uvicorn, granian only**;
+hypercorn/daphne already trail the matrix in Sprint 13 and the A/B
+would not be informative for them.
+
+T3 uses [`bench/peers/nginx_proxy.conf`](peers/nginx_proxy.conf) (new
+in Sprint 14) — a pure reverse-proxy config with upstream keepalive
+(`keepalive 256` + `Connection ""`) so we measure steady-state request
+cost rather than connection-establishment overhead.
+
+Sprint 14 lanes run **B-wrk only** (B1, B3, B4, B6); Lane A doesn't
+apply (T3 upstream is HTTP/1.1 by construction).  Standard invocation:
+
+```bash
+STACKS="blackbull blackbull-cleartext blackbull-nginx \
+        uvicorn uvicorn-h11 uvicorn-cleartext uvicorn-nginx \
+        granian granian-cleartext granian-nginx" \
+  LANES="B-wrk" \
+  bash bench/aws/run.sh
+```
+
 ## File layout (target)
 
 ```

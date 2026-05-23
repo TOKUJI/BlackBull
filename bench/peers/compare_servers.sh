@@ -23,6 +23,10 @@
 set -e
 
 BASE_PORT="${PORT:-8443}"
+# BASE is now per-stack — set inside bench_stack() via compute_base() so
+# the Sprint 14 *-cleartext stacks target http:// and *-nginx / *-h11 stacks
+# stay on https://.  Initial value is the standalone-TLS default so the
+# pre-loop health check / report header still work.
 BASE="https://localhost:${BASE_PORT}"
 CERT="tests/cert.pem"
 KEY="tests/key.pem"
@@ -34,11 +38,26 @@ LANES_ALL="A B-wrk B-oha C D"
 STACKS="${STACKS:-$STACKS_ALL}"
 LANES="${LANES:-$LANES_ALL}"
 
-# Servers that support HTTP/2 (lane A applies)
+# Servers that support HTTP/2 (lane A applies).  Sprint 14 variants
+# (*-cleartext, *-nginx, *-h11) are intentionally NOT listed — Lane A
+# would either not negotiate (cleartext) or measure nginx-frontend H2
+# (which isn't apples-to-apples with the standalone H2 numbers).
 SUPPORTS_H2="blackbull hypercorn granian nginx"
 # Servers that DO NOT support /echo POST or /ws — those scenarios are skipped
 # automatically by the orchestrator's health check (server returns 405 / no WS).
 NO_POST_NO_WS="nginx"
+
+# Per-stack BASE URL.  Sprint 14 introduces three suffix conventions:
+#   *-cleartext  → http  on $BASE_PORT (no TLS on the server)
+#   *-nginx      → https on $BASE_PORT (TLS terminated by nginx, HTTP upstream)
+#   *-h11        → https on $BASE_PORT (uvicorn with --http h11)
+#   (no suffix)  → https on $BASE_PORT (standalone TLS — current default)
+compute_base() {
+    case "$1" in
+        *-cleartext) echo "http://localhost:${BASE_PORT}" ;;
+        *)           echo "https://localhost:${BASE_PORT}" ;;
+    esac
+}
 
 RESULT_DIR="bench/results"
 mkdir -p "$RESULT_DIR"
@@ -301,13 +320,20 @@ PYEOF
 bench_stack() {
     local stack="$1"
 
+    # Sprint 14: per-stack BASE.  *-cleartext stacks target http://, the
+    # rest stay on https://.  All downstream helpers (health_check, the
+    # lane runners) read $BASE from the outer scope.
+    BASE="$(compute_base "$stack")"
+
     echo ""
     echo "=========================================="
-    echo "Benchmarking: $stack"
+    echo "Benchmarking: $stack  (target: $BASE)"
     echo "=========================================="
     {
         echo ""
         echo "## $stack"
+        echo ""
+        echo "_Target URL: ${BASE}_"
     } >> "$OUT"
 
     kill_existing
@@ -392,7 +418,7 @@ bench_stack() {
     echo "Methodology: bench/CHARACTERIZATION.md"
     echo "App:         bench/peers/asgi_app.py (shared minimal ASGI)"
     echo "             — BlackBull uses bench/app.py for parity at the wire level"
-    echo "Target:      $BASE"
+    echo "Target:      $BASE  (default; Sprint 14 *-cleartext stacks use http:// instead)"
     echo ""
     echo "Hardware:    $(uname -a | cut -d' ' -f1-3)"
     echo "CPU:         $(grep -m1 'model name' /proc/cpuinfo | sed 's/.*: //')"
