@@ -22,6 +22,14 @@ from ..server.recipient import (AbstractReader, AsyncioReader,
 from ..server.sender import AbstractWriter, AsyncioWriter
 from .exceptions import ConnectionError, ProtocolError
 from .http2 import ClientResponse  # shared dataclass
+from .scenario import (
+    Abort,
+    ReadResponse,
+    Scenario,
+    ScenarioResult,
+    SendBytes,
+    Sleep,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -258,7 +266,8 @@ class HTTP1Client:
 
     def __init__(self, host: str, port: int, *,
                  ssl: _ssl.SSLContext | None = None,
-                 record_wire_bytes: bool = False) -> None:
+                 record_wire_bytes: bool = False,
+                 connect_timeout: float | None = None) -> None:
         self._host = host
         self._port = port
         self._ssl = ssl
@@ -273,12 +282,21 @@ class HTTP1Client:
         # there is a Phase 8 concern.
         self._record_wire_bytes = record_wire_bytes
         self._wire_buffer: bytearray = bytearray()
+        # Sprint 17 Phase 5 — bound the connect() so a hung accept can't
+        # stall the scenario executor before any step runs.  atheris in
+        # particular cannot afford an unbounded wait per TestOneInput.
+        # None = no timeout (preserves pre-Phase-5 behaviour).
+        self._connect_timeout = connect_timeout
 
     # ---- async context manager -------------------------------------------
 
     async def __aenter__(self) -> 'HTTP1Client':
         if self._raw_writer is None:
-            r, w = await asyncio.open_connection(self._host, self._port, ssl=self._ssl)
+            coro = asyncio.open_connection(self._host, self._port, ssl=self._ssl)
+            if self._connect_timeout is not None:
+                r, w = await asyncio.wait_for(coro, timeout=self._connect_timeout)
+            else:
+                r, w = await coro
             self._raw_writer = w
             self._reader = AsyncioReader(r)
             self._writer = AsyncioWriter(w)
@@ -460,3 +478,68 @@ class HTTP1Client:
         if timeout is None:
             return await coro
         return await asyncio.wait_for(coro, timeout=timeout)
+
+    # ---- Sprint 17 Phase 5 — scenario executor ----------------------------
+    #
+    # A :class:`Scenario` is a tagged sequence of steps (SendBytes / Sleep /
+    # ReadResponse / Abort) shared by the differential test and the atheris
+    # fuzz harness.  The executor below is glue over the Phase 2 primitives:
+    # it walks the steps, dispatches each to the appropriate primitive, and
+    # folds the outcome into a :class:`ScenarioResult` without raising.
+
+    async def execute_scenario(
+        self, scenario: Scenario,
+    ) -> ScenarioResult:
+        """Walk ``scenario.steps`` against the connected socket.
+
+        Never raises.  Every outcome (response, timeout, transport
+        failure, hard-abort) is folded into the returned
+        :class:`ScenarioResult` so callers can categorise without
+        try/except boilerplate per scenario.
+
+        Step dispatch:
+          * :class:`SendBytes`   → :meth:`send_raw`
+          * :class:`Sleep`       → :func:`asyncio.sleep`
+          * :class:`ReadResponse` → :meth:`read_response`
+          * :class:`Abort`       → ``transport.abort()`` (RST on Linux);
+                                   walks no further steps.
+        """
+        import time as _time  # noqa: PLC0415
+
+        # Per-step primitives assert on their own preconditions
+        # (send_raw needs _writer, read_response needs _reader), so we
+        # don't gate the executor on _reader here — scenarios that
+        # never read shouldn't have to wire a reader.
+        assert self._writer is not None, 'connect via __aenter__ first'
+        result = ScenarioResult()
+        t0 = _time.monotonic()
+        try:
+            for step in scenario.steps:
+                if isinstance(step, SendBytes):
+                    await self.send_raw(step.data, byte_interval=step.byte_interval)
+                elif isinstance(step, Sleep):
+                    await asyncio.sleep(step.duration)
+                elif isinstance(step, ReadResponse):
+                    try:
+                        result.response = await self.read_response(timeout=step.timeout)
+                    except asyncio.TimeoutError as exc:
+                        result.timed_out = True
+                        result.exception = repr(exc)
+                        return result
+                elif isinstance(step, Abort):
+                    # Hard-close: send RST rather than FIN.  abort() is
+                    # synchronous on asyncio's transport layer.  After
+                    # this, subsequent socket I/O would raise; short-
+                    # circuit by returning.
+                    if self._raw_writer is not None:
+                        self._raw_writer.transport.abort()
+                    result.aborted = True
+                    return result
+                else:  # noqa: PLR5501
+                    raise TypeError(f'unknown step type: {type(step).__name__}')
+                result.steps_completed += 1
+        except Exception as exc:  # noqa: BLE001
+            result.exception = repr(exc)
+        finally:
+            result.elapsed_s = _time.monotonic() - t0
+        return result

@@ -51,7 +51,12 @@ from testcontainers.core.container import DockerContainer  # noqa: E402
 from testcontainers.nginx import NginxContainer  # noqa: E402
 
 from blackbull import BlackBull, read_body  # noqa: E402
-from blackbull.client import HTTP1Client  # noqa: E402
+from blackbull.client import (  # noqa: E402
+    HTTP1Client,
+    ReadResponse,
+    Scenario,
+    SendBytes,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -270,11 +275,19 @@ class SideOutcome:
 
 @dataclass
 class DiffContext:
-    req: dict
+    """A failure-diagnosis snapshot for one Hypothesis example.
+
+    Sprint 17 Phase 5 — ``scenario`` replaces the prior dict-shaped
+    ``req`` field as the source of truth for what went on the wire.
+    ``wire_request`` continues to hold the actual bytes captured from
+    the *BlackBull* side's :attr:`HTTP1Client.wire_buffer` (the nginx
+    side sends the same bytes; we only carry one capture in the dump).
+    """
+    scenario: Scenario
     nginx: SideOutcome
     blackbull: SideOutcome
     category: Category
-    wire_request: bytes = b''           # reconstructed (not captured)
+    wire_request: bytes = b''
     notes: list[str] = field(default_factory=list)
 
 
@@ -315,44 +328,60 @@ def normalize_response(resp):
 _PER_REQUEST_TIMEOUT_S = 10.0
 
 
-async def send_http1(host: str, port: int, req: dict) -> SideOutcome:
-    """Send *req* to (host, port) and return a SideOutcome.
+async def run_scenario(host: str, port: int,
+                       scenario: Scenario) -> tuple[SideOutcome, bytes]:
+    """Execute *scenario* against (host, port) and return (outcome, wire_bytes).
 
-    Never raises — failures are folded into the outcome so the test layer
-    can categorise rather than crash on unhandled exceptions.
+    Sprint 17 Phase 5 — supersedes the prior ``send_http1(req)`` path.
+    Drives the scenario through :meth:`HTTP1Client.execute_scenario`,
+    which itself never raises; this wrapper only adds an outer
+    ``asyncio.wait_for`` so a runaway scenario (e.g. trickled bytes
+    plus a long read timeout) can't blow the per-example budget.
+
+    Returns the captured wire bytes (BlackBull and nginx receive
+    identical bytes, so one capture is enough for the failure dump).
     """
-    headers = list(req['headers'].items())
     t0 = _time.monotonic()
+    wire = b''
     try:
-        async def _drive():
-            async with HTTP1Client(host, port) as c:
-                return await c.request(
-                    req['method'], req['path'],
-                    headers=headers, body=req['body'],
-                )
-        resp = await asyncio.wait_for(_drive(), timeout=_PER_REQUEST_TIMEOUT_S)
+        async with HTTP1Client(host, port,
+                               record_wire_bytes=True,
+                               connect_timeout=2.0) as c:
+            result = await asyncio.wait_for(
+                c.execute_scenario(scenario),
+                timeout=_PER_REQUEST_TIMEOUT_S,
+            )
+            wire = c.wire_buffer
+        if result.response is not None:
+            return SideOutcome(
+                response=normalize_response(result.response),
+                elapsed_s=_time.monotonic() - t0,
+            ), wire
+        if result.timed_out:
+            return SideOutcome(
+                exception=result.exception or 'TimeoutError',
+                timed_out=True,
+                elapsed_s=_time.monotonic() - t0,
+            ), wire
+        # No response, no per-step timeout — either the scenario had
+        # no ReadResponse step (treat as "no answer") or a primitive
+        # raised mid-scenario.  Either way we report the exception
+        # (or a synthetic marker) so the categoriser sees ng.ok=False.
         return SideOutcome(
-            response=normalize_response(resp),
+            exception=result.exception or 'no-response (scenario had no READ step)',
             elapsed_s=_time.monotonic() - t0,
-        )
+        ), wire
     except asyncio.TimeoutError as exc:
         return SideOutcome(
             exception=repr(exc),
             timed_out=True,
             elapsed_s=_time.monotonic() - t0,
-        )
+        ), wire
     except Exception as exc:  # noqa: BLE001
-        # Catch deepest cause too so IncompleteReadError-from-EOF reads
-        # cleanly in the dump.
-        chain = []
-        cur: BaseException | None = exc
-        while cur is not None:
-            chain.append(f'{type(cur).__name__}: {cur!r}')
-            cur = cur.__cause__
         return SideOutcome(
-            exception=' / '.join(chain),
+            exception=repr(exc),
             elapsed_s=_time.monotonic() - t0,
-        )
+        ), wire
 
 
 def reconstruct_wire_request(req: dict) -> bytes:
@@ -432,6 +461,76 @@ http_request_strategy = st.fixed_dictionaries({
 })
 
 
+# ---------------------------------------------------------------------------
+# Sprint 17 Phase 5 — scenario-level strategies
+#
+# A Scenario is the unified shape both this differential test and
+# tests/conformance/http1/fuzz/fuzz_http1.py drive against the server.
+# The dict-shaped http_request_strategy above stays as the source of
+# truth for "what a normal HTTP/1.1 request looks like" — we just
+# lift it into a Scenario for the executor.
+# ---------------------------------------------------------------------------
+
+
+def _ensure_host(req: dict) -> dict:
+    """Inject a Host header if the example didn't pick one.
+
+    Phase 5 sends bytes verbatim via `SendBytes` (no HTTP1Client.request
+    Host injection), so the wire request must already carry Host or
+    nginx will respond 400 while BlackBull is more permissive — a
+    divergence that's an oracle artefact, not a bug.
+    """
+    headers = dict(req.get('headers', {}))
+    if b'host' not in headers:
+        headers[b'host'] = b'localhost'
+    return {**req, 'headers': headers}
+
+
+well_formed_scenario_strategy = http_request_strategy.map(
+    lambda req: Scenario.well_formed(reconstruct_wire_request(_ensure_host(req))),
+)
+
+
+def _build_slowloris_scenario(req: dict, split_at: int,
+                              byte_interval: float) -> Scenario:
+    """Split a well-formed wire request into two SendBytes — the first
+    transmitted slowly (one byte every ``byte_interval`` seconds), the
+    second at full speed — followed by a ReadResponse with a generous
+    timeout.
+
+    ``split_at`` indexes within the wire bytes; clamped to leave at
+    least 1 byte on each side so we always have *some* trickle and
+    *some* burst.
+    """
+    wire = reconstruct_wire_request(_ensure_host(req))
+    cut = max(1, min(len(wire) - 1, split_at))
+    return Scenario(steps=(
+        SendBytes(data=wire[:cut], byte_interval=byte_interval),
+        SendBytes(data=wire[cut:]),
+        ReadResponse(timeout=5.0),
+    ))
+
+
+slowloris_scenario_strategy = st.builds(
+    _build_slowloris_scenario,
+    req=http_request_strategy,
+    split_at=st.integers(min_value=1, max_value=64),
+    # Modest interval — keeps the per-example budget under the 10s wall
+    # clock above even for a 50-byte request.
+    byte_interval=st.sampled_from([0.01, 0.02, 0.05]),
+)
+
+
+# Top-level mix that the differential test consumes.  Well-formed
+# dominates so we keep solid coverage of the common path; slowloris
+# rides along to probe both servers' tolerance for trickled bytes.
+# Phase 7 will add ``malformed_scenario_strategy`` to this one_of().
+scenario_strategy = st.one_of(
+    well_formed_scenario_strategy,
+    slowloris_scenario_strategy,
+)
+
+
 def _is_4xx(resp: dict) -> bool:
     s = resp.get('status')
     return isinstance(s, int) and 400 <= s < 500
@@ -496,14 +595,18 @@ def _scrubbed_headers(d: dict) -> dict:
 
 
 def dump(ctx: DiffContext) -> str:
+    """Render a DiffContext as a human-readable JSON dump.
+
+    Phase 5 — the scenario is JSON-Lines under ``scenario``; the
+    captured wire bytes (what BlackBull actually received) sit
+    alongside as ``wire_request``.  They're related but not redundant:
+    the scenario is the *input* (what we asked the client to do);
+    wire_request is the *output* (what landed on the socket).
+    """
     payload = {
         'category': ctx.category.value,
+        'scenario': ctx.scenario.to_json().splitlines(),
         'wire_request': _json_default(ctx.wire_request),
-        'req': {
-            **{k: v for k, v in ctx.req.items() if k not in ('headers', 'body')},
-            'headers': _scrubbed_headers(ctx.req.get('headers', {})),
-            'body': _json_default(ctx.req.get('body', b'')),
-        },
         'nginx': {
             'ok': ctx.nginx.ok,
             'elapsed_s': round(ctx.nginx.elapsed_s, 4),
@@ -523,6 +626,7 @@ def dump(ctx: DiffContext) -> str:
     return json.dumps(payload, indent=2, default=_json_default)
 
 
+@pytest.mark.docker
 @pytest.mark.xfail(
     reason='Sprint 17: known divergences from nginx remain (e.g. host: \':\' '
            'closes the connection on BlackBull).  Phase 4 categorises them '
@@ -530,7 +634,7 @@ def dump(ctx: DiffContext) -> str:
            'decision once the underlying causes are understood.',
     strict=False,
 )
-@given(http_request_strategy)
+@given(scenario_strategy)
 @settings(
     max_examples=1000,
     suppress_health_check=[HealthCheck.too_slow],
@@ -539,19 +643,19 @@ def dump(ctx: DiffContext) -> str:
 async def test_blackbull_vs_nginx_http11_differential(
     nginx_server,
     diff_h1_app,
-    req,
+    scenario,
 ):
-    ng = await send_http1(nginx_server['host'], nginx_server['port'], req)
-    bb = await send_http1('127.0.0.1', diff_h1_app.port, req)
+    ng, _ = await run_scenario(nginx_server['host'], nginx_server['port'], scenario)
+    bb, bb_wire = await run_scenario('127.0.0.1', diff_h1_app.port, scenario)
     cat = categorize(ng, bb)
 
-    note(f'req={req}')
+    note(f'scenario.steps={len(scenario.steps)}')
     note(f'category={cat.value}')
     note(f'nginx ok={ng.ok} elapsed={ng.elapsed_s:.3f}s')
     note(f'blackbull ok={bb.ok} elapsed={bb.elapsed_s:.3f}s')
 
     ctx = DiffContext(
-        req=req, nginx=ng, blackbull=bb, category=cat,
-        wire_request=reconstruct_wire_request(req),
+        scenario=scenario, nginx=ng, blackbull=bb, category=cat,
+        wire_request=bb_wire,
     )
     assert cat in ACCEPTED_CATEGORIES, dump(ctx)
