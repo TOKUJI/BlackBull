@@ -209,18 +209,92 @@ def nginx_server(echo_server, docker_network):
 
 
 # ---------------------------------------------------------------------------
-# Diff context (Phase 4 will expand this with wire_bytes + categories)
+# Phase 4 — failure categorisation + wire-byte reconstruction + structured
+# per-side outcome (response | exception | timeout) so the test can
+# bucket every Hypothesis example without unhandled exceptions reaching
+# pytest.
 # ---------------------------------------------------------------------------
 
-from dataclasses import dataclass  # noqa: E402
+import enum  # noqa: E402
+import time as _time  # noqa: E402
+from dataclasses import dataclass, field  # noqa: E402
+
+
+class Category(str, enum.Enum):
+    """Why a differential example was (not) accepted.
+
+    Subclassing ``str`` makes the values JSON-serialisable directly and
+    keeps ``assert ctx.category == 'OK'``-style sites readable.  Phase 4
+    introduces this enum; later phases (5–8) may add categories.
+    """
+    OK = 'OK'                          # normalised responses match
+    STATUS_DIFFER = 'STATUS_DIFFER'    # both responded, status differs
+    BODY_DIFFER = 'BODY_DIFFER'        # both responded, same status, body differs
+    HEADER_DIFFER = 'HEADER_DIFFER'    # both responded, same status+body, headers differ
+    BB_TRANSPORT_FAIL = 'BB_TRANSPORT_FAIL'   # BlackBull errored, nginx fine
+    NG_TRANSPORT_FAIL = 'NG_TRANSPORT_FAIL'   # nginx errored, BlackBull fine
+    BB_TIMEOUT = 'BB_TIMEOUT'          # BlackBull exceeded per-example wait_for
+    NG_TIMEOUT = 'NG_TIMEOUT'          # nginx ditto
+    BOTH_REJECTED = 'BOTH_REJECTED'    # both 4xx OR both transport-failed
+
+
+# Categories accepted by the assertion below.  Adding a new known-
+# divergence category here is a config change, not a code change.  Start
+# tight: only OK (true equivalence) and BOTH_REJECTED (both servers
+# refused the input the same way).  Other categories are surfaced for
+# investigation.
+ACCEPTED_CATEGORIES: frozenset[Category] = frozenset({
+    Category.OK,
+    Category.BOTH_REJECTED,
+})
+
+
+@dataclass
+class SideOutcome:
+    """One side's response in a differential pair.
+
+    Exactly one of (response, exception) is populated.  ``timed_out`` is
+    True if the failure was an :class:`asyncio.TimeoutError` from the
+    per-example wait_for; we record it separately because timeouts are
+    semantically distinct from other transport errors.
+    """
+    response: dict | None = None        # normalised {status, headers, body}
+    exception: str | None = None        # repr(exc) when no response arrived
+    timed_out: bool = False
+    elapsed_s: float = 0.0
+
+    @property
+    def ok(self) -> bool:
+        return self.response is not None
 
 
 @dataclass
 class DiffContext:
     req: dict
-    nginx: dict
-    blackbull: dict
-    category: str | None = None
+    nginx: SideOutcome
+    blackbull: SideOutcome
+    category: Category
+    wire_request: bytes = b''           # reconstructed (not captured)
+    notes: list[str] = field(default_factory=list)
+
+
+# Framing / transport headers stripped from the differential comparison.
+# These are emitted (or not) at the discretion of the server's protocol
+# layer and are RFC-compliant either way; comparing them produces noise.
+#   - date / server: clock + identity (varies per host)
+#   - content-length: derived from body, already in body
+#   - connection: HTTP/1.1 keep-alive is implicit; nginx emits the header
+#     explicitly while BlackBull omits it.  Both legal per RFC 9112 §9.1.
+#   - keep-alive: nginx-specific timing hint (RFC 9112 deprecates it)
+#   - transfer-encoding: framing detail, derived from body shape
+_FRAMING_HEADERS = frozenset({
+    b'date',
+    b'server',
+    b'content-length',
+    b'connection',
+    b'keep-alive',
+    b'transfer-encoding',
+})
 
 
 def normalize_response(resp):
@@ -229,21 +303,91 @@ def normalize_response(resp):
         'headers': sorted(
             (k.lower(), v)
             for k, v in resp.headers
-            if k.lower() not in {b'date', b'server', b'content-length'}
+            if k.lower() not in _FRAMING_HEADERS
         ),
         'body': resp.body,
     }
 
 
-async def send_http1(host: str, port: int, req: dict):
+# Per-example wall-clock budget.  Phase 6 will tighten this; for Phase 4
+# a generous bound is fine so the categorisation can be observed without
+# Hypothesis crying about slow examples.
+_PER_REQUEST_TIMEOUT_S = 10.0
+
+
+async def send_http1(host: str, port: int, req: dict) -> SideOutcome:
+    """Send *req* to (host, port) and return a SideOutcome.
+
+    Never raises — failures are folded into the outcome so the test layer
+    can categorise rather than crash on unhandled exceptions.
+    """
     headers = list(req['headers'].items())
-    async with HTTP1Client(host, port) as c:
-        return await c.request(
-            req['method'],
-            req['path'],
-            headers=headers,
-            body=req['body'],
+    t0 = _time.monotonic()
+    try:
+        async def _drive():
+            async with HTTP1Client(host, port) as c:
+                return await c.request(
+                    req['method'], req['path'],
+                    headers=headers, body=req['body'],
+                )
+        resp = await asyncio.wait_for(_drive(), timeout=_PER_REQUEST_TIMEOUT_S)
+        return SideOutcome(
+            response=normalize_response(resp),
+            elapsed_s=_time.monotonic() - t0,
         )
+    except asyncio.TimeoutError as exc:
+        return SideOutcome(
+            exception=repr(exc),
+            timed_out=True,
+            elapsed_s=_time.monotonic() - t0,
+        )
+    except Exception as exc:  # noqa: BLE001
+        # Catch deepest cause too so IncompleteReadError-from-EOF reads
+        # cleanly in the dump.
+        chain = []
+        cur: BaseException | None = exc
+        while cur is not None:
+            chain.append(f'{type(cur).__name__}: {cur!r}')
+            cur = cur.__cause__
+        return SideOutcome(
+            exception=' / '.join(chain),
+            elapsed_s=_time.monotonic() - t0,
+        )
+
+
+def reconstruct_wire_request(req: dict) -> bytes:
+    """Best-effort reconstruction of the bytes HTTP1Client would put on
+    the wire for *req*.  Not byte-exact (the client may inject Host /
+    Content-Length we don't know about here), but close enough to be a
+    diagnostic anchor in failure dumps.  Phase 8 replaces this with a
+    real capture via the client's record_wire_bytes path."""
+    method = req['method']
+    if isinstance(method, bytes):
+        method_b = method
+    else:
+        method_b = method.encode()
+    path = req['path']
+    if isinstance(path, bytes):
+        path_b = path
+    else:
+        path_b = path.encode()
+    out = bytearray()
+    out += method_b + b' ' + path_b + b' HTTP/1.1\r\n'
+    headers_dict = req.get('headers', {})
+    has_host = any(k.lower() == b'host' for k in headers_dict)
+    if not has_host:
+        out += b'host: <client-injected>\r\n'
+    for k, v in headers_dict.items():
+        out += k + b': ' + v + b'\r\n'
+    body = req.get('body', b'')
+    method_upper = method_b.upper()
+    if body or method_upper in {b'POST', b'PUT', b'PATCH', b'DELETE'}:
+        if not any(k.lower() == b'content-length' for k in headers_dict):
+            out += b'content-length: ' + str(len(body)).encode() + b'\r\n'
+    out += b'\r\n'
+    if body:
+        out += body
+    return bytes(out)
 
 
 # ---------------------------------------------------------------------------
@@ -288,12 +432,45 @@ http_request_strategy = st.fixed_dictionaries({
 })
 
 
-def categorize(req, nginx_resp, blackbull_resp):
-    if nginx_resp['status'] != blackbull_resp['status']:
-        return 'status_mismatch'
-    if nginx_resp['body'] != blackbull_resp['body']:
-        return 'body_mismatch'
-    return 'OK'
+def _is_4xx(resp: dict) -> bool:
+    s = resp.get('status')
+    return isinstance(s, int) and 400 <= s < 500
+
+
+def categorize(ng: SideOutcome, bb: SideOutcome) -> Category:
+    """Bucket a differential example into a :class:`Category`.
+
+    Phase 4 — replaces the prior 3-way status_mismatch/body_mismatch/OK
+    enumeration.  Order of the checks matters: both-rejected wins over
+    individual transport failures so we don't flag inputs that nginx
+    also refused.
+    """
+    # Both sides failed transport-wise (any mix of exception / timeout).
+    if not ng.ok and not bb.ok:
+        return Category.BOTH_REJECTED
+
+    # One side responded, the other didn't.
+    if ng.ok and not bb.ok:
+        return Category.BB_TIMEOUT if bb.timed_out else Category.BB_TRANSPORT_FAIL
+    if bb.ok and not ng.ok:
+        return Category.NG_TIMEOUT if ng.timed_out else Category.NG_TRANSPORT_FAIL
+
+    # Both responded with an HTTP status.  After Phase 3's fixture
+    # widening + on_error handlers, the diff_h1_app returns 200 for
+    # any method on any path that nginx also returns 200 for.  If both
+    # sides answered with a 4xx, treat as BOTH_REJECTED (input was
+    # malformed enough that both refused it the same way).
+    assert ng.response is not None and bb.response is not None
+    if _is_4xx(ng.response) and _is_4xx(bb.response):
+        return Category.BOTH_REJECTED
+
+    if ng.response['status'] != bb.response['status']:
+        return Category.STATUS_DIFFER
+    if ng.response['body'] != bb.response['body']:
+        return Category.BODY_DIFFER
+    if ng.response['headers'] != bb.response['headers']:
+        return Category.HEADER_DIFFER
+    return Category.OK
 
 
 def _json_default(o):
@@ -302,33 +479,55 @@ def _json_default(o):
     backslash-escapes so the dump round-trips through stdout cleanly."""
     if isinstance(o, bytes):
         return o.decode('latin-1', errors='backslashreplace')
+    if isinstance(o, Category):
+        return o.value
+    if hasattr(o, '__dict__'):
+        return o.__dict__
     return repr(o)
 
 
-def dump(ctx):
+def _scrubbed_headers(d: dict) -> dict:
+    """Render a bytes-keyed header dict with latin-1 escapes so it can
+    fit through json.dumps' string-key requirement."""
+    return {
+        _json_default(k): _json_default(v)
+        for k, v in d.items()
+    }
+
+
+def dump(ctx: DiffContext) -> str:
     payload = {
-        'category': ctx.category,
-        # Convert bytes-keyed dicts (req['headers']) ahead of json.dumps —
-        # the encoder accepts strings for keys but our headers are bytes.
+        'category': ctx.category.value,
+        'wire_request': _json_default(ctx.wire_request),
         'req': {
-            **ctx.req,
-            'headers': {
-                _json_default(k): _json_default(v)
-                for k, v in ctx.req.get('headers', {}).items()
-            },
-            'body': _json_default(ctx.req['body']),
+            **{k: v for k, v in ctx.req.items() if k not in ('headers', 'body')},
+            'headers': _scrubbed_headers(ctx.req.get('headers', {})),
+            'body': _json_default(ctx.req.get('body', b'')),
         },
-        'nginx': ctx.nginx,
-        'blackbull': ctx.blackbull,
+        'nginx': {
+            'ok': ctx.nginx.ok,
+            'elapsed_s': round(ctx.nginx.elapsed_s, 4),
+            'response': ctx.nginx.response,
+            'exception': ctx.nginx.exception,
+            'timed_out': ctx.nginx.timed_out,
+        },
+        'blackbull': {
+            'ok': ctx.blackbull.ok,
+            'elapsed_s': round(ctx.blackbull.elapsed_s, 4),
+            'response': ctx.blackbull.response,
+            'exception': ctx.blackbull.exception,
+            'timed_out': ctx.blackbull.timed_out,
+        },
+        'notes': ctx.notes,
     }
     return json.dumps(payload, indent=2, default=_json_default)
 
 
 @pytest.mark.xfail(
-    reason='Sprint 17: known divergences from nginx — Phase 4 introduces '
-           'failure categorisation and a whitelist so this can pass '
-           'without obscuring real bugs.  Remove this xfail when the '
-           'whitelist lands.',
+    reason='Sprint 17: known divergences from nginx remain (e.g. host: \':\' '
+           'closes the connection on BlackBull).  Phase 4 categorises them '
+           'as BB_TRANSPORT_FAIL; widening ACCEPTED_CATEGORIES is a future '
+           'decision once the underlying causes are understood.',
     strict=False,
 )
 @given(http_request_strategy)
@@ -342,13 +541,17 @@ async def test_blackbull_vs_nginx_http11_differential(
     diff_h1_app,
     req,
 ):
-    nginx_resp = await send_http1(nginx_server['host'], nginx_server['port'], req)
-    blackbull_resp = await send_http1('127.0.0.1', diff_h1_app.port, req)
+    ng = await send_http1(nginx_server['host'], nginx_server['port'], req)
+    bb = await send_http1('127.0.0.1', diff_h1_app.port, req)
+    cat = categorize(ng, bb)
 
-    n = normalize_response(nginx_resp)
-    b = normalize_response(blackbull_resp)
     note(f'req={req}')
-    note(f'nginx={n}')
-    note(f'blackbull={b}')
-    ctx = DiffContext(req=req, nginx=n, blackbull=b, category=categorize(req, n, b))
-    assert ctx.category == 'OK', dump(ctx)
+    note(f'category={cat.value}')
+    note(f'nginx ok={ng.ok} elapsed={ng.elapsed_s:.3f}s')
+    note(f'blackbull ok={bb.ok} elapsed={bb.elapsed_s:.3f}s')
+
+    ctx = DiffContext(
+        req=req, nginx=ng, blackbull=bb, category=cat,
+        wire_request=reconstruct_wire_request(req),
+    )
+    assert cat in ACCEPTED_CATEGORIES, dump(ctx)
