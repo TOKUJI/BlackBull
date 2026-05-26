@@ -1,0 +1,9 @@
+{
+  "category": "STATUS_DIFFER",
+  "captured_at_unix": 1779819241,
+  "wire_request_latin1": "PUT /echo HTTP/1.1\r\nhost: 0/0\r\nuser-agent: \r\nconnection: 7E\\GbJ=u-}CG:^\r\nx-test: x5cTWnXG\r\ncontent-type: 0/0\r\ncontent-length: 1\r\n\r\n\u0096",
+  "nginx_exception": null,
+  "nginx_status": 400,
+  "blackbull_exception": null,
+  "blackbull_status": 200
+}

@@ -1,0 +1,2 @@
+{"op": "SEND", "data": "R0VUICBodHRwOi8vbG9jYWxob3N0L3ggSFRUUC8xLjANCkhvc3Q6IGxvY2FsaG9zdA0KDQo=", "byte_interval": 0.0}
+{"op": "READ", "timeout": 1.0}

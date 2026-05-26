@@ -739,6 +739,58 @@ def dump(ctx: DiffContext) -> str:
     return json.dumps(payload, indent=2, default=_json_default)
 
 
+# ---------------------------------------------------------------------------
+# Sprint 17 Phase 8 — JSONL corpus capture + regression replay.
+#
+# When the Hypothesis sweep finds an example that lands outside
+# ACCEPTED_CATEGORIES, we serialise the scenario (`diff_*.jsonl`) and
+# its sidecar metadata (`diff_*.meta.json`) to the shared corpus dir.
+# The companion ``test_corpus_replay`` then reloads each pair, runs
+# the scenario against the live stack, and asserts the recorded
+# category is reproduced.  This buys regression coverage for known
+# divergences without expanding the Hypothesis budget.
+# ---------------------------------------------------------------------------
+
+import hashlib  # noqa: E402
+
+_CORPUS_DIR = Path(__file__).parent / 'fuzz' / 'corpus'
+
+
+def _scenario_short_hash(scenario: Scenario) -> str:
+    """First 16 hex chars of the SHA-1 over the JSONL form — used as
+    the dedup suffix on corpus filenames so two captures of the same
+    scenario don't pile up under different timestamps."""
+    digest = hashlib.sha1(scenario.to_json().encode('utf-8')).hexdigest()
+    return digest[:16]
+
+
+def _maybe_dump_corpus(ctx: DiffContext) -> None:
+    """Write ``diff_<ts>_<hash>.jsonl`` + sidecar metadata when the
+    example landed outside ACCEPTED_CATEGORIES.
+
+    Idempotent on (scenario, category): the hash suffix means the same
+    failing scenario maps to the same filename regardless of when it
+    fires, so re-runs overwrite rather than accumulate.
+    """
+    if ctx.category in ACCEPTED_CATEGORIES:
+        return
+    _CORPUS_DIR.mkdir(parents=True, exist_ok=True)
+    short = _scenario_short_hash(ctx.scenario)
+    base = _CORPUS_DIR / f'diff_{int(_time.time())}_{short}'
+    base.with_suffix('.jsonl').write_text(ctx.scenario.to_json() + '\n')
+    meta = {
+        'category': ctx.category.value,
+        'captured_at_unix': int(_time.time()),
+        'wire_request_latin1': ctx.wire_request.decode(
+            'latin-1', errors='backslashreplace'),
+        'nginx_exception': ctx.nginx.exception,
+        'nginx_status': (ctx.nginx.response or {}).get('status'),
+        'blackbull_exception': ctx.blackbull.exception,
+        'blackbull_status': (ctx.blackbull.response or {}).get('status'),
+    }
+    base.with_suffix('.meta.json').write_text(json.dumps(meta, indent=2))
+
+
 @pytest.mark.docker
 @pytest.mark.xfail(
     reason='Sprint 17: known divergences from nginx remain (e.g. host: \':\' '
@@ -775,4 +827,63 @@ async def test_blackbull_vs_nginx_http11_differential(
         scenario=scenario, nginx=ng, blackbull=bb, category=cat,
         wire_request=bb_wire,
     )
+    _maybe_dump_corpus(ctx)
     assert cat in ACCEPTED_CATEGORIES, dump(ctx)
+
+
+# ---------------------------------------------------------------------------
+# Phase 8 — corpus replay.
+# Reloads every captured diff_*.jsonl + .meta.json pair, replays the
+# scenario, and asserts the recorded category is reproduced.  Fast
+# regression signal — drops a known-failing scenario into a fixed
+# sequence, no Hypothesis budget consumed.
+# ---------------------------------------------------------------------------
+
+
+def _iter_corpus_pairs():
+    """Yield (scenario, expected_category, source_path) for each
+    ``diff_*.jsonl`` that has a matching ``.meta.json`` sidecar."""
+    if not _CORPUS_DIR.exists():
+        return
+    for jsonl in sorted(_CORPUS_DIR.glob('diff_*.jsonl')):
+        meta_path = jsonl.with_suffix('.meta.json')
+        if not meta_path.exists():
+            continue
+        meta = json.loads(meta_path.read_text())
+        try:
+            expected = Category(meta['category'])
+        except ValueError:
+            # Recorded category not in current enum — skip rather than
+            # fail; an enum migration could legitimately rename a
+            # category and we don't want stale corpus to block the
+            # suite.
+            continue
+        scenario = Scenario.from_json(jsonl.read_text())
+        yield scenario, expected, jsonl
+
+
+def _corpus_ids():
+    return [p.stem for _, _, p in _iter_corpus_pairs()]
+
+
+@pytest.mark.docker
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    'scenario,expected_category,source_path',
+    list(_iter_corpus_pairs()),
+    ids=_corpus_ids() or ['<no corpus>'],
+)
+async def test_corpus_replay(nginx_server, diff_h1_app,
+                             scenario, expected_category, source_path):
+    """Replay each captured corpus entry and assert the category still
+    matches.  When new BlackBull / nginx behaviour aligns or diverges,
+    this test pinpoints which scenarios moved without re-running the
+    full 200-example Hypothesis sweep.
+    """
+    ng, _ = await run_scenario(nginx_server['host'], nginx_server['port'], scenario)
+    bb, _ = await run_scenario('127.0.0.1', diff_h1_app.port, scenario)
+    cat = categorize(ng, bb)
+    assert cat == expected_category, (
+        f'corpus replay drift in {source_path.name}: '
+        f'recorded={expected_category.value}, now={cat.value}'
+    )
