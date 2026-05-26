@@ -1,9 +1,10 @@
 {
-  "category": "STATUS_DIFFER",
+  "category": "BOTH_REJECTED",
   "captured_at_unix": 1779819241,
   "wire_request_latin1": "PUT /echo HTTP/1.1\r\nhost: 0/0\r\nuser-agent: \r\ncontent-length: 0\r\n\r\n",
   "nginx_exception": null,
   "nginx_status": 400,
   "blackbull_exception": null,
-  "blackbull_status": 200
+  "blackbull_status": 400,
+  "post_sprint18_fix": true
 }

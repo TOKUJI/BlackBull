@@ -1,9 +1,0 @@
-{
-  "category": "BB_TRANSPORT_FAIL",
-  "captured_at_unix": 1779819241,
-  "wire_request_latin1": "POST /echo HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: identity, chunked\r\n\r\n",
-  "nginx_exception": null,
-  "nginx_status": 501,
-  "blackbull_exception": "ConnectionError('connection closed before response')",
-  "blackbull_status": null
-}

@@ -1,0 +1,9 @@
+{
+  "category": "STATUS_DIFFER",
+  "captured_at_unix": 1779822388,
+  "wire_request_latin1": "GET  http://localhost/x HTTP/9.9\r\nHost: localhost\r\n\r\n",
+  "nginx_exception": null,
+  "nginx_status": 505,
+  "blackbull_exception": null,
+  "blackbull_status": 400
+}

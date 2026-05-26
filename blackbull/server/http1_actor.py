@@ -60,6 +60,12 @@ class HeaderTooLargeError(Exception):
     """
 
 
+class NotImplementedFramingError(Exception):
+    """RFC 9112 §6.1 — the request used a Transfer-Encoding the server
+    does not implement.  Answered with 501 Not Implemented (a separate
+    response code from :class:`BadRequestError`'s 400)."""
+
+
 def _validate_message_framing(headers: 'Headers') -> None:
     """RFC 9112 §6 — reject framing-header combinations that are unsafe.
 
@@ -73,6 +79,12 @@ def _validate_message_framing(headers: 'Headers') -> None:
     * §6.1 — if both ``Content-Length`` and ``Transfer-Encoding`` are
       present, the message is anomalous.  We reject (the spec also
       allows "ignore CL, use TE"; rejecting is the safer policy).
+    * §6.1 — unknown ``Transfer-Encoding`` codings → 501 Not Implemented.
+      We accept exactly ``chunked``; anything else (``gzip``, the
+      ``identity, chunked`` multi-coding form, etc.) raises
+      :class:`NotImplementedFramingError`.  Without this check the
+      recipient layer raised ``NotImplementedError`` later and the
+      connection dropped silently (Sprint 17 Finding C).
     """
     cls = headers.getlist(b'content-length')
     tes = headers.getlist(b'transfer-encoding')
@@ -95,6 +107,56 @@ def _validate_message_framing(headers: 'Headers') -> None:
         if len(values) > 1:
             raise BadRequestError(
                 f'conflicting Content-Length values: {sorted(values)!r}')
+
+    # Sprint 18 Phase 2 — TE coding validation.  Match nginx's behaviour:
+    # only the bare ``chunked`` token is accepted; everything else (gzip,
+    # deflate, identity-as-comma-list, etc.) is 501.  Both nginx and
+    # BlackBull's corpus showed nginx returning 501 on ``identity,
+    # chunked`` and ``gzip``.
+    for _, raw_value in tes:
+        te = raw_value.strip().lower()
+        if te != b'chunked':
+            raise NotImplementedFramingError(
+                f'Transfer-Encoding {raw_value!r} is not implemented')
+
+
+# RFC 3986 §3.2 — authority = [userinfo "@"] host [":" port].  None of
+# these delimiter octets belong in a Host header value; their presence
+# (or an empty value) is a smuggling / SSRF vector that nginx rejects
+# with 400 and BlackBull, pre-Sprint-18, accepted silently.
+_HOST_FORBIDDEN_BYTES = frozenset(b'/?# \t')
+
+
+def _validate_host(headers: 'Headers') -> None:
+    """RFC 9112 §3.2 / §7.2 — Host MUST be present and contain a valid
+    URI-authority component.  Sprint 17 Finding B captured several
+    inputs (``host: 0/0``, empty host) where BlackBull answered 200 and
+    nginx answered 400.  This check brings BlackBull into RFC alignment.
+
+    Rules enforced:
+      * at most one Host header (§7.2; multiple is a smuggling vector);
+      * non-empty value after OWS-stripping;
+      * no ``/`` / ``?`` / ``#`` / whitespace in the authority
+        (RFC 3986 §3.2 delimiters).
+    """
+    hosts = headers.getlist(b'host')
+    if len(hosts) > 1:
+        raise BadRequestError(
+            f'multiple Host headers ({len(hosts)} — smuggling vector)')
+    if not hosts:
+        # HTTP/1.1 §3.2 requires Host but HTTP/1.0 doesn't; we don't
+        # check version here because absent-Host on 1.1 is already
+        # handled elsewhere if at all.  Leaving the strict-absent
+        # check to a separate Sprint 18 follow-up keeps the patch
+        # focused on the captured-corpus divergences.
+        return
+    value = hosts[0][1].strip(b' \t')
+    if not value:
+        raise BadRequestError('empty Host header value')
+    if any(b in _HOST_FORBIDDEN_BYTES for b in value):
+        raise BadRequestError(
+            f'invalid Host authority {value!r}: contains '
+            f'delimiter / whitespace forbidden by RFC 3986 §3.2')
 
 
 # ---------------------------------------------------------------------------
@@ -286,6 +348,20 @@ class HTTP1Actor(Actor):
                          (b'content-type', b'text/plain')],
                     )
                     return
+                except NotImplementedFramingError as exc:
+                    # Sprint 18 Phase 2 — RFC 9112 §6.1: server received a
+                    # Transfer-Encoding it does not implement.  Pre-Sprint-18
+                    # this raised inside HTTP1Recipient and the connection
+                    # dropped silently (Finding C in user-corpus).  Match
+                    # nginx and answer with 501 then close.
+                    logger.warning('501 Not Implemented: %s', exc)
+                    await send(
+                        b'501 Not Implemented',
+                        HTTPStatus.NOT_IMPLEMENTED,
+                        [(b'connection', b'close'),
+                         (b'content-type', b'text/plain')],
+                    )
+                    return
                 self._fill_connection_info(scope)
 
                 if scope.get('type') == 'websocket':
@@ -461,7 +537,10 @@ class HTTP1Actor(Actor):
 
         # RFC 9112 §6 — message framing validation.  Done here so a bad
         # framing header is rejected before any body bytes are read.
+        # Sprint 18 — also validates Host (§3.2 / §7.2) and the
+        # transfer-coding registry (§6.1 → 501 on unknown coding).
         _validate_message_framing(headers)
+        _validate_host(headers)
 
         scope = {
             'type': 'http',

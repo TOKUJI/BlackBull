@@ -1,9 +1,10 @@
 {
-  "category": "BB_TRANSPORT_FAIL",
+  "category": "BOTH_REJECTED",
   "captured_at_unix": 1779819241,
   "wire_request_latin1": "POST /echo HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: gzip\r\n\r\n",
   "nginx_exception": null,
   "nginx_status": 501,
-  "blackbull_exception": "ConnectionError('connection closed before response')",
-  "blackbull_status": null
+  "blackbull_exception": null,
+  "blackbull_status": 501,
+  "post_sprint18_fix": true
 }

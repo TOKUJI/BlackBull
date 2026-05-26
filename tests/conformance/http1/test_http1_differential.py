@@ -644,9 +644,17 @@ scenario_strategy = st.one_of(
 )
 
 
-def _is_4xx(resp: dict) -> bool:
+def _is_error_status(resp: dict) -> bool:
+    """True for 4xx (client error) and 5xx (server error) responses.
+
+    Sprint 18 — broadened from 4xx-only.  When both servers reject an
+    input with any error status the response *bodies* (e.g.
+    BlackBull's ``501 Not Implemented`` plaintext vs nginx's HTML
+    error page) are server-specific and not a meaningful divergence,
+    so the pair collapses to BOTH_REJECTED.
+    """
     s = resp.get('status')
-    return isinstance(s, int) and 400 <= s < 500
+    return isinstance(s, int) and 400 <= s < 600
 
 
 def categorize(ng: SideOutcome, bb: SideOutcome) -> Category:
@@ -670,11 +678,16 @@ def categorize(ng: SideOutcome, bb: SideOutcome) -> Category:
     # Both responded with an HTTP status.  After Phase 3's fixture
     # widening + on_error handlers, the diff_h1_app returns 200 for
     # any method on any path that nginx also returns 200 for.  If both
-    # sides answered with a 4xx, treat as BOTH_REJECTED (input was
-    # malformed enough that both refused it the same way).
+    # sides answered with a 4xx OR 5xx, treat as BOTH_REJECTED — the
+    # error body is server-specific (nginx's HTML page vs BlackBull's
+    # plaintext) and not load-bearing.
     assert ng.response is not None and bb.response is not None
-    if _is_4xx(ng.response) and _is_4xx(bb.response):
-        return Category.BOTH_REJECTED
+    if _is_error_status(ng.response) and _is_error_status(bb.response):
+        # Status must still match — a 4xx/5xx mismatch is real
+        # divergence (e.g. 400 vs 501 means the two servers
+        # categorised the same input differently).
+        if ng.response['status'] == bb.response['status']:
+            return Category.BOTH_REJECTED
 
     if ng.response['status'] != bb.response['status']:
         return Category.STATUS_DIFFER
@@ -770,18 +783,21 @@ def _scenario_short_hash(scenario: Scenario) -> str:
 
 
 def _maybe_dump_corpus(ctx: DiffContext) -> None:
-    """Write ``diff_<ts>_<hash>.jsonl`` + sidecar metadata when the
-    example landed outside ACCEPTED_CATEGORIES.
+    """Write ``diff_<hash>.jsonl`` + sidecar metadata when the example
+    landed outside ACCEPTED_CATEGORIES.
 
-    Idempotent on (scenario, category): the hash suffix means the same
-    failing scenario maps to the same filename regardless of when it
-    fires, so re-runs overwrite rather than accumulate.
+    Sprint 18 — filename is now hash-only (no timestamp prefix) so
+    re-captures of the same scenario overwrite rather than create new
+    files.  Pre-Sprint-18 the timestamp prefix meant every run added
+    another copy under a different ``diff_<ts>_<hash>.jsonl`` name.
+    The ``captured_at_unix`` field in the sidecar still records when
+    the divergence was last observed.
     """
     if ctx.category in ACCEPTED_CATEGORIES:
         return
     _CORPUS_DIR.mkdir(parents=True, exist_ok=True)
     short = _scenario_short_hash(ctx.scenario)
-    base = _CORPUS_DIR / f'diff_{int(_time.time())}_{short}'
+    base = _CORPUS_DIR / f'diff_{short}'
     base.with_suffix('.jsonl').write_text(ctx.scenario.to_json() + '\n')
     meta = {
         'category': ctx.category.value,
