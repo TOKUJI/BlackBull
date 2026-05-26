@@ -39,6 +39,10 @@ except Exception as exc:  # noqa: BLE001
         allow_module_level=True,
     )
 
+import asyncio  # noqa: E402
+from http import HTTPMethod  # noqa: E402
+from multiprocessing import Process  # noqa: E402
+
 import requests  # noqa: E402
 from docker import from_env  # noqa: E402
 from hypothesis import HealthCheck, given, note, settings  # noqa: E402
@@ -46,12 +50,76 @@ from hypothesis import strategies as st  # noqa: E402
 from testcontainers.core.container import DockerContainer  # noqa: E402
 from testcontainers.nginx import NginxContainer  # noqa: E402
 
+from blackbull import BlackBull, read_body  # noqa: E402
 from blackbull.client import HTTP1Client  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
 # Docker fixtures: nginx oracle + echo backend on a shared network
 # ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# BlackBull side: differential-specific h1_app whose `/` route mirrors the
+# nginx oracle's `return 200 "ok"` for ANY method.  The shared h1_app in
+# conftest.py registers `/` for GET only — that mismatch is what the
+# Sprint 17 Phase 1 minimisation surfaced as the headline status_mismatch.
+# Sprint 17 Phase 3 widens just the differential test's app instead of
+# touching the shared fixture (which other tests rely on for 405-on-PATCH).
+# ---------------------------------------------------------------------------
+
+_DIFF_METHODS = [HTTPMethod.GET, HTTPMethod.POST, HTTPMethod.PUT,
+                 HTTPMethod.DELETE, HTTPMethod.OPTIONS]
+
+
+def _make_diff_app() -> BlackBull:
+    from http import HTTPStatus  # noqa: PLC0415
+
+    app = BlackBull()
+
+    @app.route(path='/echo', methods=_DIFF_METHODS)
+    async def echo(scope, receive, send):
+        body = await read_body(receive)
+        await send({'type': 'http.response.start', 'status': 200,
+                    'headers': [(b'content-type', b'application/octet-stream')]})
+        await send({'type': 'http.response.body', 'body': body})
+
+    # nginx's `location /` returns 200 "ok" for ANY method and ANY path
+    # that isn't matched by a more specific location.  Mirror that here by
+    # turning 404 + 405 into 200 "ok".  Without this, every Hypothesis
+    # example with path ∉ {`/`, `/echo`} would diverge on status alone.
+    # Body is drained on the way out so the keep-alive connection state
+    # stays consistent for the next request on the same socket.
+    @app.on_error(HTTPStatus.NOT_FOUND)
+    async def _not_found(scope, receive, send):
+        await read_body(receive)
+        await send({'type': 'http.response.start', 'status': 200,
+                    'headers': [(b'content-type', b'text/plain')]})
+        await send({'type': 'http.response.body', 'body': b'ok'})
+
+    @app.on_error(HTTPStatus.METHOD_NOT_ALLOWED)
+    async def _method_not_allowed(scope, receive, send):
+        await read_body(receive)
+        await send({'type': 'http.response.start', 'status': 200,
+                    'headers': [(b'content-type', b'text/plain')]})
+        await send({'type': 'http.response.body', 'body': b'ok'})
+
+    return app
+
+
+@pytest.fixture(scope='module')
+def diff_h1_app():
+    """A live BlackBull HTTP/1.1 server with nginx-matching `/` + `/echo`
+    semantics — used only by the differential test in this module."""
+    app = _make_diff_app()
+    app.create_server(port=0)
+    p = Process(target=lambda: asyncio.run(app.run()))
+    p.start()
+    app.wait_for_port(timeout=10.0)
+    yield app
+    app.stop()
+    p.terminate()
+    p.join(timeout=5)
+
 
 @pytest.fixture(scope='session')
 def docker_network():
@@ -271,11 +339,11 @@ def dump(ctx):
 @pytest.mark.asyncio
 async def test_blackbull_vs_nginx_http11_differential(
     nginx_server,
-    h1_app,
+    diff_h1_app,
     req,
 ):
     nginx_resp = await send_http1(nginx_server['host'], nginx_server['port'], req)
-    blackbull_resp = await send_http1('127.0.0.1', h1_app.port, req)
+    blackbull_resp = await send_http1('127.0.0.1', diff_h1_app.port, req)
 
     n = normalize_response(nginx_resp)
     b = normalize_response(blackbull_resp)

@@ -212,6 +212,29 @@ class HTTP1Actor(Actor):
                             await self._read_headers(cfg.header_max_total)
                     else:
                         await self._read_headers(cfg.header_max_total)
+                except IncompleteReadError:
+                    # Sprint 17 Phase 3 — distinguish idle EOF from
+                    # mid-headers EOF.  ``self._request`` is empty in
+                    # the idle case (just-after keep-alive reset or
+                    # fresh connection with no preamble); peer closed
+                    # without sending anything ⇒ silent close.
+                    # Non-empty buffer ⇒ peer sent partial bytes then
+                    # disconnected ⇒ 400 Bad Request before close, so
+                    # differential tests can categorise this as a
+                    # protocol violation rather than a transport reset.
+                    if self._request:
+                        logger.info(
+                            '400 Bad Request — peer EOF mid-headers '
+                            'after %d bytes; peer=%r',
+                            len(self._request), self._peername,
+                        )
+                        await send(
+                            b'400 Bad Request',
+                            HTTPStatus.BAD_REQUEST,
+                            [(b'connection', b'close'),
+                             (b'content-type', b'text/plain')],
+                        )
+                    return
                 except HeaderTooLargeError as exc:
                     # RFC 6585 §5 — 431 Request Header Fields Too Large.
                     # The buffer is over the configured budget; close so an
@@ -296,7 +319,10 @@ class HTTP1Actor(Actor):
                 send._head_mode = (scope['method'] == 'HEAD')
                 if send._head_mode:
                     scope['method'] = 'GET'
-                inner_receive = RecipientFactory.http1(self._reader, scope)
+                inner_receive = RecipientFactory.http1(
+                    self._reader, scope,
+                    body_timeout=cfg.body_timeout,
+                )
 
                 if not await self._dispatch_request(scope, inner_receive, capturing_send, log_record):
                     break  # unhandled error — close connection
@@ -321,11 +347,21 @@ class HTTP1Actor(Actor):
                         next_chunk = await self._reader.readuntil(_REQ_END)
                 except TimeoutError:
                     break  # idle too long — drop the connection
+                except IncompleteReadError:
+                    # Peer cleanly closed between requests — silent close
+                    # is correct (no 400, no 408): the previous response
+                    # already shipped, and the spec allows either side
+                    # to close a persistent connection at any time.
+                    break
                 if next_chunk == _REQ_END:
                     break
                 self._request = next_chunk
 
         except IncompleteReadError:
+            # Safety net: any IncompleteReadError that escapes the
+            # explicit catches above (e.g. body-read EOF that wasn't
+            # absorbed by HTTP1Recipient).  Surface http.disconnect
+            # to the ASGI sender and let the connection close.
             await send({'type': ASGIEvent.HTTP_DISCONNECT})
 
     # ------------------------------------------------------------------

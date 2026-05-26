@@ -252,6 +252,15 @@ class Settings:
     #: (legacy behaviour; only recommended for trusted local clients).
     header_timeout: float = 10.0
 
+    #: Maximum seconds an HTTP/1.1 client has to deliver the complete
+    #: request body once headers are parsed.  Mirrors ``header_timeout``
+    #: for the body half — slowloris attackers can otherwise hold a
+    #: ``Content-Length: N`` connection open by dripping body bytes after
+    #: the headers have arrived.  When the deadline elapses the recipient
+    #: returns ``http.disconnect`` and the server tears the connection
+    #: down.  0 = disabled (legacy behaviour).
+    body_timeout: float = 30.0
+
     #: Maximum bytes in a single HTTP/1.1 request-line or header line.
     #: A pathological 1 GB ``X-foo: ...`` header would otherwise live in
     #: ``readuntil``'s internal buffer.  Enforced before parsing so an
@@ -357,6 +366,7 @@ def get_settings() -> Settings:
         tcp_user_timeout_ms=_int_env_nonneg('BB_TCP_USER_TIMEOUT_MS', 60_000),
         request_timeout=_float_env_nonneg('BB_REQUEST_TIMEOUT', 0.0),
         header_timeout=_float_env_nonneg('BB_HEADER_TIMEOUT', 10.0),
+        body_timeout=_float_env_nonneg('BB_BODY_TIMEOUT', 30.0),
         header_max_line=_int_env_nonneg('BB_HEADER_MAX_LINE', 8192),
         header_max_total=_int_env_nonneg('BB_HEADER_MAX_TOTAL', 65536),
         h2_initial_window_size=_int_env('BB_H2_INITIAL_WINDOW_SIZE', 1048576),

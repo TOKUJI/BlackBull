@@ -33,6 +33,16 @@ RequestBody = Union[bytes, bytearray, memoryview, AsyncIterable[bytes]]
 # CRLF as used throughout RFC 7230.
 _CRLF = b'\r\n'
 
+# Sprint 17 Phase 3 — methods for which an empty body still warrants an
+# explicit ``Content-Length: 0`` on the wire.  RFC 9110 §8.6 makes the
+# header optional in this case, but always emitting it removes ambiguity
+# for upstreams (notably reverse proxies that treat absent CL on POST as
+# "read body until close").  Methods listed in BODY_LESS_METHODS instead
+# skip the header entirely when no body is present, matching nginx /
+# uvicorn / curl conventions.
+_BODY_ALLOWED_METHODS = frozenset({b'POST', b'PUT', b'PATCH', b'DELETE'})
+_BODY_LESS_METHODS = frozenset({b'GET', b'HEAD', b'OPTIONS', b'TRACE', b'CONNECT'})
+
 
 class HTTP1RequestSender:
     """Writes an HTTP/1.1 request — request line, headers, body — to an ``AbstractWriter``.
@@ -58,11 +68,74 @@ class HTTP1RequestSender:
 
     async def _send_fixed(self, method: str, path: str, headers: Headers,
                           body: bytes) -> None:
-        if body and b'content-length' not in headers:
-            headers.append(b'content-length', str(len(body)).encode())
+        self._normalize_content_length(method, headers, body)
         await self._write_start(method, path, headers)
         if body:
             await self._writer.write(body)
+
+    @staticmethod
+    def _normalize_content_length(method: str, headers: Headers,
+                                  body: bytes) -> None:
+        """Emit / validate the ``Content-Length`` header for the request.
+
+        Sprint 17 Phase 3 — replaces the previous "add CL only if body is
+        truthy and no CL already present" rule, which let an empty POST go
+        out without any framing header at all (RFC-legal but confuses
+        reverse proxies) and silently sent inconsistent framing if the
+        caller pre-passed a CL that didn't match the body.
+
+        New rules:
+          * If the caller pre-passed a ``Content-Length`` header, verify
+            it parses as an int and equals ``len(body)``.  Raise
+            ``ValueError`` on mismatch — duplicate / mismatched CL is a
+            CL.CL smuggling vector and the right thing to do is fail
+            loudly, not silently send something the peer will reject.
+          * Otherwise, for body-allowed methods (POST/PUT/PATCH/DELETE),
+            always emit ``Content-Length: N`` — including ``0`` for an
+            empty body.  This matches nginx/curl and avoids absent-CL
+            ambiguity.
+          * For body-less methods (GET/HEAD/OPTIONS/TRACE/CONNECT) with
+            an empty body, skip the header entirely.  An empty GET should
+            not carry ``Content-Length: 0`` because some upstream proxies
+            treat that as suspicious.
+          * For unknown / custom methods, fall back to the "emit when
+            body is non-empty" rule — the safe path for forwards
+            compatibility.
+        """
+        cl_actual = len(body)
+        method_upper = method.upper().encode() if isinstance(method, str) else method.upper()
+
+        if b'content-length' in headers:
+            cl_existing = headers.get(b'content-length')
+            try:
+                cl_int = int(cl_existing)
+            except ValueError as exc:
+                raise ValueError(
+                    f'caller-supplied Content-Length is not an integer: '
+                    f'{cl_existing!r}'
+                ) from exc
+            if cl_int != cl_actual:
+                raise ValueError(
+                    f'caller-supplied Content-Length ({cl_int}) does not '
+                    f'match body length ({cl_actual} bytes); rejecting '
+                    f'to avoid CL.CL smuggling on the wire'
+                )
+            return
+
+        # No caller-supplied Content-Length — decide whether to add one.
+        if cl_actual > 0:
+            headers.append(b'content-length', str(cl_actual).encode())
+            return
+        if method_upper in _BODY_ALLOWED_METHODS:
+            # Empty body on a body-allowed method — still emit CL: 0.
+            headers.append(b'content-length', b'0')
+            return
+        if method_upper in _BODY_LESS_METHODS:
+            # GET/HEAD/etc. with no body — skip the header by design.
+            return
+        # Unknown method: forwards-compatible fallback identical to the
+        # pre-Sprint-17 behaviour (omit CL on empty body).
+        return
 
     async def _send_chunked(self, method: str, path: str, headers: Headers,
                             body: AsyncIterable[bytes]) -> None:

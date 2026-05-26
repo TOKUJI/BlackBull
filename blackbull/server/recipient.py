@@ -257,7 +257,8 @@ class HTTP1Recipient(BaseRecipient):
 
     _reader: AbstractReader  # narrows BaseRecipient._reader from AbstractReader | None
 
-    def __init__(self, reader: AbstractReader, scope: dict):
+    def __init__(self, reader: AbstractReader, scope: dict,
+                 *, body_timeout: float = 0.0):
         super().__init__(reader)
         self._scope = scope
         headers = scope['headers']
@@ -272,6 +273,17 @@ class HTTP1Recipient(BaseRecipient):
         self._chunked = (te == b'chunked')
         self._content_length = int(cl) if cl else None
         self._done = False
+        # Sprint 17 Phase 3 — body-read deadline.  0 = disabled.  Applied
+        # per __call__() invocation (i.e. per chunk for chunked bodies,
+        # single window for Content-Length).  Mirrors nginx
+        # ``client_body_timeout`` semantics: each read has the same bound.
+        self._body_timeout = body_timeout
+
+    async def _read_with_timeout(self, coro):
+        """Run *coro* under the configured body_timeout, if any."""
+        if self._body_timeout > 0:
+            return await asyncio.wait_for(coro, timeout=self._body_timeout)
+        return await coro
 
     async def __call__(self) -> dict:
         if self._done:
@@ -279,28 +291,41 @@ class HTTP1Recipient(BaseRecipient):
 
         try:
             if self._chunked:
-                size_line = await self._reader.readuntil(b'\r\n')
+                size_line = await self._read_with_timeout(
+                    self._reader.readuntil(b'\r\n'))
                 chunk_size = _parse_chunk_size(size_line)
                 if chunk_size == 0:
                     # RFC 9112 §7.1.2 — last-chunk is followed by an
                     # optional trailer-part and then a final CRLF.  Read
                     # lines until we hit the terminator.
                     while True:
-                        line = await self._reader.readuntil(b'\r\n')
+                        line = await self._read_with_timeout(
+                            self._reader.readuntil(b'\r\n'))
                         if line == b'\r\n':
                             break
                     self._done = True
                     return {'type': ASGIEvent.HTTP_REQUEST, 'body': b'', 'more_body': False}
-                data = await self._reader.read(chunk_size)
-                await self._reader.readuntil(b'\r\n')        # consume CRLF after chunk data
+                data = await self._read_with_timeout(
+                    self._reader.read(chunk_size))
+                await self._read_with_timeout(
+                    self._reader.readuntil(b'\r\n'))        # consume CRLF after chunk data
                 return {'type': ASGIEvent.HTTP_REQUEST, 'body': data, 'more_body': True}
             else:
                 self._done = True
-                body = await self._reader.readexactly(self._content_length) if self._content_length else b''
+                if self._content_length:
+                    body = await self._read_with_timeout(
+                        self._reader.readexactly(self._content_length))
+                else:
+                    body = b''
                 logger.debug('HTTP1Recipient body: %r', body)
                 return {'type': ASGIEvent.HTTP_REQUEST, 'body': body, 'more_body': False}
 
-        except IncompleteReadError:
+        except (IncompleteReadError, asyncio.TimeoutError, TimeoutError):
+            # EOF mid-body OR body_timeout exceeded.  In either case the
+            # request is unfinishable — surface disconnect to the ASGI
+            # app so it can clean up.  The server actor closes the
+            # connection on app return (does not send 408 in Sprint 17 —
+            # see plan note).
             self._done = True
             return {'type': ASGIEvent.HTTP_DISCONNECT}
 
@@ -660,10 +685,11 @@ class RecipientFactory:
     """
 
     @staticmethod
-    def http1(reader, scope: dict) -> HTTP1Recipient:
+    def http1(reader, scope: dict, *,
+              body_timeout: float = 0.0) -> HTTP1Recipient:
         if not isinstance(reader, AbstractReader):
             reader = AsyncioReader(reader)
-        return HTTP1Recipient(reader, scope)
+        return HTTP1Recipient(reader, scope, body_timeout=body_timeout)
 
     @staticmethod
     def http2(frame: FrameBase | None = None,
