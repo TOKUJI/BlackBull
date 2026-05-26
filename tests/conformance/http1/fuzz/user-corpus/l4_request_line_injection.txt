@@ -1,0 +1,1 @@
+GET / HTTP/1.1\r\nHost: localhost\r\nX: test\r\nInjected: yes\r\n\r\n

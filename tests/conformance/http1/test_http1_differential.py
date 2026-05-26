@@ -753,7 +753,12 @@ def dump(ctx: DiffContext) -> str:
 
 import hashlib  # noqa: E402
 
-_CORPUS_DIR = Path(__file__).parent / 'fuzz' / 'corpus'
+# Sprint 17 epilogue — the user-curated regression corpus lives under
+# ``fuzz/user-corpus/``, separate from ``fuzz/corpus/`` which atheris
+# uses as its working directory.  Keeping the two apart means atheris's
+# auto-generated seeds don't pollute the replay set and our curated
+# entries don't drift under libFuzzer's pruning.
+_CORPUS_DIR = Path(__file__).parent / 'fuzz' / 'user-corpus'
 
 
 def _scenario_short_hash(scenario: Scenario) -> str:
