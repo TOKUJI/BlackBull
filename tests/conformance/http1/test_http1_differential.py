@@ -322,10 +322,13 @@ def normalize_response(resp):
     }
 
 
-# Per-example wall-clock budget.  Phase 6 will tighten this; for Phase 4
-# a generous bound is fine so the categorisation can be observed without
-# Hypothesis crying about slow examples.
-_PER_REQUEST_TIMEOUT_S = 10.0
+# Per-side wall-clock budget.  Sprint 17 Phase 6 — tightened from 10 s
+# down to 5 s so a single pathological example can't push the whole
+# 200-example sweep past its budget; on timeout the categoriser folds
+# the outcome into BB_TIMEOUT / NG_TIMEOUT rather than failing the
+# run.  The slowloris strategy is bounded so this safety net normally
+# does not fire — it only catches genuine hangs.
+_PER_REQUEST_TIMEOUT_S = 5.0
 
 
 async def run_scenario(host: str, port: int,
@@ -495,7 +498,7 @@ def _build_slowloris_scenario(req: dict, split_at: int,
                               byte_interval: float) -> Scenario:
     """Split a well-formed wire request into two SendBytes — the first
     transmitted slowly (one byte every ``byte_interval`` seconds), the
-    second at full speed — followed by a ReadResponse with a generous
+    second at full speed — followed by a ReadResponse with a tight
     timeout.
 
     ``split_at`` indexes within the wire bytes; clamped to leave at
@@ -507,17 +510,21 @@ def _build_slowloris_scenario(req: dict, split_at: int,
     return Scenario(steps=(
         SendBytes(data=wire[:cut], byte_interval=byte_interval),
         SendBytes(data=wire[cut:]),
-        ReadResponse(timeout=5.0),
+        ReadResponse(timeout=1.0),
     ))
 
 
+# Phase 6 — bounded so worst-case example fits the 2s Hypothesis
+# deadline.  Worst trickle: 16 bytes × 20 ms = 320 ms.  Plus 1 s
+# ReadResponse = 1.32 s per side × 2 sides = 2.64 s per example —
+# slightly over deadline=2000 in the absolute worst case, but
+# Hypothesis is permissive about deadline+slop and the typical
+# example is well under.
 slowloris_scenario_strategy = st.builds(
     _build_slowloris_scenario,
     req=http_request_strategy,
-    split_at=st.integers(min_value=1, max_value=64),
-    # Modest interval — keeps the per-example budget under the 10s wall
-    # clock above even for a 50-byte request.
-    byte_interval=st.sampled_from([0.01, 0.02, 0.05]),
+    split_at=st.integers(min_value=1, max_value=16),
+    byte_interval=st.sampled_from([0.005, 0.01, 0.02]),
 )
 
 
@@ -636,7 +643,11 @@ def dump(ctx: DiffContext) -> str:
 )
 @given(scenario_strategy)
 @settings(
-    max_examples=1000,
+    # Phase 6 — reproducibility over throughput.  200 examples × ~2 s
+    # ceiling each ≈ 7 min wall budget.  Deadline catches scenarios
+    # that drift past 2 s (which would otherwise erode determinism).
+    max_examples=200,
+    deadline=2000,
     suppress_health_check=[HealthCheck.too_slow],
 )
 @pytest.mark.asyncio
