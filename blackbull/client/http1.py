@@ -184,13 +184,22 @@ class HTTP1Client:
     """
 
     def __init__(self, host: str, port: int, *,
-                 ssl: _ssl.SSLContext | None = None) -> None:
+                 ssl: _ssl.SSLContext | None = None,
+                 record_wire_bytes: bool = False) -> None:
         self._host = host
         self._port = port
         self._ssl = ssl
         self._reader: AbstractReader | None = None
         self._writer: AbstractWriter | None = None
         self._raw_writer: asyncio.StreamWriter | None = None
+        # Sprint 17 Phase 2 — opt-in wire-bytes capture for the low-level
+        # primitives (send_raw, send_request_line, send_header_line, ...).
+        # When True, every byte sent through those methods is also appended
+        # to ``self._wire_buffer`` for later inspection by failing tests.
+        # request() does NOT populate this buffer in Sprint 17; capture
+        # there is a Phase 8 concern.
+        self._record_wire_bytes = record_wire_bytes
+        self._wire_buffer: bytearray = bytearray()
 
     # ---- async context manager -------------------------------------------
 
@@ -266,3 +275,115 @@ class HTTP1Client:
         if b'host' not in h:
             h.append(b'host', f'{self._host}:{self._port}'.encode())
         return h
+
+    # ---- Sprint 17 Phase 2 — low-level test-instrument primitives ----
+    #
+    # These methods bypass HTTP1RequestSender's safety net (no Host
+    # injection, no Content-Length, no validation).  They exist so tests
+    # can put deliberately malformed bytes on the wire — slowloris-style
+    # trickle, duplicate Content-Length, invalid request lines, etc. —
+    # without dropping to a raw asyncio socket and duplicating wire-
+    # shaping logic.  The high-level request() / stream() API is the
+    # production path and remains source-compatible.
+
+    @property
+    def wire_buffer(self) -> bytes:
+        """Bytes sent so far by the low-level primitives in this session.
+
+        Empty unless the client was constructed with
+        ``record_wire_bytes=True``.  Reset with :meth:`reset_wire_buffer`.
+        """
+        return bytes(self._wire_buffer)
+
+    def reset_wire_buffer(self) -> None:
+        """Discard previously captured wire bytes."""
+        self._wire_buffer.clear()
+
+    async def send_raw(self, data: bytes, *,
+                       byte_interval: float = 0.0) -> None:
+        """Push arbitrary bytes onto the underlying socket.
+
+        When ``byte_interval > 0`` the bytes are transmitted one at a time
+        with ``byte_interval`` seconds between writes — the primitive
+        slowloris-style stall the differential tests rely on.  Each per-
+        byte write is followed by ``drain()`` (inherited from
+        :class:`AsyncioWriter`), so the bytes actually leave the socket
+        on schedule rather than accumulating in the asyncio send buffer.
+        """
+        assert self._writer is not None, 'connect via __aenter__ first'
+        if self._record_wire_bytes:
+            self._wire_buffer.extend(data)
+        if byte_interval <= 0.0 or len(data) <= 1:
+            await self._writer.write(data)
+            return
+        for i, byte in enumerate(data):
+            await self._writer.write(bytes((byte,)))
+            if i + 1 < len(data):
+                await asyncio.sleep(byte_interval)
+
+    async def send_request_line(
+        self, method: bytes | str | HTTPMethod,
+        target: bytes | str,
+        *, version: bytes = b'HTTP/1.1',
+    ) -> None:
+        """Emit ``METHOD<SP>TARGET<SP>HTTP/1.1\\r\\n`` with no validation.
+
+        Accepts arbitrary bytes for ``method``/``target``/``version`` so a
+        test can deliberately send ``b"BREW"``, lowercase versions, or
+        garbage tokens.  No automatic Host or Content-Length injection —
+        the caller drives the wire bit by bit.
+        """
+        m: bytes
+        if isinstance(method, HTTPMethod):
+            m = str(method).encode()
+        elif isinstance(method, str):
+            m = method.encode()
+        else:
+            m = bytes(method)
+        t: bytes = target.encode() if isinstance(target, str) else bytes(target)
+        await self.send_raw(m + b' ' + t + b' ' + version + _CRLF)
+
+    async def send_header_line(self, name: bytes, value: bytes) -> None:
+        """Emit one ``Name: Value\\r\\n`` header line with no dedup or
+        validation.  Callers wanting a duplicate ``Content-Length`` or a
+        header value containing arbitrary bytes use this primitive
+        directly."""
+        await self.send_raw(name + b': ' + value + _CRLF)
+
+    async def end_headers(self) -> None:
+        """Emit the bare CRLF that terminates the header block."""
+        await self.send_raw(_CRLF)
+
+    async def send_body_bytes(self, data: bytes, *,
+                              byte_interval: float = 0.0) -> None:
+        """Send body octets to the peer.
+
+        Same semantics as :meth:`send_raw`, kept separate for readability
+        at call sites that frame headers separately from the body."""
+        await self.send_raw(data, byte_interval=byte_interval)
+
+    async def send_chunk(self, data: bytes) -> None:
+        """Send one ``Transfer-Encoding: chunked`` chunk.
+
+        Caller must have already emitted ``Transfer-Encoding: chunked``
+        via :meth:`send_header_line` and called :meth:`end_headers`.
+        Finish the chunked stream with :meth:`end_chunked`."""
+        await self.send_raw(f'{len(data):x}'.encode() + _CRLF + data + _CRLF)
+
+    async def end_chunked(self) -> None:
+        """Emit the size-0 terminator chunk that closes a chunked body."""
+        await self.send_raw(b'0' + _CRLF + _CRLF)
+
+    async def read_response(self, *,
+                            timeout: float | None = None) -> ClientResponse:
+        """Read one HTTP/1.1 response from the connection.
+
+        Optional ``timeout`` bounds the entire read (status line + headers
+        + body).  Raises :class:`asyncio.TimeoutError` if the deadline is
+        hit; the caller decides whether to treat that as a transport-
+        fail or a normal protocol outcome."""
+        assert self._reader is not None, 'connect via __aenter__ first'
+        coro = HTTP1ResponseRecipient().receive(self._reader)
+        if timeout is None:
+            return await coro
+        return await asyncio.wait_for(coro, timeout=timeout)
