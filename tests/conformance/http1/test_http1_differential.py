@@ -528,13 +528,119 @@ slowloris_scenario_strategy = st.builds(
 )
 
 
+# ---------------------------------------------------------------------------
+# Sprint 17 Phase 7 — malformed_scenario_strategy.
+#
+# These strategies emit wire bytes that the high-level HTTP1Client.request()
+# would reject up front — garbage request lines, RFC-invalid header values,
+# duplicate Content-Length, conflicting CL+TE, bad HTTP versions.  Driven
+# through SendBytes so the bytes land verbatim on the wire.  Both servers
+# should reject the same way (-> BOTH_REJECTED) or BlackBull's behaviour
+# matches nginx's (-> OK).  Divergences land in the failure categories
+# Phase 4 introduced.
+# ---------------------------------------------------------------------------
+
+
+# Garbage tokens that look method-like but aren't on the RFC 9110 list.
+# nginx and BlackBull should both reject — or both accept and forward to
+# /echo, depending on permissiveness.  The differential is what we care
+# about; the exact behaviour is a finding, not a precondition.
+_GARBAGE_METHODS = (
+    b'BREW',           # not a registered HTTP method
+    b'   GET',          # leading whitespace — RFC 9112 forbids
+    b'GET ',            # trailing space then path follows immediately
+    b'\x80GET',         # high-bit byte in method
+    b'',                # empty method — request line malformed
+)
+
+# Targets that aren't path-form (RFC 9112 §3.2 enumerates the four
+# request-target forms; we exercise the unusual three).
+_UNUSUAL_TARGETS = (
+    b'http://localhost/x',      # protocol-absolute (proxy form)
+    b'example.com:443',         # authority-form (CONNECT)
+    b'*',                       # asterisk-form (server-wide OPTIONS)
+    b'/' + b'a' * 4096,         # very long path
+    b'/%2e%2e/etc/passwd',      # percent-encoded traversal
+)
+
+# RFC-invalid HTTP versions on plaintext HTTP/1.x.
+_BAD_VERSIONS = (
+    b'HTTP/1.0',   # valid, but our app+test currently assume 1.1 framing
+    b'HTTP/2.0',   # MUST NOT appear over plaintext per RFC 9112
+    b'HTTP/9.9',   # bogus
+    b'http/1.1',   # lowercase — RFC requires uppercase
+    b'HTP/1.1',    # typo
+)
+
+
+def _build_garbage_request_line_scenario(method: bytes, target: bytes,
+                                         version: bytes) -> Scenario:
+    """Send a request with a deliberately broken request line."""
+    return Scenario(steps=(
+        SendBytes(
+            data=method + b' ' + target + b' ' + version + b'\r\n'
+                 b'Host: localhost\r\n\r\n',
+        ),
+        ReadResponse(timeout=1.0),
+    ))
+
+
+garbage_request_line_strategy = st.builds(
+    _build_garbage_request_line_scenario,
+    method=st.sampled_from(_GARBAGE_METHODS),
+    target=st.sampled_from(_UNUSUAL_TARGETS),
+    version=st.sampled_from(_BAD_VERSIONS),
+)
+
+
+# Header lines that violate RFC 7230 §3.2 (field-value charset).
+_INVALID_HEADER_LINES = (
+    b'X-Nul: a\x00b',                              # NUL in value
+    b'X-High: \x80\x81\x82',                       # high-bit in value
+    b'X-Empty:',                                    # empty value
+    b'X-Whitespace:    ',                           # all-whitespace
+    b'X-Very-Long: ' + b'a' * 8192,                 # value > 8 KiB
+    b'Content-Length: 5\r\nContent-Length: 10',     # duplicate CL
+    b'Content-Length: 5\r\nTransfer-Encoding: chunked',  # CL + TE
+    b'Transfer-Encoding: identity, chunked',        # double TE token
+    b'Transfer-Encoding: gzip',                     # unsupported encoding
+)
+
+
+def _build_invalid_header_scenario(invalid_line: bytes) -> Scenario:
+    return Scenario(steps=(
+        SendBytes(
+            data=b'POST /echo HTTP/1.1\r\n'
+                 b'Host: localhost\r\n'
+                 + invalid_line + b'\r\n\r\n',
+        ),
+        ReadResponse(timeout=1.0),
+    ))
+
+
+invalid_header_strategy = st.builds(
+    _build_invalid_header_scenario,
+    invalid_line=st.sampled_from(_INVALID_HEADER_LINES),
+)
+
+
+# Aggregate malformed-scenario strategy.  Both sub-strategies are
+# uniform-weighted; the top-level scenario_strategy below biases
+# toward well_formed so the malformed cases don't dominate the budget.
+malformed_scenario_strategy = st.one_of(
+    garbage_request_line_strategy,
+    invalid_header_strategy,
+)
+
+
 # Top-level mix that the differential test consumes.  Well-formed
 # dominates so we keep solid coverage of the common path; slowloris
-# rides along to probe both servers' tolerance for trickled bytes.
-# Phase 7 will add ``malformed_scenario_strategy`` to this one_of().
+# and malformed ride along to probe both servers' tolerance for
+# pathological inputs.
 scenario_strategy = st.one_of(
     well_formed_scenario_strategy,
     slowloris_scenario_strategy,
+    malformed_scenario_strategy,
 )
 
 
