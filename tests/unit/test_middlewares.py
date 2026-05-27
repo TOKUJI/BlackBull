@@ -28,7 +28,7 @@ from blackbull.middleware.compression import Compression
 # *Middleware-suffix rename — tests construct a fresh ``Compression``
 # here, which is the same shape (pre-built, no args).
 compress = Compression()
-from blackbull.server.headers import Headers
+from blackbull.headers import Headers
 
 try:
     import brotli as _brotli

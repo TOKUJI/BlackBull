@@ -477,6 +477,6 @@ if __name__ == '__main__':
         logger.info('TLS not configured — SSE (HTTP/2) unavailable; WebSocket and Long Polling work.')
 
     try:
-        asyncio.run(app.run(certfile=args.cert, keyfile=args.key, port=args.port))
+        app.run(certfile=args.cert, keyfile=args.key, port=args.port)
     except KeyboardInterrupt:
         logger.info('Stopped.')

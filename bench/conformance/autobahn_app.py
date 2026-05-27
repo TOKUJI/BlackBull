@@ -63,4 +63,4 @@ def _parse_args():
 if __name__ == '__main__':
     args = _parse_args()
     print(f'WS echo server on ws://localhost:{args.port}/')
-    app.serve(port=args.port)
+    app.run(port=args.port)

@@ -7,10 +7,11 @@ from email.utils import formatdate
 from ..protocol.frame_types import (FrameTypes, HeaderFrameFlags, DataFrameFlags,
                                     SettingFrameFlags, FrameBase, PseudoHeaders,
                                     DEFAULT_INITIAL_WINDOW_SIZE, DEFAULT_MAX_FRAME_SIZE)
-from .constants import ASGIEvent, WSCloseCode
+from .constants import WSCloseCode
 from .ws_codec import WSOpcode, WSFrameBits, WSFrameHeader, encode_frame
 import logging
-from .headers import Headers, HeaderList
+from ..asgi import ASGIEvent
+from ..headers import Headers, HeaderList
 
 logger = logging.getLogger(__name__)
 

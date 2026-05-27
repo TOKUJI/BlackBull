@@ -17,6 +17,8 @@ import pytest_asyncio
 from blackbull import BlackBull, JSONResponse, Response
 from blackbull.response import StreamingResponse
 
+from .conftest import live_server
+
 
 _CERT = pathlib.Path(__file__).parent.parent / 'cert.pem'
 _KEY  = pathlib.Path(__file__).parent.parent / 'key.pem'
@@ -43,24 +45,11 @@ def _make_app() -> BlackBull:
     return app
 
 
-def _run(app):
-    asyncio.run(app.run())
-
-
 @pytest_asyncio.fixture
 async def h2_app():
     app = _make_app()
-    app.create_server(certfile=str(_CERT), keyfile=str(_KEY), port=0)
-
-    p = Process(target=_run, args=(app,))
-    p.start()
-    app.wait_for_port(timeout=10.0)
-
-    yield app
-
-    app.stop()
-    p.terminate()
-    p.join(timeout=5)
+    with live_server(app, certfile=str(_CERT), keyfile=str(_KEY)) as handle:
+        yield handle
 
 
 @pytest.mark.integration

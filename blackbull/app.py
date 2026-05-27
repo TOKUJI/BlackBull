@@ -460,32 +460,6 @@ class BlackBull:
         """
         return self._error_router(key)
 
-    def has_server(self):
-        return hasattr(self, 'server')
-
-    def create_server(self, certfile=None, keyfile=None, port=0,
-                      max_connections: int | None = None,
-                      stream_queue_depth: int | None = None,
-                      ws_queue_depth: int | None = None):
-        from .server import ASGIServer
-        from .env import get_settings as _get_settings  # noqa: PLC0415
-        _cfg = _get_settings()
-        kwargs = {
-            'certfile': certfile,
-            'keyfile':  keyfile,
-            'loop':     self.loop,
-        }
-        # Honour explicit args; fall back to env-derived settings so
-        # BB_MAX_CONNECTIONS / BB_STREAM_QUEUE_DEPTH / BB_WS_QUEUE_DEPTH
-        # actually reach ASGIServer in single-worker mode (multi-worker
-        # already did this via serve()).
-        kwargs['max_connections']    = max_connections    if max_connections    is not None else _cfg.max_connections
-        kwargs['stream_queue_depth'] = stream_queue_depth if stream_queue_depth is not None else _cfg.stream_queue_depth
-        kwargs['ws_queue_depth']     = ws_queue_depth     if ws_queue_depth     is not None else _cfg.ws_queue_depth
-        self.server = ASGIServer(self, **kwargs)
-        self.server.open_socket(port)
-        self._logger.info(self.server)
-
     def url_path_for(self, name: str, /, **params) -> str:
         """Return the path for the named route with *params* substituted."""
         return self._router.url_path_for(name, **params)
@@ -532,67 +506,34 @@ class BlackBull:
             _swagger_ui.__blackbull_openapi_internal__ = True
             self.route(methods=HTTPMethod.GET, path=docs_path)(_swagger_ui)
 
-    async def run(self, certfile=None, keyfile=None, port=0,
-                  workers: int = 1,
-                  max_connections: int | None = None,
-                  stream_queue_depth: int | None = None,
-                  ws_queue_depth: int | None = None):
-        """Run the server.
+    def run(self, certfile=None, keyfile=None, port=0,
+            unix_path: str | None = None,
+            inherited_fd: int | None = None,
+            workers: int | None = None,
+            max_connections: int | None = None,
+            stream_queue_depth: int | None = None,
+            ws_queue_depth: int | None = None,
+            reload: bool = False,
+            reload_paths: list | None = None) -> None:
+        """Run the app under BlackBull's own server (single- or multi-worker).
 
-        For ``workers=1`` (default) this runs in the current asyncio event loop.
-        For ``workers > 1`` the multi-worker master is run in a thread so the
-        async caller does not block the loop during the synchronous monitoring
-        phase; use :meth:`serve` if you want a synchronous entry point.
-        """
-        self._logger.info('Run is called.')
-        self._router.validate()
+        This is the synchronous, fire-and-forget entry point — callers
+        write ``app.run(port=8000)``, not ``asyncio.run(app.run(...))``.
+        For ``workers > 1`` *or* ``reload=True`` the master pre-binds
+        sockets, forks workers, and blocks until SIGTERM / SIGINT.
 
-        if workers > 1:
-            await asyncio.to_thread(
-                self.serve,
-                certfile=certfile,
-                keyfile=keyfile,
-                port=port,
-                workers=workers,
-                max_connections=max_connections,
-                stream_queue_depth=stream_queue_depth,
-                ws_queue_depth=ws_queue_depth,
-            )
-            return
-
-        if not self.has_server():
-            self.create_server(
-                certfile=certfile,
-                keyfile=keyfile,
-                port=port,
-                max_connections=max_connections,
-                stream_queue_depth=stream_queue_depth,
-                ws_queue_depth=ws_queue_depth,
-            )
-
-        await self.server.run(port=port)
-
-    def serve(self, certfile=None, keyfile=None, port=0,
-              unix_path: str | None = None,
-              inherited_fd: int | None = None,
-              workers: int | None = None,
-              max_connections: int | None = None,
-              stream_queue_depth: int | None = None,
-              ws_queue_depth: int | None = None,
-              reload: bool = False,
-              reload_paths: list | None = None) -> None:
-        """Synchronous entry point — thin shim over :func:`serve`.
-
-        Existed before the module-level ``serve()`` function and kept
-        for backwards compatibility with embedded callers (notebooks,
-        test harnesses, ``examples/*.py``).  Prefer ``serve(app, …)``
-        in new code.
+        For embedded use under an existing event loop, or for pre-binding
+        a socket before forking a test subprocess, instantiate
+        :class:`blackbull.server.ASGIServer` directly.  Any external
+        ASGI server (uvicorn / hypercorn / granian / …) can drive the
+        :class:`BlackBull` instance via its ASGI 3.0 ``__call__``.
 
         Example::
 
-            app.serve(port=8443, certfile='cert.pem', keyfile='key.pem', workers=4)
-            app.serve(port=8443, certfile='cert.pem', keyfile='key.pem', reload=True)
-            app.serve(unix_path='/run/blackbull.sock')
+            app.run(port=8000)
+            app.run(port=8443, certfile='cert.pem', keyfile='key.pem', workers=4)
+            app.run(port=8443, certfile='cert.pem', keyfile='key.pem', reload=True)
+            app.run(unix_path='/run/blackbull.sock')
         """
         serve(
             self,
@@ -606,16 +547,6 @@ class BlackBull:
             reload=reload,
             reload_paths=reload_paths,
         )
-
-    def wait_for_port(self, timeout: float = 10.0, poll_interval: float = 0.1):
-        self.server.wait_for_port(timeout=timeout, poll_interval=poll_interval)
-
-    def stop(self):
-        self.server.close()
-
-    @property
-    def port(self):
-        return self.server.port
 
 
 def serve(app, *,

@@ -183,4 +183,4 @@ if __name__ == '__main__':
     print('Web server on http://localhost:8000')
     print(f'Access logs → http://{LOG_SERVER_HOST}{LOG_SERVER_URL}')
     print('Press Ctrl-C to stop.\n')
-    asyncio.run(app.run(port=8000))
+    app.run(port=8000)

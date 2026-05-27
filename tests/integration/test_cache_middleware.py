@@ -15,6 +15,7 @@ import pytest_asyncio
 
 from blackbull import BlackBull
 from blackbull.middleware.cache import Cache
+from .conftest import live_server
 
 
 def _make_app() -> BlackBull:
@@ -46,16 +47,8 @@ def _make_app() -> BlackBull:
 @pytest_asyncio.fixture
 async def cache_app():
     app = _make_app()
-    app.create_server(port=0)
-    p = Process(target=lambda: asyncio.run(app.run()))
-    p.start()
-    app.wait_for_port(timeout=10.0)
-    yield app
-    app.stop()
-    p.terminate()
-    p.join(timeout=5)
-
-
+    with live_server(app) as handle:
+        yield handle
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_second_request_served_from_cache(cache_app):

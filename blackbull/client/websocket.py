@@ -22,7 +22,7 @@ from http import HTTPStatus
 from typing import Iterable
 
 import logging
-from ..server.headers import Headers
+from ..headers import Headers
 from ..server.recipient import (AbstractReader, AsyncioReader,
                                 WebSocketRecipient)
 from ..server.sender import AbstractWriter, AsyncioWriter, WebSocketSender

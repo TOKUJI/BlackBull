@@ -1,8 +1,8 @@
 import asyncio
 import gzip
 from collections.abc import Callable
-from ..server.constants import ASGIEvent
-from ..server.headers import Headers
+from ..asgi import ASGIEvent
+from ..headers import Headers
 from ..asgi import ResponseStart, ResponseBody, parse_response_event
 from .utils import as_middleware
 

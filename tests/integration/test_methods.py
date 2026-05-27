@@ -9,6 +9,7 @@ import pytest
 
 from blackbull import BlackBull, JSONResponse
 from blackbull.request import read_body
+from .conftest import live_server
 
 
 def _make_app() -> BlackBull:
@@ -44,16 +45,8 @@ def _make_app() -> BlackBull:
 @pytest.fixture(scope="module")
 def live():
     app = _make_app()
-    app.create_server(port=0)
-    p = Process(target=lambda: asyncio.run(app.run()))
-    p.start()
-    app.wait_for_port(timeout=10.0)
-    yield app
-    app.stop()
-    p.terminate()
-    p.join(timeout=5)
-
-
+    with live_server(app) as handle:
+        yield handle
 def _base(app) -> str:
     return f'http://127.0.0.1:{app.port}'
 

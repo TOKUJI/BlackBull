@@ -1,5 +1,5 @@
 import pytest
-from blackbull.server.headers import Headers
+from blackbull.headers import Headers
 
 
 @pytest.fixture

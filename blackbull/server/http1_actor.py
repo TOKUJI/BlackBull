@@ -15,11 +15,12 @@ from urllib.parse import urlparse
 from ..actor import Actor, Message
 from ..event import Event
 from ..event_aggregator import EventAggregator
-from .headers import Headers
+from ..asgi import ASGIEvent
+from ..headers import Headers
 from .recipient import AbstractReader, IncompleteReadError, RecipientFactory, _WS_EVENT_QUEUE_DEPTH
 from .sender import AbstractWriter, SenderFactory
 from .access_log import AccessLogRecord as _AccessLogRecord, _make_capturing_send, _make_disconnect_detecting_receive, emit_access_log as _emit_access_log
-from .constants import ASGIEvent, WSCloseCode
+from .constants import WSCloseCode
 
 logger = logging.getLogger(__name__)
 

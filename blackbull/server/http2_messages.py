@@ -6,7 +6,7 @@ These dataclasses are the internal messages exchanged between
 from dataclasses import dataclass, field
 
 from ..actor import Message
-from .headers import HeaderList
+from ..headers import HeaderList
 from .recipient import AbstractReader
 from .sender import AbstractWriter
 

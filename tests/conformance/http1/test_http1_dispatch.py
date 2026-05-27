@@ -506,7 +506,7 @@ class TestStreamingRequestBody:
 
     def _make_recipient(self, chunked_wire: bytes):
         from blackbull.server.recipient import HTTP1Recipient, AsyncioReader
-        from blackbull.server.headers import Headers
+        from blackbull.headers import Headers
         scope = {'headers': Headers([(b'transfer-encoding', b'chunked')])}
         reader = AsyncioReader(_FakeReader(chunked_wire))
         return HTTP1Recipient(reader, scope)

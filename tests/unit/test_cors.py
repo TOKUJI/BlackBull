@@ -2,7 +2,7 @@
 import pytest
 
 from blackbull.middleware.cors import CORS
-from blackbull.server.headers import Headers
+from blackbull.headers import Headers
 
 
 def _make_scope(method='GET', origin=None, headers=None, type_='http'):

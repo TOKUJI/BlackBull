@@ -198,7 +198,7 @@ async def test_http2_sender_auto_emits_date_on_bytes_path():
 async def test_http2_sender_auto_emits_date_on_asgi_event_path():
     """ASGI streaming path (``http.response.start``) also gets the auto-date."""
     from blackbull.server.sender import HTTP2Sender, AsyncioWriter
-    from blackbull.server.constants import ASGIEvent
+    from blackbull.asgi import ASGIEvent
 
     written = bytearray()
     mock_writer = MagicMock()

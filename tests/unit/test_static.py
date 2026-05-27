@@ -14,7 +14,7 @@ StaticFiles is an ASGI callable:
 import pathlib
 import pytest
 
-from blackbull.server.headers import Headers
+from blackbull.headers import Headers
 
 
 def _scope(method: str = 'GET', path: str = '/',

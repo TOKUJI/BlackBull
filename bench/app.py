@@ -181,7 +181,7 @@ if __name__ == '__main__':
     print(f'Starting bench server on https://localhost:{args.port}')
     print(f'  cert={args.cert}  key={args.key}')
     print('Routes: /ping  /1kb  /16kb  /echo  /ws  /metrics')
-    app.serve(
+    app.run(
         port=args.port,
         certfile=args.cert,
         keyfile=args.key,

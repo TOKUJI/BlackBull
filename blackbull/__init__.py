@@ -5,17 +5,25 @@ Public API exports:
 - `BlackBull`: the main application object; wraps routing, middleware, and lifespan hooks.
 - `serve`: synchronous entry point that runs any ASGI 3.0 callable (also used by the ``blackbull`` console script).
 - `Response`, `JSONResponse`, `StreamingResponse`, `WebSocketResponse`: response helpers.
+- `Headers`: case-insensitive, ordered, multi-valued HTTP header store.
 - `cookie_header`: builds a ``Set-Cookie`` header tuple.
 - `read_body`: reads and buffers the full request body from the ASGI receive channel.
 - `parse_cookies`: parses the ``Cookie`` header into a plain ``dict``.
 - `CORS`: adds ``Access-Control-*`` headers; handles preflight OPTIONS requests.
 - `as_middleware`: decorator that marks an async function or class as middleware; normalises ``send`` so inner wrappers see only ASGI event dicts.
 - `TrustedProxy`: rewrites ``scope['client']`` / ``scope['scheme']`` from proxy headers.
+
+Importing this package does **not** load the server stack
+(``blackbull.server.*``).  Use ``ASGIServer`` from ``blackbull.server``
+when you want to embed BlackBull's own server; otherwise pass the
+``BlackBull`` instance to any external ASGI server (uvicorn, hypercorn,
+granian, …) since ``BlackBull.__call__`` is ASGI 3.0 compliant.
 """
 import logging
 logging.getLogger('blackbull').addHandler(logging.NullHandler())
 
 from .app import BlackBull, serve
+from .headers import Headers
 from .request import read_body, parse_cookies
 from .response import Response, JSONResponse, StreamingResponse, WebSocketResponse, cookie_header
 from .event import Event, EventHandler

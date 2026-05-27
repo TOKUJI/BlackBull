@@ -1,7 +1,7 @@
 """End-to-end test for auto-reload (Sprint 10).
 
 What this test exercises:
-  1. ``app.serve(reload=True)`` is launched as a subprocess against a
+  1. ``app.run(reload=True)`` is launched as a subprocess against a
      scratch script the test owns.
   2. After the first request returns ``v1``, the script is rewritten so
      the same route returns ``v2``.
@@ -85,7 +85,7 @@ def _write_app(script: Path, port: int, version: str) -> None:
             return b'{version}'
 
         if __name__ == '__main__':
-            app.serve(port={port}, reload=True)
+            app.run(port={port}, reload=True)
     ''').lstrip())
 
 

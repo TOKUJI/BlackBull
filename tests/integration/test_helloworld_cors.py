@@ -14,6 +14,7 @@ import pytest_asyncio
 
 from blackbull import CORS, BlackBull, JSONResponse
 from blackbull.request import read_body
+from .conftest import live_server
 
 
 # ---------------------------------------------------------------------------
@@ -51,36 +52,14 @@ def _run(app):
 async def cors_app():
     """BlackBull app with explicit CORS origin; runs in a child process."""
     app = _make_app(allow_origins=['https://example.com'])
-    app.create_server(port=0)
-
-    p = Process(target=_run, args=(app,))
-    p.start()
-    app.wait_for_port(timeout=10.0)
-
-    yield app
-
-    app.stop()
-    p.terminate()
-    p.join(timeout=5)
-
-
+    with live_server(app) as handle:
+        yield handle
 @pytest_asyncio.fixture
 async def cors_wildcard_app():
     """BlackBull app with wildcard CORS origin; runs in a child process."""
     app = _make_app(allow_origins=['*'])
-    app.create_server(port=0)
-
-    p = Process(target=_run, args=(app,))
-    p.start()
-    app.wait_for_port(timeout=10.0)
-
-    yield app
-
-    app.stop()
-    p.terminate()
-    p.join(timeout=5)
-
-
+    with live_server(app) as handle:
+        yield handle
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

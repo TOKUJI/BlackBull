@@ -125,7 +125,7 @@ class TestParse:
         assert scope['path'] == '/chat'
 
     def test_headers_is_iterable_of_pairs(self):
-        from blackbull.server.headers import Headers
+        from blackbull.headers import Headers
         scope = _get_scope(_http_request())
         assert isinstance(scope['headers'], Headers)
         for name, value in scope['headers']:

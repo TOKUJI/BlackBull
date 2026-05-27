@@ -1,5 +1,5 @@
-from ..server.constants import ASGIEvent
-from ..server.headers import Headers
+from ..asgi import ASGIEvent
+from ..headers import Headers
 from .utils import as_middleware
 
 

@@ -15,7 +15,6 @@ Try:
     curl http://localhost:8000/double/21
     curl http://localhost:8000/info/12345678-1234-5678-1234-567812345678
 """
-import asyncio
 import uuid
 from http import HTTPMethod
 
@@ -43,4 +42,4 @@ if __name__ == '__main__':
     print('url_path_for examples:')
     print(' ', app.url_path_for('greet', name='Alice'))
     print(' ', app.url_path_for('double', n=21))
-    asyncio.run(app.run(port=8000))
+    app.run(port=8000)

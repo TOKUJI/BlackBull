@@ -3,7 +3,7 @@ from pathlib import Path
 from urllib.parse import unquote
 
 from blackbull.env import get_settings, Environment
-from blackbull.server.constants import ASGIEvent
+from blackbull.asgi import ASGIEvent
 
 
 class StaticFiles:

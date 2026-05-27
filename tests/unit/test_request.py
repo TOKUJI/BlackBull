@@ -1,7 +1,7 @@
 import pytest
 
 from blackbull.request import read_body, parse_cookies
-from blackbull.server.headers import Headers
+from blackbull.headers import Headers
 
 
 # ---------------------------------------------------------------------------

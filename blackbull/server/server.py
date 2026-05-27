@@ -25,8 +25,8 @@ from .sender import SenderFactory, AbstractWriter
 from .recipient import (RecipientFactory, HTTP2Recipient, AbstractReader, AsyncioReader,
                         IncompleteReadError, _HTTP2_STREAM_QUEUE_DEPTH, _WS_EVENT_QUEUE_DEPTH)
 from .access_log import AccessLogRecord, _make_capturing_send, emit_access_log as _emit_access_log
-from .constants import ASGIEvent
-from .headers import Headers
+from ..asgi import ASGIEvent
+from ..headers import Headers
 from .http2_actor import HTTP2Actor
 logger = logging.getLogger(__name__)
 

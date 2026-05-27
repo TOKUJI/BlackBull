@@ -14,7 +14,7 @@ from blackbull.server.websocket_actor import WebSocketActor
 from blackbull.server.recipient import AbstractReader
 from blackbull.server.sender import AbstractWriter
 from blackbull.event_aggregator import EventAggregator
-from blackbull.server.headers import Headers
+from blackbull.headers import Headers
 
 
 # ---------------------------------------------------------------------------

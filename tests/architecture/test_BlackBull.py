@@ -23,11 +23,10 @@ import websockets
 logger = logging.getLogger(__name__)
 
 
-def run_application(app):
-    logger.info('dummy is called.')
-    loop = asyncio.new_event_loop()
-    task = loop.create_task(app.run())
-    loop.run_until_complete(task)
+def run_application(server):
+    """Subprocess entry point — drive a pre-bound ASGIServer to completion."""
+    logger.info('run_application is called.')
+    asyncio.run(server.run())
 
 
 async def wait_for_server(host, port, *, timeout=10.0, interval=0.1):
@@ -60,10 +59,12 @@ async def app(manage_cert_and_key):
     key_path = cd / 'key.pem'
 
     app = BlackBull()
+    from blackbull.server import ASGIServer
 
     logger.info(f"[app fixture] cert.pem exists: {cert_path.exists()}, key.pem exists: {key_path.exists()}")
 
-    app.create_server(certfile=cert_path, keyfile=key_path, port=0)
+    server = ASGIServer(app, certfile=str(cert_path), keyfile=str(key_path))
+    server.open_socket(0)
 
     # Routing not using middleware.
     @app.route(path='/test')
@@ -141,21 +142,26 @@ async def app(manage_cert_and_key):
                 logger.debug('Have not received any message in this second.')
                 await send(Response('Any message?'))
 
-    p = Process(target=run_application, args=(app,))
+    p = Process(target=run_application, args=(server,))
     p.start()
-    app.wait_for_port(timeout=10.0)
+    server.wait_for_port(timeout=10.0)
 
     # Wait until the server is actually accepting connections before yielding
     # to the test.  Without this, the test races against server startup and
     # gets a ConnectionRefusedError or a silent TimeoutError.
-    await wait_for_server('127.0.0.1', app.port)
+    await wait_for_server('127.0.0.1', server.port)
 
-    yield app
+    # Tests dereference `app.port` for URL construction; expose it as a
+    # transient attribute on the BlackBull instance just for this fixture.
+    app.port = server.port
 
-    logger.info('At teardown.')
-    app.stop()
-    p.terminate()
-    p.join(timeout=5)
+    try:
+        yield app
+    finally:
+        logger.info('At teardown.')
+        server.close()
+        p.terminate()
+        p.join(timeout=5)
 
 
 @pytest_asyncio.fixture
@@ -359,11 +365,6 @@ def test_ws_protocols_setter_keeps_bytes():
     app = BlackBull()
     app.available_ws_protocols = [b'h2']
     assert app.available_ws_protocols == [b'h2']
-
-
-def test_has_server_false_initially():
-    app = BlackBull()
-    assert app.has_server() is False
 
 
 @pytest.mark.asyncio

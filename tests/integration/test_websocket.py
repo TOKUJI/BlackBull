@@ -14,6 +14,7 @@ import websockets
 
 from blackbull import BlackBull, WebSocketResponse
 from blackbull.utils import Scheme
+from .conftest import live_server
 
 
 def _make_echo_app() -> BlackBull:
@@ -45,19 +46,8 @@ def _run(app):
 @pytest_asyncio.fixture
 async def ws_app():
     app = _make_echo_app()
-    app.create_server(port=0)
-
-    p = Process(target=_run, args=(app,))
-    p.start()
-    app.wait_for_port(timeout=10.0)
-
-    yield app
-
-    app.stop()
-    p.terminate()
-    p.join(timeout=5)
-
-
+    with live_server(app) as handle:
+        yield handle
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_websocket_text_echo(ws_app):

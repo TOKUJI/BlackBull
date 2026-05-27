@@ -1,4 +1,3 @@
-import asyncio
 from blackbull import BlackBull, Response
 
 app = BlackBull()
@@ -23,4 +22,4 @@ async def hello(scope, receive, send):
     })
 
 if __name__ == '__main__':
-    asyncio.run(app.run(port=8000))
+    app.run(port=8000)

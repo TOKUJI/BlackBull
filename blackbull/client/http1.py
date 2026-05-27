@@ -16,7 +16,7 @@ from http import HTTPMethod
 from typing import Union
 
 import logging
-from ..server.headers import Headers, HeaderList
+from ..headers import Headers, HeaderList
 from ..server.recipient import (AbstractReader, AsyncioReader,
                                 IncompleteReadError)
 from ..server.sender import AbstractWriter, AsyncioWriter

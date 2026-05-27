@@ -4,7 +4,7 @@ import traceback
 from ..protocol.stream import Stream
 from ..protocol.frame_types import FrameTypes, PseudoHeaders
 import logging
-from .headers import Headers
+from ..headers import Headers
 
 logger = logging.getLogger(__name__)
 

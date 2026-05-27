@@ -138,22 +138,16 @@ def test_workers_serve_http_requests(plain_app):
 
 
 # ---------------------------------------------------------------------------
-# T4 — BlackBull.serve() single-worker uses asyncio.run (regression guard)
+# T4 — BlackBull.run() single-worker uses asyncio.run (regression guard)
 # ---------------------------------------------------------------------------
 
-def test_serve_single_worker_uses_asyncio_run(plain_app):
-    """serve(workers=1) must delegate to asyncio.run, not MultiWorkerServer."""
-    called_with = {}
-
-    async def _fake_run(**kwargs):
-        called_with.update(kwargs)
-
-    with patch.object(plain_app, 'run', side_effect=_fake_run):
-        with patch('asyncio.run') as mock_asyncio_run:
-            # asyncio.run won't actually run the coroutine in the mock, so
-            # we just verify it was called.
-            plain_app.serve(port=9999, workers=1)
-            assert mock_asyncio_run.called, 'asyncio.run must be called for workers=1'
+def test_run_single_worker_uses_asyncio_run(plain_app):
+    """app.run(workers=1) must delegate to asyncio.run, not MultiWorkerServer."""
+    with patch('blackbull.app.asyncio.run') as mock_asyncio_run:
+        # asyncio.run won't actually run the coroutine in the mock, so
+        # we just verify it was called.
+        plain_app.run(port=9999, workers=1)
+        assert mock_asyncio_run.called, 'asyncio.run must be called for workers=1'
 
 
 # ---------------------------------------------------------------------------

@@ -141,7 +141,7 @@ def test_reload_disables_reuseport(monkeypatch):
     from blackbull.server.multiworker import MultiWorkerServer
     from blackbull import BlackBull
 
-    # Pre-bind a master socket the way app.serve() does.
+    # Pre-bind a master socket the way bench/aws/run.sh does — Sprint 22.
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     sock.bind(('127.0.0.1', 0))

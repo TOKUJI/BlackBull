@@ -126,4 +126,4 @@ if __name__ == '__main__':
     print(f'  time curl -s http://localhost:{args.port}/slow   # cached: instant')
     print(f'  curl -s http://localhost:{args.port}/counter     # handler ran once')
 
-    asyncio.run(app.run(port=args.port))
+    app.run(port=args.port)

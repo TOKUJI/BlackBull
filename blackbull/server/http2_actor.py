@@ -23,14 +23,14 @@ from ..protocol.frame_types import (
     DEFAULT_INITIAL_WINDOW_SIZE, DEFAULT_MAX_FRAME_SIZE,
 )
 from ..protocol.stream import Stream, StreamState
-from .headers import Headers
+from ..headers import Headers
 from .parser import ParserFactory, parse_headers
 from .recipient import (AbstractReader, IncompleteReadError,
                         RecipientFactory, _HTTP2_STREAM_QUEUE_DEPTH)
 from .response import ResponderFactory
 from .sender import AbstractWriter, SenderFactory
 from .access_log import AccessLogRecord, _make_capturing_send, _make_disconnect_detecting_receive, emit_access_log as _emit_access_log
-from .constants import ASGIEvent
+from ..asgi import ASGIEvent
 from .http1_actor import RequestActor
 
 logger = logging.getLogger(__name__)

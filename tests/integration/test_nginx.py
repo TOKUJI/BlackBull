@@ -16,6 +16,7 @@ from blackbull import BlackBull
 from blackbull.middleware.cors import CORS
 from blackbull.response import JSONResponse
 from blackbull.request import read_body
+from .conftest import live_server
 
 
 
@@ -140,18 +141,8 @@ def _run(app):
 async def app():
     # app = _make_app(allow_origins=['https://example.com'])
     app = _make_app()
-    app.create_server(port=0)
-
-    p = Process(target=_run, args=(app,))
-    p.start()
-    app.wait_for_port(timeout=10.0)
-
-    yield app
-
-    app.stop()
-    p.terminate()
-    p.join(timeout=5)
-
+    with live_server(app) as handle:
+        yield handle
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

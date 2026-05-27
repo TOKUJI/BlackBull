@@ -4,8 +4,9 @@ from abc import ABC, abstractmethod
 
 from .sender import AbstractWriter, AsyncioWriter
 from .ws_codec import WSOpcode, encode_frame, read_frame_header, read_payload
-from .constants import ASGIEvent, WSCloseCode
-from .headers import Headers
+from .constants import WSCloseCode
+from ..asgi import ASGIEvent
+from ..headers import Headers
 from ..protocol.frame_types import FrameBase, Data
 from ..event import Event, EventDispatcher
 import logging

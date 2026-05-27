@@ -2,7 +2,7 @@
 import pytest
 
 from blackbull.middleware.proxy import TrustedProxy
-from blackbull.server.headers import Headers
+from blackbull.headers import Headers
 
 
 def _make_scope(client_ip, headers: dict[bytes, bytes], type_='http'):

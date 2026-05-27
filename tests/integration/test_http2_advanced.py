@@ -12,6 +12,8 @@ import pytest
 
 from blackbull import BlackBull, Response
 
+from .conftest import live_server
+
 
 _CERT = pathlib.Path(__file__).parent.parent / 'cert.pem'
 _KEY  = pathlib.Path(__file__).parent.parent / 'key.pem'
@@ -59,27 +61,15 @@ def _make_priority_app() -> BlackBull:
 @pytest.fixture(scope="module")
 def push_app(manage_cert_and_key):
     app = _make_push_app()
-    app.create_server(certfile=str(_CERT), keyfile=str(_KEY), port=0)
-    p = Process(target=lambda: asyncio.run(app.run()))
-    p.start()
-    app.wait_for_port(timeout=10.0)
-    yield app
-    app.stop()
-    p.terminate()
-    p.join(timeout=5)
+    with live_server(app, certfile=str(_CERT), keyfile=str(_KEY)) as handle:
+        yield handle
 
 
 @pytest.fixture(scope="module")
 def priority_app(manage_cert_and_key):
     app = _make_priority_app()
-    app.create_server(certfile=str(_CERT), keyfile=str(_KEY), port=0)
-    p = Process(target=lambda: asyncio.run(app.run()))
-    p.start()
-    app.wait_for_port(timeout=10.0)
-    yield app
-    app.stop()
-    p.terminate()
-    p.join(timeout=5)
+    with live_server(app, certfile=str(_CERT), keyfile=str(_KEY)) as handle:
+        yield handle
 
 
 @pytest.mark.integration

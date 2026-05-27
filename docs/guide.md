@@ -47,7 +47,7 @@ async def hello(scope, receive, send):
     await send(Response(b'Hello, world!'))
 
 if __name__ == '__main__':
-    asyncio.run(app.run(port=8000))
+    app.run(port=8000)
 ```
 
 Every handler is an `async` function.  The full form receives `(scope, receive, send)`
@@ -459,7 +459,7 @@ async def info(uid: uuid.UUID):
 if __name__ == '__main__':
     print(app.url_path_for('greet', name='Alice'))   # /greet/Alice
     print(app.url_path_for('double', n=21))           # /double/21
-    asyncio.run(app.run(port=8000))
+    app.run(port=8000)
 ```
 
 Every converter type matches its handler annotation, so `validate()` succeeds and the server starts.
@@ -484,7 +484,7 @@ async def double(n: str):      # BUG: converter is int, annotation is str
 
 if __name__ == '__main__':
     try:
-        asyncio.run(app.run(port=8000))
+        app.run(port=8000)
     except* ConfigurationError as eg:
         for exc in eg.exceptions:
             print(f'ConfigurationError: {exc}')
@@ -1425,30 +1425,34 @@ BlackBull exposes three entry points, in increasing order of how
 "production-shaped" they are:
 
 ```python
-import asyncio
 from blackbull import serve  # module-level function; works with any ASGI app
 
-# 1. In-Python, async — useful inside notebooks, test harnesses, embedded callers
-asyncio.run(app.run(port=8000))
-asyncio.run(app.run(port=8443, certfile='cert.pem', keyfile='key.pem'))
+# 1. In-Python — single-worker, suitable for development / `python myapp.py` scripts.
+app.run(port=8000)
+app.run(port=8443, certfile='cert.pem', keyfile='key.pem')
 
-# 2. In-Python, sync — typical for `python myapp.py` style scripts
-app.serve(port=8443, certfile='cert.pem', keyfile='key.pem', workers=4)
+# 2. In-Python — multi-worker (pre-forks N workers; master holds the listening sockets).
+app.run(port=8443, certfile='cert.pem', keyfile='key.pem', workers=4)
 
-# Development: hot-reload when *.py files change.
+# 3. Development: hot-reload when *.py files change.
 # Uses watchfiles + master-keeps-listening-sockets across worker recycles.
 # Requires the [reload] extra: pip install -e '.[reload]'
-app.serve(port=8000, reload=True)
+app.run(port=8000, reload=True)
 ```
 
 ```bash
-# 3. Console script — same flags work for any ASGI 3.0 callable.
+# 4. Console script — same flags work for any ASGI 3.0 callable.
 #    Useful for systemd / Docker / PaaS where a CLI is the deployment surface.
 blackbull myapp:app --bind 0.0.0.0:8443 \
     --certfile cert.pem --keyfile key.pem --workers 4
 
 # Auto-reload via the CLI:
 blackbull myapp:app --bind 127.0.0.1:8000 --reload
+
+# 5. Any external ASGI server — BlackBull instances are valid ASGI 3.0 callables.
+uvicorn myapp:app --port 8000
+hypercorn myapp:app --bind 0.0.0.0:8000
+granian --interface asgi myapp:app
 ```
 
 The CLI accepts any ``module:attribute`` import path; the attribute may
@@ -1459,18 +1463,31 @@ every peer server including BlackBull).
 `app.run()` signature:
 
 ```python
-async def run(port=0, certfile=None, keyfile=None,
-              workers=1, max_connections=None,
-              stream_queue_depth=None, ws_queue_depth=None)
+def run(port=0, certfile=None, keyfile=None,
+        workers=None, unix_path=None, inherited_fd=None,
+        max_connections=None, stream_queue_depth=None,
+        ws_queue_depth=None, reload=False, reload_paths=None)
 ```
 
-`app.serve()` is the synchronous counterpart; pass ``reload=True`` to
-enable auto-reload (only available via ``serve()`` because it needs a
-long-lived supervisor process around the event loop).  All three
-entry points ultimately call :func:`blackbull.serve`, which is the
-module-level function the CLI dispatches to — embedded users can
-import it directly to serve a raw ASGI callable without instantiating
-a :class:`BlackBull`.
+``app.run()`` is **synchronous** — it internalises ``asyncio.run`` so
+callers write ``app.run(port=8000)`` rather than
+``asyncio.run(app.run(...))``.  ``reload=True`` and ``workers > 1`` both
+trigger the master-process path (long-lived supervisor around the worker
+pool).  The same logic is reachable through the module-level
+:func:`blackbull.serve` function — the CLI calls it after resolving the
+``module:attr`` import.
+
+For embedded use under an existing event loop (rare), or to pre-bind a
+socket before forking a test subprocess, instantiate
+:class:`blackbull.server.ASGIServer` directly:
+
+```python
+from blackbull.server import ASGIServer
+
+server = ASGIServer(app, certfile='cert.pem', keyfile='key.pem')
+server.open_socket(8443)
+await server.run()
+```
 
 ### §10.1  Workers and the event loop
 
@@ -1664,15 +1681,17 @@ before starting the server:
 ```python
 import asyncio
 from blackbull import BlackBull
+from blackbull.server import ASGIServer
 
 app = BlackBull()
 
 # ... define routes ...
 
-# Create the server manually so we can configure mTLS before accepting connections
-app.create_server(certfile='cert.pem', keyfile='key.pem', port=8443)
-app.server.configure_mtls(ca_cert='ca.pem')   # enables CERT_REQUIRED
-asyncio.run(app.run())
+# Build the server manually so we can configure mTLS before accepting connections.
+server = ASGIServer(app, certfile='cert.pem', keyfile='key.pem')
+server.open_socket(8443)
+server.configure_mtls(ca_cert='ca.pem')   # enables CERT_REQUIRED
+asyncio.run(server.run())
 ```
 
 `configure_mtls` raises `RuntimeError` if called before TLS is configured (i.e.
@@ -2045,7 +2064,7 @@ if __name__ == '__main__':
     parser.add_argument('--cert', default=None)
     parser.add_argument('--key',  default=None)
     args = parser.parse_args()
-    asyncio.run(app.run(port=args.port, certfile=args.cert, keyfile=args.key))
+    app.run(port=args.port, certfile=args.cert, keyfile=args.key)
 ```
 
 The working implementation of this skeleton is
