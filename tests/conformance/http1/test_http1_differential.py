@@ -57,6 +57,14 @@ from blackbull.client import (  # noqa: E402
     Scenario,
     SendBytes,
 )
+from blackbull.client.scenario_oracle import (  # noqa: E402
+    ACCEPTED_CATEGORIES,
+    Category,
+    SideOutcome,
+    categorize,
+    normalize_response,
+    run_scenario,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -220,57 +228,14 @@ def nginx_server(echo_server, docker_network):
 # pytest.
 # ---------------------------------------------------------------------------
 
-import enum  # noqa: E402
 import time as _time  # noqa: E402
 from dataclasses import dataclass, field  # noqa: E402
 
-
-class Category(str, enum.Enum):
-    """Why a differential example was (not) accepted.
-
-    Subclassing ``str`` makes the values JSON-serialisable directly and
-    keeps ``assert ctx.category == 'OK'``-style sites readable.  Phase 4
-    introduces this enum; later phases (5–8) may add categories.
-    """
-    OK = 'OK'                          # normalised responses match
-    STATUS_DIFFER = 'STATUS_DIFFER'    # both responded, status differs
-    BODY_DIFFER = 'BODY_DIFFER'        # both responded, same status, body differs
-    HEADER_DIFFER = 'HEADER_DIFFER'    # both responded, same status+body, headers differ
-    BB_TRANSPORT_FAIL = 'BB_TRANSPORT_FAIL'   # BlackBull errored, nginx fine
-    NG_TRANSPORT_FAIL = 'NG_TRANSPORT_FAIL'   # nginx errored, BlackBull fine
-    BB_TIMEOUT = 'BB_TIMEOUT'          # BlackBull exceeded per-example wait_for
-    NG_TIMEOUT = 'NG_TIMEOUT'          # nginx ditto
-    BOTH_REJECTED = 'BOTH_REJECTED'    # both 4xx OR both transport-failed
-
-
-# Categories accepted by the assertion below.  Adding a new known-
-# divergence category here is a config change, not a code change.  Start
-# tight: only OK (true equivalence) and BOTH_REJECTED (both servers
-# refused the input the same way).  Other categories are surfaced for
-# investigation.
-ACCEPTED_CATEGORIES: frozenset[Category] = frozenset({
-    Category.OK,
-    Category.BOTH_REJECTED,
-})
-
-
-@dataclass
-class SideOutcome:
-    """One side's response in a differential pair.
-
-    Exactly one of (response, exception) is populated.  ``timed_out`` is
-    True if the failure was an :class:`asyncio.TimeoutError` from the
-    per-example wait_for; we record it separately because timeouts are
-    semantically distinct from other transport errors.
-    """
-    response: dict | None = None        # normalised {status, headers, body}
-    exception: str | None = None        # repr(exc) when no response arrived
-    timed_out: bool = False
-    elapsed_s: float = 0.0
-
-    @property
-    def ok(self) -> bool:
-        return self.response is not None
+# Sprint 18 Phase 3 — Category, ACCEPTED_CATEGORIES, SideOutcome,
+# normalize_response, categorize, and run_scenario moved to
+# blackbull.client.scenario_oracle so the atheris fuzz harness can
+# reuse them without importing this pytest module.  Imports at the
+# top of the file pull them back in.
 
 
 @dataclass
@@ -289,102 +254,6 @@ class DiffContext:
     category: Category
     wire_request: bytes = b''
     notes: list[str] = field(default_factory=list)
-
-
-# Framing / transport headers stripped from the differential comparison.
-# These are emitted (or not) at the discretion of the server's protocol
-# layer and are RFC-compliant either way; comparing them produces noise.
-#   - date / server: clock + identity (varies per host)
-#   - content-length: derived from body, already in body
-#   - connection: HTTP/1.1 keep-alive is implicit; nginx emits the header
-#     explicitly while BlackBull omits it.  Both legal per RFC 9112 §9.1.
-#   - keep-alive: nginx-specific timing hint (RFC 9112 deprecates it)
-#   - transfer-encoding: framing detail, derived from body shape
-_FRAMING_HEADERS = frozenset({
-    b'date',
-    b'server',
-    b'content-length',
-    b'connection',
-    b'keep-alive',
-    b'transfer-encoding',
-})
-
-
-def normalize_response(resp):
-    return {
-        'status': resp.status,
-        'headers': sorted(
-            (k.lower(), v)
-            for k, v in resp.headers
-            if k.lower() not in _FRAMING_HEADERS
-        ),
-        'body': resp.body,
-    }
-
-
-# Per-side wall-clock budget.  Sprint 17 Phase 6 — tightened from 10 s
-# down to 5 s so a single pathological example can't push the whole
-# 200-example sweep past its budget; on timeout the categoriser folds
-# the outcome into BB_TIMEOUT / NG_TIMEOUT rather than failing the
-# run.  The slowloris strategy is bounded so this safety net normally
-# does not fire — it only catches genuine hangs.
-_PER_REQUEST_TIMEOUT_S = 5.0
-
-
-async def run_scenario(host: str, port: int,
-                       scenario: Scenario) -> tuple[SideOutcome, bytes]:
-    """Execute *scenario* against (host, port) and return (outcome, wire_bytes).
-
-    Sprint 17 Phase 5 — supersedes the prior ``send_http1(req)`` path.
-    Drives the scenario through :meth:`HTTP1Client.execute_scenario`,
-    which itself never raises; this wrapper only adds an outer
-    ``asyncio.wait_for`` so a runaway scenario (e.g. trickled bytes
-    plus a long read timeout) can't blow the per-example budget.
-
-    Returns the captured wire bytes (BlackBull and nginx receive
-    identical bytes, so one capture is enough for the failure dump).
-    """
-    t0 = _time.monotonic()
-    wire = b''
-    try:
-        async with HTTP1Client(host, port,
-                               record_wire_bytes=True,
-                               connect_timeout=2.0) as c:
-            result = await asyncio.wait_for(
-                c.execute_scenario(scenario),
-                timeout=_PER_REQUEST_TIMEOUT_S,
-            )
-            wire = c.wire_buffer
-        if result.response is not None:
-            return SideOutcome(
-                response=normalize_response(result.response),
-                elapsed_s=_time.monotonic() - t0,
-            ), wire
-        if result.timed_out:
-            return SideOutcome(
-                exception=result.exception or 'TimeoutError',
-                timed_out=True,
-                elapsed_s=_time.monotonic() - t0,
-            ), wire
-        # No response, no per-step timeout — either the scenario had
-        # no ReadResponse step (treat as "no answer") or a primitive
-        # raised mid-scenario.  Either way we report the exception
-        # (or a synthetic marker) so the categoriser sees ng.ok=False.
-        return SideOutcome(
-            exception=result.exception or 'no-response (scenario had no READ step)',
-            elapsed_s=_time.monotonic() - t0,
-        ), wire
-    except asyncio.TimeoutError as exc:
-        return SideOutcome(
-            exception=repr(exc),
-            timed_out=True,
-            elapsed_s=_time.monotonic() - t0,
-        ), wire
-    except Exception as exc:  # noqa: BLE001
-        return SideOutcome(
-            exception=repr(exc),
-            elapsed_s=_time.monotonic() - t0,
-        ), wire
 
 
 def reconstruct_wire_request(req: dict) -> bytes:
@@ -642,60 +511,6 @@ scenario_strategy = st.one_of(
     slowloris_scenario_strategy,
     malformed_scenario_strategy,
 )
-
-
-def _is_error_status(resp: dict) -> bool:
-    """True for 4xx (client error) and 5xx (server error) responses.
-
-    Sprint 18 — broadened from 4xx-only.  When both servers reject an
-    input with any error status the response *bodies* (e.g.
-    BlackBull's ``501 Not Implemented`` plaintext vs nginx's HTML
-    error page) are server-specific and not a meaningful divergence,
-    so the pair collapses to BOTH_REJECTED.
-    """
-    s = resp.get('status')
-    return isinstance(s, int) and 400 <= s < 600
-
-
-def categorize(ng: SideOutcome, bb: SideOutcome) -> Category:
-    """Bucket a differential example into a :class:`Category`.
-
-    Phase 4 — replaces the prior 3-way status_mismatch/body_mismatch/OK
-    enumeration.  Order of the checks matters: both-rejected wins over
-    individual transport failures so we don't flag inputs that nginx
-    also refused.
-    """
-    # Both sides failed transport-wise (any mix of exception / timeout).
-    if not ng.ok and not bb.ok:
-        return Category.BOTH_REJECTED
-
-    # One side responded, the other didn't.
-    if ng.ok and not bb.ok:
-        return Category.BB_TIMEOUT if bb.timed_out else Category.BB_TRANSPORT_FAIL
-    if bb.ok and not ng.ok:
-        return Category.NG_TIMEOUT if ng.timed_out else Category.NG_TRANSPORT_FAIL
-
-    # Both responded with an HTTP status.  After Phase 3's fixture
-    # widening + on_error handlers, the diff_h1_app returns 200 for
-    # any method on any path that nginx also returns 200 for.  If both
-    # sides answered with a 4xx OR 5xx, treat as BOTH_REJECTED — the
-    # error body is server-specific (nginx's HTML page vs BlackBull's
-    # plaintext) and not load-bearing.
-    assert ng.response is not None and bb.response is not None
-    if _is_error_status(ng.response) and _is_error_status(bb.response):
-        # Status must still match — a 4xx/5xx mismatch is real
-        # divergence (e.g. 400 vs 501 means the two servers
-        # categorised the same input differently).
-        if ng.response['status'] == bb.response['status']:
-            return Category.BOTH_REJECTED
-
-    if ng.response['status'] != bb.response['status']:
-        return Category.STATUS_DIFFER
-    if ng.response['body'] != bb.response['body']:
-        return Category.BODY_DIFFER
-    if ng.response['headers'] != bb.response['headers']:
-        return Category.HEADER_DIFFER
-    return Category.OK
 
 
 def _json_default(o):
