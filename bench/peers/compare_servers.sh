@@ -423,8 +423,13 @@ bench_stack() {
         # remote log on failure so the orchestrator output is useful.
         local granian_log_env_remote=""
         [ "$stack" = "granian" ] && granian_log_env_remote="GRANIAN_LOG_TARGET=$BENCH_REMOTE_REPO/$SCRATCH/server_granian.log"
+        # Sprint 21 Phase B: propagate BB_BENCH_TASKSET so per-stack runs
+        # can pin workers to specific CPUs.  Empty (the default) means no
+        # pinning on the server side.
+        local taskset_env_remote=""
+        [ -n "${BB_BENCH_TASKSET:-}" ] && taskset_env_remote="BB_BENCH_TASKSET=$BB_BENCH_TASKSET"
         $BENCH_REMOTE_SSH "cd $BENCH_REMOTE_REPO && mkdir -p $SCRATCH && \
-            $granian_log_env_remote BIND_HOST=$BENCH_BIND_HOST BASE_PORT=$BASE_PORT \
+            $granian_log_env_remote $taskset_env_remote BIND_HOST=$BENCH_BIND_HOST BASE_PORT=$BASE_PORT \
             bash bench/peers/server_lifecycle_remote.sh start \
             '$stack' '$BASE_PORT' '$CERT' '$KEY' '$SCRATCH/server_${stack}.log'" \
             || {
@@ -441,7 +446,11 @@ bench_stack() {
         # buffering question altogether); other stacks use the shell pipe.
         local granian_log_env=""
         [ "$stack" = "granian" ] && granian_log_env="GRANIAN_LOG_TARGET=$(pwd)/$SCRATCH/server_granian.log"
+        # Sprint 21 Phase B: optional CPU pinning, same env var as remote mode.
+        local taskset_prefix=()
+        [ -n "${BB_BENCH_TASKSET:-}" ] && taskset_prefix=(taskset -c "$BB_BENCH_TASKSET")
         env $granian_log_env \
+            "${taskset_prefix[@]}" \
             bash bench/peers/run_peer.sh "$stack" "$BASE_PORT" "$CERT" "$KEY" \
             > "$SCRATCH/server_${stack}.log" 2>&1 &
         server_pid=$!

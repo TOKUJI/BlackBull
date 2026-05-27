@@ -495,14 +495,15 @@ Topology (`TOPO=split`):
   (h2load / wrk / oha / k6) keeps verifying TLS without
   `--insecure`.
 
-Canonical artefacts: Lanes A + B-wrk + B-oha in
-[`bench/results/aws/20260527-064727Z/`](results/aws/20260527-064727Z/);
-Lanes C + D in
-[`bench/results/aws/20260527-090649Z/`](results/aws/20260527-090649Z/).
-Two artefacts because the Sprint 20 plumbing initially missed the
-`BASE` env-var wiring through to `bench/k6/*.js` — k6 hit
-`https://localhost:8443` on the loadgen (no listener) and reported
-all-zero metrics.  Fix landed; Lane C + D were re-run cleanly.
+Canonical artefact:
+[`bench/results/aws/20260527-135137Z/`](results/aws/20260527-135137Z/)
+— full Lanes A + B-wrk + B-oha + C + D pass.  (Two earlier partial
+artefacts split across Lanes A+B and Lanes C+D were superseded by
+this complete re-run and deleted to keep `bench/results/aws/`
+canonical; numbers in the tables below are from that re-run.  The
+qualitative finding holds.  Sprint-21-era footnote: the
+`BASE` env-var wiring through to `bench/k6/*.js` was the bug that
+necessitated the re-run.)
 
 #### Headline — HTTP/2 scaling was masked by load-gen contention
 
@@ -593,6 +594,195 @@ calls when reading older artefacts:
 - Throughput-bound rows (Lane C high-VU, multi-worker Lane B)
   are the cleanest cross-topology comparison once that floor is
   amortised over enough requests.
+
+### Sprint 21 Phase B — w=2 → w=4 scaling cliff diagnosis
+
+The Sprint 20 canonical artefact showed only ~1.10–1.21 × scaling
+from w=2 to w=4 across both HTTP/1.1 (B1) and HTTP/2 (A1, C2).
+An external audit framed this as "scaling collapses past w2 —
+likely a BlackBull-specific defect."  Phase B was a cheap
+pinned/free-scheduled experiment + a py-spy/mpstat capture to
+falsify or confirm.
+
+#### Setup
+
+Same `TOPO=split` topology as Sprint 20.  Server CPU topology
+(captured by [bench/aws/install.sh](aws/install.sh) into
+[`sprint21-phaseB/server-cpu-topology.txt`](results/aws/sprint21-phaseB/server-cpu-topology.txt)):
+c7i.xlarge is 2 physical cores × 2 SMT threads — vCPUs 0,2 are
+the SMT siblings of core 0; vCPUs 1,3 of core 1.  Pinning was
+done with the new `BB_BENCH_TASKSET` env-var seam through
+[bench/peers/server_lifecycle_remote.sh](peers/server_lifecycle_remote.sh).
+
+#### Result
+
+Three pinning configs, BlackBull `blackbull-w2` / `-w4` only,
+Lane B-wrk + Lane C, default duration:
+
+| Config | B1 req/s | C1 req/s | C2 req/s |
+|---|---|---|---|
+| w=2 free (Sprint 20 reference) | 30 848 | 19 628 | 19 246 |
+| w=2 pinned to **distinct cores** (`taskset -c 0,1`) | 29 386 | 19 397 | 18 821 |
+| w=2 pinned to **SMT siblings** (`taskset -c 0,2`) | 29 314 | 19 320 | 18 868 |
+| w=4 free (Sprint 20 reference) | 37 297 | 23 231 | 22 926 |
+| w=4 free (re-measure during Phase B) | 35 895 | 22 684 | 22 501 |
+
+Two surprises in one table:
+
+1. **w=2 distinct-cores ≈ w=2 SMT-siblings ≈ 29 350 req/s** on B1
+   (within 0.2 %).  If each worker were CPU-saturating its
+   thread, sharing a physical core via SMT should cost 30–50 %.
+   It doesn't.  Each BlackBull worker is therefore **well below
+   1 vCPU's worth of CPU work**.
+2. **w=4 free (35 895) > w=2 pinned-distinct (29 386) by +22 %**.
+   So adding two more workers still buys throughput even though
+   we've already used both physical cores at w=2-pinned.  Adding
+   workers on SMT siblings (effectively the w=4 case) helps.
+
+The SMT-ceiling hypothesis is falsified: it predicts (a) w=2
+SMT-siblings ≪ w=2 distinct-cores (we measured them equal) and
+(b) w=4 free ≈ w=2 distinct-cores (we measured +22 %).  Neither
+holds.
+
+#### Where the cycles go
+
+Two captures during a B1-shaped 45 s `wrk -t8 -c256` saturation
+(see [`sprint21-phaseB/`](results/aws/sprint21-phaseB/)):
+
+`mpstat -P ALL 3 15` per-CPU averages (steady-state window):
+
+| vCPU | %usr | %sys | %soft | %idle |
+|---|---|---|---|---|
+| 0 | 44 % | 47 % | 4 % | 6 % |
+| 1 | 88 % | 4 % | 3 % | 6 % |
+| 2 | 87 % | 4 % | 3 % | 6 % |
+| 3 | 87 % | 4 % | 4 % | 6 % |
+
+**vCPU 0 is spending ~half its time in the kernel** (irq + soft).
+On Nitro c7i.xlarge the ENA driver pins all RX/TX softirq to
+`cpu0` by default — the other three vCPUs see ~4 % kernel time.
+Effective Python capacity is `0.44 + 3 × 0.88 = 3.08` vCPU on a
+4-vCPU box, not 4.0.  That accounts for most of the
+"diminishing return" past w=2.
+
+`py-spy record --rate 200 --duration 30` on worker pid 7048
+(see [`sprint21-phaseB/worker_7048.speedscope.json`](results/aws/sprint21-phaseB/worker_7048.speedscope.json)),
+top self-time frames:
+
+| self % | function (path) |
+|---|---|
+| 11.5 % | `run` ([asyncio/runners.py]) — event-loop overhead |
+| 9.6 % | `reschedule` / `timeout` / `__aexit__` ([asyncio/timeouts.py]) |
+| 7.2 % | `read` + `write` ([python3.12/ssl.py]) — TLS |
+| 5.4 % | `write` ([asyncio/streams.py]) |
+| 5.4 % | `_send_static` ([bench/peers/asgi_app.py]) — app response |
+| 4.9 % | `run` + `_parse` family ([blackbull/server/http1_actor.py]) |
+
+`asyncio.timeouts.*` machinery is **~9.6 % of per-worker CPU**.
+That comes from the stacked `async with asyncio.timeout(...)`
+contexts around header / body / idle waits (Sprint 17 added
+`BB_BODY_TIMEOUT`; the per-request reschedule cost accumulates).
+This overhead is per-request and does not amortise across
+workers, so it shows up as a per-worker tax that limits the
+linear-scaling regime.
+
+#### Conclusion
+
+The cliff is **the sum of**:
+
+1. **Network-side asymmetry** — AWS Nitro ENA softirq concentrated
+   on vCPU 0 (~0.5 vCPU of effective capacity lost on a 4 vCPU
+   instance).  Not a BlackBull issue.
+2. **Per-worker scheduler overhead** — ~10 % of each worker's
+   CPU is asyncio-timeout machinery, which doesn't scale away
+   with more workers.  Tangible but not a defect: the timeouts
+   are load-bearing (RFC-9112 §9.3 idle, slowloris vector closed
+   by Sprint 17 `BB_BODY_TIMEOUT`).
+
+No BlackBull-internal serialization point was found: the
+profile shows clean per-request work, no shared lock contention,
+no single-worker accept funnel.  Phase B closes **without a
+code fix**.
+
+Two follow-on observations worth keeping (out of Sprint 21
+scope):
+
+- Future deep-perf work targeting the asyncio-timeout cost
+  would compound across **all** lanes and workers — it's the
+  highest-leverage non-parser optimisation on the profile.  But
+  it touches load-bearing protection code (slowloris) and
+  needs care.
+- Multi-queue ENA configuration (RPS/RFS tuning) would spread
+  the softirq across vCPUs and partially recover the lost 0.5
+  vCPU.  Pure ops, not a server-code change.
+
+#### Deployment-sizing formula
+
+Direct corollary of the Phase B data — a closed-form prediction
+for `R(W)` on Intel Sapphire Rapids (c7i family) with off-box
+loadgen.  Validated against an out-of-sample c7i.4xlarge run
+(see next subsection).
+
+```
+R(W) ≈ R_unit × κ(W; N_cores, N_vcpu)
+
+with
+  κ(W) = W                                            if  W ≤ N_cores
+       = N_cores × (1 + s × (W − N_cores)/N_cores)    if  N_cores < W ≤ N_vcpu
+
+  R_unit:   single-worker, dedicated-machine rate
+            ≈ 15 000 req/s for Lane B1  (HTTP/1.1 plaintext)
+            ≈  9 300 req/s for Lane C2  (HTTP/2 high-concurrency)
+  s = 0.21  SMT scaling factor — what each extra SMT-sibling
+            worker buys beyond N_cores
+  N_cores   physical cores; N_vcpu = 2 × N_cores on SMT-enabled
+            hardware
+```
+
+Rule-of-thumb for deployments: `BB_WORKERS = N_vcpu` whenever
+the loadgen / clients are off-box; the gain from N_cores → N_vcpu
+is the +21 % SMT bonus.  `W > N_vcpu` adds context-switch tax
+without throughput gain.
+
+Caveats baked into the formula:
+
+- `R_unit` includes the ~10 % per-worker `asyncio.timeout` cost
+  in the py-spy profile; if that overhead were cut, `R_unit`
+  rises proportionally for **every** W.
+- `s = 0.21` is workload-dependent.  Lane C2 (hpack-heavy) shows
+  closer to `s ≈ 0.19` at W = N_vcpu — execution-unit contention
+  on the SMT pair eats more of the bonus.
+- ENA softirq spread on larger Nitro instances isn't modelled
+  explicitly; the formula is slightly conservative for c7i.2xlarge+
+  because more RX queues mean less softirq concentrated on a
+  single vCPU.
+
+#### Phase B formula validation — c7i.4xlarge out-of-sample
+
+To confirm the formula generalises beyond the c7i.xlarge box it
+was fitted on, an out-of-sample run was done on c7i.4xlarge
+(8 physical cores × 2 SMT = 16 vCPU, server-side; c7i.4xlarge
+loadgen).  Canonical artefact:
+[`bench/results/aws/sprint21-phaseB-validation/`](results/aws/sprint21-phaseB-validation/).
+
+Predicted vs measured:
+
+| W | Lane B1 predicted (req/s) | measured | Δ |
+|---|---|---|---|
+| 4 (W < N_cores) | 60 000 | 60 918 | **+1.5 %** |
+| 8 (W = N_cores) | 120 000 | 120 225 | **+0.2 %** |
+| 16 (W = N_vcpu) | 145 200 | 144 840 | **−0.2 %** |
+
+| W | Lane C2 predicted (req/s) | measured | Δ |
+|---|---|---|---|
+| 4 | 37 200 | 36 703 | −1.3 % |
+| 8 | 74 400 | 75 191 | +1.1 % |
+| 16 | 90 024 | 85 558 | −5.0 % |
+
+HTTP/1.1 is within ±1.5 % at every W — noise band.  HTTP/2 is
+within 5 %, with the small w=16 negative bias consistent with the
+"hpack execution-unit contention on SMT siblings" caveat above.
+The formula generalises.
 
 ## File layout (target)
 

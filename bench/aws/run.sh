@@ -54,6 +54,10 @@ echo "  LANES=$LANES"
 echo "  STACKS=$STACKS"
 echo
 
+# Sprint 21 Phase B: BB_BENCH_TASKSET is optional and threaded through to the
+# server's launch path.  Empty means no pinning.
+BB_BENCH_TASKSET="${BB_BENCH_TASKSET:-}"
+
 case "$TOPO" in
     single)
         REMOTE="$SSH_USER@$SERVER_PUBLIC_IP"
@@ -62,6 +66,7 @@ case "$TOPO" in
             "$REMOTE" \
             "cd $REMOTE_REPO && source .venv/bin/activate && \
              RUNS='$RUNS' DURATION='$DURATION' LANES='$LANES' STACKS='$STACKS' \
+             BB_BENCH_TASKSET='$BB_BENCH_TASKSET' \
              bash bench/peers/compare_servers.sh" \
             2>&1 | tee "$LOCAL_DEST/run.log"
         RESULTS_HOST="$REMOTE"
@@ -93,6 +98,7 @@ case "$TOPO" in
              BENCH_REMOTE_REPO='$REMOTE_REPO' \
              BENCH_BIND_HOST=0.0.0.0 \
              BENCH_REMOTE_SSH=\"$REMOTE_SSH\" \
+             BB_BENCH_TASKSET='$BB_BENCH_TASKSET' \
              bash bench/peers/compare_servers.sh" \
             2>&1 | tee "$LOCAL_DEST/run.log"
         RESULTS_HOST="$REMOTE"

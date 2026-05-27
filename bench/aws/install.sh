@@ -124,6 +124,26 @@ sudo update-ca-certificates >/dev/null
 echo "=== Smoke test ==="
 .venv/bin/python -m pytest -q tests/unit/ --timeout=30 -x 2>&1 | tail -5
 
+echo "=== Server CPU topology (Sprint 21 Phase B) ==="
+mkdir -p bench/results
+{
+    echo "# Server CPU topology — captured at bench install time."
+    echo "# Used to interpret multi-worker scaling: vCPUs that share the"
+    echo "# same 'CORE' column are SMT siblings of a single physical core."
+    echo
+    echo "## lscpu --extended"
+    lscpu --extended=CPU,CORE,SOCKET,ONLINE 2>/dev/null || true
+    echo
+    echo "## /proc/cpuinfo (processor / physical id / core id)"
+    grep -E '^processor|^physical id|^core id' /proc/cpuinfo || true
+    echo
+    echo "## /sys/devices/system/cpu/cpu*/topology/thread_siblings_list"
+    for f in /sys/devices/system/cpu/cpu[0-9]*/topology/thread_siblings_list; do
+        cpu="${f#/sys/devices/system/cpu/}"; cpu="${cpu%%/*}"
+        [ -r "$f" ] && printf '%s  %s\n' "$cpu" "$(cat "$f")"
+    done
+} > bench/results/server-cpu-topology.txt
+
 echo "=== Versions ==="
 .venv/bin/python --version
 .venv/bin/python -c 'import blackbull; print("blackbull module OK")'
