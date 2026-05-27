@@ -471,6 +471,129 @@ future Sprint-16-shape runs include Lane A.  The Lane C2 column
 above already covers the HTTP/2 multi-worker story; no re-run is
 queued just to backfill Lane A.
 
+### Sprint 20 — Split-topology re-measurement
+
+Sprints 13–16 all ran the load generator on the same `c7i.xlarge`
+as the server.  Sprint 16's HTTP/2 finding (#3 above: "w=4 buys
+*essentially nothing* (1.02× over w=2)") explicitly called this
+out as a possible confounder.  Sprint 20 closes it by adding a
+**second EC2 instance dedicated to load generation** — see
+[bench/aws/README.md](aws/README.md) for the harness changes
+(`TOPO=split`).
+
+Topology (`TOPO=split`):
+
+- **Server**: `c7i.xlarge` (4 vCPU) — same as Sprints 13–16.
+- **Load generator**: `c7i.2xlarge` (8 vCPU) — chosen so the
+  generator is never the bottleneck.
+- Both instances in the same AZ, **same cluster placement group**
+  (low-latency intra-rack), talking over VPC private IPs.
+- TLS path unchanged: the server's `tests/cert.pem` is regenerated
+  at install time with `bench-server.internal` + the server's VPC
+  private IP as SANs; both instances install the cert into the CA
+  store and put a matching `/etc/hosts` entry, so every load tool
+  (h2load / wrk / oha / k6) keeps verifying TLS without
+  `--insecure`.
+
+Canonical artefacts: Lanes A + B-wrk + B-oha in
+[`bench/results/aws/20260527-064727Z/`](results/aws/20260527-064727Z/);
+Lanes C + D in
+[`bench/results/aws/20260527-090649Z/`](results/aws/20260527-090649Z/).
+Two artefacts because the Sprint 20 plumbing initially missed the
+`BASE` env-var wiring through to `bench/k6/*.js` — k6 hit
+`https://localhost:8443` on the loadgen (no listener) and reported
+all-zero metrics.  Fix landed; Lane C + D were re-run cleanly.
+
+#### Headline — HTTP/2 scaling was masked by load-gen contention
+
+Sprint 16 single-host vs Sprint 20 split, BlackBull Lane C2
+(HTTP/2, 500 VU):
+
+| w | Sprint 16 single (req/s) | Sprint 20 split (req/s) | Δ |
+|---|---|---|---|
+| w=1 | 8 784 | 8 785 | +0.0 % (within noise; single-worker is not CPU-saturated) |
+| w=2 | 14 441 | 19 213 | **+33 %** |
+| w=4 | 14 775 | 23 184 | **+57 %** |
+
+In-topology scaling ratios:
+
+| Ratio | Sprint 16 | Sprint 20 | What it means |
+|---|---|---|---|
+| w=2 / w=1 | 1.64× | **2.19×** | Sprint 16's w=2 was already load-gen-bottlenecked. |
+| w=4 / w=2 | 1.02× | **1.21×** | Sprint 16's "saturation at w=2" was load-gen saturation, *not* server saturation. |
+| w=4 / w=1 | 1.68× | **2.64×** | The actual HTTP/2 multi-worker headroom on BlackBull. |
+
+**The Sprint 16 finding #3 ("HTTP/2 saturates at w=2") was
+incorrect** — it was an artefact of the single-host topology, not
+a property of BlackBull's HTTP/2 stack.  With a dedicated
+loadgen, HTTP/2 worker scaling looks like a noisier version of
+HTTP/1.1's, not a hard wall at w=2.
+
+#### HTTP/1.1 (Lane B1) — basically unchanged
+
+| w | Sprint 16 single (req/s) | Sprint 20 split (req/s) | Δ |
+|---|---|---|---|
+| w=1 | 15 636 | 14 822 | −5.2 % |
+| w=2 | 31 606 | 30 804 | −2.5 % |
+| w=4 | 37 092 | 37 489 | +1.1 % |
+
+HTTP/1.1 is within ±5 % across the entire `w` ladder — the
+Sprint 16 HTTP/1.1 numbers were *not* load-gen-confounded.
+The +17 % at w=4 over w=2 from Sprint 16 reproduces here as
++21.7 %.  Sprint 16's HTTP/1.1 scaling story stands; only the
+HTTP/2 conclusion needed correction.
+
+#### Lane A (HTTP/2, single-worker) — VPC RTT delta
+
+Lane A is multiplexed but single-worker by construction (the
+`blackbull` row, no `-w<N>` suffix).  Comparing Sprint 13 single
+vs Sprint 20 split for BlackBull-w1:
+
+| Scenario | Sprint 13 (req/s) | Sprint 20 (req/s) | Δ |
+|---|---|---|---|
+| A1 mux1 | 10 638 | 10 462 | −1.7 % |
+| A2 mux10 | 11 256 | 10 805 | −4.0 % |
+| A3 mux50 | 13 342 | 11 627 | **−12.9 %** |
+| A4 json mux10 | 12 124 | 10 826 | −10.7 % |
+| A5 16 KB mux10 | 10 830 | 9 420 | −13.0 % |
+| A6 64 KB mux10 | 7 501 | 6 609 | −11.9 % |
+| A7 1 MB mux3 | 1 315 | 1 084 | −17.6 % |
+
+This is the **VPC-overhead floor**: ~150–300 µs of network RTT
+plus per-byte EC2 ENA overhead vs kernel loopback.  Larger
+payloads (A5–A7) regress more because the per-byte cost
+accumulates.  Single-worker Lane A is latency-bound, not CPU-bound,
+so there is no contention to remove that would offset this floor.
+
+#### Updated deployment-sizing implication
+
+The Sprint 16 rule-of-thumb ("`BB_WORKERS = N_vCPU / 2` when load
+gen shares the box") was correct *for the topology it was measured
+on*.  On topology where the server has the CPU to itself:
+
+- **`BB_WORKERS = N_vCPU`** is the natural ceiling for HTTP/2 —
+  w=4 on 4 vCPU lands +21 % over w=2 (the Sprint 16 single-host
+  +17 % HTTP/1.1 finding generalises to HTTP/2 once the loadgen
+  is offloaded).
+- For HTTP/1.1 the previous rule still applies: w=2 captures
+  most of the win, w=4 adds modest tail-latency improvement.
+- The Sprint 15 finding stands — BlackBull's HTTP/2 hot path is
+  still `hpack`-dominated; Sprint 20 just shows there's more
+  CPU headroom than Sprint 16 could measure.
+
+#### Comparability across topologies
+
+Single-host (Sprints 13–16) and split (Sprint 20) numbers are
+**not** directly comparable for absolute latency.  Two specific
+calls when reading older artefacts:
+
+- Add the per-request VPC floor (~150–300 µs depending on
+  payload) to any single-host A-lane / B-lane absolute-latency
+  number before mentally comparing it to split-topology data.
+- Throughput-bound rows (Lane C high-VU, multi-worker Lane B)
+  are the cleanest cross-topology comparison once that floor is
+  amortised over enough requests.
+
 ## File layout (target)
 
 ```

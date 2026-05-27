@@ -108,14 +108,26 @@ if ! "${AWS_BASE[@]}" ec2 describe-security-groups --group-ids "$SG_ID" \
         --protocol tcp --port 22 --cidr "$MY_CIDR" >/dev/null
 fi
 
-# Split-topology only: allow TCP from the SG to itself on the bench port
-# range so the load generator instance can hit the server instance over
-# its private IP without exposing the bench ports to the internet.
+# Split-topology only: allow intra-SG TCP traffic for two purposes —
+#   1. Port 22, so the loadgen can SSH into the server to drive the
+#      remote-lifecycle hook (`BENCH_REMOTE_LIFECYCLE=1`).
+#   2. Ports 8000-9100, the bench port range that the load tools target.
+# Neither rule exposes anything to the internet — both restrict source
+# to the same SG, so only members of the SG can use them.
 if [ "$TOPO" = "split" ]; then
+    if ! "${AWS_BASE[@]}" ec2 describe-security-groups --group-ids "$SG_ID" \
+            --query "SecurityGroups[0].IpPermissions[?FromPort==\`22\`].UserIdGroupPairs[].GroupId" \
+            --output text | grep -qF "$SG_ID"; then
+        echo "Authorising intra-SG ingress 22/tcp (loadgen → server SSH) ..."
+        "${AWS_BASE[@]}" ec2 authorize-security-group-ingress \
+            --group-id "$SG_ID" \
+            --ip-permissions "[{\"IpProtocol\":\"tcp\",\"FromPort\":22,\"ToPort\":22,\"UserIdGroupPairs\":[{\"GroupId\":\"$SG_ID\"}]}]" \
+            >/dev/null
+    fi
     if ! "${AWS_BASE[@]}" ec2 describe-security-groups --group-ids "$SG_ID" \
             --query "SecurityGroups[0].IpPermissions[?FromPort==\`8000\`].UserIdGroupPairs[].GroupId" \
             --output text | grep -qF "$SG_ID"; then
-        echo "Authorising intra-SG ingress 8000-9100/tcp (loadgen → server) ..."
+        echo "Authorising intra-SG ingress 8000-9100/tcp (loadgen → server bench ports) ..."
         "${AWS_BASE[@]}" ec2 authorize-security-group-ingress \
             --group-id "$SG_ID" \
             --ip-permissions "[{\"IpProtocol\":\"tcp\",\"FromPort\":8000,\"ToPort\":9100,\"UserIdGroupPairs\":[{\"GroupId\":\"$SG_ID\"}]}]" \

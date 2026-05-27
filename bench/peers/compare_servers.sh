@@ -295,15 +295,18 @@ run_lane_c_k6() {
     local json_c1="$SCRATCH/k6_${label}_c1.json"
     local json_c2="$SCRATCH/k6_${label}_c2.json"
 
-    # C1 — 200 VU
-    K6_VUS=200 K6_DURATION=60s \
+    # C1 — 200 VU.  BASE is exported so the k6 script picks up the
+    # actual benchmark target (Sprint 20 split topology points BASE at
+    # bench-server.internal rather than localhost).
+    K6_VUS=200 K6_DURATION=60s BASE="$BASE" \
         k6 run --quiet --summary-export="$json_c1" \
             --summary-trend-stats="p(50),p(95),p(99),max" \
             bench/k6/http_stress.js >/dev/null 2>&1 || true
     # C2 — 500 VU (default)
-    k6 run --quiet --summary-export="$json_c2" \
-        --summary-trend-stats="p(50),p(95),p(99),max" \
-        bench/k6/http_stress.js >/dev/null 2>&1 || true
+    BASE="$BASE" \
+        k6 run --quiet --summary-export="$json_c2" \
+            --summary-trend-stats="p(50),p(95),p(99),max" \
+            bench/k6/http_stress.js >/dev/null 2>&1 || true
 
     {
         echo ""
@@ -353,7 +356,7 @@ run_lane_d_ws() {
     local json_d="$SCRATCH/k6_ws_${label}.json"
     # Include avg in summary stats — k6's Trend stores sub-ms accuracy in
     # avg even though percentile buckets are ms-quantized.
-    k6 run --quiet --summary-export="$json_d" \
+    BASE="$BASE" k6 run --quiet --summary-export="$json_d" \
         --summary-trend-stats="avg,p(50),p(95),p(99),max" \
         bench/k6/websocket.js >/dev/null 2>&1 || true
     {
