@@ -766,6 +766,21 @@ class HTTP1Actor(Actor):
         ``self._request``.  Enforces the configured total-block size limit;
         raises :class:`HeaderTooLargeError` when the buffer overshoots.
 
+        Read **one CRLF-terminated line per iteration** rather than scanning
+        for the contiguous ``\\r\\n\\r\\n`` delimiter.  Sprint 19 — the
+        ``readuntil(b'\\r\\n\\r\\n')`` shape deadlocked when
+        :class:`ConnectionActor` had already consumed the first line's
+        ``\\r\\n`` via its protocol-detect ``readuntil(b'\\r\\n')`` and the
+        remaining buffer contained only the terminating empty line's
+        ``\\r\\n`` (two bytes, half of the contiguous delimiter the loop
+        was searching for).  A minimally-valid HTTP/1.0 request
+        (``GET / HTTP/1.0\\r\\n\\r\\n``, no headers) would hang here until
+        the client closed its write side.  Reading line-by-line handles
+        the case naturally: each iteration consumes one CRLF, and the
+        empty header-block terminator (line == ``b'\\r\\n'``) makes
+        ``self._request`` end with ``\\r\\n\\r\\n`` regardless of how the
+        request was split across the two reader stages.
+
         asyncio's StreamReader has its own buffer limit (default 64 KiB,
         triggering ``LimitOverrunError``) which is converted into the same
         :class:`HeaderTooLargeError` here so callers can handle one
@@ -774,12 +789,12 @@ class HTTP1Actor(Actor):
         import asyncio  # noqa: PLC0415
         while not self._request.endswith(_REQ_END):
             try:
-                chunk = await self._reader.readuntil(_REQ_END)
+                line = await self._reader.readuntil(b'\r\n')
             except asyncio.LimitOverrunError as exc:
                 raise HeaderTooLargeError(
                     f'asyncio buffer overflow ({exc.consumed} bytes) '
                     f'while reading headers') from exc
-            self._request += chunk
+            self._request += line
             if max_total > 0 and len(self._request) > max_total:
                 raise HeaderTooLargeError(
                     f'header block {len(self._request)} bytes > '

@@ -48,21 +48,22 @@ with atheris.instrument_imports():
         categorize,
         run_scenario,
     )
-    from blackbull.response import StreamingResponse
-    from http import HTTPMethod
+    from http import HTTPMethod, HTTPStatus
 
 
+# Differential mode pairs this app against an nginx whose
+# ``location /`` returns 200 "ok" for any method, any path.  To avoid
+# every atheris-generated random path firing 404 (BlackBull) vs 200
+# (nginx) — which would flood the fuzz with false-positive
+# STATUS_DIFFER — the app below mirrors that nginx semantics via
+# ``on_error`` handlers (same pattern as ``_make_diff_app`` in
+# test_http1_differential.py).
 app = BlackBull()
 
 
-@app.route(path='/')
-async def index(scope, receive, send):
-    await send({'type': 'http.response.start', 'status': 200,
-                'headers': [(b'content-type', b'text/plain')]})
-    await send({'type': 'http.response.body', 'body': b'ok'})
-
-
-@app.route(path='/echo', methods=[HTTPMethod.GET, HTTPMethod.POST, HTTPMethod.PUT])
+@app.route(path='/echo', methods=[HTTPMethod.GET, HTTPMethod.POST,
+                                  HTTPMethod.PUT, HTTPMethod.DELETE,
+                                  HTTPMethod.OPTIONS])
 async def echo(scope, receive, send):
     body = await read_body(receive)
     await send({'type': 'http.response.start', 'status': 200,
@@ -70,12 +71,20 @@ async def echo(scope, receive, send):
     await send({'type': 'http.response.body', 'body': body})
 
 
-@app.route(path='/chunked')
-async def chunked(scope, receive, send):
-    async def events():
-        for ch in (b'a', b'b', b'c'):
-            yield ch
-    await StreamingResponse(events())(scope, receive, send)
+@app.on_error(HTTPStatus.NOT_FOUND)
+async def _not_found(scope, receive, send):
+    await read_body(receive)
+    await send({'type': 'http.response.start', 'status': 200,
+                'headers': [(b'content-type', b'text/plain')]})
+    await send({'type': 'http.response.body', 'body': b'ok'})
+
+
+@app.on_error(HTTPStatus.METHOD_NOT_ALLOWED)
+async def _method_not_allowed(scope, receive, send):
+    await read_body(receive)
+    await send({'type': 'http.response.start', 'status': 200,
+                'headers': [(b'content-type', b'text/plain')]})
+    await send({'type': 'http.response.body', 'body': b'ok'})
 
 
 # ---------------------------------------------------------------------------

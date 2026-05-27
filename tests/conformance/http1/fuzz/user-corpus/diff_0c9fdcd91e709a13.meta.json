@@ -1,0 +1,10 @@
+{
+  "category": "OK",
+  "captured_at_unix": 1779847797,
+  "source": "fuzz_http1",
+  "wire_request_latin1": "GET / HTTP/1.0\r\n\r\n",
+  "nginx_status": 200,
+  "blackbull_status": 200,
+  "history": "Pre-Sprint-19 BB_TIMEOUT (BlackBull hung in _read_headers because connection_actor's protocol-detect consumed the first CRLF). Sprint 19 fix: _read_headers reads line-by-line so the empty header terminator (single CRLF) is detected regardless of how the request was split across reader stages.",
+  "post_sprint19_fix": true
+}

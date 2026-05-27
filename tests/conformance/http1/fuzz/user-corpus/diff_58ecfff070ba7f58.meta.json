@@ -1,6 +1,6 @@
 {
   "category": "STATUS_DIFFER",
-  "captured_at_unix": 1779843713,
+  "captured_at_unix": 1779848716,
   "wire_request_latin1": "GET  http://localhost/x HTTP/1.0\r\nHost: localhost\r\n\r\n",
   "nginx_exception": null,
   "nginx_status": 200,
