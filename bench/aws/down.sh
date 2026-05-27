@@ -2,11 +2,12 @@
 # bench/aws/down.sh — tear down everything up.sh created.
 #
 # Refuses to run without a state file (no stray deletes).  Order:
-#   1. terminate instance, wait until 'terminated'
-#   2. delete security group
-#   3. delete key pair (AWS) + local .pem
-#   4. remove .state and .known_hosts
-#   5. verify no tagged resources remain
+#   1. terminate all instances (server + optional loadgen), wait
+#   2. delete placement group if TOPO=split (must be empty first)
+#   3. delete security group
+#   4. delete key pair (AWS) + local .pem
+#   5. remove .state and .known_hosts
+#   6. verify no tagged resources remain
 #
 # Each step is best-effort: if AWS reports the resource is already gone
 # we log and continue.  The final verification step is what guarantees
@@ -19,24 +20,55 @@ source "$(dirname "$0")/config.sh"
 _bench_aws_check_env || exit 1
 _bench_aws_load_state || exit 1
 
+# Backward-compat: pre-Sprint-20 state files only have INSTANCE_ID/PUBLIC_IP.
+SERVER_INSTANCE_ID="${SERVER_INSTANCE_ID:-${INSTANCE_ID:-}}"
+LOADGEN_INSTANCE_ID="${LOADGEN_INSTANCE_ID:-}"
+TOPO="${TOPO:-single}"
+PLACEMENT_GROUP_NAME="${PLACEMENT_GROUP_NAME:-blackbull-bench-cpg}"
+
 echo "Tearing down:"
-echo "  INSTANCE_ID = $INSTANCE_ID"
-echo "  SG_ID       = $SG_ID"
-echo "  KEY_NAME    = $KEY_NAME"
+echo "  TOPO         = $TOPO"
+echo "  SERVER       = $SERVER_INSTANCE_ID"
+[ -n "$LOADGEN_INSTANCE_ID" ] && echo "  LOADGEN      = $LOADGEN_INSTANCE_ID"
+echo "  SG_ID        = $SG_ID"
+echo "  KEY_NAME     = $KEY_NAME"
+[ "$TOPO" = "split" ] && echo "  PG_NAME      = $PLACEMENT_GROUP_NAME"
 echo
 
-# 1. Terminate instance ----------------------------------------------------
-echo "Terminating instance $INSTANCE_ID ..."
-if "${AWS_BASE[@]}" ec2 terminate-instances --instance-ids "$INSTANCE_ID" \
-        >/dev/null 2>&1; then
-    echo "Waiting for state=terminated ..."
-    "${AWS_BASE[@]}" ec2 wait instance-terminated --instance-ids "$INSTANCE_ID"
-    echo "  terminated."
-else
-    echo "  (terminate returned non-zero; instance may already be gone)"
+# 1. Terminate instances ---------------------------------------------------
+INSTANCE_IDS=()
+[ -n "$SERVER_INSTANCE_ID" ]  && INSTANCE_IDS+=("$SERVER_INSTANCE_ID")
+[ -n "$LOADGEN_INSTANCE_ID" ] && INSTANCE_IDS+=("$LOADGEN_INSTANCE_ID")
+
+if [ "${#INSTANCE_IDS[@]}" -gt 0 ]; then
+    echo "Terminating instance(s): ${INSTANCE_IDS[*]} ..."
+    if "${AWS_BASE[@]}" ec2 terminate-instances --instance-ids "${INSTANCE_IDS[@]}" \
+            >/dev/null 2>&1; then
+        echo "Waiting for state=terminated ..."
+        "${AWS_BASE[@]}" ec2 wait instance-terminated --instance-ids "${INSTANCE_IDS[@]}"
+        echo "  terminated."
+    else
+        echo "  (terminate returned non-zero; instance(s) may already be gone)"
+    fi
 fi
 
-# 2. Delete security group -------------------------------------------------
+# 2. Delete placement group (only if it exists; must be empty) -------------
+if [ "$TOPO" = "split" ]; then
+    echo "Deleting placement group $PLACEMENT_GROUP_NAME ..."
+    if "${AWS_BASE[@]}" ec2 describe-placement-groups --group-names "$PLACEMENT_GROUP_NAME" >/dev/null 2>&1; then
+        for _ in 1 2 3 4 5 6; do
+            if "${AWS_BASE[@]}" ec2 delete-placement-group --group-name "$PLACEMENT_GROUP_NAME" >/dev/null 2>&1; then
+                echo "  deleted."
+                break
+            fi
+            sleep 5
+        done
+    else
+        echo "  (placement group already gone)"
+    fi
+fi
+
+# 3. Delete security group -------------------------------------------------
 echo "Deleting security group $SG_ID ..."
 # AWS sometimes needs a few seconds after instance termination before the
 # ENI is released and the SG is deletable.  Retry briefly.
@@ -48,7 +80,7 @@ for _ in 1 2 3 4 5 6; do
     sleep 5
 done
 
-# 3. Delete key pair -------------------------------------------------------
+# 4. Delete key pair -------------------------------------------------------
 echo "Deleting key pair $KEY_NAME ..."
 "${AWS_BASE[@]}" ec2 delete-key-pair --key-name "$KEY_NAME" >/dev/null 2>&1 \
     && echo "  deleted from AWS." \
@@ -59,12 +91,12 @@ if [ -f "$LOCAL_KEY" ]; then
     echo "  removed local key file."
 fi
 
-# 4. Remove local state ----------------------------------------------------
+# 5. Remove local state ----------------------------------------------------
 rm -f "$STATE_FILE"
 rm -f "$AWS_DIR/.known_hosts"
 echo "Removed local state."
 
-# 5. Verification ----------------------------------------------------------
+# 6. Verification ----------------------------------------------------------
 echo
 echo "Verifying no project resources remain ..."
 LEFTOVERS=$("${AWS_BASE[@]}" ec2 describe-instances \
@@ -95,4 +127,13 @@ if [ -n "$LEFTOVER_KP" ] && [ "$LEFTOVER_KP" != "None" ]; then
     exit 1
 fi
 
-echo "  clean — no instances, security groups, or key pairs left."
+LEFTOVER_PG=$("${AWS_BASE[@]}" ec2 describe-placement-groups \
+    --filters "Name=group-name,Values=$PLACEMENT_GROUP_NAME" \
+    --query 'PlacementGroups[].GroupName' --output text)
+if [ -n "$LEFTOVER_PG" ] && [ "$LEFTOVER_PG" != "None" ]; then
+    echo "WARNING: placement group $PLACEMENT_GROUP_NAME still exists." >&2
+    echo "  manual cleanup:  aws ec2 delete-placement-group --region $REGION --group-name $PLACEMENT_GROUP_NAME" >&2
+    exit 1
+fi
+
+echo "  clean — no instances, security groups, key pairs, or placement groups left."

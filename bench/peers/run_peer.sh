@@ -34,6 +34,12 @@ port="${2:-8443}"
 cert="${3:-tests/cert.pem}"
 key="${4:-tests/key.pem}"
 
+# Bind interface for every peer's listen socket.  Defaults to 127.0.0.1 so
+# the legacy single-host benchmark path is byte-identical.  Sprint 20 split
+# topology sets BIND_HOST=0.0.0.0 so the load generator on a second
+# instance can reach the server over the VPC private network.
+BIND_HOST="${BIND_HOST:-127.0.0.1}"
+
 if [ -z "$stack" ]; then
     echo "Usage: $0 <stack> [port] [cert] [key]" >&2
     echo "Bases: blackbull, uvicorn, hypercorn, granian, daphne, nginx" >&2
@@ -152,7 +158,7 @@ case "$base" in
                 BB_H2_MAX_CONCURRENT_STREAMS=100
                 BB_ACCESS_LOG=0
             blackbull bench.peers.asgi_app:app
-                --bind "127.0.0.1:${upstream_port}"
+                --bind "${BIND_HOST}:${upstream_port}"
                 "${bb_tls_args[@]}"
         )
         finalize
@@ -170,7 +176,7 @@ case "$base" in
         fi
         LAUNCH_CMD=(
             uvicorn bench.peers.asgi_app:app
-                --host 127.0.0.1 --port "$upstream_port"
+                --host "$BIND_HOST" --port "$upstream_port"
                 "${uv_tls_args[@]}"
                 --loop auto --http "$uv_http" --workers 1
                 --log-level warning --no-access-log
@@ -185,7 +191,7 @@ case "$base" in
         # A/B would not be informative).
         LAUNCH_CMD=(
             hypercorn --config bench/peers/hypercorn.toml
-                --bind "127.0.0.1:${upstream_port}"
+                --bind "${BIND_HOST}:${upstream_port}"
                 bench.peers.asgi_app:app
         )
         finalize
@@ -217,7 +223,7 @@ json.dump(cfg, open(sys.argv[2], 'w'))
             LAUNCH_CMD=(
                 env PYTHONUNBUFFERED=1
                 granian --interface asgi
-                    --host 127.0.0.1 --port "$upstream_port"
+                    --host "$BIND_HOST" --port "$upstream_port"
                     "${gr_tls_args[@]}"
                     --workers 1 --loop uvloop
                     --http auto
@@ -229,7 +235,7 @@ json.dump(cfg, open(sys.argv[2], 'w'))
             LAUNCH_CMD=(
                 env PYTHONUNBUFFERED=1 stdbuf -oL -eL
                 granian --interface asgi
-                    --host 127.0.0.1 --port "$upstream_port"
+                    --host "$BIND_HOST" --port "$upstream_port"
                     "${gr_tls_args[@]}"
                     --workers 1 --loop uvloop
                     --http auto
@@ -244,7 +250,7 @@ json.dump(cfg, open(sys.argv[2], 'w'))
         # Sprint 14: daphne intentionally has no cleartext/nginx variants
         # (same rationale as hypercorn).
         LAUNCH_CMD=(
-            daphne --bind 127.0.0.1
+            daphne --bind "$BIND_HOST"
                 -e "ssl:${upstream_port}:privateKey=${key}:certKey=${cert}"
                 --access-log /dev/null
                 bench.peers.asgi_app:app

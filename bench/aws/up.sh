@@ -1,16 +1,23 @@
 #!/usr/bin/env bash
-# bench/aws/up.sh — provision the EC2 instance for a single AWS bench pass.
+# bench/aws/up.sh — provision EC2 instance(s) for an AWS bench pass.
 #
-# Idempotent enough that a re-run after partial failure is safe: existing
-# key pair / security group are reused if their names already match.  The
-# only blocking failure is "an instance is already running and tagged for
-# this project" — in which case the script refuses rather than orphan it.
+# TOPO=single (default): one $INSTANCE_TYPE host runs both the server
+#   under test and the load tools (legacy Sprint-13–16 topology).
+# TOPO=split:            two hosts in a cluster placement group — a
+#   $INSTANCE_TYPE server and a $LOADGEN_INSTANCE_TYPE load generator
+#   talking over VPC private networking (Sprint 20).
+#
+# Idempotent: existing key pair / security group / placement group are
+# reused if their names already match.  The only blocking failure is
+# "tagged resources already exist for this project" — the script refuses
+# rather than orphan or duplicate.
 #
 # Side effects (all cleaned up by down.sh):
-#   - aws ec2 create-key-pair (writes private key to bench/aws/<KEY_NAME>.pem)
+#   - aws ec2 create-key-pair                (writes private key locally)
 #   - aws ec2 create-security-group + authorize-security-group-ingress
-#   - aws ec2 run-instances (one instance, $INSTANCE_TYPE, tagged)
-#   - bench/aws/.state holds INSTANCE_ID / PUBLIC_IP / SG_ID / AMI_ID
+#   - aws ec2 create-placement-group         (TOPO=split only)
+#   - aws ec2 run-instances                  (1 or 2 instances)
+#   - bench/aws/.state                       (full topology snapshot)
 
 set -euo pipefail
 
@@ -24,6 +31,12 @@ if [ -f "$STATE_FILE" ]; then
     echo "  bash bench/aws/down.sh" >&2
     exit 1
 fi
+
+case "$TOPO" in
+    single|split) ;;
+    *) echo "bench/aws: TOPO must be 'single' or 'split' (got '$TOPO')" >&2; exit 1 ;;
+esac
+echo "Topology: $TOPO"
 
 # --- Find a current Ubuntu 24.04 LTS AMI for the region -------------------
 echo "Looking up latest Ubuntu 24.04 LTS AMI in $REGION ..."
@@ -95,52 +108,125 @@ if ! "${AWS_BASE[@]}" ec2 describe-security-groups --group-ids "$SG_ID" \
         --protocol tcp --port 22 --cidr "$MY_CIDR" >/dev/null
 fi
 
-# --- Launch instance ------------------------------------------------------
-echo "Launching $INSTANCE_TYPE in $REGION ..."
-INSTANCE_ID=$("${AWS_BASE[@]}" ec2 run-instances \
-    --image-id "$AMI_ID" \
-    --instance-type "$INSTANCE_TYPE" \
-    --key-name "$KEY_NAME" \
-    --security-group-ids "$SG_ID" \
-    --block-device-mappings "[{\"DeviceName\":\"/dev/sda1\",\"Ebs\":{\"VolumeSize\":$VOLUME_SIZE_GB,\"VolumeType\":\"gp3\",\"DeleteOnTermination\":true}}]" \
-    --tag-specifications "ResourceType=instance,Tags=[{Key=$TAG_KEY,Value=$TAG_VALUE},{Key=Owner,Value=$USER}]" \
-    --count 1 \
-    --query 'Instances[0].InstanceId' --output text)
-echo "  instance id: $INSTANCE_ID"
-
-echo "Waiting for instance state=running ..."
-"${AWS_BASE[@]}" ec2 wait instance-running --instance-ids "$INSTANCE_ID"
-
-PUBLIC_IP=$("${AWS_BASE[@]}" ec2 describe-instances \
-    --instance-ids "$INSTANCE_ID" \
-    --query 'Reservations[0].Instances[0].PublicIpAddress' --output text)
-echo "  public IP: $PUBLIC_IP"
-
-# --- Wait for SSH ---------------------------------------------------------
-echo "Waiting for SSH on $SSH_USER@$PUBLIC_IP ..."
-deadline=$(( $(date +%s) + 180 ))
-while [ "$(date +%s)" -lt "$deadline" ]; do
-    if ssh "${SSH_OPTS[@]}" "$SSH_USER@$PUBLIC_IP" 'echo ok' >/dev/null 2>&1; then
-        break
+# Split-topology only: allow TCP from the SG to itself on the bench port
+# range so the load generator instance can hit the server instance over
+# its private IP without exposing the bench ports to the internet.
+if [ "$TOPO" = "split" ]; then
+    if ! "${AWS_BASE[@]}" ec2 describe-security-groups --group-ids "$SG_ID" \
+            --query "SecurityGroups[0].IpPermissions[?FromPort==\`8000\`].UserIdGroupPairs[].GroupId" \
+            --output text | grep -qF "$SG_ID"; then
+        echo "Authorising intra-SG ingress 8000-9100/tcp (loadgen → server) ..."
+        "${AWS_BASE[@]}" ec2 authorize-security-group-ingress \
+            --group-id "$SG_ID" \
+            --ip-permissions "[{\"IpProtocol\":\"tcp\",\"FromPort\":8000,\"ToPort\":9100,\"UserIdGroupPairs\":[{\"GroupId\":\"$SG_ID\"}]}]" \
+            >/dev/null
     fi
-    sleep 5
-done
-if ! ssh "${SSH_OPTS[@]}" "$SSH_USER@$PUBLIC_IP" 'echo ok' >/dev/null 2>&1; then
-    echo "bench/aws: SSH did not come up within 180s on $PUBLIC_IP" >&2
-    echo "  instance is left running so you can investigate; tear down with:" >&2
-    echo "    aws ec2 terminate-instances --region $REGION --instance-ids $INSTANCE_ID" >&2
-    exit 1
 fi
-echo "  SSH ready."
+
+# --- Placement group (split topology only) --------------------------------
+PLACEMENT_ARGS=()
+if [ "$TOPO" = "split" ]; then
+    if "${AWS_BASE[@]}" ec2 describe-placement-groups --group-names "$PLACEMENT_GROUP_NAME" >/dev/null 2>&1; then
+        echo "Placement group $PLACEMENT_GROUP_NAME already exists."
+    else
+        echo "Creating cluster placement group $PLACEMENT_GROUP_NAME ..."
+        "${AWS_BASE[@]}" ec2 create-placement-group \
+            --group-name "$PLACEMENT_GROUP_NAME" \
+            --strategy cluster \
+            --tag-specifications "ResourceType=placement-group,Tags=[{Key=$TAG_KEY,Value=$TAG_VALUE}]" \
+            >/dev/null
+    fi
+    PLACEMENT_ARGS=(--placement "GroupName=$PLACEMENT_GROUP_NAME")
+fi
+
+# --- Launch instances -----------------------------------------------------
+# launch_one <role> <instance-type>  →  echoes "<id> <public-ip> <private-ip>"
+launch_one() {
+    local role="$1" itype="$2"
+    local iid
+    iid=$("${AWS_BASE[@]}" ec2 run-instances \
+        --image-id "$AMI_ID" \
+        --instance-type "$itype" \
+        --key-name "$KEY_NAME" \
+        --security-group-ids "$SG_ID" \
+        "${PLACEMENT_ARGS[@]}" \
+        --block-device-mappings "[{\"DeviceName\":\"/dev/sda1\",\"Ebs\":{\"VolumeSize\":$VOLUME_SIZE_GB,\"VolumeType\":\"gp3\",\"DeleteOnTermination\":true}}]" \
+        --tag-specifications "ResourceType=instance,Tags=[{Key=$TAG_KEY,Value=$TAG_VALUE},{Key=Owner,Value=$USER},{Key=$ROLE_TAG_KEY,Value=$role}]" \
+        --count 1 \
+        --query 'Instances[0].InstanceId' --output text)
+    echo "  $role instance id: $iid" >&2
+    "${AWS_BASE[@]}" ec2 wait instance-running --instance-ids "$iid" >&2
+    local pub priv
+    pub=$("${AWS_BASE[@]}" ec2 describe-instances --instance-ids "$iid" \
+        --query 'Reservations[0].Instances[0].PublicIpAddress' --output text)
+    priv=$("${AWS_BASE[@]}" ec2 describe-instances --instance-ids "$iid" \
+        --query 'Reservations[0].Instances[0].PrivateIpAddress' --output text)
+    echo "  $role public IP:  $pub"  >&2
+    echo "  $role private IP: $priv" >&2
+    printf '%s %s %s\n' "$iid" "$pub" "$priv"
+}
+
+wait_for_ssh() {
+    local ip="$1" role="$2"
+    echo "Waiting for SSH on $SSH_USER@$ip ($role) ..."
+    local deadline
+    deadline=$(( $(date +%s) + 180 ))
+    while [ "$(date +%s)" -lt "$deadline" ]; do
+        if ssh "${SSH_OPTS[@]}" "$SSH_USER@$ip" 'echo ok' >/dev/null 2>&1; then
+            echo "  SSH ready ($role)."
+            return 0
+        fi
+        sleep 5
+    done
+    echo "bench/aws: SSH did not come up within 180s on $ip ($role)" >&2
+    return 1
+}
+
+echo "Launching server ($INSTANCE_TYPE) in $REGION ..."
+read -r SERVER_INSTANCE_ID SERVER_PUBLIC_IP SERVER_PRIVATE_IP <<<"$(launch_one "$SERVER_ROLE_VALUE" "$INSTANCE_TYPE")"
+
+LOADGEN_INSTANCE_ID=""
+LOADGEN_PUBLIC_IP=""
+LOADGEN_PRIVATE_IP=""
+if [ "$TOPO" = "split" ]; then
+    echo "Launching load generator ($LOADGEN_INSTANCE_TYPE) in $REGION ..."
+    read -r LOADGEN_INSTANCE_ID LOADGEN_PUBLIC_IP LOADGEN_PRIVATE_IP <<<"$(launch_one "$LOADGEN_ROLE_VALUE" "$LOADGEN_INSTANCE_TYPE")"
+fi
+
+wait_for_ssh "$SERVER_PUBLIC_IP" "server" || {
+    echo "  server is left running so you can investigate; tear down with:" >&2
+    echo "    bash bench/aws/down.sh" >&2
+    exit 1
+}
+if [ "$TOPO" = "split" ]; then
+    wait_for_ssh "$LOADGEN_PUBLIC_IP" "loadgen" || {
+        echo "  loadgen is left running so you can investigate; tear down with:" >&2
+        echo "    bash bench/aws/down.sh" >&2
+        exit 1
+    }
+fi
 
 # --- Persist state --------------------------------------------------------
+# Backward-compat shim: INSTANCE_ID / PUBLIC_IP still point at the server
+# instance, so any external tooling that consumed the legacy keys keeps
+# working.  The SERVER_* / LOADGEN_* keys are the canonical set going
+# forward.
 umask 077
 cat > "$STATE_FILE" <<EOF
 # bench/aws/.state — written by up.sh on $(date -Iseconds)
-INSTANCE_ID="$INSTANCE_ID"
-PUBLIC_IP="$PUBLIC_IP"
+TOPO="$TOPO"
 SG_ID="$SG_ID"
 AMI_ID="$AMI_ID"
+PLACEMENT_GROUP_NAME="$PLACEMENT_GROUP_NAME"
+SERVER_INSTANCE_ID="$SERVER_INSTANCE_ID"
+SERVER_PUBLIC_IP="$SERVER_PUBLIC_IP"
+SERVER_PRIVATE_IP="$SERVER_PRIVATE_IP"
+LOADGEN_INSTANCE_ID="$LOADGEN_INSTANCE_ID"
+LOADGEN_PUBLIC_IP="$LOADGEN_PUBLIC_IP"
+LOADGEN_PRIVATE_IP="$LOADGEN_PRIVATE_IP"
+# Legacy aliases (the server is the only host in TOPO=single).
+INSTANCE_ID="$SERVER_INSTANCE_ID"
+PUBLIC_IP="$SERVER_PUBLIC_IP"
 EOF
 echo
 echo "Done.  Next: bash bench/aws/install.sh"

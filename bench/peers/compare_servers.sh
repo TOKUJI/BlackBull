@@ -23,11 +23,33 @@
 set -e
 
 BASE_PORT="${PORT:-8443}"
+# Sprint 20: $BENCH_TARGET_HOST replaces the hard-coded `localhost` in every
+# $BASE URL the load tools see.  Default keeps loopback semantics for the
+# single-instance harness; split-topology sets BENCH_TARGET_HOST to a name
+# that resolves to the server instance's VPC private IP (with cert SAN +
+# /etc/hosts entry in place so TLS verification keeps working).
+BENCH_TARGET_HOST="${BENCH_TARGET_HOST:-localhost}"
 # BASE is now per-stack — set inside bench_stack() via compute_base() so
 # the Sprint 14 *-cleartext stacks target http:// and *-nginx / *-h11 stacks
 # stay on https://.  Initial value is the standalone-TLS default so the
 # pre-loop health check / report header still work.
-BASE="https://localhost:${BASE_PORT}"
+BASE="https://${BENCH_TARGET_HOST}:${BASE_PORT}"
+
+# Sprint 20: when BENCH_REMOTE_LIFECYCLE=1 the launcher / kill / readiness
+# checks dispatch over SSH to a second instance instead of running locally.
+# BENCH_REMOTE_SSH is the ssh prefix (e.g. `ssh -i ~/.ssh/server.pem ... ubuntu@10.0.0.5`).
+# BENCH_REMOTE_REPO is the absolute path of the BlackBull checkout on the
+# server instance (must already contain the regenerated cert with the right SANs).
+# BENCH_BIND_HOST is the BIND_HOST that the remote launcher passes to run_peer.sh.
+BENCH_REMOTE_LIFECYCLE="${BENCH_REMOTE_LIFECYCLE:-0}"
+BENCH_REMOTE_SSH="${BENCH_REMOTE_SSH:-}"
+BENCH_REMOTE_REPO="${BENCH_REMOTE_REPO:-/home/ubuntu/BlackBull}"
+BENCH_BIND_HOST="${BENCH_BIND_HOST:-127.0.0.1}"
+
+if [ "$BENCH_REMOTE_LIFECYCLE" = "1" ] && [ -z "$BENCH_REMOTE_SSH" ]; then
+    echo "compare_servers.sh: BENCH_REMOTE_LIFECYCLE=1 requires BENCH_REMOTE_SSH to be set" >&2
+    exit 1
+fi
 CERT="tests/cert.pem"
 KEY="tests/key.pem"
 RUNS="${RUNS:-3}"
@@ -69,8 +91,8 @@ strip_worker_suffix() {
 #   (no suffix)     → https on $BASE_PORT (standalone TLS — current default)
 compute_base() {
     case "$1" in
-        *-cleartext) echo "http://localhost:${BASE_PORT}" ;;
-        *)           echo "https://localhost:${BASE_PORT}" ;;
+        *-cleartext) echo "http://${BENCH_TARGET_HOST}:${BASE_PORT}" ;;
+        *)           echo "https://${BENCH_TARGET_HOST}:${BASE_PORT}" ;;
     esac
 }
 
@@ -96,7 +118,7 @@ done
 # Lifecycle helpers
 # ----------------------------------------------------------------------------
 
-kill_existing() {
+kill_existing_local() {
     # Kill by listening port — robust against forked workers whose cmdlines
     # no longer contain the launcher's name (hypercorn multiprocessing
     # workers lose "hypercorn" from argv after fork, which is how today's
@@ -127,14 +149,33 @@ kill_existing() {
     return 0   # never abort the orchestrator on a stuck port — wait_ready handles validation
 }
 
+kill_existing() {
+    if [ "$BENCH_REMOTE_LIFECYCLE" = "1" ]; then
+        # Server lives on a remote instance — dispatch via SSH.  The remote
+        # helper mirrors kill_existing_local's by-port + by-name logic.
+        $BENCH_REMOTE_SSH "cd $BENCH_REMOTE_REPO && BASE_PORT=$BASE_PORT bash bench/peers/server_lifecycle_remote.sh kill_existing" 2>/dev/null || true
+        return 0
+    fi
+    kill_existing_local
+}
+
 # Argument: expected server PID (the one we just backgrounded).
 # wait_ready confirms (1) the port comes up, (2) it's held by the expected
 # PID or one of its descendants — so the response can't be an orphan from
 # the previous section.
+#
+# In remote-lifecycle mode the local orchestrator cannot see the server's
+# process tree, so we drop the PID-descendant check and trust that the
+# preceding kill_existing left the port clean.  The HTTP probe is the only
+# remaining readiness signal — same shape as Sprint 16's between-lane
+# health_check, just used at startup instead of between lanes.
 wait_ready() {
     local expected_pid="$1"
     for _ in $(seq 1 30); do
         if curl -sk --max-time 2 "$BASE/plaintext" 2>/dev/null | grep -q "Hello"; then
+            if [ "$BENCH_REMOTE_LIFECYCLE" = "1" ]; then
+                return 0
+            fi
             # Confirm the listener belongs to our spawned tree.
             local listener_pid
             listener_pid=$(ss -tlnp 2>/dev/null \
@@ -371,20 +412,47 @@ bench_stack() {
     kill_existing
 
     echo "Starting $stack ..."
-    # Granian gets a direct FileHandler log (avoids the shell-pipe
-    # buffering question altogether); other stacks use the shell pipe.
-    local granian_log_env=""
-    [ "$stack" = "granian" ] && granian_log_env="GRANIAN_LOG_TARGET=$(pwd)/$SCRATCH/server_granian.log"
-    env $granian_log_env \
-        bash bench/peers/run_peer.sh "$stack" "$BASE_PORT" "$CERT" "$KEY" \
-        > "$SCRATCH/server_${stack}.log" 2>&1 &
-    local server_pid=$!
-    disown
+    local server_pid=0
+    if [ "$BENCH_REMOTE_LIFECYCLE" = "1" ]; then
+        # Remote mode: server_lifecycle_remote.sh handles backgrounding +
+        # log redirection on the server instance.  The pseudo-PID 0 tells
+        # wait_ready to skip the process-tree check.  We still snapshot the
+        # remote log on failure so the orchestrator output is useful.
+        local granian_log_env_remote=""
+        [ "$stack" = "granian" ] && granian_log_env_remote="GRANIAN_LOG_TARGET=$BENCH_REMOTE_REPO/$SCRATCH/server_granian.log"
+        $BENCH_REMOTE_SSH "cd $BENCH_REMOTE_REPO && mkdir -p $SCRATCH && \
+            $granian_log_env_remote BIND_HOST=$BENCH_BIND_HOST BASE_PORT=$BASE_PORT \
+            bash bench/peers/server_lifecycle_remote.sh start \
+            '$stack' '$BASE_PORT' '$CERT' '$KEY' '$SCRATCH/server_${stack}.log'" \
+            || {
+                echo "  remote launcher failed for $stack" >&2
+                {
+                    echo ""
+                    echo "**$stack failed to start (remote launcher non-zero exit).**"
+                    echo ""
+                } >> "$OUT"
+                return 0
+            }
+    else
+        # Granian gets a direct FileHandler log (avoids the shell-pipe
+        # buffering question altogether); other stacks use the shell pipe.
+        local granian_log_env=""
+        [ "$stack" = "granian" ] && granian_log_env="GRANIAN_LOG_TARGET=$(pwd)/$SCRATCH/server_granian.log"
+        env $granian_log_env \
+            bash bench/peers/run_peer.sh "$stack" "$BASE_PORT" "$CERT" "$KEY" \
+            > "$SCRATCH/server_${stack}.log" 2>&1 &
+        server_pid=$!
+        disown
+    fi
 
     if ! wait_ready "$server_pid"; then
         echo "  failed to start (or orphan answering on port); last 20 log lines:" >&2
-        tail -20 "$SCRATCH/server_${stack}.log" >&2
-        kill "$server_pid" 2>/dev/null || true
+        if [ "$BENCH_REMOTE_LIFECYCLE" = "1" ]; then
+            $BENCH_REMOTE_SSH "tail -20 $BENCH_REMOTE_REPO/$SCRATCH/server_${stack}.log" >&2 2>/dev/null || true
+        else
+            tail -20 "$SCRATCH/server_${stack}.log" >&2
+            kill "$server_pid" 2>/dev/null || true
+        fi
         {
             echo ""
             echo "**$stack failed to start** — see \`scratch_${TS}/server_${stack}.log\`."

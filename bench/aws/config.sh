@@ -11,14 +11,32 @@
 
 # --- AWS targeting --------------------------------------------------------
 : "${REGION:=us-east-1}"
-: "${INSTANCE_TYPE:=c7i.xlarge}"
+: "${INSTANCE_TYPE:=c7i.xlarge}"            # server instance (legacy default)
+: "${LOADGEN_INSTANCE_TYPE:=c7i.2xlarge}"   # split-topology load generator
 : "${VOLUME_SIZE_GB:=20}"     # /dev/sda1 root volume — generous for venv + apt
+
+# --- Topology -------------------------------------------------------------
+# Sprint 20: TOPO=single keeps the historical one-host loopback bench
+# unchanged (server and load generator share the c7i.xlarge); TOPO=split
+# launches a second LOADGEN instance in a cluster placement group and
+# drives the bench over VPC private networking.  Numbers from the two
+# topologies are NOT directly comparable — see bench/CHARACTERIZATION.md
+# Topology section for the rationale.
+: "${TOPO:=single}"
+: "${PLACEMENT_GROUP_NAME:=blackbull-bench-cpg}"
+# Both instances put this DNS name in /etc/hosts pointing at the server's
+# VPC private IP; the regenerated tests/cert.pem carries it as a SAN so
+# https://$SERVER_DNS_NAME:$PORT validates without --insecure.
+: "${SERVER_DNS_NAME:=bench-server.internal}"
 
 # --- Named resources (must be unique per concurrent run) ------------------
 : "${KEY_NAME:=blackbull-bench-key}"
 : "${SG_NAME:=blackbull-bench-sg}"
 : "${TAG_KEY:=Project}"
 : "${TAG_VALUE:=BlackBull-bench}"
+: "${ROLE_TAG_KEY:=Role}"
+: "${SERVER_ROLE_VALUE:=server}"
+: "${LOADGEN_ROLE_VALUE:=loadgen}"
 
 # --- Local files ----------------------------------------------------------
 AWS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
