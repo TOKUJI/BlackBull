@@ -735,6 +735,62 @@
   
   
     <li class="md-nav__item">
+      <a href="../../client/scenario/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    scenario
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../client/scenario_oracle/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    scenario_oracle
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../client/websocket/" class="md-nav__link">
         
   
@@ -1836,6 +1892,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.server.http1_actor.NotImplementedFramingError" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        NotImplementedFramingError
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.server.http1_actor.RequestActor" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2392,6 +2459,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.server.http1_actor.NotImplementedFramingError" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        NotImplementedFramingError
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.server.http1_actor.RequestActor" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2596,6 +2674,39 @@ the configured limit (<code>BB_HEADER_MAX_LINE</code> / <code>BB_HEADER_MAX_TOTA
 <p>The actor answers with 431 Request Header Fields Too Large (RFC 6585
 §5) and closes the connection.  Distinct from :class:<code>BadRequestError</code>
 because the response status differs.</p>
+
+
+
+
+
+
+
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="blackbull.server.http1_actor.NotImplementedFramingError" class="doc doc-heading">
+            <code>NotImplementedFramingError</code>
+
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="Exception">Exception</span></code></p>
+
+
+
+        <p>RFC 9112 §6.1 — the request used a Transfer-Encoding the server
+does not implement.  Answered with 501 Not Implemented (a separate
+response code from :class:<code>BadRequestError</code>'s 400).</p>
 
 
 
