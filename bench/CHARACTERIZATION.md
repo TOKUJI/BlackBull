@@ -1,10 +1,17 @@
 # BlackBull characterization plan
 
-A fixed set of scenarios, metrics, and methodology for measuring BlackBull
-and comparing it against four peer ASGI servers.
+A diagnostic and regression-tracking document for BlackBull.  The
+scenarios, metrics, and methodology here exist to **attribute cost**
+(which layer of the stack pays the cycles?), **detect regressions**
+(does a release behave like the previous one?), and **isolate
+topology effects** from code effects.  This is not a competitive
+benchmark report — external servers appear only as diagnostic
+references and architectural contrasts (see "Reference servers and
+diagnostic roles" below).
 
-The matrix is the contract: every release should be measurable against it,
-and every comparison run produces the same shape of table.
+The matrix is the contract: every release should be measurable against
+it, and every measurement run produces the same shape of table so
+deltas are visible.
 
 > ⚠️ **Cross-topology absolute-latency comparisons are invalid.**
 > Only throughput trends and relative scaling *within the same
@@ -37,35 +44,43 @@ In order of priority:
    characterised by Sprint 21 Phase B's closed-form `R(W)` formula.
 5. **Implementation clarity / from-scratch identity.**
 
-Peak req/s comes after all five.  Benchmark comparisons against
-granian (Rust) and nginx (static-file server, no ASGI dispatch) are
-reference floors / ceilings, not peer targets.
+Peak req/s comes after all five.  External servers in the matrix are
+diagnostic references — see "Reference servers and diagnostic roles"
+below — not targets to beat.
 
 ## Goals
 
-1. **Self-characterization.** Know how BlackBull behaves across protocol,
-   payload size, and load. Today there are scattered numbers in
-   `wise-conjuring-sundae.md` and ad-hoc `bench/results/` files; no single
-   document defines the regression baseline.
-2. **Peer comparison.** Same ASGI app on five servers, same load generator,
-   same hardware. Numbers are *relative* — the absolute values depend on
-   the host and matter mostly when reproduced on identical hardware.
+1. **Self-characterization.** Know how BlackBull behaves across
+   protocol, payload size, and load.  The matrix is the
+   regression-tracking baseline; the per-sprint findings below are
+   the bottleneck-attribution log.
+2. **Cost decomposition.** Same ASGI app on multiple servers, same
+   load generator, same hardware.  Per-stack deltas help attribute
+   cost to specific layers (TLS termination, HTTP/1.1 parsing, ASGI
+   dispatch, HPACK codec).  Numbers are *relative* and only
+   citeable against another number from the same topology.
 3. **AWS-ready.** Methodology is stable enough that re-running on EC2
-   produces directly comparable numbers (only the host changes).
+   produces directly comparable numbers under the same topology
+   (only the host changes).
 
-## Comparison matrix
+## Reference servers and diagnostic roles
 
-Five servers. Not all speak HTTP/2; the matrix splits by protocol.
+Five servers in the matrix.  Each plays a specific diagnostic role —
+not a competitor — chosen so that BlackBull-vs-reference deltas
+isolate a specific layer of cost.
 
-| Server     | Version pinned in | HTTP/1.1 | HTTP/2 | WebSocket | Notes |
+| Server     | Version pinned in | HTTP/1.1 | HTTP/2 | WebSocket | Diagnostic role |
 |------------|---|---|---|---|---|
-| BlackBull  | repo head        | ✅ | ✅ | ✅ | Subject under test |
-| uvicorn    | `bench/peers/`   | ✅ | ❌ | ✅ | Industry default; pure-Python via h11/wsproto |
-| hypercorn  | `bench/peers/`   | ✅ | ✅ | ✅ | Direct peer — also h2 library based |
-| granian    | `bench/peers/`   | ✅ | ✅ | ✅ | Rust-backed; shows the ceiling of this niche |
-| daphne     | `bench/peers/`   | ✅ | ❌ | ✅ | Django reference impl; slow but canonical |
+| BlackBull  | repo head        | ✅ | ✅ | ✅ | Implementation under regression-tracking. |
+| uvicorn    | `bench/peers/`   | ✅ | ❌ | ✅ | **Python ASGI decomposition reference.**  Pure-Python (h11/wsproto) HTTP/1.1 with a mature parser pipeline; BlackBull-vs-uvicorn deltas isolate per-request framework overhead on the same runtime substrate. |
+| hypercorn  | `bench/peers/`   | ✅ | ✅ | ✅ | **Python ASGI decomposition reference (HTTP/2).**  Pure-Python h2-library based; BlackBull-vs-hypercorn deltas isolate HTTP/2-specific framework overhead independent of hpack codec cost (both use the same `hpack` package). |
+| granian    | `bench/peers/`   | ✅ | ✅ | ✅ | **Architectural contrast reference.**  Rust runtime + Rust parser; BlackBull-vs-granian deltas attribute cost to the pure-Python runtime as a whole, not to any specific BlackBull layer. |
+| nginx      | `bench/peers/`   | ✅ | ❌ | ❌ | **Architectural contrast reference (static).**  C event-driven, no ASGI dispatch; BlackBull-vs-nginx deltas indicate the floor cost of doing Python-application work at all. |
+| daphne     | `bench/peers/`   | ✅ | ❌ | ✅ | **Compatibility reference.**  Django's canonical ASGI implementation — included for compatibility tracking, not cost comparison. |
 
-ASGI app is identical across all five — see *Test target* below.
+ASGI app is identical across uvicorn/hypercorn/granian/daphne;
+BlackBull uses its own `bench/app.py` with the same routes.  See
+*Test target* below.
 
 ## Test target
 
@@ -103,20 +118,38 @@ in the request path. No compression, no auth, no logging.
 ## Scenarios
 
 Each scenario fixes (load tool, protocol, route, concurrency, duration).
+The Lane A / B / C / D / E grouping below reflects the **load-tool
+and protocol** dimension and is how the harness invokes them.  The
+table immediately under this paragraph re-projects the same scenarios
+onto their **diagnostic purpose** — which question each one helps
+answer — for readers who care about *why* a row exists, not *which
+binary produced it*.
+
+### Scenarios by diagnostic purpose
+
+| Diagnostic purpose | What it isolates / attributes | Scenarios |
+|---|---|---|
+| **Per-request overhead** | The floor cost of routing + dispatch + framing for a tiny payload — isolates framework overhead from body-handling cost. | A1 (HTTP/2, 1 stream), B1 (HTTP/1.1, c=256), B3 (HTTP/1.1, c=256, JSON), C1 (k6 200 VU at /ping) |
+| **Payload scaling** | How per-request cost grows with body size — attributes cost to serialization, flow control, and framing chunking. | A5 / A6 / A7 (16 KB / 64 KB / 1 MB over HTTP/2), B4 / B5 (16 KB / 64 KB over HTTP/1.1), B6 / B7 (POST 1 KB / 100 KB) |
+| **Concurrency scaling** | How throughput and tail latency respond to more parallelism — separates stream multiplexing (intra-connection) from connection parallelism (inter-connection). | A2 / A3 (HTTP/2 mux=10 / 50), B1 / B2 (c=256 / c=1024 + pipeline 16), C2 (k6 500 VU at saturation) |
+| **Connection lifecycle** | Cost of `accept` + TLS handshake + close per request — attributes the connection-setup tax separately from steady-state work.  Adjacent to the slowloris-defence test suite in `tests/conformance/http1/test_rfc9112_slowloris.py`. | E1 (HTTP/1.1, no-keepalive, Sprint 24) |
+| **Worker scaling** | How throughput and tail latency respond to additional workers on the same instance — attributes scaling behaviour to per-worker vs per-host costs. | Stack-name suffix `-w<N>`: all of Lane A + B + C re-run at `w=1 / w=2 / w=4` (Sprints 16, 20, 21) |
+| **Pipeline behavior** | How HTTP/1.1 pipelining changes the per-request floor — synthetic upper bound; pipelining is effectively dead in modern browsers. | B2 (c=1024 + pipeline 16) |
+| **WebSocket round-trip** | Per-message frame-encode + frame-decode cost on a persistent connection. | D1 (k6 ws, 50 conns at 5 msg/s/conn) |
 
 ### Lane A — HTTP/2 multiplexing (h2load)
 
 Applies to: BlackBull, hypercorn, granian.
 
-| Scenario | Route        | -n (requests) | -c (conns) | -m (streams/conn) | What it stresses |
+| Scenario | Route        | -n (requests) | -c (conns) | -m (streams/conn) | Diagnostic purpose |
 |---|---|---|---|---|---|
-| A1 | `/plaintext` | 50,000 | 50 | 1   | Per-request overhead w/o mux (TechEmpower-comparable) |
-| A2 | `/plaintext` | 90,000 | 50 | 10  | Browser-realistic mux |
-| A3 | `/plaintext` | 90,000 | 50 | 50  | Heavy mux — stress, not browser-realistic (real browsers cap at ~10 concurrent streams; kept to characterise the multiplexing ceiling) |
-| A4 | `/json`      | 50,000 | 50 | 10  | Tiny JSON over HTTP/2 |
-| A5 | `/16kb`      | 50,000 | 50 | 10  | Medium body throughput |
-| A6 | `/64kb`      | 30,000 | 50 | 10  | Large body, single frame |
-| A7 | `/1mb`       |  3,000 | 20 |  3  | Flow-control window |
+| A1 | `/plaintext` | 50,000 | 50 | 1   | Per-request HTTP/2 overhead with mux=1 — isolates frame parser + ASGI dispatch from stream-multiplexing cost. |
+| A2 | `/plaintext` | 90,000 | 50 | 10  | Browser-realistic multiplexing — attributes per-stream cost. |
+| A3 | `/plaintext` | 90,000 | 50 | 50  | Heavy multiplexing — not browser-realistic (browsers cap at ~10 concurrent streams); kept to characterise multiplexing scaling behaviour at high stream counts. |
+| A4 | `/json`      | 50,000 | 50 | 10  | Tiny-JSON path on HTTP/2 — attributes JSON serialization cost vs A2. |
+| A5 | `/16kb`      | 50,000 | 50 | 10  | Medium-body payload-scaling — exposes per-byte framing/copy cost. |
+| A6 | `/64kb`      | 30,000 | 50 | 10  | Large body crossing default `max_frame_size` — attributes frame-chunking cost. |
+| A7 | `/1mb`       |  3,000 | 20 |  3  | Body large enough to exercise the connection flow-control window — attributes window-update cost. |
 
 ### Lane B — HTTP/1.1 keep-alive (wrk + oha)
 
@@ -125,15 +158,15 @@ script for pipelining + POST bodies, TechEmpower-style) and **oha** (single
 binary, granian-style). Each tool measures independently — the spread
 between them is itself a data point.
 
-| Scenario | Route        | Threads | Conns | Duration | Pipeline | What it stresses |
+| Scenario | Route        | Threads | Conns | Duration | Pipeline | Diagnostic purpose |
 |---|---|---|---|---|---|---|
-| B1 | `/plaintext` | 4       | 256   | 30s      | none     | TechEmpower-style baseline, comparable to public numbers |
-| B2 | `/plaintext` | 4       | 1024  | 30s      | 16       | TechEmpower-style with pipelining — synthetic upper bound (HTTP/1.1 pipelining is effectively dead in modern browsers; kept for cross-board comparability) |
-| B3 | `/json`      | 4       | 256   | 30s      | none     | Tiny-JSON throughput, comparable to TechEmpower JSON |
-| B4 | `/16kb`      | 4       | 100   | 30s      | none     | Body throughput (internal) |
-| B5 | `/64kb`      | 4       |  50   | 30s      | none     | Large response (internal) |
-| B6 | `/echo`      | 4       | 100   | 30s      | none     | POST 1 KiB body (granian-comparable) |
-| B7 | `/echo`      | 4       |  50   | 30s      | none     | POST 100 KiB body (granian-comparable) |
+| B1 | `/plaintext` | 4       | 256   | 30s      | none     | Per-request HTTP/1.1 overhead baseline (TechEmpower-style; usable as an external comparability anchor). |
+| B2 | `/plaintext` | 4       | 1024  | 30s      | 16       | Pipelining behaviour — synthetic upper bound on per-request floor; HTTP/1.1 pipelining is effectively dead in modern browsers, kept for cross-board comparability only. |
+| B3 | `/json`      | 4       | 256   | 30s      | none     | Tiny-JSON path on HTTP/1.1 — attributes JSON serialization cost vs B1. |
+| B4 | `/16kb`      | 4       | 100   | 30s      | none     | Medium-body payload-scaling — exposes per-byte copy/write cost. |
+| B5 | `/64kb`      | 4       |  50   | 30s      | none     | Large-body payload-scaling — saturates the TLS write path. |
+| B6 | `/echo`      | 4       | 100   | 30s      | none     | POST 1 KiB body — attributes request-body-read cost (granian-comparable). |
+| B7 | `/echo`      | 4       |  50   | 30s      | none     | POST 100 KiB body — exposes chunked-read / large-body-read cost (granian-comparable). |
 
 ### Lane C — k6 stress (VU-based latency distribution)
 
@@ -141,10 +174,10 @@ Applies to: all five servers. Each VU holds one persistent connection.
 HTTP/2-capable servers negotiate via ALPN; others fall back to HTTP/1.1.
 The `proto` field in the summary records which actually ran.
 
-| Scenario | Route | VUs | Duration | What it stresses |
+| Scenario | Route | VUs | Duration | Diagnostic purpose |
 |---|---|---|---|---|
-| C1 | `/ping`  | 200 | 60s | Rampup-realistic load |
-| C2 | `/ping`  | 500 | 60s | Saturation behaviour |
+| C1 | `/ping`  | 200 | 60s | Rampup-realistic concurrent VUs — characterises latency distribution at moderate load. |
+| C2 | `/ping`  | 500 | 60s | Saturation behaviour — exposes per-event-loop-turn cost and tail-latency growth under contention. |
 
 ### Lane D — WebSocket RTT (k6 ws)
 
@@ -158,9 +191,9 @@ Applies to: all five servers.
 
 Applies to: all five servers.  Opt-in: pass `LANES="… E-wrk"`.
 
-| Scenario | Route | Tool | Threads | Conns | Duration | Keepalive | What it stresses |
+| Scenario | Route | Tool | Threads | Conns | Duration | Keepalive | Diagnostic purpose |
 |---|---|---|---|---|---|---|---|
-| E1 | `/plaintext` | wrk + [`bench/wrk/no_keepalive.lua`](wrk/no_keepalive.lua) | 4 | 256 | 60 s | **off** (`Connection: close` per request) | TLS handshake + accept-loop cost |
+| E1 | `/plaintext` | wrk + [`bench/wrk/no_keepalive.lua`](wrk/no_keepalive.lua) | 4 | 256 | 60 s | **off** (`Connection: close` per request) | Connection-lifecycle cost: isolates TLS handshake + accept-loop cost from steady-state work.  Comparing E1 against B1 attributes the connection-setup tax. |
 
 Lane E exposes accept-loop + TLS-handshake costs that the
 keep-alive-dominated Lane B hides.  Run against `*-cleartext` stacks
@@ -217,7 +250,7 @@ Python version, server version, load-gen version, kernel TCP settings
 | Limitation | Mitigation |
 |---|---|
 | WSL2 loopback hides real-NIC behaviour (no DMA, no driver, no syscall cost matching a real card) | Numbers are explicitly *relative*; absolute measurements on EC2 |
-| **WSL2 noise floor on B2r (~-R 5000)**: BlackBull single-stack 5-run spread is 1.3-5.1 ms mean with no code change. Any optimisation < ~15 % is invisible. | Run ≥ 5 runs per stack and report the *median*. Do not claim a B2r win from any single A/B unless the medians differ by > 15 %. Sub-ms-precision work belongs on EC2. |
+| **WSL2 noise floor on B2r (~-R 5000)**: BlackBull single-stack 5-run spread is 1.3-5.1 ms mean with no code change. Any optimisation < ~15 % is invisible. | Run ≥ 5 runs per stack and report the *median*. Do not cite a B2r improvement from any single A/B unless the medians differ by > 15 %. Sub-ms-precision work belongs on EC2. |
 | Single-host load gen + server share CPU | k6 and the server pinned to different CPU sets where possible; or run load gen on a second EC2 instance |
 | Different servers use different HTTP/2 libraries (h2 vs Rust impl in granian) | Documented per result; mux scaling differences are mostly library-driven |
 | uvicorn and daphne can't run lane A | Marked as N/A in the matrix; cross-protocol comparison handled by lane C |
@@ -277,36 +310,45 @@ Approximate single-run shape on EC2 (HEAD = `638f56c`):
 
 ### WSL → EC2 delta (Sprint 13 finding)
 
-The off-WSL pass answered both questions the sprint was scoped to ask.
+The off-WSL pass answered the two questions the sprint was scoped to ask.
 
-**Q1 — how distorted are WSL numbers?** Answer: the *ranking* is, at
-the top end.  WSL loopback acts as a syscall-floor ceiling that caps
-fast servers and leaves slow ones alone.
+**Q1 — how distorted are WSL numbers?**  Topology-dependent.  WSL2
+loopback imposes a syscall-floor that compresses the high end of the
+distribution, hiding cost decomposition that becomes visible on real
+Linux.
 
 Lane B1 plaintext c=256 (single run from each environment, blackbull
 HEAD = `638f56c`):
 
-| Stack | WSL post-9d | EC2 (095507Z) | EC2 / WSL |
-|---|---|---|---|
-| blackbull | ~20.7 k | 16.5 k | **0.80×** |
-| uvicorn   | ~22 k   | 30.4 k | 1.38× |
-| hypercorn | ~5 k    | 5.8 k  | 1.16× |
-| granian   | ~26 k   | 91.4 k | **3.52×** |
-| daphne    | ~5 k    | 6.2 k  | 1.24× |
-| nginx     | n/a (not in WSL baseline) | 103 k (B1 wrk) | — |
+| Stack | Role | WSL post-9d | EC2 (095507Z) | EC2 / WSL |
+|---|---|---|---|---|
+| blackbull | subject | ~20.7 k | 16.5 k | 0.80× |
+| uvicorn   | Python ASGI decomposition ref | ~22 k   | 30.4 k | 1.38× |
+| hypercorn | Python ASGI decomposition ref (H2) | ~5 k    | 5.8 k  | 1.16× |
+| granian   | architectural contrast (Rust) | ~26 k   | 91.4 k | 3.52× |
+| daphne    | compatibility ref | ~5 k    | 6.2 k  | 1.24× |
+| nginx     | architectural contrast (C, static) | n/a | 103 k | — |
 
-Pure-Python ASGI servers (BlackBull/hypercorn/daphne) move ±20 % on
-EC2; the C/Rust peers (granian especially) gain 1.5–3.5×.  BlackBull
-moves *down* on EC2.  Likely reason: pure-Python ASGI throughput is
-clock-bound per request, and a c7i.xlarge vCPU runs at ~3.0 GHz base
-(~3.8 GHz turbo) — lower than typical desktop single-core clocks where
-the WSL host sits.  Granian/nginx are I/O-bound, not clock-bound, so
-they win the better syscall path on real Linux.
+Two attribution observations from these ratios:
 
-**Q2 — apples-to-apples ranking?** On EC2 B1 the order is
-**granian ≫ uvicorn > blackbull > daphne ≈ hypercorn**, with nginx
-above all four as the static-file reference.  This contradicts the
-WSL-only view that had BlackBull within 25 % of granian.
+- Pure-Python ASGI references (uvicorn, hypercorn, daphne) move ±20 %
+  going WSL→EC2; the C/Rust references gain 1.5–3.5×.  BlackBull
+  moves *down* (0.80×).  This isolates a **clock-bound** cost
+  component in BlackBull's hot path: c7i.xlarge vCPU runs at
+  ~3.0 GHz base (~3.8 GHz turbo), lower than typical desktop
+  single-core clocks where the WSL host sits.  Granian/nginx are
+  I/O-bound rather than clock-bound, so they get the syscall-path
+  improvement on real Linux without paying the clock-drop.
+- The uvicorn +38 % gain on EC2 (where BlackBull goes −20 %)
+  indicates uvicorn's hot path has less Python-arithmetic work per
+  request than BlackBull's — a real cost-decomposition signal worth
+  carrying forward into the per-sprint hypothesis log below.
+
+**Q2 — does the topology change the cost ordering?**  Yes.  On EC2 B1
+the order is *granian ≫ uvicorn → blackbull → daphne ≈ hypercorn*,
+with nginx well above all five.  The WSL2 ordering compressed that
+spread because loopback throughput caps the C/Rust references; the
+EC2 ordering reflects the real cost-per-request decomposition.
 
 ### EC2 noise floor (Sprint 13 finding)
 
@@ -327,10 +369,10 @@ variance — same instance class, different physical hosts (each
 (BlackBull's spread was the worst at +31 %, partly because its
 absolute numbers are smaller so each ms swing reads bigger).
 
-Implication for future tuning A/Bs: a sub-15 % win on EC2 is below
-the current noise floor and not citeable.  Either tighten the noise
-(more medians, placement groups, BB-pinned CPU sets) or look for
-≥20 % deltas.
+Implication for future tuning A/Bs: a sub-15 % improvement on EC2 is
+below the current noise floor and not citeable.  Either tighten the
+noise (more medians, placement groups, BB-pinned CPU sets) or look
+for ≥20 % deltas.
 
 ### Sprint 14 — layer-attribution topologies
 
@@ -377,9 +419,9 @@ STACKS="blackbull blackbull-cleartext blackbull-nginx \
 
 ### Sprint 15 — high-concurrency profile finding
 
-_Status: confirmed (hpack-codec ceiling finding).  The static-table half of
-the codec cost was subsequently closed by the Sprint 21 Phase C HPACK
-fastpath ([`blackbull/protocol/hpack_fastpath.py`](../blackbull/protocol/hpack_fastpath.py));
+_Status: confirmed (hpack-codec bottleneck finding).  The static-table
+half of the codec cost was subsequently closed by the Sprint 21 Phase C
+HPACK fastpath ([`blackbull/protocol/hpack_fastpath.py`](../blackbull/protocol/hpack_fastpath.py));
 the dynamic-table half remains the limiter._
 
 py-spy flame graphs captured on a fresh c7i.xlarge under k6 stress
@@ -417,28 +459,35 @@ hpack encode + decode together account for roughly a third of the
 busy frames at both VU levels.  The `hpack` package is third-party
 pure-Python; we don't control the codec directly.
 
-**Finding 3 — BlackBull's HTTP/2 stack saturates at ~500 VU but is
-still the fastest pure-Python HTTP/2 ASGI server measured.**
-Throughput drops 14 % from 200→500 VU and event-loop lag rises 2.4×.
-For comparison, Sprint 13's Lane C2 single-worker numbers were:
+**Finding 3 — BlackBull's HTTP/2 hot path reaches an `hpack`-bound
+plateau around 500 VU; the references confirm the bottleneck is the
+codec, not the surrounding framework.**  Throughput drops 14 % from
+200→500 VU and event-loop lag rises 2.4×.  Sprint 13's Lane C2
+single-worker numbers, presented for cost attribution (not ranking):
 
-| Stack | Lane C2 req/s | proto | ratio to BlackBull |
-|---|---|---|---|
-| BlackBull | 7 179 | HTTP/2 | 1.00× |
-| uvicorn   | 17 331 | HTTP/1.1 | 2.41× (different protocol) |
-| granian   | 26 403 | HTTP/2 | 3.68× (Rust core) |
-| hypercorn |  2 433 | HTTP/2 | 0.34× |
-| daphne    |  2 320 | HTTP/1.1 | 0.32× |
+| Stack | Role | Lane C2 req/s | proto | What the delta vs BlackBull attributes |
+|---|---|---|---|---|
+| BlackBull | subject | 7 179 | HTTP/2 | (baseline) |
+| hypercorn | Python ASGI decomposition ref (H2) | 2 433 | HTTP/2 | Both stacks share the same `hpack` package; the ~3× delta isolates per-server framework overhead from codec cost. |
+| uvicorn   | Python ASGI decomposition ref (H1 only) | 17 331 | HTTP/1.1 | Different protocol — the 2.4× delta is not citeable as an apples-to-apples comparison. |
+| granian   | architectural contrast (Rust) | 26 403 | HTTP/2 | Native parser + Rust hpack; the 3.7× delta indicates the pure-Python runtime cost as a whole. |
+| daphne    | compatibility ref (HTTP/1.1 only) | 2 320 | HTTP/1.1 | Different protocol; included for completeness. |
 
-Among pure-Python HTTP/2 ASGI servers (just BlackBull and hypercorn
-in this matrix), BlackBull leads by ~3×.
+The decomposition reads as: BlackBull-vs-hypercorn shows ~3×
+difference on the same pure-Python `hpack` substrate, attributing
+that delta to framework overhead (sender, actor dispatch, etc.).
+BlackBull-vs-granian shows ~3.7× on different runtimes,
+attributing most of the additional gap to the Python/Rust boundary
+rather than to BlackBull-specific framework cost.
 
 **No tuning sprint queued from this finding.**  The dominant cost is
-in the third-party `hpack` codec; closing it would mean replacing or
-working around `hpack`, which goes beyond the configuration-only
-scope this measurement work has stayed in.  Tracked separately if a
-real user need appears (analogous to the `[speed-h1]` story in
-README §P4).
+in the third-party `hpack` codec; the static-table portion was later
+closed by the Sprint 21 Phase C HPACK fastpath
+([`blackbull/protocol/hpack_fastpath.py`](../blackbull/protocol/hpack_fastpath.py)).
+Going further would mean replacing or working around `hpack`'s
+dynamic-table machinery, which goes beyond the configuration-only
+scope this document stayed in.  Tracked separately if a real user
+need appears (analogous to the `[speed-h1]` story in README §P4).
 
 #### Methodology caveat — access logging contamination
 The first Sprint 15 profile (run-log under `20260523-162617Z/`) ran
@@ -462,7 +511,8 @@ section in mind._
 Single-worker BlackBull was the entire Sprint 13/14/15 baseline.
 Sprint 16 measured **BlackBull with `BB_WORKERS=1/2/4` on the same
 c7i.xlarge (4 vCPU)** to characterise production-shape scaling.
-**BlackBull-only — no peer comparison in this matrix.**
+**BlackBull-only — no diagnostic-reference servers in this matrix; this
+sprint isolates BlackBull's own scaling behaviour.**
 
 Stack-name convention: `blackbull-w<N>` (see
 [`bench/peers/run_peer.sh`](peers/run_peer.sh) suffix parser).
@@ -502,7 +552,7 @@ Canonical artefact:
    throughput; w=4 buys *essentially nothing* (1.02× over w=2).
    Consistent with the Sprint 15 finding that HTTP/2 in BlackBull
    is CPU-bound on pure-Python `hpack` — workers hit the per-worker
-   GIL ceiling sooner.  C2 p99 at w=4 (86 ms) is **higher** than
+   GIL bound sooner.  C2 p99 at w=4 (86 ms) is **higher** than
    w=2 (75 ms) — CPU contention with k6 dominates.
 
 4. **More workers cut HTTP/1.1 tail latency by half.**  B1 p99
@@ -644,12 +694,13 @@ The Sprint 16 rule-of-thumb ("`BB_WORKERS = N_vCPU / 2` when load
 gen shares the box") was correct *for the topology it was measured
 on*.  On topology where the server has the CPU to itself:
 
-- **`BB_WORKERS = N_vCPU`** is the natural ceiling for HTTP/2 —
+- **`BB_WORKERS = N_vCPU`** is the natural upper bound for HTTP/2 —
   w=4 on 4 vCPU lands +21 % over w=2 (the Sprint 16 single-host
   +17 % HTTP/1.1 finding generalises to HTTP/2 once the loadgen
   is offloaded).
 - For HTTP/1.1 the previous rule still applies: w=2 captures
-  most of the win, w=4 adds modest tail-latency improvement.
+  most of the throughput improvement, w=4 adds modest
+  tail-latency reduction.
 - The Sprint 15 finding stands — BlackBull's HTTP/2 hot path is
   still `hpack`-dominated; Sprint 20 just shows there's more
   CPU headroom than Sprint 16 could measure.
@@ -716,7 +767,7 @@ Two surprises in one table:
    we've already used both physical cores at w=2-pinned.  Adding
    workers on SMT siblings (effectively the w=4 case) helps.
 
-The SMT-ceiling hypothesis is falsified: it predicts (a) w=2
+The SMT-saturation hypothesis is falsified: it predicts (a) w=2
 SMT-siblings ≪ w=2 distinct-cores (we measured them equal) and
 (b) w=4 free ≈ w=2 distinct-cores (we measured +22 %).  Neither
 holds.
@@ -920,7 +971,7 @@ counts where each worker is closer to saturation; that's the
 near the EC2 single-worker noise band (Sprint 13's "EC2 noise
 floor" subsection put pure-Python ASGI run-to-run variance at
 ±15 %, dominated by physical-host placement on fresh
-`up.sh` provisions).  The credibility of the win comes from the
+`up.sh` provisions).  The credibility of the improvement comes from the
 **py-spy result below** — `asyncio.timeouts.*` dropping from
 9.6 % inclusive to 0 samples is a direct, sampling-based
 attribution of the saved cycles, not an inference from a noisy
@@ -1190,10 +1241,13 @@ bench/
 
 ## Reading the matrix
 
-A scenario is meaningful when at least three servers in the same lane
-finish without errors. A single outlier may be a tuning issue; a pattern
-(e.g., BlackBull beats hypercorn on lane A but loses on lane B) is real
-signal. AWS re-measurement is the final arbiter.
+A scenario produces actionable signal when at least three servers in
+the same lane finish without errors.  A single outlier may be a tuning
+issue or noise; a pattern (e.g., BlackBull shows lower overhead than
+hypercorn on Lane A but higher overhead on Lane B) is real signal
+that helps attribute cost to specific layers.  AWS re-measurement is
+the final arbiter under the cross-topology warning at the top of this
+document.
 
 ## Public benchmark reference
 
