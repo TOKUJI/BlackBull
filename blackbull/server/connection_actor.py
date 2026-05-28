@@ -6,6 +6,7 @@ from typing import Any
 
 from ..actor import Actor, Message
 from ..event_aggregator import EventAggregator
+from .deadline import ConnectionDeadline
 from .recipient import (AbstractReader, IncompleteReadError,
                         _HTTP2_STREAM_QUEUE_DEPTH, _WS_EVENT_QUEUE_DEPTH)
 from .sender import AbstractWriter
@@ -79,6 +80,14 @@ class ConnectionActor(Actor):
         # still bounded.  ``header_timeout=0`` disables both halves.
         deadline = cfg.header_timeout if cfg.header_timeout > 0 else None
 
+        # Sprint 23: one rescheduled TimerHandle per connection replaces
+        # the per-phase ``async with asyncio.timeout(d):`` allocations.
+        # The deadline binds to *this* task — the per-connection dispatch
+        # task — and gets passed down into HTTP1Actor / HTTP1Recipient so
+        # each phase boundary (preface, headers, body chunk, keep-alive)
+        # just re-arms the same handle.
+        dl = ConnectionDeadline()
+
         # ALPN-negotiated HTTP/2: the peer is committed to HTTP/2, so the
         # first 24 bytes MUST be the connection preface (RFC 9113 §3.4).
         # Read exactly 24 bytes rather than scanning for CRLF so an invalid
@@ -88,7 +97,7 @@ class ConnectionActor(Actor):
         if self._alpn == 'h2':
             try:
                 if deadline is not None:
-                    async with asyncio.timeout(deadline):
+                    with dl.guard(deadline):
                         preface = await self._reader.readexactly(24)
                 else:
                     preface = await self._reader.readexactly(24)
@@ -125,7 +134,7 @@ class ConnectionActor(Actor):
         # No ALPN (cleartext) or ALPN didn't pick h2 — sniff the first line.
         try:
             if deadline is not None:
-                async with asyncio.timeout(deadline):
+                with dl.guard(deadline):
                     first_line = await self._reader.readuntil(b'\r\n')
             else:
                 first_line = await self._reader.readuntil(b'\r\n')
@@ -165,6 +174,7 @@ class ConnectionActor(Actor):
                 peername=self._peername, sockname=self._sockname,
                 ssl=self._ssl,
                 ws_queue_depth=self._ws_queue_depth,
+                deadline=dl,
             )
         await actor.run()
 

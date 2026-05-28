@@ -17,6 +17,7 @@ from ..event import Event
 from ..event_aggregator import EventAggregator
 from ..asgi import ASGIEvent
 from ..headers import Headers
+from .deadline import ConnectionDeadline
 from .recipient import AbstractReader, IncompleteReadError, RecipientFactory, _WS_EVENT_QUEUE_DEPTH
 from .sender import AbstractWriter, SenderFactory
 from .access_log import AccessLogRecord as _AccessLogRecord, _make_capturing_send, _make_disconnect_detecting_receive, emit_access_log as _emit_access_log
@@ -243,6 +244,7 @@ class HTTP1Actor(Actor):
         sockname: tuple[str, int] | None = None,
         ssl: bool = False,
         ws_queue_depth: int = _WS_EVENT_QUEUE_DEPTH,
+        deadline: ConnectionDeadline | None = None,
     ) -> None:
         super().__init__()
         self._reader = reader
@@ -254,12 +256,24 @@ class HTTP1Actor(Actor):
         self._sockname = sockname
         self._ssl = ssl
         self._ws_queue_depth = ws_queue_depth
+        # When the actor is constructed without a deadline (test
+        # fixtures that drive the actor directly), one is lazily
+        # created on entry to ``run()`` so the production hot path and
+        # the test path share the same code.
+        self._deadline = deadline
 
     async def run(self) -> None:
         """Keep-alive loop — process requests until connection closes."""
         import asyncio  # noqa: PLC0415
         from ..env import get_settings as _get_settings  # noqa: PLC0415
         cfg = _get_settings()
+        # Sprint 23: one rescheduled TimerHandle per connection drives
+        # all phase deadlines (headers / body / keep-alive).  Created
+        # lazily so tests that instantiate HTTP1Actor without a wrapping
+        # ConnectionActor still work — same task either way.
+        if self._deadline is None:
+            self._deadline = ConnectionDeadline()
+        dl = self._deadline
         send = SenderFactory.http1(self._writer)
         try:
             while True:
@@ -271,7 +285,7 @@ class HTTP1Actor(Actor):
                 # deadline (legacy behaviour for trusted local use).
                 try:
                     if cfg.header_timeout > 0:
-                        async with asyncio.timeout(cfg.header_timeout):
+                        with dl.guard(cfg.header_timeout):
                             await self._read_headers(cfg.header_max_total)
                     else:
                         await self._read_headers(cfg.header_max_total)
@@ -399,6 +413,7 @@ class HTTP1Actor(Actor):
                 inner_receive = RecipientFactory.http1(
                     self._reader, scope,
                     body_timeout=cfg.body_timeout,
+                    deadline=dl,
                 )
 
                 if not await self._dispatch_request(scope, inner_receive, capturing_send, log_record):
@@ -418,7 +433,7 @@ class HTTP1Actor(Actor):
                 # mobile network change) doesn't hold a ghost connection.
                 try:
                     if cfg.keep_alive_timeout > 0:
-                        async with asyncio.timeout(cfg.keep_alive_timeout):
+                        with dl.guard(cfg.keep_alive_timeout):
                             next_chunk = await self._reader.readuntil(_REQ_END)
                     else:
                         next_chunk = await self._reader.readuntil(_REQ_END)

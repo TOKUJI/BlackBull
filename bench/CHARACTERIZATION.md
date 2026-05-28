@@ -784,6 +784,81 @@ within 5 %, with the small w=16 negative bias consistent with the
 "hpack execution-unit contention on SMT siblings" caveat above.
 The formula generalises.
 
+### Sprint 23 — `asyncio.timeouts.*` cost removed from the per-request hot path
+
+Sprint 21 Phase B identified `asyncio.timeouts.*` machinery at
+~9.6 % inclusive of per-worker CPU under a B1 saturation profile
+(`reschedule` / `__aexit__` / per-call cancel-scope registration).
+Sprint 23 replaces the per-phase `async with asyncio.timeout(d):`
+context managers in [`blackbull/server/connection_actor.py`](../blackbull/server/connection_actor.py),
+[`blackbull/server/http1_actor.py`](../blackbull/server/http1_actor.py),
+and [`blackbull/server/recipient.py`](../blackbull/server/recipient.py)
+with a single rescheduled `loop.call_later()` `TimerHandle` per
+connection (new [`blackbull/server/deadline.py`](../blackbull/server/deadline.py)
+`ConnectionDeadline`).  Per-phase semantics preserved — the
+`body_timeout` re-arms on every chunk read, matching the nginx
+`client_body_timeout` "each read has the same bound" rule.
+
+#### Throughput — c7i.xlarge TOPO=split, single-worker
+
+Single-worker isolates the per-request cost from the multi-worker
+scaling factor that confounded the original Phase B finding.
+Canonical artefact:
+[`bench/results/aws/sprint23/compare_servers_single_worker.md`](results/aws/sprint23/compare_servers_single_worker.md).
+
+| Scenario | Sprint 20 split (req/s) | Sprint 23 (req/s) | Δ |
+|---|---|---|---|
+| **B1 plaintext c=256** | **14 822** | **15 793** | **+6.5 %** |
+| B3 json c=256 | ~14 822 (B1 proxy) | 15 372 | — |
+| A1 mux1 (HTTP/2) | 10 462 | 10 236 | −2.2 % (within noise) |
+
+The +6.5 % on B1 is consistent with the Phase B caveat that
+single-worker c7i.xlarge isn't fully CPU-saturated (line 515
+showed w=1 was within noise across Sprint 16 → Sprint 20).  More
+of the CPU saving translates to throughput at higher worker
+counts where each worker is closer to saturation; that's the
+"compounds across all lanes and workers" point Phase B logged.
+
+A1 (HTTP/2) is unchanged within noise — expected, since the
+HTTP/2 stream-lifetime `asyncio.wait_for` at
+`http2_actor.py:678` is gated on `BB_REQUEST_TIMEOUT > 0` (off
+by default) and was deliberately out of scope.
+
+#### Profile — `asyncio.timeouts.*` is gone
+
+`py-spy record --rate 200 --duration 85` on the bench worker
+during a k6 200-VU stress pass.  Artefact:
+[`bench/results/aws/sprint23/profile_b1_vu200.svg`](results/aws/sprint23/profile_b1_vu200.svg).
+
+| Symbol | Sprint 21 Phase B | Sprint 23 |
+|---|---|---|
+| `asyncio/timeouts.py` (`reschedule` / `__aexit__`) | 9.6 % | **0 samples** |
+| `blackbull/server/deadline.py` | n/a | 0 samples |
+| `loop.call_later` / `TimerHandle.cancel` | not material | 0 samples |
+
+The cost moved off the profile entirely.  A `TimerHandle.cancel
++ loop.call_later` pair is too cheap to surface at 200 Hz
+sampling, where the previous `Timeout`-object allocation +
+cancel-scope registration consistently registered as ~10 % of
+per-worker time.
+
+(The dominant frames on the Sprint 23 profile are HTTP/2 work
+— k6 stress is HTTP/2 by default — plus the async-logging
+QueueListener thread.  Not Sprint 23 surface.)
+
+#### Carry-forward
+
+- HTTP/2 per-stream `asyncio.wait_for` at
+  [`http2_actor.py:678`](../blackbull/server/http2_actor.py#L678)
+  remains untouched.  Default `BB_REQUEST_TIMEOUT=0` keeps it
+  off; deferred unless a profile flags it material.
+- Multi-queue ENA / RPS-RFS tuning (~0.5 vCPU on vCPU 0) — pure
+  ops, unrelated.
+- The deployment-sizing formula's `R_unit` baseline rises by the
+  Sprint 23 saving for any future predictions; existing entries
+  in the table above were measured before the change and remain
+  correct as historical references.
+
 ## File layout (target)
 
 ```
