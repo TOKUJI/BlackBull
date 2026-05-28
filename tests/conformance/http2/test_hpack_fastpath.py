@@ -148,3 +148,84 @@ def test_status_only_response_is_single_byte():
     h = _make_headers(encoder, "200", [])
     payload = _extract_payload(h.save())
     assert payload == bytes((0x88,))
+
+
+# ---------------------------------------------------------------------------
+# Sprint 24 — request-side fastpath (PUSH_PROMISE pseudo-headers)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("name,value,expected_byte", [
+    (b":method", b"GET",         0x80 | 2),
+    (b":method", b"POST",        0x80 | 3),
+    (b":path",   b"/",           0x80 | 4),
+    (b":path",   b"/index.html", 0x80 | 5),
+    (b":scheme", b"http",        0x80 | 6),
+    (b":scheme", b"https",       0x80 | 7),
+])
+def test_pseudo_fast_bytes_static_entries(name: bytes, value: bytes, expected_byte: int):
+    """Sprint 24 — every static-table entry with both name and value
+    defined returns the expected single-byte Indexed Header Field."""
+    wire = hpack_fastpath.pseudo_fast_bytes(name, value)
+    assert wire == bytes((expected_byte,))
+
+
+@pytest.mark.parametrize("name,value", [
+    (b":method", b"PATCH"),       # PATCH is not in the static table
+    (b":path",   b"/admin"),      # arbitrary paths fall through
+    (b":scheme", b"ftp"),         # ftp not in the static table
+    (b":authority", b"example.com"),  # :authority (idx 1) has no static value
+])
+def test_pseudo_fast_bytes_misses(name: bytes, value: bytes):
+    """Pairs not in the static table return None — caller must fall
+    back to the encoder."""
+    assert hpack_fastpath.pseudo_fast_bytes(name, value) is None
+
+
+def test_push_promise_save_uses_fastpath():
+    """PushPromise.save() must prepend the static-indexed bytes for
+    matched pseudo-headers and produce the same wire output as the
+    encoder alone."""
+    from blackbull.protocol.frame_types import PushPromise
+
+    enc_fast = Encoder()
+    enc_full = Encoder()
+
+    pp = PushPromise(
+        length=0,
+        type_=FrameTypes.PUSH_PROMISE.value,
+        flags=0,
+        stream_id=1,
+        data=(2).to_bytes(4, 'big'),
+        encoder=enc_fast,
+    )
+    pp.pseudo_headers[PseudoHeaders.METHOD] = "GET"
+    pp.pseudo_headers[PseudoHeaders.SCHEME] = "https"
+    pp.pseudo_headers[PseudoHeaders.PATH]   = "/"
+    pp.pseudo_headers[PseudoHeaders.AUTHORITY] = "example.com"
+    pp.headers.append((b"cache-control", b"max-age=60"))
+
+    fast_bytes = pp.save()
+    # Strip the 9-byte frame header + 4-byte promised_stream_id prefix.
+    fast_payload = fast_bytes[9 + 4:]
+
+    full_payload = enc_full.encode([
+        (b":method", b"GET"),
+        (b":scheme", b"https"),
+        (b":path", b"/"),
+        (b":authority", b"example.com"),
+        (b"cache-control", b"max-age=60"),
+    ])
+
+    assert fast_payload == full_payload, (
+        f"PushPromise fastpath diverged from encoder-only output; "
+        f"fast={fast_payload!r}, full={full_payload!r}"
+    )
+
+    # And the decoded fields must match the inputs.
+    dec = Decoder()
+    fields = [(bytes(k), bytes(v)) for k, v in dec.decode(fast_payload, raw=True)]
+    assert (b":method", b"GET") in fields
+    assert (b":scheme", b"https") in fields
+    assert (b":path", b"/") in fields
+    assert (b":authority", b"example.com") in fields
+    assert (b"cache-control", b"max-age=60") in fields

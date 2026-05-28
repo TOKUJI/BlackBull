@@ -6,6 +6,41 @@ and comparing it against four peer ASGI servers.
 The matrix is the contract: every release should be measurable against it,
 and every comparison run produces the same shape of table.
 
+> ⚠️ **Cross-topology absolute-latency comparisons are invalid.**
+> Only throughput trends and relative scaling *within the same
+> topology* should be interpreted quantitatively.  WSL2, EC2
+> single-host, and EC2 split topologies each carry a different
+> per-request floor (loopback syscall cost vs VPC RTT); mixing them
+> produces apparent regressions that aren't real.  See the
+> "Comparability across topologies" notes under each sprint that
+> changed topology.
+
+## What BlackBull optimises for
+
+In order of priority:
+
+1. **Correctness under malformed traffic.**  RFC 9112 §15 slowloris
+   defence, RFC 7541 framing-violation rejection, smuggling-vector
+   coverage (CL.CL, CL+TE, unknown TE).  The differential corpus
+   under [`tests/conformance/http1/fuzz/user-corpus/`](../tests/conformance/http1/fuzz/user-corpus/)
+   is the ratchet.
+2. **Explicit timeout semantics.**  Per-phase deadlines (header /
+   body-per-chunk / keep-alive idle), all env-knob configurable.
+   No "magic" defaults.
+3. **HTTP/2 protocol stack implemented in Python.**  Frame parser,
+   stream state machine, flow control, and (via the `hpack` package)
+   HPACK codec all live in Python.  The event loop may still be
+   `uvloop` (C); the *protocol* layer is what we mean here.  Sets
+   BlackBull apart from granian (Rust runtime + Rust parser) in
+   this matrix.
+4. **Predictable multi-worker scaling** on commodity Linux —
+   characterised by Sprint 21 Phase B's closed-form `R(W)` formula.
+5. **Implementation clarity / from-scratch identity.**
+
+Peak req/s comes after all five.  Benchmark comparisons against
+granian (Rust) and nginx (static-file server, no ASGI dispatch) are
+reference floors / ceilings, not peer targets.
+
 ## Goals
 
 1. **Self-characterization.** Know how BlackBull behaves across protocol,
@@ -77,7 +112,7 @@ Applies to: BlackBull, hypercorn, granian.
 |---|---|---|---|---|---|
 | A1 | `/plaintext` | 50,000 | 50 | 1   | Per-request overhead w/o mux (TechEmpower-comparable) |
 | A2 | `/plaintext` | 90,000 | 50 | 10  | Browser-realistic mux |
-| A3 | `/plaintext` | 90,000 | 50 | 50  | Heavy mux |
+| A3 | `/plaintext` | 90,000 | 50 | 50  | Heavy mux — stress, not browser-realistic (real browsers cap at ~10 concurrent streams; kept to characterise the multiplexing ceiling) |
 | A4 | `/json`      | 50,000 | 50 | 10  | Tiny JSON over HTTP/2 |
 | A5 | `/16kb`      | 50,000 | 50 | 10  | Medium body throughput |
 | A6 | `/64kb`      | 30,000 | 50 | 10  | Large body, single frame |
@@ -93,7 +128,7 @@ between them is itself a data point.
 | Scenario | Route        | Threads | Conns | Duration | Pipeline | What it stresses |
 |---|---|---|---|---|---|---|
 | B1 | `/plaintext` | 4       | 256   | 30s      | none     | TechEmpower-style baseline, comparable to public numbers |
-| B2 | `/plaintext` | 4       | 1024  | 30s      | 16       | TechEmpower-style with pipelining — extreme per-request overhead |
+| B2 | `/plaintext` | 4       | 1024  | 30s      | 16       | TechEmpower-style with pipelining — synthetic upper bound (HTTP/1.1 pipelining is effectively dead in modern browsers; kept for cross-board comparability) |
 | B3 | `/json`      | 4       | 256   | 30s      | none     | Tiny-JSON throughput, comparable to TechEmpower JSON |
 | B4 | `/16kb`      | 4       | 100   | 30s      | none     | Body throughput (internal) |
 | B5 | `/64kb`      | 4       |  50   | 30s      | none     | Large response (internal) |
@@ -119,6 +154,20 @@ Applies to: all five servers.
 |---|---|---|---|---|
 | D1 | `/ws` | 50 | 5 msg/s/conn | 60s |
 
+### Lane E — Connection churn (wrk no-keepalive) — Sprint 24
+
+Applies to: all five servers.  Opt-in: pass `LANES="… E-wrk"`.
+
+| Scenario | Route | Tool | Threads | Conns | Duration | Keepalive | What it stresses |
+|---|---|---|---|---|---|---|---|
+| E1 | `/plaintext` | wrk + [`bench/wrk/no_keepalive.lua`](wrk/no_keepalive.lua) | 4 | 256 | 60 s | **off** (`Connection: close` per request) | TLS handshake + accept-loop cost |
+
+Lane E exposes accept-loop + TLS-handshake costs that the
+keep-alive-dominated Lane B hides.  Run against `*-cleartext` stacks
+in addition to standalone-TLS to isolate the handshake cost from the
+accept-loop cost (cleartext drops TLS but keeps the accept-per-request
+cost).  See the Sprint 24 results section for first numbers.
+
 ## Metrics
 
 Per scenario:
@@ -134,7 +183,11 @@ Per scenario:
 | CPU%                     | `/usr/bin/time -v`                     | Whether the worker saturated its core |
 
 Numbers reported as median of N runs (default N=3 for h2load and wrk;
-N=1 for k6 since each run is 60s+). Spread > 10% across runs is flagged.
+N=1 for k6 since each run is 60s+). Sprint 24+ wrk lanes also report
+**min..max** range and **MAD** (median absolute deviation) in a
+trailing "noise (MAD)" column; rows where `MAD / median > 10 %` carry
+a 🌫 marker — a visible flag that the number is in the noise band and
+should not be cited for sub-10 % comparisons.
 
 ## Methodology
 
@@ -193,6 +246,9 @@ against current code — the post-9d B1/B3/B6 numbers are ~25–40 %
 higher than the pre-9d baseline.  See the README in that directory.
 
 ### EC2 baseline of record (Sprint 13, 2026-05-23)
+
+_Status: superseded by Sprint 20 for HTTP/2 multi-worker numbers; still the
+baseline-of-record for HTTP/1.1 single-host topology._
 
 First off-WSL measurement pass.  Canonical AWS report:
 [`bench/results/aws/20260523-095507Z/results/compare_servers_20260523-095508.md`](results/aws/20260523-095507Z/results/compare_servers_20260523-095508.md).
@@ -278,6 +334,9 @@ the current noise floor and not citeable.  Either tighten the noise
 
 ### Sprint 14 — layer-attribution topologies
 
+_Status: confirmed.  The T1/T2/T3/T1-h11 topology suffix convention is the
+current methodology for "which layer is paying the cost"._
+
 Sprint 14 augments the existing stack list with **topology variants**
 that hold the server constant and vary the deployment shape.  The goal
 is to attribute the HTTP/1.1 gap (BlackBull at ~½ uvicorn, ~⅙ granian)
@@ -317,6 +376,11 @@ STACKS="blackbull blackbull-cleartext blackbull-nginx \
 ```
 
 ### Sprint 15 — high-concurrency profile finding
+
+_Status: confirmed (hpack-codec ceiling finding).  The static-table half of
+the codec cost was subsequently closed by the Sprint 21 Phase C HPACK
+fastpath ([`blackbull/protocol/hpack_fastpath.py`](../blackbull/protocol/hpack_fastpath.py));
+the dynamic-table half remains the limiter._
 
 py-spy flame graphs captured on a fresh c7i.xlarge under k6 stress
 load via [`bench/profile_under_load.sh`](profile_under_load.sh)
@@ -389,6 +453,11 @@ Subsequent runs of `bench/profile_under_load.sh` set
 the contamination touches a background thread, not the event loop.
 
 ### Sprint 16 — multi-worker scaling finding
+
+_Status: partially superseded by Sprint 20.  The HTTP/2 conclusion
+("saturates at w=2") was a single-host load-gen artefact; the HTTP/1.1
+scaling story stands.  Read this section only with Sprint 20's correction
+section in mind._
 
 Single-worker BlackBull was the entire Sprint 13/14/15 baseline.
 Sprint 16 measured **BlackBull with `BB_WORKERS=1/2/4` on the same
@@ -472,6 +541,9 @@ above already covers the HTTP/2 multi-worker story; no re-run is
 queued just to backfill Lane A.
 
 ### Sprint 20 — Split-topology re-measurement
+
+_Status: current understanding for HTTP/2 multi-worker scaling.  Supersedes
+Sprint 16's HTTP/2 conclusions._
 
 Sprints 13–16 all ran the load generator on the same `c7i.xlarge`
 as the server.  Sprint 16's HTTP/2 finding (#3 above: "w=4 buys
@@ -596,6 +668,11 @@ calls when reading older artefacts:
   amortised over enough requests.
 
 ### Sprint 21 Phase B — w=2 → w=4 scaling cliff diagnosis
+
+_Status: current understanding for the w=2→w=4 scaling cliff (Nitro ENA
+softirq concentration on vCPU 0 + per-worker scheduler overhead).  The
+`asyncio.timeouts.*` half of the finding was closed in Sprint 23; the
+deployment-sizing formula in this section is still the current rule-of-thumb._
 
 The Sprint 20 canonical artefact showed only ~1.10–1.21 × scaling
 from w=2 to w=4 across both HTTP/1.1 (B1) and HTTP/2 (A1, C2).
@@ -784,7 +861,27 @@ within 5 %, with the small w=16 negative bias consistent with the
 "hpack execution-unit contention on SMT siblings" caveat above.
 The formula generalises.
 
+### Audit recommendations already in place
+
+Defensive against future external reviews flagging the same items as
+gaps.  Each row links to the file:line evidence that the recommendation
+is already wired up.
+
+| Recommendation | Where it lives | Closing sprint |
+|---|---|---|
+| HPACK static-header fastpath (precomputed `:status` bytes, etc.) | [`blackbull/protocol/hpack_fastpath.py`](../blackbull/protocol/hpack_fastpath.py); wire-equivalence tests at [`tests/conformance/http2/test_hpack_fastpath.py`](../tests/conformance/http2/test_hpack_fastpath.py) | Sprint 21 Phase C |
+| TLS write coalescing on the HTTP/1.1 hot path (status line + headers + body emitted as a single buffer) | [`blackbull/server/sender.py:307`](../blackbull/server/sender.py#L307) | Sprint 9d |
+| HTTP/2 fast-path coalescing (HEADERS + DATA emitted as one buffer when the body fits in one frame) | [`blackbull/server/sender.py:462`](../blackbull/server/sender.py#L462) | Sprint 9d / 15 |
+| `asyncio.timeouts.*` cost removed from per-request hot path | [`blackbull/server/deadline.py`](../blackbull/server/deadline.py) (`ConnectionDeadline`) | Sprint 23 |
+| Per-second `Date` header cache (avoids `formatdate` on every response) | [`blackbull/server/sender.py`](../blackbull/server/sender.py) `_http_date` | Sprint 9d |
+| Inline access-log capture (no wrapper-per-request layer) | [`blackbull/server/http1_actor.py`](../blackbull/server/http1_actor.py) `send._log_record` pattern | Sprint 8 |
+| Optional `[speed-h1]` C parser (httptools / llhttp) | Tracked in [README §P4](../README.md) as opt-in; deliberate non-default to keep the from-scratch identity (HPACK first, httptools later). | (planned, not committed) |
+
 ### Sprint 23 — `asyncio.timeouts.*` cost removed from the per-request hot path
+
+_Status: current.  The +6.5 % B1 RPS delta is near the EC2 single-worker
+noise band — credibility comes from the py-spy result (`asyncio.timeouts.*`
+dropped from 9.6 % to 0 samples), not from the RPS number alone._
 
 Sprint 21 Phase B identified `asyncio.timeouts.*` machinery at
 ~9.6 % inclusive of per-worker CPU under a B1 saturation profile
@@ -818,6 +915,17 @@ showed w=1 was within noise across Sprint 16 → Sprint 20).  More
 of the CPU saving translates to throughput at higher worker
 counts where each worker is closer to saturation; that's the
 "compounds across all lanes and workers" point Phase B logged.
+
+**Note on the +6.5 % number itself.**  This single-pass delta is
+near the EC2 single-worker noise band (Sprint 13's "EC2 noise
+floor" subsection put pure-Python ASGI run-to-run variance at
+±15 %, dominated by physical-host placement on fresh
+`up.sh` provisions).  The credibility of the win comes from the
+**py-spy result below** — `asyncio.timeouts.*` dropping from
+9.6 % inclusive to 0 samples is a direct, sampling-based
+attribution of the saved cycles, not an inference from a noisy
+RPS comparison.  Future sub-10 % deltas in this document carry
+the Sprint 24 🌫 noise-flag explicitly.
 
 A1 (HTTP/2) is unchanged within noise — expected, since the
 HTTP/2 stream-lifetime `asyncio.wait_for` at
@@ -858,6 +966,202 @@ QueueListener thread.  Not Sprint 23 surface.)
   Sprint 23 saving for any future predictions; existing entries
   in the table above were measured before the change and remain
   correct as historical references.
+
+### Sprint 24 — audit follow-ups: doc clarity, methodology, Lane E, HPACK extension
+
+_Status: current.  Doc / methodology / harness work.  The Lane E first pass
+exposed a loadgen-side TIME_WAIT exhaustion issue (documented below) — the
+nginx baseline is the only clean Lane E number this sprint; BlackBull /
+uvicorn Lane E numbers are deferred until the harness ships per-stack
+cool-down._
+
+External audit reviewed CHARACTERIZATION.md + the Sprint 13–22 perf
+record.  Sprint 24 took on five tranches of work:
+
+1. **Doc clarity** — top-of-file cross-topology warning box; per-sprint
+   status badges ("confirmed / superseded / current understanding");
+   new "What BlackBull optimises for" section near the top; "Audit
+   recommendations already in place" subsection (defensive against
+   future reviewers flagging items Sprint 21 Phase C already closed);
+   targeted clarifications on B2 (synthetic upper bound), A3 mux=50
+   (stress not browser-realistic), Sprint 23 +6.5 % framing.
+2. **Methodology upgrade** — Sprint 24+ wrk lanes run `RUNS_WRK=3`
+   (default) and emit a trailing **"noise (MAD)"** column showing
+   `min..max (MAD X, Y%)`; rows where `MAD / median > 10 %` carry a
+   🌫 marker.  See [`bench/wrk/_stats.py`](wrk/_stats.py) and the
+   per-stack tables in
+   [`bench/results/aws/sprint24/compare_servers_lane_e_first_pass.md`](results/aws/sprint24/compare_servers_lane_e_first_pass.md).
+   Also: `DURATION` default raised from 30 s to 60 s; new `WARMUP=15`
+   env var fires a 15 s `/plaintext c=64` burst per stack before the
+   measured runs to settle Python allocator + kernel TCP autotune +
+   TLS session cache.  Older numbers were captured without these and
+   remain valid for their topology.
+3. **Lane E (connection churn)** — new wrk lane forcing
+   `Connection: close` per request via
+   [`bench/wrk/no_keepalive.lua`](wrk/no_keepalive.lua) +
+   [`bench/wrk/lane_e.sh`](wrk/lane_e.sh).  Lane E exposes TLS
+   handshake + accept-loop costs that Lane B's keep-alive amortises
+   away.  Opt-in: `LANES="… E-wrk"`.
+4. **HPACK fastpath extension** — Sprint 21 Phase C cached the seven
+   `:status` static-table entries; Sprint 24 extends the same
+   single-byte indexed encoding to the request-side pseudo-headers
+   ([`blackbull/protocol/hpack_fastpath.py`](../blackbull/protocol/hpack_fastpath.py))
+   — `:method GET/POST`, `:path /` / `/index.html`, `:scheme
+   http/https` — which fire on the PUSH_PROMISE encode path
+   ([`blackbull/protocol/frame_types.py::PushPromise.save`](../blackbull/protocol/frame_types.py)).
+   Wire-equivalence + dynamic-table-neutrality covered by 11 new
+   tests under
+   [`tests/conformance/http2/test_hpack_fastpath.py`](../tests/conformance/http2/test_hpack_fastpath.py).
+   The static table is now **exhausted** for single-byte indexed
+   encoding on either side; all other static entries are name-only
+   (e.g. `content-type` at index 31), so further fastpath work would
+   require the literal-with-indexed-name encoding (RFC 7541 §6.2)
+   and is out of scope.
+5. **HTTP/1.1 baseline-of-record under the new methodology** —
+   blackbull single-worker on c7i.xlarge `TOPO=split` with
+   `DURATION=20s`, `RUNS_WRK=3`, `WARMUP=15s`.  Numbers below are
+   from the **clean baseline pass**
+   ([`bench/results/aws/sprint24/compare_servers_clean_baseline.md`](results/aws/sprint24/compare_servers_clean_baseline.md));
+   see the "Host-placement variance" subsection below for why a
+   second pass was needed.
+
+   | Scenario | req/s (median) | range / MAD |
+   |---|---|---|
+   | B1 plaintext c=256 | 13 320 | 12 992..13 577 (MAD 257, 1.9 %) |
+   | B3 json c=256 | 13 189 | 12 858..13 616 (MAD 331, 2.5 %) |
+   | B4 16 KB c=100 | 12 879 | 12 875..12 963 (MAD 4, 0.0 %) |
+   | B5 64 KB c=50 | 9 238 | 9 169..9 386 (MAD 70, 0.8 %) |
+   | B6 echo 1k | 12 177 | 12 147..12 211 (MAD 30, 0.2 %) |
+   | B7 echo 100k | 3 846 | 3 801..3 925 (MAD 46, 1.2 %) |
+   | B2 plaintext c=1024 p=16 | 18 041 | 17 870..18 216 (MAD 171, 0.9 %) |
+   | A1 mux1 (HTTP/2) | 10 042 | — |
+
+   Within-pass MAD/median ≤ 2.5 % — methodology is solid.  These
+   replace the Sprint 23 single-worker B1 row as the post-Sprint-24
+   reference baseline.
+
+#### Host-placement variance — Sprint 23's number was a high outlier
+
+The Sprint 24 first pass measured BlackBull B1 at 13 744 req/s,
+13 % below Sprint 23's 15 793.  The clean-baseline pass on a
+*third* freshly-provisioned host landed at **13 320** — even
+slightly lower, and consistent in direction.  Cross-stack data
+on the same hosts:
+
+| Stack | Sprint 20 (135137Z) | Sprint 23 (024813Z) | Sprint 24 first (043450Z) | Sprint 24 clean (073008Z) |
+|---|---|---|---|---|
+| blackbull B1 req/s | 14 822 | **15 793** | 13 704 | **13 320** |
+| blackbull B1 mean lat / stdev | — | 15.73 / **1.17 ms** | 18.08 / 3.89 ms | 18.51 / **6.18 ms** |
+| uvicorn B1 req/s | 33 075 | — | (died, TIME_WAIT) | 28 260 |
+| uvicorn B1 mean lat / stdev | 7.68 / 2.82 ms | — | — | 8.89 / 2.95 ms |
+| nginx B1 req/s | 119 691 | — | 123 940 | — |
+| nginx B1 mean lat / stdev | 2.25 / 2.90 ms | — | 2.22 / 3.38 ms | — |
+
+Three observations rule out a BlackBull regression:
+
+1. **Both Python stacks regress in lock-step** on the Sprint 24
+   hosts.  BlackBull B1 dropped from 14.8k/15.8k → 13.3k/13.7k
+   (−10 to −15 %); uvicorn B1 dropped from 33.1k → 28.3k (−15 %).
+   A BlackBull-specific code regression would not symmetrically
+   slow uvicorn.
+2. **nginx is unchanged.**  Same instance class, same kernel,
+   same install harness — yet nginx mean latency is identical
+   (2.25 → 2.22 ms) and throughput is even slightly higher
+   (+3.5 %).  A generally degraded host would slow nginx too.
+3. **BlackBull's latency *stdev* grew 3-5×** on Sprint 24 hosts
+   (1.17 → 6.18 ms) while uvicorn's stdev barely moved
+   (2.82 → 2.95 ms).  The Sprint 24 hosts have a higher jitter
+   floor that single-threaded blackbull inherits more than
+   uvicorn's multi-thread-per-worker setup.
+
+Mechanism (most likely): the Sprint 24 c7i.xlarge instances sit
+in the lower half of the host pool for **sustained single-core
+throughput** — typical causes are L3 contention from a CPU-hot
+neighbor, lower sustained turbo frequency, or AWS Nitro
+microcode mitigations that hit branch-heavy Python interpreter
+loops harder than C event-loop code.  This affects:
+
+- blackbull single-worker most (one Python thread on one vCPU)
+- uvicorn moderately (default single-worker; one Python loop)
+- nginx not at all (multi-process C, work per request is so
+  small the cache-eviction tax doesn't register in the mean)
+
+This is the **same Sprint 13 finding** the document warned about
+near the top (~±15 % EC2 noise band for slow-Python stacks;
+~±5 % for nginx/granian) — Sprint 24's two-host A/B is now the
+canonical evidence.  **Sprint 23's 15 793 was the top of the
+distribution; ~13 500 is the realistic mid-pool baseline.**
+
+#### HPACK fastpath extension — neutral under the current matrix
+
+Lane A1 mux1 measured 10 042 req/s in the Sprint 24 clean pass
+vs 10 236 in Sprint 23: a −2 % difference, within noise.  This
+is expected: the new request-side static entries
+(`:method GET/POST`, `:path /`, `:scheme http/https`) only fire
+on the PUSH_PROMISE encode path, and no scenario in Lanes
+A/B/C/D triggers push.  The extension is **correctness-extending**
+(coverage of the static table for the push path), not
+**performance-extending** in this matrix.  A push-promise lane
+would expose the gain; carry-forward.
+
+#### Lane E first pass — methodology lesson
+
+The Sprint 24 Lane E pass ran four stacks in order
+(`blackbull blackbull-cleartext uvicorn nginx`).  Only blackbull's
+Lane B and nginx's Lanes B + E produced clean numbers; the other six
+stack-lane cells all came back `unable to connect`.
+
+Root cause: Lane E (`Connection: close` per request, `c=256` at
+high rate) burns through the **loadgen's** ephemeral source-port pool
+in seconds.  Each closed connection lands in `TIME_WAIT` for 60 s by
+default (`net.ipv4.tcp_fin_timeout` on Linux), and the 1 s
+inter-stack settle the harness uses is far short of that.  The
+next stack's wrk inherited an exhausted port pool and could not
+dial — even though the (new) server was alive (`wait_ready` passed).
+
+Nginx escaped because it was the LAST stack — by the time we got
+there, enough TIME_WAITs had aged out.  Its numbers are
+representative:
+
+| Scenario | nginx req/s (median) | range / MAD |
+|---|---|---|
+| B1 plaintext c=256 (keep-alive) | 123 648 | 122 967..123 940 (MAD 291, 0.2 %) |
+| **E1 plaintext c=256 (no-keepalive)** | **3 832** | 3 823..3 847 (MAD 9, 0.2 %) |
+
+That's a **32 ×** throughput collapse from B1 to E1 — exactly the
+connection-setup-tax signal Lane E was designed to expose.  TLS
+handshake + accept-loop work that the keep-alive lanes amortise
+across many requests dominates the cost when every request takes
+the full path.
+
+**Lane E methodology fix (carry-forward):** the harness needs one
+of:
+
+- An explicit per-stack cool-down ≥ `net.ipv4.tcp_fin_timeout`
+  (default 60 s) inserted between stacks when any preceding lane
+  ran Lane E.
+- Loadgen-side sysctl tuning in [`bench/aws/install.sh`](aws/install.sh):
+  `net.ipv4.tcp_tw_reuse=1` + widened
+  `net.ipv4.ip_local_port_range` so TIME_WAIT sockets can be
+  re-used immediately.
+- A blanket recommendation to run Lane E in isolation
+  (`LANES="E-wrk" STACKS="<one>"`) until the harness fix lands.
+
+For now, BlackBull / uvicorn Lane E numbers are deferred to a
+future sprint.  The nginx data point is enough to validate the
+methodology and the **32 × ratio** sets the rough expectation for
+a real connection-setup tax.
+
+#### Carry-forward
+
+- **Lane E harness fix** (above) — the highest-priority follow-up.
+- The Phase B `R_unit` deployment-sizing formula's `R_unit` rows
+  in [§Deployment-sizing formula](#deployment-sizing-formula) are
+  still calibrated against pre-Sprint-23/24 numbers; refresh when
+  a clean multi-worker AWS pass under the new methodology happens.
+- HPACK fastpath benefits the PUSH_PROMISE path only; no benchmark
+  in the matrix exercises it.  Add a push-promise scenario to Lane
+  A in a future sprint if the gain matters to a real user.
 
 ## File layout (target)
 

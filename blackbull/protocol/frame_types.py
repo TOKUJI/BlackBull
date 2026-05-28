@@ -473,7 +473,20 @@ class PushPromise(FrameBase):
 
     def save(self) -> bytes:
         encoder = self.encoder if self.encoder is not None else Encoder()
-        block = encoder.encode(list(self.pseudo_headers.items()) + self.headers)
+        # Sprint 24: extend the HPACK static fastpath to the request-side
+        # pseudo-headers that PUSH_PROMISE emits (``:method``, ``:scheme``,
+        # ``:path``).  Same wire-equivalence + dynamic-table-neutrality
+        # invariants as the Sprint 21 Phase C ``:status`` fast-path on
+        # ``Headers.save``.
+        fast_bytes = b''
+        remaining_pseudo = []
+        for k, v in self.pseudo_headers.items():
+            wire = hpack_fastpath.pseudo_fast_bytes(str(k), v)
+            if wire is not None:
+                fast_bytes += wire
+            else:
+                remaining_pseudo.append((k, v))
+        block = fast_bytes + encoder.encode(remaining_pseudo + self.headers)
         payload = (self.promised_stream_id & 0x7FFFFFFF).to_bytes(4, 'big') + block
         self.length = len(payload)
         self.flags = HeaderFrameFlags.END_HEADERS
