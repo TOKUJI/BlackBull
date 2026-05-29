@@ -117,6 +117,48 @@ async def test_guard_does_not_leak_cancel_after_timeout():
 
 
 @pytest.mark.asyncio
+async def test_guard_propagates_non_cancel_exception():
+    """If the body raises a non-CancelledError exception, ``guard`` must
+    propagate it unchanged and still disarm the pending timer (Sprint 26
+    Phase A — parity case 2 from the contextmanager-era implementation)."""
+    dl = ConnectionDeadline()
+    with pytest.raises(ValueError, match='boom'):
+        with dl.guard(0.5):
+            raise ValueError('boom')
+    assert not dl.fired
+    # Timer must be disarmed even on raise — rearm should start clean.
+    assert dl._handle is None
+
+
+@pytest.mark.asyncio
+async def test_guard_same_tick_race_raises_timeout():
+    """Same-tick race: the body completes normally but ``_fired`` is set
+    in the same loop iteration (Sprint 26 Phase A — parity case 5).
+    This is the convention ``asyncio.timeout`` uses: a deadline that
+    fired wins even if the awaited read also produced a value."""
+    dl = ConnectionDeadline()
+    with pytest.raises(TimeoutError):
+        with dl.guard(0.5):
+            # Simulate the same-tick race by setting _fired without
+            # going through _fire (which would also cancel the task).
+            dl._fired = True
+    # Disarmed and clean.
+    assert dl._handle is None
+
+
+@pytest.mark.asyncio
+async def test_guard_returns_self_as_context_manager():
+    """``dl.guard(s)`` returns the deadline itself so ``with ... as x``
+    binds ``x`` to ``dl``.  Locks in the protocol; calling code does not
+    use the ``as`` form today but the parity case from the old
+    @contextmanager form returned ``None``, so this is a deliberate
+    extension."""
+    dl = ConnectionDeadline()
+    with dl.guard(0.5) as bound:
+        assert bound is dl
+
+
+@pytest.mark.asyncio
 async def test_arm_cancels_previous_handle():
     """Calling ``arm`` again before the previous deadline fires must
     cancel the pending handle — otherwise the older, shorter deadline

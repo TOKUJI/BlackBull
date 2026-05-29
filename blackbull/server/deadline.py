@@ -16,7 +16,6 @@ once per chunk.
 from __future__ import annotations
 
 import asyncio
-from contextlib import contextmanager
 
 
 class ConnectionDeadline:
@@ -37,13 +36,14 @@ class ConnectionDeadline:
     ``TimerHandle`` skips all three.
     """
 
-    __slots__ = ('_loop', '_task', '_handle', '_fired')
+    __slots__ = ('_loop', '_task', '_handle', '_fired', '_pending')
 
     def __init__(self) -> None:
         self._loop = asyncio.get_running_loop()
         self._task = asyncio.current_task()
         self._handle: asyncio.TimerHandle | None = None
         self._fired = False
+        self._pending = 0.0
 
     def arm(self, seconds: float) -> None:
         """(Re-)set the deadline; ``seconds <= 0`` disables it.
@@ -75,12 +75,8 @@ class ConnectionDeadline:
     def fired(self) -> bool:
         return self._fired
 
-    @contextmanager
-    def guard(self, seconds: float):
-        """Arm the deadline, yield, then disarm — translating
-        deadline-driven ``CancelledError`` into :class:`TimeoutError`
-        and clearing the task's cancel state so subsequent awaits are
-        not spuriously cancelled.
+    def guard(self, seconds: float) -> 'ConnectionDeadline':
+        """Arm the deadline and return ``self`` as a context manager.
 
         Caller pattern::
 
@@ -92,23 +88,28 @@ class ConnectionDeadline:
         same-loop-iteration race where the underlying read completes
         *and* the deadline fires in the same tick is treated as a
         timeout (same convention as ``asyncio.timeout``).
+
+        Returns ``self`` rather than allocating a wrapper object.  Safe
+        because each connection owns its own ``ConnectionDeadline``
+        and uses it sequentially from a single task.
         """
-        self.arm(seconds)
-        try:
-            yield
-        except asyncio.CancelledError:
-            if not self._fired:
-                raise
-            # Fall through to the disarm + TimeoutError raise below.
-        finally:
-            self.disarm()
-        if self._fired:
+        self._pending = seconds
+        return self
+
+    def __enter__(self) -> 'ConnectionDeadline':
+        self.arm(self._pending)
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> bool:
+        self.disarm()
+        if self._fired and (exc_type is None or exc_type is asyncio.CancelledError):
             task = asyncio.current_task()
             if task is not None:
                 # Clear the cancel that ``_fire`` requested; the read
-                # either raised already (handled above) or completed
-                # normally with a still-pending cancel.  Either way
-                # the surrounding task must not stay in cancelled
-                # state.
+                # either raised CancelledError (suppressed here) or
+                # completed normally in the same tick the timer fired.
+                # Either way the surrounding task must not stay in
+                # cancelled state.
                 task.uncancel()
             raise TimeoutError
+        return False
