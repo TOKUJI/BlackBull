@@ -158,6 +158,160 @@ class TestParse:
     def test_query_string_empty_bytes_when_absent(self):
         assert _get_scope(_http_request(path='/tasks'))['query_string'] == b''
 
+    # ------------------------------------------------------------------
+    # Sprint 25 Phase A — _parse URL splitter boundary cases.
+    #
+    # Replaced urllib.parse.urlparse with bytes.partition chain in
+    # http1_actor._parse.  The replacement preserves urlparse semantics
+    # for the .path + .query attributes used by the scope dict:
+    # strip #fragment, separate ?query, drop ;params from the path.
+    # These tests pin the observable behaviour so future refactors
+    # cannot silently drift.
+    # ------------------------------------------------------------------
+
+    def test_path_strips_fragment(self):
+        """RFC 7230 §5.3 — fragment must not appear in request-target;
+        urlparse silently strips it.  Pre-Sprint-25 behaviour preserved."""
+        scope = _get_scope(_http_request(path='/api#frag'))
+        assert scope['path'] == '/api'
+        assert scope['query_string'] == b''
+
+    def test_path_strips_semicolon_params(self):
+        """urllib's URL grammar separates ;params from the path."""
+        scope = _get_scope(_http_request(path='/cart;sid=abc'))
+        assert scope['path'] == '/cart'
+        assert scope['query_string'] == b''
+
+    def test_path_strips_params_keeps_query(self):
+        scope = _get_scope(_http_request(path='/cart;sid=abc?x=1'))
+        assert scope['path'] == '/cart'
+        assert scope['query_string'] == b'x=1'
+
+    def test_path_strips_fragment_after_query(self):
+        scope = _get_scope(_http_request(path='/api?x=1#frag'))
+        assert scope['path'] == '/api'
+        assert scope['query_string'] == b'x=1'
+
+    def test_path_strips_all_three(self):
+        scope = _get_scope(_http_request(path='/cart;sid=abc?x=1#frag'))
+        assert scope['path'] == '/cart'
+        assert scope['query_string'] == b'x=1'
+
+    def test_multiple_question_marks_kept_in_query(self):
+        """Per RFC 3986 the first ? terminates the path; subsequent
+        ? characters are part of the query."""
+        scope = _get_scope(_http_request(path='/api?x=1?y=2'))
+        assert scope['path'] == '/api'
+        assert scope['query_string'] == b'x=1?y=2'
+
+    def test_only_query_string(self):
+        """Edge case: request-target is just ?query (no leading path)."""
+        scope = _get_scope(_http_request(path='?onlyq'))
+        assert scope['path'] == ''
+        assert scope['query_string'] == b'onlyq'
+
+    def test_trailing_question_mark_yields_empty_query(self):
+        scope = _get_scope(_http_request(path='/empty?'))
+        assert scope['path'] == '/empty'
+        assert scope['query_string'] == b''
+
+    def test_raw_path_unchanged_by_splitter(self):
+        """raw_path must be the original bytes — splitter changes
+        only `path` + `query_string`."""
+        scope = _get_scope(_http_request(path='/cart;sid=abc?x=1'))
+        assert scope['raw_path'] == b'/cart;sid=abc?x=1'
+
+    def test_http_version_10(self):
+        assert _get_scope(_http_request(version='HTTP/1.0'))['http_version'] == '1.0'
+
+    def test_http_version_11(self):
+        assert _get_scope(_http_request(version='HTTP/1.1'))['http_version'] == '1.1'
+
+    # ------------------------------------------------------------------
+    # Sprint 25 Phase B — compiled-regex header validators.
+    #
+    # Replaced per-byte `any(...)` scans in _parse with compiled
+    # `_FIELD_NAME_INVALID_RE.search(...)` and
+    # `_FIELD_VALUE_INVALID_RE.search(...)`.  The regex character
+    # classes must match the exact RFC 9110 §5.6.2 tchar negation
+    # and the §5.5 CTL-except-HTAB allow-list respectively.  These
+    # tests exercise the character-boundary cases that would diverge
+    # if the regex were one byte off.
+    # ------------------------------------------------------------------
+
+    def test_tchar_accepted_in_method(self):
+        """All non-alphanumeric tchar characters accepted in method."""
+        for ch in b"!#$%&'*+-.^_`|~":
+            method = b'GE' + bytes([ch])
+            req = b'%b /x HTTP/1.1\r\nHost: x:80\r\n\r\n' % method
+            scope = _get_scope(req)
+            assert scope['method'] == method.decode()
+
+    @pytest.mark.parametrize('bad_byte', [
+        0x20,  # space — request-line delimiter, not tchar
+        0x22,  # " — separator
+        0x28,  # ( — separator
+        0x40,  # @ — separator
+        0x7B,  # { — separator (Sprint 25 Phase B boundary)
+        0x7F,  # DEL — CTL
+    ])
+    def test_non_tchar_rejected_in_method(self, bad_byte):
+        from blackbull.server.http1_actor import BadRequestError
+        method = b'GE' + bytes([bad_byte])
+        req = b'%b /x HTTP/1.1\r\nHost: x:80\r\n\r\n' % method
+        with pytest.raises(BadRequestError):
+            _get_scope(req)
+
+    def test_tchar_accepted_in_header_name(self):
+        """tchar boundary chars accepted in field-name."""
+        req = b'GET / HTTP/1.1\r\nHost: x:80\r\nx-^_|: ok\r\n\r\n'
+        scope = _get_scope(req)
+        names = [n for n, _ in scope['headers']]
+        assert b'x-^_|' in names
+
+    @pytest.mark.parametrize('bad_byte', [0x20, 0x28, 0x40, 0x7B, 0x7F])
+    def test_non_tchar_rejected_in_header_name(self, bad_byte):
+        from blackbull.server.http1_actor import BadRequestError
+        bad_name = b'bad' + bytes([bad_byte])
+        req = b'GET /x HTTP/1.1\r\nHost: x:80\r\n' + bad_name + b': v\r\n\r\n'
+        with pytest.raises(BadRequestError):
+            _get_scope(req)
+
+    def test_htab_allowed_in_field_value(self):
+        """RFC 9110 §5.5 — HTAB (0x09) is the one CTL allowed in value."""
+        req = b'GET / HTTP/1.1\r\nHost: x:80\r\nx-tab: a\tb\r\n\r\n'
+        scope = _get_scope(req)
+        kv = [(n, v) for n, v in scope['headers']]
+        assert (b'x-tab', b'a\tb') in kv
+
+    @pytest.mark.parametrize('ctl_byte', [
+        0x00,  # NUL
+        0x01,  # SOH
+        0x08,  # BS — last CTL before HTAB
+        0x0A,  # LF — first CTL above HTAB
+        0x1F,  # US — last C0 control
+        0x7F,  # DEL
+    ])
+    def test_ctl_rejected_in_field_value(self, ctl_byte):
+        from blackbull.server.http1_actor import BadRequestError
+        bad_value = b'val' + bytes([ctl_byte]) + b'ue'
+        req = b'GET / HTTP/1.1\r\nHost: x:80\r\nx-h: ' + bad_value + b'\r\n\r\n'
+        with pytest.raises(BadRequestError):
+            _get_scope(req)
+
+    @pytest.mark.parametrize('ok_byte', [
+        0x20,  # space — allowed mid-value
+        0x21,  # ! — first printable
+        0x7E,  # ~ — last printable below DEL
+    ])
+    def test_printable_accepted_in_field_value(self, ok_byte):
+        """Visible ASCII 0x20-0x7E is value-legal."""
+        good_value = b'v' + bytes([ok_byte]) + b'v'
+        req = b'GET / HTTP/1.1\r\nHost: x:80\r\nx-h: ' + good_value + b'\r\n\r\n'
+        scope = _get_scope(req)
+        kv = [(n, v) for n, v in scope['headers']]
+        assert (b'x-h', good_value) in kv
+
 
 def _make_h2_headers_frame_dispatch(extra_headers: list | None = None) -> object:
     from hpack import Encoder
