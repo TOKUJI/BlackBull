@@ -18,7 +18,7 @@ import asyncio
 
 import pytest
 
-from blackbull.server.deadline import ConnectionDeadline
+from blackbull.server.deadline import ConnectionDeadline, _Scanner
 
 
 @pytest.mark.asyncio
@@ -126,8 +126,9 @@ async def test_guard_propagates_non_cancel_exception():
         with dl.guard(0.5):
             raise ValueError('boom')
     assert not dl.fired
-    # Timer must be disarmed even on raise — rearm should start clean.
-    assert dl._handle is None
+    # Deadline must be disarmed even on raise — rearm should start clean.
+    assert dl._deadline_at == float('inf')
+    assert not dl._registered
 
 
 @pytest.mark.asyncio
@@ -143,7 +144,8 @@ async def test_guard_same_tick_race_raises_timeout():
             # going through _fire (which would also cancel the task).
             dl._fired = True
     # Disarmed and clean.
-    assert dl._handle is None
+    assert dl._deadline_at == float('inf')
+    assert not dl._registered
 
 
 @pytest.mark.asyncio
@@ -170,3 +172,70 @@ async def test_arm_cancels_previous_handle():
     await asyncio.sleep(0.05)
     assert not dl.fired
     dl.disarm()
+
+
+# --- Scanner-architecture-specific tests (Sprint 26 Phase B) ---
+
+
+@pytest.mark.asyncio
+async def test_scanner_singleton_resurrects_after_quiesce():
+    """The per-process scanner cancels its tick handle once the registry
+    drains; the next ``arm`` must re-arm the scanner."""
+    dl = ConnectionDeadline()
+    dl.arm(5.0)
+    assert _Scanner._HANDLE is not None
+    assert dl in _Scanner._REGISTRY
+    dl.disarm()
+    assert dl not in _Scanner._REGISTRY
+    # After disarm, registry may still hold the handle until the next
+    # tick — but a fresh arm must observe the scanner running.  We can't
+    # easily wait a full tick here, so the invariant we lock in is just
+    # that re-arming re-registers.
+    dl.arm(5.0)
+    assert dl in _Scanner._REGISTRY
+    assert _Scanner._HANDLE is not None
+    dl.disarm()
+
+
+@pytest.mark.asyncio
+async def test_scanner_handles_multiple_independent_deadlines():
+    """One scanner serves many deadlines.  Firing one must not affect
+    the others; the registry must track each independently."""
+    a, b, c = ConnectionDeadline(), ConnectionDeadline(), ConnectionDeadline()
+    a.arm(5.0)
+    b.arm(5.0)
+    c.arm(5.0)
+    assert {a, b, c} <= _Scanner._REGISTRY
+    b.disarm()
+    assert b not in _Scanner._REGISTRY
+    assert a in _Scanner._REGISTRY
+    assert c in _Scanner._REGISTRY
+    a.disarm()
+    c.disarm()
+
+
+@pytest.mark.asyncio
+async def test_scanner_fires_short_deadline_within_tick_window():
+    """End-to-end: a deadline armed past ``_TICK_S`` must fire through
+    the scanner.  Uses guard() which translates the cancellation into
+    ``TimeoutError`` — same observable shape as Sprint 23."""
+    dl = ConnectionDeadline()
+    with pytest.raises(TimeoutError):
+        with dl.guard(0.05):
+            # Sleep long enough that the scanner is guaranteed to
+            # observe the expiry (one full _TICK_S past the deadline).
+            await asyncio.sleep(1.0)
+    assert dl.fired
+
+
+@pytest.mark.asyncio
+async def test_arm_zero_disables_deadline_and_unregisters():
+    """``arm(0.0)`` after a positive arm must drop the deadline from
+    the registry — otherwise we leak entries when callers disable a
+    previously-armed timer."""
+    dl = ConnectionDeadline()
+    dl.arm(5.0)
+    assert dl in _Scanner._REGISTRY
+    dl.arm(0.0)
+    assert dl not in _Scanner._REGISTRY
+    assert dl._deadline_at == float('inf')
