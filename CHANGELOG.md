@@ -28,6 +28,53 @@ so the editable install's metadata catches up.
 
 ---
 
+## [0.27.1] — 2026-05-31
+
+Packaging cleanup ahead of first PyPI publish.  Between-sprints PATCH
+work per the ZeroVer rule — no `blackbull/` source changes outside
+the new PEP 561 marker.
+
+### Fixed
+- **`beartype` promoted from `[validation]` optional extra to a hard
+  dependency.**  `Router.validate()` imports `beartype.door` at every
+  `app.run()` / `app.serve()` boot; with the prior packaging, a cold
+  `pip install blackbull` followed by running any app crashed with
+  `ModuleNotFoundError: No module named 'beartype'`.  The
+  `[validation]` extra is retained as an empty no-op for
+  backwards-compatible install commands.
+
+### Packaging
+- **Wheel slimmed from 243 → 67 files** (~590 KiB → ~209 KiB).  `[tool.setuptools.packages.find]`
+  now `include = ["blackbull*"]` with explicit exclusions for `bench`,
+  `tests`, `examples`, `docs`, `site`, `templates`.  Previously the
+  wheel shipped benchmark snapshot directories and the full test
+  suite, which `pip install blackbull` users had no reason to
+  download.
+- **PEP 561 typed distribution** — added `blackbull/py.typed` marker
+  + `[tool.setuptools.package-data]` entry so downstream type-checkers
+  (mypy, pyright) trust the inline annotations.
+- **PyPI classifiers** — Development Status, Framework :: AsyncIO,
+  License :: OSI Approved :: Apache Software License, Python 3.11 /
+  3.12 / 3.13, HTTP Servers topic, Typing :: Typed.
+- **Keywords** — `asgi asyncio http http2 websocket web framework
+  server`.
+- **`project.urls`** expanded — separate Documentation, Changelog,
+  Issues entries (previously just two redundant pointers at the
+  GitHub repo).
+
+### Documentation
+- **README rewritten** as a PyPI sell sheet — what BlackBull is, why
+  someone would pick it, working install + hello-world + TLS +
+  WebSocket + middleware snippets.  Internal P1/P2/P3/P4 roadmap
+  removed (lived as project-facing todo, not user-facing reference).
+- **Fixed a real bug in the prior README's hello-world.** Was
+  `asyncio.run(app.run(port=8000))` — `app.run()` is itself a
+  blocking sync entry point; wrapping it in `asyncio.run` raised on
+  the first execution.  Now `app.run(port=8000)`, matching
+  `examples/helloworld-simple.py`.
+
+---
+
 ## [0.27.0] — 2026-05-30
 
 Sprint 27 — methodology pin (cascade-multiplier rule) + HttpArena

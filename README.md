@@ -1,12 +1,40 @@
 # BlackBull
 
-BlackBull is a Python ASGI 3.0 web framework supporting HTTP/1.1, HTTP/2, and WebSocket.
+**From-scratch async ASGI 3.0 framework** with native HTTP/1.1, HTTP/2,
+and WebSocket implementations — no `httptools`, no `uvicorn`, no
+`hypercorn` underneath.  Pure-Python protocol stack, single
+deployable, zero C-extension footprint outside the standard library.
 
-## Quick Start
+[![PyPI](https://img.shields.io/pypi/v/blackbull.svg)](https://pypi.org/project/blackbull/)
+[![Python](https://img.shields.io/pypi/pyversions/blackbull.svg)](https://pypi.org/project/blackbull/)
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
+
+## Why BlackBull
+
+- **One package, one process** — the framework *is* the server.  No
+  separate ASGI runner; `app.run()` opens the socket and serves.
+- **HTTP/1.1 + HTTP/2 + WebSocket** all implemented natively (RFC 9112
+  for H/1, RFC 9113 for H/2, RFC 6455 + RFC 8441 for WebSocket).
+- **Pure-Python identity** — no `httptools`, no `uvloop` dependency
+  (uvloop available as an optional `[speed]` extra).
+- **Conformance-tested** against `h2spec`, Autobahn, and a
+  differential nginx fuzz corpus.
+- **Modern Python** — requires 3.11+, full type hints, PEP 561 typed
+  distribution.
+
+## Install
+
+```bash
+pip install blackbull
+pip install 'blackbull[compression]'   # add brotli + zstandard codecs
+pip install 'blackbull[speed]'         # add uvloop event loop
+pip install 'blackbull[reload]'        # add watchfiles for --reload
+```
+
+## Hello, world
 
 ```python
-import asyncio
-from blackbull import BlackBull, Response
+from blackbull import BlackBull
 
 app = BlackBull()
 
@@ -15,56 +43,109 @@ async def hello():
     return "Hello, world!"
 
 if __name__ == '__main__':
-    asyncio.run(app.run(port=8000))
+    app.run(port=8000)
 ```
 
-Handlers also accept `(scope, receive, send)` for full ASGI control.
+Run it:
 
-**Full documentation:** [`docs/guide.md`](docs/guide.md)
+```bash
+python app.py              # HTTP/1.1 on :8000
+```
+
+Or via the bundled CLI:
+
+```bash
+blackbull app:app --bind 0.0.0.0:8000
+```
+
+## Simplified handlers
+
+Route handlers may return a `str`, `bytes`, `dict`, or `Response`;
+path parameters are coerced to the annotation type:
+
+```python
+@app.route(path='/tasks/{task_id:int}')
+async def get_task(task_id: int):
+    return {"id": task_id, "title": "..."}
+```
+
+Drop down to full ASGI `(scope, receive, send)` whenever you need it
+— routes accept either shape.
+
+## TLS + HTTP/2
+
+```python
+app.run(port=8443, certfile='cert.pem', keyfile='key.pem')
+```
+
+ALPN negotiates `h2` automatically; HTTP/1.1 clients fall back via
+the same socket.
+
+## WebSocket
+
+```python
+from http import HTTPMethod
+from blackbull.utils import Scheme
+
+@app.route(path='/ws', methods=[HTTPMethod.GET], scheme=Scheme.websocket)
+async def ws_echo(scope, receive, send):
+    await receive()                              # websocket.connect
+    await send({'type': 'websocket.accept'})
+    while True:
+        msg = await receive()
+        if msg['type'] == 'websocket.disconnect':
+            break
+        if msg['type'] == 'websocket.receive':
+            await send({'type': 'websocket.send',
+                        'text': msg.get('text') or ''})
+```
+
+## Built-in middleware
+
+Compose via `app.use(...)` or per-route `middlewares=[...]`:
+
+| Middleware       | What it does |
+|------------------|---|
+| `Compression`    | Negotiates `br` / `zstd` / `gzip` from `Accept-Encoding` |
+| `StaticFiles`    | Serves files from a directory under a URL prefix |
+| `Cache`          | Per-worker LRU + ETag / `Cache-Control` honouring |
+| `Session`        | Signed-cookie sessions (HMAC-SHA256) |
+| `CORS`           | Preflight + actual-request header injection |
+| `TrustedProxy`   | Rewrites `scope['client']` / `scope['scheme']` from proxy headers |
+
+## OpenAPI / Swagger UI
+
+```python
+app.enable_openapi()   # publishes /openapi.json and /docs
+```
+
+Auto-generates an OpenAPI 3.1 spec from route signatures, path-param
+converters, docstrings, and `@dataclass` annotations on body
+parameters.  Dataclass-typed bodies are also deserialized at runtime
+— `async def h(body: CreateTask): ...` receives a constructed
+instance, no manual `json.loads`.
 
 ## Examples
 
 | Example | Demonstrates |
 |---|---|
 | [`examples/SimpleTaskManager/`](examples/SimpleTaskManager/) | REST API + HTML UI, middleware pipeline, route groups, SQLite, Bearer token auth |
-| [`examples/ChatServer/`](examples/ChatServer/) | WebSocket, SSE, long polling — three real-time transports side-by-side, built on the middleware pipeline (Session, Compression, custom auth) |
-| [`examples/typed_routes_ok.py`](examples/typed_routes_ok.py) | `{param:converter}` syntax, `url_path_for` — validation passes |
-| [`examples/typed_routes_fail.py`](examples/typed_routes_fail.py) | Same routes with annotation mismatch — `ConfigurationError` at startup |
+| [`examples/ChatServer/`](examples/ChatServer/) | WebSocket, SSE, long polling side by side; Session + Compression + custom auth |
+| [`examples/typed_routes_ok.py`](examples/typed_routes_ok.py) | `{param:converter}` syntax, `url_path_for` |
 
-## Running
+## Documentation
 
-```bash
-pip install .
-python app.py --port 8000                              # HTTP/1.1
-python app.py --port 8443 --cert cert.pem --key key.pem  # HTTPS + HTTP/2
-```
+- **Guide**: [`docs/guide.md`](docs/guide.md)
+- **Architecture**: [`docs/ActorDesign.md`](docs/ActorDesign.md)
+- **Changelog**: [`CHANGELOG.md`](CHANGELOG.md)
 
-## Testing
+## Versioning
 
-```bash
-pytest
-```
+BlackBull uses [ZeroVer](https://0ver.org/) prior to a 1.0 commitment.
+`MINOR` advances at each sprint close; `PATCH` is for bug fixes and
+harness work between sprints.  See [`CHANGELOG.md`](CHANGELOG.md) for
+the full release history.
 
----
+## License
 
-## Todo
-
-### P1 — Spec violations / breaks conformant ASGI apps
-
-### P2 — Important protocol features
-
-- [x] RFC 8441 — WebSocket over HTTP/2 (Extended CONNECT). Currently WebSocket requires HTTP/1.1; when TLS is active the browser negotiates HTTP/2 via ALPN and WebSocket upgrade is blocked.
-- [ ] Conformance to RFC 8441 — a dedicated test harness (analogous to h2spec for RFC 9113 and Autobahn for RFC 6455) that walks the Extended CONNECT handshake, settings, and stream lifecycle to confirm the implementation matches the spec.
-
-### P3 — Features and enhancements
-
-- [x] Worker processes — pre-fork **multiprocessing** (not threads); each worker runs its own asyncio event loop. `BB_WORKERS=N` or `0` for cpu_count. SO_REUSEPORT gives each worker its own kernel accept queue.
-
-### P4 — Application framework
-
-- [ ] Optional `[speed-h1]` extra — opt-in C-based HTTP/1.1 parser (`httptools` / `llhttp`) for users who want to make it faster.
-- [x] Route lookup cache — internal per-worker LRU cache (transparent, no user API)
-- [x] Response/application caching middleware — `Cache`; per-worker LRU, ETag + If-None-Match → 304, `Cache-Control: no-store/private/no-cache` respected, `max-age` / `s-maxage` honoured, opt-out for authenticated requests
-- [x] Cookie-based session middleware (signed cookie) — `Session`; HMAC-SHA256, `BB_SESSION_SECRET` or explicit secret
-- [x] OpenAPI / interactive API docs (Swagger UI) — `app.enable_openapi()` publishes a 3.1 spec at `/openapi.json` and Swagger UI at `/docs`.  Covers routes, methods, path-param schemas from converters, docstring → summary/description, and **request/response schemas synthesized from `@dataclass` annotations** on handler params/returns.  Dataclass-typed body params are also **deserialized at runtime** — `async def h(body: CreateTask): ...` receives a constructed `CreateTask` instance, no manual `json.loads`.
-- [x] beartype for startup type checking on route handlers — `Router.validate()` runs at `app.run()` / `app.serve()` boot and checks every path-converter output against the handler's annotation; the same package powers the test-suite's `--beartype-packages=blackbull` import hook
+[Apache License 2.0](LICENSE) — © TOKUJI.
