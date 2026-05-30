@@ -51,6 +51,7 @@ from testcontainers.core.container import DockerContainer  # noqa: E402
 from testcontainers.nginx import NginxContainer  # noqa: E402
 
 from blackbull import BlackBull, read_body  # noqa: E402
+from blackbull.server import ASGIServer  # noqa: E402
 from blackbull.client import (  # noqa: E402
     HTTP1Client,
     ReadResponse,
@@ -123,15 +124,20 @@ def _make_diff_app() -> BlackBull:
 def diff_h1_app():
     """A live BlackBull HTTP/1.1 server with nginx-matching `/` + `/echo`
     semantics — used only by the differential test in this module."""
+    from types import SimpleNamespace
+
     app = _make_diff_app()
-    app.create_server(port=0)
-    p = Process(target=lambda: asyncio.run(app.run()))
+    server = ASGIServer(app)
+    server.open_socket(0)
+    p = Process(target=lambda: asyncio.run(server.run()))
     p.start()
-    app.wait_for_port(timeout=10.0)
-    yield app
-    app.stop()
-    p.terminate()
-    p.join(timeout=5)
+    try:
+        server.wait_for_port(timeout=10.0)
+        yield SimpleNamespace(app=app, port=server.port)
+    finally:
+        server.close()
+        p.terminate()
+        p.join(timeout=5)
 
 
 @pytest.fixture(scope='session')

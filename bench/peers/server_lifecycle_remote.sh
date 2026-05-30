@@ -46,11 +46,32 @@ case "$cmd" in
         # orchestrator misconfiguration.
         bind_host="${BIND_HOST:-0.0.0.0}"
 
+        # Activate the project venv so run_peer.sh can find the peer
+        # binaries (blackbull / uvicorn / hypercorn / granian / daphne).
+        # The local orchestrator path is invoked from within an
+        # already-activated venv by run.sh; the remote path needs to do it
+        # itself because the SSH session inherits the login shell's clean
+        # environment.
+        if [ -f .venv/bin/activate ]; then
+            # shellcheck disable=SC1091
+            source .venv/bin/activate
+        fi
+
+        # Optional CPU pinning for Sprint 21 Phase B (w=2→w=4 scaling
+        # diagnosis).  When BB_BENCH_TASKSET is set, prefix the launch
+        # with `taskset -c $BB_BENCH_TASKSET` so the worker pool inherits
+        # the CPU mask.  Defaults to no pinning, matching prior behaviour.
+        taskset_prefix=()
+        if [ -n "${BB_BENCH_TASKSET:-}" ]; then
+            taskset_prefix=(taskset -c "$BB_BENCH_TASKSET")
+        fi
+
         # Detach so the SSH session can return immediately; orchestrator's
         # wait_ready does the actual readiness probe.  Redirect stdin from
         # /dev/null per Sprint 10/11 caution: pipe stdin to a non-reader
         # is a known deadlock shape.
-        nohup env $granian_env BIND_HOST="$bind_host" \
+        nohup env $granian_env BIND_HOST="$bind_host" PATH="$PATH" \
+            "${taskset_prefix[@]}" \
             bash bench/peers/run_peer.sh "$stack" "$port" "$cert" "$key" \
             </dev/null >"$logfile_rel" 2>&1 &
         echo $! > /tmp/bench_server.pid

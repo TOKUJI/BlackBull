@@ -25,7 +25,13 @@ export const options = {
   },
 };
 
-const URL    = 'wss://localhost:8443/ws';
+// WS_URL takes precedence; otherwise derive from BASE (the HTTP base
+// the harness already passes through) by swapping the scheme so split-
+// topology runs hit wss://bench-server.internal:8443/ws transparently.
+const URL    = __ENV.WS_URL ||
+    (__ENV.BASE
+        ? __ENV.BASE.replace(/^http(s?):/, 'ws$1:') + '/ws'
+        : 'wss://localhost:8443/ws');
 const PARAMS = {};
 
 // Sequence counter for unique message IDs (the old Date.now()-as-id

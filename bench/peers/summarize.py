@@ -121,12 +121,41 @@ def is_wsl2_bound(stacks, stack):
     return bound, spread
 
 
-def render_summary(stacks: dict[str, dict]) -> str:
+def is_wsl2_report(report_text: str) -> bool:
+    """Detect WSL2 from the report's `Hardware:` preamble (kernel release).
+
+    The data host's kernel — not the host running summarize.py — is what
+    determines whether the WSL2-bound row is meaningful.  AWS runs land
+    a `Linux ip-... <ver>-aws` kernel; WSL2 lands `... -microsoft-...`.
+    """
+    m = re.search(r"^Hardware:\s+(.+)$", report_text, re.MULTILINE)
+    return bool(m and 'microsoft' in m.group(1).lower())
+
+
+def parse_b2_socket_errors(cell: str) -> tuple[int, int] | None:
+    """Parse 'connect 7, read 0, write 0, timeout 0' → (connect, timeout)."""
+    if not cell or cell.strip() in ("", "—"):
+        return None
+    connect = timeout = 0
+    m = re.search(r"connect\s+(\d+)", cell)
+    if m:
+        connect = int(m.group(1))
+    m = re.search(r"timeout\s+(\d+)", cell)
+    if m:
+        timeout = int(m.group(1))
+    return connect, timeout
+
+
+def render_summary(stacks: dict[str, dict], *, is_wsl2: bool = False) -> str:
     out = ["", "## Summary — side-by-side", ""]
-    out.append(f"All numbers from the per-stack tables below. Highest peer-column-wise"
-               f" result **bolded**; nginx values _italicized_ (reference floor,"
-               f" not a peer); `🧱` flags WSL2-loopback-bound (small-payload"
-               f" req/s clusters within ±{int(CEILING_SPREAD*100)}%).")
+    legend = ("All numbers from the per-stack tables below. Highest peer-column-wise"
+              " result **bolded**; nginx values _italicized_ (reference floor,"
+              " not a peer)")
+    if is_wsl2:
+        legend += (f"; `🧱` flags WSL2-loopback-bound (small-payload"
+                   f" req/s clusters within ±{int(CEILING_SPREAD*100)}%)")
+    legend += "."
+    out.append(legend)
     out.append("")
 
     # Build columns
@@ -147,6 +176,11 @@ def render_summary(stacks: dict[str, dict]) -> str:
     REFERENCE_STACKS = {"nginx"}
     peers = [s for s in present if s not in REFERENCE_STACKS]
 
+    # Stacks that don't expose Lane A at all (no HTTP/2 support, e.g. daphne).
+    # Used to swap a plain `—` for `—¹` so the absence has a footnote, not
+    # the same glyph the harness uses for "scenario ran but no data".
+    h2_skipped = [s for s in present if "Lane A" not in stacks.get(s, {})]
+
     # Header
     header = "| Metric | " + " | ".join(present) + " |"
     sep = "|---|" + "|".join(["---"] * len(present)) + "|"
@@ -163,11 +197,12 @@ def render_summary(stacks: dict[str, dict]) -> str:
                                                             key=defined_peers.get)
         else:
             best = None
+        is_lane_a = label.startswith("Lane A")
         cells = []
         for s in present:
             v = vals[s]
             if v is None:
-                cells.append("—")
+                cells.append("—¹" if is_lane_a and s in h2_skipped else "—")
                 continue
             txt = f"{v:.0f}" if v >= 100 else f"{v:.2f}"
             if s == best:
@@ -196,27 +231,61 @@ def render_summary(stacks: dict[str, dict]) -> str:
             ws_row.append(txt)
     out.append(" | ".join(ws_row) + " |")
 
-    # WSL2-bound row
-    bound_row = [f"| WSL2-bound (small-payload spread <{int(CEILING_SPREAD*100)}%)"]
+    # B2 socket-error row — surfaces connect failures + timeouts on the
+    # 1024-connection lane that the per-stack tables already report, so
+    # behavioural failures don't get buried under the per-stack scroll.
+    b2_row = ["| B2 conn/timeout err"]
     for s in present:
-        bound, spread = is_wsl2_bound(stacks, s)
-        if bound:
-            bound_row.append(f"🧱 yes ({spread*100:.1f}%)")
+        cells = stacks.get(s, {}).get("Lane B-wrk", {}).get("B2_plaintext_c1024_p16")
+        # socket-errors column is the 7th cell (idx 6).  Missing for nginx
+        # in some report shapes; tolerate that gracefully.
+        cell = cells[6] if cells and len(cells) > 6 else ""
+        parsed = parse_b2_socket_errors(cell)
+        if parsed is None:
+            b2_row.append("—")
+            continue
+        connect, timeout = parsed
+        if connect == 0 and timeout == 0:
+            b2_row.append("0 / 0")
         else:
-            bound_row.append(f"no ({spread*100:.1f}%)" if spread else "—")
-    out.append(" | ".join(bound_row) + " |")
+            marker = "🚨 " if timeout > 100 else ""
+            b2_row.append(f"{marker}{connect} / {timeout}")
+    out.append(" | ".join(b2_row) + " |")
+
+    # WSL2-bound row — only meaningful on WSL2 hosts.  On AWS / bare-metal
+    # the spread heuristic measures something else entirely, so skip both
+    # the row and the interpretation paragraph below.
+    if is_wsl2:
+        bound_row = [f"| WSL2-bound (small-payload spread <{int(CEILING_SPREAD*100)}%)"]
+        for s in present:
+            bound, spread = is_wsl2_bound(stacks, s)
+            if bound:
+                bound_row.append(f"🧱 yes ({spread*100:.1f}%)")
+            else:
+                bound_row.append(f"no ({spread*100:.1f}%)" if spread else "—")
+        out.append(" | ".join(bound_row) + " |")
 
     out.append("")
-    out.append("WSL2-bound interpretation: such a stack's request rate is set by"
-               " the syscall/TLS floor on Linux loopback, not by the server's"
-               " own code path. On a real network its number will move; the"
-               " others should hold roughly to the same ranking.")
+    if h2_skipped:
+        out.append(f"¹ Lane A not run by harness for this stack"
+                   f" — outside `SUPPORTS_H2` in compare_servers.sh"
+                   f" ({', '.join(h2_skipped)}).")
+        out.append("")
+    out.append("`B2 conn/timeout err`: counts from the B2_plaintext_c1024_p16"
+               " row's `socket errors` cell — `connect` is failed dials,"
+               " `timeout` is requests that exceeded wrk's 2 s deadline."
+               " 🚨 marks timeout counts above 100.")
     out.append("")
+    if is_wsl2:
+        out.append("WSL2-bound interpretation: such a stack's request rate is set by"
+                   " the syscall/TLS floor on Linux loopback, not by the server's"
+                   " own code path. On a real network its number will move; the"
+                   " others should hold roughly to the same ranking.")
+        out.append("")
     return "\n".join(out)
 
 
 SUMMARY_START = "## Summary — side-by-side"
-SUMMARY_END_MARK = "WSL2-bound interpretation:"
 
 
 def splice(report_text: str, summary: str) -> str:
@@ -248,7 +317,7 @@ def main(argv):
     path = Path(argv[1])
     text = path.read_text()
     stacks = parse_report(text)
-    summary = render_summary(stacks)
+    summary = render_summary(stacks, is_wsl2=is_wsl2_report(text))
     spliced = splice(text, summary)
     path.write_text(spliced)
     print(f"Wrote summary into {path}")

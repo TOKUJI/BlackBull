@@ -770,7 +770,7 @@ class TestHTTP2ScopeHeaders:
         )
 
     async def test_scope_headers_contains_cookie(self):
-        from blackbull.server.headers import Headers
+        from blackbull.headers import Headers
 
         h_frame = self._make_headers_frame_with_cookie(cookie=b'session_id=abc123')
         scopes = []

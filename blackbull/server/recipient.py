@@ -2,10 +2,12 @@ import asyncio
 import zlib
 from abc import ABC, abstractmethod
 
+from .deadline import ConnectionDeadline
 from .sender import AbstractWriter, AsyncioWriter
 from .ws_codec import WSOpcode, encode_frame, read_frame_header, read_payload
-from .constants import ASGIEvent, WSCloseCode
-from .headers import Headers
+from .constants import WSCloseCode
+from ..asgi import ASGIEvent
+from ..headers import Headers
 from ..protocol.frame_types import FrameBase, Data
 from ..event import Event, EventDispatcher
 import logging
@@ -258,7 +260,8 @@ class HTTP1Recipient(BaseRecipient):
     _reader: AbstractReader  # narrows BaseRecipient._reader from AbstractReader | None
 
     def __init__(self, reader: AbstractReader, scope: dict,
-                 *, body_timeout: float = 0.0):
+                 *, body_timeout: float = 0.0,
+                 deadline: ConnectionDeadline | None = None):
         super().__init__(reader)
         self._scope = scope
         headers = scope['headers']
@@ -274,14 +277,26 @@ class HTTP1Recipient(BaseRecipient):
         self._content_length = int(cl) if cl else None
         self._done = False
         # Sprint 17 Phase 3 — body-read deadline.  0 = disabled.  Applied
-        # per __call__() invocation (i.e. per chunk for chunked bodies,
-        # single window for Content-Length).  Mirrors nginx
+        # per ``_read_with_timeout`` call (i.e. per chunk for chunked
+        # bodies, single window for Content-Length).  Mirrors nginx
         # ``client_body_timeout`` semantics: each read has the same bound.
+        #
+        # Sprint 23 — the deadline is rescheduled on the shared
+        # :class:`ConnectionDeadline` rather than allocating a fresh
+        # ``asyncio.wait_for`` Timeout per chunk.  Per-chunk semantics
+        # preserved.
         self._body_timeout = body_timeout
+        self._deadline = deadline
 
     async def _read_with_timeout(self, coro):
         """Run *coro* under the configured body_timeout, if any."""
+        if self._body_timeout > 0 and self._deadline is not None:
+            with self._deadline.guard(self._body_timeout):
+                return await coro
         if self._body_timeout > 0:
+            # Fallback for direct-instantiation tests that don't pass a
+            # ConnectionDeadline.  Preserves per-call semantics; the
+            # production hot path takes the deadline-guard branch above.
             return await asyncio.wait_for(coro, timeout=self._body_timeout)
         return await coro
 
@@ -686,10 +701,12 @@ class RecipientFactory:
 
     @staticmethod
     def http1(reader, scope: dict, *,
-              body_timeout: float = 0.0) -> HTTP1Recipient:
+              body_timeout: float = 0.0,
+              deadline: ConnectionDeadline | None = None) -> HTTP1Recipient:
         if not isinstance(reader, AbstractReader):
             reader = AsyncioReader(reader)
-        return HTTP1Recipient(reader, scope, body_timeout=body_timeout)
+        return HTTP1Recipient(reader, scope, body_timeout=body_timeout,
+                              deadline=deadline)
 
     @staticmethod
     def http2(frame: FrameBase | None = None,

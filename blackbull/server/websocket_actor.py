@@ -6,7 +6,8 @@ from uuid import uuid4
 
 from ..actor import Actor, Message
 from ..event_aggregator import EventAggregator
-from .constants import ASGIEvent, WSCloseCode
+from ..asgi import ASGIEvent
+from .constants import WSCloseCode
 from .permessage_deflate import (
     DeflateParams, InboundDecompressor, OutboundCompressor,
 )

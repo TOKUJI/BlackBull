@@ -15,7 +15,6 @@ process so the cold-start chain build doesn't pollute later numbers.
 from __future__ import annotations
 
 import argparse
-import asyncio
 import os
 import subprocess
 import sys
@@ -47,7 +46,7 @@ def _make_app(n_middleware: int) -> BlackBull:
 
 def _run_server(n_middleware: int, port: int, cert: str, key: str) -> None:
     app = _make_app(n_middleware)
-    asyncio.run(app.run(port=port, certfile=cert, keyfile=key))
+    app.run(port=port, certfile=cert, keyfile=key)
 
 
 def _h2load(url: str, n: int, c: int, m: int) -> dict:

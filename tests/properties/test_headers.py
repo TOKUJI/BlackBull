@@ -7,7 +7,7 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from blackbull.server.headers import Headers
+from blackbull.headers import Headers
 from .strategies import header_name, header_value
 
 

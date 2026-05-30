@@ -136,35 +136,47 @@ def _run_mtls_server(app, certfile: str, keyfile: str, cafile: str):
 
 @pytest.fixture(scope="module")
 def mtls_server(pki):
+    """Spin up a TLS server that requires client certificates.
+
+    Uses ASGIServer directly so the SSL context can be overridden to
+    set ``verify_mode = CERT_REQUIRED`` before the worker forks.  The
+    pre-Sprint-22 form mutated ``app.server.ssl_context``; the
+    ``app.server`` attribute no longer exists, so this fixture holds
+    the server reference itself.
+    """
+    import ssl as _ssl
+    from blackbull.server import ASGIServer
+
     app = _make_app()
-    app.create_server(
+    server = ASGIServer(
+        app,
         certfile=str(pki / 'server.crt'),
         keyfile=str(pki / 'server.key'),
-        port=0,
     )
-    # Override the ssl_context to require client certs
-    import ssl as _ssl
+    server.open_socket(0)
     ctx = _ssl.SSLContext(_ssl.PROTOCOL_TLS_SERVER)
     ctx.load_cert_chain(certfile=str(pki / 'server.crt'),
                         keyfile=str(pki / 'server.key'))
     ctx.load_verify_locations(cafile=str(pki / 'ca.pem'))
     ctx.verify_mode = _ssl.CERT_REQUIRED
-    app.server.ssl_context = ctx
+    server.ssl_context = ctx
 
-    p = Process(target=lambda: asyncio.run(app.run()))
+    p = Process(target=lambda: asyncio.run(server.run()))
     p.start()
-    app.wait_for_port(timeout=10.0)
-    yield {'app': app, 'pki': pki}
-    app.stop()
-    p.terminate()
-    p.join(timeout=5)
+    try:
+        server.wait_for_port(timeout=10.0)
+        yield {'app': app, 'pki': pki, 'port': server.port}
+    finally:
+        server.close()
+        p.terminate()
+        p.join(timeout=5)
 
 
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_mtls_valid_client_cert(mtls_server):
     pki = mtls_server['pki']
-    port = mtls_server['app'].port
+    port = mtls_server['port']
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     ctx.load_verify_locations(cafile=str(pki / 'ca.pem'))
     ctx.load_cert_chain(certfile=str(pki / 'client.crt'),
@@ -179,7 +191,7 @@ async def test_mtls_valid_client_cert(mtls_server):
 @pytest.mark.asyncio
 async def test_mtls_no_client_cert_rejected(mtls_server):
     pki = mtls_server['pki']
-    port = mtls_server['app'].port
+    port = mtls_server['port']
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     ctx.load_verify_locations(cafile=str(pki / 'ca.pem'))
     ctx.check_hostname = False
@@ -192,7 +204,7 @@ async def test_mtls_no_client_cert_rejected(mtls_server):
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_mtls_self_signed_client_cert_rejected(mtls_server, pki):
-    port = mtls_server['app'].port
+    port = mtls_server['port']
     # Generate a cert signed by a different (unknown) CA
     rogue_ca_key  = _gen_key()
     rogue_ca_cert = _gen_ca_cert(rogue_ca_key)

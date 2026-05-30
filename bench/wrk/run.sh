@@ -24,8 +24,15 @@ OUTDIR="${OUTDIR:-bench/results}"
 LABEL="${LABEL:-}"
 LABEL_PREFIX="${LABEL_PREFIX:-}"   # filename prefix so per-stack runs don't overwrite
 D="${DURATION:-30}"
+# Sprint 24 (audit 4-1, 4-2): RUNS_WRK > 1 enables multi-run aggregation —
+# median req/s with MAD / min / max / noise% columns.  RUNS_WRK=1 keeps
+# Sprint 13–23 single-run behaviour (the report just emits the wrk numbers
+# directly and the noise columns read `—`).
+RUNS_WRK="${RUNS_WRK:-3}"
 
 mkdir -p "$OUTDIR"
+
+_SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 # wrk doesn't disable TLS verification natively; LD_PRELOAD or env trickery
 # isn't portable.  Use --latency for distribution; --no-check-certificate
@@ -34,49 +41,89 @@ WRK="wrk --latency"
 
 run_one() {
     local label="$1" threads="$2" conns="$3" extra="$4" url="$5" pipe_args="$6"
-    local logfile="$OUTDIR/wrk_${LABEL_PREFIX}${label}.txt"
     local cmd="$WRK -t${threads} -c${conns} -d${D}s ${extra} ${url}"
     if [ -n "$pipe_args" ]; then
         cmd="$cmd -- $pipe_args"
     fi
-    {
-        echo "# scenario: $label"
-        echo "# command: $cmd"
-        eval "$cmd"
-    } > "$logfile" 2>&1 || true   # tolerate connection-refused mid-run
 
-    # If wrk couldn't connect at all, emit an err row and bail.
-    if grep -q "unable to connect" "$logfile" 2>/dev/null; then
-        echo "| $label | err | — | — | — | — |  (unable to connect)"
-        return 0
-    fi
+    # Sprint 24: loop RUNS_WRK times, capture each run's req/s + the
+    # latency stats from the LAST run (the latency distribution is
+    # already a per-run percentile; aggregating it across runs would
+    # be misleading, while aggregating throughput is straightforward).
+    local rps_list=""
+    local last_logfile=""
+    local i
+    for i in $(seq 1 "$RUNS_WRK"); do
+        local logfile
+        if [ "$RUNS_WRK" = "1" ]; then
+            logfile="$OUTDIR/wrk_${LABEL_PREFIX}${label}.txt"
+        else
+            logfile="$OUTDIR/wrk_${LABEL_PREFIX}${label}_run${i}.txt"
+        fi
+        last_logfile="$logfile"
+        {
+            echo "# scenario: $label"
+            echo "# run: $i / $RUNS_WRK"
+            echo "# command: $cmd"
+            eval "$cmd"
+        } > "$logfile" 2>&1 || true   # tolerate connection-refused mid-run
 
-    # Parse: req/s, avg latency, p50, p99, max, socket errors.
-    # Anchor 50%/99% to the Latency Distribution rows — bare `grep 50%`
-    # can also match the Thread Stats "+/- Stdev" column when its value
-    # ends in `X.50%` / `X.99%`, splitting the cell across lines.
-    # wrk's `--latency` p50/p99 can overflow to `0.00us` under pipelining;
-    # show `—` in that case.
-    local rps avg p50 p99 max errs
-    rps=$(grep 'Requests/sec' "$logfile" | awk '{print $2}')
-    avg=$(grep -m1 '^    Latency' "$logfile" | awk '{print $2}')
-    p50=$(grep -E '^[[:space:]]+50%[[:space:]]' "$logfile" | awk '{print $2}')
-    p99=$(grep -E '^[[:space:]]+99%[[:space:]]' "$logfile" | awk '{print $2}')
-    max=$(grep -m1 '^    Latency' "$logfile" | awk '{print $4}')
-    # Socket errors line, if present: `Socket errors: connect N, read N, write N, timeout N`
-    errs=$(grep -m1 'Socket errors:' "$logfile" | sed 's/^[[:space:]]*Socket errors:[[:space:]]*//')
+        # If wrk couldn't connect at all, emit an err row and bail.
+        if grep -q "unable to connect" "$logfile" 2>/dev/null; then
+            echo "| $label | err | — | — | — | — |  (unable to connect) | — | — |"
+            return 0
+        fi
+        local rps_one
+        rps_one=$(grep 'Requests/sec' "$logfile" | awk '{print $2}')
+        rps_list="$rps_list $rps_one"
+    done
+
+    # Parse latency / socket errors from the last run.  See above for why
+    # latency distribution is reported per-run rather than aggregated.
+    local avg p50 p99 max errs
+    avg=$(grep -m1 '^    Latency' "$last_logfile" | awk '{print $2}')
+    p50=$(grep -E '^[[:space:]]+50%[[:space:]]' "$last_logfile" | awk '{print $2}')
+    p99=$(grep -E '^[[:space:]]+99%[[:space:]]' "$last_logfile" | awk '{print $2}')
+    max=$(grep -m1 '^    Latency' "$last_logfile" | awk '{print $4}')
+    errs=$(grep -m1 'Socket errors:' "$last_logfile" | sed 's/^[[:space:]]*Socket errors:[[:space:]]*//')
     [ "$p50" = "0.00us" ] && p50="—"
     [ "$p99" = "0.00us" ] && p99="—"
-    if [ -n "$errs" ]; then
-        echo "| $label | $rps | $avg | $p50 | $p99 | $max | $errs |"
+
+    # Aggregate req/s across runs.  When RUNS_WRK=1 the helper returns
+    # the single value as the median and reports MAD=0 / noise=0; the
+    # noise-flag rule then naturally leaves the row unmarked.
+    # shellcheck disable=SC2086
+    local agg
+    agg=$(python3 "$_SCRIPT_DIR/_stats.py" $rps_list)
+    local rps_med mad lo hi noise_pct
+    read -r rps_med mad lo hi noise_pct <<< "$agg"
+    # Format the noise column: "MAD=X (Y%)" or "🌫 MAD=X (Y%)" if Y>=10.
+    local noise_col
+    if [ "$mad" = "—" ] || [ "$RUNS_WRK" = "1" ]; then
+        noise_col="—"
     else
-        echo "| $label | $rps | $avg | $p50 | $p99 | $max |  |"
+        local flag=""
+        # Bash compare floats by stripping the dot — close enough for the
+        # 10 % threshold.  noise_pct is always 0.0..100.0.
+        local noise_x10
+        noise_x10=$(printf '%.0f' "$noise_pct")
+        if [ "$noise_x10" -ge 10 ]; then
+            flag="🌫 "
+        fi
+        noise_col="${flag}${lo}..${hi} (MAD ${mad}, ${noise_pct}%)"
+    fi
+    if [ -n "$errs" ]; then
+        echo "| $label | $rps_med | $avg | $p50 | $p99 | $max | $errs | $noise_col |"
+    else
+        echo "| $label | $rps_med | $avg | $p50 | $p99 | $max |  | $noise_col |"
     fi
 }
 
-# Header
-echo "| Scenario | req/s | mean lat | p50 | p99 | max | socket errors |"
-echo "|---|---|---|---|---|---|---|"
+# Header — Sprint 24 added the trailing "noise (MAD)" column.  Rows
+# where MAD/median > 10 % carry a 🌫 marker; older RUNS_WRK=1 reports
+# leave the column blank.
+echo "| Scenario | req/s | mean lat | p50 | p99 | max | socket errors | noise (MAD) |"
+echo "|---|---|---|---|---|---|---|---|"
 
 # B1 — /plaintext, no pipeline (TechEmpower-style baseline)
 run_one "B1_plaintext_c256"   4  256 ""                                  "$BASE/plaintext" ""

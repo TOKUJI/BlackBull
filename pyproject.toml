@@ -1,7 +1,11 @@
 [project]
 name = "blackbull"
-version = "0.0.1"
-description = "Asynchronous ASGI application framework."
+# ZeroVer (0.MINOR.PATCH).  MINOR advances at each sprint close (one
+# minor per closed sprint); PATCH covers bug fixes / harness work
+# between sprints.  No 1.0 commitment until the framework's identity
+# and surface have stabilised across several sprints.  See CHANGELOG.md.
+version = "0.27.1"
+description = "From-scratch async ASGI 3.0 framework with native HTTP/1.1, HTTP/2 and WebSocket implementations."
 readme = "README.md"
 requires-python = ">=3.11"
 
@@ -11,14 +15,43 @@ authors = [
 
 license = { file = "LICENSE" }
 
+keywords = ["asgi", "asyncio", "http", "http2", "websocket", "web", "framework", "server"]
+
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Framework :: AsyncIO",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Topic :: Internet :: WWW/HTTP :: HTTP Servers",
+    "Topic :: Software Development :: Libraries :: Application Frameworks",
+    "Typing :: Typed",
+]
+
 dependencies = [
     "h2",
     "hpack",
+    # beartype is load-bearing — Router.validate() imports it at every
+    # app.run() / app.serve() boot to type-check path-param converters
+    # against handler annotations.  Without it the framework crashes on
+    # first request handling.  Was historically declared in the
+    # [validation] optional extra; promoted to a hard dependency in
+    # 0.27.1 so `pip install blackbull` works out of the box.
+    "beartype",
 ]
 
 [project.urls]
 Homepage = "https://github.com/TOKUJI/BlackBull"
+Documentation = "https://tokuji.github.io/BlackBull/"
 Repository = "https://github.com/TOKUJI/BlackBull"
+Changelog = "https://github.com/TOKUJI/BlackBull/blob/master/CHANGELOG.md"
+Issues = "https://github.com/TOKUJI/BlackBull/issues"
 
 [project.scripts]
 blackbull = "blackbull.cli:main"
@@ -29,9 +62,10 @@ compression = [
     "zstandard"
 ]
 
-validation = [
-    "beartype",
-]
+# [validation] retained as a no-op alias for backwards compatibility
+# with prior install instructions (`pip install -e '.[validation]'`).
+# beartype is now a hard dependency — see core ``dependencies``.
+validation = []
 
 testing = [
     "pytest",
@@ -77,3 +111,9 @@ omit = ["*/tests/*",
 
 [tool.setuptools.packages.find]
 where = ["."]
+include = ["blackbull*"]
+exclude = ["bench*", "tests*", "examples*", "docs*", "site*", "templates*"]
+
+[tool.setuptools.package-data]
+# PEP 561 — distribute inline type hints to downstream type-checkers.
+blackbull = ["py.typed"]

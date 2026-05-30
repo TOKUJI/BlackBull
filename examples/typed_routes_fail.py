@@ -12,7 +12,6 @@ Expected output:
     ConfigurationError: Route '/double/{n:int}' param 'n': converter
     'int' yields 'int' but annotation is <class 'str'>: ...
 """
-import asyncio
 from http import HTTPMethod
 
 from blackbull import BlackBull
@@ -33,7 +32,7 @@ async def double(n: str):      # BUG: converter is int, annotation is str
 
 if __name__ == '__main__':
     try:
-        asyncio.run(app.run(port=8000))
+        app.run(port=8000)
     except* ConfigurationError as eg:
         for exc in eg.exceptions:
             print(f'ConfigurationError: {exc}')

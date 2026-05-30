@@ -12,6 +12,8 @@ import pytest
 
 from blackbull import BlackBull, Response
 
+from .conftest import live_server
+
 
 _CERT = pathlib.Path(__file__).parent.parent / 'cert.pem'
 _KEY  = pathlib.Path(__file__).parent.parent / 'key.pem'
@@ -59,27 +61,15 @@ def _make_priority_app() -> BlackBull:
 @pytest.fixture(scope="module")
 def push_app(manage_cert_and_key):
     app = _make_push_app()
-    app.create_server(certfile=str(_CERT), keyfile=str(_KEY), port=0)
-    p = Process(target=lambda: asyncio.run(app.run()))
-    p.start()
-    app.wait_for_port(timeout=10.0)
-    yield app
-    app.stop()
-    p.terminate()
-    p.join(timeout=5)
+    with live_server(app, certfile=str(_CERT), keyfile=str(_KEY)) as handle:
+        yield handle
 
 
 @pytest.fixture(scope="module")
 def priority_app(manage_cert_and_key):
     app = _make_priority_app()
-    app.create_server(certfile=str(_CERT), keyfile=str(_KEY), port=0)
-    p = Process(target=lambda: asyncio.run(app.run()))
-    p.start()
-    app.wait_for_port(timeout=10.0)
-    yield app
-    app.stop()
-    p.terminate()
-    p.join(timeout=5)
+    with live_server(app, certfile=str(_CERT), keyfile=str(_KEY)) as handle:
+        yield handle
 
 
 @pytest.mark.integration
@@ -118,22 +108,13 @@ async def test_server_push_scope_extension_present(push_app):
     import pathlib
     _CERT = pathlib.Path(__file__).parent.parent / 'cert.pem'
     _KEY  = pathlib.Path(__file__).parent.parent / 'key.pem'
-    app2.create_server(certfile=str(_CERT), keyfile=str(_KEY), port=0)
-    from multiprocessing import Process as _Process
-    import asyncio as _asyncio
-    p2 = _Process(target=lambda: _asyncio.run(app2.run()))
-    p2.start()
-    app2.wait_for_port(timeout=10.0)
-    try:
+    from .conftest import live_server
+    with live_server(app2, certfile=str(_CERT), keyfile=str(_KEY)) as live:
         async with httpx.AsyncClient(http2=True, verify=False) as c:
-            r = await c.get(f'https://localhost:{app2.port}/ext')
+            r = await c.get(f'https://localhost:{live.port}/ext')
         assert r.status_code == 200
         # Verify that the framework advertises push support in the scope
         # (the assertion lives in the server process; we just check the response)
-    finally:
-        app2.stop()
-        p2.terminate()
-        p2.join(timeout=5)
 
 
 @pytest.mark.integration

@@ -269,7 +269,7 @@ class TestHTTP1RequestSenderWire:
     @pytest.mark.asyncio
     async def test_bytes_body_sets_content_length(self):
         from blackbull.client.http1 import HTTP1RequestSender
-        from blackbull.server.headers import Headers
+        from blackbull.headers import Headers
         from blackbull.server.sender import AbstractWriter
 
         class _BytesWriter(AbstractWriter):
@@ -291,7 +291,7 @@ class TestHTTP1RequestSenderWire:
     @pytest.mark.asyncio
     async def test_streaming_body_uses_chunked(self):
         from blackbull.client.http1 import HTTP1RequestSender
-        from blackbull.server.headers import Headers
+        from blackbull.headers import Headers
         from blackbull.server.sender import AbstractWriter
 
         class _BytesWriter(AbstractWriter):

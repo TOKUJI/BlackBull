@@ -14,6 +14,7 @@ import pytest_asyncio
 
 from blackbull import BlackBull
 from blackbull.middleware.session import Session
+from .conftest import live_server
 
 
 def _make_app() -> BlackBull:
@@ -67,16 +68,8 @@ def _make_app() -> BlackBull:
 @pytest_asyncio.fixture
 async def session_app():
     app = _make_app()
-    app.create_server(port=0)
-    p = Process(target=lambda: asyncio.run(app.run()))
-    p.start()
-    app.wait_for_port(timeout=10.0)
-    yield app
-    app.stop()
-    p.terminate()
-    p.join(timeout=5)
-
-
+    with live_server(app) as handle:
+        yield handle
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_round_trip_sets_then_reads(session_app):

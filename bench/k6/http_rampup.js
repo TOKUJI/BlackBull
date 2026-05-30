@@ -32,7 +32,7 @@ export const options = {
   },
 };
 
-const BASE = 'https://localhost:8443';
+const BASE = __ENV.BASE || 'https://localhost:8443';
 const PARAMS = {};
 
 export default function () {

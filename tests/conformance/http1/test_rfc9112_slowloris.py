@@ -50,7 +50,7 @@ _SHORT_BODY_TIMEOUT = 3.0
 _SHORT_KEEP_ALIVE_TIMEOUT = 5.0
 
 
-def _run_with_short_timeouts(app, env_overrides):
+def _run_with_short_timeouts(server, env_overrides):
     """Subprocess entry point — apply env overrides before running."""
     for k, v in env_overrides.items():
         os.environ[k] = v
@@ -59,7 +59,7 @@ def _run_with_short_timeouts(app, env_overrides):
     # call re-reads the overridden env vars.
     from blackbull.env import reset_settings_cache
     reset_settings_cache()
-    asyncio.run(app.run())
+    asyncio.run(server.run())
 
 
 @pytest_asyncio.fixture
@@ -67,24 +67,32 @@ async def slow_app():
     """A BlackBull subprocess with all three timeouts shortened.
 
     Shared by every test in this module — single fixture instance so the
-    process starts once, runs every scenario, then teardown.
+    process starts once, runs every scenario, then teardown.  Uses
+    ASGIServer directly (not ``live_server``) because the worker needs
+    custom env-var setup before invoking ``asyncio.run``.
     """
+    from types import SimpleNamespace
+    from blackbull.server import ASGIServer
+
     app = _make_app()
-    app.create_server(port=0)
+    server = ASGIServer(app)
+    server.open_socket(0)
     p = Process(
         target=_run_with_short_timeouts,
-        args=(app, {
+        args=(server, {
             'BB_HEADER_TIMEOUT': str(_SHORT_HEADER_TIMEOUT),
             'BB_BODY_TIMEOUT': str(_SHORT_BODY_TIMEOUT),
             'BB_KEEP_ALIVE_TIMEOUT': str(_SHORT_KEEP_ALIVE_TIMEOUT),
         }),
     )
     p.start()
-    app.wait_for_port(timeout=10.0)
-    yield app
-    app.stop()
-    p.terminate()
-    p.join(timeout=5)
+    try:
+        server.wait_for_port(timeout=10.0)
+        yield SimpleNamespace(app=app, port=server.port)
+    finally:
+        server.close()
+        p.terminate()
+        p.join(timeout=5)
 
 
 # ---------------------------------------------------------------------------

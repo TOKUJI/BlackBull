@@ -138,8 +138,8 @@ if __name__ == '__main__':
     logger.info('Listening on https://localhost:%d', args.port)
     logger.info('Endpoints: / /priority-echo /work')
     try:
-        asyncio.run(app.run(port=args.port,
+        app.run(port=args.port,
                             certfile=args.cert,
-                            keyfile=args.key))
+                            keyfile=args.key)
     except KeyboardInterrupt:
         logger.info('Stopped.')

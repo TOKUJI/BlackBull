@@ -15,8 +15,8 @@ unspecified falls back to the matching ``BB_*`` environment variable
 
 This module is registered as the ``blackbull`` console script via
 ``[project.scripts]`` in ``pyproject.toml``.  The in-Python entry
-``app.serve(...)`` is unchanged and remains the preferred path for
-embedded callers (notebooks, test harnesses, ``examples/*.py``).
+``app.run(...)`` (synchronous) is the preferred path for embedded
+callers (notebooks, test harnesses, ``examples/*.py``).
 """
 from __future__ import annotations
 

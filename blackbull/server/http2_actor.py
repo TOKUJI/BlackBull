@@ -23,14 +23,14 @@ from ..protocol.frame_types import (
     DEFAULT_INITIAL_WINDOW_SIZE, DEFAULT_MAX_FRAME_SIZE,
 )
 from ..protocol.stream import Stream, StreamState
-from .headers import Headers
+from ..headers import Headers
 from .parser import ParserFactory, parse_headers
 from .recipient import (AbstractReader, IncompleteReadError,
                         RecipientFactory, _HTTP2_STREAM_QUEUE_DEPTH)
 from .response import ResponderFactory
 from .sender import AbstractWriter, SenderFactory
 from .access_log import AccessLogRecord, _make_capturing_send, _make_disconnect_detecting_receive, emit_access_log as _emit_access_log
-from .constants import ASGIEvent
+from ..asgi import ASGIEvent
 from .http1_actor import RequestActor
 
 logger = logging.getLogger(__name__)
@@ -941,14 +941,18 @@ class HTTP2Actor(Actor):
         pp = self.factory.push_promise(parent_stream_id, push_stream_id, pseudo, regular)
         await self.send_frame(pp)
 
-        query = _urlparse(path).query
+        # ASGI: scope['path'] is the decoded path component (no query),
+        # scope['query_string'] is the raw query as bytes.  RFC 9113
+        # §8.3.1 puts both into the ``:path`` pseudo-header; split here.
+        _parsed_pushed = _urlparse(path)
         pushed_scope: dict = {
             'type': 'http',
             'http_version': '2',
             'method': 'GET',
-            'path': path,
+            'path': _parsed_pushed.path,
+            'raw_path': _parsed_pushed.path.encode('utf-8'),
             'scheme': parent_scope.get('scheme', 'https'),
-            'query_string': query.encode() if query else b'',
+            'query_string': _parsed_pushed.query.encode('utf-8'),
             'root_path': '',
             'client': parent_scope.get('client'),
             'headers': Headers([(k.encode() if isinstance(k, str) else k,

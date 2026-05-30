@@ -41,8 +41,12 @@
 # --- Local files ----------------------------------------------------------
 AWS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$AWS_DIR/../.." && pwd)"
-STATE_FILE="$AWS_DIR/.state"          # INSTANCE_ID, PUBLIC_IP, SG_ID, AMI_ID
-LOCAL_KEY="$AWS_DIR/${KEY_NAME}.pem"  # private SSH key — chmod 600 by up.sh
+# STATE_FILE is overridable so the parallel-pair harness in
+# full_ab.sh can run up.sh / install.sh / down.sh M times against
+# distinct per-pair state files without races.  Default keeps the
+# single-pair workflow at the legacy path.
+: "${STATE_FILE:=$AWS_DIR/.state}"     # INSTANCE_ID, PUBLIC_IP, SG_ID, AMI_ID
+LOCAL_KEY="$AWS_DIR/${KEY_NAME}.pem"   # private SSH key — chmod 600 by up.sh
 
 # --- Remote access --------------------------------------------------------
 SSH_USER="ubuntu"

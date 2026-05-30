@@ -17,7 +17,13 @@
 #   STACKS    space-separated subset (default: all five)
 #   LANES     space-separated subset of {A, B-wrk, B-oha, C, D} (default: all)
 #   PORT      bind port (default 8443)
-#   DURATION  per-scenario seconds for wrk/oha (default 30)
+#   DURATION  per-scenario seconds for wrk/oha (default 60 from Sprint 24;
+#             was 30 in Sprints 13–23 — set DURATION=30 to reproduce older
+#             numbers)
+#   WARMUP    server warmup seconds before any measured run (default 15);
+#             one wrk pass at /plaintext c=64, output discarded.  Set to 0
+#             to skip — older Sprint 13–23 numbers were captured without
+#             this pass.
 #   RUNS      h2load runs per scenario (median picked; default 3)
 
 set -e
@@ -53,9 +59,22 @@ fi
 CERT="tests/cert.pem"
 KEY="tests/key.pem"
 RUNS="${RUNS:-3}"
-DURATION="${DURATION:-30}"
+# Sprint 24: default duration raised from 30 s to 60 s for the
+# wrk/oha lanes.  Audit recommendation 2-1 — 30 s left allocator-state,
+# kernel-pacing, and TLS-session-cache transients in the measured
+# window.  Older numbers in CHARACTERIZATION.md were captured at 30 s;
+# Sprint 24+ rows are 60 s.  Override via env to reproduce.
+DURATION="${DURATION:-60}"
+# Sprint 24: explicit server warmup pass before any lane runs.  One
+# 15 s wrk burst against /plaintext c=64 — discards output, just nudges
+# Python allocator + kernel TCP autotune + TLS session-cache to
+# steady-state before the measured runs start.
+WARMUP="${WARMUP:-15}"
 
 STACKS_ALL="blackbull uvicorn hypercorn granian daphne nginx"
+# Sprint 24 added Lane E (connection churn).  Defaulting it off in the
+# all-lanes set so existing AWS runs (and the cost envelope they assume)
+# don't grow without intent — opt in with LANES="A B-wrk B-oha C D E-wrk".
 LANES_ALL="A B-wrk B-oha C D"
 STACKS="${STACKS:-$STACKS_ALL}"
 LANES="${LANES:-$LANES_ALL}"
@@ -274,6 +293,18 @@ run_lane_b_wrk() {
     } >> "$OUT"
 }
 
+run_lane_e_wrk() {
+    local label="$1"
+    {
+        echo ""
+        echo "### $label — Lane E (connection churn, wrk no-keepalive)"
+        echo ""
+        BASE="$BASE" OUTDIR="$SCRATCH" DURATION="$DURATION" \
+            LABEL_PREFIX="${label}_" \
+            bash bench/wrk/lane_e.sh
+    } >> "$OUT"
+}
+
 run_lane_b_oha() {
     local label="$1"
     local skip_post=0
@@ -295,15 +326,18 @@ run_lane_c_k6() {
     local json_c1="$SCRATCH/k6_${label}_c1.json"
     local json_c2="$SCRATCH/k6_${label}_c2.json"
 
-    # C1 — 200 VU
-    K6_VUS=200 K6_DURATION=60s \
+    # C1 — 200 VU.  BASE is exported so the k6 script picks up the
+    # actual benchmark target (Sprint 20 split topology points BASE at
+    # bench-server.internal rather than localhost).
+    K6_VUS=200 K6_DURATION=60s BASE="$BASE" \
         k6 run --quiet --summary-export="$json_c1" \
             --summary-trend-stats="p(50),p(95),p(99),max" \
             bench/k6/http_stress.js >/dev/null 2>&1 || true
     # C2 — 500 VU (default)
-    k6 run --quiet --summary-export="$json_c2" \
-        --summary-trend-stats="p(50),p(95),p(99),max" \
-        bench/k6/http_stress.js >/dev/null 2>&1 || true
+    BASE="$BASE" \
+        k6 run --quiet --summary-export="$json_c2" \
+            --summary-trend-stats="p(50),p(95),p(99),max" \
+            bench/k6/http_stress.js >/dev/null 2>&1 || true
 
     {
         echo ""
@@ -353,7 +387,7 @@ run_lane_d_ws() {
     local json_d="$SCRATCH/k6_ws_${label}.json"
     # Include avg in summary stats — k6's Trend stores sub-ms accuracy in
     # avg even though percentile buckets are ms-quantized.
-    k6 run --quiet --summary-export="$json_d" \
+    BASE="$BASE" k6 run --quiet --summary-export="$json_d" \
         --summary-trend-stats="avg,p(50),p(95),p(99),max" \
         bench/k6/websocket.js >/dev/null 2>&1 || true
     {
@@ -420,8 +454,13 @@ bench_stack() {
         # remote log on failure so the orchestrator output is useful.
         local granian_log_env_remote=""
         [ "$stack" = "granian" ] && granian_log_env_remote="GRANIAN_LOG_TARGET=$BENCH_REMOTE_REPO/$SCRATCH/server_granian.log"
+        # Sprint 21 Phase B: propagate BB_BENCH_TASKSET so per-stack runs
+        # can pin workers to specific CPUs.  Empty (the default) means no
+        # pinning on the server side.
+        local taskset_env_remote=""
+        [ -n "${BB_BENCH_TASKSET:-}" ] && taskset_env_remote="BB_BENCH_TASKSET=$BB_BENCH_TASKSET"
         $BENCH_REMOTE_SSH "cd $BENCH_REMOTE_REPO && mkdir -p $SCRATCH && \
-            $granian_log_env_remote BIND_HOST=$BENCH_BIND_HOST BASE_PORT=$BASE_PORT \
+            $granian_log_env_remote $taskset_env_remote BIND_HOST=$BENCH_BIND_HOST BASE_PORT=$BASE_PORT \
             bash bench/peers/server_lifecycle_remote.sh start \
             '$stack' '$BASE_PORT' '$CERT' '$KEY' '$SCRATCH/server_${stack}.log'" \
             || {
@@ -438,7 +477,11 @@ bench_stack() {
         # buffering question altogether); other stacks use the shell pipe.
         local granian_log_env=""
         [ "$stack" = "granian" ] && granian_log_env="GRANIAN_LOG_TARGET=$(pwd)/$SCRATCH/server_granian.log"
+        # Sprint 21 Phase B: optional CPU pinning, same env var as remote mode.
+        local taskset_prefix=()
+        [ -n "${BB_BENCH_TASKSET:-}" ] && taskset_prefix=(taskset -c "$BB_BENCH_TASKSET")
         env $granian_log_env \
+            "${taskset_prefix[@]}" \
             bash bench/peers/run_peer.sh "$stack" "$BASE_PORT" "$CERT" "$KEY" \
             > "$SCRATCH/server_${stack}.log" 2>&1 &
         server_pid=$!
@@ -461,6 +504,16 @@ bench_stack() {
         return 0
     fi
     echo "$stack ready (spawn pid=$server_pid)."
+
+    # Sprint 24: short warmup burst to settle Python allocator, kernel
+    # TCP autotune, and TLS session-cache before any measured run.
+    # Output is discarded — this exists to remove transients, not to
+    # produce a number.  WARMUP=0 disables (back-compat with the
+    # Sprint 13–23 protocol).
+    if [ "${WARMUP:-15}" -gt 0 ]; then
+        echo "  warmup ${WARMUP}s ..."
+        wrk -t2 -c64 -d"${WARMUP}s" "$BASE/plaintext" >/dev/null 2>&1 || true
+    fi
 
     # Between-lane health check: if the server has died mid-run (hypercorn
     # has been observed to crash silently on large multiplexed responses),
@@ -494,6 +547,11 @@ bench_stack() {
     if contains_word "B-oha" $LANES; then
         echo "  Lane B-oha ..."
         run_lane_b_oha "$stack"
+        health_check || { kill_existing; return 0; }
+    fi
+    if contains_word "E-wrk" $LANES; then
+        echo "  Lane E-wrk (connection churn) ..."
+        run_lane_e_wrk "$stack"
         health_check || { kill_existing; return 0; }
     fi
     if contains_word "C" $LANES; then
@@ -549,6 +607,7 @@ except PackageNotFoundError: print('not installed')" 2>/dev/null || echo 'not in
     echo "Stacks:      $STACKS"
     echo "Lanes:       $LANES"
     echo "Duration:    $DURATION s per HTTP/1.1 scenario"
+    echo "Warmup:      $WARMUP s per stack (one /plaintext burst, output discarded)"
     echo ""
 } > "$OUT"
 

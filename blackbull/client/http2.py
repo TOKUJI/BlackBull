@@ -19,7 +19,7 @@ from ..protocol.frame_types import (DEFAULT_INITIAL_WINDOW_SIZE,
                                     DataFrameFlags, FrameBase, FrameTypes,
                                     HeaderFrameFlags, PseudoHeaders)
 from ..protocol.stream import Stream
-from ..server.headers import Headers, HeaderList
+from ..headers import Headers, HeaderList
 from ..server.recipient import AbstractReader, AsyncioReader
 from ..server.sender import AbstractWriter, AsyncioWriter, HTTP2Sender
 from ..utils import HTTP2 as _HTTP2_PREFACE

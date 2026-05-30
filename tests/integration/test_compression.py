@@ -12,6 +12,7 @@ import pytest
 
 from blackbull import BlackBull
 from blackbull.middleware.compression import Compression
+from .conftest import live_server
 
 
 _LARGE_BODY = b'x' * 500   # > 100-byte threshold
@@ -47,16 +48,8 @@ def _make_app() -> BlackBull:
 @pytest.fixture(scope="module")
 def live():
     app = _make_app()
-    app.create_server(port=0)
-    p = Process(target=lambda: asyncio.run(app.run()))
-    p.start()
-    app.wait_for_port(timeout=10.0)
-    yield app
-    app.stop()
-    p.terminate()
-    p.join(timeout=5)
-
-
+    with live_server(app) as handle:
+        yield handle
 def _base(app) -> str:
     return f'http://127.0.0.1:{app.port}'
 
@@ -97,3 +90,23 @@ async def test_below_threshold_not_compressed(live):
     assert r.status_code == 200
     assert 'content-encoding' not in r.headers
     assert r.content == b'hello'
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_content_length_matches_compressed_body(live):
+    """When upstream sets Content-Length on the uncompressed body, the
+    middleware must rewrite it to the compressed length — otherwise the
+    HTTP/1.1 keepalive framing breaks (client expects N uncompressed
+    bytes but receives the compressed body)."""
+    async with httpx.AsyncClient() as c:
+        r = await c.get(
+            f'{_base(live)}/large',
+            headers={'Accept-Encoding': 'gzip'},
+        )
+    assert r.status_code == 200
+    assert r.headers.get('content-encoding') == 'gzip'
+    declared = int(r.headers['content-length'])
+    # Compressed length must match the actual wire body, not the
+    # uncompressed body length.
+    assert declared == len(gzip.compress(_LARGE_BODY)) or declared < len(_LARGE_BODY)

@@ -5,7 +5,7 @@ import logging
 import time
 from dataclasses import dataclass, field
 
-from .constants import ASGIEvent
+from ..asgi import ASGIEvent
 # Imported at runtime (not under TYPE_CHECKING) so beartype can resolve
 # the ``'EventAggregator'`` forward reference on
 # ``_make_disconnect_detecting_receive``.  No circular-import risk —

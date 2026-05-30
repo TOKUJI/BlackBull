@@ -1,6 +1,6 @@
 import logging
 
-from ..server.constants import ASGIEvent
+from ..asgi import ASGIEvent
 
 logger = logging.getLogger(__name__)
 

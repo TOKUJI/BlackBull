@@ -1,6 +1,6 @@
 import ipaddress
 
-from ..server.headers import Headers
+from ..headers import Headers
 
 
 def _parse_forwarded(value: str) -> dict[str, str]:

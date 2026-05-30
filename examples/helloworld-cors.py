@@ -61,7 +61,6 @@ Nginx config (for reference)::
 """
 
 import argparse
-import asyncio
 import json
 from http import HTTPMethod
 
@@ -222,4 +221,4 @@ if __name__ == '__main__':
     print(f"    -H 'Origin: https://localhost' \\")
     print(f"    -H 'Access-Control-Request-Method: GET' -v 2>&1 | grep '< '")
 
-    asyncio.run(app.run(port=args.port))
+    app.run(port=args.port)

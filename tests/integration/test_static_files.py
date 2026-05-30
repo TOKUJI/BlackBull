@@ -13,6 +13,8 @@ import pytest
 
 from blackbull import BlackBull
 
+from .conftest import live_server
+
 
 def _make_app(root_dir: str) -> BlackBull:
     app = BlackBull()
@@ -28,14 +30,8 @@ def live(tmp_path_factory):
     (root / 'binary.bin').write_bytes(bytes(range(256)))
 
     app = _make_app(str(root))
-    app.create_server(port=0)
-    p = Process(target=lambda: asyncio.run(app.run()))
-    p.start()
-    app.wait_for_port(timeout=10.0)
-    yield app
-    app.stop()
-    p.terminate()
-    p.join(timeout=5)
+    with live_server(app) as handle:
+        yield handle
 
 
 def _base(app) -> str:

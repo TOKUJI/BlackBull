@@ -130,6 +130,9 @@ bench/results/baselines/pre_sprint9d/*
 bench/aws/.state
 bench/aws/.known_hosts
 bench/aws/*.pem
+# bench/httparena — local sandbox mounts (dataset + dev certs).  See
+# bench/httparena/README.md for the local smoke-test recipe.
+bench/httparena/_local/
 # peer benchmark harness — work-in-progress automated runner.
 # Kept on disk for future development; not committed until the socket-state
 # contamination is solved cleanly.
@@ -137,6 +140,16 @@ bench/peers/compare.sh
 
 # peer benchmark harness — private development notes
 *.private.md
+
+# Sprint-by-sprint bottleneck-attribution logs.  Kept local-only:
+# they contain point-in-time numbers for external reference servers
+# (uvicorn / hypercorn / granian / daphne / nginx) measured under
+# tuning chosen for BlackBull's diagnostic shape.  Those numbers
+# are correct as internal diagnostic-attribution evidence but
+# misrepresent the peer projects if cited as competitive benchmarks
+# detached from CHARACTERIZATION.md's framing.  CHARACTERIZATION.md
+# is the public artifact; these are not.
+bench/sprint-logs/
 
 # RFC conformance test output (kept directory, ignore data files)
 bench/conformance/results/*.txt

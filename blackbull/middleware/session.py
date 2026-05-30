@@ -53,7 +53,7 @@ import os
 import time
 from typing import Any
 
-from ..server.constants import ASGIEvent
+from ..asgi import ASGIEvent
 from .utils import as_middleware
 
 logger = logging.getLogger(__name__)

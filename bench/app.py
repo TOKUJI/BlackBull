@@ -167,6 +167,11 @@ def _parse_args():
     p.add_argument('--port', type=int, default=8443)
     p.add_argument('--cert', default='cert.pem')
     p.add_argument('--key',  default='key.pem')
+    p.add_argument('--no-tls', action='store_true',
+                   help='Listen on plain HTTP (no TLS).  Used by Sprint 27 profile '
+                        'lanes to isolate framework cost from TLS-stack cost; mirrors '
+                        'the common production topology where TLS is offloaded to '
+                        'nginx.  See bench/aws/profile_lanes.sh BB_TLS=0.')
     p.add_argument('--workers', type=int, default=None,
                    help='Worker processes (default BB_WORKERS env or 1; 0 = cpu_count)')
     p.add_argument('--stream-queue-depth', type=int, default=None,
@@ -178,14 +183,24 @@ def _parse_args():
 
 if __name__ == '__main__':
     args = _parse_args()
-    print(f'Starting bench server on https://localhost:{args.port}')
-    print(f'  cert={args.cert}  key={args.key}')
-    print('Routes: /ping  /1kb  /16kb  /echo  /ws  /metrics')
-    app.serve(
-        port=args.port,
-        certfile=args.cert,
-        keyfile=args.key,
-        workers=args.workers,
-        stream_queue_depth=args.stream_queue_depth,
-        ws_queue_depth=args.ws_queue_depth,
-    )
+    if args.no_tls:
+        print(f'Starting bench server on http://localhost:{args.port} (NO TLS)')
+        print('Routes: /ping  /1kb  /16kb  /echo  /ws  /metrics')
+        app.run(
+            port=args.port,
+            workers=args.workers,
+            stream_queue_depth=args.stream_queue_depth,
+            ws_queue_depth=args.ws_queue_depth,
+        )
+    else:
+        print(f'Starting bench server on https://localhost:{args.port}')
+        print(f'  cert={args.cert}  key={args.key}')
+        print('Routes: /ping  /1kb  /16kb  /echo  /ws  /metrics')
+        app.run(
+            port=args.port,
+            certfile=args.cert,
+            keyfile=args.key,
+            workers=args.workers,
+            stream_queue_depth=args.stream_queue_depth,
+            ws_queue_depth=args.ws_queue_depth,
+        )

@@ -85,9 +85,33 @@ set -euo pipefail
 cd "$HOME/BlackBull"
 
 echo "=== apt prerequisites ==="
-sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq
+# The us-east-1 regional EC2 mirror (us-east-1.ec2.archive.ubuntu.com)
+# has been observed serving a stale `noble-updates/universe` Packages.xz
+# whose size disagrees with its own InRelease declaration (size-mismatch
+# error from apt).  Switch sources to the global archive.ubuntu.com,
+# which is slightly slower but resilient to single-region sync issues.
+# Belt-and-braces: tolerate update failure (cached indexes from AMI
+# would also work, since python3-pip / build-essential / etc all live
+# in `noble` base, not `noble-updates`).
+echo "swapping apt sources us-east-1.ec2.archive.ubuntu.com -> archive.ubuntu.com"
+sudo sed -i 's|us-east-1\.ec2\.archive\.ubuntu\.com|archive.ubuntu.com|g' \
+    /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources 2>/dev/null || true
+_apt_update() {
+    sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq \
+        -o Acquire::Retries=3 \
+        -o Acquire::http::No-Cache=true
+}
+if ! _apt_update; then
+    echo "WARN: apt-get update returned non-zero; waiting 30s and retrying once" >&2
+    sleep 30
+    if ! _apt_update; then
+        echo "WARN: second apt-get update also failed; proceeding with cached indexes" >&2
+    fi
+fi
 sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
-    python3-pip python3-venv build-essential git curl ca-certificates openssl
+    -o Acquire::Retries=3 \
+    python3-pip python3-venv build-essential git curl ca-certificates openssl \
+    sysstat
 
 echo "=== Python venv ==="
 if [ ! -d .venv ]; then
@@ -121,8 +145,44 @@ echo "=== Install repo TLS cert into system CA store ==="
 sudo cp tests/cert.pem /usr/local/share/ca-certificates/blackbull-bench-rootCA.crt
 sudo update-ca-certificates >/dev/null
 
+echo "=== Loadgen TCP tuning (Lane E support) ==="
+# Lane E (Connection: close per request) exhausts the ephemeral source-port
+# pool within seconds at any meaningful rate.  Raise the ceiling and let
+# TIME_WAIT sockets be re-used immediately so Lane E measures stack
+# cost-per-connection-setup rather than the kernel's port-recycle rate.
+# In TOPO=single this host plays both roles; tuning runs unconditionally.
+sudo tee /etc/sysctl.d/99-blackbull-bench.conf >/dev/null <<'SYSCTL'
+# BlackBull benchmark loadgen tuning — installed by bench/aws/install.sh.
+# Required for Lane E (Connection: close per request) to measure stack
+# cost rather than kernel ephemeral-port-pool ceiling.  See
+# bench/CHARACTERIZATION.md "Lane E methodology" for rationale.
+net.ipv4.tcp_tw_reuse = 1
+net.ipv4.ip_local_port_range = 1024 65535
+SYSCTL
+sudo sysctl --quiet -p /etc/sysctl.d/99-blackbull-bench.conf
+
 echo "=== Smoke test ==="
 .venv/bin/python -m pytest -q tests/unit/ --timeout=30 -x 2>&1 | tail -5
+
+echo "=== Server CPU topology (Sprint 21 Phase B) ==="
+mkdir -p bench/results
+{
+    echo "# Server CPU topology — captured at bench install time."
+    echo "# Used to interpret multi-worker scaling: vCPUs that share the"
+    echo "# same 'CORE' column are SMT siblings of a single physical core."
+    echo
+    echo "## lscpu --extended"
+    lscpu --extended=CPU,CORE,SOCKET,ONLINE 2>/dev/null || true
+    echo
+    echo "## /proc/cpuinfo (processor / physical id / core id)"
+    grep -E '^processor|^physical id|^core id' /proc/cpuinfo || true
+    echo
+    echo "## /sys/devices/system/cpu/cpu*/topology/thread_siblings_list"
+    for f in /sys/devices/system/cpu/cpu[0-9]*/topology/thread_siblings_list; do
+        cpu="${f#/sys/devices/system/cpu/}"; cpu="${cpu%%/*}"
+        [ -r "$f" ] && printf '%s  %s\n' "$cpu" "$(cat "$f")"
+    done
+} > bench/results/server-cpu-topology.txt
 
 echo "=== Versions ==="
 .venv/bin/python --version
@@ -190,9 +250,33 @@ set -euo pipefail
 cd "$HOME/BlackBull"
 
 echo "=== apt prerequisites ==="
-sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq
+# The us-east-1 regional EC2 mirror (us-east-1.ec2.archive.ubuntu.com)
+# has been observed serving a stale `noble-updates/universe` Packages.xz
+# whose size disagrees with its own InRelease declaration (size-mismatch
+# error from apt).  Switch sources to the global archive.ubuntu.com,
+# which is slightly slower but resilient to single-region sync issues.
+# Belt-and-braces: tolerate update failure (cached indexes from AMI
+# would also work, since python3-pip / build-essential / etc all live
+# in `noble` base, not `noble-updates`).
+echo "swapping apt sources us-east-1.ec2.archive.ubuntu.com -> archive.ubuntu.com"
+sudo sed -i 's|us-east-1\.ec2\.archive\.ubuntu\.com|archive.ubuntu.com|g' \
+    /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources 2>/dev/null || true
+_apt_update() {
+    sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq \
+        -o Acquire::Retries=3 \
+        -o Acquire::http::No-Cache=true
+}
+if ! _apt_update; then
+    echo "WARN: apt-get update returned non-zero; waiting 30s and retrying once" >&2
+    sleep 30
+    if ! _apt_update; then
+        echo "WARN: second apt-get update also failed; proceeding with cached indexes" >&2
+    fi
+fi
 sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
-    python3-pip python3-venv build-essential git curl ca-certificates openssl
+    -o Acquire::Retries=3 \
+    python3-pip python3-venv build-essential git curl ca-certificates openssl \
+    sysstat
 
 echo "=== Python venv (loadgen only needs the test/bench libs + curl) ==="
 if [ ! -d .venv ]; then
@@ -217,6 +301,19 @@ fi
 echo "=== Install repo TLS cert into system CA store ==="
 sudo cp tests/cert.pem /usr/local/share/ca-certificates/blackbull-bench-rootCA.crt
 sudo update-ca-certificates >/dev/null
+
+echo "=== Loadgen TCP tuning (Lane E support) ==="
+# See server-side block for rationale.  This host is the loadgen in
+# TOPO=split, so the tuning is what actually matters for Lane E.
+sudo tee /etc/sysctl.d/99-blackbull-bench.conf >/dev/null <<'SYSCTL'
+# BlackBull benchmark loadgen tuning — installed by bench/aws/install.sh.
+# Required for Lane E (Connection: close per request) to measure stack
+# cost rather than kernel ephemeral-port-pool ceiling.  See
+# bench/CHARACTERIZATION.md "Lane E methodology" for rationale.
+net.ipv4.tcp_tw_reuse = 1
+net.ipv4.ip_local_port_range = 1024 65535
+SYSCTL
+sudo sysctl --quiet -p /etc/sysctl.d/99-blackbull-bench.conf
 
 echo "=== Smoke test ==="
 .venv/bin/python -m pytest -q tests/unit/ --timeout=30 -x 2>&1 | tail -5

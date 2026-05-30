@@ -14,6 +14,8 @@ import pytest
 from blackbull import BlackBull
 from blackbull.server.server import LifespanManager
 
+from .conftest import live_server
+
 
 def _make_startup_app(startup_counter) -> BlackBull:
     app = BlackBull()
@@ -50,14 +52,8 @@ def _run_lifespan_only(app, ready_flag, stop_flag, shutdown_flag):
 def live_startup():
     counter = Value('i', 0)
     app = _make_startup_app(counter)
-    app.create_server(port=0)
-    p = Process(target=lambda: asyncio.run(app.run()))
-    p.start()
-    app.wait_for_port(timeout=10.0)
-    yield app
-    app.stop()
-    p.terminate()
-    p.join(timeout=5)
+    with live_server(app) as handle:
+        yield handle
 
 
 @pytest.mark.integration

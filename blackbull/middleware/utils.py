@@ -9,7 +9,7 @@ Public API:
 from functools import wraps
 
 from ..response import Response
-from ..server.constants import ASGIEvent
+from ..asgi import ASGIEvent
 
 
 def _normalize_send(inner_send):

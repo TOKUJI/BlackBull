@@ -41,6 +41,7 @@ import atheris
 
 with atheris.instrument_imports():
     from blackbull import BlackBull, read_body
+    from blackbull.server import ASGIServer
     from blackbull.client import HTTP1Client, Scenario
     from blackbull.client.scenario_oracle import (
         ACCEPTED_CATEGORIES,
@@ -206,11 +207,12 @@ def main():
 
 if __name__ == "__main__":
     p = None
+    server = ASGIServer(app)
     try:
-        app.create_server(port=0)
-        p = Process(target=lambda: asyncio.run(app.run()))
+        server.open_socket(0)
+        p = Process(target=lambda: asyncio.run(server.run()))
         p.start()
-        wait_until_ready(f"http://localhost:{app.port}")
+        wait_until_ready(f"http://localhost:{server.port}")
         if _DIFFERENTIAL:
             print(f'[fuzz] differential mode: nginx {_NGINX_HOST}:{_NGINX_PORT}',
                   file=sys.stderr)
@@ -221,7 +223,7 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"Error occurred: {e}")
     finally:
-        app.stop()
+        server.close()
         if p is not None:
             p.terminate()
             p.join(timeout=5)
