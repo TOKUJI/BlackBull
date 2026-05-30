@@ -941,14 +941,18 @@ class HTTP2Actor(Actor):
         pp = self.factory.push_promise(parent_stream_id, push_stream_id, pseudo, regular)
         await self.send_frame(pp)
 
-        query = _urlparse(path).query
+        # ASGI: scope['path'] is the decoded path component (no query),
+        # scope['query_string'] is the raw query as bytes.  RFC 9113
+        # §8.3.1 puts both into the ``:path`` pseudo-header; split here.
+        _parsed_pushed = _urlparse(path)
         pushed_scope: dict = {
             'type': 'http',
             'http_version': '2',
             'method': 'GET',
-            'path': path,
+            'path': _parsed_pushed.path,
+            'raw_path': _parsed_pushed.path.encode('utf-8'),
             'scheme': parent_scope.get('scheme', 'https'),
-            'query_string': query.encode() if query else b'',
+            'query_string': _parsed_pushed.query.encode('utf-8'),
             'root_path': '',
             'client': parent_scope.get('client'),
             'headers': Headers([(k.encode() if isinstance(k, str) else k,

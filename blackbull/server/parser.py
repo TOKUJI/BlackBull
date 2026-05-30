@@ -1,5 +1,6 @@
 from functools import partial
 import traceback
+from urllib.parse import urlparse
 
 from ..protocol.stream import Stream
 from ..protocol.frame_types import FrameTypes, PseudoHeaders
@@ -19,14 +20,29 @@ def _make_scope():
         'method': 'HEAD',
         'scheme': 'https',
         'path': '',
-        'raw_path': '',
-        'query_string': '',
+        'raw_path': b'',
+        'query_string': b'',
         'root_path': '',
         'headers': [],
         'client': [],
         'server': [],
         'state': {},
     }
+
+
+def _split_h2_path(raw):
+    """Split an HTTP/2 ``:path`` pseudo into ASGI (path, raw_path, query_string).
+
+    RFC 9113 §8.3.1: ``:path`` carries the absolute-form request target
+    (path + optional query) joined by ``?``.  ASGI requires
+    ``scope['path']`` to be the decoded path component (str) and
+    ``scope['query_string']`` to be the raw query as ``bytes``.
+    """
+    if isinstance(raw, bytes):
+        raw = raw.decode('utf-8')
+    parsed = urlparse(raw)
+    path = parsed.path
+    return path, path.encode('utf-8'), parsed.query.encode('utf-8')
 
 
 class ParserFactory:
@@ -133,7 +149,8 @@ def parse_headers(frame) -> dict:
         scheme = frame.pseudo_headers.get(PseudoHeaders.SCHEME, 'https')
         scope['scheme'] = 'wss' if scheme == 'https' else 'ws'
         if path := frame.pseudo_headers.get(PseudoHeaders.PATH):
-            scope['path'] = path
+            scope['path'], scope['raw_path'], scope['query_string'] = \
+                _split_h2_path(path)
         scope['headers'] = Headers(frame.headers)
         scope['root_path'] = scope['headers'].get(
             b'x-forwarded-prefix', b'').decode('utf-8')
@@ -147,7 +164,8 @@ def parse_headers(frame) -> dict:
         scope['method'] = method
 
     if path := frame.pseudo_headers.get(PseudoHeaders.PATH):
-        scope['path'] = path
+        scope['path'], scope['raw_path'], scope['query_string'] = \
+            _split_h2_path(path)
 
     if scheme := frame.pseudo_headers.get(PseudoHeaders.SCHEME):
         scope['scheme'] = scheme

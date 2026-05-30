@@ -176,13 +176,21 @@ class Stream:
         pseudo = headers.pseudo_headers
         self.scope['method'] = pseudo.get(PseudoHeaders.METHOD, self.scope.get('method', 'GET'))
         self.scope['scheme'] = pseudo.get(PseudoHeaders.SCHEME, self.scope.get('scheme', 'https'))
-        self.scope['path']   = pseudo.get(PseudoHeaders.PATH,   self.scope.get('path', '/'))
 
-        if 'path' in self.scope:
-            parsed = urlparse(self.scope['path'])
-            self.scope['query_string'] = parsed.query
-            self.scope['root_path'] = ''
-            self.scope['client'] = None
+        # ASGI requires scope['path'] to be the *decoded path component*
+        # and scope['query_string'] to be the raw query *as bytes*.  The
+        # HTTP/2 ``:path`` pseudo-header carries both joined by ``?``
+        # (RFC 9113 §8.3.1), so split them before populating the scope.
+        # See bench/sprint-logs/sprint-27.md carry-forward.
+        raw_path = pseudo.get(PseudoHeaders.PATH, self.scope.get('path', '/'))
+        if isinstance(raw_path, bytes):
+            raw_path = raw_path.decode('utf-8')
+        parsed = urlparse(raw_path)
+        self.scope['path']         = parsed.path
+        self.scope['raw_path']     = parsed.path.encode('utf-8')
+        self.scope['query_string'] = parsed.query.encode('utf-8')
+        self.scope['root_path']    = ''
+        self.scope['client']       = None
 
         if PseudoHeaders.AUTHORITY in pseudo:
             self.scope['headers'].append(pseudo[PseudoHeaders.AUTHORITY].split(':'))
