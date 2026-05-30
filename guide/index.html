@@ -2791,6 +2791,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../api/blackbull/headers/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    headers
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../api/blackbull/logger/" class="md-nav__link">
         
   
@@ -2827,10 +2855,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_1_11" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_1_12" >
         
           
-          <label class="md-nav__link" for="__nav_3_1_11" id="__nav_3_1_11_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_3_1_12" id="__nav_3_1_12_label" tabindex="0">
             
   
   
@@ -2848,8 +2876,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_3_1_11_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_3_1_11">
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_3_1_12_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_1_12">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -3190,10 +3218,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_1_13" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_1_14" >
         
           
-          <label class="md-nav__link" for="__nav_3_1_13" id="__nav_3_1_13_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_3_1_14" id="__nav_3_1_14_label" tabindex="0">
             
   
   
@@ -3211,8 +3239,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_3_1_13_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_3_1_13">
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_3_1_14_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_1_14">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -3293,6 +3321,34 @@
     
   
     frame_types
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/blackbull/protocol/hpack_fastpath/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    hpack_fastpath
   
 
     
@@ -3469,10 +3525,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_1_17" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_1_18" >
         
           
-          <label class="md-nav__link" for="__nav_3_1_17" id="__nav_3_1_17_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_3_1_18" id="__nav_3_1_18_label" tabindex="0">
             
   
   
@@ -3490,8 +3546,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_3_1_17_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_3_1_17">
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_3_1_18_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_1_18">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -3620,14 +3676,14 @@
   
   
     <li class="md-nav__item">
-      <a href="../api/blackbull/server/headers/" class="md-nav__link">
+      <a href="../api/blackbull/server/deadline/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    headers
+    deadline
   
 
     
@@ -6029,7 +6085,7 @@ async def hello(scope, receive, send):
     await send(Response(b'Hello, world!'))
 
 if __name__ == '__main__':
-    asyncio.run(app.run(port=8000))
+    app.run(port=8000)
 </code></pre>
 <p>Every handler is an <code>async</code> function.  The full form receives <code>(scope, receive, send)</code>
 and calls <code>send</code> directly.  A simplified form omits those parameters and returns the
@@ -6507,7 +6563,7 @@ async def info(uid: uuid.UUID):
 if __name__ == '__main__':
     print(app.url_path_for('greet', name='Alice'))   # /greet/Alice
     print(app.url_path_for('double', n=21))           # /double/21
-    asyncio.run(app.run(port=8000))
+    app.run(port=8000)
 </code></pre>
 <p>Every converter type matches its handler annotation, so <code>validate()</code> succeeds and the server starts.</p>
 <h4 id="example-validation-fails-examplestyped_routes_failpy">Example — validation fails (<a href="https://github.com/TOKUJI/BlackBull/blob/master/examples/typed_routes_fail.py"><code>examples/typed_routes_fail.py</code></a>)</h4>
@@ -6528,7 +6584,7 @@ async def double(n: str):      # BUG: converter is int, annotation is str
 
 if __name__ == '__main__':
     try:
-        asyncio.run(app.run(port=8000))
+        app.run(port=8000)
     except* ConfigurationError as eg:
         for exc in eg.exceptions:
             print(f'ConfigurationError: {exc}')
@@ -7547,45 +7603,59 @@ async def on_disconnected(event):
 <h2 id="10-running-the-server">§10  Running the Server</h2>
 <p>BlackBull exposes three entry points, in increasing order of how
 "production-shaped" they are:</p>
-<pre><code class="language-python">import asyncio
-from blackbull import serve  # module-level function; works with any ASGI app
+<pre><code class="language-python">from blackbull import serve  # module-level function; works with any ASGI app
 
-# 1. In-Python, async — useful inside notebooks, test harnesses, embedded callers
-asyncio.run(app.run(port=8000))
-asyncio.run(app.run(port=8443, certfile='cert.pem', keyfile='key.pem'))
+# 1. In-Python — single-worker, suitable for development / `python myapp.py` scripts.
+app.run(port=8000)
+app.run(port=8443, certfile='cert.pem', keyfile='key.pem')
 
-# 2. In-Python, sync — typical for `python myapp.py` style scripts
-app.serve(port=8443, certfile='cert.pem', keyfile='key.pem', workers=4)
+# 2. In-Python — multi-worker (pre-forks N workers; master holds the listening sockets).
+app.run(port=8443, certfile='cert.pem', keyfile='key.pem', workers=4)
 
-# Development: hot-reload when *.py files change.
+# 3. Development: hot-reload when *.py files change.
 # Uses watchfiles + master-keeps-listening-sockets across worker recycles.
 # Requires the [reload] extra: pip install -e '.[reload]'
-app.serve(port=8000, reload=True)
+app.run(port=8000, reload=True)
 </code></pre>
-<pre><code class="language-bash"># 3. Console script — same flags work for any ASGI 3.0 callable.
+<pre><code class="language-bash"># 4. Console script — same flags work for any ASGI 3.0 callable.
 #    Useful for systemd / Docker / PaaS where a CLI is the deployment surface.
 blackbull myapp:app --bind 0.0.0.0:8443 \
     --certfile cert.pem --keyfile key.pem --workers 4
 
 # Auto-reload via the CLI:
 blackbull myapp:app --bind 127.0.0.1:8000 --reload
+
+# 5. Any external ASGI server — BlackBull instances are valid ASGI 3.0 callables.
+uvicorn myapp:app --port 8000
+hypercorn myapp:app --bind 0.0.0.0:8000
+granian --interface asgi myapp:app
 </code></pre>
 <p>The CLI accepts any <code>module:attribute</code> import path; the attribute may
 be a :class:<code>BlackBull</code> instance <em>or</em> a plain ASGI callable (which is
 how the benchmark harness loads <code>bench/peers/asgi_app.py</code> against
 every peer server including BlackBull).</p>
 <p><code>app.run()</code> signature:</p>
-<pre><code class="language-python">async def run(port=0, certfile=None, keyfile=None,
-              workers=1, max_connections=None,
-              stream_queue_depth=None, ws_queue_depth=None)
+<pre><code class="language-python">def run(port=0, certfile=None, keyfile=None,
+        workers=None, unix_path=None, inherited_fd=None,
+        max_connections=None, stream_queue_depth=None,
+        ws_queue_depth=None, reload=False, reload_paths=None)
 </code></pre>
-<p><code>app.serve()</code> is the synchronous counterpart; pass <code>reload=True</code> to
-enable auto-reload (only available via <code>serve()</code> because it needs a
-long-lived supervisor process around the event loop).  All three
-entry points ultimately call :func:<code>blackbull.serve</code>, which is the
-module-level function the CLI dispatches to — embedded users can
-import it directly to serve a raw ASGI callable without instantiating
-a :class:<code>BlackBull</code>.</p>
+<p><code>app.run()</code> is <strong>synchronous</strong> — it internalises <code>asyncio.run</code> so
+callers write <code>app.run(port=8000)</code> rather than
+<code>asyncio.run(app.run(...))</code>.  <code>reload=True</code> and <code>workers &gt; 1</code> both
+trigger the master-process path (long-lived supervisor around the worker
+pool).  The same logic is reachable through the module-level
+:func:<code>blackbull.serve</code> function — the CLI calls it after resolving the
+<code>module:attr</code> import.</p>
+<p>For embedded use under an existing event loop (rare), or to pre-bind a
+socket before forking a test subprocess, instantiate
+:class:<code>blackbull.server.ASGIServer</code> directly:</p>
+<pre><code class="language-python">from blackbull.server import ASGIServer
+
+server = ASGIServer(app, certfile='cert.pem', keyfile='key.pem')
+server.open_socket(8443)
+await server.run()
+</code></pre>
 <h3 id="101-workers-and-the-event-loop">§10.1  Workers and the event loop</h3>
 <p>By default <code>app.run()</code> runs one worker process with the standard asyncio
 event loop.  Two environment variables let you change that:</p>
@@ -7776,15 +7846,17 @@ PORT    = int(os.environ.get('PORT', 8000))
 before starting the server:</p>
 <pre><code class="language-python">import asyncio
 from blackbull import BlackBull
+from blackbull.server import ASGIServer
 
 app = BlackBull()
 
 # ... define routes ...
 
-# Create the server manually so we can configure mTLS before accepting connections
-app.create_server(certfile='cert.pem', keyfile='key.pem', port=8443)
-app.server.configure_mtls(ca_cert='ca.pem')   # enables CERT_REQUIRED
-asyncio.run(app.run())
+# Build the server manually so we can configure mTLS before accepting connections.
+server = ASGIServer(app, certfile='cert.pem', keyfile='key.pem')
+server.open_socket(8443)
+server.configure_mtls(ca_cert='ca.pem')   # enables CERT_REQUIRED
+asyncio.run(server.run())
 </code></pre>
 <p><code>configure_mtls</code> raises <code>RuntimeError</code> if called before TLS is configured (i.e.
 before <code>certfile</code> and <code>keyfile</code> are provided).</p>
@@ -8141,7 +8213,7 @@ if __name__ == '__main__':
     parser.add_argument('--cert', default=None)
     parser.add_argument('--key',  default=None)
     args = parser.parse_args()
-    asyncio.run(app.run(port=args.port, certfile=args.cert, keyfile=args.key))
+    app.run(port=args.port, certfile=args.cert, keyfile=args.key)
 </code></pre>
 <p>The working implementation of this skeleton is
 <a href="https://github.com/TOKUJI/BlackBull/blob/master/examples/SimpleTaskManager/app.py"><code>examples/SimpleTaskManager/app.py</code></a>.

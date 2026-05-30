@@ -536,6 +536,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#blackbull.asgi.ASGIEvent" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ASGIEvent
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.asgi.ResponseBody" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1008,6 +1019,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../headers/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    headers
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../logger/" class="md-nav__link">
         
   
@@ -1044,10 +1083,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_1_11" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_1_12" >
         
           
-          <label class="md-nav__link" for="__nav_3_1_11" id="__nav_3_1_11_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_3_1_12" id="__nav_3_1_12_label" tabindex="0">
             
   
   
@@ -1065,8 +1104,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_3_1_11_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_3_1_11">
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_3_1_12_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_1_12">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -1407,10 +1446,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_1_13" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_1_14" >
         
           
-          <label class="md-nav__link" for="__nav_3_1_13" id="__nav_3_1_13_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_3_1_14" id="__nav_3_1_14_label" tabindex="0">
             
   
   
@@ -1428,8 +1467,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_3_1_13_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_3_1_13">
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_3_1_14_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_1_14">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -1510,6 +1549,34 @@
     
   
     frame_types
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../protocol/hpack_fastpath/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    hpack_fastpath
   
 
     
@@ -1686,10 +1753,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_1_17" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_1_18" >
         
           
-          <label class="md-nav__link" for="__nav_3_1_17" id="__nav_3_1_17_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_3_1_18" id="__nav_3_1_18_label" tabindex="0">
             
   
   
@@ -1707,8 +1774,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_3_1_17_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_3_1_17">
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_3_1_18_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_1_18">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -1837,14 +1904,14 @@
   
   
     <li class="md-nav__item">
-      <a href="../server/headers/" class="md-nav__link">
+      <a href="../server/deadline/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    headers
+    deadline
   
 
     
@@ -2368,6 +2435,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#blackbull.asgi.ASGIEvent" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ASGIEvent
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.asgi.ResponseBody" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2440,11 +2518,18 @@
 
     <div class="doc doc-contents first">
 
-        <p>ASGI protocol event wrappers with typed property access.</p>
-<p>Provides dict-subclass wrappers for the two response event shapes so
-middleware can dispatch on Python type rather than string comparison.
-Both subclass <code>dict</code> so <code>isinstance(e, dict)</code> remains True — required
-for beartype and any ASGI send callable annotated <code>event: dict</code>.</p>
+        <p>ASGI protocol types: event-type string constants and typed event wrappers.</p>
+<p>Two responsibilities, both framework-side:</p>
+<ul>
+<li><code>ASGIEvent</code>: namespace of ASGI 3.0 event-type strings, used for
+  <code>match</code>/<code>case</code> dispatch and equality checks across both the
+  framework and (importing from here) the server stack.</li>
+<li><code>ResponseStart</code> / <code>ResponseBody</code>: dict-subclass wrappers for the
+  two outgoing response event shapes so middleware can dispatch on
+  Python type rather than string comparison.  Both subclass <code>dict</code>
+  so <code>isinstance(e, dict)</code> remains True — required for beartype and
+  any ASGI send callable annotated <code>event: dict</code>.</li>
+</ul>
 
 
 
@@ -2464,6 +2549,52 @@ for beartype and any ASGI send callable annotated <code>event: dict</code>.</p>
 
 
 
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="blackbull.asgi.ASGIEvent" class="doc doc-heading">
+            <code>ASGIEvent</code>
+
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+
+
+        <p>Namespace for ASGI protocol event type strings (ASGI 3.0 spec).</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
 
 <div class="doc doc-object doc-class">
 
