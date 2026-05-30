@@ -245,6 +245,25 @@ scenarios.
 Python version, server version, load-gen version, kernel TCP settings
 (`somaxconn`, `tcp_tw_reuse`).
 
+### Cascade-multiplier rule (gating optimisation sprints)
+
+Microbench numbers translate to throughput numbers at a multiplier that
+depends on the optimised path's share of py-spy samples on the target
+lane (typically B1 or B2).  Sprint 25 measured ~2-3× (path was a
+dominant slice); Sprint 26 measured ~0.21× (path had been reduced past
+dominance).  Predict the multiplier from the share **before** committing
+sprint scope:
+
+| Profile share of optimised path (B1/B2 self-time + inclusive) | Expected multiplier | Decision rule |
+|---|---|---|
+| ≥ 30 % | 2-3× (cascade) | A ≥ 10 % per-call microbench reduction is worth a sprint |
+| 10-30 % | ~1× | Microbench % ≈ throughput % |
+| < 10 % | sub-cascade (~0.2-0.5×) | Don't pursue unless the change is trivial or buys something other than throughput (clarity, correctness) |
+
+Capture the share with `bench/aws/profile_lanes.sh` (Sprint 27 — wrk-driven
+py-spy on EC2 split topology, one speedscope JSON per lane).  The
+"Left Heavy" view in speedscope.app reads off the share directly.
+
 ## Known limitations
 
 | Limitation | Mitigation |
