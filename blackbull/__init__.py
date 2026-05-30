@@ -22,6 +22,18 @@ granian, …) since ``BlackBull.__call__`` is ASGI 3.0 compliant.
 import logging
 logging.getLogger('blackbull').addHandler(logging.NullHandler())
 
+# Single source of truth for the version is pyproject.toml; expose it at
+# runtime via importlib.metadata so the two never drift.  Falls back to a
+# sentinel only when blackbull is being imported from a source checkout
+# without `pip install -e .` (the test runners and `bench/app.py` both
+# install editably, so this path is exercised only in unusual setups).
+from importlib.metadata import PackageNotFoundError, version as _pkg_version
+
+try:
+    __version__ = _pkg_version('blackbull')
+except PackageNotFoundError:
+    __version__ = '0.0.0+unknown'
+
 from .app import BlackBull, serve
 from .headers import Headers
 from .request import read_body, parse_cookies
