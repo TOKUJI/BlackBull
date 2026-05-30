@@ -182,8 +182,16 @@ class Compression:
             compressed = await loop.run_in_executor(None, compressor, body)
         else:
             compressed = compressor(body)
-        existing = list(start_event.get('headers', []))
+        # The compressed body is a different size; strip any upstream
+        # content-length and replace it with the post-compression length.
+        # Leaving the original value behind breaks HTTP/1.1 keepalive
+        # framing (client expects N bytes but receives the compressed
+        # body) and is rejected as a protocol error by strict HTTP/2
+        # clients.
+        existing = [(k, v) for k, v in start_event.get('headers', [])
+                    if k.lower() != b'content-length']
         existing.append((b'content-encoding', codec_name.encode()))
+        existing.append((b'content-length', str(len(compressed)).encode()))
         await send({**start_event, 'headers': existing})
         await send({'type': ASGIEvent.HTTP_RESPONSE_BODY, 'body': compressed, 'more_body': False})
 
