@@ -1,0 +1,25 @@
+{
+  "display_name": "blackbull",
+  "language": "Python",
+  "type": "production",
+  "engine": "blackbull",
+  "description": "BlackBull — from-scratch async ASGI 3.0 framework with native HTTP/1.1, HTTP/2 and WebSocket implementations (no httptools, no uvicorn, no hypercorn).",
+  "repo": "https://github.com/TOKUJI/BlackBull",
+  "enabled": false,
+  "tests": [
+    "baseline",
+    "pipelined",
+    "limited-conn",
+    "json",
+    "json-comp",
+    "json-tls",
+    "upload",
+    "static",
+    "baseline-h2",
+    "baseline-h2c",
+    "static-h2",
+    "json-h2c",
+    "echo-ws"
+  ],
+  "maintainers": []
+}

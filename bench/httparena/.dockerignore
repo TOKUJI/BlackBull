@@ -1,0 +1,8 @@
+# Keep image small — exclude everything except the source tree + framework files.
+**
+!pyproject.toml
+!blackbull/**
+!bench/httparena/app.py
+!bench/httparena/launcher.py
+**/__pycache__/
+**/*.pyc
