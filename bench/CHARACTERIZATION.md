@@ -294,6 +294,8 @@ Cross-sprint coverage:
   noise column), Lane E, HPACK extension.
 - **Sprint 25**: `_parse` URL splitter + header-loop regex
   validators; multi-pair EC2 harness (`full_ab.sh`).
+- **Sprint 26**: deadline subsystem rework — per-arm
+  `loop.call_later` replaced by per-process tick scanner.
 
 ## File layout (target)
 

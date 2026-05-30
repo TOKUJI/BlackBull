@@ -184,12 +184,18 @@ _start_blackbull() {
 }
 
 _start_uvicorn() {
+    # Pin --loop uvloop explicitly.  uvicorn auto-detects uvloop when
+    # installed and silently chooses it, which was the case in
+    # Sprints 23–25 — but the silent default made the pair.log
+    # `uvloop=0` label misleading for the uvicorn bookend.  Pinning
+    # makes the choice visible and reproducible.
     ssh "${SSH_OPTS_LOCAL[@]}" "$SERVER_REMOTE" \
         "cd $REMOTE_REPO && source .venv/bin/activate &&
          (nohup .venv/bin/uvicorn bench.peers.asgi_app:app \
             --host 0.0.0.0 --port 8443 \
             --ssl-certfile tests/cert.pem --ssl-keyfile tests/key.pem \
             --workers 1 --no-access-log \
+            --loop uvloop \
             > /tmp/uvi.log 2>&1 < /dev/null &)
          sleep 4
          ss -tln | grep -q 8443 && echo OK" >/dev/null
@@ -212,7 +218,16 @@ _run_phase() {
     local kind="$2"       # 'uvicorn' | 'blackbull'
     local uvloop="${3:-0}"
 
-    plog ">>> phase $phase (kind=$kind, uvloop=$uvloop)"
+    # The `uvloop` arg is meaningful only for kind=blackbull (sets
+    # BB_UVLOOP=$uvloop).  For kind=uvicorn it's ignored; uvicorn is
+    # pinned to --loop uvloop by `_start_uvicorn` regardless of the
+    # arg.  Log honestly to avoid the Sprint 26 close-out confusion
+    # where "uvloop=0" suggested uvicorn was running without uvloop.
+    case "$kind" in
+        uvicorn)   plog ">>> phase $phase (kind=$kind, loop=uvloop[pinned])" ;;
+        blackbull) plog ">>> phase $phase (kind=$kind, uvloop=$uvloop)" ;;
+        *)         plog ">>> phase $phase (kind=$kind)" ;;
+    esac
     local pdir="$OUT_DIR/$phase"
     mkdir -p "$pdir"
 
@@ -281,9 +296,19 @@ _deploy_snapshot() {
 }
 
 # ===== A/B sequence =====
-# State at entry: server has BASELINE code (HEAD bytes) from install.sh.
+# State at entry depends on BASE_REF mode:
+#   * BASE_REF=HEAD (default): server has BASELINE code (HEAD bytes)
+#     from install.sh; the first blackbull-base phase needs no rsync.
+#   * BASE_REF=<commit>:       server has TREATMENT code (HEAD bytes)
+#     from install.sh; we must deploy SNAP_BASE before the first
+#     blackbull-base phase.
 
 _run_phase uvicorn-pre uvicorn
+
+if [ "${BASE_REF:-HEAD}" != "HEAD" ]; then
+    plog "BASE_REF=$BASE_REF: deploying SNAP_BASE over treatment-on-server before first base phase"
+    _deploy_snapshot "$SNAP_BASE"
+fi
 
 _run_phase blackbull-base-u0 blackbull 0
 

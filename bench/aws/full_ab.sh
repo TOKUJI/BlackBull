@@ -167,53 +167,131 @@ WATCHDOG_PID=$!
 disown $WATCHDOG_PID
 
 # ----- snapshot baseline vs treatment file states -----
-# Treatment = current working tree (the modifications under test).
-# Baseline  = git HEAD bytes for the same files.
-log "snapshotting baseline vs treatment file contents"
+# Two modes:
+#  * BASE_REF unset / "HEAD" (default) — Treatment = current working tree,
+#    Baseline = HEAD bytes.  Used while iterating on uncommitted changes.
+#  * BASE_REF=<commit> — Treatment = HEAD bytes (latest commit),
+#    Baseline = <commit> bytes.  Used for cumulative sprint
+#    re-measures where multiple optimisation commits are already
+#    landed and we want to compare the cumulative HEAD against a
+#    historical baseline (e.g. last sprint's close commit).
+BASE_REF="${BASE_REF:-HEAD}"
+log "snapshotting baseline vs treatment file contents (BASE_REF=$BASE_REF)"
 SNAP_BASE="$OUT_ROOT/snap-baseline"
 SNAP_TRT="$OUT_ROOT/snap-treatment"
 mkdir -p "$SNAP_BASE" "$SNAP_TRT"
 
-TREATMENT_FILES=$(cd "$REPO_ROOT" && git diff --name-only -- 'blackbull/' 'tests/' || echo)
-if [ -z "$TREATMENT_FILES" ]; then
-    die "no modified files under blackbull/ or tests/ — nothing to A/B"
+if [ "$BASE_REF" = "HEAD" ]; then
+    TREATMENT_FILES=$(cd "$REPO_ROOT" && git diff --name-only -- 'blackbull/' 'tests/' || echo)
+    if [ -z "$TREATMENT_FILES" ]; then
+        die "no modified files under blackbull/ or tests/ — nothing to A/B"
+    fi
+    log "treatment files (working tree vs HEAD): $TREATMENT_FILES"
+    for f in $TREATMENT_FILES; do
+        mkdir -p "$SNAP_BASE/$(dirname "$f")" "$SNAP_TRT/$(dirname "$f")"
+        (cd "$REPO_ROOT" && git show "HEAD:$f" > "$SNAP_BASE/$f")
+        cp "$REPO_ROOT/$f" "$SNAP_TRT/$f"
+    done
+    # Temporarily revert to baseline for the install.sh rsync.
+    log "checking out baseline file contents for initial deploy"
+    ( cd "$REPO_ROOT" && git checkout -- $TREATMENT_FILES )
+else
+    # Resolve BASE_REF to a sha for the log.
+    BASE_SHA=$(cd "$REPO_ROOT" && git rev-parse --short "$BASE_REF")
+    HEAD_SHA=$(cd "$REPO_ROOT" && git rev-parse --short HEAD)
+    TREATMENT_FILES=$(cd "$REPO_ROOT" && git diff --name-only "$BASE_REF" HEAD -- 'blackbull/' 'tests/' || echo)
+    if [ -z "$TREATMENT_FILES" ]; then
+        die "no files differ between $BASE_REF and HEAD under blackbull/ or tests/ — nothing to A/B"
+    fi
+    log "treatment files ($BASE_SHA → $HEAD_SHA): $TREATMENT_FILES"
+    for f in $TREATMENT_FILES; do
+        mkdir -p "$SNAP_BASE/$(dirname "$f")" "$SNAP_TRT/$(dirname "$f")"
+        (cd "$REPO_ROOT" && git show "$BASE_REF:$f" > "$SNAP_BASE/$f")
+        (cd "$REPO_ROOT" && git show "HEAD:$f"      > "$SNAP_TRT/$f")
+    done
+    # Working tree is at HEAD = treatment.  install.sh will deploy
+    # treatment first; _pair_bench.sh reverts to SNAP_BASE before the
+    # first base phase (see DEPLOY_BASE_BEFORE_FIRST_PHASE handling).
+    log "BASE_REF mode: working tree already at HEAD (=treatment); install.sh deploys treatment; first base phase reverts via rsync"
 fi
-log "treatment files: $TREATMENT_FILES"
-for f in $TREATMENT_FILES; do
-    mkdir -p "$SNAP_BASE/$(dirname "$f")" "$SNAP_TRT/$(dirname "$f")"
-    (cd "$REPO_ROOT" && git show "HEAD:$f" > "$SNAP_BASE/$f")
-    cp "$REPO_ROOT/$f" "$SNAP_TRT/$f"
-done
-
-# Temporarily revert to baseline for the install.sh rsync.
-# We'll restore the treatment files later, but the initial deploy
-# is BASELINE.
-log "checking out baseline file contents for initial deploy"
-( cd "$REPO_ROOT" && git checkout -- $TREATMENT_FILES )
 
 # ----- helper: drive a pair through up.sh + install.sh -----
+#
+# Logs the exit code + last 20 lines of up.log / install.log on
+# failure so root-cause analysis doesn't require spelunking
+# pair-private files (Sprint 26 close-out finding).
+#
+# `up.sh` failures are sometimes transient: a single `aws ec2 wait`
+# flake will fail one pair while every other run on the same code
+# succeeds.  Retry up.sh once with a brief teardown in between
+# before declaring the pair lost.
+_log_tail_into_orchestrator() {
+    local label="$1" logfile="$2"
+    if [ -f "$logfile" ]; then
+        warn "$label — last 20 lines of $(basename "$logfile"):"
+        tail -20 "$logfile" | sed 's/^/    /' | tee -a "$OUT_ROOT/orchestrator.log"
+    fi
+}
+
+_run_up() {
+    local i="$1" pdir="$2"
+    TOPO=split \
+    STATE_FILE="$pdir/.state" \
+    KEY_NAME="blackbull-bench-key-pair${i}" \
+    SG_NAME="blackbull-bench-sg-pair${i}" \
+    PLACEMENT_GROUP_NAME="blackbull-bench-cpg-pair${i}" \
+    timeout 600 bash "$AWS_DIR/up.sh" > "$pdir/up.log" 2>&1
+}
+
+_teardown_partial_pair() {
+    local i="$1" pdir="$2"
+    if [ -f "$pdir/.state" ]; then
+        STATE_FILE="$pdir/.state" \
+        KEY_NAME="blackbull-bench-key-pair${i}" \
+        SG_NAME="blackbull-bench-sg-pair${i}" \
+        PLACEMENT_GROUP_NAME="blackbull-bench-cpg-pair${i}" \
+        timeout 180 bash "$AWS_DIR/down.sh" >> "$pdir/teardown.log" 2>&1 || true
+    fi
+}
+
 _provision_pair() {
     local i="$1"
     local pdir="$WORK_ROOT/pair-$i"
     mkdir -p "$pdir"
 
-    log "pair $i: up.sh"
-    TOPO=split \
-    STATE_FILE="$pdir/.state" \
-    KEY_NAME="blackbull-bench-key-pair${i}" \
-    SG_NAME="blackbull-bench-sg-pair${i}" \
-    PLACEMENT_GROUP_NAME="blackbull-bench-cpg-pair${i}" \
-    timeout 600 bash "$AWS_DIR/up.sh" \
-        > "$pdir/up.log" 2>&1 || { warn "pair $i: up.sh failed"; return 1; }
+    local rc=0
+    log "pair $i: up.sh (attempt 1)"
+    _run_up "$i" "$pdir" || rc=$?
+    if [ "$rc" -ne 0 ]; then
+        warn "pair $i: up.sh attempt 1 failed (exit $rc); tearing down partial state and retrying once"
+        _log_tail_into_orchestrator "pair $i up.sh attempt 1" "$pdir/up.log"
+        _teardown_partial_pair "$i" "$pdir"
+        # Save attempt-1 log so the retry doesn't overwrite it.
+        mv "$pdir/up.log" "$pdir/up.attempt1.log" 2>/dev/null || true
+        sleep 30
+        rc=0
+        log "pair $i: up.sh (attempt 2)"
+        _run_up "$i" "$pdir" || rc=$?
+        if [ "$rc" -ne 0 ]; then
+            warn "pair $i: up.sh attempt 2 also failed (exit $rc); abandoning pair"
+            _log_tail_into_orchestrator "pair $i up.sh attempt 2" "$pdir/up.log"
+            return 1
+        fi
+    fi
 
     log "pair $i: install.sh (deploys BASELINE since treatment files reverted)"
+    rc=0
     TOPO=split \
     STATE_FILE="$pdir/.state" \
     KEY_NAME="blackbull-bench-key-pair${i}" \
     SG_NAME="blackbull-bench-sg-pair${i}" \
     PLACEMENT_GROUP_NAME="blackbull-bench-cpg-pair${i}" \
-    timeout 900 bash "$AWS_DIR/install.sh" \
-        > "$pdir/install.log" 2>&1 || { warn "pair $i: install.sh failed"; return 1; }
+    timeout 900 bash "$AWS_DIR/install.sh" > "$pdir/install.log" 2>&1 || rc=$?
+    if [ "$rc" -ne 0 ]; then
+        warn "pair $i: install.sh failed (exit $rc)"
+        _log_tail_into_orchestrator "pair $i install.sh" "$pdir/install.log"
+        return 1
+    fi
 
     log "pair $i: provisioned"
 }
@@ -265,6 +343,7 @@ for i in "${SURVIVING_PAIRS[@]}"; do
     DURATION="$DURATION" \
     RUNS_WRK="$RUNS_WRK" \
     HEALTH_TIMEOUT="$HEALTH_TIMEOUT" \
+    BASE_REF="$BASE_REF" \
     bash "$AWS_DIR/_pair_bench.sh" &
     BENCH_PIDS+=($!)
 done

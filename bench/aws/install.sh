@@ -85,8 +85,31 @@ set -euo pipefail
 cd "$HOME/BlackBull"
 
 echo "=== apt prerequisites ==="
-sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq
+# The us-east-1 regional EC2 mirror (us-east-1.ec2.archive.ubuntu.com)
+# has been observed serving a stale `noble-updates/universe` Packages.xz
+# whose size disagrees with its own InRelease declaration (size-mismatch
+# error from apt).  Switch sources to the global archive.ubuntu.com,
+# which is slightly slower but resilient to single-region sync issues.
+# Belt-and-braces: tolerate update failure (cached indexes from AMI
+# would also work, since python3-pip / build-essential / etc all live
+# in `noble` base, not `noble-updates`).
+echo "swapping apt sources us-east-1.ec2.archive.ubuntu.com -> archive.ubuntu.com"
+sudo sed -i 's|us-east-1\.ec2\.archive\.ubuntu\.com|archive.ubuntu.com|g' \
+    /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources 2>/dev/null || true
+_apt_update() {
+    sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq \
+        -o Acquire::Retries=3 \
+        -o Acquire::http::No-Cache=true
+}
+if ! _apt_update; then
+    echo "WARN: apt-get update returned non-zero; waiting 30s and retrying once" >&2
+    sleep 30
+    if ! _apt_update; then
+        echo "WARN: second apt-get update also failed; proceeding with cached indexes" >&2
+    fi
+fi
 sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
+    -o Acquire::Retries=3 \
     python3-pip python3-venv build-essential git curl ca-certificates openssl \
     sysstat
 
@@ -227,8 +250,31 @@ set -euo pipefail
 cd "$HOME/BlackBull"
 
 echo "=== apt prerequisites ==="
-sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq
+# The us-east-1 regional EC2 mirror (us-east-1.ec2.archive.ubuntu.com)
+# has been observed serving a stale `noble-updates/universe` Packages.xz
+# whose size disagrees with its own InRelease declaration (size-mismatch
+# error from apt).  Switch sources to the global archive.ubuntu.com,
+# which is slightly slower but resilient to single-region sync issues.
+# Belt-and-braces: tolerate update failure (cached indexes from AMI
+# would also work, since python3-pip / build-essential / etc all live
+# in `noble` base, not `noble-updates`).
+echo "swapping apt sources us-east-1.ec2.archive.ubuntu.com -> archive.ubuntu.com"
+sudo sed -i 's|us-east-1\.ec2\.archive\.ubuntu\.com|archive.ubuntu.com|g' \
+    /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources 2>/dev/null || true
+_apt_update() {
+    sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq \
+        -o Acquire::Retries=3 \
+        -o Acquire::http::No-Cache=true
+}
+if ! _apt_update; then
+    echo "WARN: apt-get update returned non-zero; waiting 30s and retrying once" >&2
+    sleep 30
+    if ! _apt_update; then
+        echo "WARN: second apt-get update also failed; proceeding with cached indexes" >&2
+    fi
+fi
 sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
+    -o Acquire::Retries=3 \
     python3-pip python3-venv build-essential git curl ca-certificates openssl \
     sysstat
 
