@@ -13,7 +13,13 @@ authors = [
     { name = "TOKUJI" }
 ]
 
-license = { file = "LICENSE" }
+# PEP 639 license declaration — SPDX identifier in the field, LICENSE
+# file listed in license-files.  Replaces the older `license = {file =
+# "LICENSE"}` form which embedded the entire 10 KB license text into
+# the metadata's License field.  PEP 639 says SPDX supersedes the
+# Trove "License ::" classifier, so the classifier is removed below.
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 
 keywords = ["asgi", "asyncio", "http", "http2", "websocket", "web", "framework", "server"]
 
@@ -21,7 +27,6 @@ classifiers = [
     "Development Status :: 4 - Beta",
     "Framework :: AsyncIO",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: Apache Software License",
     "Operating System :: POSIX :: Linux",
     "Operating System :: MacOS",
     "Programming Language :: Python :: 3",

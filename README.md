@@ -14,7 +14,7 @@ deployable, zero C-extension footprint outside the standard library.
 - **One package, one process** — the framework *is* the server.  No
   separate ASGI runner; `app.run()` opens the socket and serves.
 - **HTTP/1.1 + HTTP/2 + WebSocket** all implemented natively (RFC 9112
-  for H/1, RFC 9113 for H/2, RFC 6455 + RFC 8441 for WebSocket).
+  for H/1, RFC 9113 for H/2, RFC 6455 for WebSocket).
 - **Pure-Python identity** — no `httptools`, no `uvloop` dependency
   (uvloop available as an optional `[speed]` extra).
 - **Conformance-tested** against `h2spec`, Autobahn, and a
