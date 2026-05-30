@@ -315,6 +315,14 @@ Cross-sprint coverage:
   validators; multi-pair EC2 harness (`full_ab.sh`).
 - **Sprint 26**: deadline subsystem rework — per-arm
   `loop.call_later` replaced by per-process tick scanner.
+- **Sprint 27**: methodology pin — cascade-multiplier rule codified
+  (`## Methodology`); per-lane py-spy harness
+  (`bench/aws/profile_lanes.sh`); ZeroVer + CHANGELOG seed;
+  HttpArena local-only environment scaffold (`bench/httparena/`);
+  ASGI correctness fixes (H/2 `:path` split, Compression
+  `Content-Length` rewrite) surfaced via HttpArena prep.  No
+  optimisation Phase 2 — Phase 1 data placed the original Sprint 28
+  candidate under deployment-posture conditions.
 
 ## File layout (target)
 

@@ -24,7 +24,72 @@ so the editable install's metadata catches up.
 
 ## [Unreleased]
 
-(Nothing yet — Sprint 27 work in progress, will land as 0.27.0.)
+(Nothing yet — next sprint pending.)
+
+---
+
+## [0.27.0] — 2026-05-30
+
+Sprint 27 — methodology pin (cascade-multiplier rule) + HttpArena
+local-only integration prep.  No optimisation Phase 2: the new
+profile data placed the original Sprint 28 candidate (SSL/TLS Python
+glue) under deployment-posture conditions and the `httptools` target
+sub-cascade, both reclassified accordingly.
+
+### Added
+- **Cascade-multiplier rule** pinned in
+  [`bench/CHARACTERIZATION.md ## Methodology`](bench/CHARACTERIZATION.md)
+  as a sprint-gating mechanism.  Profile-share table maps per-call
+  microbench delta → expected B-lane throughput delta.  Replaces the
+  ad-hoc "≈2-3×" rule of thumb with three explicit bands
+  (≥ 30 %, 10-30 %, < 10 %).
+- **`bench/aws/profile_lanes.sh`** — wrk-driven per-lane py-spy
+  capture on EC2 split topology.  `BB_TLS=0` opt-in for cleartext
+  profiling (mirrors nginx-fronted production posture).  Lessons
+  baked in: `(...&)` subshell form for nohup re-parenting, cold-cache
+  warmup discard before the measured wrk pass.
+- **`bench/app.py --no-tls`** flag — listens cleartext for the
+  TLS-off profiling lane.
+- **`bench/httparena/`** scaffold (Task 4) — HttpArena
+  `frameworks/blackbull/`-shaped Docker container with two-process
+  launcher (cleartext :8080, TLS :8081), `meta.json` declaring 13
+  profiles, integration with the existing `Compression` +
+  `StaticFiles` middleware.  Verified per-process 1.5-7.2× faster
+  than FastAPI/uvicorn on H/1.1 + static paths; HTTP/2 served (vs
+  uvicorn's zero h2c).  Not enabled for leaderboard submission.
+
+### Fixed
+- **HTTP/2 query-string scope (`scope['path']`)** — the H/2 `:path`
+  pseudo-header was copied verbatim into `scope['path']` including
+  any `?query`, and `scope['query_string']` was set to `str` where
+  ASGI requires `bytes`.  Router pattern `/json/{count:int}` then
+  failed to match `/json/3?m=2.0` and returned 404.  Centralised the
+  split into a `_split_h2_path()` helper called from `parse_headers`
+  (http + RFC 8441 websocket branches), `Stream.update_scope`, and
+  the push-promise scope builder in `http2_actor.py`.  HTTP/1.1 was
+  unaffected (its parser already partitions path + query at
+  request-line decode time).
+- **`Compression` middleware Content-Length** — when the upstream
+  handler sets `Content-Length` on the uncompressed body (e.g.
+  `StaticFiles`), the middleware previously left the original value
+  in place after compressing.  Broke HTTP/1.1 keepalive framing and
+  triggered protocol errors on strict HTTP/2 clients.  Now strips
+  upstream `Content-Length` and writes the post-compression length.
+
+### Methodology
+- Sprint 28 anchor flipped from `httptools` to **deployment-posture
+  dependent**.  Re-profile (`0c80080`, B1/B3 EC2 c7i.xlarge, py-spy
+  200 Hz) showed:
+  - With BlackBull terminating TLS: SSL/TLS Python glue ~15 %
+    self-time → cascade-rule prediction +7-8 % B1 if coalesced.
+  - With TLS terminated upstream (`--no-tls`, nginx-fronted
+    posture): SSL/TLS slice **disappears** — no single Python slice
+    exceeds ~5 % self-time post-Sprint-26.
+  - `_parse` (the `httptools` target) was ~2 % self-time in both
+    topologies — sub-cascade per the new rule.  Decommissioned as a
+    Sprint 28 candidate; pure-Python H1 parser kept as identity.
+- HTTP/3 / QUIC confirmed as **intentionally out of scope** —
+  removed from Sprint 28 candidates.
 
 ---
 
