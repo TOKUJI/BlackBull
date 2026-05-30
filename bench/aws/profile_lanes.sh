@@ -27,11 +27,19 @@
 #   WARMUP        warmup seconds before measurement     (default: 15)
 #   PROFILE_RATE  py-spy sampling rate in Hz            (default: 200)
 #   BB_UVLOOP     event-loop posture (0 or 1)           (default: 0 — pure-Python identity)
+#   BB_TLS        TLS posture (1 = HTTPS:8443; 0 = HTTP:8000, no TLS)
+#                                                       (default: 1 — matches production
+#                                                        wrk lanes; set 0 to isolate
+#                                                        framework cost from TLS-stack
+#                                                        cost in the typical
+#                                                        nginx-fronted production
+#                                                        topology where TLS is
+#                                                        terminated by nginx).
 #
 # Output:
-#   bench/results/aws/sprint27-phase1-<ts>/<lane>/profile.json   speedscope
-#   bench/results/aws/sprint27-phase1-<ts>/<lane>/profile.log    py-spy stderr
-#   bench/results/aws/sprint27-phase1-<ts>/<lane>/wrk.txt        wrk output
+#   bench/results/aws/sprint27-phase1[-tls<n>]-<ts>/<lane>/profile.json   speedscope
+#   bench/results/aws/sprint27-phase1[-tls<n>]-<ts>/<lane>/profile.log    py-spy stderr
+#   bench/results/aws/sprint27-phase1[-tls<n>]-<ts>/<lane>/wrk.txt        wrk output
 #
 # Speedscope JSON viewable at https://www.speedscope.app — drag-and-drop.
 
@@ -52,15 +60,26 @@ DURATION="${DURATION:-60}"
 WARMUP="${WARMUP:-15}"
 PROFILE_RATE="${PROFILE_RATE:-200}"
 BB_UVLOOP="${BB_UVLOOP:-0}"
+BB_TLS="${BB_TLS:-1}"
 
 TS="$(date -u +%Y%m%d-%H%M%SZ)"
-LOCAL_DEST="$REPO_ROOT/bench/results/aws/sprint27-phase1-$TS"
+if [ "$BB_TLS" = "0" ]; then
+    LOCAL_DEST="$REPO_ROOT/bench/results/aws/sprint27-phase1-tls0-$TS"
+    PORT=8000
+    SCHEME="http"
+    SERVER_CLI_ARGS="--port $PORT --no-tls"
+else
+    LOCAL_DEST="$REPO_ROOT/bench/results/aws/sprint27-phase1-$TS"
+    PORT=8443
+    SCHEME="https"
+    SERVER_CLI_ARGS="--port $PORT --cert tests/cert.pem --key tests/key.pem"
+fi
 mkdir -p "$LOCAL_DEST"
 
 SERVER_REMOTE="$SSH_USER@$SERVER_PUBLIC_IP"
 LOADGEN_REMOTE="$SSH_USER@$LOADGEN_PUBLIC_IP"
 REMOTE_REPO="/home/$SSH_USER/BlackBull"
-BASE="https://bench-server.internal:8443"
+BASE="${SCHEME}://bench-server.internal:${PORT}"
 
 echo "=== profile_lanes.sh ==="
 echo "  destination: $LOCAL_DEST"
@@ -68,6 +87,7 @@ echo "  lanes:       $LANES"
 echo "  duration:    ${DURATION}s + ${WARMUP}s warmup"
 echo "  py-spy rate: ${PROFILE_RATE} Hz"
 echo "  BB_UVLOOP:   $BB_UVLOOP"
+echo "  BB_TLS:      $BB_TLS  ($SCHEME on port $PORT)"
 echo
 
 # Lane shapes mirror bench/wrk/run.sh exactly.
@@ -101,8 +121,21 @@ _run_one_lane() {
          pkill -f '[p]y-spy record' 2>/dev/null || true
          sleep 1" || true
 
-    # 2. Start the server through py-spy.  Background-detached via nohup;
-    #    we'll poll readiness from the loadgen side.
+    # 2. Start the server through py-spy.  The `(...&)` subshell form is
+    #    load-bearing: it backgrounds the chain INSIDE the subshell, then
+    #    the subshell exits immediately — re-parenting the background
+    #    process to init BEFORE the outer SSH bash exits.  Without the
+    #    explicit subshell (e.g. plain `cmd & ` form), the backgrounded
+    #    process remains a child of the SSH bash and dies via SIGHUP
+    #    when SSH disconnects (Sprint 27 Phase 1 finding — cleartext-v1
+    #    attempt without the subshell broke server startup on B1).
+    #
+    #    B2 (c=1024 + pipeline=16) wants `ulimit -n` raised, but applying
+    #    `ulimit -n 65536 && ...` inside the `(...&)` subshell ALSO
+    #    breaks server startup (cause unidentified).  The two together
+    #    are incompatible; for now B2 is run without the ulimit bump
+    #    (will hit EMFILE), and B2 profiling waits for a wrapper-script
+    #    approach.  B1 + B3 cover the cascade-decision picture fully.
     ssh -n "${SSH_OPTS[@]}" "$SERVER_REMOTE" \
         "cd $REMOTE_REPO && source .venv/bin/activate &&
          (BB_WORKERS=1 BB_UVLOOP=$BB_UVLOOP BB_ACCESS_LOG=0 \
@@ -111,8 +144,7 @@ _run_one_lane() {
              --rate $PROFILE_RATE \
              --format speedscope \
              --output /tmp/profile_${lane}.json \
-             -- python bench/app.py --port 8443 \
-                --cert tests/cert.pem --key tests/key.pem \
+             -- python bench/app.py $SERVER_CLI_ARGS \
              > /tmp/profile_${lane}.log 2>&1 &)" || {
         echo "  ssh-start failed for $lane" >&2
         return 1
@@ -136,7 +168,11 @@ _run_one_lane() {
         return 1
     fi
 
-    # 4. Warmup — discarded.
+    # 4. Warmup — discarded.  Settles wrk loadgen state + accept queue
+    #    BEFORE the measured wrk pass, so the first lane in a run
+    #    doesn't pay the cold-cache + connection-storm tax that lane-N
+    #    runs don't see (Sprint 27 Phase 1 finding: B3-first throughput
+    #    was ~21 % lower than B3-last on the same code).
     echo "  warmup (${WARMUP}s) ..."
     ssh "${SSH_OPTS[@]}" "$LOADGEN_REMOTE" \
         "wrk -t4 -c64 -d${WARMUP}s ${BASE}/plaintext > /dev/null 2>&1 || true"
