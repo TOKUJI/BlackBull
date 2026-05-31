@@ -30,6 +30,7 @@ import asyncio
 import json
 import os
 import sys
+import tracemalloc
 
 # Allow running as `python bench/app.py` from the repo root
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
@@ -39,6 +40,15 @@ from http import HTTPMethod
 from blackbull import BlackBull, Response, read_body
 from blackbull.utils import Scheme
 from bench.lag_monitor import LoopLagMonitor
+
+# Sprint 28 Task 2 — soak harness hook.  Set BB_TRACEMALLOC=1 to start
+# tracemalloc at import (before any allocation we care about happens
+# in BlackBull's own setup) and expose a /tracemalloc endpoint that
+# returns the current top-N allocation snapshot as JSON.  Bench-only
+# instrumentation; production users keep tracemalloc off by default.
+_BB_TRACEMALLOC = os.environ.get('BB_TRACEMALLOC', '0') == '1'
+if _BB_TRACEMALLOC:
+    tracemalloc.start(int(os.environ.get('BB_TRACEMALLOC_FRAMES', '10')))
 
 # ---------------------------------------------------------------------------
 # Application setup
@@ -115,6 +125,34 @@ async def echo(scope, receive, send):
 @app.route(path='/metrics', methods=[HTTPMethod.GET])
 async def metrics():
     return json.dumps(monitor.snapshot()).encode()
+
+
+@app.route(path='/tracemalloc', methods=[HTTPMethod.GET])
+async def tracemalloc_snapshot():
+    """Soak-harness endpoint: top-N allocation sites + totals.
+
+    Returns 404 when BB_TRACEMALLOC is not enabled (production
+    posture).  Enabled by ``BB_TRACEMALLOC=1`` env var.
+    """
+    if not _BB_TRACEMALLOC:
+        return Response(b'tracemalloc not enabled', status=404,
+                        content_type='text/plain; charset=utf-8')
+    snap = tracemalloc.take_snapshot()
+    stats = snap.statistics('lineno')[:30]
+    current, peak = tracemalloc.get_traced_memory()
+    payload = {
+        'current_bytes': current,
+        'peak_bytes': peak,
+        'top': [
+            {'file': str(s.traceback[0].filename),
+             'line': s.traceback[0].lineno,
+             'size': s.size,
+             'count': s.count}
+            for s in stats
+        ],
+    }
+    return Response(json.dumps(payload).encode(),
+                    content_type='application/json')
 
 
 @app.route(path='/config', methods=[HTTPMethod.GET])

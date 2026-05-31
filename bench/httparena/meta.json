@@ -16,9 +16,7 @@
     "upload",
     "static",
     "baseline-h2",
-    "baseline-h2c",
     "static-h2",
-    "json-h2c",
     "echo-ws"
   ],
   "maintainers": []

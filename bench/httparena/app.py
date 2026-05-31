@@ -36,6 +36,11 @@ import sys
 from http import HTTPMethod
 from urllib.parse import parse_qs
 
+# bench/httparena/app.py imports Scheme to register the WebSocket route
+# (`echo-ws` HttpArena profile).  Use the same Scheme.websocket sentinel
+# as bench/app.py / examples/ChatServer/.
+from blackbull.utils import Scheme
+
 # Ensure the BlackBull source tree is importable when the Docker image
 # vendors it at /src/BlackBull/.  Local runs use `pip install -e .` so
 # this is a no-op then.
@@ -92,8 +97,13 @@ async def pipeline():
     return Response(_PIPELINE_BODY, content_type=_PLAIN)
 
 
-@app.route(path='/baseline11', methods=[HTTPMethod.GET, HTTPMethod.POST])
-async def baseline11(scope, receive, send):
+async def _baseline_handler(scope, receive, send):
+    """Shared body for /baseline11 (H/1.1) and /baseline2 (H/2).
+
+    HttpArena uses path-suffix to distinguish the two profiles, but
+    the semantics are identical: sum integer query params, add posted
+    body if integer, return as text/plain.
+    """
     total = 0
     for vals in _qs(scope).values():
         for v in vals:
@@ -112,6 +122,18 @@ async def baseline11(scope, receive, send):
     await send({'type': 'http.response.start', 'status': 200,
                 'headers': [(b'content-type', _PLAIN.encode())]})
     await send({'type': 'http.response.body', 'body': payload})
+
+
+@app.route(path='/baseline11', methods=[HTTPMethod.GET, HTTPMethod.POST])
+async def baseline11(scope, receive, send):
+    await _baseline_handler(scope, receive, send)
+
+
+# HttpArena's H/2 baseline profile uses /baseline2 (path suffix
+# disambiguates from the H/1.1 /baseline11).  Same semantics.
+@app.route(path='/baseline2', methods=[HTTPMethod.GET, HTTPMethod.POST])
+async def baseline2(scope, receive, send):
+    await _baseline_handler(scope, receive, send)
 
 
 def _json_payload(count: int, m: float):
@@ -171,6 +193,30 @@ async def upload_endpoint(scope, receive, send):
 @app.route(path='/healthz', methods=[HTTPMethod.GET])
 async def healthz():
     return Response(b'ok', content_type=_PLAIN)
+
+
+# HttpArena `echo-ws` profile — RFC 6455 WebSocket echo.  Mirrors
+# ws_echo in bench/app.py — first message after accept is the receive
+# loop; text frames echo as text, binary frames echo as bytes.
+@app.route(path='/ws', methods=[HTTPMethod.GET], scheme=Scheme.websocket)
+async def ws_echo(scope, receive, send):
+    event = await receive()
+    if event.get('type') != 'websocket.connect':
+        return
+    await send({'type': 'websocket.accept'})
+    while True:
+        event = await receive()
+        t = event.get('type', '')
+        if t == 'websocket.disconnect':
+            break
+        if t != 'websocket.receive':
+            continue
+        text = event.get('text')
+        if text is not None:
+            await send({'type': 'websocket.send', 'text': text})
+        else:
+            await send({'type': 'websocket.send',
+                        'bytes': event.get('bytes') or b''})
 
 
 # ---------------------------------------------------------------------------
