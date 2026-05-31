@@ -1,7 +1,7 @@
 # BlackBull
 
 > ⚠ **Early Alpha — API may break between MINOR versions.**
-> Readiness evidence: [`ALPHA_READINESS.md`](ALPHA_READINESS.md).
+> Readiness evidence: [`docs/ALPHA_READINESS.md`](docs/ALPHA_READINESS.md).
 > Things to know before adopting: [`KNOWN_LIMITATIONS.md`](KNOWN_LIMITATIONS.md).
 
 **From-scratch async ASGI 3.0 framework** with native HTTP/1.1, HTTP/2,

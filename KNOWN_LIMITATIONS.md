@@ -3,7 +3,7 @@
 This document is the single user-facing inventory of behaviours and
 gaps that may surprise an app author adopting BlackBull at its
 current **Early Alpha** maturity level.  The companion
-[`ALPHA_READINESS.md`](ALPHA_READINESS.md) covers the formal audit
+[`docs/ALPHA_READINESS.md`](docs/ALPHA_READINESS.md) covers the formal audit
 evidence behind the alpha classification; this file is the
 narrative "things to know before you build on top of it" list.
 

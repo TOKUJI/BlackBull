@@ -28,6 +28,111 @@ so the editable install's metadata catches up.
 
 ---
 
+## [0.28.0] — 2026-05-31
+
+**Sprint 28 — Early Alpha readiness.**  First release labelled
+*Early Alpha*: the framework now has an externally-audited
+readiness deliverable, a soak-tested leak-free posture, and an
+EC2-reproducible benchmark cross-check against FastAPI.  API may
+still break between MINOR versions per ZeroVer; see
+[`docs/ALPHA_READINESS.md`](docs/ALPHA_READINESS.md) for the evidence map
+and [`KNOWN_LIMITATIONS.md`](KNOWN_LIMITATIONS.md) for the
+explicit "what's not promised yet" list.
+
+### Added
+- **`docs/ALPHA_READINESS.md`** — evidence-mapped readiness
+  checklist (9 categories, ~36 items) with classification, top-3
+  risks, top-5 missing validations.  Linked from `README.md` Early
+  Alpha banner.
+- **`KNOWN_LIMITATIONS.md`** — single consolidated doc covering
+  RFC 8441 opt-in, HTTP/2 mux overhead, slowloris response shape,
+  single-host benchmark caveats, RFC-defensible diffs from nginx
+  in the differential corpus, no DB layer, no HTTP/3, no gRPC.
+- **`bench/soak/`** — soak harness (1-hour wrk + tracemalloc +
+  `/proc/<pid>/status` sampling, mixed-lane lua script).  Two
+  1-hour soaks (single-worker + 4-worker) across 19.5 M requests
+  confirmed RSS plateau, FD return-to-baseline, no growing
+  tracemalloc slab.  Artefacts gitignored under
+  `bench/results/soak/`.
+- **`bench/aws/httparena_compare.sh`** — EC2 c7i.xlarge HttpArena
+  comparison harness; provisions Docker + liburing 2.9 + gcannon
+  from source + wrk + h2load + h2spec + Autobahn runner; vendors
+  `bench/httparena/` as the framework; trap-EXIT teardown.
+- **CLI `--version` flag** — prints `blackbull <version>` and
+  exits 0.  Reads from `importlib.metadata.version('blackbull')`
+  so it always agrees with the installed wheel.
+- **HttpArena `/ws` echo route** + `/baseline2` (H/2 path) in
+  `bench/httparena/app.py`.  Closes the WebSocket profile and the
+  H/2 baseline; previously only H/1.1 was implemented.
+
+### Changed
+- **`StaticFiles` middleware now caches small files in memory.**
+  mtime+size-keyed LRU cache (default ≤ 4 MiB per file, 256
+  entries); cache hits are two `send()` calls with no thread-pool
+  dispatch.  Replaces the per-request `asyncio.to_thread(...)`
+  open/seek/read/close chain that exhausted the default
+  ThreadPoolExecutor (8 workers) at HttpArena's c=1024–6800 load
+  — first run plateaued at 71-79 r/s and subsequent runs collapsed
+  to 0 r/s as the dispatch queue saturated.  Local back-to-back
+  c=1024 measurements after the fix: 17,885 / 18,345 / 18,149 r/s
+  with worker RSS flat at ~33 MB (was 275 → 768 MiB).  Files
+  above the threshold keep the streaming path so per-request peak
+  memory stays at one chunk regardless of body size.
+- **Default error handler is environment-aware.**
+  `_default_error_handler` (registered on every HTTP error status
+  and `Exception`) now reads `BLACKBULL_ENV`:
+  - `development` — surfaces the full Python traceback inline so
+    users debugging locally see the failure point in the response
+    body.  `Accept: text/html` returns a styled HTML page;
+    everything else returns text/plain.
+  - `production` — terse: status code + phrase only.  Exception
+    class and message no longer leak to the network.
+  Sets `Content-Type` and `Content-Length` explicitly on all
+  error responses (previously omitted).
+- **`bench/httparena/launcher.py` now spawns three workers** —
+  HTTP cleartext on :8080, HTTPS+H1 on :8081, HTTPS+H2 on :8443.
+  Matches HttpArena's `scripts/validate.sh` port layout
+  (`PORT=8080`, `H1TLS_PORT=8081`, `H2PORT=8443`).  Closes the 5
+  `json-tls` validation failures the previous two-process layout
+  caused (nothing was bound on :8081).  Shape mirrors the
+  HttpArena `frameworks/fastapi/launcher.py` reference — no
+  port-readiness gating, no TLS-handshake synchronisation.
+
+### Fixed
+- **Static-file middleware run-2/run-3 collapse to 0 r/s** under
+  HttpArena's high-concurrency wrk passes.  Root cause was
+  asyncio thread-pool exhaustion (see "Changed" above), not a
+  memory leak — RSS climbed because thousands of in-flight scope
+  dicts and file descriptors accumulated while waiting on the
+  shared executor.
+- **`bench/peers/asgi_app.py`** + **`bench/app.py`** — replaced
+  `status: 200 / 404` integer literals with `HTTPStatus.OK` /
+  `HTTPStatus.NOT_FOUND`.  Cosmetic; no runtime behaviour
+  change.
+
+### EC2 cross-check (Sprint 28 Task 3 + Task 4 carry-forward)
+- HttpArena validate on `c7i.xlarge`: **49/49 pass** (previous
+  pass-count 44/5 fail before the launcher fix).  Includes
+  baseline H/1.1, pipelined, limited-conn, json, json-comp,
+  json-tls, upload, static, baseline-h2, static-h2, echo-ws.
+- HttpArena benchmark numbers captured for BlackBull and FastAPI
+  across the validated profiles.  Detailed results in the
+  Sprint 28 internal log; consolidated summary in
+  `bench/CHARACTERIZATION.md ## Sprint history`.
+- Static throughput on EC2 remained the dominant gap pre-cache;
+  the in-memory cache lands as a 0.28.0 source change but the
+  EC2 re-measure of static under the new code is a Sprint 29
+  open carry-forward (no new EC2 spend in Sprint 28).
+
+### Methodology
+- **`docs/ALPHA_READINESS.md` classification flipped to
+  "READY FOR EARLY ALPHA"** after Task 2 (soak) and Task 4
+  (release-shape + EC2 cross-check) closed.  Both blocking risks
+  noted at audit time — no ≥1-hour soak, no externally
+  reproducible benchmark — are now closed.
+
+---
+
 ## [0.27.1] — 2026-05-31
 
 Packaging cleanup ahead of first PyPI publish.  Between-sprints PATCH

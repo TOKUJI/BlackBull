@@ -15,7 +15,7 @@ Run with one of::
 Note daphne and uvicorn do not negotiate HTTP/2 — they're HTTP/1.1 + WS only.
 """
 import os
-
+from http import HTTPStatus
 # -- pre-encoded bodies (allocated once at import) --------------------------
 
 _PLAINTEXT = b'Hello, World!'
@@ -66,7 +66,7 @@ async def _echo(scope, receive, send):
             break
     payload = b''.join(chunks)
     await send({'type': 'http.response.start',
-                'status': 200,
+                'status': HTTPStatus.OK,
                 'headers': _H_OCTET})
     await send({'type': 'http.response.body',
                 'body': payload})
@@ -93,7 +93,7 @@ async def _ws_echo(scope, receive, send):
 
 
 async def _not_found(send):
-    await send({'type': 'http.response.start', 'status': 404,
+    await send({'type': 'http.response.start', 'status': HTTPStatus.NOT_FOUND,
                 'headers': _H_PLAIN})
     await send({'type': 'http.response.body', 'body': b'not found'})
 

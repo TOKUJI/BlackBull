@@ -113,6 +113,18 @@ def test_parser_defaults():
     assert args.reload_paths is None
 
 
+def test_parser_version_flag(capsys):
+    """`blackbull --version` prints the package version and exits 0."""
+    from blackbull import __version__
+    parser = _build_parser()
+    with pytest.raises(SystemExit) as exc:
+        parser.parse_args(['--version'])
+    assert exc.value.code == 0
+    out = capsys.readouterr().out
+    assert __version__ in out
+    assert out.startswith('blackbull ')
+
+
 def test_parser_full_flags():
     parser = _build_parser()
     args = parser.parse_args([

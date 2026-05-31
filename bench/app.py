@@ -31,6 +31,7 @@ import json
 import os
 import sys
 import tracemalloc
+from http import HTTPStatus
 
 # Allow running as `python bench/app.py` from the repo root
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
@@ -117,7 +118,7 @@ async def one_mb():
 @app.route(path='/echo', methods=[HTTPMethod.POST])
 async def echo(scope, receive, send):
     body = await read_body(receive)
-    await send({'type': 'http.response.start', 'status': 200,
+    await send({'type': 'http.response.start', 'status': HTTPStatus.OK,
                 'headers': [(b'content-type', b'application/octet-stream')]})
     await send({'type': 'http.response.body', 'body': body})
 
@@ -135,7 +136,7 @@ async def tracemalloc_snapshot():
     posture).  Enabled by ``BB_TRACEMALLOC=1`` env var.
     """
     if not _BB_TRACEMALLOC:
-        return Response(b'tracemalloc not enabled', status=404,
+        return Response(b'tracemalloc not enabled', status=HTTPStatus.NOT_FOUND,
                         content_type='text/plain; charset=utf-8')
     snap = tracemalloc.take_snapshot()
     stats = snap.statistics('lineno')[:30]

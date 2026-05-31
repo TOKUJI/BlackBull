@@ -50,6 +50,46 @@ def _wrap_send(raw_send):
     return _send
 
 
+def _wants_html(scope) -> bool:
+    """True when the request's Accept header indicates an HTML preference."""
+    for k, v in scope.get('headers', ()):
+        if k.lower() == b'accept':
+            val = v.lower()
+            return b'text/html' in val or b'application/xhtml' in val
+    return False
+
+
+def _render_error_html(status, exc, tb_text: str | None, scope) -> bytes:
+    """Build the DEV-mode HTML error page.  Traceback only when exc is set."""
+    from html import escape
+    method = escape(scope.get('method', '') or '')
+    path = escape(scope.get('path', '') or '')
+    title = f"{int(status)} {status.phrase}"
+    tb_block = (
+        f"<pre>{escape(tb_text)}</pre>" if tb_text else ''
+    )
+    exc_line = (
+        f"<p><strong>{escape(type(exc).__name__)}</strong>: {escape(str(exc))}</p>"
+        if exc is not None else ''
+    )
+    return (
+        '<!doctype html><html><head><meta charset="utf-8">'
+        f'<title>{escape(title)}</title>'
+        '<style>'
+        'body{font-family:-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;'
+        'margin:2em;color:#222;background:#fafafa}'
+        'h1{color:#c00;border-bottom:1px solid #ccc;padding-bottom:.3em}'
+        'pre{background:#fff;border:1px solid #ddd;padding:1em;overflow:auto;'
+        'font-size:13px;line-height:1.4}'
+        '.req{color:#666;font-size:13px}'
+        '</style></head><body>'
+        f'<h1>{escape(title)}</h1>'
+        f'<p class="req">{method} {path}</p>'
+        f'{exc_line}{tb_block}'
+        '</body></html>'
+    ).encode()
+
+
 async def _default_error_handler(scope, receive, send):  # noqa: ARG001
     """Comprehensive fallback error handler registered at BlackBull construction.
 
@@ -58,23 +98,51 @@ async def _default_error_handler(scope, receive, send):  # noqa: ARG001
       - 'error_exception' : exception instance (optional)
       - 'allowed_methods' : iterable of method names (for 405 Allow header)
 
-    Returns a plain-text response with the status code, status phrase,
-    and — when an exception is present — its class name and message.
+    Output adapts to ``BLACKBULL_ENV`` and the request ``Accept`` header:
+
+    * ``development`` — include the full Python traceback when an exception
+      is present, so users debugging locally see the failure inline.
+      ``Accept: text/html`` returns a styled HTML page; everything else
+      gets text/plain.
+    * ``production`` — terse: status code + phrase only.  No exception
+      class or message is leaked.  Browsers get a minimal HTML page;
+      curl-style clients get text/plain.
     """
+    # Imported here to avoid a circular import at module load (env -> app).
+    from .env import get_settings, Environment
+
     state = scope.get('state', {})
     status = state.get('error_status', HTTPStatus.INTERNAL_SERVER_ERROR)
     exc = state.get('error_exception')
     allowed = state.get('allowed_methods', ())
 
+    is_dev = get_settings().env == Environment.DEVELOPMENT
+    html_ok = _wants_html(scope)
+
     headers = []
     if allowed:
         headers.append((b'allow', ', '.join(m.upper() for m in allowed).encode()))
 
-    lines = [f"{status} {status.phrase}"]
-    if exc is not None:
-        lines.append(f"{type(exc).__name__}: {exc}")
-    body = '\n'.join(lines).encode()
+    tb_text = None
+    if is_dev and exc is not None:
+        tb_text = ''.join(
+            traceback.format_exception(type(exc), exc, exc.__traceback__))
 
+    if html_ok:
+        body = _render_error_html(status, exc if is_dev else None,
+                                  tb_text, scope)
+        headers.append((b'content-type', b'text/html; charset=utf-8'))
+    else:
+        lines = [f"{status} {status.phrase}"]
+        if is_dev and exc is not None:
+            lines.append(f"{type(exc).__name__}: {exc}")
+            if tb_text:
+                lines.append('')
+                lines.append(tb_text.rstrip())
+        body = '\n'.join(lines).encode()
+        headers.append((b'content-type', b'text/plain; charset=utf-8'))
+
+    headers.append((b'content-length', str(len(body)).encode()))
     await send({'type': 'http.response.start', 'status': status, 'headers': headers})
     await send({'type': 'http.response.body', 'body': body, 'more_body': False})
 
@@ -341,8 +409,8 @@ class BlackBull:
         try:
             function = self._router[(path, method, scheme)]
         except MethodNotApplicable as e:
-            self._logger.debug("405 Method Not Allowed: path=%r method=%r allowed=%r",
-                         path, method, e.allowed_methods)
+            self._logger.debug("%s: path=%r method=%r allowed=%r",
+                         HTTPStatus.METHOD_NOT_ALLOWED.phrase, path, method, e.allowed_methods)
             scope.setdefault('state', {}).update({
                 'error_status': HTTPStatus.METHOD_NOT_ALLOWED,
                 'allowed_methods': e.allowed_methods,
@@ -352,7 +420,7 @@ class BlackBull:
                 await handler(scope, receive, send)
             return
         except PathNotRegistered:
-            self._logger.debug("404 Not Found: path=%r", path)
+            self._logger.debug("%s: path=%r", HTTPStatus.NOT_FOUND.phrase, path)
             scope.setdefault('state', {})['error_status'] = HTTPStatus.NOT_FOUND
             handler = self._error_router[HTTPStatus.NOT_FOUND]
             if handler is not None:

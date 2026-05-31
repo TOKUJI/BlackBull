@@ -207,6 +207,93 @@ class TestDefaultErrorHandler:
         assert b'POST' in headers[b'allow']
 
 
+class TestDevErrorPageTraceback:
+    """DEV mode: unhandled exceptions surface their full traceback so users
+    debugging locally see the failure inline (alpha-readiness §9)."""
+
+    def _raise(self):
+        # Real frame so the traceback is non-empty.
+        raise RuntimeError("kaboom")
+
+    @pytest.mark.asyncio
+    async def test_dev_plain_text_includes_traceback(self):
+        from blackbull.env import reset_settings_cache
+        import os
+        os.environ['BLACKBULL_ENV'] = 'development'
+        reset_settings_cache()
+        try:
+            try:
+                self._raise()
+            except RuntimeError as e:
+                exc = e
+            scope = _make_scope()
+            scope['state']['error_status'] = HTTPStatus.INTERNAL_SERVER_ERROR
+            scope['state']['error_exception'] = exc
+            send = _CaptureSend()
+            await _default_error_handler(scope, None, send)
+            assert send.status == 500
+            # Traceback frames are present, not just class/message.
+            assert b'Traceback' in send.body
+            assert b'kaboom' in send.body
+            assert b'_raise' in send.body
+        finally:
+            os.environ.pop('BLACKBULL_ENV', None)
+            reset_settings_cache()
+
+    @pytest.mark.asyncio
+    async def test_dev_html_for_browser_accept(self):
+        from blackbull.env import reset_settings_cache
+        import os
+        os.environ['BLACKBULL_ENV'] = 'development'
+        reset_settings_cache()
+        try:
+            try:
+                self._raise()
+            except RuntimeError as e:
+                exc = e
+            scope = _make_scope()
+            scope['headers'] = [(b'accept', b'text/html,application/xhtml+xml')]
+            scope['state']['error_status'] = HTTPStatus.INTERNAL_SERVER_ERROR
+            scope['state']['error_exception'] = exc
+            send = _CaptureSend()
+            await _default_error_handler(scope, None, send)
+            start = next(e for e in send.events if e['type'] == 'http.response.start')
+            ctype = dict(start['headers']).get(b'content-type', b'')
+            assert b'text/html' in ctype
+            assert b'<pre>' in send.body
+            assert b'RuntimeError' in send.body
+        finally:
+            os.environ.pop('BLACKBULL_ENV', None)
+            reset_settings_cache()
+
+
+class TestProductionErrorPage:
+    """Production mode keeps the response terse — no exception class or
+    message is leaked to the network."""
+
+    @pytest.mark.asyncio
+    async def test_prod_omits_exception_details(self):
+        from blackbull.env import reset_settings_cache
+        import os
+        os.environ['BLACKBULL_ENV'] = 'production'
+        reset_settings_cache()
+        try:
+            exc = ValueError("secret-internal-detail")
+            scope = _make_scope()
+            scope['state']['error_status'] = HTTPStatus.INTERNAL_SERVER_ERROR
+            scope['state']['error_exception'] = exc
+            send = _CaptureSend()
+            await _default_error_handler(scope, None, send)
+            assert send.status == 500
+            assert b'Internal Server Error' in send.body
+            assert b'ValueError' not in send.body
+            assert b'secret-internal-detail' not in send.body
+            assert b'Traceback' not in send.body
+        finally:
+            os.environ.pop('BLACKBULL_ENV', None)
+            reset_settings_cache()
+
+
 class TestBlackBullErrorDispatch:
 
     def _make_app(self):

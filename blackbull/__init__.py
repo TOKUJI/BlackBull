@@ -1,8 +1,8 @@
 """BlackBull — async ASGI 3.0 web framework.
 
 **Early Alpha** — API may break between MINOR versions; see
-``ALPHA_READINESS.md`` and ``KNOWN_LIMITATIONS.md`` in the repo root
-before building production-shape work on top.
+``docs/ALPHA_READINESS.md`` and ``KNOWN_LIMITATIONS.md`` before
+building production-shape work on top.
 
 Public API exports:
 

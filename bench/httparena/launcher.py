@@ -1,112 +1,76 @@
-"""Spawn cleartext + TLS BlackBull workers per HttpArena container spec.
+"""Spawn HTTP + HTTPS BlackBull workers per HttpArena framework spec.
 
-HttpArena expects each framework container to expose:
-  :8080  HTTP/1.1 cleartext + h2c (prior-knowledge, same port — BlackBull
-         autodetects HTTP/2 from the connection preface)
-  :8443  HTTPS — TLS terminating HTTP/1.1 and HTTP/2 via ALPN
+HttpArena's `scripts/validate.sh` uses four ports:
 
-Sidecar mounts:
-  /data/dataset.json    read-only dataset (50 items)
-  /data/static/         read-only static assets (not served yet)
-  /certs/server.crt
-  /certs/server.key
+  :8080  HTTP/1.1 cleartext (also serves h2c via prior-knowledge)
+  :8081  HTTPS HTTP/1.1     — the ``json-tls`` profile probes here
+  :8082  h2c only           — we don't claim baseline-h2c / json-h2c
+  :8443  HTTPS HTTP/2 ALPN  — ``baseline-h2`` / ``static-h2`` probe here
 
-The launcher follows the same shape as the fastapi reference launcher:
-two ``app.py`` subprocesses, both terminated on SIGTERM/SIGINT.
+FastAPI uses :8080 + :8081 only (they don't claim H/2 profiles).
+BlackBull claims both H/1.1+TLS and H/2+TLS, so we expose both
+:8081 and :8443 — same BlackBull, same cert, different listeners.
+ALPN negotiates HTTP/1.1 on :8081 connections and h2 on :8443.
 
-Sprint 28 Task 4: HTTPS moved from :8081 to :8443 to match HttpArena's
-documented port contract (Task 3 EC2 validate surfaced this — the
-`baseline-h2` and `static-h2` profiles probe :8443 specifically).
-The h2c-only :8082 binding is NOT provided; we don't subscribe to
-the `baseline-h2c` / `json-h2c` profiles in meta.json because they
-require :8082 to refuse HTTP/1.1, which BlackBull's plaintext port
-doesn't currently support (it autodetects both H/1.1 and h2c on the
-same socket).
+Follows the same shape as the fastapi reference launcher: parallel
+``subprocess.Popen`` for each port, both terminated on SIGTERM/
+SIGINT.  No port-readiness gating — BlackBull's bind happens in
+``serve()`` as the first awaited step, so by the time the
+subprocess is alive the kernel TCP accept queue is open.
 """
+import multiprocessing
 import os
 import signal
-import socket
 import subprocess
 import sys
 import time
 
 
-HTTP_PORT  = int(os.environ.get('HTTPARENA_HTTP_PORT',  '8080'))
-HTTPS_PORT = int(os.environ.get('HTTPARENA_HTTPS_PORT', '8443'))
-TLS_CERT   = os.environ.get('TLS_CERT', '/certs/server.crt')
-TLS_KEY    = os.environ.get('TLS_KEY',  '/certs/server.key')
+HTTP_PORT      = int(os.environ.get('HTTPARENA_HTTP_PORT',      '8080'))
+HTTPS_H1_PORT  = int(os.environ.get('HTTPARENA_HTTPS_H1_PORT',  '8081'))
+HTTPS_H2_PORT  = int(os.environ.get('HTTPARENA_HTTPS_H2_PORT',  '8443'))
+TLS_CERT       = os.environ.get('TLS_CERT', '/certs/server.crt')
+TLS_KEY        = os.environ.get('TLS_KEY',  '/certs/server.key')
 
-# Worker count.  HTTPARENA_WORKERS=0 → cpu_count (matches the fastapi
-# reference launcher, which auto-scales by sched_getaffinity).  Default
-# to cpu_count for apples-to-apples vs peer launchers; override down to
-# 1 with HTTPARENA_WORKERS=1 for per-process measurements.  Sprint 28
-# Task 4 finding: the first EC2 run used the historical default of 1
-# worker, putting BlackBull at a 4× worker disadvantage vs FastAPI's
-# uvicorn-default cpu_count and producing misleadingly weak static
-# numbers (22 r/s vs FastAPI 1281 r/s).
-_workers_env = os.environ.get('HTTPARENA_WORKERS', '0')
+# Worker count — matches the fastapi reference launcher's autoscale.
+CPU_COUNT = multiprocessing.cpu_count()
 try:
-    WORKERS = int(_workers_env)
-except ValueError:
-    WORKERS = 0
-if WORKERS == 0:
-    try:
-        WORKERS = max(len(os.sched_getaffinity(0)), 1)
-    except (AttributeError, OSError):
-        WORKERS = os.cpu_count() or 1
+    WRK_COUNT = min(len(os.sched_getaffinity(0)), 128)
+except (AttributeError, OSError):
+    WRK_COUNT = CPU_COUNT
+WRK_COUNT = max(WRK_COUNT, 4)
 
 PY = sys.executable
 APP = os.path.join(os.path.dirname(__file__), 'app.py')
 
 
 def _spawn(extra):
-    return subprocess.Popen([PY, APP, *extra, '--workers', str(WORKERS)])
+    return subprocess.Popen([PY, APP, *extra, '--workers', str(WRK_COUNT)])
 
 
-def _wait_for_port(port: int, timeout: float = 20.0) -> bool:
-    """Block until TCP port is accepting connections, or timeout.
-
-    HttpArena's per-profile test scripts don't all wait for HTTPS to
-    be up before probing it (the json-tls validate-script doesn't
-    have a [wait] step like baseline-h2's does).  So we ensure both
-    listeners are bound before the launcher exits its setup phase.
-    Sprint 28 Task 4 finding.
-    """
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        try:
-            with socket.create_connection(('127.0.0.1', port), timeout=1.0):
-                return True
-        except (ConnectionRefusedError, OSError):
-            time.sleep(0.1)
-    return False
-
-
-http_proc  = _spawn(['--port', str(HTTP_PORT)])
-https_proc = None
+http_proc       = _spawn(['--port', str(HTTP_PORT)])
+https_h1_proc   = None
+https_h2_proc   = None
 if os.path.exists(TLS_CERT) and os.path.exists(TLS_KEY):
-    https_proc = _spawn(['--port', str(HTTPS_PORT),
-                         '--cert', TLS_CERT, '--key', TLS_KEY])
+    https_h1_proc = _spawn(['--port', str(HTTPS_H1_PORT),
+                            '--cert', TLS_CERT, '--key', TLS_KEY])
+    https_h2_proc = _spawn(['--port', str(HTTPS_H2_PORT),
+                            '--cert', TLS_CERT, '--key', TLS_KEY])
 else:
     sys.stderr.write(
         f'launcher: TLS cert/key not present at {TLS_CERT} / {TLS_KEY}; '
         f'starting cleartext only\n')
 
-# Block until both ports are ready before going into wait() mode.
-# Prevents the json-tls race where the HTTPS test probes :8443 before
-# the second subprocess has finished binding.
-if not _wait_for_port(HTTP_PORT):
-    sys.stderr.write(f'launcher: HTTP port {HTTP_PORT} did not bind within 20s\n')
-if https_proc is not None and not _wait_for_port(HTTPS_PORT):
-    sys.stderr.write(f'launcher: HTTPS port {HTTPS_PORT} did not bind within 20s\n')
+
+_PROCS = (http_proc, https_h1_proc, https_h2_proc)
 
 
 def _shutdown(*_):
-    for p in (http_proc, https_proc):
+    for p in _PROCS:
         if p is not None:
             p.terminate()
     time.sleep(1)
-    for p in (http_proc, https_proc):
+    for p in _PROCS:
         if p is not None and p.poll() is None:
             p.kill()
     sys.exit(0)
@@ -118,6 +82,7 @@ signal.signal(signal.SIGINT,  _shutdown)
 try:
     rc = http_proc.wait()
 finally:
-    if https_proc is not None:
-        https_proc.terminate()
+    for p in (https_h1_proc, https_h2_proc):
+        if p is not None:
+            p.terminate()
 sys.exit(rc)

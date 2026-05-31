@@ -228,10 +228,15 @@ def _import_app(spec: str) -> Any:
 
 
 def _build_parser() -> argparse.ArgumentParser:
+    from . import __version__
     p = argparse.ArgumentParser(
         prog='blackbull',
         description='Run an ASGI 3.0 application with the BlackBull server.',
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    p.add_argument(
+        '--version', action='version',
+        version=f'blackbull {__version__}',
     )
     p.add_argument(
         'app',

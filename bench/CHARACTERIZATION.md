@@ -323,6 +323,13 @@ Cross-sprint coverage:
   `Content-Length` rewrite) surfaced via HttpArena prep.  No
   optimisation Phase 2 — Phase 1 data placed the original Sprint 28
   candidate under deployment-posture conditions.
+- **Sprint 28**: Early Alpha readiness — readiness deliverable
+  (`docs/ALPHA_READINESS.md`, `KNOWN_LIMITATIONS.md`); 1-hour soak
+  harness (`bench/soak/`) confirming leak-free posture across
+  19.5 M requests on single- + 4-worker runs; EC2 c7i.xlarge
+  HttpArena cross-check vs FastAPI; `StaticFiles` mtime/size-keyed
+  in-memory cache; default error handler `BLACKBULL_ENV`-aware
+  (DEV traceback, PROD terse); CLI `--version`.
 
 ## File layout (target)
 
