@@ -13,6 +13,10 @@ extra_css:
 markdown_extensions:
   - admonition
   - pymdownx.details
+  - pymdownx.superfences
+  - footnotes
+  - toc:
+      permalink: true
 
 plugins:
   - search
@@ -32,5 +36,34 @@ plugins:
 
 nav:
   - Home: index.md
-  - User Guide: guide.md
-  - API Reference: api/
+  - Getting Started:
+    - Installation: getting-started/installation.md
+    - Hello World: getting-started/hello-world.md
+    - Your First App: getting-started/first-app.md
+  - Guide:
+    - Overview: guide/index.md
+    - Routing: guide/routing.md
+    - Middleware: guide/middleware.md
+    - Error handling: guide/error-handling.md
+    - Requests and responses: guide/requests-and-responses.md
+    - WebSockets: guide/websockets.md
+    - HTTP/2: guide/http2.md
+    - Events: guide/events.md
+    - Logging: guide/logging.md
+    - Static files: guide/static-files.md
+    - Configuration: guide/configuration.md
+    - OpenAPI: guide/openapi.md
+    - Testing: guide/testing.md
+  - Deployment:
+    - Running BlackBull: deployment/running.md
+    - Workers: deployment/workers.md
+    - TLS: deployment/tls.md
+    - Behind nginx: deployment/behind-nginx.md
+    - Unix and fd inheritance: deployment/unix-and-fd.md
+    - Hot reload: deployment/hot-reload.md
+  - Reference:
+    - Environment variables: reference/env-vars.md
+    - API: api/
+  - About:
+    - Conformance: about/conformance.md
+    - Internals: about/internals.md

@@ -1,15 +1,12 @@
 #!/usr/bin/env bash
-# bench/aws/httparena_compare.sh — Sprint 28 Task 3.
+# bench/aws/httparena_compare.sh — EC2 HttpArena cross-check.
 #
-# Make HttpArena numbers externally reproducible.  Provisions one EC2
-# instance, installs Docker, clones MDA2AV/HttpArena, vendors
-# bench/httparena/ as the `blackbull` framework, runs HttpArena's
-# official scripts/validate.sh and scripts/benchmark.sh for both
-# `blackbull` and `fastapi` across a small profile set, pulls
-# results back, and tears the instance down.
-#
-# Closes ALPHA_READINESS.md §7 (benchmark validity outside WSL2) and
-# the top-3-risk "benchmark reproducibility is local-only".
+# Provisions one EC2 instance, installs Docker + HttpArena's load
+# tooling (gcannon, wrk, h2load), clones MDA2AV/HttpArena, vendors
+# bench/httparena/ as the `blackbull` framework, installs BlackBull
+# from PyPI in the container, runs HttpArena's official
+# scripts/validate.sh and scripts/benchmark.sh, pulls results back,
+# and tears the instance down.
 #
 # Cost estimate: c7i.2xlarge at ~$0.36/hr × ~30 min = ~$0.18.
 # Override INSTANCE_TYPE to c7i.xlarge (~$0.18/hr) for ~$0.09.
@@ -22,11 +19,21 @@
 #              (default: "baseline json json-tls static")
 #   FRAMEWORKS space-separated framework names to run
 #              (default: "blackbull fastapi")
-#   SKIP_VALIDATE   set to 1 to skip the 18-point correctness check
+#   BLACKBULL_VERSION  PyPI version pin (default: pyproject.toml's version)
+#   SPRINT_TAG  prefix on the result directory (default: sprint29)
+#   SKIP_VALIDATE   set to 1 to skip the 49-point correctness check
 #   KEEP_INSTANCE   set to 1 to leave the EC2 instance running on exit
 #                   (for debugging — REMEMBER to `bash bench/aws/down.sh`)
 
 set -euo pipefail
+
+# Pick a roomier instance than `config.sh`'s 4-vCPU default — HttpArena
+# colocates loadgen + framework in the same VM, so 8 vCPUs gives enough
+# headroom that the loadgen isn't competing with the framework for CPU.
+# Set BEFORE sourcing config.sh so config.sh's `: "${INSTANCE_TYPE:=...}"`
+# default no-ops (env-set value wins).  Override with the env var.
+: "${INSTANCE_TYPE:=c7i.2xlarge}"
+export INSTANCE_TYPE
 
 # shellcheck source=config.sh
 source "$(dirname "$0")/config.sh"
@@ -41,15 +48,9 @@ FRAMEWORKS="${FRAMEWORKS:-blackbull fastapi}"
 KEEP_INSTANCE="${KEEP_INSTANCE:-0}"
 SKIP_VALIDATE="${SKIP_VALIDATE:-0}"
 
-# Pick a roomier instance than the 4-vCPU default — HttpArena
-# colocates loadgen + framework in the same VM, so 8 vCPUs gives
-# enough headroom that the loadgen isn't competing with the
-# framework for CPU.  Override with INSTANCE_TYPE if needed.
-: "${INSTANCE_TYPE:=c7i.2xlarge}"
-export INSTANCE_TYPE
-
 TS="$(date -u +%Y%m%d-%H%M%SZ)"
-LOCAL_DEST="$REPO_ROOT/bench/results/httparena/sprint28-${TS}"
+SPRINT_TAG="${SPRINT_TAG:-sprint29}"
+LOCAL_DEST="$REPO_ROOT/bench/results/httparena/${SPRINT_TAG}-${TS}"
 mkdir -p "$LOCAL_DEST"
 
 echo "=== bench/aws/httparena_compare.sh ==="
@@ -60,17 +61,13 @@ echo "  frameworks:    $FRAMEWORKS"
 echo
 
 # ---------------------------------------------------------------------------
-# Step 0 — build the BlackBull wheel locally so we can vendor it as part of
-# the framework dir.  Lets the remote Dockerfile install from a pinned
-# artefact rather than re-running pip install -e on EC2.
+# Step 0 — resolve the BlackBull version we want installed on the EC2
+# instance.  0.28.0 onward is on PyPI, so we install from there instead
+# of building + uploading a wheel.  This matches the install path real
+# users follow.  Override BLACKBULL_VERSION to test a different release.
 # ---------------------------------------------------------------------------
-echo ">>> building BlackBull wheel locally ..."
-WHEEL_DIR="$REPO_ROOT/dist"
-rm -rf "$WHEEL_DIR" "$REPO_ROOT/blackbull.egg-info" "$REPO_ROOT/build"
-"${PY:-$REPO_ROOT/.venv/bin/python}" -m build --wheel --outdir "$WHEEL_DIR" "$REPO_ROOT" >/dev/null
-WHEEL_PATH="$(ls -1t "$WHEEL_DIR"/blackbull-*.whl | head -n1)"
-WHEEL_NAME="$(basename "$WHEEL_PATH")"
-echo "    built $WHEEL_NAME"
+BLACKBULL_VERSION="${BLACKBULL_VERSION:-$(grep -E '^version' "$REPO_ROOT/pyproject.toml" | sed -E 's/.*"([^"]+)".*/\1/')}"
+echo ">>> BlackBull version: $BLACKBULL_VERSION (from PyPI)"
 
 # ---------------------------------------------------------------------------
 # Step 1 — provision EC2 (and arm a teardown trap so we don't leak the
@@ -171,19 +168,20 @@ ssh "${SSH_OPTS[@]}" "$SERVER_REMOTE" '
 echo ">>> staging blackbull framework dir on the instance ..."
 ssh "${SSH_OPTS[@]}" "$SERVER_REMOTE" 'mkdir -p HttpArena/frameworks/blackbull'
 
-# Upload framework files + the wheel.
+# Upload framework files only — no wheel.  BlackBull is installed
+# from PyPI inside the container build.
 rsync -e "ssh ${SSH_OPTS[*]}" -az --delete \
     "$REPO_ROOT/bench/httparena/app.py" \
     "$REPO_ROOT/bench/httparena/launcher.py" \
     "$REPO_ROOT/bench/httparena/meta.json" \
-    "$WHEEL_PATH" \
     "$SERVER_REMOTE:HttpArena/frameworks/blackbull/"
 
-# Generate a self-contained Dockerfile that installs from the wheel.
+# Generate a Dockerfile that installs BlackBull from PyPI.  Same
+# install path real adopters follow; reproducible by anyone with the
+# version string.
 ssh "${SSH_OPTS[@]}" "$SERVER_REMOTE" "cat > HttpArena/frameworks/blackbull/Dockerfile" <<EOF
 # Auto-generated by bench/aws/httparena_compare.sh.
-# Installs BlackBull from the pre-built wheel uploaded alongside this
-# Dockerfile (no source-tree copy needed).
+# Installs BlackBull from PyPI (no source tree on the instance).
 FROM python:3.13-slim
 WORKDIR /app
 
@@ -192,12 +190,11 @@ ENV PYTHONDONTWRITEBYTECODE=1 \\
     PIP_NO_CACHE_DIR=1 \\
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
-COPY ${WHEEL_NAME} /tmp/
-RUN pip install --no-cache-dir "/tmp/${WHEEL_NAME}[compression]"
+RUN pip install --no-cache-dir 'blackbull[compression]==${BLACKBULL_VERSION}'
 
 COPY app.py launcher.py /app/
 
-EXPOSE 8080 8081
+EXPOSE 8080 8081 8443
 CMD ["python", "launcher.py"]
 EOF
 
@@ -252,15 +249,16 @@ rsync -e "ssh ${SSH_OPTS[*]}" -az --include='*/' --include='*.json' \
     --include='*.tsv' --include='*.csv' --include='*.md' --exclude='*' \
     "$SERVER_REMOTE:HttpArena/" "$LOCAL_DEST/httparena-tree/" || true
 
-# Record provenance for the audit trail.
+# Record provenance.
 cat > "$LOCAL_DEST/provenance.md" <<EOF
-# HttpArena EC2 cross-check — Sprint 28 Task 3
+# HttpArena EC2 cross-check
 
-- Timestamp: $TS
-- Instance:  $INSTANCE_TYPE in $REGION
-- Public IP: $SERVER_PUBLIC_IP
-- BlackBull: $WHEEL_NAME (commit $(cd "$REPO_ROOT" && git rev-parse --short HEAD))
-- Profiles:  $PROFILES
+- Timestamp:  $TS
+- Sprint tag: $SPRINT_TAG
+- Instance:   $INSTANCE_TYPE in $REGION
+- Public IP:  $SERVER_PUBLIC_IP
+- BlackBull:  blackbull==$BLACKBULL_VERSION (from PyPI; repo commit $(cd "$REPO_ROOT" && git rev-parse --short HEAD))
+- Profiles:   $PROFILES
 - Frameworks: $FRAMEWORKS
 EOF
 

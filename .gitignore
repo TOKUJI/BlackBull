@@ -133,6 +133,9 @@ bench/aws/*.pem
 # bench/httparena — local sandbox mounts (dataset + dev certs).  See
 # bench/httparena/README.md for the local smoke-test recipe.
 bench/httparena/_local/
+# A locally-built wheel that Dockerfile.dev installs from.  Untracked
+# so the dev image always builds against fresh source.
+bench/httparena/blackbull-*.whl
 # peer benchmark harness — work-in-progress automated runner.
 # Kept on disk for future development; not committed until the socket-state
 # contamination is solved cleanly.

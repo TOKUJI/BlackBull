@@ -24,7 +24,7 @@ OUTDIR="${OUTDIR:-bench/results}"
 LABEL="${LABEL:-}"
 LABEL_PREFIX="${LABEL_PREFIX:-}"   # filename prefix so per-stack runs don't overwrite
 D="${DURATION:-30}"
-# Sprint 24 (audit 4-1, 4-2): RUNS_WRK > 1 enables multi-run aggregation —
+# Sprint 24 : RUNS_WRK > 1 enables multi-run aggregation —
 # median req/s with MAD / min / max / noise% columns.  RUNS_WRK=1 keeps
 # Sprint 13–23 single-run behaviour (the report just emits the wrk numbers
 # directly and the noise columns read `—`).

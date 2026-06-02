@@ -18,6 +18,14 @@ class StaticFiles:
     # 64 KiB streaming chunk for files above the cache threshold.
     _CHUNK = 64 * 1024
 
+    # Server preference order for precompressed variant selection.
+    # Matches blackbull.middleware.compression's order (br > zstd > gzip).
+    _ENCODING_SUFFIXES: tuple[tuple[bytes, str], ...] = (
+        (b'br',   '.br'),
+        (b'zstd', '.zst'),
+        (b'gzip', '.gz'),
+    )
+
     def __init__(self, directory: str | None = None, *,
                  url_prefix: str = '', root_dir: str | Path | None = None):
         resolved = directory or root_dir
@@ -25,8 +33,13 @@ class StaticFiles:
             raise ValueError('directory or root_dir is required')
         self._root = Path(resolved).resolve()
         self._url_prefix = url_prefix.rstrip('/')
-        # path -> (mtime_ns, size, body, mime_bytes).  LRU via OrderedDict.
-        self._cache: OrderedDict[Path, tuple[int, int, bytes, bytes]] = OrderedDict()
+        # cache key = the actual file path served (original or sibling).
+        # value = (mtime_ns, size, body, mime, content_encoding).
+        # content_encoding is b'' for uncompressed; b'br'/b'gzip'/b'zstd'
+        # for precompressed siblings.
+        self._cache: OrderedDict[
+            Path, tuple[int, int, bytes, bytes, bytes]
+        ] = OrderedDict()
 
     async def __call__(self, scope, receive, send, call_next=None):
         if scope.get('type') != 'http' or scope.get('method') not in ('GET', 'HEAD'):
@@ -71,29 +84,88 @@ class StaticFiles:
 
         await self._serve(scope, send, target)
 
+    @staticmethod
+    def _client_accepts(accept_header: bytes, encoding: bytes) -> bool:
+        """Cheap Accept-Encoding parser — True iff `encoding` is offered with q>0."""
+        if not accept_header:
+            return False
+        for token in accept_header.split(b','):
+            parts = token.strip().split(b';')
+            if parts[0].strip().lower() != encoding:
+                continue
+            for param in parts[1:]:
+                p = param.strip()
+                if p.startswith(b'q='):
+                    try:
+                        if float(p[2:]) <= 0:
+                            return False
+                    except ValueError:
+                        pass
+            return True
+        return False
+
+    def _negotiate(self, scope, target: Path) -> tuple[Path, bytes]:
+        """Pick which file to serve and what Content-Encoding to advertise.
+
+        Returns ``(path_to_serve, content_encoding)``.  `content_encoding`
+        is ``b''`` for uncompressed; ``b'br'`` / ``b'zstd'`` / ``b'gzip'``
+        when a precompressed sibling (``<path>.<suffix>``) was selected.
+
+        Range requests bypass the precompressed-sibling lookup — encoded
+        bodies have a different size than the original and serving a
+        Range over an encoded variant is messy.  Matches what nginx
+        does with ``gzip_static`` + Range.
+        """
+        accept = b''
+        for k, v in scope.get('headers', []):
+            kl = k.lower()
+            if kl == b'range':
+                return target, b''
+            if kl == b'accept-encoding':
+                accept = v.lower()
+        if not accept:
+            return target, b''
+        for enc, suffix in self._ENCODING_SUFFIXES:
+            if not self._client_accepts(accept, enc):
+                continue
+            sibling = target.with_name(target.name + suffix)
+            if sibling.is_file():
+                return sibling, enc
+        return target, b''
+
     async def _serve(self, scope, send, path: Path):
+        # Pick variant (precompressed sibling if available + accepted).
+        served_path, content_encoding = self._negotiate(scope, path)
+        # Content-Type derives from the original path's extension, not
+        # the .br/.gz/.zst suffix — e.g. text/javascript for app.js.br.
+        mime = (mimetypes.guess_type(path.name)[0]
+                or 'application/octet-stream').encode()
+
         # stat() is one cheap syscall (~µs).  Running it sync in the event
         # loop avoids the asyncio thread-pool dispatch that became the
         # bottleneck under HttpArena's c=1024-6800 load (Sprint 28).
         try:
-            st = path.stat()
+            st = served_path.stat()
         except OSError:
             await self._respond(send, HTTPStatus.NOT_FOUND)
             return
         size = st.st_size
         mtime_ns = st.st_mtime_ns
 
-        body, mime = self._lookup(path, mtime_ns, size)
-        if body is None and size <= self._CACHE_MAX_BYTES_PER_FILE:
+        cached = self._lookup(served_path, mtime_ns, size)
+        body: bytes | None
+        if cached is not None:
+            body = cached
+        elif size <= self._CACHE_MAX_BYTES_PER_FILE:
             try:
-                with open(path, 'rb') as f:
+                with open(served_path, 'rb') as f:
                     body = f.read()
             except OSError:
                 await self._respond(send, HTTPStatus.NOT_FOUND)
                 return
-            mime = (mimetypes.guess_type(path.name)[0]
-                    or 'application/octet-stream').encode()
-            self._store(path, mtime_ns, size, body, mime)
+            self._store(served_path, mtime_ns, size, body, mime, content_encoding)
+        else:
+            body = None  # streaming path below
 
         range_hdr = None
         for k, v in scope.get('headers', []):
@@ -126,11 +198,17 @@ class StaticFiles:
 
         body_len = end - start + 1
 
+        if content_encoding:
+            # When we negotiated a precompressed variant, tell the client
+            # how it's encoded and that the response Varies on
+            # Accept-Encoding (so HTTP caches don't mis-cache).
+            extra_headers.append((b'content-encoding', content_encoding))
+            extra_headers.append((b'vary', b'Accept-Encoding'))
+
         if body is not None:
             # Cache-hit (or just-filled) fast path: two send() calls, no
             # thread-pool dispatch.  Slicing a bytes object is cheap and
             # the slice doesn't escape this coroutine.
-            assert mime is not None
             await send({'type': ASGIEvent.HTTP_RESPONSE_START, 'status': status,
                         'headers': [
                             (b'content-type', mime),
@@ -146,8 +224,6 @@ class StaticFiles:
         # threshold.  Goes through the asyncio thread pool one chunk at a
         # time so per-request peak memory stays at _CHUNK regardless of
         # body size.
-        mime = (mimetypes.guess_type(path.name)[0]
-                or 'application/octet-stream').encode()
         await send({'type': ASGIEvent.HTTP_RESPONSE_START, 'status': status,
                     'headers': [
                         (b'content-type', mime),
@@ -156,7 +232,7 @@ class StaticFiles:
                     ]})
 
         remaining = body_len
-        fobj = await asyncio.to_thread(open, str(path), 'rb')
+        fobj = await asyncio.to_thread(open, str(served_path), 'rb')
         try:
             if start:
                 await asyncio.to_thread(fobj.seek, start)
@@ -171,21 +247,21 @@ class StaticFiles:
         finally:
             await asyncio.to_thread(fobj.close)
 
-    def _lookup(self, path: Path, mtime_ns: int, size: int):
+    def _lookup(self, path: Path, mtime_ns: int, size: int) -> bytes | None:
         entry = self._cache.get(path)
         if entry is None:
-            return None, None
+            return None
         if entry[0] != mtime_ns or entry[1] != size:
             # stale — drop and force refill
             self._cache.pop(path, None)
-            return None, None
+            return None
         # mark as recently used
         self._cache.move_to_end(path)
-        return entry[2], entry[3]
+        return entry[2]
 
     def _store(self, path: Path, mtime_ns: int, size: int,
-               body: bytes, mime: bytes):
-        self._cache[path] = (mtime_ns, size, body, mime)
+               body: bytes, mime: bytes, content_encoding: bytes):
+        self._cache[path] = (mtime_ns, size, body, mime, content_encoding)
         self._cache.move_to_end(path)
         while len(self._cache) > self._CACHE_MAX_ENTRIES:
             self._cache.popitem(last=False)

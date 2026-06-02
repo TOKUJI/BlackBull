@@ -3,9 +3,10 @@
 This document is the single user-facing inventory of behaviours and
 gaps that may surprise an app author adopting BlackBull at its
 current **Early Alpha** maturity level.  The companion
-[`docs/ALPHA_READINESS.md`](docs/ALPHA_READINESS.md) covers the formal audit
-evidence behind the alpha classification; this file is the
-narrative "things to know before you build on top of it" list.
+[`docs/about/conformance.md`](docs/about/conformance.md) records the
+protocol-level test coverage behind the standards-compliance claims;
+this file is the narrative "things to know before you build on top
+of it" list.
 
 The list is consolidated from internal sprint logs and the
 differential nginx fuzz corpus — every item here is something we
@@ -175,8 +176,7 @@ in Sprint 28 Task 5.
 
 ## What's flagged but not yet measured
 
-These items are on the audit's "missing validations" list and
-will be addressed in Sprint 28 or Sprint 29 close:
+These items will be addressed in Sprint 28 or Sprint 29 close:
 
 - **Quantitative slowloris characterisation** — current tests
   verify 408 is returned, not the quantitative "N held conns →

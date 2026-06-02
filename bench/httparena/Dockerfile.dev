@@ -1,0 +1,13 @@
+# Dev/test Dockerfile: installs BlackBull from a locally-built wheel
+# instead of PyPI.  Use for benchmarking changes that haven't been
+# published yet.  Built via:
+#   docker build -f bench/httparena/Dockerfile.dev -t blackbull-httparena:dev bench/httparena/
+FROM python:3.13-slim
+WORKDIR /app
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1 PIP_DISABLE_PIP_VERSION_CHECK=1
+COPY blackbull-*.whl /tmp/
+RUN pip install --no-cache-dir /tmp/blackbull-*.whl '/tmp/blackbull-0.28.0-py3-none-any.whl[compression]' || \
+    (cd /tmp && WHEEL=$(ls blackbull-*.whl) && pip install --no-cache-dir "/tmp/${WHEEL}[compression]")
+COPY app.py launcher.py ./
+EXPOSE 8080 8081 8443
+CMD ["python", "launcher.py"]

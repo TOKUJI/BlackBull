@@ -309,8 +309,8 @@ Cross-sprint coverage:
   closed-form `R(W)` deployment-sizing formula.
 - **Sprint 23**: `asyncio.timeouts.*` cost removed from per-request
   hot path.
-- **Sprint 24**: Audit follow-ups — doc clarity, methodology (MAD
-  noise column), Lane E, HPACK extension.
+- **Sprint 24**: Doc clarity, methodology (MAD noise column), 
+  Lane E, HPACK extension.
 - **Sprint 25**: `_parse` URL splitter + header-loop regex
   validators; multi-pair EC2 harness (`full_ab.sh`).
 - **Sprint 26**: deadline subsystem rework — per-arm
@@ -323,10 +323,9 @@ Cross-sprint coverage:
   `Content-Length` rewrite) surfaced via HttpArena prep.  No
   optimisation Phase 2 — Phase 1 data placed the original Sprint 28
   candidate under deployment-posture conditions.
-- **Sprint 28**: Early Alpha readiness — readiness deliverable
-  (`docs/ALPHA_READINESS.md`, `KNOWN_LIMITATIONS.md`); 1-hour soak
-  harness (`bench/soak/`) confirming leak-free posture across
-  19.5 M requests on single- + 4-worker runs; EC2 c7i.xlarge
+- **Sprint 28**: Early Alpha readiness — `KNOWN_LIMITATIONS.md`;
+  1-hour soak harness (`bench/soak/`) confirming leak-free posture
+  across 19.5 M requests on single- + 4-worker runs; EC2 c7i.xlarge
   HttpArena cross-check vs FastAPI; `StaticFiles` mtime/size-keyed
   in-memory cache; default error handler `BLACKBULL_ENV`-aware
   (DEV traceback, PROD terse); CLI `--version`.

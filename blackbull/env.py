@@ -96,6 +96,15 @@ BB_COMPRESSION_EXECUTOR_THRESHOLD
     executor so the event loop can continue processing other requests during
     the (CPU-heavy) compress call.  ``0`` always compresses on the event loop
     (disables offloading).  Default: ``65536`` (64 KiB).
+BB_COMPRESSION_MAX_INFLIGHT
+    Maximum number of compression offloads allowed to be running
+    concurrently in the asyncio default thread pool.  When at or above
+    this cap, additional eligible responses are served **uncompressed**
+    rather than queued — bounded fall-back rather than unbounded queue
+    growth.  Tied to executor size: setting this above ``os.cpu_count()
+    + 4`` provides no benefit (Python's default executor pool size).
+    ``0`` disables backpressure (unbounded queue, pre-0.29 behaviour).
+    Default: ``os.cpu_count() * 2``.
 BB_FRAME_YIELD_EVERY
     Number of stream tasks spawned per connection before the frame loop
     inserts ``await asyncio.sleep(0)`` to let the event loop dispatch the
@@ -323,6 +332,13 @@ class Settings:
     #: executor so the event loop stays responsive.  0 = always on event loop (disable offloading).
     compression_executor_threshold: int = 65536  # 64 KiB
 
+    #: Max concurrent compression offloads to the asyncio executor.  When at
+    #: this cap, eligible responses are served **uncompressed** rather than
+    #: queued.  0 disables the cap (unbounded queue — pre-0.29 behaviour;
+    #: vulnerable to executor saturation under burst load).
+    #: Default is set in get_settings() to ``os.cpu_count() * 2``.
+    compression_max_inflight: int = 0
+
     #: Cooperative yield interval for the HTTP/2 frame loop.  After this many
     #: stream tasks are spawned without a natural yield, ``asyncio.sleep(0)``
     #: is inserted so the event loop can dispatch queued tasks.
@@ -379,6 +395,8 @@ def get_settings() -> Settings:
         h2_active_streams=_int_env_nonneg('BB_H2_ACTIVE_STREAMS', 20),
         compression_min_size=_int_env('BB_COMPRESSION_MIN_SIZE', 100),
         compression_executor_threshold=_int_env_nonneg('BB_COMPRESSION_EXECUTOR_THRESHOLD', 65536),
+        compression_max_inflight=_int_env_nonneg(
+            'BB_COMPRESSION_MAX_INFLIGHT', max((os.cpu_count() or 1) * 2, 4)),
         frame_yield_every=_int_env_nonneg('BB_FRAME_YIELD_EVERY', 8),
     )
 

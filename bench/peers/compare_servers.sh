@@ -60,7 +60,7 @@ CERT="tests/cert.pem"
 KEY="tests/key.pem"
 RUNS="${RUNS:-3}"
 # Sprint 24: default duration raised from 30 s to 60 s for the
-# wrk/oha lanes.  Audit recommendation 2-1 — 30 s left allocator-state,
+# wrk/oha lanes.  30 s left allocator-state,
 # kernel-pacing, and TLS-session-cache transients in the measured
 # window.  Older numbers in CHARACTERIZATION.md were captured at 30 s;
 # Sprint 24+ rows are 60 s.  Override via env to reproduce.

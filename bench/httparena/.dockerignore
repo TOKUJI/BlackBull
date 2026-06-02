@@ -1,8 +1,9 @@
-# Keep image small — exclude everything except the source tree + framework files.
+# Build context = bench/httparena/.  Keep the image small: only
+# app.py + launcher.py are copied into the image.
 **
-!pyproject.toml
-!blackbull/**
-!bench/httparena/app.py
-!bench/httparena/launcher.py
+!app.py
+!launcher.py
+# Dev-only: a locally-built wheel for Dockerfile.dev.  Untracked.
+!blackbull-*.whl
 **/__pycache__/
 **/*.pyc

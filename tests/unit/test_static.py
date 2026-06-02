@@ -333,3 +333,126 @@ class TestBlackBullStaticRegistration:
         start, body = await _collect(mw, _scope(path='/assets/hello.txt'))
         assert start['status'] == 200
         assert body == b'Hello, static world!'
+
+
+# ---------------------------------------------------------------------------
+# Precompressed-variant serving (Sprint 29 #1)
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def precompressed_dir(tmp_path: pathlib.Path) -> pathlib.Path:
+    """Static dir with both original and precompressed siblings."""
+    (tmp_path / 'app.js').write_bytes(b'console.log("hi");' * 200)
+    (tmp_path / 'app.js.br').write_bytes(b'BR-COMPRESSED-BYTES')
+    (tmp_path / 'app.js.gz').write_bytes(b'GZ-COMPRESSED-BYTES')
+    (tmp_path / 'app.js.zst').write_bytes(b'ZST-COMPRESSED-BYTES')
+    # File without precompressed siblings
+    (tmp_path / 'manifest.json').write_bytes(b'{}')
+    return tmp_path
+
+
+@pytest.mark.asyncio
+class TestPrecompressedVariant:
+    async def test_serves_br_sibling_when_accept_br(self, precompressed_dir):
+        from blackbull.middleware.static import StaticFiles
+        app = StaticFiles(directory=str(precompressed_dir))
+        start, body = await _collect(
+            app, _scope(path='/app.js', headers={'accept-encoding': 'br, gzip'}))
+        assert start['status'] == 200
+        assert body == b'BR-COMPRESSED-BYTES'
+        hdrs = dict(start['headers'])
+        assert hdrs[b'content-encoding'] == b'br'
+        assert hdrs[b'content-type'] == b'text/javascript'    # mime from .js, not .js.br
+        assert hdrs[b'vary'] == b'Accept-Encoding'
+
+    async def test_serves_gzip_when_only_gzip_offered(self, precompressed_dir):
+        from blackbull.middleware.static import StaticFiles
+        app = StaticFiles(directory=str(precompressed_dir))
+        start, body = await _collect(
+            app, _scope(path='/app.js', headers={'accept-encoding': 'gzip'}))
+        assert start['status'] == 200
+        assert body == b'GZ-COMPRESSED-BYTES'
+        hdrs = dict(start['headers'])
+        assert hdrs[b'content-encoding'] == b'gzip'
+
+    async def test_prefers_br_over_gzip_when_both_offered(self, precompressed_dir):
+        from blackbull.middleware.static import StaticFiles
+        app = StaticFiles(directory=str(precompressed_dir))
+        start, body = await _collect(
+            app, _scope(path='/app.js', headers={'accept-encoding': 'gzip, br'}))
+        # Server preference br > zstd > gzip overrides client list order
+        hdrs = dict(start['headers'])
+        assert hdrs[b'content-encoding'] == b'br'
+        assert body == b'BR-COMPRESSED-BYTES'
+
+    async def test_falls_through_when_no_sibling_exists(self, precompressed_dir):
+        from blackbull.middleware.static import StaticFiles
+        app = StaticFiles(directory=str(precompressed_dir))
+        # manifest.json has no .br/.gz/.zst sibling
+        start, body = await _collect(
+            app, _scope(path='/manifest.json',
+                        headers={'accept-encoding': 'br, gzip'}))
+        assert start['status'] == 200
+        assert body == b'{}'
+        hdrs = dict(start['headers'])
+        assert b'content-encoding' not in hdrs
+
+    async def test_zero_q_value_does_not_match(self, precompressed_dir):
+        from blackbull.middleware.static import StaticFiles
+        app = StaticFiles(directory=str(precompressed_dir))
+        # client offers br but with q=0 (explicitly refuses)
+        start, body = await _collect(
+            app, _scope(path='/app.js',
+                        headers={'accept-encoding': 'br;q=0, gzip'}))
+        hdrs = dict(start['headers'])
+        assert hdrs[b'content-encoding'] == b'gzip'
+
+    async def test_range_request_skips_sibling(self, precompressed_dir):
+        from blackbull.middleware.static import StaticFiles
+        app = StaticFiles(directory=str(precompressed_dir))
+        # Range requests must be served from the uncompressed file because
+        # the encoded sibling has a different size (start/end would be wrong).
+        start, body = await _collect(
+            app, _scope(path='/app.js',
+                        headers={'accept-encoding': 'br',
+                                 'range': 'bytes=0-9'}))
+        assert start['status'] == 206
+        hdrs = dict(start['headers'])
+        assert b'content-encoding' not in hdrs
+        assert hdrs[b'content-type'] == b'text/javascript'
+        assert body == b'console.lo'
+
+    async def test_no_accept_encoding_serves_uncompressed(self, precompressed_dir):
+        from blackbull.middleware.static import StaticFiles
+        app = StaticFiles(directory=str(precompressed_dir))
+        start, body = await _collect(app, _scope(path='/app.js'))
+        hdrs = dict(start['headers'])
+        assert b'content-encoding' not in hdrs
+        assert hdrs[b'content-type'] == b'text/javascript'
+        # uncompressed body is what we wrote
+        assert body == b'console.log("hi");' * 200
+
+    async def test_cache_hit_returns_same_sibling(self, precompressed_dir):
+        from blackbull.middleware.static import StaticFiles
+        app = StaticFiles(directory=str(precompressed_dir))
+        # First request fills the cache
+        start1, body1 = await _collect(
+            app, _scope(path='/app.js', headers={'accept-encoding': 'br'}))
+        # Second request — cache hit
+        start2, body2 = await _collect(
+            app, _scope(path='/app.js', headers={'accept-encoding': 'br'}))
+        assert body1 == body2 == b'BR-COMPRESSED-BYTES'
+        assert dict(start1['headers'])[b'content-encoding'] == b'br'
+        assert dict(start2['headers'])[b'content-encoding'] == b'br'
+
+    async def test_different_encoding_uses_different_cache_entries(self, precompressed_dir):
+        from blackbull.middleware.static import StaticFiles
+        app = StaticFiles(directory=str(precompressed_dir))
+        # Fill cache with br
+        _, body_br = await _collect(
+            app, _scope(path='/app.js', headers={'accept-encoding': 'br'}))
+        # Then request gzip — should hit gzip sibling, not the cached br
+        _, body_gz = await _collect(
+            app, _scope(path='/app.js', headers={'accept-encoding': 'gzip'}))
+        assert body_br == b'BR-COMPRESSED-BYTES'
+        assert body_gz == b'GZ-COMPRESSED-BYTES'

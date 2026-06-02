@@ -8,6 +8,11 @@ from .utils import as_middleware
 
 _MIN_SIZE = 100  # default minimum body size to bother compressing
 _EXECUTOR_THRESHOLD = 65536  # default body size above which compression is offloaded
+# Default cap on concurrent executor offloads.  When at the cap, additional
+# eligible responses are served *uncompressed* rather than queued — bounded
+# fall-back instead of unbounded executor queue growth.  ``0`` disables.
+import os as _os  # noqa: PLC0415
+_MAX_INFLIGHT = max((_os.cpu_count() or 1) * 2, 4)
 _SERVER_PREFERENCE = ['br', 'zstd', 'gzip']  # server-side priority order
 
 # Content-Type prefixes whose payloads are already compressed or binary and
@@ -80,9 +85,16 @@ class Compression:
     """
 
     def __init__(self, min_size: int = _MIN_SIZE,
-                 executor_threshold: int = _EXECUTOR_THRESHOLD):
+                 executor_threshold: int = _EXECUTOR_THRESHOLD,
+                 executor_max_inflight: int = _MAX_INFLIGHT):
         self._min_size = min_size
         self._executor_threshold = executor_threshold
+        # Concurrency cap on executor offloads.  When at cap, fall back to
+        # uncompressed rather than queueing — keeps the asyncio default
+        # thread pool from growing an unbounded backlog under burst load
+        # (the HttpArena `static` profile collapse mode, Sprint 29).
+        self._executor_max_inflight = executor_max_inflight
+        self._executor_inflight: int = 0
         self._available = _detect_codecs()
 
     @staticmethod
@@ -138,24 +150,43 @@ class Compression:
 
         codec_name, compressor = selection
         start_event: dict = {}
+        start_forwarded = False
         body_parts: list[bytes] = []
         streaming = False
         skip_compression = False
 
         async def intercepting_send(event: dict) -> None:
-            nonlocal streaming, skip_compression
+            nonlocal streaming, skip_compression, start_forwarded
             parsed = parse_response_event(event)
             match parsed:
                 case ResponseStart():
                     start_event.update(parsed)
                     if not _is_compressible_content_type(parsed.headers):
                         skip_compression = True
+                    # An upstream layer (e.g. `StaticFiles` serving a
+                    # precompressed sibling) may have already set
+                    # Content-Encoding.  Don't double-wrap.
+                    elif parsed.headers.get(b'content-encoding'):
+                        skip_compression = True
+                    # When skipping, forward the start event immediately
+                    # so the downstream sender doesn't sit on a body with
+                    # no headers (which would be invalid HTTP).
+                    if skip_compression:
+                        await send(start_event)
+                        start_forwarded = True
                 case ResponseBody():
                     if streaming or skip_compression:
+                        # If we already decided to skip but the start
+                        # arrived as part of this body event somehow,
+                        # forward it now to be safe.
+                        if not start_forwarded and start_event:
+                            await send(start_event)
+                            start_forwarded = True
                         await send(parsed)
                     elif parsed.more_body:
                         streaming = True
                         await send(start_event)
+                        start_forwarded = True
                         if parsed.body:
                             await send({'type': ASGIEvent.HTTP_RESPONSE_BODY,
                                         'body': parsed.body, 'more_body': True})
@@ -169,6 +200,17 @@ class Compression:
         if streaming:
             return
 
+        # When skip_compression triggered on the upstream ResponseStart,
+        # intercepting_send has already forwarded both the start event
+        # and the body inline.  Re-sending here would produce two start
+        # events on the same response, which the HTTP/1.1 sender treats
+        # as the end of the first response — causing the connection to
+        # be closed after every successful response.  Detected via the
+        # 1:1 success/read-error ratio under wrk keep-alive load
+        # (Sprint 29).
+        if start_forwarded:
+            return
+
         body = b''.join(body_parts)
 
         if skip_compression or len(body) < self._min_size:
@@ -178,8 +220,24 @@ class Compression:
 
         threshold = self._executor_threshold
         if threshold > 0 and len(body) >= threshold:
-            loop = asyncio.get_running_loop()
-            compressed = await loop.run_in_executor(None, compressor, body)
+            # Backpressure: if the executor already has _executor_max_inflight
+            # compressions running, skip this one and serve uncompressed
+            # rather than queueing.  Prevents the unbounded executor backlog
+            # that caused the HttpArena `static` profile to collapse to 0 r/s
+            # on run 2 under c=1024 (Sprint 29).  Counter increment / decrement
+            # is safe without a lock — asyncio is single-threaded.
+            if (self._executor_max_inflight > 0
+                    and self._executor_inflight >= self._executor_max_inflight):
+                await send(start_event)
+                await send({'type': ASGIEvent.HTTP_RESPONSE_BODY,
+                            'body': body, 'more_body': False})
+                return
+            self._executor_inflight += 1
+            try:
+                loop = asyncio.get_running_loop()
+                compressed = await loop.run_in_executor(None, compressor, body)
+            finally:
+                self._executor_inflight -= 1
         else:
             compressed = compressor(body)
         # The compressed body is a different size; strip any upstream
@@ -209,6 +267,7 @@ def _make_default_compress() -> 'Compression':
         return Compression(
             min_size=cfg.compression_min_size,
             executor_threshold=cfg.compression_executor_threshold,
+            executor_max_inflight=cfg.compression_max_inflight,
         )
     except Exception:
         return Compression()

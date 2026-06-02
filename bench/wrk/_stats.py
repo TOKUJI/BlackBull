@@ -1,6 +1,6 @@
 """Aggregate per-run numbers from a wrk multi-run.
 
-Sprint 24 (audit recommendations 4-1, 4-2): the wrk/oha lanes now run
+Sprint 24 : the wrk/oha lanes now run
 RUNS times per scenario and report a robust set of stats:
 
     median  median-absolute-deviation  min  max  noise_pct

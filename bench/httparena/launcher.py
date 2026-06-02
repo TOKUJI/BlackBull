@@ -32,13 +32,15 @@ HTTPS_H2_PORT  = int(os.environ.get('HTTPARENA_HTTPS_H2_PORT',  '8443'))
 TLS_CERT       = os.environ.get('TLS_CERT', '/certs/server.crt')
 TLS_KEY        = os.environ.get('TLS_KEY',  '/certs/server.key')
 
-# Worker count — matches the fastapi reference launcher's autoscale.
-CPU_COUNT = multiprocessing.cpu_count()
+# Worker count — honour cgroup-aware CPU affinity if the platform
+# exposes it (Linux), otherwise fall back to multiprocessing.cpu_count().
+# Capped at 128 as a sanity guard; HttpArena's leaderboard hardware is
+# c7i.metal-48xlarge (96 vCPU) so the cap is mostly defensive.  No
+# floor — if the kernel says we have N cores, we run N workers.
 try:
     WRK_COUNT = min(len(os.sched_getaffinity(0)), 128)
 except (AttributeError, OSError):
-    WRK_COUNT = CPU_COUNT
-WRK_COUNT = max(WRK_COUNT, 4)
+    WRK_COUNT = multiprocessing.cpu_count()
 
 PY = sys.executable
 APP = os.path.join(os.path.dirname(__file__), 'app.py')

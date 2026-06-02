@@ -28,22 +28,102 @@ so the editable install's metadata catches up.
 
 ---
 
+## [0.28.1] — 2026-06-02
+
+**PATCH release — fixes a `Compression` + `StaticFiles` interaction
+discovered while preparing the Sprint 29 HttpArena leaderboard
+submission.**  Adds precompressed-variant serving so a static-file
+workload with `Accept-Encoding: br/gzip/zstd` no longer engages
+on-the-fly compression for every request.  Adds backpressure on
+the Compression executor so the same workload degrades gracefully
+when no precompressed sibling is available instead of collapsing
+under burst load.
+
+### Fixed
+- **`Compression` middleware emitted duplicate `http.response.start`
+  events when the upstream response was already encoded.**  Under
+  HTTP/1.1 keep-alive this caused the sender to treat the second
+  start as the end of the first response and close the connection
+  — visible as a 1:1 success/read-error ratio in `wrk` and a
+  ~500× throughput drop on `Accept-Encoding`-bearing static
+  workloads.  Now: when `skip_compression` triggers, the start
+  event is forwarded inline and the outer code path returns
+  early.  Regression test added at
+  [`tests/unit/test_compression_backpressure.py::test_skip_path_emits_exactly_one_start_event`](tests/unit/test_compression_backpressure.py).
+
+### Added
+- **Precompressed-variant serving in `StaticFiles`.**  When the
+  client offers `Accept-Encoding: br | gzip | zstd` and a
+  `<path>.br` / `.gz` / `.zst` sibling exists on disk,
+  `StaticFiles` serves that file directly with the matching
+  `Content-Encoding` header (and `Vary: Accept-Encoding`).  No
+  on-the-fly compression on the static hot path.  Server
+  preference order matches the `Compression` middleware
+  (`br > zstd > gzip`).  Range requests bypass sibling lookup
+  to avoid encoded-vs-Range size confusion.  Same pattern as
+  nginx `gzip_static`, Caddy `file_server { precompressed }`,
+  Apache `mod_negotiation`.
+- **`Compression` executor-queue backpressure.**  New
+  constructor argument `executor_max_inflight` and env var
+  `BB_COMPRESSION_MAX_INFLIGHT` (default
+  `max(os.cpu_count() * 2, 4)`).  When at the cap, additional
+  eligible responses are served **uncompressed** rather than
+  queued.  Prevents the unbounded executor backlog that caused
+  the HttpArena `static` profile to collapse to 0 r/s on
+  run 2/3 under c=1024.  `0` disables the cap (pre-0.28.1
+  unbounded behaviour, if you want it back).
+- **`Compression` skips already-encoded responses.**  When the
+  upstream response has a `Content-Encoding` header set (e.g.
+  by the new precompressed-variant `StaticFiles` path), the
+  middleware forwards as-is rather than wrapping again.  Same
+  shape Starlette / Caddy / nginx use.
+
+### Changed
+- **`StaticFiles` cache key extended** to record content-encoding
+  alongside (path, mtime, size).  Different encodings of the
+  same file now coexist in the cache as separate entries.
+
+### Local benchmark — three back-to-back wrk passes, `c=1024`
+
+| Workload | 0.28.0 | 0.28.1 |
+|---|---:|---:|
+| `Accept-Encoding: br` + precompressed sibling | 54 / 0 / 0 r/s | **54,664 / 34,380 / 34,920 r/s** |
+| `Accept-Encoding: br` + no sibling (backpressure) | 54 / 0 / 0 r/s | **3,857 / 3,994 / 3,951 r/s** stable |
+| No `Accept-Encoding` (no Compression engagement) | 24,572 / 27,386 / 31,358 r/s | unchanged |
+
+### Tests
+- **+10 unit tests.**  `tests/unit/test_static.py` gains 9 tests
+  covering precompressed-variant negotiation (br/gzip/zstd
+  preference, q=0 refusal, Range bypass, no-sibling fall-through,
+  cache hits, separate-encoding cache entries).
+  `tests/unit/test_compression_backpressure.py` is new with 6
+  tests covering the executor-inflight counter (under cap →
+  compresses; at cap → serves uncompressed; counter decrement on
+  success and on exception; small-body path bypasses the cap;
+  skip-path emits exactly one start event).  Total unit-test
+  count: **812 passing**.
+
+### Notes for adopters
+- For `static` content under burst load, the right pattern is to
+  ship precompressed `.br` / `.gz` / `.zst` siblings on disk
+  (build-time step) and rely on the new variant-serving path.
+  Compression on the fly via the `Compression` middleware is
+  fine for small dynamic responses but doesn't scale to thousands
+  of concurrent requests on large bodies — for that, terminate
+  compression at a CDN or reverse proxy.
+
+---
+
 ## [0.28.0] — 2026-05-31
 
 **Sprint 28 — Early Alpha readiness.**  First release labelled
-*Early Alpha*: the framework now has an externally-audited
-readiness deliverable, a soak-tested leak-free posture, and an
-EC2-reproducible benchmark cross-check against FastAPI.  API may
-still break between MINOR versions per ZeroVer; see
-[`docs/ALPHA_READINESS.md`](docs/ALPHA_READINESS.md) for the evidence map
-and [`KNOWN_LIMITATIONS.md`](KNOWN_LIMITATIONS.md) for the
-explicit "what's not promised yet" list.
+*Early Alpha*: the framework now has a soak-tested leak-free
+posture and an EC2-reproducible benchmark cross-check against
+FastAPI.  API may still break between MINOR versions per
+ZeroVer; see [`KNOWN_LIMITATIONS.md`](KNOWN_LIMITATIONS.md) for
+the explicit "what's not promised yet" list.
 
 ### Added
-- **`docs/ALPHA_READINESS.md`** — evidence-mapped readiness
-  checklist (9 categories, ~36 items) with classification, top-3
-  risks, top-5 missing validations.  Linked from `README.md` Early
-  Alpha banner.
 - **`KNOWN_LIMITATIONS.md`** — single consolidated doc covering
   RFC 8441 opt-in, HTTP/2 mux overhead, slowloris response shape,
   single-host benchmark caveats, RFC-defensible diffs from nginx
@@ -125,11 +205,10 @@ explicit "what's not promised yet" list.
   open carry-forward (no new EC2 spend in Sprint 28).
 
 ### Methodology
-- **`docs/ALPHA_READINESS.md` classification flipped to
-  "READY FOR EARLY ALPHA"** after Task 2 (soak) and Task 4
-  (release-shape + EC2 cross-check) closed.  Both blocking risks
-  noted at audit time — no ≥1-hour soak, no externally
-  reproducible benchmark — are now closed.
+- **Early Alpha classification confirmed** after Task 2 (soak) and
+  Task 4 (release-shape + EC2 cross-check) closed.  Both blocking
+  risks noted at the start of the sprint — no ≥1-hour soak, no
+  externally reproducible benchmark — are now closed.
 
 ---
 
@@ -322,7 +401,7 @@ Sprint 25 — HTTP/1 parser hot-path + cross-pair EC2 harness.
 
 ## [0.24.0] — 2026-05-28
 
-Sprint 24 — external-audit follow-ups + Lane E.
+Sprint 24 — follow-ups + Lane E.
 
 ### Changed
 - Methodology hardening: `RUNS_WRK=3` with MAD noise column + 🌫
@@ -342,8 +421,7 @@ Sprint 24 — external-audit follow-ups + Lane E.
   `ip_local_port_range`) to lift Lane E off the default
   accept-queue / port-range floor.
 - Top-of-file cross-topology warning box in
-  `bench/CHARACTERIZATION.md`; per-sprint status badges; "Audit
-  recommendations already in place" defensive cross-ref.
+  `bench/CHARACTERIZATION.md`; per-sprint status badges;
 
 ---
 
