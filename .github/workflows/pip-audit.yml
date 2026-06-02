@@ -3,11 +3,11 @@ name: pip-audit
 # Scans BlackBull's dependency tree against the PyPI advisory
 # database and OSV.  Fails the build on known-CVE matches.
 #
-# Triggers:
-#   - on every PR that touches pyproject.toml
-#   - weekly schedule to catch advisories filed against unchanged
-#     dependencies between PRs
-#   - manual dispatch
+# Triggers on every push and PR to master so the check appears in
+# branch-protection's required-status-checks dropdown for all PRs
+# (Dependabot bumps that don't touch pyproject.toml included).
+# Weekly schedule catches advisories filed against unchanged
+# dependencies between PRs; manual dispatch for ad-hoc runs.
 #
 # Dependabot security alerts are independent of this workflow and
 # will surface a CVE PR even when this job has not yet run.  The
@@ -16,14 +16,8 @@ name: pip-audit
 on:
   push:
     branches: [master]
-    paths:
-      - 'pyproject.toml'
-      - '.github/workflows/pip-audit.yml'
   pull_request:
     branches: [master]
-    paths:
-      - 'pyproject.toml'
-      - '.github/workflows/pip-audit.yml'
   schedule:
     - cron: '17 6 * * 1'   # weekly, Monday 06:17 UTC
   workflow_dispatch:
