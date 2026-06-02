@@ -329,6 +329,16 @@ Cross-sprint coverage:
   HttpArena cross-check vs FastAPI; `StaticFiles` mtime/size-keyed
   in-memory cache; default error handler `BLACKBULL_ENV`-aware
   (DEV traceback, PROD terse); CLI `--version`.
+- **Sprint 29**: Adopter experience — `docs/guide.md` (3,379 lines)
+  split into journey-organized tree under `getting-started/`,
+  `guide/`, `deployment/`, `reference/`, `about/`; HttpArena harness
+  pivoted to PyPI install path (matches real-adopter shape).  0.28.1
+  PATCH cut mid-sprint: `Compression` + `StaticFiles` interaction
+  caused static-profile collapse to 0 r/s on burst-keepalive runs 2/3
+  — fixed via precompressed-variant serving in `StaticFiles` plus
+  executor-inflight backpressure in `Compression`.  EC2 c7i.2xlarge
+  cross-check confirms collapse-to-zero is gone; ~30-50%
+  between-runs degradation under c≥4096 remains as Sprint 30 anchor.
 
 ## File layout (target)
 
