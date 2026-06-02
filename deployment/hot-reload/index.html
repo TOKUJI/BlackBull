@@ -10,24 +10,28 @@
       
       
       
-        <link rel="canonical" href="https://TOKUJI.github.io/BlackBull/ActorDesign/">
+        <link rel="canonical" href="https://TOKUJI.github.io/BlackBull/deployment/hot-reload/">
       
       
+        <link rel="prev" href="../unix-and-fd/">
+      
+      
+        <link rel="next" href="../../reference/env-vars/">
       
       
         
       
       
-      <link rel="icon" href="../assets/images/favicon.png">
+      <link rel="icon" href="../../assets/images/favicon.png">
       <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
     
     
       
-        <title>BlackBull — Level A Actor Model Design - BlackBull</title>
+        <title>Hot reload - BlackBull</title>
       
     
     
-      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
       
       
 
@@ -46,11 +50,11 @@
       
     
     
-      <link rel="stylesheet" href="../assets/_mkdocstrings.css">
+      <link rel="stylesheet" href="../../assets/_mkdocstrings.css">
     
-      <link rel="stylesheet" href="../stylesheets/extra.css">
+      <link rel="stylesheet" href="../../stylesheets/extra.css">
     
-    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
     
       
 
@@ -68,7 +72,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#blackbull-level-a-actor-model-design" class="md-skip">
+        <a href="#hot-reload" class="md-skip">
           Skip to content
         </a>
       
@@ -84,7 +88,7 @@
 
 <header class="md-header md-header--shadow" data-md-component="header">
   <nav class="md-header__inner md-grid" aria-label="Header">
-    <a href=".." title="BlackBull" class="md-header__button md-logo" aria-label="BlackBull" data-md-component="logo">
+    <a href="../.." title="BlackBull" class="md-header__button md-logo" aria-label="BlackBull" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
@@ -104,7 +108,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              BlackBull — Level A Actor Model Design
+              Hot reload
             
           </span>
         </div>
@@ -194,7 +198,7 @@
 
 <nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
   <label class="md-nav__title" for="__drawer">
-    <a href=".." title="BlackBull" class="md-nav__button md-logo" aria-label="BlackBull" data-md-component="logo">
+    <a href="../.." title="BlackBull" class="md-nav__button md-logo" aria-label="BlackBull" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
@@ -224,7 +228,7 @@
   
   
     <li class="md-nav__item">
-      <a href=".." class="md-nav__link">
+      <a href="../.." class="md-nav__link">
         
   
   
@@ -250,15 +254,62 @@
   
   
   
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting Started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
     <li class="md-nav__item">
-      <a href="../guide/" class="md-nav__link">
+      <a href="../../getting-started/installation/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    User Guide
+    Installation
   
 
     
@@ -267,6 +318,70 @@
   
 
       </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/hello-world/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Hello World
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/first-app/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Your First App
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
     </li>
   
 
@@ -296,7 +411,7 @@
   <span class="md-ellipsis">
     
   
-    API Reference
+    Guide
   
 
     
@@ -312,7 +427,848 @@
             <span class="md-nav__icon md-icon"></span>
             
   
-    API Reference
+    Guide
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/routing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Routing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/middleware/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Middleware
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/error-handling/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Error handling
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/requests-and-responses/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Requests and responses
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/websockets/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    WebSockets
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/http2/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    HTTP/2
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/events/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Events
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/logging/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Logging
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/static-files/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Static files
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/openapi/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    OpenAPI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/testing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Testing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deployment
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Deployment
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../running/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Running BlackBull
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../workers/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Workers
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tls/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    TLS
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../behind-nginx/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Behind nginx
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../unix-and-fd/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Unix and fd inheritance
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Hot reload
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Hot reload
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#setup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Setup
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#use" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Use
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#how-it-works" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How it works
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#default-watch-path" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Default watch path
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#caveats" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Caveats
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#production-alternative" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Production alternative
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#next" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Next
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/env-vars/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Environment variables
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_2" id="__nav_5_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_5_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    API
   
 
           </label>
@@ -333,10 +1289,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_1" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2_1" >
         
           
-          <label class="md-nav__link" for="__nav_3_1" id="__nav_3_1_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_5_2_1" id="__nav_5_2_1_label" tabindex="0">
             
   
   
@@ -354,8 +1310,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_1_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_3_1">
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_5_2_1_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_2_1">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -372,7 +1328,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../api/blackbull/" class="md-nav__link">
+      <a href="../../api/blackbull/" class="md-nav__link">
         
   
   
@@ -400,7 +1356,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../api/blackbull/actor/" class="md-nav__link">
+      <a href="../../api/blackbull/actor/" class="md-nav__link">
         
   
   
@@ -428,7 +1384,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../api/blackbull/app/" class="md-nav__link">
+      <a href="../../api/blackbull/app/" class="md-nav__link">
         
   
   
@@ -456,7 +1412,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../api/blackbull/asgi/" class="md-nav__link">
+      <a href="../../api/blackbull/asgi/" class="md-nav__link">
         
   
   
@@ -484,7 +1440,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../api/blackbull/cli/" class="md-nav__link">
+      <a href="../../api/blackbull/cli/" class="md-nav__link">
         
   
   
@@ -520,10 +1476,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_1_6" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2_1_6" >
         
           
-          <label class="md-nav__link" for="__nav_3_1_6" id="__nav_3_1_6_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_5_2_1_6" id="__nav_5_2_1_6_label" tabindex="0">
             
   
   
@@ -541,8 +1497,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_3_1_6_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_3_1_6">
+        <nav class="md-nav" data-md-level="4" aria-labelledby="__nav_5_2_1_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_2_1_6">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -559,7 +1515,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../api/blackbull/client/" class="md-nav__link">
+      <a href="../../api/blackbull/client/" class="md-nav__link">
         
   
   
@@ -587,7 +1543,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../api/blackbull/client/client/" class="md-nav__link">
+      <a href="../../api/blackbull/client/client/" class="md-nav__link">
         
   
   
@@ -615,7 +1571,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../api/blackbull/client/exceptions/" class="md-nav__link">
+      <a href="../../api/blackbull/client/exceptions/" class="md-nav__link">
         
   
   
@@ -643,7 +1599,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../api/blackbull/client/http1/" class="md-nav__link">
+      <a href="../../api/blackbull/client/http1/" class="md-nav__link">
         
   
   
@@ -671,7 +1627,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../api/blackbull/client/http2/" class="md-nav__link">
+      <a href="../../api/blackbull/client/http2/" class="md-nav__link">
         
   
   
@@ -699,7 +1655,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../api/blackbull/client/response/" class="md-nav__link">
+      <a href="../../api/blackbull/client/response/" class="md-nav__link">
         
   
   
@@ -727,7 +1683,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../api/blackbull/client/scenario/" class="md-nav__link">
+      <a href="../../api/blackbull/client/scenario/" class="md-nav__link">
         
   
   
@@ -755,7 +1711,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../api/blackbull/client/scenario_oracle/" class="md-nav__link">
+      <a href="../../api/blackbull/client/scenario_oracle/" class="md-nav__link">
         
   
   
@@ -783,7 +1739,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../api/blackbull/client/websocket/" class="md-nav__link">
+      <a href="../../api/blackbull/client/websocket/" class="md-nav__link">
         
   
   
@@ -819,7 +1775,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../api/blackbull/env/" class="md-nav__link">
+      <a href="../../api/blackbull/env/" class="md-nav__link">
         
   
   
@@ -847,7 +1803,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../api/blackbull/event/" class="md-nav__link">
+      <a href="../../api/blackbull/event/" class="md-nav__link">
         
   
   
@@ -875,7 +1831,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../api/blackbull/event_aggregator/" class="md-nav__link">
+      <a href="../../api/blackbull/event_aggregator/" class="md-nav__link">
         
   
   
@@ -903,7 +1859,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../api/blackbull/headers/" class="md-nav__link">
+      <a href="../../api/blackbull/headers/" class="md-nav__link">
         
   
   
@@ -931,7 +1887,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../api/blackbull/logger/" class="md-nav__link">
+      <a href="../../api/blackbull/logger/" class="md-nav__link">
         
   
   
@@ -967,10 +1923,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_1_12" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2_1_12" >
         
           
-          <label class="md-nav__link" for="__nav_3_1_12" id="__nav_3_1_12_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_5_2_1_12" id="__nav_5_2_1_12_label" tabindex="0">
             
   
   
@@ -988,8 +1944,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_3_1_12_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_3_1_12">
+        <nav class="md-nav" data-md-level="4" aria-labelledby="__nav_5_2_1_12_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_2_1_12">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -1006,7 +1962,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../api/blackbull/middleware/" class="md-nav__link">
+      <a href="../../api/blackbull/middleware/" class="md-nav__link">
         
   
   
@@ -1034,7 +1990,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../api/blackbull/middleware/base/" class="md-nav__link">
+      <a href="../../api/blackbull/middleware/base/" class="md-nav__link">
         
   
   
@@ -1062,7 +2018,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../api/blackbull/middleware/cache/" class="md-nav__link">
+      <a href="../../api/blackbull/middleware/cache/" class="md-nav__link">
         
   
   
@@ -1090,7 +2046,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../api/blackbull/middleware/compression/" class="md-nav__link">
+      <a href="../../api/blackbull/middleware/compression/" class="md-nav__link">
         
   
   
@@ -1118,7 +2074,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../api/blackbull/middleware/cors/" class="md-nav__link">
+      <a href="../../api/blackbull/middleware/cors/" class="md-nav__link">
         
   
   
@@ -1146,7 +2102,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../api/blackbull/middleware/proxy/" class="md-nav__link">
+      <a href="../../api/blackbull/middleware/proxy/" class="md-nav__link">
         
   
   
@@ -1174,7 +2130,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../api/blackbull/middleware/session/" class="md-nav__link">
+      <a href="../../api/blackbull/middleware/session/" class="md-nav__link">
         
   
   
@@ -1202,7 +2158,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../api/blackbull/middleware/static/" class="md-nav__link">
+      <a href="../../api/blackbull/middleware/static/" class="md-nav__link">
         
   
   
@@ -1230,7 +2186,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../api/blackbull/middleware/utils/" class="md-nav__link">
+      <a href="../../api/blackbull/middleware/utils/" class="md-nav__link">
         
   
   
@@ -1258,7 +2214,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../api/blackbull/middleware/websocket/" class="md-nav__link">
+      <a href="../../api/blackbull/middleware/websocket/" class="md-nav__link">
         
   
   
@@ -1294,7 +2250,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../api/blackbull/openapi/" class="md-nav__link">
+      <a href="../../api/blackbull/openapi/" class="md-nav__link">
         
   
   
@@ -1330,10 +2286,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_1_14" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2_1_14" >
         
           
-          <label class="md-nav__link" for="__nav_3_1_14" id="__nav_3_1_14_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_5_2_1_14" id="__nav_5_2_1_14_label" tabindex="0">
             
   
   
@@ -1351,8 +2307,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_3_1_14_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_3_1_14">
+        <nav class="md-nav" data-md-level="4" aria-labelledby="__nav_5_2_1_14_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_2_1_14">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -1369,7 +2325,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../api/blackbull/protocol/" class="md-nav__link">
+      <a href="../../api/blackbull/protocol/" class="md-nav__link">
         
   
   
@@ -1397,7 +2353,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../api/blackbull/protocol/frame/" class="md-nav__link">
+      <a href="../../api/blackbull/protocol/frame/" class="md-nav__link">
         
   
   
@@ -1425,7 +2381,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../api/blackbull/protocol/frame_types/" class="md-nav__link">
+      <a href="../../api/blackbull/protocol/frame_types/" class="md-nav__link">
         
   
   
@@ -1453,7 +2409,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../api/blackbull/protocol/hpack_fastpath/" class="md-nav__link">
+      <a href="../../api/blackbull/protocol/hpack_fastpath/" class="md-nav__link">
         
   
   
@@ -1481,7 +2437,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../api/blackbull/protocol/rsock/" class="md-nav__link">
+      <a href="../../api/blackbull/protocol/rsock/" class="md-nav__link">
         
   
   
@@ -1509,7 +2465,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../api/blackbull/protocol/stream/" class="md-nav__link">
+      <a href="../../api/blackbull/protocol/stream/" class="md-nav__link">
         
   
   
@@ -1545,7 +2501,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../api/blackbull/request/" class="md-nav__link">
+      <a href="../../api/blackbull/request/" class="md-nav__link">
         
   
   
@@ -1573,7 +2529,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../api/blackbull/response/" class="md-nav__link">
+      <a href="../../api/blackbull/response/" class="md-nav__link">
         
   
   
@@ -1601,7 +2557,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../api/blackbull/router/" class="md-nav__link">
+      <a href="../../api/blackbull/router/" class="md-nav__link">
         
   
   
@@ -1637,10 +2593,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_1_18" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2_1_18" >
         
           
-          <label class="md-nav__link" for="__nav_3_1_18" id="__nav_3_1_18_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_5_2_1_18" id="__nav_5_2_1_18_label" tabindex="0">
             
   
   
@@ -1658,8 +2614,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_3_1_18_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_3_1_18">
+        <nav class="md-nav" data-md-level="4" aria-labelledby="__nav_5_2_1_18_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_2_1_18">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -1676,7 +2632,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../api/blackbull/server/" class="md-nav__link">
+      <a href="../../api/blackbull/server/" class="md-nav__link">
         
   
   
@@ -1704,7 +2660,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../api/blackbull/server/access_log/" class="md-nav__link">
+      <a href="../../api/blackbull/server/access_log/" class="md-nav__link">
         
   
   
@@ -1732,7 +2688,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../api/blackbull/server/connection_actor/" class="md-nav__link">
+      <a href="../../api/blackbull/server/connection_actor/" class="md-nav__link">
         
   
   
@@ -1760,7 +2716,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../api/blackbull/server/constants/" class="md-nav__link">
+      <a href="../../api/blackbull/server/constants/" class="md-nav__link">
         
   
   
@@ -1788,7 +2744,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../api/blackbull/server/deadline/" class="md-nav__link">
+      <a href="../../api/blackbull/server/deadline/" class="md-nav__link">
         
   
   
@@ -1816,7 +2772,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../api/blackbull/server/http1_actor/" class="md-nav__link">
+      <a href="../../api/blackbull/server/http1_actor/" class="md-nav__link">
         
   
   
@@ -1844,7 +2800,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../api/blackbull/server/http2_actor/" class="md-nav__link">
+      <a href="../../api/blackbull/server/http2_actor/" class="md-nav__link">
         
   
   
@@ -1872,7 +2828,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../api/blackbull/server/http2_messages/" class="md-nav__link">
+      <a href="../../api/blackbull/server/http2_messages/" class="md-nav__link">
         
   
   
@@ -1900,7 +2856,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../api/blackbull/server/http2_ws/" class="md-nav__link">
+      <a href="../../api/blackbull/server/http2_ws/" class="md-nav__link">
         
   
   
@@ -1928,7 +2884,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../api/blackbull/server/multiworker/" class="md-nav__link">
+      <a href="../../api/blackbull/server/multiworker/" class="md-nav__link">
         
   
   
@@ -1956,7 +2912,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../api/blackbull/server/parser/" class="md-nav__link">
+      <a href="../../api/blackbull/server/parser/" class="md-nav__link">
         
   
   
@@ -1984,7 +2940,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../api/blackbull/server/permessage_deflate/" class="md-nav__link">
+      <a href="../../api/blackbull/server/permessage_deflate/" class="md-nav__link">
         
   
   
@@ -2012,7 +2968,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../api/blackbull/server/recipient/" class="md-nav__link">
+      <a href="../../api/blackbull/server/recipient/" class="md-nav__link">
         
   
   
@@ -2040,7 +2996,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../api/blackbull/server/reload/" class="md-nav__link">
+      <a href="../../api/blackbull/server/reload/" class="md-nav__link">
         
   
   
@@ -2068,7 +3024,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../api/blackbull/server/response/" class="md-nav__link">
+      <a href="../../api/blackbull/server/response/" class="md-nav__link">
         
   
   
@@ -2096,7 +3052,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../api/blackbull/server/sender/" class="md-nav__link">
+      <a href="../../api/blackbull/server/sender/" class="md-nav__link">
         
   
   
@@ -2124,7 +3080,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../api/blackbull/server/server/" class="md-nav__link">
+      <a href="../../api/blackbull/server/server/" class="md-nav__link">
         
   
   
@@ -2152,7 +3108,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../api/blackbull/server/websocket_actor/" class="md-nav__link">
+      <a href="../../api/blackbull/server/websocket_actor/" class="md-nav__link">
         
   
   
@@ -2180,7 +3136,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../api/blackbull/server/worker/" class="md-nav__link">
+      <a href="../../api/blackbull/server/worker/" class="md-nav__link">
         
   
   
@@ -2208,7 +3164,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../api/blackbull/server/ws_codec/" class="md-nav__link">
+      <a href="../../api/blackbull/server/ws_codec/" class="md-nav__link">
         
   
   
@@ -2244,7 +3200,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../api/blackbull/utils/" class="md-nav__link">
+      <a href="../../api/blackbull/utils/" class="md-nav__link">
         
   
   
@@ -2268,6 +3224,124 @@
           </ul>
         </nav>
       
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    About
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    About
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../about/conformance/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Conformance
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../about/internals/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Internals
+  
+
+    
+  </span>
+  
+  
+
+      </a>
     </li>
   
 
@@ -2307,10 +3381,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#goal" class="md-nav__link">
+  <a href="#setup" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Goal
+        Setup
       
     </span>
   </a>
@@ -2318,10 +3392,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#primitives" class="md-nav__link">
+  <a href="#use" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Primitives
+        Use
       
     </span>
   </a>
@@ -2329,10 +3403,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#actor-hierarchy" class="md-nav__link">
+  <a href="#how-it-works" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Actor Hierarchy
+        How it works
       
     </span>
   </a>
@@ -2340,104 +3414,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#actor-responsibilities" class="md-nav__link">
+  <a href="#default-watch-path" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Actor Responsibilities
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Actor Responsibilities">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#serveractor" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        ServerActor
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#connectionactor" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        ConnectionActor
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#http1actor" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        HTTP1Actor
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#requestactor" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        RequestActor
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#http2actor" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        HTTP2Actor
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#streamactor" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        StreamActor
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#websocketactor" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        WebSocketActor
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#level-a-level-b-aggregation" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Level A → Level B Aggregation
+        Default watch path
       
     </span>
   </a>
@@ -2445,10 +3425,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#supervisor-strategy-summary" class="md-nav__link">
+  <a href="#caveats" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Supervisor Strategy Summary
+        Caveats
       
     </span>
   </a>
@@ -2456,10 +3436,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#message-protocol" class="md-nav__link">
+  <a href="#production-alternative" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Message Protocol
+        Production alternative
       
     </span>
   </a>
@@ -2467,32 +3447,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#exception-propagation-rules-per-event-decisions" class="md-nav__link">
+  <a href="#next" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Exception Propagation Rules (per-event decisions)
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#migration-path" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Migration Path
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#resolved-questions" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Resolved Questions
+        Next
       
     </span>
   </a>
@@ -2519,347 +3477,73 @@
   
 
 
-<h1 id="blackbull-level-a-actor-model-design">BlackBull — Level A Actor Model Design</h1>
-<p><strong>Status</strong>: Implemented — Phase 6 complete (commit 7da77a6); refactored (packaging, codec, frame split, method decomposition)<br />
-<strong>Prerequisite completed</strong>: Phase 3 (examples migration), Phase 4 (docs), Phase 6 (Actor model)</p>
-<hr />
-<h2 id="goal">Goal</h2>
-<p>Refactor BlackBull's internal components into an Actor-model architecture (Level A),
-where each Actor owns its state and communicates exclusively via message queues.
-Level B application-facing events remain unchanged.</p>
-<hr />
-<h2 id="primitives">Primitives</h2>
-<p>BlackBull does not depend on an external Actor framework.
-Each Actor is implemented as:</p>
-<pre><code class="language-python">class Actor:
-    def __init__(self):
-        self._inbox: asyncio.Queue[Message] = asyncio.Queue()
+<h1 id="hot-reload">Hot reload<a class="headerlink" href="#hot-reload" title="Permanent link">&para;</a></h1>
+<p><code>--reload</code> (or <code>reload=True</code> to <code>app.run()</code>) restarts workers
+when source files change, so you don't have to stop and restart
+the server every time you edit code.  Intended for development
+only.</p>
+<h2 id="setup">Setup<a class="headerlink" href="#setup" title="Permanent link">&para;</a></h2>
+<p>Install the <code>reload</code> extra — it pulls in
+<a href="https://watchfiles.helpmanual.io/"><code>watchfiles</code></a>, the
+notify-driven file watcher:</p>
+<div class="highlight"><pre><span></span><code>pip<span class="w"> </span>install<span class="w"> </span><span class="s1">&#39;blackbull[reload]&#39;</span>
+</code></pre></div>
+<h2 id="use">Use<a class="headerlink" href="#use" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><span class="c1"># Watch the current working directory</span>
+blackbull<span class="w"> </span>myapp:app<span class="w"> </span>--bind<span class="w"> </span><span class="m">127</span>.0.0.1:8000<span class="w"> </span>--reload
 
-    async def run(self) -&gt; None:
-        &quot;&quot;&quot;Main loop — consume inbox forever.&quot;&quot;&quot;
-        async for msg in self._inbox_iter():
-            await self._handle(msg)
+<span class="c1"># Watch specific directories (repeatable)</span>
+blackbull<span class="w"> </span>myapp:app<span class="w"> </span>--reload<span class="w"> </span>--reload-path<span class="w"> </span>src/<span class="w"> </span>--reload-path<span class="w"> </span>templates/
 
-    async def send(self, msg: Message) -&gt; None:
-        await self._inbox.put(msg)
-
-    async def _inbox_iter(self):
-        while True:
-            yield await self._inbox.get()
-</code></pre>
-<ul>
-<li>Each Actor runs as an <code>asyncio.Task</code> started by its Supervisor.</li>
-<li>Actors never share mutable state — all coordination is via <code>send()</code>.</li>
-<li>The ask-pattern (request/reply) is used only when a caller must await a result;
-  otherwise fire-and-forget <code>send()</code> is preferred.</li>
-</ul>
-<hr />
-<h2 id="actor-hierarchy">Actor Hierarchy</h2>
-<pre><code>ServerActor  (Supervisor — one per process)
-│
-└── ConnectionActor  (one per accepted TCP connection)
-      │
-      ├── HTTP1Actor           (HTTP/1.1 protocol driver)
-      │     └── RequestActor   (one per HTTP/1.1 request, short-lived)
-      │
-      ├── HTTP2Actor           (HTTP/2 connection driver)
-      │     └── StreamActor    (one per HTTP/2 stream, short-lived)
-      │
-      └── WebSocketActor       (spawned after upgrade, replaces HTTP1/2Actor)
-</code></pre>
-<p><code>EventAggregator</code> is a <strong>non-Actor</strong> component that sits between Level A and
-Level B. It subscribes to Level A messages by reference and emits Level B events
-via the existing <code>EventDispatcher</code>. It has no inbox and no lifecycle of its own.</p>
-<hr />
-<h2 id="actor-responsibilities">Actor Responsibilities</h2>
-<h3 id="serveractor">ServerActor</h3>
-<ul>
-<li>Owns the listening socket.</li>
-<li>Accepts TCP connections; for each, spawns a <code>ConnectionActor</code> task.</li>
-<li>Supervisor strategy: <strong>restart</strong> on failure (bind/accept errors are retried
-  with backoff; the server does not crash on one bad connection).</li>
-<li>Emits: <code>app_startup</code>, <code>app_shutdown</code> (Level B, via <code>EventAggregator</code>).</li>
-</ul>
-<h3 id="connectionactor">ConnectionActor</h3>
-<ul>
-<li>Owns the <code>AbstractReader</code> / <code>AbstractWriter</code> for one TCP connection.</li>
-<li>Detects protocol: TLS → HTTP/2 preface check → spawns <code>HTTP2Actor</code> or <code>HTTP1Actor</code>.</li>
-<li>Supervisor strategy: <strong>isolate</strong> — one connection dying does not affect others.
-  <code>ExceptionGroup</code> from the child <code>TaskGroup</code> is caught here; unhandled exceptions
-  are logged and the connection is closed.</li>
-<li>Emits (Level A): <code>connection_accepted</code>, <code>tls_handshake_started</code>,
-  <code>tls_handshake_completed</code>.</li>
-</ul>
-<h3 id="http1actor">HTTP1Actor</h3>
-<ul>
-<li>Drives the HTTP/1.1 request/response cycle.</li>
-<li>For each request: spawns a short-lived <code>RequestActor</code>, awaits completion,
-  then loops for keep-alive.</li>
-<li>On <code>Connection: Upgrade</code> (WebSocket): tears itself down and hands the
-  reader/writer to a new <code>WebSocketActor</code>.</li>
-<li>Supervisor strategy: <strong>isolate</strong> — an error in one request closes the connection.</li>
-<li>Emits (Level A): <code>http1_request_line_received</code>, (aggregated into Level B
-  <code>request_received</code>).</li>
-</ul>
-<h3 id="requestactor">RequestActor</h3>
-<ul>
-<li>Owns one HTTP/1.1 request lifetime.</li>
-<li>Receives the parsed headers and body from <code>HTTP1Actor</code>.</li>
-<li>Calls the ASGI app, collects the response, writes it via <code>HTTP1Actor</code>'s writer.</li>
-<li>Emits (Level A): used by <code>EventAggregator</code> to fire <code>before_handler</code>,
-  <code>after_handler</code>, <code>request_completed</code>, <code>error</code>.</li>
-</ul>
-<h3 id="http2actor">HTTP2Actor</h3>
-<ul>
-<li>Drives the HTTP/2 connection state machine (settings, flow control, GOAWAY).</li>
-<li>For each <code>HEADERS</code> frame with a new stream ID: spawns a <code>StreamActor</code>.</li>
-<li>Owns the connection-level send window; <code>StreamActor</code>s block via ask-pattern
-  when the window is exhausted.</li>
-<li>Supervisor strategy: <strong>propagate</strong> — a framing error on the connection is fatal;
-  <code>HTTP2Actor</code> sends GOAWAY and exits, causing <code>ConnectionActor</code> to close.</li>
-<li>Emits (Level A): <code>http2_preface_received</code>, <code>http2_settings_received</code>,
-  <code>stream_window_updated</code>.</li>
-</ul>
-<h3 id="streamactor">StreamActor</h3>
-<ul>
-<li>Owns one HTTP/2 stream.</li>
-<li>Assembles DATA frames, calls the ASGI app, writes response frames back via
-  ask-pattern to <code>HTTP2Actor</code>.</li>
-<li>Emits (Level A): <code>stream_headers_received</code>, <code>stream_data_received</code>,
-  <code>stream_priority_updated</code>, <code>stream_closed</code>.</li>
-<li>Supervisor strategy: <strong>isolate</strong> — stream errors send <code>RST_STREAM</code> and exit;
-  the connection continues.</li>
-</ul>
-<h3 id="websocketactor">WebSocketActor</h3>
-<ul>
-<li>Owns one WebSocket connection after the upgrade handshake.</li>
-<li>Runs the <code>FragmentAssembler</code> internally; the ASGI app sees only complete messages.</li>
-<li>Emits (Level A): <code>websocket_frame_received</code>, <code>websocket_fragment_appended</code>.</li>
-<li>Supervisor strategy: <strong>isolate</strong> — a protocol error closes this connection only.</li>
-</ul>
-<hr />
-<h2 id="level-a-level-b-aggregation">Level A → Level B Aggregation</h2>
-<p><code>EventAggregator</code> translates Level A messages into Level B <code>EventDispatcher</code> calls.
-It is instantiated once and passed (by reference) to each Actor at construction.</p>
-<table>
-<thead>
-<tr>
-<th>Level A message(s)</th>
-<th>Level B event</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>connection_accepted</code> + app routing complete</td>
-<td><code>request_received</code></td>
-</tr>
-<tr>
-<td><code>RequestActor</code> pre-dispatch</td>
-<td><code>before_handler</code></td>
-</tr>
-<tr>
-<td><code>RequestActor</code> post-dispatch</td>
-<td><code>after_handler</code></td>
-</tr>
-<tr>
-<td><code>stream_closed</code> (HTTP/2) / response sent (HTTP/1.1)</td>
-<td><code>request_completed</code></td>
-</tr>
-<tr>
-<td>Reader EOF / <code>RST_STREAM</code> before response</td>
-<td><code>request_disconnected</code></td>
-</tr>
-<tr>
-<td>Any Actor unhandled exception</td>
-<td><code>error</code></td>
-</tr>
-<tr>
-<td><code>WebSocketActor</code> handshake complete</td>
-<td><code>websocket_connected</code></td>
-</tr>
-<tr>
-<td><code>websocket_frame_received</code> (complete message)</td>
-<td><code>websocket_message</code></td>
-</tr>
-<tr>
-<td><code>WebSocketActor</code> exit</td>
-<td><code>websocket_disconnected</code></td>
-</tr>
-<tr>
-<td><code>ServerActor</code> startup</td>
-<td><code>app_startup</code></td>
-</tr>
-<tr>
-<td><code>ServerActor</code> shutdown drain</td>
-<td><code>app_shutdown</code></td>
-</tr>
-</tbody>
-</table>
-<p>The aggregation logic lives in <code>blackbull/event_aggregator.py</code> (new file).
-It must not be exported from the package's public <code>__init__.py</code>.</p>
-<hr />
-<h2 id="supervisor-strategy-summary">Supervisor Strategy Summary</h2>
-<table>
-<thead>
-<tr>
-<th>Actor</th>
-<th>Strategy</th>
-<th>Rationale</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>ServerActor</code></td>
-<td>Restart with backoff</td>
-<td>Accept loop must stay alive</td>
-</tr>
-<tr>
-<td><code>ConnectionActor</code></td>
-<td>Isolate</td>
-<td>One bad connection must not affect others</td>
-</tr>
-<tr>
-<td><code>HTTP1Actor</code></td>
-<td>Isolate</td>
-<td>Error closes the connection cleanly</td>
-</tr>
-<tr>
-<td><code>RequestActor</code></td>
-<td>Isolate</td>
-<td>Error fires <code>error</code> event; connection survives</td>
-</tr>
-<tr>
-<td><code>HTTP2Actor</code></td>
-<td>Propagate to <code>ConnectionActor</code></td>
-<td>Framing error is connection-fatal</td>
-</tr>
-<tr>
-<td><code>StreamActor</code></td>
-<td>Isolate (RST_STREAM)</td>
-<td>Stream error is stream-fatal only</td>
-</tr>
-<tr>
-<td><code>WebSocketActor</code></td>
-<td>Isolate</td>
-<td>Protocol error closes this WS connection only</td>
-</tr>
-</tbody>
-</table>
-<hr />
-<h2 id="message-protocol">Message Protocol</h2>
-<p>All messages are <code>dataclass</code> instances (not dicts) for type safety.
-A base class provides the actor-source reference for reply routing.
-HTTP/2 message types are defined in <code>blackbull/server/http2_messages.py</code>:</p>
-<pre><code class="language-python">@dataclass
-class Message:
-    sender: Actor | None = None  # None for externally-originated messages
-
-# HTTP/2 Level A messages (blackbull/server/http2_messages.py)
-@dataclass
-class ConnectionAccepted(Message):
-    reader: AbstractReader
-    writer: AbstractWriter
-    peername: tuple[str, int]
-
-@dataclass
-class StreamHeadersReceived(Message):
-    stream_id: int
-    headers: HeaderList
-    end_stream: bool
-
-@dataclass
-class WindowUpdate(Message):       # ask-pattern reply
-    stream_id: int
-    increment: int
-</code></pre>
-<hr />
-<h2 id="exception-propagation-rules-per-event-decisions">Exception Propagation Rules (per-event decisions)</h2>
-<table>
-<thead>
-<tr>
-<th>Scenario</th>
-<th>Strategy</th>
-<th>Reason</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>RequestActor</code> handler raises</td>
-<td>(b) isolate + (c) re-emit as <code>error</code></td>
-<td>Handler error must not kill the connection</td>
-</tr>
-<tr>
-<td><code>HTTP2Actor</code> framing error</td>
-<td>(a) propagate to <code>ConnectionActor</code></td>
-<td>GOAWAY required; connection is unusable</td>
-</tr>
-<tr>
-<td><code>StreamActor</code> app error</td>
-<td>(b) isolate + RST_STREAM</td>
-<td>Other streams continue</td>
-</tr>
-<tr>
-<td><code>WebSocketActor</code> protocol error</td>
-<td>(b) isolate + CLOSE frame</td>
-<td>Single connection</td>
-</tr>
-<tr>
-<td>Observer handler raises</td>
-<td>(b) isolate</td>
-<td>Existing Level B contract</td>
-</tr>
-<tr>
-<td>Intercept handler raises</td>
-<td>(a) propagate to emitter</td>
-<td>Existing Level B contract</td>
-</tr>
-</tbody>
-</table>
-<hr />
-<h2 id="migration-path">Migration Path</h2>
-<p>Phase 6 implemented this design in order, keeping the full test suite green at each step:</p>
+<span class="c1"># In Python</span>
+app.run<span class="o">(</span><span class="nv">port</span><span class="o">=</span><span class="m">8000</span>,<span class="w"> </span><span class="nv">reload</span><span class="o">=</span>True<span class="o">)</span>
+app.run<span class="o">(</span><span class="nv">port</span><span class="o">=</span><span class="m">8000</span>,<span class="w"> </span><span class="nv">reload</span><span class="o">=</span>True,<span class="w"> </span><span class="nv">reload_paths</span><span class="o">=[</span><span class="s1">&#39;src&#39;</span>,<span class="w"> </span><span class="s1">&#39;templates&#39;</span><span class="o">])</span>
+</code></pre></div>
+<h2 id="how-it-works">How it works<a class="headerlink" href="#how-it-works" title="Permanent link">&para;</a></h2>
+<p>When <code>--reload</code> is on, BlackBull's master process:</p>
 <ol>
-<li>✅ Defined <code>Message</code> dataclasses and the <code>Actor</code> base class (<code>blackbull/actor.py</code>).</li>
-<li>✅ Implemented <code>EventAggregator</code> forwarding to <code>EventDispatcher</code>.</li>
-<li>✅ Extracted <code>HTTP1Actor</code> + <code>RequestActor</code>; transport metadata via explicit keyword args.</li>
-<li>✅ Extracted <code>StreamActor</code> + <code>HTTP2Actor</code>; streams run in <code>asyncio.TaskGroup</code>.</li>
-<li>✅ Introduced <code>WebSocketActor</code> + <code>ConnectionActor</code>; added <code>on_connection_accepted</code>.</li>
-<li>✅ <code>ServerActor</code> role absorbed by <code>ASGIServer</code> + <code>ConnectionActor</code> (no separate class needed).</li>
-<li>✅ Deleted <code>HTTP11Handler</code>, <code>HTTP2Handler</code>, <code>WebSocketHandler</code>.</li>
+<li>Watches the configured paths for <code>*.py</code> file changes.</li>
+<li>On a change, sends <code>SIGTERM</code> to the running workers.</li>
+<li>Re-execs itself (<code>os.execvp</code>) with the original argv,
+   marking listening sockets as inheritable so the new master
+   can adopt them.</li>
+<li>The fresh master forks workers from the new code.</li>
 </ol>
-<p>Post-Phase-6 refactoring (all steps kept 721-test suite green):</p>
+<p>The kernel multiplexes the same listening fd across master
+generations — no socket is ever closed, so connections in
+flight during a reload finish under the old workers, and new
+connections route to new workers transparently.</p>
+<h2 id="default-watch-path">Default watch path<a class="headerlink" href="#default-watch-path" title="Permanent link">&para;</a></h2>
+<p>If <code>--reload-path</code> is not passed, BlackBull watches the current
+working directory.</p>
+<h2 id="caveats">Caveats<a class="headerlink" href="#caveats" title="Permanent link">&para;</a></h2>
 <ul>
-<li>✅ Fixed packaging: <code>pyproject.toml</code> requires Python <code>&gt;=3.11</code>; <code>Pipfile</code> aligned to <code>3.11</code>; <code>h2</code> added to <code>pyproject.toml</code> dependencies; <code>hpack</code> added to <code>Pipfile</code>.</li>
-<li>✅ Extracted WebSocket frame codec into <code>blackbull/server/ws_codec.py</code> (<code>WSOpcode</code>, <code>WSFrameBits</code>, <code>WSFrameHeader</code>, <code>encode_frame</code>, <code>read_frame_header</code>, <code>read_payload</code>, <code>read_frame</code>).</li>
-<li>✅ Split <code>blackbull/protocol/frame.py</code>: frame-type definitions and enums moved to <code>blackbull/protocol/frame_types.py</code>; <code>frame.py</code> now contains only <code>FrameFactory</code>.</li>
-<li>✅ Extracted HTTP/2 actor message types into <code>blackbull/server/http2_messages.py</code>.</li>
-<li>✅ Decomposed long methods: <code>HTTP2Actor._frame_loop()</code> → <code>_on_headers_frame</code>, <code>_on_continuation_frame</code>, <code>_on_data_frame</code>, <code>_on_goaway_frame</code>, <code>_spawn_stream_task</code>; <code>HTTP1Actor.run()</code> → <code>_dispatch_request</code>; <code>WebSocketRecipient._read_loop()</code> → <code>_handle_data_frame</code>, <code>_handle_control_frame</code>, <code>_handle_unknown_opcode</code>.</li>
+<li><strong>Development only.</strong>  <code>--reload</code> exists for the edit-save
+  loop.  Don't run it in production — re-execing the process on
+  every file change is the opposite of what production wants.</li>
+<li><strong>First <code>*.py</code> change after start may be delayed.</strong>  The
+  inotify watcher needs ~1-2 seconds after arm before
+  subsequent events fire reliably.  Real users editing files
+  seconds after starting the server never notice this; it's
+  visible in tests that touch a watched file within the first
+  second.</li>
+<li><strong>Watches <code>*.py</code> only.</strong>  Template / static file changes
+  don't trigger a reload — those usually don't require a
+  worker restart anyway since they're read on every request.</li>
 </ul>
-<hr />
-<h2 id="resolved-questions">Resolved Questions</h2>
-<ol>
-<li>
-<p><strong>Ask-pattern timeout</strong>: use the connection-level idle timeout already
-   configured on <code>ASGIServer</code>. No separate timeout value introduced.</p>
-</li>
-<li>
-<p><strong><code>EventAggregator</code> threading</strong>: currently always called from the event loop
-   thread (single-event-loop design). Do not add a thread-safety layer now;
-   revisit if multi-loop or thread-executor support is added later.</p>
-</li>
-<li>
-<p><strong>Server push</strong>: yes — pushed streams (even stream IDs) become <code>StreamActor</code>s
-   with the same lifecycle as request-driven streams.</p>
-</li>
-<li>
-<p><strong><code>ExceptionGroup</code> surface</strong>: emit a <strong>single</strong> Level B <code>error</code> event with the
-   <code>ExceptionGroup</code> placed in <code>detail['exception']</code>. <code>ExceptionGroup</code> is a
-   <code>BaseException</code> subclass, so the event contract is unchanged. Subscribers that
-   need the individual failures iterate <code>eg.exceptions</code>; subscribers that do not
-   care are unaffected. Note: <code>ExceptionGroup</code> and <code>except*</code> require Python 3.11+;
-   <code>pyproject.toml</code> should reflect this floor explicitly.</p>
-</li>
-</ol>
+<h2 id="production-alternative">Production alternative<a class="headerlink" href="#production-alternative" title="Permanent link">&para;</a></h2>
+<p>Production deployments don't need hot-reload — they need
+zero-downtime restarts on deploy.  For that, systemd socket
+activation keeps the listening socket open across service
+restarts; see
+<a href="../unix-and-fd/#fd-inheritance-systemd-socket-activation">Unix and fd inheritance</a>.</p>
+<h2 id="next">Next<a class="headerlink" href="#next" title="Permanent link">&para;</a></h2>
+<ul>
+<li><a href="../running/">Running BlackBull</a> — the broader entry-point
+  overview.</li>
+<li><a href="../workers/">Workers</a> — multi-worker behaviour outside of
+  reload (production deployment).</li>
+</ul>
 
 
 
@@ -2909,10 +3593,10 @@ class WindowUpdate(Message):       # ask-pattern reply
     
       
       
-      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": [], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": [], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
     
     
-      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
       
     
   </body>
