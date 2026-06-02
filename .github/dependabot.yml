@@ -1,0 +1,41 @@
+# Dependabot configuration for BlackBull.
+#
+# Monitors:
+#   - Python dependencies declared in pyproject.toml
+#   - GitHub Actions used in .github/workflows/
+#
+# Cadence: weekly.  Security alerts come through independently and
+# do not wait for the scheduled cadence.
+version: 2
+updates:
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "python"
+    commit-message:
+      prefix: "deps"
+      include: "scope"
+    # Group routine version bumps to reduce PR churn; security
+    # advisories are still surfaced as individual PRs.
+    groups:
+      python-deps:
+        patterns:
+          - "*"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "github-actions"
+    commit-message:
+      prefix: "ci"
+      include: "scope"
