@@ -58,11 +58,10 @@ class ConnectionActor(Actor):
         if self._aggregator is not None:
             await self._aggregator.on_connection_accepted(self._peername)
         try:
-            async with asyncio.TaskGroup() as tg:
-                tg.create_task(self._dispatch())
-        except* Exception as eg:
+            await self._dispatch()
+        except Exception as exc:
             if self._aggregator is not None:
-                await self._aggregator.on_error({}, eg)
+                await self._aggregator.on_error({}, exc)
         finally:
             await self._writer.close()
 
