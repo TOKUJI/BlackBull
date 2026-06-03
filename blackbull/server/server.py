@@ -278,8 +278,12 @@ class ASGIServer:
 
         wrapped_reader = (reader if isinstance(reader, AbstractReader)
                           else AsyncioReader(reader))
-        wrapped_writer = (writer if isinstance(writer, AbstractWriter)
-                          else AsyncioWriter(writer))
+        if isinstance(writer, AbstractWriter):
+            wrapped_writer = writer
+        else:
+            from ..env import get_settings as _get_settings  # noqa: PLC0415
+            wrapped_writer = AsyncioWriter(
+                writer, write_timeout=_get_settings().write_timeout)
 
         aggregator = self._cached_aggregator
 
