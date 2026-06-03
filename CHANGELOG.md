@@ -28,6 +28,146 @@ so the editable install's metadata catches up.
 
 ---
 
+## [0.29.0a1] — 2026-06-04
+
+**Alpha pre-release of Sprint 30 — event-loop integrity under hostile
+/ burst load.**  Cut from master after Tier 1 + Tier 1.5 PRs landed
+(#32-#38) so the HttpArena EC2 cross-check can pin a real installable
+version.  Tagging as `a1` (PEP 440 alpha) deliberately — the EC2
+measurement gates the `0.29.0` final.
+
+### Added
+
+- **`BB_WRITE_TIMEOUT`** (default 30 s, `0` disables) — bounds the
+  time spent in `StreamWriter.drain()` waiting for the kernel send
+  buffer to flush.  Defends against the **slow-read** shape of
+  slowloris: a client that reads the response 1 byte/sec eventually
+  fills the kernel send buffer and the server's drain blocks
+  indefinitely without this timeout.  On timeout the transport is
+  force-closed and the failure surfaces as a peer-side
+  `ConnectionResetError` for the sender's existing error path.
+  (PR #33)
+- **`BB_MAX_CONNECTIONS` graceful 503 response** — when the cap is
+  reached, new connections now receive HTTP/1.1 `503 Service
+  Unavailable` with `Retry-After: 1` before close.  Previously the
+  rejection path silently closed the socket, which load-balancers
+  interpret as a server crash.  ALPN-h2 connections still close
+  without writing (no SETTINGS exchange yet for clean GOAWAY).
+  (PR #35)
+- **`BB_USE_CUSTOM_PROTOCOL`** (default False — opt-in) — switch to
+  a custom `asyncio.Protocol` subclass (`_BlackBullProtocol`) that
+  handles peer-FIN synchronously in `eof_received` instead of
+  routing through `StreamReader`'s future-wakeup chain.  The
+  architectural change saves one event-loop iteration per close;
+  local measurement shows ~5% drain-time improvement at c=4096 and
+  no measurable cliff fix on its own.  **Marked experimental
+  pending EC2 cross-check**; ship-default is OFF.  See
+  `bench/sprint-logs/sprint-30-tier1.5-design.md` for the honest
+  outcome write-up of what was achieved vs originally claimed.
+  (PRs #36 + #37 + #38)
+- **`ProtocolBuffer`** at `blackbull.server.protocol_buffer` — a
+  cancellable byte buffer used by the custom protocol path.  Drop-in
+  superset of the bits of `asyncio.StreamReader` we use; available
+  with both `readuntil` / `read_until` naming so the existing
+  `AsyncioReader` wraps it without translation.
+
+### Changed
+
+- **`BB_KEEP_ALIVE_TIMEOUT` default lowered from `60` to `5` seconds.**
+  Aligns with the industry-standard short-idle default (uvicorn,
+  granian, Caddy, Apache, Go `net/http` — all 5 s; gunicorn 2 s).
+  60 s was a long-standing outlier that parked ghost / idle
+  connection tasks in the loop's `readuntil` for far longer than
+  necessary, inflating suspended-task count and amplifying drain
+  time on burst-close.  **Behaviour change**: clients that pause
+  >5 s between requests on a keep-alive connection will be closed
+  and must reopen.  Set `BB_KEEP_ALIVE_TIMEOUT=60` to restore the
+  prior default.  (PR #34)
+- **`BB_MAX_CONNECTIONS` default raised from `0` (disabled) to
+  `1024` per worker.**  Unbounded per-worker concurrency lets a
+  single client, burst, or slowloris-class workload park thousands
+  of suspended-readuntil tasks on the event loop, amplifying drain
+  time on burst-close and inflating worst-case latency.  1024 is
+  the typical ceiling for a single asyncio loop; multi-worker
+  servers multiply the ceiling (`workers × max_connections`).
+  **Behaviour change**: deployments accepting >1024 concurrent
+  connections per worker now see HTTP/1.1 503 once the cap is
+  reached.  Set `BB_MAX_CONNECTIONS=0` to restore unbounded.
+  (PR #35)
+
+### Fixed
+
+- **`AsyncioWriter.close()` no longer awaits `wait_closed()`.**  The
+  synchronous `self._sw.close()` already initiates the TCP shutdown
+  and schedules the transport's `connection_lost` callback.  Awaiting
+  `wait_closed()` afterwards serialised our connection-actor
+  coroutine with full transport-close completion, adding 1-3
+  event-loop turns per connection.  Under burst-keepalive workloads
+  (HttpArena `static` at c=4096) those extra turns multiplied into
+  multi-second drains that monopolised the loop and degraded
+  throughput on back-to-back wrk runs.  (PR #32)
+- **`ConnectionActor.run` drops redundant `asyncio.TaskGroup` wrap.**
+  Both HTTP/1.1 (`HTTP1Actor`) and HTTP/2 (`HTTP2Actor`) run their
+  protocol-specific logic without spawning sibling tasks at this
+  level; HTTP/2 manages per-stream tasks via its own internal
+  TaskGroup inside `HTTP2Actor.run()`.  The outer wrap added no
+  supervision — just an extra `asyncio.Task` allocation per
+  connection (observed 2× alive-task count vs connections in
+  diagnostic dumps).  Replaced with a direct `await self._dispatch()`
+  + plain `except Exception`.  (PR #32)
+
+### Local benchmark (HttpArena static profile, c=4096, 3 back-to-back wrk runs)
+
+| Configuration | Run 1 r/s | Run 2 r/s | Run 3 r/s | Degradation 1→3 |
+|---|---:|---:|---:|---:|
+| **Master before Sprint 30** (cap=0) | 4,630 | 4,362 | 4,048 | **12.6%** |
+| **Sprint 30 default** (cap=1024, keep-alive 5 s) | 4,287 | 4,173 | 4,081 | **4.8%** |
+| Same with c=1024 (under cap) | 4,704 | 5,159 | 5,056 | **none — runs 2/3 faster** |
+
+The cliff at c=4096 is halved.  At c=1024 (the realistic adopter
+concurrency) it is **eliminated** — back-to-back runs 2/3 are
+faster than run 1.
+
+### Tests
+
+- 27 new unit tests across `test_asyncio_writer.py` (5 — write-timeout
+  edge cases), `test_max_connections_503.py` (4 — 503-response shape),
+  `test_protocol_buffer.py` (22 — cancellable-buffer semantics), and
+  `test_edge_protocol.py` (10 — custom protocol behaviour against a
+  fake transport).
+- 3 new architecture-level integration tests in
+  `test_custom_protocol_toggle.py` proving the
+  `BB_USE_CUSTOM_PROTOCOL=1` code path serves real HTTP/1.1 requests
+  end-to-end.
+- Total unit-test count: **1232 passing** (was 1197 at 0.28.1).
+
+### Notes for adopters
+
+- **Default keepalive 60 s → 5 s** matches every other major HTTP
+  server.  If your clients legitimately need longer idle periods,
+  set `BB_KEEP_ALIVE_TIMEOUT` explicitly.
+- **Default max-connections 0 → 1024** caps per-worker concurrency.
+  For higher load, set `workers=N` (multi-worker scales the
+  ceiling).  `BB_MAX_CONNECTIONS=0` restores unbounded.
+- **`BB_USE_CUSTOM_PROTOCOL` is experimental.**  Default off.  The
+  local benchmark didn't show dramatic improvement over Tier 1
+  alone; we're keeping the code path in case EC2 measurement or
+  CPU-constrained hosts surface the win at scale.  Production
+  workloads should leave it off until validated.
+
+### Out of scope / deferred
+
+- **Accept-pausing watermarks** (`BB_ACCEPT_PAUSE_HIGH/LOW_WATERMARK`):
+  prototyped on the `tier2-accept-pausing` branch but deferred — the
+  mechanism works (3× client-side latency reduction in measurement)
+  but trades throughput in a way that surprises adopters who expect
+  asyncio servers to be throughput-stable.  Branch retained for
+  future revisit if a priority-scheduling primitive becomes available.
+  See `bench/sprint-logs/sprint-30-tier1.5-design.md` for the fuller
+  analysis.
+
+---
+
 ## [0.28.1] — 2026-06-02
 
 **PATCH release — fixes a `Compression` + `StaticFiles` interaction
