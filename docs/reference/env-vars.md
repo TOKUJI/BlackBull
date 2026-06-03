@@ -19,7 +19,7 @@ For the precedence order (CLI flags > env > TOML), see
 
 | Variable | Default | Controls |
 |---|---|---|
-| `BB_MAX_CONNECTIONS` | `500` | Maximum simultaneous TCP connections **per worker**.  New connections beyond the cap are rejected before TLS / handshake to keep memory and FD use bounded.  `0` = unlimited. |
+| `BB_MAX_CONNECTIONS` | `1024` | Maximum simultaneous TCP connections **per worker**.  When the cap is reached, new connections receive HTTP/1.1 `503 Service Unavailable` with `Retry-After: 1` before close — a well-formed response so load-balancers / health-checks can interpret it correctly.  `0` disables the cap (rely on OS file-descriptor limit instead).  Multi-worker servers multiply the ceiling (`workers × max_connections`). |
 | `BB_REQUEST_TIMEOUT` | `0` (off) | Per-HTTP/2-stream deadline in seconds.  When the deadline elapses the stream is forcibly cancelled with `RST_STREAM CANCEL`.  Use a positive value (e.g. `30`) in production to evict stalled handlers from stream slots. |
 | `BB_HEADER_TIMEOUT` | `10.0` | Seconds an HTTP/1.1 client has to deliver the complete header block (request-line + headers + `CRLFCRLF`).  Primary slowloris defence — without it, an attacker can hold a connection open indefinitely by dripping bytes.  Server answers `408 Request Timeout` and closes.  `0` disables. |
 | `BB_KEEP_ALIVE_TIMEOUT` | `5.0` | Seconds an idle HTTP/1.1 keep-alive connection is held open after a complete response.  Lower for high-fan-in deployments; higher for chatty clients on slow links. |
