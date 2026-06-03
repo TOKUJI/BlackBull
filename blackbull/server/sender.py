@@ -116,8 +116,17 @@ class AsyncioWriter(AbstractWriter):
                     self._write_timeout)
                 try:
                     self._sw.close()
-                except Exception:
-                    pass
+                except Exception as close_exc:
+                    # Best-effort transport teardown.  We're already in
+                    # the timeout error path and the transport may be in
+                    # a half-broken state (SSL aborted, FD already
+                    # reaped by a sibling task, etc.); swallowing here
+                    # lets us still raise ConnectionResetError below so
+                    # the sender's existing peer-disconnect handling
+                    # runs uniformly.
+                    logger.debug(
+                        'write timeout: transport.close() also failed (%s) — '
+                        'continuing with ConnectionResetError', close_exc)
                 raise ConnectionResetError(
                     f'write timeout after {self._write_timeout:.1f}s'
                 ) from None
