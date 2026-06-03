@@ -3602,6 +3602,16 @@ limits and tune the sockets in production.</p>
 <td>Seconds an HTTP/1.1 client has to deliver the complete header block (request-line + headers + <code>CRLFCRLF</code>).  Primary slowloris defence — without it, an attacker can hold a connection open indefinitely by dripping bytes.  Server answers <code>408 Request Timeout</code> and closes.  <code>0</code> disables.</td>
 </tr>
 <tr>
+<td><code>BB_BODY_TIMEOUT</code></td>
+<td><code>30.0</code></td>
+<td>Per-chunk deadline for the request body once headers are parsed.  Slowloris body-half defence.  Each <code>await receive()</code> is bounded by this; exceed → the recipient surfaces <code>http.disconnect</code> and the connection tears down.  <code>0</code> disables.</td>
+</tr>
+<tr>
+<td><code>BB_WRITE_TIMEOUT</code></td>
+<td><code>30.0</code></td>
+<td>Seconds the server will wait for a single response write to flush to the peer (via <code>StreamWriter.drain()</code>).  Defends against the <em>slow-read</em> shape of slowloris: a client that reads the response 1 byte/sec eventually fills the kernel send buffer and our drain blocks indefinitely.  On timeout the transport is force-closed and the failure surfaces as a peer-side <code>ConnectionResetError</code> for the sender's existing error path.  <code>0</code> disables.</td>
+</tr>
+<tr>
 <td><code>BB_KEEP_ALIVE_TIMEOUT</code></td>
 <td><code>5.0</code></td>
 <td>Seconds an idle HTTP/1.1 keep-alive connection is held open after a complete response.  Lower for high-fan-in deployments; higher for chatty clients on slow links.</td>

@@ -3841,6 +3841,13 @@ and <code>drain()</code> (async) — the asyncio StreamWriter API — so that te
 doubles such as <code>MagicMock</code> can be injected without ceremony.</p>
 <p><code>drain()</code> is called inside <code>write()</code> so the asyncio backpressure
 mechanism is handled transparently and <code>BaseSender</code> stays runtime-agnostic.</p>
+<p><code>write_timeout</code> (seconds, <code>0</code> = disabled) bounds the time spent
+in <code>drain()</code> waiting for the kernel send buffer to flush.  Defends
+against the slow-read shape of slowloris: a client that reads the
+response 1 byte/sec fills the send buffer and our drain blocks
+indefinitely waiting for the peer's TCP window to reopen.  On
+timeout we close the transport and raise <code>ConnectionResetError</code>
+so the sender treats the failure the same as a peer-side reset.</p>
 
 
 
