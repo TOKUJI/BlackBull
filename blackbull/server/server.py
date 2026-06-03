@@ -294,26 +294,51 @@ class ASGIServer:
         #   SO_SNDBUF / SO_RCVBUF / TCP_USER_TIMEOUT are on the LISTENING
         #     socket and inherited (set once at open_socket time).
         #   Idle keep-alive ghosts are evicted by an app-level timer in
-        #     HTTP1Actor (``BB_KEEP_ALIVE_TIMEOUT``, default 60 s) — the
-        #     hypercorn pattern.
+        #     HTTP1Actor (``BB_KEEP_ALIVE_TIMEOUT``, default 5 s) — the
+        #     uvicorn / granian / Caddy pattern.
         # Net cost: 0 setsockopt syscalls per accept (was 6, then 4).
 
         wrapped_reader = (reader if isinstance(reader, AbstractReader)
                           else AsyncioReader(reader))
-        wrapped_writer = (writer if isinstance(writer, AbstractWriter)
-                          else AsyncioWriter(writer))
+        if isinstance(writer, AbstractWriter):
+            wrapped_writer = writer
+        else:
+            from ..env import get_settings as _get_settings  # noqa: PLC0415
+            wrapped_writer = AsyncioWriter(
+                writer, write_timeout=_get_settings().write_timeout)
 
         aggregator = self._cached_aggregator
 
         # max_connections == 0 disables the cap entirely (rely on OS fd
-        # limits and per-stream backpressure — the hypercorn/granian
-        # default).  Otherwise reject the new connection only when we're
-        # at the cap.
+        # limits).  Otherwise, send a well-formed HTTP/1.1 503 +
+        # Retry-After so load-balancers and health-checks can interpret
+        # the response — better than a silent reset, which looks like a
+        # crash from the LB's perspective.  For ALPN-negotiated h2 we
+        # don't have the SETTINGS exchange to send GOAWAY cleanly, so a
+        # straight close is the safest answer there.
         if self._max_connections and self._active_connections >= self._max_connections:
             logger.warning(
-                'Connection limit reached (%d/%d) — rejecting %s',
+                'Connection limit reached (%d/%d) — 503 to %s',
                 self._active_connections, self._max_connections, peername,
             )
+            if alpn != 'h2':
+                # HTTP/1.1 (or undetected cleartext — h1 is the safe
+                # default since the client hasn't spoken yet).  Minimal
+                # response: no body, content-length: 0, connection:
+                # close.  Retry-After in seconds.
+                try:
+                    await wrapped_writer.write(
+                        b'HTTP/1.1 503 Service Unavailable\r\n'
+                        b'retry-after: 1\r\n'
+                        b'content-length: 0\r\n'
+                        b'connection: close\r\n'
+                        b'\r\n')
+                except Exception:
+                    # Peer may already be gone or transport broken; the
+                    # close() below still runs.  No further action.
+                    logger.debug(
+                        '503 write failed for %s (peer disconnected?)',
+                        peername)
             await wrapped_writer.close()
             return
 

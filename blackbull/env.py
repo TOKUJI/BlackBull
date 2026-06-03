@@ -12,8 +12,11 @@ BB_WORKERS
     Number of worker processes.  ``0`` resolves to ``os.cpu_count()``.
     Default: ``1``.
 BB_MAX_CONNECTIONS
-    Maximum simultaneous TCP connections accepted per worker.
-    Default: ``500``.
+    Maximum simultaneous TCP connections accepted per worker.  When the
+    cap is reached, new connections receive HTTP/1.1 ``503 Service
+    Unavailable`` with ``Retry-After: 1`` (a load-balancer-friendly
+    response, not a silent reset).  ``0`` disables the cap and relies
+    on the OS file-descriptor limit instead.  Default: ``1024``.
 BB_STREAM_QUEUE_DEPTH
     ``asyncio.Queue`` depth for HTTP/2 per-stream request-body events.
     Limits memory growth when an ASGI handler is slower than the client.
@@ -199,13 +202,24 @@ class Settings:
     #: caller; stored as-is here).
     workers: int = 1
 
-    #: Maximum simultaneous TCP connections per worker.  ``0`` (the
-    #: default) disables the application-level cap and relies on the OS
-    #: file-descriptor limit and per-stream backpressure — matching the
-    #: hypercorn / granian defaults.  Set ``BB_MAX_CONNECTIONS`` to a
-    #: positive integer to opt into a hard cap (e.g. for shared hosts
-    #: where one process must not exhaust the global fd table).
-    max_connections: int = 0
+    #: Maximum simultaneous TCP connections per worker.  When the cap
+    #: is reached, new connections receive HTTP/1.1 ``503 Service
+    #: Unavailable`` with ``Retry-After: 1`` before close (well-formed
+    #: response so load-balancers / health-checks can interpret it
+    #: correctly).  ``0`` disables the cap entirely — relies on the OS
+    #: file-descriptor limit instead.
+    #:
+    #: Default raised from 0 (disabled) to 1024 in Sprint 30 (event-loop
+    #: integrity).  Unbounded per-worker concurrency lets a single
+    #: client (or burst, or slowloris-class workload) park thousands of
+    #: suspended-readuntil tasks on the event loop, amplifying drain
+    #: time on burst-close and inflating worst-case latency.  1024 is
+    #: the typical ceiling for a single asyncio loop on commodity
+    #: hardware; the multi-worker ``workers=N`` setting multiplies the
+    #: ceiling (so N=8 workers → 8K concurrent connections per
+    #: process).  Set ``BB_MAX_CONNECTIONS=0`` to opt back into
+    #: unbounded behaviour on trusted hosts.
+    max_connections: int = 1024
 
     #: When True, ``ASGIServer`` uses the custom asyncio Protocol
     #: (``_BlackBullProtocol``) instead of the default
@@ -256,7 +270,16 @@ class Settings:
     #: to wrk c=1024-burst connect-RST errors).  Combined with
     #: ``TCP_USER_TIMEOUT`` on the listening socket (inherits to accepted)
     #: which handles the *active-but-stuck* case.  0 disables the timer.
-    keep_alive_timeout: float = 60.0
+    #:
+    #: Default lowered from 60 s to 5 s in Sprint 30 (event-loop
+    #: integrity).  60 s parks ghost / idle connections in the loop's
+    #: ``readuntil`` for far longer than necessary, inflating the
+    #: suspended-task count and amplifying burst-close drain time.
+    #: 5 s matches uvicorn / granian / Caddy / Go-net/http and is the
+    #: industry-standard short-idle value.  Long-lived clients on slow
+    #: links should set ``BB_KEEP_ALIVE_TIMEOUT`` explicitly to a
+    #: higher value.
+    keep_alive_timeout: float = 5.0
 
     #: ``TCP_USER_TIMEOUT`` value in **milliseconds** for accepted sockets.
     #: Linux-only; set on the listening socket and inherited by accepted.
@@ -284,6 +307,18 @@ class Settings:
     #: returns ``http.disconnect`` and the server tears the connection
     #: down.  0 = disabled (legacy behaviour).
     body_timeout: float = 30.0
+
+    #: Maximum seconds the server will wait for a single write to be
+    #: flushed to the peer (via ``StreamWriter.drain()``).  Defends
+    #: against the *slow-read* shape of slowloris: a client that reads
+    #: the response 1 byte/sec eventually fills the kernel send buffer
+    #: and our ``drain()`` blocks indefinitely waiting for the peer's
+    #: TCP window to reopen.  Without this timeout the server's write
+    #: coroutine — and the connection slot it holds — is parked
+    #: forever.  When the deadline elapses we close the transport;
+    #: the sender treats the failure the same as a peer-side
+    #: ``ConnectionResetError``.  0 = disabled.
+    write_timeout: float = 30.0
 
     #: Maximum bytes in a single HTTP/1.1 request-line or header line.
     #: A pathological 1 GB ``X-foo: ...`` header would otherwise live in
@@ -393,11 +428,12 @@ def get_settings() -> Settings:
         socket_sndbuf=_int_env_nonneg('BB_SOCKET_SNDBUF', 262144),
         socket_rcvbuf=_int_env_nonneg('BB_SOCKET_RCVBUF', 262144),
         socket_reuseport=_bool_env('BB_SOCKET_REUSEPORT', True),
-        keep_alive_timeout=_float_env_nonneg('BB_KEEP_ALIVE_TIMEOUT', 60.0),
+        keep_alive_timeout=_float_env_nonneg('BB_KEEP_ALIVE_TIMEOUT', 5.0),
         tcp_user_timeout_ms=_int_env_nonneg('BB_TCP_USER_TIMEOUT_MS', 60_000),
         request_timeout=_float_env_nonneg('BB_REQUEST_TIMEOUT', 0.0),
         header_timeout=_float_env_nonneg('BB_HEADER_TIMEOUT', 10.0),
         body_timeout=_float_env_nonneg('BB_BODY_TIMEOUT', 30.0),
+        write_timeout=_float_env_nonneg('BB_WRITE_TIMEOUT', 30.0),
         header_max_line=_int_env_nonneg('BB_HEADER_MAX_LINE', 8192),
         header_max_total=_int_env_nonneg('BB_HEADER_MAX_TOTAL', 65536),
         h2_initial_window_size=_int_env('BB_H2_INITIAL_WINDOW_SIZE', 1048576),

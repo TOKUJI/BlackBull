@@ -81,27 +81,75 @@ class AsyncioWriter(AbstractWriter):
 
     ``drain()`` is called inside ``write()`` so the asyncio backpressure
     mechanism is handled transparently and ``BaseSender`` stays runtime-agnostic.
+
+    ``write_timeout`` (seconds, ``0`` = disabled) bounds the time spent
+    in ``drain()`` waiting for the kernel send buffer to flush.  Defends
+    against the slow-read shape of slowloris: a client that reads the
+    response 1 byte/sec fills the send buffer and our drain blocks
+    indefinitely waiting for the peer's TCP window to reopen.  On
+    timeout we close the transport and raise ``ConnectionResetError``
+    so the sender treats the failure the same as a peer-side reset.
     """
 
-    def __init__(self, stream_writer):
+    def __init__(self, stream_writer, write_timeout: float = 0.0):
         if not (hasattr(stream_writer, 'write') and hasattr(stream_writer, 'drain')):
             raise TypeError(
                 f"AsyncioWriter requires an object with write() and drain(), "
                 f"got {type(stream_writer)}"
             )
         self._sw = stream_writer
+        self._write_timeout = write_timeout
 
     async def write(self, data: bytes) -> None:
         self._sw.write(data)
-        await self._sw.drain()
+        if self._write_timeout > 0:
+            try:
+                await asyncio.wait_for(self._sw.drain(),
+                                       timeout=self._write_timeout)
+            except (asyncio.TimeoutError, TimeoutError):
+                # Slow-read peer / dead TCP route — close the transport
+                # so the FD is released and the connection slot is
+                # reclaimed, then surface as a peer disconnect for the
+                # sender's existing error-handling path.
+                logger.warning(
+                    'write timeout (%.1fs) exceeded — closing connection',
+                    self._write_timeout)
+                try:
+                    self._sw.close()
+                except Exception as close_exc:
+                    # Best-effort transport teardown.  We're already in
+                    # the timeout error path and the transport may be in
+                    # a half-broken state (SSL aborted, FD already
+                    # reaped by a sibling task, etc.); swallowing here
+                    # lets us still raise ConnectionResetError below so
+                    # the sender's existing peer-disconnect handling
+                    # runs uniformly.
+                    logger.debug(
+                        'write timeout: transport.close() also failed (%s) — '
+                        'continuing with ConnectionResetError', close_exc)
+                raise ConnectionResetError(
+                    f'write timeout after {self._write_timeout:.1f}s'
+                ) from None
+        else:
+            await self._sw.drain()
 
     async def close(self) -> None:
+        # ``self._sw.close()`` is synchronous: it initiates the TCP
+        # shutdown and schedules the transport's ``connection_lost``
+        # callback for a later loop iteration.  We DO NOT await
+        # ``wait_closed()`` here — under burst-keepalive workloads
+        # (HttpArena ``static`` at c=4096) awaiting it serializes the
+        # connection-actor coroutine with the transport-close completion,
+        # adding 1-3 event-loop turns per connection.  With thousands of
+        # simultaneous closes that latency multiplies into a multi-second
+        # drain that monopolises the loop and starves the next wrk run.
+        #
+        # Safety: every ``write()`` above flushes via ``drain()``, so by
+        # the time we reach close() there is no buffered payload.  The
+        # transport tears down asynchronously; our coroutine exiting
+        # earlier is harmless for the connection-actor path (no
+        # follow-up state to flush).
         self._sw.close()
-        if hasattr(self._sw, 'wait_closed'):
-            try:
-                await self._sw.wait_closed()
-            except Exception:
-                pass
 
 
 # ---------------------------------------------------------------------------
