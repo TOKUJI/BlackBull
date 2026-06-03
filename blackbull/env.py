@@ -241,7 +241,16 @@ class Settings:
     #: to wrk c=1024-burst connect-RST errors).  Combined with
     #: ``TCP_USER_TIMEOUT`` on the listening socket (inherits to accepted)
     #: which handles the *active-but-stuck* case.  0 disables the timer.
-    keep_alive_timeout: float = 60.0
+    #:
+    #: Default lowered from 60 s to 5 s in Sprint 30 (event-loop
+    #: integrity).  60 s parks ghost / idle connections in the loop's
+    #: ``readuntil`` for far longer than necessary, inflating the
+    #: suspended-task count and amplifying burst-close drain time.
+    #: 5 s matches uvicorn / granian / Caddy / Go-net/http and is the
+    #: industry-standard short-idle value.  Long-lived clients on slow
+    #: links should set ``BB_KEEP_ALIVE_TIMEOUT`` explicitly to a
+    #: higher value.
+    keep_alive_timeout: float = 5.0
 
     #: ``TCP_USER_TIMEOUT`` value in **milliseconds** for accepted sockets.
     #: Linux-only; set on the listening socket and inherited by accepted.
@@ -390,7 +399,7 @@ def get_settings() -> Settings:
         socket_sndbuf=_int_env_nonneg('BB_SOCKET_SNDBUF', 262144),
         socket_rcvbuf=_int_env_nonneg('BB_SOCKET_RCVBUF', 262144),
         socket_reuseport=_bool_env('BB_SOCKET_REUSEPORT', True),
-        keep_alive_timeout=_float_env_nonneg('BB_KEEP_ALIVE_TIMEOUT', 60.0),
+        keep_alive_timeout=_float_env_nonneg('BB_KEEP_ALIVE_TIMEOUT', 5.0),
         tcp_user_timeout_ms=_int_env_nonneg('BB_TCP_USER_TIMEOUT_MS', 60_000),
         request_timeout=_float_env_nonneg('BB_REQUEST_TIMEOUT', 0.0),
         header_timeout=_float_env_nonneg('BB_HEADER_TIMEOUT', 10.0),
