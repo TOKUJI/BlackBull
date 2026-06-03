@@ -77,6 +77,13 @@ jobs:
           path: dist/
 
       - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@6733eb7d741f0b11ec6a39b58540dab7590f9b7d   # v1.14.0
+        # SHA pin doesn't work for this action: when ``uses:`` is a
+        # commit SHA, GitHub Actions tries to pull a Docker image
+        # tagged with that same SHA from ghcr.io.  PyPA only publishes
+        # version-tagged images (no per-SHA tags), so SHA-pinning
+        # this action fails with ``manifest unknown`` at runtime.
+        # Pin to a specific version tag instead — PyPA maintains the
+        # tag, and Dependabot still tracks version updates here.
+        uses: pypa/gh-action-pypi-publish@v1.14.0
         # No ``with: password:`` — Trusted Publishing exchanges the
         # GitHub OIDC token for a short-lived PyPI token automatically.
