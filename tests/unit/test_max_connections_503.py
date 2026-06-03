@@ -9,8 +9,6 @@ mocked reader/writer pairs so we can assert on the wire bytes.
 """
 from __future__ import annotations
 
-import asyncio
-
 import pytest
 
 from blackbull.server.server import ASGIServer
@@ -80,7 +78,6 @@ async def test_below_cap_does_not_send_503():
     fire prematurely.)"""
     srv = ASGIServer(_noop_app, max_connections=2)
     # Two slots free → don't reject the first connection.
-    writer = _RecordingWriter()
     # We can't easily run the full client_connected_cb without
     # mocking ConnectionActor — but we can assert that with 0 active
     # the cap branch isn't entered.  Just check the precondition.
