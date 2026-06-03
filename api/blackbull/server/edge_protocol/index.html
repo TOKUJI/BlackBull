@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://TOKUJI.github.io/BlackBull/api/blackbull/server/server/">
+        <link rel="canonical" href="https://TOKUJI.github.io/BlackBull/api/blackbull/server/edge_protocol/">
       
       
-        <link rel="prev" href="../sender/">
+        <link rel="prev" href="../deadline/">
       
       
-        <link rel="next" href="../websocket_actor/">
+        <link rel="next" href="../http1_actor/">
       
       
         
@@ -27,7 +27,7 @@
     
     
       
-        <title>server - BlackBull</title>
+        <title>edge_protocol - BlackBull</title>
       
     
     
@@ -72,7 +72,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#blackbullserverserver" class="md-skip">
+        <a href="#blackbullserveredge_protocol" class="md-skip">
           Skip to content
         </a>
       
@@ -108,7 +108,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              server
+              edge_protocol
             
           </span>
         </div>
@@ -2651,10 +2651,37 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../edge_protocol/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    edge_protocol
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -2670,6 +2697,65 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#blackbull.server.edge_protocol" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        edge_protocol
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="edge_protocol">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.edge_protocol--how-it-lands" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How it lands
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.edge_protocol--state-machine" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        State machine
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -3015,37 +3101,10 @@
                 
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    server
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../server/" class="md-nav__link">
         
   
   
@@ -3061,126 +3120,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#blackbull.server.server" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        server
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="server">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.server.ASGIServer" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        ASGIServer
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="ASGIServer">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.server.ASGIServer.client_connected_cb" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        client_connected_cb
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.server.ASGIServer.run" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        run
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.server.ASGIServer.shutdown" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        shutdown
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.server.ASGIServer.startup" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        startup
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.server.LifespanManager" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        LifespanManager
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.server.SocketManager" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        SocketManager
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -3466,34 +3405,22 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#blackbull.server.server" class="md-nav__link">
+  <a href="#blackbull.server.edge_protocol" class="md-nav__link">
     <span class="md-ellipsis">
       
-        server
+        edge_protocol
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="server">
+    <nav class="md-nav" aria-label="edge_protocol">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#blackbull.server.server.ASGIServer" class="md-nav__link">
+  <a href="#blackbull.server.edge_protocol--how-it-lands" class="md-nav__link">
     <span class="md-ellipsis">
       
-        ASGIServer
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="ASGIServer">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.server.ASGIServer.client_connected_cb" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        client_connected_cb
+        How it lands
       
     </span>
   </a>
@@ -3501,59 +3428,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#blackbull.server.server.ASGIServer.run" class="md-nav__link">
+  <a href="#blackbull.server.edge_protocol--state-machine" class="md-nav__link">
     <span class="md-ellipsis">
       
-        run
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.server.ASGIServer.shutdown" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        shutdown
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.server.ASGIServer.startup" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        startup
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.server.LifespanManager" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        LifespanManager
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.server.SocketManager" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        SocketManager
+        State machine
       
     </span>
   </a>
@@ -3585,203 +3463,67 @@
   
 
 
-<h1 id="blackbullserverserver"><code>blackbull.server.server</code><a class="headerlink" href="#blackbullserverserver" title="Permanent link">&para;</a></h1>
+<h1 id="blackbullserveredge_protocol"><code>blackbull.server.edge_protocol</code><a class="headerlink" href="#blackbullserveredge_protocol" title="Permanent link">&para;</a></h1>
 
 
 <div class="doc doc-object doc-module">
 
 
 
-<h2 id="blackbull.server.server" class="doc doc-heading">
-            <code>blackbull.server.server</code>
+<h2 id="blackbull.server.edge_protocol" class="doc doc-heading">
+            <code>blackbull.server.edge_protocol</code>
 
 
-<a href="#blackbull.server.server" class="headerlink" title="Permanent link">&para;</a></h2>
+<a href="#blackbull.server.edge_protocol" class="headerlink" title="Permanent link">&para;</a></h2>
 
     <div class="doc doc-contents first">
 
-
-
-
-
-
-
-
-
-
-<div class="doc doc-children">
-
-
-
-
-
-
-
-
-
-<div class="doc doc-object doc-class">
-
-
-
-<h3 id="blackbull.server.server.ASGIServer" class="doc doc-heading">
-            <code>ASGIServer</code>
-
-
-<a href="#blackbull.server.server.ASGIServer" class="headerlink" title="Permanent link">&para;</a></h3>
-
-
-    <div class="doc doc-contents ">
-
-
-
-        <p>An asyncio socket server with which reads first several bytes and dispatches
-transactions to HTTP2/HTTP1.1/WebSocket server.
-When ssl_context or certfile is set, this server runs as a HTTPS server.</p>
-
-
-
-
-
-
-
-
-
-
-
-<div class="doc doc-children">
-
-
-
-
-
-
-
-
-
-
-<div class="doc doc-object doc-function">
-
-
-<h4 id="blackbull.server.server.ASGIServer.client_connected_cb" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">client_connected_cb</span><span class="p">(</span><span class="n">reader</span><span class="p">,</span> <span class="n">writer</span><span class="p">)</span></code>
-
-  <span class="doc doc-labels">
-      <small class="doc doc-label doc-label-async"><code>async</code></small>
-  </span>
-
-<a href="#blackbull.server.server.ASGIServer.client_connected_cb" class="headerlink" title="Permanent link">&para;</a></h4>
-
-
-    <div class="doc doc-contents ">
-
-        <p>Called when the server receives a new TCP connection.</p>
-
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-function">
-
-
-<h4 id="blackbull.server.server.ASGIServer.run" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">run</span><span class="p">(</span><span class="n">port</span><span class="o">=</span><span class="mi">80</span><span class="p">)</span></code>
-
-  <span class="doc doc-labels">
-      <small class="doc doc-label doc-label-async"><code>async</code></small>
-  </span>
-
-<a href="#blackbull.server.server.ASGIServer.run" class="headerlink" title="Permanent link">&para;</a></h4>
-
-
-    <div class="doc doc-contents ">
-
-        <p>Run an asyncio socket server with the setting in this object.</p>
-
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-function">
-
-
-<h4 id="blackbull.server.server.ASGIServer.shutdown" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">shutdown</span><span class="p">()</span></code>
-
-  <span class="doc doc-labels">
-      <small class="doc doc-label doc-label-async"><code>async</code></small>
-  </span>
-
-<a href="#blackbull.server.server.ASGIServer.shutdown" class="headerlink" title="Permanent link">&para;</a></h4>
-
-
-    <div class="doc doc-contents ">
-
-        <p>Drive the ASGI lifespan shutdown handshake.</p>
-
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-function">
-
-
-<h4 id="blackbull.server.server.ASGIServer.startup" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">startup</span><span class="p">()</span></code>
-
-  <span class="doc doc-labels">
-      <small class="doc doc-label doc-label-async"><code>async</code></small>
-  </span>
-
-<a href="#blackbull.server.server.ASGIServer.startup" class="headerlink" title="Permanent link">&para;</a></h4>
-
-
-    <div class="doc doc-contents ">
-
-        <p>Drive the ASGI lifespan startup handshake.</p>
-<p>Launches the app's lifespan task, delivers 'lifespan.startup', and
-waits for 'lifespan.startup.complete'.  Raises RuntimeError on
-'lifespan.startup.failed'.  Stores the context manager so that
-shutdown() can deliver 'lifespan.shutdown' to the same task.</p>
-
-
-    </div>
-
-</div>
-
-
-
-  </div>
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-class">
-
-
-
-<h3 id="blackbull.server.server.LifespanManager" class="doc doc-heading">
-            <code>LifespanManager</code>
-
-
-<a href="#blackbull.server.server.LifespanManager" class="headerlink" title="Permanent link">&para;</a></h3>
-
-
-    <div class="doc doc-contents ">
-
-
-
-        <p>Async context manager that drives the ASGI lifespan protocol.</p>
-<p>On enter: launches the app's lifespan task and delivers 'lifespan.startup'.
-Raises RuntimeError if the app responds with 'lifespan.startup.failed'.
-On exit: delivers 'lifespan.shutdown' and waits for 'lifespan.shutdown.complete'.</p>
-<p>Implemented as a class (not asynccontextmanager) so that <strong>aenter</strong> and
-<strong>aexit</strong> can be called independently — e.g. startup() / shutdown() — without
-leaving a zombie async-generator that asyncio tries to finalize on loop close.</p>
-
+        <p>Custom asyncio.Protocol for the keepalive-idle read path.</p>
+<p>Sprint 30 Tier 1.5 Step 2 — replaces the default
+<code>asyncio.StreamReaderProtocol</code> used by <code>asyncio.start_server</code> so
+that the EOF → close chain folds into one event-loop turn per FD
+lifecycle (vs ~3-5 turns through the default StreamReader future
+wakeup chain).</p>
+<h4 id="blackbull.server.edge_protocol--how-it-lands">How it lands<a class="headerlink" href="#blackbull.server.edge_protocol--how-it-lands" title="Permanent link">&para;</a></h4>
+<p>This is just the Protocol class.  Wiring it into <code>server.py</code> (Step 3)
+will switch <code>ASGIServer</code> from <code>asyncio.start_server</code> to
+<code>loop.create_server</code> with this protocol factory.  Until then this
+module is dormant — landing now lets us tests it in isolation.</p>
+<h4 id="blackbull.server.edge_protocol--state-machine">State machine<a class="headerlink" href="#blackbull.server.edge_protocol--state-machine" title="Permanent link">&para;</a></h4>
+<p>::</p>
+<pre><code>┌──────────────────────────────┐
+│   __init__ (factory called)  │
+└──────────────┬───────────────┘
+               │ connection_made(transport)
+               ▼
+    ┌───────────────────────────┐
+</code></pre>
+<p>┌───►│  ACTIVE                   │
+   │    │  buffer = ProtocolBuffer()│
+   │    │  writer = StreamWriter()  │
+   │    │  task = create_task(cb)   │
+   │    └────┬─────────────────┬────┘
+   │         │ data_received   │ eof_received  (SYNCHRONOUS)
+   │         ▼                 ▼
+   │   ┌──────────┐    ┌────────────────────────┐
+   │   │buffer.   │    │ 1) transport.close()   │
+   │   │feed()    │    │ 2) buffer.feed_eof()   │
+   │   └────┬─────┘    │ 3) return False        │
+   │        │          └──────────┬─────────────┘
+   └────────┘                     │
+                                  ▼
+                     ┌──────────────────────────┐
+                     │  CLOSED                  │
+                     │  connection_lost(exc)    │
+                     │  buffer.close()          │
+                     │  (task winds itself up)  │
+                     └──────────────────────────┘</p>
+<p>The synchronous <code>eof_received</code> is the architectural change: it
+runs in the same event-loop iteration as the epoll batch that
+delivered the EOF.  By the time the actor task next runs, the FD
+is already on its way to <code>connection_lost</code>-fired <code>_sock.close()</code>
+— no readuntil-resume → break → finally → writer.close() chain
+needed to release the FD.</p>
 
 
 
@@ -3802,45 +3544,6 @@ leaving a zombie async-generator that asyncio tries to finalize on loop close.</
 
 
 
-
-
-
-  </div>
-
-    </div>
-
-</div>
-
-
-<div class="doc doc-object doc-function">
-
-
-<h3 id="blackbull.server.server.SocketManager" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">SocketManager</span><span class="p">(</span><span class="n">cb</span><span class="p">,</span> <span class="n">raw_sockets</span><span class="p">,</span> <span class="n">ssl_context</span><span class="p">)</span></code>
-
-  <span class="doc doc-labels">
-      <small class="doc doc-label doc-label-async"><code>async</code></small>
-  </span>
-
-<a href="#blackbull.server.server.SocketManager" class="headerlink" title="Permanent link">&para;</a></h3>
-
-
-    <div class="doc doc-contents ">
-
-        <p>Async context manager that creates asyncio servers from already-bound sockets.</p>
-<p>On enter: wraps each raw socket in asyncio.start_server (TCP) or
-asyncio.start_unix_server (AF_UNIX) and yields the list.
-On exit: closes all asyncio servers.</p>
-<p>Dispatches by <code>sock.family</code>: AF_INET / AF_INET6 take the TCP
-server, AF_UNIX takes the unix server.  Both honour the configured
-<code>socket_backlog</code> (asyncio's default of 100 is silently re-applied
-via <code>sock.listen(backlog)</code> otherwise — caused wrk c=1024 connect
-errors in Sprint 9c).</p>
-
-
-    </div>
-
-</div>
 
 
 
