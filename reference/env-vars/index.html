@@ -3644,8 +3644,8 @@ limits and tune the sockets in production.</p>
 <tbody>
 <tr>
 <td><code>BB_MAX_CONNECTIONS</code></td>
-<td><code>500</code></td>
-<td>Maximum simultaneous TCP connections <strong>per worker</strong>.  New connections beyond the cap are rejected before TLS / handshake to keep memory and FD use bounded.  <code>0</code> = unlimited.</td>
+<td><code>1024</code></td>
+<td>Maximum simultaneous TCP connections <strong>per worker</strong>.  When the cap is reached, new connections receive HTTP/1.1 <code>503 Service Unavailable</code> with <code>Retry-After: 1</code> before close — a well-formed response so load-balancers / health-checks can interpret it correctly.  <code>0</code> disables the cap (rely on OS file-descriptor limit instead).  Multi-worker servers multiply the ceiling (<code>workers × max_connections</code>).</td>
 </tr>
 <tr>
 <td><code>BB_REQUEST_TIMEOUT</code></td>

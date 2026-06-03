@@ -3553,8 +3553,11 @@ BB_WORKERS
     Number of worker processes.  <code>0</code> resolves to <code>os.cpu_count()</code>.
     Default: <code>1</code>.
 BB_MAX_CONNECTIONS
-    Maximum simultaneous TCP connections accepted per worker.
-    Default: <code>500</code>.
+    Maximum simultaneous TCP connections accepted per worker.  When the
+    cap is reached, new connections receive HTTP/1.1 <code>503 Service
+    Unavailable</code> with <code>Retry-After: 1</code> (a load-balancer-friendly
+    response, not a silent reset).  <code>0</code> disables the cap and relies
+    on the OS file-descriptor limit instead.  Default: <code>1024</code>.
 BB_STREAM_QUEUE_DEPTH
     <code>asyncio.Queue</code> depth for HTTP/2 per-stream request-body events.
     Limits memory growth when an ASGI handler is slower than the client.
