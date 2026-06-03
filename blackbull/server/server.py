@@ -130,10 +130,20 @@ async def SocketManager(cb, raw_sockets, ssl_context):
     ``socket_backlog`` (asyncio's default of 100 is silently re-applied
     via ``sock.listen(backlog)`` otherwise — caused wrk c=1024 connect
     errors in Sprint 9c).
+
+    When ``BB_USE_CUSTOM_PROTOCOL=1`` (Sprint 30 Tier 1.5), TCP
+    listeners switch to ``loop.create_server`` with a
+    ``_BlackBullProtocol`` factory so peer-FIN is processed
+    synchronously in ``eof_received``.  AF_UNIX retains the
+    StreamReader path for now — UDS workloads aren't the
+    burst-close cliff target and the protocol's
+    write_timeout-on-pause-resume semantics are TCP-shaped.
     """
     import socket as _socket  # noqa: PLC0415
     from ..env import get_settings as _get_settings  # noqa: PLC0415
-    _backlog = _get_settings().socket_backlog
+    _cfg = _get_settings()
+    _backlog = _cfg.socket_backlog
+    _custom = _cfg.use_custom_protocol
     servers = []
     for sock in raw_sockets:
         # ssl_handshake_timeout is meaningful only when SSL is enabled.
@@ -145,6 +155,18 @@ async def SocketManager(cb, raw_sockets, ssl_context):
             # TCP create_server() rejects non-INET families at family-
             # validation time.
             srv = await asyncio.start_unix_server(cb, **kwargs)
+        elif _custom:
+            # Sprint 30 Tier 1.5: custom protocol.  ``cb`` receives
+            # (reader, writer) per asyncio.start_server convention;
+            # ``_BlackBullProtocol`` produces (ProtocolBuffer,
+            # StreamWriter) — the buffer's asyncio-compat aliases
+            # (readuntil / readexactly) let the existing
+            # AsyncioReader wrap it without translation, so ``cb``
+            # works unchanged.
+            from .edge_protocol import _BlackBullProtocol  # noqa: PLC0415
+            loop = asyncio.get_event_loop()
+            srv = await loop.create_server(
+                lambda: _BlackBullProtocol(cb), **kwargs)
         else:
             srv = await asyncio.start_server(cb, **kwargs)
         servers.append(srv)

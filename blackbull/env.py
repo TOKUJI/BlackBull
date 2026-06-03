@@ -207,6 +207,21 @@ class Settings:
     #: where one process must not exhaust the global fd table).
     max_connections: int = 0
 
+    #: When True, ``ASGIServer`` uses the custom asyncio Protocol
+    #: (``_BlackBullProtocol``) instead of the default
+    #: ``asyncio.start_server`` + ``StreamReaderProtocol`` path.  The
+    #: custom protocol handles peer-FIN synchronously in
+    #: ``eof_received`` — folding the close chain into one event-loop
+    #: turn vs ~3-5 for the default path.  Reduces drain time under
+    #: burst-keepalive workloads (HttpArena ``static`` profile,
+    #: slowloris-style task accumulation).
+    #:
+    #: Off by default for the first release cycle so the new path
+    #: bakes in.  Sprint 31 may flip the default after EC2
+    #: cross-checking confirms the burst-close cliff is gone and
+    #: existing test coverage (conformance + Autobahn) stays green.
+    use_custom_protocol: bool = False
+
     #: asyncio.Queue depth for HTTP/2 per-stream request-body events.
     stream_queue_depth: int = 64
 
@@ -391,6 +406,7 @@ def get_settings() -> Settings:
         h2_enable_websocket=_bool_env('BB_H2_ENABLE_WEBSOCKET', False),
         ws_permessage_deflate=_bool_env('BB_WS_PERMESSAGE_DEFLATE', True),
         use_uvloop=_bool_env('BB_UVLOOP', False),
+        use_custom_protocol=_bool_env('BB_USE_CUSTOM_PROTOCOL', False),
         h2_active_streams_1w=_int_env_nonneg('BB_H2_ACTIVE_STREAMS_1W', 20),
         h2_active_streams=_int_env_nonneg('BB_H2_ACTIVE_STREAMS', 20),
         compression_min_size=_int_env('BB_COMPRESSION_MIN_SIZE', 100),
