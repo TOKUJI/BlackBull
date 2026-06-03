@@ -651,6 +651,8 @@ def serve(app, *,
     workers = workers if workers is not None else _cfg.workers
     workers = workers or (_os.cpu_count() or 1)
     max_connections = max_connections if max_connections is not None else _cfg.max_connections
+    accept_pause_high = _cfg.accept_pause_high_watermark
+    accept_pause_low = _cfg.accept_pause_low_watermark
     stream_queue_depth = (stream_queue_depth if stream_queue_depth is not None
                           else _cfg.stream_queue_depth)
     ws_queue_depth = ws_queue_depth if ws_queue_depth is not None else _cfg.ws_queue_depth
@@ -683,6 +685,8 @@ def serve(app, *,
                 unix_path=unix_path,
                 inherited_fd=inherited_fd,
                 max_connections=max_connections,
+                accept_pause_high=accept_pause_high,
+                accept_pause_low=accept_pause_low,
                 stream_queue_depth=stream_queue_depth,
                 ws_queue_depth=ws_queue_depth,
             ))
@@ -698,6 +702,8 @@ def serve(app, *,
     # inherited fds instead of binding.
     master_server = ASGIServer(app, certfile=certfile, keyfile=keyfile,
                                max_connections=max_connections,
+                               accept_pause_high_watermark=accept_pause_high,
+                               accept_pause_low_watermark=accept_pause_low,
                                stream_queue_depth=stream_queue_depth,
                                ws_queue_depth=ws_queue_depth)
     master_server.open_socket(port, unix_path=unix_path, inherited_fd=inherited_fd)
@@ -725,11 +731,15 @@ def serve(app, *,
 
 
 async def _run_single(app, *, certfile, keyfile, port, unix_path, inherited_fd,
-                      max_connections, stream_queue_depth, ws_queue_depth):
+                      max_connections, stream_queue_depth, ws_queue_depth,
+                      accept_pause_high: int = 0,
+                      accept_pause_low: int = 0):
     """Single-worker server loop — invoked from :func:`serve`."""
     from .server import ASGIServer  # noqa: PLC0415
     server = ASGIServer(app, certfile=certfile, keyfile=keyfile,
                         max_connections=max_connections,
+                        accept_pause_high_watermark=accept_pause_high,
+                        accept_pause_low_watermark=accept_pause_low,
                         stream_queue_depth=stream_queue_depth,
                         ws_queue_depth=ws_queue_depth)
     server.open_socket(port, unix_path=unix_path, inherited_fd=inherited_fd)

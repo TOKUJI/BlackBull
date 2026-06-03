@@ -163,11 +163,25 @@ class ASGIServer:
     def __init__(self, app, *,
                  ssl_context=None, certfile=None, keyfile=None, password=None,
                  max_connections: int = 0,
+                 accept_pause_high_watermark: int = 0,
+                 accept_pause_low_watermark: int = 0,
                  stream_queue_depth: int = _HTTP2_STREAM_QUEUE_DEPTH,
                  ws_queue_depth: int = _WS_EVENT_QUEUE_DEPTH,
                  **kwds):
         self.app = app
         self._max_connections = max_connections
+        # Accept-pause watermarks: explicit kwargs win; otherwise fall
+        # back to env-var settings so multi-worker forks pick the
+        # values up without plumbing through worker.run_worker.
+        if accept_pause_high_watermark > 0:
+            self._accept_pause_high = accept_pause_high_watermark
+            self._accept_pause_low = accept_pause_low_watermark
+        else:
+            from ..env import get_settings as _get_settings  # noqa: PLC0415
+            _cfg = _get_settings()
+            self._accept_pause_high = _cfg.accept_pause_high_watermark
+            self._accept_pause_low = _cfg.accept_pause_low_watermark
+        self._shedding: bool = False
         self._stream_queue_depth = stream_queue_depth
         self._ws_queue_depth = ws_queue_depth
         self._active_connections = 0
@@ -283,15 +297,45 @@ class ASGIServer:
 
         aggregator = self._cached_aggregator
 
-        # max_connections == 0 disables the cap entirely (rely on OS fd
-        # limits and per-stream backpressure — the hypercorn/granian
-        # default).  Otherwise reject the new connection only when we're
-        # at the cap.
+        # Connection admission: two layers.
+        #
+        # 1. Hard cap (BB_MAX_CONNECTIONS).  When active >= max, the
+        #    new connection is silently closed.  Existing behaviour.
+        # 2. Soft shedding via hysteresis (BB_ACCEPT_PAUSE_*).  When
+        #    HIGH_WATERMARK > 0 and active crosses HIGH, the server
+        #    enters "shedding" mode: every new connection gets closed
+        #    until active drops to LOW.  Sprint 30 Tier 2 — the
+        #    "prioritise close over open" mechanism.  Without this,
+        #    accept callbacks compete with close work in the loop's
+        #    FIFO _ready queue and the burst-close cliff stays sharp.
+        should_reject = False
         if self._max_connections and self._active_connections >= self._max_connections:
             logger.warning(
                 'Connection limit reached (%d/%d) — rejecting %s',
                 self._active_connections, self._max_connections, peername,
             )
+            should_reject = True
+        elif self._accept_pause_high > 0:
+            if self._shedding:
+                if self._active_connections <= self._accept_pause_low:
+                    self._shedding = False
+                    logger.info(
+                        'accept-pause: resuming '
+                        '(active=%d ≤ LOW=%d)',
+                        self._active_connections, self._accept_pause_low,
+                    )
+                else:
+                    should_reject = True
+            elif self._active_connections >= self._accept_pause_high:
+                self._shedding = True
+                should_reject = True
+                logger.info(
+                    'accept-pause: shedding '
+                    '(active=%d ≥ HIGH=%d)',
+                    self._active_connections, self._accept_pause_high,
+                )
+
+        if should_reject:
             await wrapped_writer.close()
             return
 

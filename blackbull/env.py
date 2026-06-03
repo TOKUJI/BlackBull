@@ -207,6 +207,38 @@ class Settings:
     #: where one process must not exhaust the global fd table).
     max_connections: int = 0
 
+    #: Accept-pause **high watermark** for hysteresis-based shedding
+    #: (Sprint 30 Tier 2 — the "prioritise close over open" mechanism).
+    #:
+    #: When the active connection count crosses this value, the server
+    #: enters "shedding" mode: every new connection is immediately
+    #: rejected with HTTP/1.1 ``503 Service Unavailable`` + ``Retry-After``
+    #: without proceeding to protocol handling.  This frees the event
+    #: loop to drain existing close work without competing with new
+    #: connection-actor setup.  Shedding persists until the active
+    #: count drops to or below ``accept_pause_low_watermark``
+    #: (hysteresis — prevents flapping at the threshold).
+    #:
+    #: ``0`` disables the feature — the server only rejects at the
+    #: hard ``max_connections`` cap, no early shedding.
+    #:
+    #: Note: this does NOT pause kernel-level ``accept()``; new SYNs
+    #: still complete the asyncio accept callback, then get a 503 +
+    #: close response.  That's much cheaper than processing a full
+    #: protocol handshake under load, but it isn't zero cost.  A
+    #: future ``Server._stop_serving``-based real pause is on the
+    #: roadmap if this soft shedding turns out to be insufficient.
+    accept_pause_high_watermark: int = 0
+
+    #: Accept-pause **low watermark** — when the active connection
+    #: count drops to or below this value while in shedding mode, the
+    #: server exits shedding mode and resumes normal accept handling.
+    #:
+    #: Must be strictly less than ``accept_pause_high_watermark`` for
+    #: the feature to do anything useful (typically 70-85% of HIGH).
+    #: When ``accept_pause_high_watermark`` is 0 this value is ignored.
+    accept_pause_low_watermark: int = 0
+
     #: asyncio.Queue depth for HTTP/2 per-stream request-body events.
     stream_queue_depth: int = 64
 
@@ -370,6 +402,10 @@ def get_settings() -> Settings:
         env=env,
         workers=_int_env('BB_WORKERS', 1),
         max_connections=_int_env_nonneg('BB_MAX_CONNECTIONS', 0),
+        accept_pause_high_watermark=_int_env_nonneg(
+            'BB_ACCEPT_PAUSE_HIGH_WATERMARK', 0),
+        accept_pause_low_watermark=_int_env_nonneg(
+            'BB_ACCEPT_PAUSE_LOW_WATERMARK', 0),
         stream_queue_depth=_int_env('BB_STREAM_QUEUE_DEPTH', 64),
         ws_queue_depth=_int_env('BB_WS_QUEUE_DEPTH', 256),
         async_logging=_bool_env('BB_ASYNC_LOGGING', True),
