@@ -69,8 +69,13 @@ class _FakeTransport(asyncio.Transport):
         for d in list_of_data:
             self.write(d)
 
+    # Stub methods below — asyncio.Transport requires them, but these
+    # tests never exercise the write-buffer / read-pause control surface.
+    # Bodies are intentional no-ops; ``...`` (Ellipsis) is recognised by
+    # CodeQL as an explicit empty stub.
+
     def write_eof(self) -> None:
-        pass
+        ...
 
     def can_write_eof(self) -> bool:
         return True
@@ -82,13 +87,13 @@ class _FakeTransport(asyncio.Transport):
         return (0, 0)
 
     def set_write_buffer_limits(self, high=None, low=None) -> None:
-        pass
+        ...
 
     def pause_reading(self) -> None:
-        pass
+        ...
 
     def resume_reading(self) -> None:
-        pass
+        ...
 
     def set_protocol(self, protocol) -> None:
         self._protocol = protocol
@@ -366,7 +371,10 @@ async def test_realistic_request_response_cycle():
             b'ok'
         )
         response_sent.set()
-        # Wait for EOF on next-request readuntil.
+        # Wait for EOF on next-request readuntil.  Expected to raise
+        # IncompleteReadError once the test calls eof_received(); we
+        # swallow it because the consumer task should exit cleanly on
+        # peer close (mirroring HTTP1Actor's break-on-EOF behaviour).
         try:
             await buffer.read_until(b'\r\n')
         except IncompleteReadError:
