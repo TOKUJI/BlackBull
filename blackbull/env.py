@@ -270,6 +270,18 @@ class Settings:
     #: down.  0 = disabled (legacy behaviour).
     body_timeout: float = 30.0
 
+    #: Maximum seconds the server will wait for a single write to be
+    #: flushed to the peer (via ``StreamWriter.drain()``).  Defends
+    #: against the *slow-read* shape of slowloris: a client that reads
+    #: the response 1 byte/sec eventually fills the kernel send buffer
+    #: and our ``drain()`` blocks indefinitely waiting for the peer's
+    #: TCP window to reopen.  Without this timeout the server's write
+    #: coroutine — and the connection slot it holds — is parked
+    #: forever.  When the deadline elapses we close the transport;
+    #: the sender treats the failure the same as a peer-side
+    #: ``ConnectionResetError``.  0 = disabled.
+    write_timeout: float = 30.0
+
     #: Maximum bytes in a single HTTP/1.1 request-line or header line.
     #: A pathological 1 GB ``X-foo: ...`` header would otherwise live in
     #: ``readuntil``'s internal buffer.  Enforced before parsing so an
@@ -383,6 +395,7 @@ def get_settings() -> Settings:
         request_timeout=_float_env_nonneg('BB_REQUEST_TIMEOUT', 0.0),
         header_timeout=_float_env_nonneg('BB_HEADER_TIMEOUT', 10.0),
         body_timeout=_float_env_nonneg('BB_BODY_TIMEOUT', 30.0),
+        write_timeout=_float_env_nonneg('BB_WRITE_TIMEOUT', 30.0),
         header_max_line=_int_env_nonneg('BB_HEADER_MAX_LINE', 8192),
         header_max_total=_int_env_nonneg('BB_HEADER_MAX_TOTAL', 65536),
         h2_initial_window_size=_int_env('BB_H2_INITIAL_WINDOW_SIZE', 1048576),

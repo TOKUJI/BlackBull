@@ -81,19 +81,48 @@ class AsyncioWriter(AbstractWriter):
 
     ``drain()`` is called inside ``write()`` so the asyncio backpressure
     mechanism is handled transparently and ``BaseSender`` stays runtime-agnostic.
+
+    ``write_timeout`` (seconds, ``0`` = disabled) bounds the time spent
+    in ``drain()`` waiting for the kernel send buffer to flush.  Defends
+    against the slow-read shape of slowloris: a client that reads the
+    response 1 byte/sec fills the send buffer and our drain blocks
+    indefinitely waiting for the peer's TCP window to reopen.  On
+    timeout we close the transport and raise ``ConnectionResetError``
+    so the sender treats the failure the same as a peer-side reset.
     """
 
-    def __init__(self, stream_writer):
+    def __init__(self, stream_writer, write_timeout: float = 0.0):
         if not (hasattr(stream_writer, 'write') and hasattr(stream_writer, 'drain')):
             raise TypeError(
                 f"AsyncioWriter requires an object with write() and drain(), "
                 f"got {type(stream_writer)}"
             )
         self._sw = stream_writer
+        self._write_timeout = write_timeout
 
     async def write(self, data: bytes) -> None:
         self._sw.write(data)
-        await self._sw.drain()
+        if self._write_timeout > 0:
+            try:
+                await asyncio.wait_for(self._sw.drain(),
+                                       timeout=self._write_timeout)
+            except (asyncio.TimeoutError, TimeoutError):
+                # Slow-read peer / dead TCP route — close the transport
+                # so the FD is released and the connection slot is
+                # reclaimed, then surface as a peer disconnect for the
+                # sender's existing error-handling path.
+                logger.warning(
+                    'write timeout (%.1fs) exceeded — closing connection',
+                    self._write_timeout)
+                try:
+                    self._sw.close()
+                except Exception:
+                    pass
+                raise ConnectionResetError(
+                    f'write timeout after {self._write_timeout:.1f}s'
+                ) from None
+        else:
+            await self._sw.drain()
 
     async def close(self) -> None:
         self._sw.close()
