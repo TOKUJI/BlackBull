@@ -96,12 +96,22 @@ class AsyncioWriter(AbstractWriter):
         await self._sw.drain()
 
     async def close(self) -> None:
+        # ``self._sw.close()`` is synchronous: it initiates the TCP
+        # shutdown and schedules the transport's ``connection_lost``
+        # callback for a later loop iteration.  We DO NOT await
+        # ``wait_closed()`` here — under burst-keepalive workloads
+        # (HttpArena ``static`` at c=4096) awaiting it serializes the
+        # connection-actor coroutine with the transport-close completion,
+        # adding 1-3 event-loop turns per connection.  With thousands of
+        # simultaneous closes that latency multiplies into a multi-second
+        # drain that monopolises the loop and starves the next wrk run.
+        #
+        # Safety: every ``write()`` above flushes via ``drain()``, so by
+        # the time we reach close() there is no buffered payload.  The
+        # transport tears down asynchronously; our coroutine exiting
+        # earlier is harmless for the connection-actor path (no
+        # follow-up state to flush).
         self._sw.close()
-        if hasattr(self._sw, 'wait_closed'):
-            try:
-                await self._sw.wait_closed()
-            except Exception:
-                pass
 
 
 # ---------------------------------------------------------------------------
