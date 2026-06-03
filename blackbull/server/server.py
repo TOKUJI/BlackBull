@@ -272,8 +272,8 @@ class ASGIServer:
         #   SO_SNDBUF / SO_RCVBUF / TCP_USER_TIMEOUT are on the LISTENING
         #     socket and inherited (set once at open_socket time).
         #   Idle keep-alive ghosts are evicted by an app-level timer in
-        #     HTTP1Actor (``BB_KEEP_ALIVE_TIMEOUT``, default 60 s) — the
-        #     hypercorn pattern.
+        #     HTTP1Actor (``BB_KEEP_ALIVE_TIMEOUT``, default 5 s) — the
+        #     uvicorn / granian / Caddy pattern.
         # Net cost: 0 setsockopt syscalls per accept (was 6, then 4).
 
         wrapped_reader = (reader if isinstance(reader, AbstractReader)
