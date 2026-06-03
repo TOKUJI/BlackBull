@@ -3836,6 +3836,13 @@ server, AF_UNIX takes the unix server.  Both honour the configured
 <code>socket_backlog</code> (asyncio's default of 100 is silently re-applied
 via <code>sock.listen(backlog)</code> otherwise — caused wrk c=1024 connect
 errors in Sprint 9c).</p>
+<p>When <code>BB_USE_CUSTOM_PROTOCOL=1</code> (Sprint 30 Tier 1.5), TCP
+listeners switch to <code>loop.create_server</code> with a
+<code>_BlackBullProtocol</code> factory so peer-FIN is processed
+synchronously in <code>eof_received</code>.  AF_UNIX retains the
+StreamReader path for now — UDS workloads aren't the
+burst-close cliff target and the protocol's
+write_timeout-on-pause-resume semantics are TCP-shaped.</p>
 
 
     </div>
