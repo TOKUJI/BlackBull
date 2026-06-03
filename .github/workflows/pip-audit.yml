@@ -43,11 +43,30 @@ jobs:
       - name: Install pip-audit
         run: pip install pip-audit
 
-      # Audit BlackBull's installed dependency tree, including the
-      # `compression` extra.  This covers h2, hpack, beartype,
-      # brotli, zstandard.  The `--strict` flag fails on any
-      # advisory match.
-      - name: Run pip-audit
+      # Audit BlackBull's declared dependencies (runtime + ``compression``
+      # extra) directly via ``pip-audit --requirement``.  This covers
+      # h2, hpack, beartype, brotli, zstandard.
+      #
+      # We do NOT install BlackBull itself: at release-prep time
+      # (e.g. v0.29.0a1) the new version isn't on PyPI yet, so any
+      # mode that asks pip-audit to look up BlackBull's metadata fails
+      # (404 from PyPI, or "distribution marked as editable" when using
+      # an editable install).  Extracting deps from ``pyproject.toml``
+      # and feeding them to ``pip-audit -r`` sidesteps both — pip-audit
+      # resolves the named packages from PyPI and audits THEIR
+      # advisory data, never touching BlackBull's own version.
+      - name: Audit BlackBull dependencies
         run: |
-          pip install '.[compression]'
-          pip-audit --strict --progress-spinner off
+          pip install pip-audit
+          python -c "
+          import tomllib
+          with open('pyproject.toml', 'rb') as f:
+              cfg = tomllib.load(f)
+          deps = list(cfg['project'].get('dependencies', []))
+          deps += list(cfg['project'].get('optional-dependencies', {}).get('compression', []))
+          print('\n'.join(deps))
+          " > audit-deps.txt
+          echo '--- audit-deps.txt ---'
+          cat audit-deps.txt
+          echo '----------------------'
+          pip-audit --strict --requirement audit-deps.txt --progress-spinner off
