@@ -44,10 +44,18 @@ jobs:
         run: pip install pip-audit
 
       # Audit BlackBull's installed dependency tree, including the
-      # `compression` extra.  This covers h2, hpack, beartype,
-      # brotli, zstandard.  The `--strict` flag fails on any
+      # ``compression`` extra.  This covers h2, hpack, beartype,
+      # brotli, zstandard.  The ``--strict`` flag fails on any
       # advisory match.
+      #
+      # Editable install + ``--skip-editable`` is deliberate: at
+      # release-prep time (e.g. v0.29.0a1) the new version isn't on
+      # PyPI yet, so a non-editable install would make pip-audit try
+      # to look up advisories for a package version PyPI hasn't seen
+      # → 404 → workflow failure.  Skipping the editable (the local
+      # checkout of BlackBull itself) keeps all real dependencies
+      # audited while letting pre-release PRs pass.
       - name: Run pip-audit
         run: |
-          pip install '.[compression]'
-          pip-audit --strict --progress-spinner off
+          pip install -e '.[compression]'
+          pip-audit --strict --skip-editable --progress-spinner off
