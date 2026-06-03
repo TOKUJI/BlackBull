@@ -288,14 +288,35 @@ class ASGIServer:
         aggregator = self._cached_aggregator
 
         # max_connections == 0 disables the cap entirely (rely on OS fd
-        # limits and per-stream backpressure — the hypercorn/granian
-        # default).  Otherwise reject the new connection only when we're
-        # at the cap.
+        # limits).  Otherwise, send a well-formed HTTP/1.1 503 +
+        # Retry-After so load-balancers and health-checks can interpret
+        # the response — better than a silent reset, which looks like a
+        # crash from the LB's perspective.  For ALPN-negotiated h2 we
+        # don't have the SETTINGS exchange to send GOAWAY cleanly, so a
+        # straight close is the safest answer there.
         if self._max_connections and self._active_connections >= self._max_connections:
             logger.warning(
-                'Connection limit reached (%d/%d) — rejecting %s',
+                'Connection limit reached (%d/%d) — 503 to %s',
                 self._active_connections, self._max_connections, peername,
             )
+            if alpn != 'h2':
+                # HTTP/1.1 (or undetected cleartext — h1 is the safe
+                # default since the client hasn't spoken yet).  Minimal
+                # response: no body, content-length: 0, connection:
+                # close.  Retry-After in seconds.
+                try:
+                    await wrapped_writer.write(
+                        b'HTTP/1.1 503 Service Unavailable\r\n'
+                        b'retry-after: 1\r\n'
+                        b'content-length: 0\r\n'
+                        b'connection: close\r\n'
+                        b'\r\n')
+                except Exception:
+                    # Peer may already be gone or transport broken; the
+                    # close() below still runs.  No further action.
+                    logger.debug(
+                        '503 write failed for %s (peer disconnected?)',
+                        peername)
             await wrapped_writer.close()
             return
 
