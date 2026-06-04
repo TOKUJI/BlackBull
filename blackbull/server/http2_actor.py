@@ -72,6 +72,62 @@ def _make_log_record(scope):
     return AccessLogRecord.from_scope(scope)
 
 _DEFAULT_PRIORITY: dict[str, int | bool] = {'urgency': 3, 'incremental': False}
+
+# ``_HTTP2_BASE_EXTENSIONS`` carries the protocol-level extensions that
+# every HTTP/2 scope advertises, regardless of which stream the request
+# arrived on: server push, plus the new (Sprint 32) priority and
+# stream-info hints.  The actual *contents* of the priority / stream-info
+# entries are stream-specific, so each scope gets a freshly-built
+# extensions dict via ``_build_h2_extensions`` below — only the advertised
+# keys themselves are shared.
+_HTTP2_EXTENSIONS_KEYS = (
+    ASGIEvent.HTTP_RESPONSE_PUSH,
+    'http.response.priority',
+    'http.response.http2_stream',
+)
+
+
+def _build_h2_extensions(
+    stream_id: int,
+    priority: dict,
+    peer_initial_window: int,
+    connection_window: int,
+) -> dict:
+    """Return a freshly-built ``scope['extensions']`` dict for one HTTP/2 request.
+
+    The shape Sprint 32 introduces:
+
+    - ``http.response.push`` — empty marker; signals the application can
+      send ``http.response.push`` events on this scope (existing behaviour).
+    - ``http.response.priority`` — ``{'urgency': int, 'incremental': bool}``
+      per RFC 9218 §4.1.  Field names match the gunicorn beta HTTP/2
+      surface; the *contents* are RFC 9218 rather than the deprecated
+      RFC 7540 weight/tree (RFC 9113 §5.3.2 deprecated the tree, and
+      modern clients send RFC 9218 priority signals).
+    - ``http.response.http2_stream`` — ``{'stream_id': int,
+      'send_window_remaining': int, 'connection_send_window_remaining':
+      int}``.  Snapshot at scope-build time; the windows shift as the
+      response body streams.  Lays the foundation for gRPC server-streaming
+      back-pressure awareness.
+
+    Peer recv-window is intentionally absent: BlackBull sends
+    WINDOW_UPDATE per consumed DATA frame, so there is no scalar to
+    snapshot.
+    """
+    return {
+        ASGIEvent.HTTP_RESPONSE_PUSH: {},
+        'http.response.priority': priority,
+        'http.response.http2_stream': {
+            'stream_id': stream_id,
+            'send_window_remaining': peer_initial_window,
+            'connection_send_window_remaining': connection_window,
+        },
+    }
+
+
+# Retained for older test fixtures that inspect this constant directly.
+# New code reads ``scope['extensions']`` instead; this is just a list of
+# the keys the actor advertises.
 _HTTP2_EXTENSIONS: dict = {ASGIEvent.HTTP_RESPONSE_PUSH: {}}
 
 
@@ -738,8 +794,15 @@ class HTTP2Actor(Actor):
             await self._handle_h2_websocket(stream, tg, log_record)
             return True
 
-        scope['http2_priority'] = _resolve_priority(stream, scope)
-        scope['extensions'] = _HTTP2_EXTENSIONS
+        priority = _resolve_priority(stream, scope)
+        # ``scope['http2_priority']`` is retained for one release as a
+        # deprecation alias.  New apps should read
+        # ``scope['extensions']['http.response.priority']`` instead.
+        # Removal scheduled for v0.32.0.
+        scope['http2_priority'] = priority
+        scope['extensions'] = _build_h2_extensions(
+            stream.stream_id, priority,
+            self._peer_initial_window_size, self._connection_window_size)
         stream_recipient = RecipientFactory.http2(queue_depth=self._stream_queue_depth)
         self._recipients[stream.stream_id] = stream_recipient
         stream.on_headers_received(end_stream=bool(frame.end_stream))
@@ -796,8 +859,12 @@ class HTTP2Actor(Actor):
                 self.factory.rst_stream(stream.stream_id, ErrorCodes.REFUSED_STREAM))
             return True
 
-        scope['http2_priority'] = _resolve_priority(stream, scope)
-        scope['extensions'] = _HTTP2_EXTENSIONS
+        priority = _resolve_priority(stream, scope)
+        # See deprecation note at the HEADERS path above.
+        scope['http2_priority'] = priority
+        scope['extensions'] = _build_h2_extensions(
+            stream.stream_id, priority,
+            self._peer_initial_window_size, self._connection_window_size)
         stream.scope = scope
         stream_recipient = RecipientFactory.http2(queue_depth=self._stream_queue_depth)
         self._recipients[stream.stream_id] = stream_recipient
@@ -958,7 +1025,11 @@ class HTTP2Actor(Actor):
             'headers': Headers([(k.encode() if isinstance(k, str) else k,
                                   v.encode() if isinstance(v, str) else v)
                                  for k, v in regular]),
-            'extensions': _HTTP2_EXTENSIONS,
+            'extensions': _build_h2_extensions(
+                push_stream_id, _DEFAULT_PRIORITY,
+                self._peer_initial_window_size,
+                self._connection_window_size),
+            # Deprecation alias — see HEADERS path note.
             'http2_priority': _DEFAULT_PRIORITY,
         }
 

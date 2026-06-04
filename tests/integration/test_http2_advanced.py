@@ -58,6 +58,31 @@ def _make_priority_app() -> BlackBull:
     return app
 
 
+def _make_stream_info_app() -> BlackBull:
+    """Sprint 32 — echoes both the new extensions surface and the
+    legacy ``http2_priority`` key so the integration test can verify
+    they agree."""
+    app = BlackBull()
+
+    @app.route(path='/stream-info')
+    async def stream_info_route(scope, receive, send):
+        import json
+        ext = scope.get('extensions') or {}
+        legacy = scope.get('http2_priority', {})
+        payload = {
+            'legacy_http2_priority': legacy,
+            'priority_ext': ext.get('http.response.priority'),
+            'http2_stream_ext': ext.get('http.response.http2_stream'),
+            'extension_keys': sorted(ext.keys()),
+        }
+        await send({'type': 'http.response.start', 'status': 200,
+                    'headers': [(b'content-type', b'application/json')]})
+        await send({'type': 'http.response.body',
+                    'body': json.dumps(payload).encode(), 'more_body': False})
+
+    return app
+
+
 @pytest.fixture(scope="module")
 def push_app(manage_cert_and_key):
     app = _make_push_app()
@@ -133,3 +158,72 @@ async def test_priority_hint_in_scope(priority_app):
     assert 'incremental' in hint
     # With u=1 the urgency should be parsed as 1
     assert hint['urgency'] == 1
+
+
+# ---------------------------------------------------------------------------
+# Sprint 32 — http.response.priority + http.response.http2_stream extensions
+# ---------------------------------------------------------------------------
+
+@pytest.fixture(scope="module")
+def stream_info_app(manage_cert_and_key):
+    app = _make_stream_info_app()
+    with live_server(app, certfile=str(_CERT), keyfile=str(_KEY)) as handle:
+        yield handle
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_priority_extension_present_in_scope(stream_info_app):
+    """``scope['extensions']['http.response.priority']`` is populated for
+    every HTTP/2 request and carries the same RFC 9218 urgency/incremental
+    values the legacy ``scope['http2_priority']`` does."""
+    async with httpx.AsyncClient(
+        http2=True, verify=False,
+        base_url=f'https://localhost:{stream_info_app.port}',
+    ) as c:
+        r = await c.get('/stream-info', headers={'priority': 'u=2, i'})
+    assert r.status_code == 200
+    body = r.json()
+
+    assert body['priority_ext'] is not None
+    assert body['priority_ext']['urgency'] == 2
+    assert body['priority_ext']['incremental'] is True
+    # Deprecation alias must agree.
+    assert body['legacy_http2_priority'] == body['priority_ext']
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_http2_stream_extension_present_in_scope(stream_info_app):
+    """``scope['extensions']['http.response.http2_stream']`` carries
+    stream_id and the send-window snapshot."""
+    async with httpx.AsyncClient(
+        http2=True, verify=False,
+        base_url=f'https://localhost:{stream_info_app.port}',
+    ) as c:
+        r = await c.get('/stream-info')
+    body = r.json()
+
+    s = body['http2_stream_ext']
+    assert s is not None
+    # First client-initiated stream on a fresh connection is 1 (RFC 9113 §5.1.1).
+    assert s['stream_id'] == 1
+    # Window snapshot is whatever the peer's initial setting was — non-negative.
+    assert s['send_window_remaining'] >= 0
+    assert s['connection_send_window_remaining'] >= 0
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_scope_advertises_three_extension_keys(stream_info_app):
+    """The HTTP/2 scope advertises push, priority, and http2_stream
+    keys.  Sprint 32 adds the latter two; the existing push key stays."""
+    async with httpx.AsyncClient(
+        http2=True, verify=False,
+        base_url=f'https://localhost:{stream_info_app.port}',
+    ) as c:
+        r = await c.get('/stream-info')
+    keys = set(r.json()['extension_keys'])
+    assert 'http.response.push' in keys
+    assert 'http.response.priority' in keys
+    assert 'http.response.http2_stream' in keys

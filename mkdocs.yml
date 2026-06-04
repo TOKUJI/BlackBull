@@ -67,3 +67,4 @@ nav:
   - About:
     - Conformance: about/conformance.md
     - Internals: about/internals.md
+    - gRPC assessment: about/grpc-assessment.md

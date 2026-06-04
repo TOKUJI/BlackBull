@@ -1,8 +1,9 @@
 """
 HTTP/2 Priority Example — BlackBull server
 ==========================================
-Demonstrates how to read RFC 9218 priority hints from scope['http2_priority']
-and act on them in handler code.
+Demonstrates how to read RFC 9218 priority hints from the ASGI scope
+extension ``scope['extensions']['http.response.priority']`` and act on
+them in handler code.
 
 RFC 9218 Priority field
 -----------------------
@@ -23,10 +24,17 @@ The priority field has two components:
 BlackBull does not reorder responses based on urgency.  Acting on the hint
 is entirely up to application code, as shown below.
 
+Scope location (BlackBull v0.31+):
+  scope['extensions']['http.response.priority'] → {'urgency': int, 'incremental': bool}
+
+The legacy ``scope['http2_priority']`` key is still populated for one
+release as a deprecation alias; it is scheduled for removal in
+BlackBull v0.32.0.
+
 Endpoints
 ---------
   GET /              → JSON listing all endpoints
-  GET /priority-echo → returns scope['http2_priority'] as JSON
+  GET /priority-echo → returns the priority hint as JSON
   GET /work          → simulates a variable-cost operation;
                        cost scales with urgency so high-urgency requests
                        return quickly and low-urgency ones take longer
@@ -51,8 +59,16 @@ _DEFAULT_PRIORITY = {'urgency': 3, 'incremental': False}
 
 
 def _priority(scope: dict) -> dict:
-    """Return scope's priority hint, defaulting to RFC 9218 §4.1 values."""
-    return scope.get('http2_priority', _DEFAULT_PRIORITY)
+    """Return scope's priority hint, defaulting to RFC 9218 §4.1 values.
+
+    Reads ``scope['extensions']['http.response.priority']`` — the ASGI
+    extension surface BlackBull adopted in v0.31.  The legacy
+    ``scope['http2_priority']`` key is still populated for backwards
+    compatibility but will be removed in v0.32.0; new code should use
+    the extension.
+    """
+    ext = scope.get('extensions') or {}
+    return ext.get('http.response.priority', _DEFAULT_PRIORITY)
 
 
 @app.on('request_received')
@@ -98,7 +114,8 @@ async def handle_priority_echo(scope, receive, send):
     logger.info('priority-echo: urgency=%d incremental=%s',
                 hint['urgency'], hint['incremental'])
     await send(JSONResponse({
-        'http2_priority': hint,
+        'priority': hint,
+        'scope_location': "scope['extensions']['http.response.priority']",
         'note': (
             'Set via PRIORITY_UPDATE frame or "priority" HTTP header. '
             'Defaults: urgency=3, incremental=false (RFC 9218 §4.1).'
