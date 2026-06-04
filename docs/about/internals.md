@@ -184,8 +184,11 @@ the protocol stack:
 - **HTTP/1.1 parser** — `blackbull/server/parser.py`.  Pure
   Python; no `httptools` dependency.
 - **HTTP/2 frame layer** — `blackbull/protocol/` (frame types,
-  flow-control windows, HPACK encoder/decoder + fastpath, RFC
-  9218 `PRIORITY_UPDATE`).
+  flow-control windows, RFC 9218 `PRIORITY_UPDATE`).  Header
+  compression delegates to the `hpack` library — the only
+  third-party Python package in the protocol stack — wrapped by
+  the BlackBull-owned `hpack_fastpath.py` for the common
+  short-header path.
 - **WebSocket codec** — `blackbull/server/ws_codec.py`
   (RFC 6455 framing) + `blackbull/server/websocket_actor.py`
   (fragment reassembly, RFC 7692 `permessage-deflate`).
@@ -205,12 +208,21 @@ source of truth.
 ## Why pure-Python
 
 `blackbull[speed]` adds `uvloop` as an optional dependency.
-The protocol stack itself stays pure Python — no `httptools`,
-no `h2`-as-a-replacement.  Two reasons:
+The HTTP/1.1 parser, HTTP/2 frame layer, and WebSocket codec
+are all BlackBull's own code — no `httptools`, no `h2` library
+for framing.  The one exception is HPACK header compression,
+which delegates to the [`hpack`](https://pypi.org/project/hpack/)
+library (pure Python, layered under the BlackBull-owned
+`hpack_fastpath.py`); re-implementing a conformant HPACK
+encoder/decoder is a sub-project of its own, and `hpack` is the
+de-facto Python reference.  Two reasons we keep the rest in
+pure Python:
 
-- **Debuggability.**  An issue in HPACK encoding or HTTP/2
-  flow control can be stepped into with `pdb`.  The stack is
-  the application's code, not an opaque C extension.
+- **Debuggability.**  An issue in HTTP/2 flow control or
+  frame parsing can be stepped into with `pdb`.  The stack is
+  the application's code, not an opaque C extension.  This
+  applies to `hpack` too — it is itself pure Python, so HPACK
+  bugs remain debuggable in-process.
 - **Identity.**  BlackBull exists in part to demonstrate that
   CPython is fast enough for a from-scratch ASGI implementation
   when the framework itself stays out of the way.  Swapping in

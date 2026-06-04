@@ -5,7 +5,7 @@ name = "blackbull"
 # between sprints.  No 1.0 commitment until the framework's identity
 # and surface have stabilised across several sprints.  See CHANGELOG.md.
 version = "0.31.0"
-description = "From-scratch async ASGI 3.0 framework with native HTTP/1.1, HTTP/2 and WebSocket implementations."
+description = "Async ASGI 3.0 framework with a from-scratch HTTP/1.1 parser, HTTP/2 frame layer, and WebSocket codec. HPACK delegates to the hpack library."
 readme = "README.md"
 requires-python = ">=3.11"
 
@@ -41,7 +41,13 @@ classifiers = [
 ]
 
 dependencies = [
-    "h2",
+    # HPACK header compression for HTTP/2 — pure Python; the
+    # BlackBull HTTP/2 frame layer wraps hpack's Encoder/Decoder
+    # plus our own fastpath in blackbull/protocol/hpack_fastpath.py.
+    # Re-implementing a conformant HPACK encoder/decoder is a
+    # project of its own; the rest of the HTTP/2 stack
+    # (framing, flow control, prioritisation, push, stream
+    # actor) is BlackBull's own code.
     "hpack",
     # beartype is load-bearing — Router.validate() imports it at every
     # app.run() / app.serve() boot to type-check path-param converters

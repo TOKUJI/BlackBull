@@ -4,10 +4,15 @@
 > Conformance evidence: [`docs/about/conformance.md`](docs/about/conformance.md).
 > Things to know before adopting: [`KNOWN_LIMITATIONS.md`](KNOWN_LIMITATIONS.md).
 
-**From-scratch async ASGI 3.0 framework** with native HTTP/1.1, HTTP/2,
-and WebSocket implementations — no `httptools`, no `uvicorn`, no
-`hypercorn` underneath.  Pure-Python protocol stack, single
-deployable, zero C-extension footprint outside the standard library.
+**Async ASGI 3.0 framework** with a from-scratch HTTP/1.1 parser,
+HTTP/2 frame layer, and WebSocket codec — no `httptools`, no
+`uvicorn`, no `hypercorn` underneath.  HPACK header compression
+delegates to the [`hpack`](https://github.com/python-hyper/hpack)
+library (re-implementing a conformant HPACK encoder/decoder is a
+project of its own); everything else, including the ASGI server,
+event loop integration, prioritisation, push, flow control, and
+stream actor, is BlackBull's own code.  Single deployable, no
+third-party C extensions in the protocol stack.
 
 [![PyPI](https://img.shields.io/pypi/v/blackbull.svg)](https://pypi.org/project/blackbull/)
 [![Python](https://img.shields.io/pypi/pyversions/blackbull.svg)](https://pypi.org/project/blackbull/)
@@ -17,10 +22,14 @@ deployable, zero C-extension footprint outside the standard library.
 
 - **One package, one process** — the framework *is* the server.  No
   separate ASGI runner; `app.run()` opens the socket and serves.
-- **HTTP/1.1 + HTTP/2 + WebSocket** all implemented natively (RFC 9112
-  for H/1, RFC 9113 for H/2, RFC 6455 for WebSocket).
+- **From-scratch protocol stack** for HTTP/1.1 (RFC 9112) parser,
+  HTTP/2 (RFC 9113) frame layer + flow control + RFC 9218
+  prioritisation + push, and WebSocket (RFC 6455) codec.  HPACK
+  (RFC 7541) is the one exception — see headline above.
 - **Pure-Python identity** — no `httptools`, no `uvloop` dependency
-  (uvloop available as an optional `[speed]` extra).
+  (uvloop available as an optional `[speed]` extra).  The single
+  third-party dependency in the protocol stack is `hpack`, also
+  pure Python.
 - **Conformance-tested** against `h2spec`, Autobahn, and a
   differential nginx fuzz corpus.
 - **Modern Python** — requires 3.11+, full type hints, PEP 561 typed
