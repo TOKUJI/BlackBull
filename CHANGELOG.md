@@ -28,6 +28,99 @@ so the editable install's metadata catches up.
 
 ---
 
+## [0.30.0] — 2026-06-04
+
+**Sprint 31 close — zero-copy static-file serving for cleartext
+HTTP/1.1.**  The streaming path for files > 4 MiB (the in-memory
+cache threshold) previously went through chunked
+`asyncio.to_thread`; microbench measured ~64 µs of per-chunk
+event-loop dispatch overhead, which dominated the 16 ms total cost
+on a 16 MiB transfer.  This release swaps that for a single
+`loop.sendfile()` call when the transport supports it.
+
+### Added
+
+- **`http.response.pathsend` ASGI extension** — cleartext HTTP/1.1
+  scopes now advertise the standard ASGI extension
+  ([asgi.readthedocs.io](https://asgi.readthedocs.io/en/latest/extensions.html#path-send)).
+  The application sends `http.response.start` (with Content-Length)
+  followed by `{'type': 'http.response.pathsend', 'path': str}`;
+  the sender takes responsibility for delivering the file bytes
+  via `loop.sendfile`.  TLS connections do NOT advertise the
+  extension — `loop.sendfile` raises `NotImplementedError` on SSL
+  transports because the kernel can't see the plaintext.  (PR #44)
+- **`AbstractWriter.sendfile(file, offset, count)`** — protocol-
+  agnostic zero-copy primitive.  Default implementation raises
+  `NotImplementedError`; `AsyncioWriter` drains buffered writes
+  then calls `loop.sendfile` against the underlying transport.
+  Propagates `NotImplementedError` so `HTTP1Sender` can fall back
+  to a chunked read+write loop for TLS connections.
+
+### Changed
+
+- **`StaticFiles` middleware large-file path** — when scope
+  advertises `http.response.pathsend` AND the response is not 206
+  (Range requests carry no offset/count in the extension), the
+  middleware emits `http.response.pathsend` instead of the chunked
+  `http.response.body` stream.  Cached (small) files are
+  unchanged: the bytes are already in Python, so the cache path
+  stays the same.
+
+### Performance
+
+EC2 `c7i.2xlarge` cross-check on a 16 MiB file at c=64, 60 s
+measurement window:
+
+| | chunked (v0.29.0) | sendfile (this release) | Δ |
+|---|---:|---:|---:|
+| Effective throughput | 25 r/s | **569 r/s** | **23×** |
+| Server-side p50 latency | 664 ms | **44 ms** | **15× lower** |
+| Server-side p99 latency | 742 ms | 520 ms | 1.4× lower |
+
+The chunked path was dispatch-bound at ~25 r/s (16 ms of pure
+event-loop overhead per 16 MiB request); sendfile moves the
+dispatch into kernel-space.  Effective throughput at this
+concurrency is ~9 GB/s on loopback.
+
+### Tests
+
+- 14 new unit/architecture tests covering `AsyncioWriter.sendfile`
+  (happy / TLS-NotImpl / abstract default), `HTTP1Sender`'s
+  `pathsend` handler (header rendering, computed Content-Length,
+  TLS chunked fallback, HEAD-only, defensive no-op),
+  `StaticFiles` emitting `pathsend` correctly (extension present /
+  absent / Range / small files), and the `HTTP1Actor` scope
+  extension advertisement (cleartext / TLS).
+- Total unit-test count: **1,234 passing** (was 1,206 at 0.29.0).
+  Beartype-instrumented run: also clean.
+
+### Notes for adopters
+
+- **No API change.**  Existing apps see zero-copy file serving
+  automatically for large files over cleartext HTTP/1.1.  TLS and
+  HTTP/2 connections continue using the chunked streaming path.
+- **HTTP/2 not affected.**  `h2` frames in user-space; there is
+  no kernel path to interleave DATA frames around our HEADERS
+  block.  HTTP/2 keeps the existing chunked streaming.
+- **Range requests not affected.**  The ASGI pathsend extension
+  carries no offset/count, so Range responses keep the chunked
+  path that correctly honours `Content-Range`.
+- **`KNOWN_LIMITATIONS.md`** — static-file note refreshed to
+  reflect the three-way classification (cached / sendfile /
+  chunked) while keeping the "front a real CDN for anything
+  user-visible" framing.
+
+### Out of scope / deferred
+
+- **HTTP/2 zero-copy** — no kernel path exists.  Documented as
+  intentional; revisit only if a real user need surfaces.
+- **Off-loop cached (small-file) read on cache miss** — Sprint 31
+  Task 1 diagnosis measured the cold-cache penalty at
+  sub-millisecond p50 even for 1 MiB files.  Not worth the
+  complexity.
+
+---
+
 ## [0.29.0] — 2026-06-04
 
 **Sprint 30 close — event-loop integrity under hostile / burst load
