@@ -99,7 +99,7 @@ uses.
 | `python myapp.py` (calls `app.run()`) | Development, one-shot scripts, tutorial-style apps |
 | `blackbull myapp:app …` | systemd, Docker, PaaS — anywhere the deployment surface is a CLI |
 | External ASGI server | When the surrounding deployment dictates uvicorn / granian / hypercorn for tooling reasons |
-| `ASGIServer` direct | Embedded inside another asyncio program, or when fine-grained socket / TLS control is needed (e.g. mTLS — see [TLS](tls.md#mtls)) |
+| `ASGIServer` direct | Embedded inside another asyncio program, or when fine-grained socket / TLS control is needed (e.g. mTLS — see [TLS](tls.md#mutual-tls-mtls)) |
 
 ## Next
 

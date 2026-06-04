@@ -28,13 +28,18 @@ so the editable install's metadata catches up.
 
 ---
 
-## [0.29.0a1] — 2026-06-04
+## [0.29.0] — 2026-06-04
 
-**Alpha pre-release of Sprint 30 — event-loop integrity under hostile
-/ burst load.**  Cut from master after Tier 1 + Tier 1.5 PRs landed
-(#32-#38) so the HttpArena EC2 cross-check can pin a real installable
-version.  Tagging as `a1` (PEP 440 alpha) deliberately — the EC2
-measurement gates the `0.29.0` final.
+**Sprint 30 close — event-loop integrity under hostile / burst load
+(Tier 1 only).**  Supersedes the `0.29.0a1` alpha pre-release: the
+custom-protocol path (Tier 1.5, PRs #36 / #37 / #38) shipped in `a1`
+behind `BB_USE_CUSTOM_PROTOCOL=False` was **reverted before the
+final** after the EC2 cross-check showed it regressed client-side
+latency by ~9 % (p50 189 → 207 ms) and throughput by ~8 % at c=4096
+on `c7i.2xlarge`.  The code is parked on the
+`Sprint30-tier1.5-custom-protocol` branch for future revisit; it is
+not in this release in any form.  See *Notes for adopters* below
+for migration guidance from `a1`.
 
 ### Added
 
@@ -54,22 +59,6 @@ measurement gates the `0.29.0` final.
   interpret as a server crash.  ALPN-h2 connections still close
   without writing (no SETTINGS exchange yet for clean GOAWAY).
   (PR #35)
-- **`BB_USE_CUSTOM_PROTOCOL`** (default False — opt-in) — switch to
-  a custom `asyncio.Protocol` subclass (`_BlackBullProtocol`) that
-  handles peer-FIN synchronously in `eof_received` instead of
-  routing through `StreamReader`'s future-wakeup chain.  The
-  architectural change saves one event-loop iteration per close;
-  local measurement shows ~5% drain-time improvement at c=4096 and
-  no measurable cliff fix on its own.  **Marked experimental
-  pending EC2 cross-check**; ship-default is OFF.  See
-  `bench/sprint-logs/sprint-30-tier1.5-design.md` for the honest
-  outcome write-up of what was achieved vs originally claimed.
-  (PRs #36 + #37 + #38)
-- **`ProtocolBuffer`** at `blackbull.server.protocol_buffer` — a
-  cancellable byte buffer used by the custom protocol path.  Drop-in
-  superset of the bits of `asyncio.StreamReader` we use; available
-  with both `readuntil` / `read_until` naming so the existing
-  `AsyncioReader` wraps it without translation.
 
 ### Changed
 
@@ -130,16 +119,9 @@ faster than run 1.
 
 ### Tests
 
-- 27 new unit tests across `test_asyncio_writer.py` (5 — write-timeout
-  edge cases), `test_max_connections_503.py` (4 — 503-response shape),
-  `test_protocol_buffer.py` (22 — cancellable-buffer semantics), and
-  `test_edge_protocol.py` (10 — custom protocol behaviour against a
-  fake transport).
-- 3 new architecture-level integration tests in
-  `test_custom_protocol_toggle.py` proving the
-  `BB_USE_CUSTOM_PROTOCOL=1` code path serves real HTTP/1.1 requests
-  end-to-end.
-- Total unit-test count: **1232 passing** (was 1197 at 0.28.1).
+- 9 new unit tests across `test_asyncio_writer.py` (5 — write-timeout
+  edge cases) and `test_max_connections_503.py` (4 — 503-response
+  shape).
 
 ### Notes for adopters
 
@@ -149,22 +131,29 @@ faster than run 1.
 - **Default max-connections 0 → 1024** caps per-worker concurrency.
   For higher load, set `workers=N` (multi-worker scales the
   ceiling).  `BB_MAX_CONNECTIONS=0` restores unbounded.
-- **`BB_USE_CUSTOM_PROTOCOL` is experimental.**  Default off.  The
-  local benchmark didn't show dramatic improvement over Tier 1
-  alone; we're keeping the code path in case EC2 measurement or
-  CPU-constrained hosts surface the win at scale.  Production
-  workloads should leave it off until validated.
+- **Migrating from `0.29.0a1`.**  The `a1` alpha shipped a
+  `BB_USE_CUSTOM_PROTOCOL` env var (default off) wiring a custom
+  `asyncio.Protocol` subclass.  That env var is removed in `0.29.0`;
+  anyone who set it explicitly should unset it.  The code is parked
+  on `Sprint30-tier1.5-custom-protocol` if you need to keep
+  experimenting.
 
 ### Out of scope / deferred
 
+- **Custom asyncio protocol (`_BlackBullProtocol` + `ProtocolBuffer`,
+  former Tier 1.5).**  Parked on the `Sprint30-tier1.5-custom-protocol`
+  branch.  EC2 cross-check (`c7i.2xlarge`, c=4096, 60 s window)
+  measured **client-side p50 latency 189 → 207 ms (+9 %)** and
+  **throughput 5,329 → 4,879 r/s (-8 %)** with the toggle on — a
+  regression, not the local microbenchmark's ~5 % drain-time win.
+  Removed from the release rather than shipped as opt-in code that
+  the EC2 evidence says nobody should turn on.
 - **Accept-pausing watermarks** (`BB_ACCEPT_PAUSE_HIGH/LOW_WATERMARK`):
   prototyped on the `tier2-accept-pausing` branch but deferred — the
   mechanism works (3× client-side latency reduction in measurement)
   but trades throughput in a way that surprises adopters who expect
   asyncio servers to be throughput-stable.  Branch retained for
   future revisit if a priority-scheduling primitive becomes available.
-  See `bench/sprint-logs/sprint-30-tier1.5-design.md` for the fuller
-  analysis.
 
 ---
 
