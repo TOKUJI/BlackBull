@@ -145,8 +145,11 @@ serves files three ways:
   costs roughly 64 µs each.  Use the fronting nginx path below if
   this is on the critical path for you.
 
-There is still no in-process file watcher, ETag-driven
-revalidation, byte-range-multipart, or CDN edge-cache
+The in-memory cache is stat-invalidated per request — every
+request runs `path.stat()` and refills the entry when mtime or
+size changes, so edits on disk show up on the next request with
+no staleness window.  What's still missing: ETag-driven
+revalidation, byte-range-multipart, and CDN edge-cache
 invalidation glue.  For anything user-visible, front a real
 static-file server (nginx, S3 + CloudFront).
 
