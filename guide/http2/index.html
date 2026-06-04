@@ -726,6 +726,28 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#migrating-from-scopehttp2_priority-pre-v031" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Migrating from scope['http2_priority'] (pre-v0.31)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#http2-stream-info-grpc-foundation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        HTTP/2 stream info (gRPC foundation)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#testing-priority-with-curl" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3447,6 +3469,34 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../about/grpc-assessment/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    gRPC assessment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -3530,6 +3580,28 @@
     <span class="md-ellipsis">
       
         Across every route, via an interceptor
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#migrating-from-scopehttp2_priority-pre-v031" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Migrating from scope['http2_priority'] (pre-v0.31)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#http2-stream-info-grpc-foundation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        HTTP/2 stream info (gRPC foundation)
       
     </span>
   </a>
@@ -3701,9 +3773,12 @@ the protocol detector sniff the connection preface:</p>
 requests is more important.  BlackBull surfaces the hint on the
 scope so your app can act on it.</p>
 <h3 id="what-lands-on-scope">What lands on <code>scope</code><a class="headerlink" href="#what-lands-on-scope" title="Permanent link">&para;</a></h3>
-<p>Every HTTP/2 request scope contains an <code>http2_priority</code> key
-populated by BlackBull before your handler is called:</p>
-<div class="highlight"><pre><span></span><code><span class="n">scope</span><span class="p">[</span><span class="s1">&#39;http2_priority&#39;</span><span class="p">]</span>  <span class="c1"># → {&#39;urgency&#39;: int, &#39;incremental&#39;: bool}</span>
+<p>Every HTTP/2 request scope advertises the priority hint via the
+<code>http.response.priority</code> ASGI extension (matches gunicorn's beta
+HTTP/2 key shape; the <em>contents</em> are RFC 9218 urgency/incremental,
+not the deprecated RFC 7540 weight/tree):</p>
+<div class="highlight"><pre><span></span><code><span class="n">scope</span><span class="p">[</span><span class="s1">&#39;extensions&#39;</span><span class="p">][</span><span class="s1">&#39;http.response.priority&#39;</span><span class="p">]</span>
+<span class="c1"># → {&#39;urgency&#39;: int, &#39;incremental&#39;: bool}</span>
 </code></pre></div>
 <table>
 <thead>
@@ -3736,14 +3811,15 @@ populated by BlackBull before your handler is called:</p>
 <li><code>priority</code> HTTP header in the request (e.g. <code>priority: u=1, i</code>).</li>
 <li>RFC 9218 §4.1 defaults: <code>urgency=3</code>, <code>incremental=False</code>.</li>
 </ol>
-<p>For HTTP/1.1 requests the key is absent.  Always use <code>.get()</code>
-with a default so your handler works across both protocols.</p>
+<p>For HTTP/1.1 requests the extension key is absent.  Always use
+<code>.get()</code> with a default so your handler works across both protocols.</p>
 <h3 id="using-it-in-a-handler">Using it in a handler<a class="headerlink" href="#using-it-in-a-handler" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><span class="n">_DEFAULT_PRIORITY</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;urgency&#39;</span><span class="p">:</span> <span class="mi">3</span><span class="p">,</span> <span class="s1">&#39;incremental&#39;</span><span class="p">:</span> <span class="kc">False</span><span class="p">}</span>
 
 <span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">&#39;/search&#39;</span><span class="p">)</span>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">search</span><span class="p">(</span><span class="n">scope</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
-    <span class="n">hint</span> <span class="o">=</span> <span class="n">scope</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;http2_priority&#39;</span><span class="p">,</span> <span class="n">_DEFAULT_PRIORITY</span><span class="p">)</span>
+    <span class="n">ext</span> <span class="o">=</span> <span class="n">scope</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;extensions&#39;</span><span class="p">)</span> <span class="ow">or</span> <span class="p">{}</span>
+    <span class="n">hint</span> <span class="o">=</span> <span class="n">ext</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;http.response.priority&#39;</span><span class="p">,</span> <span class="n">_DEFAULT_PRIORITY</span><span class="p">)</span>
     <span class="k">if</span> <span class="n">hint</span><span class="p">[</span><span class="s1">&#39;urgency&#39;</span><span class="p">]</span> <span class="o">&lt;=</span> <span class="mi">2</span><span class="p">:</span>
         <span class="c1"># High-urgency: return cached / pre-computed result immediately</span>
         <span class="n">result</span> <span class="o">=</span> <span class="n">get_cached_result</span><span class="p">()</span>
@@ -3756,11 +3832,69 @@ with a default so your handler works across both protocols.</p>
 <div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">intercept</span><span class="p">(</span><span class="s1">&#39;before_handler&#39;</span><span class="p">)</span>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">handle_priority</span><span class="p">(</span><span class="n">event</span><span class="p">):</span>
     <span class="n">scope</span> <span class="o">=</span> <span class="n">event</span><span class="o">.</span><span class="n">detail</span><span class="p">[</span><span class="s1">&#39;scope&#39;</span><span class="p">]</span>
-    <span class="n">hint</span> <span class="o">=</span> <span class="n">scope</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;http2_priority&#39;</span><span class="p">,</span> <span class="p">{</span><span class="s1">&#39;urgency&#39;</span><span class="p">:</span> <span class="mi">3</span><span class="p">,</span> <span class="s1">&#39;incremental&#39;</span><span class="p">:</span> <span class="kc">False</span><span class="p">})</span>
+    <span class="n">ext</span> <span class="o">=</span> <span class="n">scope</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;extensions&#39;</span><span class="p">)</span> <span class="ow">or</span> <span class="p">{}</span>
+    <span class="n">hint</span> <span class="o">=</span> <span class="n">ext</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;http.response.priority&#39;</span><span class="p">,</span> <span class="p">{</span><span class="s1">&#39;urgency&#39;</span><span class="p">:</span> <span class="mi">3</span><span class="p">,</span> <span class="s1">&#39;incremental&#39;</span><span class="p">:</span> <span class="kc">False</span><span class="p">})</span>
     <span class="k">if</span> <span class="n">hint</span><span class="p">[</span><span class="s1">&#39;urgency&#39;</span><span class="p">]</span> <span class="o">&lt;=</span> <span class="mi">1</span><span class="p">:</span>
         <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;HIGH-PRIORITY u=</span><span class="si">%d</span><span class="s1">: </span><span class="si">%s</span><span class="s1"> </span><span class="si">%s</span><span class="s1">&#39;</span><span class="p">,</span>
                     <span class="n">hint</span><span class="p">[</span><span class="s1">&#39;urgency&#39;</span><span class="p">],</span> <span class="n">event</span><span class="o">.</span><span class="n">detail</span><span class="p">[</span><span class="s1">&#39;method&#39;</span><span class="p">],</span> <span class="n">event</span><span class="o">.</span><span class="n">detail</span><span class="p">[</span><span class="s1">&#39;path&#39;</span><span class="p">])</span>
 </code></pre></div>
+<h3 id="migrating-from-scopehttp2_priority-pre-v031">Migrating from <code>scope['http2_priority']</code> (pre-v0.31)<a class="headerlink" href="#migrating-from-scopehttp2_priority-pre-v031" title="Permanent link">&para;</a></h3>
+<p>Earlier BlackBull releases exposed priority as a top-level scope
+key, <code>scope['http2_priority']</code>.  v0.31 moved it under
+<code>scope['extensions']</code> to match ASGI conventions and align the key
+name with gunicorn's beta HTTP/2 surface.  The legacy key is still
+populated alongside the new extension during the v0.31 cycle and
+is scheduled for removal in v0.32.0.</p>
+<p>To migrate, replace:</p>
+<div class="highlight"><pre><span></span><code><span class="n">hint</span> <span class="o">=</span> <span class="n">scope</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;http2_priority&#39;</span><span class="p">,</span> <span class="n">DEFAULT</span><span class="p">)</span>            <span class="c1"># legacy</span>
+</code></pre></div>
+<p>with:</p>
+<div class="highlight"><pre><span></span><code><span class="n">ext</span> <span class="o">=</span> <span class="n">scope</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;extensions&#39;</span><span class="p">)</span> <span class="ow">or</span> <span class="p">{}</span>
+<span class="n">hint</span> <span class="o">=</span> <span class="n">ext</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;http.response.priority&#39;</span><span class="p">,</span> <span class="n">DEFAULT</span><span class="p">)</span>       <span class="c1"># v0.31+</span>
+</code></pre></div>
+<p>The dict shape (<code>{'urgency': int, 'incremental': bool}</code>) is
+unchanged.</p>
+<h3 id="http2-stream-info-grpc-foundation">HTTP/2 stream info (gRPC foundation)<a class="headerlink" href="#http2-stream-info-grpc-foundation" title="Permanent link">&para;</a></h3>
+<p>Alongside the priority extension, v0.31 adds
+<code>scope['extensions']['http.response.http2_stream']</code> — a snapshot of
+the HTTP/2 stream identity and send-flow-control credit at request
+entry:</p>
+<div class="highlight"><pre><span></span><code><span class="n">scope</span><span class="p">[</span><span class="s1">&#39;extensions&#39;</span><span class="p">][</span><span class="s1">&#39;http.response.http2_stream&#39;</span><span class="p">]</span>
+<span class="c1"># → {&#39;stream_id&#39;: int, &#39;send_window_remaining&#39;: int,</span>
+<span class="c1">#    &#39;connection_send_window_remaining&#39;: int}</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>stream_id</code></td>
+<td>The HTTP/2 stream ID this request arrived on (odd for client-initiated, even for server pushes)</td>
+</tr>
+<tr>
+<td><code>send_window_remaining</code></td>
+<td>Bytes the peer will currently accept on this stream before WINDOW_UPDATE</td>
+</tr>
+<tr>
+<td><code>connection_send_window_remaining</code></td>
+<td>Same, at the connection level</td>
+</tr>
+</tbody>
+</table>
+<p>The window values are snapshots taken at scope-build time; they
+move as the response body streams.  Applications that need
+live readings (e.g. gRPC server-streaming back-pressure) can
+re-read the dict, though they will see the snapshot value unless
+they keep a reference and the populate site re-fetches it — which
+v0.31 does not do.  Live properties are a future-sprint
+consideration.</p>
+<p>Peer-side receive-window is intentionally absent: BlackBull sends
+<code>WINDOW_UPDATE</code> per consumed DATA frame, so there is no scalar to
+snapshot.</p>
 <p>See <a href="https://github.com/TOKUJI/BlackBull/tree/master/examples/PriorityExample/"><code>examples/PriorityExample/</code></a>
 for a dedicated server + client pair that demonstrates both
 sources (<code>PRIORITY_UPDATE</code> frame and <code>priority</code> header).</p>

@@ -10,13 +10,11 @@
       
       
       
-        <link rel="canonical" href="https://TOKUJI.github.io/BlackBull/about/internals/">
+        <link rel="canonical" href="https://TOKUJI.github.io/BlackBull/about/grpc-assessment/">
       
       
-        <link rel="prev" href="../conformance/">
+        <link rel="prev" href="../internals/">
       
-      
-        <link rel="next" href="../grpc-assessment/">
       
       
         
@@ -27,7 +25,7 @@
     
     
       
-        <title>Internals - BlackBull</title>
+        <title>gRPC assessment - BlackBull</title>
       
     
     
@@ -72,7 +70,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#internals" class="md-skip">
+        <a href="#grpc-over-blackbull-assessment" class="md-skip">
           Skip to content
         </a>
       
@@ -108,7 +106,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Internals
+              gRPC assessment
             
           </span>
         </div>
@@ -3199,6 +3197,34 @@
                 
   
   
+  
+  
+    <li class="md-nav__item">
+      <a href="../internals/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Internals
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
     
   
   
@@ -3218,7 +3244,7 @@
   <span class="md-ellipsis">
     
   
-    Internals
+    gRPC assessment
   
 
     
@@ -3236,7 +3262,7 @@
   <span class="md-ellipsis">
     
   
-    Internals
+    gRPC assessment
   
 
     
@@ -3262,10 +3288,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#actor-model" class="md-nav__link">
+  <a href="#what-grpc-over-http2-needs" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Actor model
+        What gRPC over HTTP/2 needs
       
     </span>
   </a>
@@ -3273,10 +3299,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#hierarchy" class="md-nav__link">
+  <a href="#what-blackbull-provides-today" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Hierarchy
+        What BlackBull provides today
       
     </span>
   </a>
@@ -3284,104 +3310,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#responsibilities" class="md-nav__link">
+  <a href="#what-sprint-32-unlocks" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Responsibilities
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Responsibilities">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#serveractor" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        ServerActor
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#connectionactor" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        ConnectionActor
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#http1actor" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        HTTP1Actor
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#requestactor" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        RequestActor
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#http2actor" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        HTTP2Actor
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#streamactor" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        StreamActor
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#websocketactor" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        WebSocketActor
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#supervisor-strategies-at-a-glance" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Supervisor strategies — at a glance
+        What Sprint 32 unlocks
       
     </span>
   </a>
@@ -3389,10 +3321,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#message-types" class="md-nav__link">
+  <a href="#whats-still-missing-for-a-minimum-grpc-server" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Message types
+        What's still missing for a minimum gRPC server
       
     </span>
   </a>
@@ -3400,10 +3332,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#how-exceptions-propagate" class="md-nav__link">
+  <a href="#effort-estimate" class="md-nav__link">
     <span class="md-ellipsis">
       
-        How exceptions propagate
+        Effort estimate
       
     </span>
   </a>
@@ -3411,10 +3343,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#the-pieces-around-the-actor-core" class="md-nav__link">
+  <a href="#open-question" class="md-nav__link">
     <span class="md-ellipsis">
       
-        The pieces around the actor core
+        Open question
       
     </span>
   </a>
@@ -3422,21 +3354,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#why-pure-python" class="md-nav__link">
+  <a href="#non-decision" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Why pure-Python
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#next" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Next
+        Non-decision
       
     </span>
   </a>
@@ -3447,34 +3368,6 @@
   
 </nav>
       
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../grpc-assessment/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    gRPC assessment
-  
-
-    
-  </span>
-  
-  
-
-      </a>
     </li>
   
 
@@ -3514,10 +3407,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#actor-model" class="md-nav__link">
+  <a href="#what-grpc-over-http2-needs" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Actor model
+        What gRPC over HTTP/2 needs
       
     </span>
   </a>
@@ -3525,10 +3418,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#hierarchy" class="md-nav__link">
+  <a href="#what-blackbull-provides-today" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Hierarchy
+        What BlackBull provides today
       
     </span>
   </a>
@@ -3536,104 +3429,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#responsibilities" class="md-nav__link">
+  <a href="#what-sprint-32-unlocks" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Responsibilities
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Responsibilities">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#serveractor" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        ServerActor
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#connectionactor" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        ConnectionActor
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#http1actor" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        HTTP1Actor
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#requestactor" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        RequestActor
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#http2actor" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        HTTP2Actor
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#streamactor" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        StreamActor
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#websocketactor" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        WebSocketActor
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#supervisor-strategies-at-a-glance" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Supervisor strategies — at a glance
+        What Sprint 32 unlocks
       
     </span>
   </a>
@@ -3641,10 +3440,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#message-types" class="md-nav__link">
+  <a href="#whats-still-missing-for-a-minimum-grpc-server" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Message types
+        What's still missing for a minimum gRPC server
       
     </span>
   </a>
@@ -3652,10 +3451,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#how-exceptions-propagate" class="md-nav__link">
+  <a href="#effort-estimate" class="md-nav__link">
     <span class="md-ellipsis">
       
-        How exceptions propagate
+        Effort estimate
       
     </span>
   </a>
@@ -3663,10 +3462,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#the-pieces-around-the-actor-core" class="md-nav__link">
+  <a href="#open-question" class="md-nav__link">
     <span class="md-ellipsis">
       
-        The pieces around the actor core
+        Open question
       
     </span>
   </a>
@@ -3674,21 +3473,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#why-pure-python" class="md-nav__link">
+  <a href="#non-decision" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Why pure-Python
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#next" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Next
+        Non-decision
       
     </span>
   </a>
@@ -3715,291 +3503,200 @@
   
 
 
-<h1 id="internals">Internals<a class="headerlink" href="#internals" title="Permanent link">&para;</a></h1>
-<p>For readers who want to know what BlackBull is doing under the
-hood.  Application authors don't need any of this — <code>@app.route</code>
-and the <a href="../../guide/routing/">Guide</a> cover the user surface.
-This page exists for contributors and for anyone curious about
-how the protocol stack is built.</p>
-<h2 id="actor-model">Actor model<a class="headerlink" href="#actor-model" title="Permanent link">&para;</a></h2>
-<p>BlackBull's server core is organized as a small hierarchy of
-actors — each one owns its state and communicates with the
-others through queues, not shared variables.  No actor reaches
-into another actor's internals; coordination is exclusively via
-messages.</p>
-<p>This isn't a third-party actor framework — every actor is a
-plain <code>asyncio.Task</code> reading from an <code>asyncio.Queue</code>:</p>
-<div class="highlight"><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">Actor</span><span class="p">:</span>
-    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
-        <span class="bp">self</span><span class="o">.</span><span class="n">_inbox</span><span class="p">:</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">Queue</span><span class="p">[</span><span class="n">Message</span><span class="p">]</span> <span class="o">=</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">Queue</span><span class="p">()</span>
-
-    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">run</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
-        <span class="k">async</span> <span class="k">for</span> <span class="n">msg</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_inbox_iter</span><span class="p">():</span>
-            <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">_handle</span><span class="p">(</span><span class="n">msg</span><span class="p">)</span>
-
-    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">send</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">msg</span><span class="p">):</span>
-        <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">_inbox</span><span class="o">.</span><span class="n">put</span><span class="p">(</span><span class="n">msg</span><span class="p">)</span>
-</code></pre></div>
-<p>The benefit isn't sophistication — it's the discipline.  An
-actor that can only communicate by sending messages is much
-easier to reason about under burst load than one with arbitrary
-back-channels into other components.</p>
-<h2 id="hierarchy">Hierarchy<a class="headerlink" href="#hierarchy" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code>ServerActor                       (one per process)
-│
-└── ConnectionActor               (one per accepted TCP connection)
-      │
-      ├── HTTP1Actor              (HTTP/1.1 driver)
-      │     └── RequestActor      (one per HTTP/1.1 request, short-lived)
-      │
-      ├── HTTP2Actor              (HTTP/2 connection driver)
-      │     └── StreamActor       (one per HTTP/2 stream, short-lived)
-      │
-      └── WebSocketActor          (after upgrade, replaces HTTP1/2Actor)
-</code></pre></div>
-<p>A separate <code>EventAggregator</code> translates the low-level
-inter-actor messages into the user-facing events documented in
-<a href="../../guide/events/">Events</a> — <code>request_received</code>,
-<code>before_handler</code>, <code>request_completed</code>, <code>websocket_message</code>,
-etc.</p>
-<h2 id="responsibilities">Responsibilities<a class="headerlink" href="#responsibilities" title="Permanent link">&para;</a></h2>
-<h3 id="serveractor"><code>ServerActor</code><a class="headerlink" href="#serveractor" title="Permanent link">&para;</a></h3>
-<ul>
-<li>Owns the listening socket.</li>
-<li>Accepts TCP connections; spawns a <code>ConnectionActor</code> task per
-  connection.</li>
-<li>Supervisor strategy: <strong>restart with backoff</strong> — accept loop
-  must stay alive even if individual binds fail.</li>
-<li>Surfaces <code>app_startup</code> and <code>app_shutdown</code> (see
-  <a href="../../guide/events/">Events</a>).</li>
-</ul>
-<h3 id="connectionactor"><code>ConnectionActor</code><a class="headerlink" href="#connectionactor" title="Permanent link">&para;</a></h3>
-<ul>
-<li>Owns the reader / writer for one TCP connection.</li>
-<li>Detects the protocol: TLS handshake → check ALPN → HTTP/2
-  preface check → spawn <code>HTTP2Actor</code> or <code>HTTP1Actor</code>.</li>
-<li>Supervisor strategy: <strong>isolate</strong> — one connection dying does
-  not affect others.  Unhandled exceptions are logged, and the
-  connection is closed.</li>
-</ul>
-<h3 id="http1actor"><code>HTTP1Actor</code><a class="headerlink" href="#http1actor" title="Permanent link">&para;</a></h3>
-<ul>
-<li>Drives the HTTP/1.1 request/response cycle.</li>
-<li>For each request: spawns a <code>RequestActor</code>, awaits its
-  completion, then loops for keep-alive.</li>
-<li>On <code>Connection: Upgrade</code> (WebSocket): hands the reader /
-  writer to a new <code>WebSocketActor</code> and exits.</li>
-<li>Supervisor strategy: <strong>isolate</strong> — an error in one request
-  closes the connection only.</li>
-</ul>
-<h3 id="requestactor"><code>RequestActor</code><a class="headerlink" href="#requestactor" title="Permanent link">&para;</a></h3>
-<ul>
-<li>Owns one HTTP/1.1 request lifetime.</li>
-<li>Receives the parsed headers and body from <code>HTTP1Actor</code>.</li>
-<li>Calls the ASGI app, collects the response, writes it back
-  via the connection's writer.</li>
-<li>Drives the <code>before_handler</code>, <code>after_handler</code>,
-  <code>request_completed</code>, and (on failure) error events.</li>
-</ul>
-<h3 id="http2actor"><code>HTTP2Actor</code><a class="headerlink" href="#http2actor" title="Permanent link">&para;</a></h3>
-<ul>
-<li>Drives the HTTP/2 connection state machine: settings, flow
-  control, GOAWAY.</li>
-<li>For each <code>HEADERS</code> frame with a new stream ID, spawns a
-  <code>StreamActor</code>.</li>
-<li>Owns the connection-level send window; <code>StreamActor</code>s block
-  on it when the window is exhausted.</li>
-<li>Supervisor strategy: <strong>propagate</strong> — a framing error on the
-  connection is fatal.  <code>HTTP2Actor</code> sends GOAWAY and exits,
-  causing <code>ConnectionActor</code> to close.</li>
-</ul>
-<h3 id="streamactor"><code>StreamActor</code><a class="headerlink" href="#streamactor" title="Permanent link">&para;</a></h3>
-<ul>
-<li>Owns one HTTP/2 stream.</li>
-<li>Assembles DATA frames into a request body, calls the ASGI
-  app, writes response frames back.</li>
-<li>Supervisor strategy: <strong>isolate</strong> — stream errors send
-  <code>RST_STREAM</code> and exit; the connection continues serving
-  other streams.</li>
-</ul>
-<h3 id="websocketactor"><code>WebSocketActor</code><a class="headerlink" href="#websocketactor" title="Permanent link">&para;</a></h3>
-<ul>
-<li>Owns one WebSocket connection after the upgrade handshake.</li>
-<li>Runs the fragment-assembler internally — the ASGI app
-  receives only complete messages (see
-  <a href="../../guide/websockets/#fragmented-messages">WebSockets — Fragmented messages</a>).</li>
-<li>Supervisor strategy: <strong>isolate</strong> — a protocol error closes
-  this connection only.</li>
-</ul>
-<h2 id="supervisor-strategies-at-a-glance">Supervisor strategies — at a glance<a class="headerlink" href="#supervisor-strategies-at-a-glance" title="Permanent link">&para;</a></h2>
+<h1 id="grpc-over-blackbull-assessment">gRPC over BlackBull — assessment<a class="headerlink" href="#grpc-over-blackbull-assessment" title="Permanent link">&para;</a></h1>
+<p>This document is an <strong>evaluation</strong>, not a commitment to ship gRPC
+support.  It exists so a future decision about gRPC can start from
+a clear picture of what BlackBull already provides, what Sprint 32
+just added, and what is still missing.</p>
+<h2 id="what-grpc-over-http2-needs">What gRPC over HTTP/2 needs<a class="headerlink" href="#what-grpc-over-http2-needs" title="Permanent link">&para;</a></h2>
+<p>gRPC is a layered protocol that runs on top of HTTP/2.  A minimal
+gRPC server has to provide:</p>
+<ol>
+<li><strong>HTTP/2 framing.</strong>  Streams, HEADERS / DATA frames, flow control.</li>
+<li><strong>Trailers.</strong>  <code>grpc-status</code>, <code>grpc-message</code>, and any
+   <code>Status-Details-Bin</code> are sent as HTTP/2 trailing headers, not body.</li>
+<li><strong>Bidirectional streaming.</strong>  Both client-streaming (server reads
+   N request messages) and server-streaming (server emits N response
+   messages) require long-lived <code>receive()</code> / <code>send</code> loops.</li>
+<li><strong>Per-stream cancellation propagation.</strong>  When the peer sends
+   <code>RST_STREAM</code>, the handler should see it as a cancellation signal,
+   not as silent connection closure.</li>
+<li><strong>Flow-control awareness.</strong>  Server-streaming RPCs MUST back-pressure
+   when the peer's receive window closes — otherwise a slow consumer
+   OOMs the server.</li>
+<li><strong>Content-type negotiation.</strong>  Routes that handle
+   <code>application/grpc</code> (or <code>application/grpc+proto</code>,
+   <code>application/grpc-web+proto</code>, etc.) need to dispatch differently
+   from regular HTTP routes.</li>
+<li><strong>Length-prefixed message framing in the body.</strong>  Each gRPC
+   message is <code>1 byte (compressed flag) + 4 bytes (length) + N bytes
+   (payload)</code>.  Application concern, but the helpers belong somewhere.</li>
+<li><strong><code>grpc-status</code> trailer + RST-code mapping.</strong>  Errors map between
+   gRPC status codes, HTTP/2 RST_STREAM codes, and the
+   <code>grpc-status</code>/<code>grpc-message</code> trailer headers.</li>
+</ol>
+<h2 id="what-blackbull-provides-today">What BlackBull provides today<a class="headerlink" href="#what-blackbull-provides-today" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
 <tr>
-<th>Actor</th>
-<th>Strategy</th>
-<th>Rationale</th>
+<th>Concern</th>
+<th>Status</th>
+<th>Notes</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td><code>ServerActor</code></td>
-<td>Restart with backoff</td>
-<td>Accept loop must stay alive</td>
+<td>HTTP/2 framing</td>
+<td>✓</td>
+<td><code>blackbull.server.http2_actor</code>, RFC 9113 compliant; conformance harness in <code>tests/conformance/http2/</code>.</td>
 </tr>
 <tr>
-<td><code>ConnectionActor</code></td>
-<td>Isolate</td>
-<td>One bad connection must not affect others</td>
+<td>Trailers (<code>http.response.trailers</code>)</td>
+<td>✓</td>
+<td>Both HTTP/1.1 (chunked) and HTTP/2 paths.  Implemented in <code>HTTP1Sender</code> and <code>HTTP2Sender</code>.</td>
 </tr>
 <tr>
-<td><code>HTTP1Actor</code></td>
-<td>Isolate</td>
-<td>Error closes the connection cleanly</td>
+<td>Bidirectional streaming</td>
+<td>⚠</td>
+<td><code>receive()</code> returns successive <code>http.request</code> events as DATA frames arrive; <code>send()</code> writes back.  No special bidi support, but the primitives exist.</td>
 </tr>
 <tr>
-<td><code>RequestActor</code></td>
-<td>Isolate</td>
-<td>Error fires <code>error</code> event; connection survives</td>
+<td>Per-stream cancellation</td>
+<td>⚠ partial</td>
+<td><code>RST_STREAM</code> triggers <code>http.disconnect</code> on <code>receive()</code>.  Adequate signal; not a first-class cancellation primitive.</td>
 </tr>
 <tr>
-<td><code>HTTP2Actor</code></td>
-<td>Propagate to <code>ConnectionActor</code></td>
-<td>Framing error is connection-fatal (GOAWAY)</td>
+<td>Send-side flow-control visibility</td>
+<td>✓ as of v0.31</td>
+<td><code>scope['extensions']['http.response.http2_stream']</code> snapshots <code>send_window_remaining</code> and <code>connection_send_window_remaining</code>.  See <em>What Sprint 32 unlocks</em> below.</td>
 </tr>
 <tr>
-<td><code>StreamActor</code></td>
-<td>Isolate (<code>RST_STREAM</code>)</td>
-<td>Stream error is stream-fatal only</td>
+<td><code>application/grpc</code> content negotiation</td>
+<td>✗</td>
+<td>Router doesn't dispatch on content-type.  Would need either a routing rule or a middleware that inspects <code>content-type</code> and rewrites the route key.</td>
 </tr>
 <tr>
-<td><code>WebSocketActor</code></td>
-<td>Isolate</td>
-<td>Protocol error closes this WS connection only</td>
+<td>Length-prefixed message framing</td>
+<td>✗</td>
+<td>Application concern.  Library code (probably a <code>blackbull-grpc</code> extension package) would supply encode/decode helpers around <code>protobuf</code> or <code>grpc-tools</code> output.</td>
+</tr>
+<tr>
+<td><code>grpc-status</code> trailer + RST-code mapping</td>
+<td>✗</td>
+<td>Trivial to express on top of trailers — but no helper today.</td>
 </tr>
 </tbody>
 </table>
-<h2 id="message-types">Message types<a class="headerlink" href="#message-types" title="Permanent link">&para;</a></h2>
-<p>All inter-actor messages are typed <code>dataclass</code> instances, not
-dicts.  A base class carries a <code>sender</code> reference for reply
-routing under the ask pattern:</p>
-<div class="highlight"><pre><span></span><code><span class="nd">@dataclass</span>
-<span class="k">class</span><span class="w"> </span><span class="nc">Message</span><span class="p">:</span>
-    <span class="n">sender</span><span class="p">:</span> <span class="n">Actor</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span>      <span class="c1"># None for externally-originated</span>
-
-<span class="nd">@dataclass</span>
-<span class="k">class</span><span class="w"> </span><span class="nc">StreamHeadersReceived</span><span class="p">(</span><span class="n">Message</span><span class="p">):</span>
-    <span class="n">stream_id</span><span class="p">:</span> <span class="nb">int</span>
-    <span class="n">headers</span><span class="p">:</span> <span class="n">HeaderList</span>
-    <span class="n">end_stream</span><span class="p">:</span> <span class="nb">bool</span>
-
-<span class="nd">@dataclass</span>
-<span class="k">class</span><span class="w"> </span><span class="nc">WindowUpdate</span><span class="p">(</span><span class="n">Message</span><span class="p">):</span>         <span class="c1"># ask-pattern reply</span>
-    <span class="n">stream_id</span><span class="p">:</span> <span class="nb">int</span>
-    <span class="n">increment</span><span class="p">:</span> <span class="nb">int</span>
+<p>Net: BlackBull is closer to a gRPC-capable HTTP/2 server than I
+expected before doing this audit.  The framing layer is solid;
+what's missing is mostly <em>gRPC-flavoured glue</em> on top of primitives
+we already have.</p>
+<h2 id="what-sprint-32-unlocks">What Sprint 32 unlocks<a class="headerlink" href="#what-sprint-32-unlocks" title="Permanent link">&para;</a></h2>
+<p>Sprint 32 added <code>scope['extensions']['http.response.http2_stream']</code>
+exposing <code>send_window_remaining</code> and
+<code>connection_send_window_remaining</code> (per RFC 9113 §5.2).  This is
+the missing primitive a gRPC server-streaming implementation
+needs to back-pressure correctly:</p>
+<div class="highlight"><pre><span></span><code><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">server_streaming_rpc</span><span class="p">(</span><span class="n">scope</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
+    <span class="n">ext</span> <span class="o">=</span> <span class="n">scope</span><span class="p">[</span><span class="s1">&#39;extensions&#39;</span><span class="p">][</span><span class="s1">&#39;http.response.http2_stream&#39;</span><span class="p">]</span>
+    <span class="k">for</span> <span class="n">msg</span> <span class="ow">in</span> <span class="n">produce_many_messages</span><span class="p">():</span>
+        <span class="c1"># If send window is below a threshold, the peer&#39;s recv buffer</span>
+        <span class="c1"># is filling up — defer the next message via cooperative yield</span>
+        <span class="c1"># or a brief asyncio.sleep instead of blasting it through.</span>
+        <span class="k">if</span> <span class="n">ext</span><span class="p">[</span><span class="s1">&#39;send_window_remaining&#39;</span><span class="p">]</span> <span class="o">&lt;</span> <span class="n">MIN_WINDOW</span><span class="p">:</span>
+            <span class="k">await</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+            <span class="c1"># Re-read snapshot: NB - v0.31 ships a snapshot at scope</span>
+            <span class="c1"># build time; the value above does NOT update mid-request.</span>
+            <span class="c1"># See &quot;Open question&quot; below.</span>
+        <span class="k">await</span> <span class="n">send</span><span class="p">({</span><span class="s1">&#39;type&#39;</span><span class="p">:</span> <span class="s1">&#39;http.response.body&#39;</span><span class="p">,</span>
+                    <span class="s1">&#39;body&#39;</span><span class="p">:</span> <span class="n">frame</span><span class="p">(</span><span class="n">msg</span><span class="p">),</span> <span class="s1">&#39;more_body&#39;</span><span class="p">:</span> <span class="kc">True</span><span class="p">})</span>
+    <span class="k">await</span> <span class="n">send</span><span class="p">({</span><span class="s1">&#39;type&#39;</span><span class="p">:</span> <span class="s1">&#39;http.response.trailers&#39;</span><span class="p">,</span>
+                <span class="s1">&#39;headers&#39;</span><span class="p">:</span> <span class="p">[(</span><span class="sa">b</span><span class="s1">&#39;grpc-status&#39;</span><span class="p">,</span> <span class="sa">b</span><span class="s1">&#39;0&#39;</span><span class="p">)]})</span>
 </code></pre></div>
-<p>HTTP/2 message types live in <code>blackbull/server/http2_messages.py</code>;
-HTTP/1.1 and WebSocket equivalents are colocated with their
-respective actors.</p>
-<h2 id="how-exceptions-propagate">How exceptions propagate<a class="headerlink" href="#how-exceptions-propagate" title="Permanent link">&para;</a></h2>
-<table>
-<thead>
-<tr>
-<th>Scenario</th>
-<th>Strategy</th>
-<th>Reason</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>RequestActor</code> handler raises</td>
-<td>Isolate + re-emit as <code>error</code> event</td>
-<td>Handler error must not kill the connection</td>
-</tr>
-<tr>
-<td><code>HTTP2Actor</code> framing error</td>
-<td>Propagate to <code>ConnectionActor</code></td>
-<td>GOAWAY required; connection is unusable</td>
-</tr>
-<tr>
-<td><code>StreamActor</code> flow-control violation</td>
-<td>Isolate (<code>RST_STREAM</code>)</td>
-<td>Stream-fatal only; other streams keep going</td>
-</tr>
-<tr>
-<td><code>ConnectionActor</code> unhandled</td>
-<td>Log + close connection</td>
-<td>One connection's failure is bounded</td>
-</tr>
-<tr>
-<td><code>ServerActor</code> accept error</td>
-<td>Backoff + retry</td>
-<td>Server stays alive across transient errors</td>
-</tr>
-</tbody>
-</table>
-<h2 id="the-pieces-around-the-actor-core">The pieces around the actor core<a class="headerlink" href="#the-pieces-around-the-actor-core" title="Permanent link">&para;</a></h2>
-<p>The actor hierarchy is the <em>control</em> side.  The <em>data</em> side is
-the protocol stack:</p>
+<p>Without this hint, a gRPC server has no way to know when to slow
+down — it would either ignore back-pressure entirely (OOM risk
+under slow consumers) or peek at internal HTTP/2 sender state
+(layering violation).</p>
+<h2 id="whats-still-missing-for-a-minimum-grpc-server">What's still missing for a minimum gRPC server<a class="headerlink" href="#whats-still-missing-for-a-minimum-grpc-server" title="Permanent link">&para;</a></h2>
+<p>In rough order of effort:</p>
+<ol>
+<li><strong>Live window-snapshot updates</strong> (small, half a sprint).
+   Sprint 32 ships a snapshot at scope-build time.  For real
+   gRPC server-streaming the application needs the <em>current</em>
+   value at each iteration of its emit loop.  Either:</li>
+<li>Re-read the dict and have the populate site re-snapshot
+     (requires a hook); or</li>
+<li>
+<p>Replace the scalar with a tiny callable
+     (<code>scope['extensions']['http.response.http2_stream']['send_window']()</code>)
+     that reads the sender's current state.</p>
+</li>
+<li>
+<p><strong><code>application/grpc</code> content-type routing</strong> (small, ~1-2 days).
+   A middleware that, when <code>content-type</code> starts with
+   <code>application/grpc</code>, rewrites the route key or sets a scope flag
+   the router dispatches on.</p>
+</li>
+<li>
+<p><strong>gRPC trailer / status helpers</strong> (small, ~1-2 days).
+   A <code>blackbull.grpc.Status</code> enum + a <code>grpc_send_status(send,
+   code, message)</code> helper that emits the appropriate trailer.</p>
+</li>
+<li>
+<p><strong>Length-prefixed message framing helpers</strong> (small, ~1 day).
+   <code>pack_message(payload) → bytes</code> and an async
+   <code>read_messages(receive) → AsyncIterator[bytes]</code> that unframes
+   the length-prefixed wire format.  Independent of protobuf.</p>
+</li>
+<li>
+<p><strong>Cancellation as first-class signal</strong> (medium, ~3-5 days).
+   Today <code>http.disconnect</code> arrives on <code>receive()</code>.  gRPC apps
+   typically expect an <code>asyncio.CancelledError</code>-flavoured signal
+   instead.  An adapter that converts disconnect → cancel a
+   handler task is reasonable scope.</p>
+</li>
+<li>
+<p><strong>Bidi streaming ergonomics</strong> (medium, ~3-5 days).
+   The primitives are there; a small DSL (<code>async for req in
+   request_iter:</code>, <code>await response_stream.send(msg)</code>) would make
+   it much nicer than poking at <code>receive()</code> / <code>send</code> directly.</p>
+</li>
+<li>
+<p><strong>Protobuf integration</strong> (large, <em>out of core scope</em>).
+   Generated code from <code>protoc</code> expects specific call shapes
+   (<code>async def MyRpc(request, context): ...</code>).  An adapter library
+   that runs generated stubs against BlackBull handlers belongs in
+   a separate package (<code>blackbull-grpc</code>) so the framework core stays
+   protobuf-free.</p>
+</li>
+</ol>
+<h2 id="effort-estimate">Effort estimate<a class="headerlink" href="#effort-estimate" title="Permanent link">&para;</a></h2>
+<p>A <strong>minimal</strong> gRPC unary + server-streaming demo (items 1–4 above)
+fits in one ~1-week sprint, on top of Sprint 32's foundation.</p>
+<p>A <strong>production-shaped</strong> gRPC implementation (items 1–6 plus the
+<code>blackbull-grpc</code> package starter) is 2-3 sprints — comparable to
+Sprint 31's static-file sendfile work in shape and risk.</p>
+<h2 id="open-question">Open question<a class="headerlink" href="#open-question" title="Permanent link">&para;</a></h2>
+<p>The biggest design question — and the reason this is an assessment
+document, not an implementation — is whether the <code>send_window</code>
+field should be a <strong>scalar snapshot</strong> or a <strong>live property</strong>.</p>
 <ul>
-<li><strong>HTTP/1.1 parser</strong> — <code>blackbull/server/parser.py</code>.  Pure
-  Python; no <code>httptools</code> dependency.</li>
-<li><strong>HTTP/2 frame layer</strong> — <code>blackbull/protocol/</code> (frame types,
-  flow-control windows, RFC 9218 <code>PRIORITY_UPDATE</code>).  Header
-  compression delegates to the <code>hpack</code> library — the only
-  third-party Python package in the protocol stack — wrapped by
-  the BlackBull-owned <code>hpack_fastpath.py</code> for the common
-  short-header path.</li>
-<li><strong>WebSocket codec</strong> — <code>blackbull/server/ws_codec.py</code>
-  (RFC 6455 framing) + <code>blackbull/server/websocket_actor.py</code>
-  (fragment reassembly, RFC 7692 <code>permessage-deflate</code>).</li>
-<li><strong>Deadline subsystem</strong> — per-process tick scanner tracking
-  every connection's idle timer; arming and disarming a
-  deadline are attribute writes + set operations rather than
-  per-arm <code>loop.call_later</code> calls.</li>
-<li><strong>Sender / Recipient</strong> — <code>blackbull/server/sender.py</code>,
-  <code>blackbull/server/recipient.py</code>.  Buffer responses on the way
-  out, parse incoming frames on the way in.  Cache headers
-  (Date, common content-types) for hot-path savings.</li>
+<li>Scalar (Sprint 32): simple, ASGI-flat, but useless for
+  iterative server-streaming RPCs that need real-time pressure
+  signals.</li>
+<li>Live property: a tiny callable on the scope.  More invasive
+  (ASGI scopes are conventionally pure data).  But this is the
+  shape gRPC genuinely needs.</li>
 </ul>
-<p>For the wire-level behaviour of each layer, the
-<a href="../conformance/">RFC conformance suites</a> are the up-to-date
-source of truth.</p>
-<h2 id="why-pure-python">Why pure-Python<a class="headerlink" href="#why-pure-python" title="Permanent link">&para;</a></h2>
-<p><code>blackbull[speed]</code> adds <code>uvloop</code> as an optional dependency.
-The HTTP/1.1 parser, HTTP/2 frame layer, and WebSocket codec
-are all BlackBull's own code — no <code>httptools</code>, no <code>h2</code> library
-for framing.  The one exception is HPACK header compression,
-which delegates to the <a href="https://pypi.org/project/hpack/"><code>hpack</code></a>
-library (pure Python, layered under the BlackBull-owned
-<code>hpack_fastpath.py</code>); re-implementing a conformant HPACK
-encoder/decoder is a sub-project of its own, and <code>hpack</code> is the
-de-facto Python reference.  Two reasons we keep the rest in
-pure Python:</p>
-<ul>
-<li><strong>Debuggability.</strong>  An issue in HTTP/2 flow control or
-  frame parsing can be stepped into with <code>pdb</code>.  The stack is
-  the application's code, not an opaque C extension.  This
-  applies to <code>hpack</code> too — it is itself pure Python, so HPACK
-  bugs remain debuggable in-process.</li>
-<li><strong>Identity.</strong>  BlackBull exists in part to demonstrate that
-  CPython is fast enough for a from-scratch ASGI implementation
-  when the framework itself stays out of the way.  Swapping in
-  a C parser would make it a different project.</li>
-</ul>
-<p>That said: stdlib C extensions (<code>_json</code>, <code>_hashlib</code>, <code>_ssl</code>)
-are used freely — they ship with CPython and don't require a
-separate build step.  "Pure Python" means <strong>no third-party C
-extensions in the protocol stack</strong>, not "no C anywhere."</p>
-<h2 id="next">Next<a class="headerlink" href="#next" title="Permanent link">&para;</a></h2>
-<ul>
-<li><a href="../conformance/">Conformance</a> — RFC test suites that exercise
-  the stack end-to-end.</li>
-<li><a href="../../guide/events/">Events</a> — the user-facing event API,
-  produced by <code>EventAggregator</code> from the low-level messages
-  shown above.</li>
-<li><a href="../../guide/http2/">HTTP/2</a> — the user surface of the HTTP/2
-  protocol features whose internals are summarized here.</li>
-</ul>
+<p>A future sprint can pick one based on a real adopter's workload.
+Until then, the snapshot is <em>load-bearing for diagnostics</em> (you
+can log it from request_received / before_handler) even if it
+doesn't yet enable full back-pressure loops.</p>
+<h2 id="non-decision">Non-decision<a class="headerlink" href="#non-decision" title="Permanent link">&para;</a></h2>
+<p>No commitment is being made to ship gRPC.  This document captures
+the design state so a future sprint can be scoped accurately
+without re-doing the audit.  Promotion criteria: a concrete
+adopter need that maps to gRPC and not to plain HTTP/2 streaming.</p>
 
 
 

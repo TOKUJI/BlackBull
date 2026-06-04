@@ -3336,6 +3336,34 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../about/grpc-assessment/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    gRPC assessment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -3508,9 +3536,9 @@ under any ASGI server:</p>
 hypercorn<span class="w"> </span>myapp:app<span class="w"> </span>--bind<span class="w"> </span><span class="m">0</span>.0.0.0:8000
 granian<span class="w"> </span>--interface<span class="w"> </span>asgi<span class="w"> </span>myapp:app
 </code></pre></div>
-<p>You lose BlackBull's native HTTP/2 and WebSocket implementations
-(the surrounding server's stack is used instead), but the
-application code is portable as-is.</p>
+<p>You lose BlackBull's own HTTP/2 frame layer and WebSocket codec
+(the surrounding server's protocol stack handles framing
+instead), but the application code is portable as-is.</p>
 <h2 id="embedded-use-under-an-existing-event-loop">Embedded use under an existing event loop<a class="headerlink" href="#embedded-use-under-an-existing-event-loop" title="Permanent link">&para;</a></h2>
 <p>To run BlackBull inside an existing event loop, or to pre-bind a
 socket before forking a test subprocess, instantiate
