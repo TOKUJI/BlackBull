@@ -41,17 +41,34 @@ class StaticFiles:
         resolved = directory or root_dir
         if resolved is None:
             raise ValueError('directory or root_dir is required')
-        self._root = Path(resolved).resolve()
+        # Internal hot path uses ``str`` + ``os.path`` rather than
+        # ``pathlib.Path``: each request previously allocated several
+        # PurePath / Path objects for the same traversal-safety check
+        # and showed up under ``mw_static_in → static_pre_send`` in the
+        # Sprint 33 phase trace.  ``os.path`` is a thin C wrapper.
+        self._root_str: str = os.path.realpath(os.fspath(resolved))
+        # Pre-computed prefix for the traversal check — accept
+        # ``<root>/...`` exactly, reject ``<root>x/...``.
+        self._root_sep: str = self._root_str + os.sep
         self._url_prefix = url_prefix.rstrip('/')
-        # cache key = the actual file path served (original or sibling).
+        # cache key = the actual filesystem path served (original or
+        # sibling), held as a ``str`` so the hash is cheap and the
+        # key matches the value returned by ``os.path.realpath``.
         # value = (mtime_ns, size, body, mime, content_encoding, last_stat).
         # content_encoding is b'' for uncompressed; b'br'/b'gzip'/b'zstd'
         # for precompressed siblings.  ``last_stat`` is the monotonic
         # clock when ``stat()`` last confirmed the entry was still fresh
         # — used to throttle the per-request stat syscall.
         self._cache: OrderedDict[
-            Path, tuple[int, int, bytes, bytes, bytes, float]
+            str, tuple[int, int, bytes, bytes, bytes, float]
         ] = OrderedDict()
+
+    @property
+    def _root(self) -> Path:
+        """Backwards-compat: pre-Sprint-33 callers and tests may inspect
+        ``staticfiles._root`` as a :class:`Path`.  Built on demand so
+        the hot path keeps its plain-string representation."""
+        return Path(self._root_str)
 
     async def __call__(self, scope, receive, send, call_next=None):
         if scope.get('type') != 'http' or scope.get('method') not in ('GET', 'HEAD'):
@@ -80,14 +97,16 @@ class StaticFiles:
             raw_path = raw_path[len(self._url_prefix):]
 
         decoded = unquote(raw_path)
-        try:
-            target = (self._root / decoded.lstrip('/')).resolve()
-            target.relative_to(self._root)
-        except ValueError:
+        # ``realpath`` follows symlinks the same way ``Path.resolve()``
+        # used to.  The traversal check is then a single string-prefix
+        # comparison against the pre-computed ``<root>/`` form — no
+        # ``PurePath.relative_to`` allocation per request.
+        target = os.path.realpath(os.path.join(self._root_str, decoded.lstrip('/')))
+        if target != self._root_str and not target.startswith(self._root_sep):
             await self._respond(send, HTTPStatus.BAD_REQUEST)
             return
 
-        if not target.is_file():
+        if not os.path.isfile(target):
             if call_next:
                 await call_next(scope, receive, send)
             else:
@@ -116,7 +135,7 @@ class StaticFiles:
             return True
         return False
 
-    def _negotiate(self, scope, target: Path) -> tuple[Path, bytes]:
+    def _negotiate(self, scope, target: str) -> tuple[str, bytes]:
         """Pick which file to serve and what Content-Encoding to advertise.
 
         Returns ``(path_to_serve, content_encoding)``.  `content_encoding`
@@ -140,12 +159,12 @@ class StaticFiles:
         for enc, suffix in self._ENCODING_SUFFIXES:
             if not self._client_accepts(accept, enc):
                 continue
-            sibling = target.with_name(target.name + suffix)
-            if sibling.is_file():
+            sibling = target + suffix
+            if os.path.isfile(sibling):
                 return sibling, enc
         return target, b''
 
-    async def _serve(self, scope, send, path: Path):
+    async def _serve(self, scope, send, path: str):
         # Pick variant (precompressed sibling if available + accepted).
         served_path, content_encoding = self._negotiate(scope, path)
 
@@ -166,7 +185,7 @@ class StaticFiles:
             # Cache miss, stale TTL, or TTL disabled — re-stat to
             # confirm the entry is still valid.
             try:
-                st = served_path.stat()
+                st = os.stat(served_path)
             except OSError:
                 await self._respond(send, HTTPStatus.NOT_FOUND)
                 return
@@ -185,10 +204,13 @@ class StaticFiles:
                 self._cache.move_to_end(served_path)
             elif size <= self._CACHE_MAX_BYTES_PER_FILE:
                 # First fill or stale entry — read once and store.
-                # Content-Type derives from the original path's extension,
-                # not the .br/.gz/.zst suffix — e.g. text/javascript for
-                # app.js.br.
-                mime = (mimetypes.guess_type(path.name)[0]
+                # Content-Type derives from the ORIGINAL request's path
+                # extension, not the .br/.gz/.zst suffix — e.g. app.js.br
+                # is still ``text/javascript``.  ``mimetypes.guess_type``
+                # only inspects the extension so passing the full path
+                # is equivalent to passing the basename, with one fewer
+                # call.
+                mime = (mimetypes.guess_type(path)[0]
                         or 'application/octet-stream').encode()
                 try:
                     with open(served_path, 'rb') as f:
@@ -202,7 +224,7 @@ class StaticFiles:
                 # Above the cache threshold — drop any stale entry and
                 # fall through to the streaming/pathsend branch.
                 self._cache.pop(served_path, None)
-                mime = (mimetypes.guess_type(path.name)[0]
+                mime = (mimetypes.guess_type(path)[0]
                         or 'application/octet-stream').encode()
                 body = None
 
@@ -286,11 +308,11 @@ class StaticFiles:
 
         if pathsend_ok:
             await send({'type': ASGIEvent.HTTP_RESPONSE_PATHSEND,
-                        'path': str(served_path)})
+                        'path': served_path})
             return
 
         remaining = body_len
-        fobj = await asyncio.to_thread(open, str(served_path), 'rb')
+        fobj = await asyncio.to_thread(open, served_path, 'rb')
         try:
             if start:
                 await asyncio.to_thread(fobj.seek, start)
@@ -305,7 +327,7 @@ class StaticFiles:
         finally:
             await asyncio.to_thread(fobj.close)
 
-    def _store(self, path: Path, mtime_ns: int, size: int,
+    def _store(self, path: str, mtime_ns: int, size: int,
                body: bytes, mime: bytes, content_encoding: bytes,
                last_stat: float):
         self._cache[path] = (mtime_ns, size, body, mime, content_encoding,
