@@ -381,6 +381,41 @@ class TestScopePopulation:
         actor._fill_connection_info(test_scope)
         assert test_scope.get('scheme') == 'wss'
 
+    @pytest.mark.asyncio
+    async def test_cleartext_advertises_pathsend_extension(self):
+        """Sprint 31 — cleartext H1 scope advertises the
+        ``http.response.pathsend`` ASGI extension so the static-file
+        middleware can hand the file path to the sender (zero-copy
+        via ``loop.sendfile``)."""
+        raw = _http_request()
+        captured = {}
+
+        async def capture_app(scope, receive, send):
+            captured.update(scope)
+
+        actor, _writer = _make_actor(raw, capture_app, ssl=False)
+        await actor.run()
+
+        assert 'extensions' in captured
+        assert 'http.response.pathsend' in captured['extensions']
+
+    @pytest.mark.asyncio
+    async def test_tls_does_not_advertise_pathsend_extension(self):
+        """TLS transports can't sendfile (kernel doesn't see plaintext),
+        so the extension MUST NOT be advertised — otherwise middleware
+        would route requests through a path that immediately falls
+        back, wasting one stat syscall per request."""
+        raw = _http_request()
+        captured = {}
+
+        async def capture_app(scope, receive, send):
+            captured.update(scope)
+
+        actor, _writer = _make_actor(raw, capture_app, ssl=True)
+        await actor.run()
+
+        assert 'http.response.pathsend' not in captured.get('extensions', {})
+
 
 # ---------------------------------------------------------------------------
 # _fill_connection_info — direct unit tests

@@ -26,6 +26,29 @@ class BytesWriter(AbstractWriter):
         self.data += data
 
 
+class _SendfileBytesWriter(BytesWriter):
+    """Captures the sendfile call and also reads the file into ``data``
+    so tests can assert on the on-the-wire byte stream.
+
+    *raises_notimplemented* (default False) makes ``sendfile`` raise
+    NotImplementedError to exercise the chunked fallback the sender
+    falls back to on TLS transports.
+    """
+
+    def __init__(self, raises_notimplemented: bool = False):
+        super().__init__()
+        self.sendfile_calls: list[tuple[int, int]] = []
+        self.raises_notimplemented = raises_notimplemented
+
+    async def sendfile(self, file, offset: int, count: int) -> int:
+        if self.raises_notimplemented:
+            raise NotImplementedError('TLS transport not supported')
+        self.sendfile_calls.append((offset, count))
+        file.seek(offset)
+        self.data += file.read(count)
+        return count
+
+
 def _make_scope(type_: str = 'http') -> dict:
     return {'type': type_, 'method': 'GET', 'path': '/', 'headers': []}
 
@@ -93,6 +116,106 @@ class TestHTTP1SenderChunked:
         await s({'type': 'http.response.body', 'body': b'x', 'more_body': True})
         await s({'type': 'http.response.body', 'body': b'', 'more_body': False})
         assert w.data.lower().count(b'transfer-encoding') == 1
+
+
+# ---------------------------------------------------------------------------
+# TestHTTP1SenderPathsend  (Sprint 31)
+# ---------------------------------------------------------------------------
+
+class TestHTTP1SenderPathsend:
+    """``http.response.pathsend`` ASGI extension — the sender writes the
+    buffered ``http.response.start`` headers, then hands the file path to
+    ``writer.sendfile`` (zero-copy on cleartext transports)."""
+
+    @staticmethod
+    def _write_tmp(tmp_path, name: str, payload: bytes) -> str:
+        p = tmp_path / name
+        p.write_bytes(payload)
+        return str(p)
+
+    @pytest.mark.asyncio
+    async def test_writes_headers_then_sendfiles_body(self, tmp_path):
+        path = self._write_tmp(tmp_path, 'body.bin', b'A' * 4096)
+        w = _SendfileBytesWriter()
+        s = HTTP1Sender(w)
+        await s({'type': 'http.response.start', 'status': 200,
+                 'headers': [(b'content-type', b'application/octet-stream'),
+                             (b'content-length', b'4096')]})
+        await s({'type': 'http.response.pathsend', 'path': path})
+
+        assert w.sendfile_calls == [(0, 4096)]
+        # Status line + headers precede the body bytes on the wire.
+        head_end = w.data.find(b'\r\n\r\n') + 4
+        assert head_end > 4
+        assert w.data[:head_end].startswith(b'HTTP/1.1 200')
+        assert b'content-length: 4096' in w.data[:head_end].lower()
+        assert w.data[head_end:] == b'A' * 4096
+
+    @pytest.mark.asyncio
+    async def test_computes_content_length_when_caller_omitted_it(self, tmp_path):
+        """ASGI spec says the application should set Content-Length, but
+        forgetting it is the most common mistake.  Make it work anyway —
+        the sender knows the file size and the cost is one stat syscall
+        we'd do regardless."""
+        path = self._write_tmp(tmp_path, 'body.bin', b'B' * 99)
+        w = _SendfileBytesWriter()
+        s = HTTP1Sender(w)
+        await s({'type': 'http.response.start', 'status': 200,
+                 'headers': [(b'content-type', b'application/octet-stream')]})
+        await s({'type': 'http.response.pathsend', 'path': path})
+
+        head = w.data.split(b'\r\n\r\n', 1)[0].lower()
+        assert b'content-length: 99' in head
+
+    @pytest.mark.asyncio
+    async def test_falls_back_to_chunked_read_on_tls(self, tmp_path):
+        """When ``writer.sendfile`` raises NotImplementedError (SSL
+        transport, mocked test) the sender reads the file in chunks
+        via ``asyncio.to_thread`` and writes them through the normal
+        ``_write`` path so TLS connections still serve the body."""
+        payload = b'C' * 200000   # > one fallback chunk (64 KiB)
+        path = self._write_tmp(tmp_path, 'body.bin', payload)
+        w = _SendfileBytesWriter(raises_notimplemented=True)
+        s = HTTP1Sender(w)
+        await s({'type': 'http.response.start', 'status': 200,
+                 'headers': [(b'content-length', str(len(payload)).encode())]})
+        await s({'type': 'http.response.pathsend', 'path': path})
+
+        # No successful sendfile (the call raised).  Body still arrived.
+        assert w.sendfile_calls == []
+        head_end = w.data.find(b'\r\n\r\n') + 4
+        assert w.data[head_end:] == payload
+
+    @pytest.mark.asyncio
+    async def test_head_request_writes_headers_only(self, tmp_path):
+        """HEAD response carries no body even when the path is sent.
+        Content-Length still reflects the file size so caches and
+        proxies don't get confused."""
+        path = self._write_tmp(tmp_path, 'body.bin', b'X' * 1234)
+        w = _SendfileBytesWriter()
+        s = HTTP1Sender(w)
+        s._head_mode = True   # the actor sets this for HEAD requests
+        await s({'type': 'http.response.start', 'status': 200,
+                 'headers': [(b'content-length', b'1234')]})
+        await s({'type': 'http.response.pathsend', 'path': path})
+
+        assert w.sendfile_calls == []
+        assert b'content-length: 1234' in w.data.lower()
+        assert b'X' * 10 not in w.data   # body bytes never written
+
+    @pytest.mark.asyncio
+    async def test_pathsend_without_buffered_start_is_a_noop_warning(self, tmp_path, caplog):
+        """Defensive: misuse (pathsend without prior start) logs a
+        warning and drops the event rather than crashing the
+        connection."""
+        path = self._write_tmp(tmp_path, 'body.bin', b'Z')
+        w = _SendfileBytesWriter()
+        s = HTTP1Sender(w)
+        with caplog.at_level('WARNING', logger='blackbull.server.sender'):
+            await s({'type': 'http.response.pathsend', 'path': path})
+        assert w.data == b''
+        assert any('pathsend without buffered start' in r.message
+                   for r in caplog.records)
 
 
 # ---------------------------------------------------------------------------

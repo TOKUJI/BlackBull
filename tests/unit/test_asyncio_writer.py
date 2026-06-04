@@ -51,6 +51,13 @@ class _FakeStreamWriter:
     async def wait_closed(self) -> None:  # pragma: no cover — close path
         return
 
+    # ``loop.sendfile`` calls ``transport.write_eof``-like primitives
+    # internally — for sendfile-targeted tests we expose a fake
+    # ``transport`` attribute that the patched loop.sendfile inspects.
+    @property
+    def transport(self):
+        return getattr(self, '_transport', object())
+
 
 @pytest.mark.asyncio
 async def test_default_write_timeout_disabled_allows_slow_drain_to_complete():
@@ -113,3 +120,76 @@ async def test_write_timeout_constructor_arg_stored():
 
     w_default = AsyncioWriter(sw)
     assert w_default._write_timeout == 0.0
+
+
+# ---------------------------------------------------------------------------
+# Sprint 31 — ``http.response.pathsend`` / sendfile path
+# ---------------------------------------------------------------------------
+
+class _SendfileLoopProxy:
+    """Wrap the running loop and replace ``sendfile`` with a recorder.
+
+    Lets the test exercise ``AsyncioWriter.sendfile`` without a real
+    socket transport.  Returns *return_value* (or raises *raises*) so
+    both the happy path and the TLS-unsupported path are coverable.
+    """
+
+    def __init__(self, return_value=None, raises=None):
+        self._return_value = return_value
+        self._raises = raises
+        self.calls = []
+
+    async def sendfile(self, transport, file, offset, count):
+        self.calls.append((transport, file, offset, count))
+        if self._raises is not None:
+            raise self._raises
+        return self._return_value
+
+
+@pytest.mark.asyncio
+async def test_sendfile_drains_then_calls_loop_sendfile(monkeypatch):
+    """Headers buffered before sendfile must be flushed first so they
+    precede the file bytes on the wire."""
+    sw = _FakeStreamWriter()
+    sw._transport = object()
+    w = AsyncioWriter(sw)
+    fake_loop = _SendfileLoopProxy(return_value=12345)
+    monkeypatch.setattr(asyncio, 'get_running_loop', lambda: fake_loop)
+
+    f = object()
+    result = await w.sendfile(f, 0, 12345)
+
+    assert result == 12345
+    assert sw.drain_calls == 1, 'must drain buffered writes before sendfile'
+    assert fake_loop.calls == [(sw._transport, f, 0, 12345)]
+
+
+@pytest.mark.asyncio
+async def test_sendfile_propagates_notimplemented_for_tls(monkeypatch):
+    """On SSL transports ``loop.sendfile`` raises NotImplementedError —
+    AsyncioWriter must let that surface so the caller can fall back."""
+    sw = _FakeStreamWriter()
+    sw._transport = object()
+    w = AsyncioWriter(sw)
+    fake_loop = _SendfileLoopProxy(
+        raises=NotImplementedError('SSL not supported'))
+    monkeypatch.setattr(asyncio, 'get_running_loop', lambda: fake_loop)
+
+    with pytest.raises(NotImplementedError):
+        await w.sendfile(object(), 0, 4096)
+
+
+@pytest.mark.asyncio
+async def test_abstract_writer_sendfile_default_raises():
+    """The default ``AbstractWriter.sendfile`` raises NotImplementedError
+    so subclasses must opt in.  Equivalent to the TLS path the writer
+    falls back from."""
+    from blackbull.server.sender import AbstractWriter
+
+    class _Bare(AbstractWriter):
+        async def write(self, data):
+            pass
+
+    bare = _Bare()
+    with pytest.raises(NotImplementedError):
+        await bare.sendfile(object(), 0, 1)

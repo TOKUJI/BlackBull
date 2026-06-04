@@ -1,4 +1,5 @@
 import asyncio
+import os
 import time
 from abc import ABC, abstractmethod
 from http import HTTPStatus
@@ -16,6 +17,11 @@ from ..headers import Headers, HeaderList
 logger = logging.getLogger(__name__)
 
 _CRLF = b'\r\n'
+
+# Fallback chunk size when ``sendfile`` isn't supported by the transport
+# (TLS, mocked tests).  Matches the static middleware's ``_CHUNK`` so
+# memory-peak guarantees stay consistent across paths.
+_PATHSEND_FALLBACK_CHUNK = 64 * 1024
 
 
 # RFC 7231 Date header is whole-second resolution, so re-formatting it
@@ -70,6 +76,21 @@ class AbstractWriter(ABC):
 
     async def close(self) -> None:
         """Close the underlying transport. Default: no-op."""
+
+    async def sendfile(self, file, offset: int, count: int) -> int:
+        """Send up to *count* bytes from *file* starting at *offset*.
+
+        Default implementation raises ``NotImplementedError`` so callers
+        can detect lack of support and fall back to a read+write loop.
+        Concrete subclasses opt in when the underlying transport
+        supports a zero-copy path (Linux ``sendfile(2)`` /
+        ``loop.sendfile``).
+
+        Used by the static-file middleware via the
+        ``http.response.pathsend`` ASGI extension.
+        """
+        raise NotImplementedError(
+            'sendfile is not supported by this writer')
 
 
 class AsyncioWriter(AbstractWriter):
@@ -150,6 +171,21 @@ class AsyncioWriter(AbstractWriter):
         # earlier is harmless for the connection-actor path (no
         # follow-up state to flush).
         self._sw.close()
+
+    async def sendfile(self, file, offset: int, count: int) -> int:
+        """Zero-copy ``loop.sendfile`` against the underlying transport.
+
+        Raises ``NotImplementedError`` (propagated from the loop) when
+        the transport is SSL — TLS framing happens in user-space, so
+        the kernel can't see the plaintext to copy.  Callers must catch
+        that and fall back to a read+write loop.
+
+        Drains any pending writes first so headers we already buffered
+        precede the file bytes in wire order.
+        """
+        await self._sw.drain()
+        loop = asyncio.get_running_loop()
+        return await loop.sendfile(self._sw.transport, file, offset, count)
 
 
 # ---------------------------------------------------------------------------
@@ -303,6 +339,9 @@ class HTTP1Sender(BaseSender):
                     await self._write(name + b': ' + value + b'\r\n')
                 await self._write(b'\r\n')
 
+            case {'type': ASGIEvent.HTTP_RESPONSE_PATHSEND}:
+                await self._pathsend(body['path'])
+
             case {'type': ASGIEvent.HTTP_DISCONNECT}:
                 # http1_actor.py sends this on IncompleteReadError; the
                 # canonical channel for disconnect is receive(), but
@@ -364,6 +403,58 @@ class HTTP1Sender(BaseSender):
             parts.append(_CRLF)
         parts.append(_CRLF)
         return b''.join(parts)
+
+    async def _pathsend(self, path: str) -> None:
+        """Handle ``http.response.pathsend`` — write headers, then sendfile.
+
+        Per the ASGI ``http.response.pathsend`` extension the caller
+        already sent ``http.response.start`` with Content-Length set
+        from the file size; we just need to flush those headers (no
+        body bytes) and stream the file via ``writer.sendfile``.
+
+        Falls back to a chunked read+write loop if the underlying
+        transport does not support sendfile (TLS, mocked tests).
+        HEAD requests get headers only.
+        """
+        if self._buffered_status is None or self._buffered_headers is None:
+            logger.warning('HTTP1Sender: pathsend without buffered start; dropping')
+            return
+
+        size = os.path.getsize(path)
+        headers = self._buffered_headers
+        if b'content-length' not in headers:
+            headers.append(b'content-length', str(size).encode())
+        if b'Date' not in headers:
+            headers.append(b'Date', _http_date())
+
+        head = self._render_start(self._buffered_status, headers)
+        self._buffered_status = None
+        self._buffered_headers = None
+
+        if self._log_record is not None:
+            self._log_record.response_bytes += size
+
+        if self._head_mode:
+            await self._write(head)
+            return
+
+        await self._write(head)
+
+        with open(path, 'rb') as f:
+            try:
+                await self._writer.sendfile(f, 0, size)
+                return
+            except NotImplementedError:
+                # TLS / unsupported transport — fall back to read+write.
+                f.seek(0)
+                remaining = size
+                while remaining > 0:
+                    chunk = await asyncio.to_thread(
+                        f.read, min(_PATHSEND_FALLBACK_CHUNK, remaining))
+                    if not chunk:
+                        break
+                    remaining -= len(chunk)
+                    await self._write(chunk)
 
 
 class HTTP2Sender(BaseSender):

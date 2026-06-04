@@ -221,15 +221,34 @@ class StaticFiles:
             return
 
         # Large-file streaming path — only hit when size exceeds the cache
-        # threshold.  Goes through the asyncio thread pool one chunk at a
-        # time so per-request peak memory stays at _CHUNK regardless of
-        # body size.
+        # threshold.  Two variants:
+        #
+        # 1. ``http.response.pathsend`` ASGI extension is advertised by
+        #    the server AND this is a full-file response (no Range).
+        #    Hand the file path to the sender; HTTP1Sender calls
+        #    ``loop.sendfile`` for zero-copy delivery — no per-chunk
+        #    event-loop dispatch (vs. ~64 µs/chunk × 256 = 16 ms wasted
+        #    on a 16 MiB transfer through the fallback path).
+        #
+        # 2. Fallback chunked streaming through ``asyncio.to_thread``.
+        #    Used for TLS (kernel sendfile can't see plaintext), HTTP/2
+        #    (h2 frames in user-space), Range requests (pathsend extension
+        #    doesn't carry offset/count), and any server that doesn't
+        #    advertise the extension.
+        pathsend_ok = (status != HTTPStatus.PARTIAL_CONTENT
+                       and 'http.response.pathsend' in scope.get('extensions', {}))
+
         await send({'type': ASGIEvent.HTTP_RESPONSE_START, 'status': status,
                     'headers': [
                         (b'content-type', mime),
                         (b'content-length', str(body_len).encode()),
                         *extra_headers,
                     ]})
+
+        if pathsend_ok:
+            await send({'type': ASGIEvent.HTTP_RESPONSE_PATHSEND,
+                        'path': str(served_path)})
+            return
 
         remaining = body_len
         fobj = await asyncio.to_thread(open, str(served_path), 'rb')

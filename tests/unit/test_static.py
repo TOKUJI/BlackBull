@@ -456,3 +456,90 @@ class TestPrecompressedVariant:
             app, _scope(path='/app.js', headers={'accept-encoding': 'gzip'}))
         assert body_br == b'BR-COMPRESSED-BYTES'
         assert body_gz == b'GZ-COMPRESSED-BYTES'
+
+
+# ---------------------------------------------------------------------------
+# Sprint 31 — ``http.response.pathsend`` extension wiring
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def large_dir(tmp_path: pathlib.Path) -> pathlib.Path:
+    """Directory with one file larger than the cache threshold so the
+    middleware takes the streaming/pathsend branch."""
+    from blackbull.middleware.static import StaticFiles
+    large = b'L' * (StaticFiles._CACHE_MAX_BYTES_PER_FILE + 1024)
+    (tmp_path / 'big.bin').write_bytes(large)
+    return tmp_path
+
+
+def _scope_with_pathsend(path: str, headers: dict | None = None) -> dict:
+    scope = _scope(path=path, headers=headers)
+    scope['extensions'] = {'http.response.pathsend': {}}
+    return scope
+
+
+@pytest.mark.asyncio
+class TestStaticFilesPathsend:
+    async def test_emits_pathsend_when_extension_advertised(self, large_dir):
+        """Above-cache file + cleartext H1 scope → pathsend event."""
+        from blackbull.middleware.static import StaticFiles
+        app = StaticFiles(directory=str(large_dir))
+        events: list = []
+
+        async def send(event):
+            events.append(event)
+
+        await app(_scope_with_pathsend('/big.bin'), _noop_receive, send)
+
+        types = [e.get('type') for e in events]
+        assert 'http.response.pathsend' in types
+        ps = next(e for e in events if e['type'] == 'http.response.pathsend')
+        assert ps['path'].endswith('big.bin')
+        # No body events on the pathsend path — the sender takes over.
+        assert 'http.response.body' not in types
+
+    async def test_falls_back_to_streaming_when_extension_absent(self, large_dir):
+        """No pathsend in scope (TLS or HTTP/2) → chunked streaming."""
+        from blackbull.middleware.static import StaticFiles
+        app = StaticFiles(directory=str(large_dir))
+        # No 'extensions' key — same as TLS HTTP/1.1.
+        start, body = await _collect(app, _scope(path='/big.bin'))
+        assert start['status'] == 200
+        assert len(body) == StaticFiles._CACHE_MAX_BYTES_PER_FILE + 1024
+
+    async def test_range_request_does_not_use_pathsend(self, large_dir):
+        """ASGI pathsend extension has no offset/count — Range requests
+        must keep using the chunked streaming path so we honour the
+        Content-Range response correctly."""
+        from blackbull.middleware.static import StaticFiles
+        app = StaticFiles(directory=str(large_dir))
+        events: list = []
+
+        async def send(event):
+            events.append(event)
+
+        scope = _scope_with_pathsend('/big.bin',
+                                     headers={'range': 'bytes=0-99'})
+        await app(scope, _noop_receive, send)
+
+        start = next(e for e in events if e['type'] == 'http.response.start')
+        assert start['status'] == 206
+        assert all(e.get('type') != 'http.response.pathsend' for e in events)
+
+    async def test_small_file_does_not_use_pathsend(self, static_dir):
+        """Cached (small) files stay on the in-memory body path even
+        when pathsend is advertised — no point opening a file we already
+        have in RAM."""
+        from blackbull.middleware.static import StaticFiles
+        app = StaticFiles(directory=str(static_dir))
+        events: list = []
+
+        async def send(event):
+            events.append(event)
+
+        await app(_scope_with_pathsend('/hello.txt'), _noop_receive, send)
+
+        assert all(e.get('type') != 'http.response.pathsend' for e in events)
+        body = b''.join(e.get('body', b'') for e in events
+                        if e.get('type') == 'http.response.body')
+        assert body == b'Hello, static world!'
