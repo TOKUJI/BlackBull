@@ -4,8 +4,9 @@ HTTP/2 Priority Example — client
 Demonstrates sending HTTP/2 priority hints to the BlackBull priority server.
 
 Priority hints are sent as a standard 'priority' HTTP header (RFC 9218 §4.2).
-httpx forwards this header over HTTP/2; a compliant intermediary or server
-parses it and populates scope['http2_priority'] on the server side.
+httpx forwards this header over HTTP/2; the server parses it and populates
+``scope['extensions']['http.response.priority']`` (BlackBull v0.31+) for
+application code to inspect.
 
 BlackBull also accepts PRIORITY_UPDATE frames (type 0x10) directly, but that
 requires a lower-level HTTP/2 client.  The 'priority' header is the portable,
@@ -45,7 +46,7 @@ async def demo(base_url: str) -> None:
                                  headers={'priority': field})
             r.raise_for_status()
             data = r.json()
-            hint = data['http2_priority']
+            hint = data['priority']
             print(f'  priority: {field!r:12s}  ({label})')
             print(f'    → urgency={hint["urgency"]}  '
                   f'incremental={hint["incremental"]}')

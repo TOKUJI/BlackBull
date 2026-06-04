@@ -28,6 +28,97 @@ so the editable install's metadata catches up.
 
 ---
 
+## [0.31.0] — 2026-06-04
+
+**Sprint 32 close — HTTP/2 stream-info ASGI extensions.**  Moves
+the existing RFC 9218 priority hint from `scope['http2_priority']`
+under `scope['extensions']` per ASGI convention and adds a new
+HTTP/2 stream-info extension exposing `stream_id` and send-side
+flow-control state.  Lays the foundation for future gRPC over
+HTTP/2 work; no gRPC code in this release, but a written
+assessment is included.
+
+### Added
+
+- **`scope['extensions']['http.response.priority']`** — RFC 9218
+  priority hint at the conventional ASGI scope-extensions
+  location.  Field name matches gunicorn's beta HTTP/2 surface;
+  the *contents* are RFC 9218 urgency/incremental rather than the
+  RFC 7540 weight/depends_on tree that RFC 9113 §5.3.2
+  deprecated.  Shape: `{'urgency': int 0-7, 'incremental': bool}`.
+- **`scope['extensions']['http.response.http2_stream']`** — new
+  BlackBull HTTP/2 stream-info extension.  Snapshot at scope
+  build time of `{'stream_id': int, 'send_window_remaining':
+  int, 'connection_send_window_remaining': int}`.  Peer
+  recv-window is intentionally absent (we send WINDOW_UPDATE per
+  consumed DATA frame, so there's no scalar to snapshot).
+- **`docs/about/grpc-assessment.md`** — written assessment of
+  what gRPC over BlackBull would need, what's available today,
+  what Sprint 32 unlocks (server-streaming back-pressure
+  visibility), and what's still missing for a minimum gRPC
+  server.  No commitment; the document is decision input for a
+  future sprint.
+
+### Changed
+
+- **`docs/guide/http2.md`** leads with the new
+  `scope['extensions']['http.response.priority']` location.  A
+  *Migrating from `scope['http2_priority']`* subsection explains
+  the rename.
+- **`examples/PriorityExample/`** updated to read priority from
+  the new extension location.  The example no longer reads
+  `scope['http2_priority']`; that key remains populated only for
+  the deprecation window.
+
+### Deprecated
+
+- **`scope['http2_priority']`** — the top-level scope key that
+  carried the same RFC 9218 urgency/incremental dict.  Still
+  populated for backwards compatibility during the v0.31 cycle
+  and scheduled for removal in `0.32.0`.  Apps should read
+  `scope['extensions']['http.response.priority']` instead.
+
+### Tests
+
+- 9 new unit tests in `tests/unit/test_http2_extensions.py`
+  pinning the helper's per-request fresh-dict semantics,
+  the priority extension contents (RFC 9218 default + explicit
+  pass-through), and the http2_stream snapshot fields.
+- 3 new integration tests in
+  `tests/integration/test_http2_advanced.py` confirming the new
+  extension keys show up in a real HTTP/2 scope and agree with
+  the deprecation alias.
+
+### Notes for adopters
+
+- **Migrating from `scope['http2_priority']`.**  Replace
+  `scope.get('http2_priority', DEFAULT)` with
+  `(scope.get('extensions') or {}).get('http.response.priority', DEFAULT)`.
+  The dict shape is unchanged.
+- **HTTP/1.1 requests** do not advertise the new HTTP/2
+  extensions.  `scope['extensions']` will contain
+  `http.response.pathsend` (from v0.30) but not
+  `http.response.priority` / `http.response.http2_stream`.
+- **Window snapshot caveat.**  The send-window fields are taken
+  at scope-build time; they shift as the response body streams.
+  Live readings (e.g. for iterative gRPC server-streaming
+  back-pressure) need a future sprint — see *Open question* in
+  `docs/about/grpc-assessment.md`.
+
+### Out of scope / deferred
+
+- **HTTP/2 mutation API** — set-priority-on-push, app-driven
+  window updates, dependency edits.  Wait for an adopter need.
+- **gRPC implementation** — only the assessment doc this sprint.
+  A real gRPC server is 1-3 sprints of work on top of these
+  primitives; the assessment doc spells out the breakdown.
+- **`scope['http2_priority']` removal** — happens in `v0.32.0`;
+  retained this release to give adopters one cycle to migrate.
+- **RFC 7540 weight/depends_on parity with gunicorn** — RFC 9113
+  deprecated those; modern clients don't send them.
+
+---
+
 ## [0.30.0] — 2026-06-04
 
 **Sprint 31 close — zero-copy static-file serving for cleartext

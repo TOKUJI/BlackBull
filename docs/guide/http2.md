@@ -34,11 +34,14 @@ scope so your app can act on it.
 
 ### What lands on `scope`
 
-Every HTTP/2 request scope contains an `http2_priority` key
-populated by BlackBull before your handler is called:
+Every HTTP/2 request scope advertises the priority hint via the
+`http.response.priority` ASGI extension (matches gunicorn's beta
+HTTP/2 key shape; the *contents* are RFC 9218 urgency/incremental,
+not the deprecated RFC 7540 weight/tree):
 
 ```python
-scope['http2_priority']  # → {'urgency': int, 'incremental': bool}
+scope['extensions']['http.response.priority']
+# → {'urgency': int, 'incremental': bool}
 ```
 
 | Key | Type | Default | Meaning |
@@ -53,8 +56,8 @@ BlackBull resolves the value in this order (first wins):
 2. `priority` HTTP header in the request (e.g. `priority: u=1, i`).
 3. RFC 9218 §4.1 defaults: `urgency=3`, `incremental=False`.
 
-For HTTP/1.1 requests the key is absent.  Always use `.get()`
-with a default so your handler works across both protocols.
+For HTTP/1.1 requests the extension key is absent.  Always use
+`.get()` with a default so your handler works across both protocols.
 
 ### Using it in a handler
 
@@ -63,7 +66,8 @@ _DEFAULT_PRIORITY = {'urgency': 3, 'incremental': False}
 
 @app.route(path='/search')
 async def search(scope, receive, send):
-    hint = scope.get('http2_priority', _DEFAULT_PRIORITY)
+    ext = scope.get('extensions') or {}
+    hint = ext.get('http.response.priority', _DEFAULT_PRIORITY)
     if hint['urgency'] <= 2:
         # High-urgency: return cached / pre-computed result immediately
         result = get_cached_result()
@@ -79,11 +83,68 @@ async def search(scope, receive, send):
 @app.intercept('before_handler')
 async def handle_priority(event):
     scope = event.detail['scope']
-    hint = scope.get('http2_priority', {'urgency': 3, 'incremental': False})
+    ext = scope.get('extensions') or {}
+    hint = ext.get('http.response.priority', {'urgency': 3, 'incremental': False})
     if hint['urgency'] <= 1:
         logger.info('HIGH-PRIORITY u=%d: %s %s',
                     hint['urgency'], event.detail['method'], event.detail['path'])
 ```
+
+### Migrating from `scope['http2_priority']` (pre-v0.31)
+
+Earlier BlackBull releases exposed priority as a top-level scope
+key, `scope['http2_priority']`.  v0.31 moved it under
+`scope['extensions']` to match ASGI conventions and align the key
+name with gunicorn's beta HTTP/2 surface.  The legacy key is still
+populated alongside the new extension during the v0.31 cycle and
+is scheduled for removal in v0.32.0.
+
+To migrate, replace:
+
+```python
+hint = scope.get('http2_priority', DEFAULT)            # legacy
+```
+
+with:
+
+```python
+ext = scope.get('extensions') or {}
+hint = ext.get('http.response.priority', DEFAULT)       # v0.31+
+```
+
+The dict shape (`{'urgency': int, 'incremental': bool}`) is
+unchanged.
+
+### HTTP/2 stream info (gRPC foundation)
+
+Alongside the priority extension, v0.31 adds
+`scope['extensions']['http.response.http2_stream']` — a snapshot of
+the HTTP/2 stream identity and send-flow-control credit at request
+entry:
+
+```python
+scope['extensions']['http.response.http2_stream']
+# → {'stream_id': int, 'send_window_remaining': int,
+#    'connection_send_window_remaining': int}
+```
+
+| Key | Meaning |
+|---|---|
+| `stream_id` | The HTTP/2 stream ID this request arrived on (odd for client-initiated, even for server pushes) |
+| `send_window_remaining` | Bytes the peer will currently accept on this stream before WINDOW_UPDATE |
+| `connection_send_window_remaining` | Same, at the connection level |
+
+The window values are snapshots taken at scope-build time; they
+move as the response body streams.  Applications that need
+live readings (e.g. gRPC server-streaming back-pressure) can
+re-read the dict, though they will see the snapshot value unless
+they keep a reference and the populate site re-fetches it — which
+v0.31 does not do.  Live properties are a future-sprint
+consideration.
+
+Peer-side receive-window is intentionally absent: BlackBull sends
+`WINDOW_UPDATE` per consumed DATA frame, so there is no scalar to
+snapshot.
 
 See [`examples/PriorityExample/`](https://github.com/TOKUJI/BlackBull/tree/master/examples/PriorityExample/)
 for a dedicated server + client pair that demonstrates both

@@ -68,9 +68,9 @@ hypercorn myapp:app --bind 0.0.0.0:8000
 granian --interface asgi myapp:app
 ```
 
-You lose BlackBull's native HTTP/2 and WebSocket implementations
-(the surrounding server's stack is used instead), but the
-application code is portable as-is.
+You lose BlackBull's own HTTP/2 frame layer and WebSocket codec
+(the surrounding server's protocol stack handles framing
+instead), but the application code is portable as-is.
 
 ## Embedded use under an existing event loop
 
