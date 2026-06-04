@@ -29,6 +29,15 @@ _WS_GUID = b'258EAFA5-E914-47DA-95CA-C5AB0DC85B11'  # RFC 6455 §1.3
 _HTTP_PORT  = 80
 _HTTPS_PORT = 443
 
+# Extensions advertised in scope['extensions'] for cleartext HTTP/1.1.
+# ``http.response.pathsend`` lets middleware (notably the static-file
+# serve path) hand a file path to the sender so the body bytes go
+# through ``loop.sendfile`` — zero-copy on Linux, no per-chunk
+# event-loop dispatch overhead.  TLS connections do NOT advertise it
+# because ``loop.sendfile`` raises NotImplementedError on SSL
+# transports (the kernel can't see the plaintext to copy).
+_H1_PATHSEND_EXTENSIONS = {'http.response.pathsend': {}}
+
 # RFC 9110 §5.6.2 — token = 1*tchar
 # RFC 9110 §5.5  — field-value disallows CTLs (0x00-0x1F, 0x7F) except HTAB
 # RFC 9112 §4   — method = token, HTTP-version = "HTTP/" DIGIT "." DIGIT
@@ -242,6 +251,11 @@ class HTTP1Actor(Actor):
     dispatcher path (fires events via ``app._dispatcher`` directly), so that
     BlackBull apps without a full EventAggregator still receive lifecycle events.
     """
+
+    # Class-level default so tests that instantiate via ``object.__new__``
+    # without calling ``__init__`` (test_parser.py uses this pattern to
+    # exercise ``_parse`` in isolation) see a cleartext scope by default.
+    _ssl: bool = False
 
     def __init__(
         self,
@@ -590,6 +604,7 @@ class HTTP1Actor(Actor):
             'client': None,
             'server': None,
             'state': {},
+            'extensions': _H1_PATHSEND_EXTENSIONS if not self._ssl else {},
         }
 
         if headers.getlist(b'host'):

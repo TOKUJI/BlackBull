@@ -24,6 +24,7 @@ class ASGIEvent:
     HTTP_RESPONSE_BODY     = 'http.response.body'
     HTTP_RESPONSE_TRAILERS = 'http.response.trailers'
     HTTP_RESPONSE_PUSH     = 'http.response.push'
+    HTTP_RESPONSE_PATHSEND = 'http.response.pathsend'
 
     # WebSocket
     WS_CONNECT    = 'websocket.connect'
