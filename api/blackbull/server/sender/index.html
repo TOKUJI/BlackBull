@@ -3029,6 +3029,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.server.sender.AbstractWriter.sendfile" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        sendfile
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.server.sender.AbstractWriter.write" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3052,6 +3063,23 @@
       
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="AsyncioWriter">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.sender.AsyncioWriter.sendfile" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        sendfile
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
         
@@ -3523,6 +3551,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.server.sender.AbstractWriter.sendfile" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        sendfile
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.server.sender.AbstractWriter.write" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3546,6 +3585,23 @@
       
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="AsyncioWriter">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.sender.AsyncioWriter.sendfile" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        sendfile
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
         
@@ -3790,6 +3846,35 @@ interface, so switching the async runtime requires only a new subclass here.</p>
 <div class="doc doc-object doc-function">
 
 
+<h4 id="blackbull.server.sender.AbstractWriter.sendfile" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">sendfile</span><span class="p">(</span><span class="n">file</span><span class="p">,</span> <span class="n">offset</span><span class="p">,</span> <span class="n">count</span><span class="p">)</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-async"><code>async</code></small>
+  </span>
+
+<a href="#blackbull.server.sender.AbstractWriter.sendfile" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Send up to <em>count</em> bytes from <em>file</em> starting at <em>offset</em>.</p>
+<p>Default implementation raises <code>NotImplementedError</code> so callers
+can detect lack of support and fall back to a read+write loop.
+Concrete subclasses opt in when the underlying transport
+supports a zero-copy path (Linux <code>sendfile(2)</code> /
+<code>loop.sendfile</code>).</p>
+<p>Used by the static-file middleware via the
+<code>http.response.pathsend</code> ASGI extension.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
 <h4 id="blackbull.server.sender.AbstractWriter.write" class="doc doc-heading">
             <code class="highlight language-python"><span class="n">write</span><span class="p">(</span><span class="n">data</span><span class="p">)</span></code>
 
@@ -3869,6 +3954,34 @@ so the sender treats the failure the same as a peer-side reset.</p>
 
 
 
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.server.sender.AsyncioWriter.sendfile" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">sendfile</span><span class="p">(</span><span class="n">file</span><span class="p">,</span> <span class="n">offset</span><span class="p">,</span> <span class="n">count</span><span class="p">)</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-async"><code>async</code></small>
+  </span>
+
+<a href="#blackbull.server.sender.AsyncioWriter.sendfile" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Zero-copy <code>loop.sendfile</code> against the underlying transport.</p>
+<p>Raises <code>NotImplementedError</code> (propagated from the loop) when
+the transport is SSL — TLS framing happens in user-space, so
+the kernel can't see the plaintext to copy.  Callers must catch
+that and fall back to a read+write loop.</p>
+<p>Drains any pending writes first so headers we already buffered
+precede the file bytes in wire order.</p>
+
+
+    </div>
+
+</div>
 
 
 
