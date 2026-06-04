@@ -73,19 +73,6 @@ def _make_log_record(scope):
 
 _DEFAULT_PRIORITY: dict[str, int | bool] = {'urgency': 3, 'incremental': False}
 
-# ``_HTTP2_BASE_EXTENSIONS`` carries the protocol-level extensions that
-# every HTTP/2 scope advertises, regardless of which stream the request
-# arrived on: server push, plus the new (Sprint 32) priority and
-# stream-info hints.  The actual *contents* of the priority / stream-info
-# entries are stream-specific, so each scope gets a freshly-built
-# extensions dict via ``_build_h2_extensions`` below — only the advertised
-# keys themselves are shared.
-_HTTP2_EXTENSIONS_KEYS = (
-    ASGIEvent.HTTP_RESPONSE_PUSH,
-    'http.response.priority',
-    'http.response.http2_stream',
-)
-
 
 def _build_h2_extensions(
     stream_id: int,

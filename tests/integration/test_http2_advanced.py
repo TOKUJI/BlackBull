@@ -5,6 +5,7 @@ connection and cannot be verified over HTTP/1.1.
 """
 import asyncio
 import pathlib
+import ssl
 from multiprocessing import Process
 
 import httpx
@@ -17,6 +18,18 @@ from .conftest import live_server
 
 _CERT = pathlib.Path(__file__).parent.parent / 'cert.pem'
 _KEY  = pathlib.Path(__file__).parent.parent / 'key.pem'
+
+
+def _test_ssl_context() -> ssl.SSLContext:
+    """SSLContext that validates against the self-signed test CA.
+
+    Replaces ``verify=False`` in httpx calls: hostname checks and
+    chain verification still run (against ``tests/cert.pem``), so
+    CodeQL no longer flags the call as "Request without certificate
+    validation" and we still get the protections cert validation
+    is meant to provide — limited to talking to our own test server.
+    """
+    return ssl.create_default_context(cafile=str(_CERT))
 
 
 def _make_push_app() -> BlackBull:
@@ -178,7 +191,7 @@ async def test_priority_extension_present_in_scope(stream_info_app):
     every HTTP/2 request and carries the same RFC 9218 urgency/incremental
     values the legacy ``scope['http2_priority']`` does."""
     async with httpx.AsyncClient(
-        http2=True, verify=False,
+        http2=True, verify=_test_ssl_context(),
         base_url=f'https://localhost:{stream_info_app.port}',
     ) as c:
         r = await c.get('/stream-info', headers={'priority': 'u=2, i'})
@@ -198,7 +211,7 @@ async def test_http2_stream_extension_present_in_scope(stream_info_app):
     """``scope['extensions']['http.response.http2_stream']`` carries
     stream_id and the send-window snapshot."""
     async with httpx.AsyncClient(
-        http2=True, verify=False,
+        http2=True, verify=_test_ssl_context(),
         base_url=f'https://localhost:{stream_info_app.port}',
     ) as c:
         r = await c.get('/stream-info')
@@ -219,7 +232,7 @@ async def test_scope_advertises_three_extension_keys(stream_info_app):
     """The HTTP/2 scope advertises push, priority, and http2_stream
     keys.  Sprint 32 adds the latter two; the existing push key stays."""
     async with httpx.AsyncClient(
-        http2=True, verify=False,
+        http2=True, verify=_test_ssl_context(),
         base_url=f'https://localhost:{stream_info_app.port}',
     ) as c:
         r = await c.get('/stream-info')
