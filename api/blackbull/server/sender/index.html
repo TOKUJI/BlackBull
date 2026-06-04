@@ -3050,6 +3050,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#blackbull.server.sender.AbstractWriter.writelines" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        writelines
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -3072,6 +3083,17 @@
     <span class="md-ellipsis">
       
         sendfile
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.sender.AsyncioWriter.writelines" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        writelines
       
     </span>
   </a>
@@ -3600,6 +3622,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#blackbull.server.sender.AbstractWriter.writelines" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        writelines
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -3622,6 +3655,17 @@
     <span class="md-ellipsis">
       
         sendfile
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.sender.AsyncioWriter.writelines" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        writelines
       
     </span>
   </a>
@@ -3923,6 +3967,32 @@ supports a zero-copy path (Linux <code>sendfile(2)</code> /
 
 </div>
 
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.server.sender.AbstractWriter.writelines" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">writelines</span><span class="p">(</span><span class="n">parts</span><span class="p">)</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-async"><code>async</code></small>
+  </span>
+
+<a href="#blackbull.server.sender.AbstractWriter.writelines" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Write multiple byte segments without joining them in user space.</p>
+<p>Default joins-and-writes so subclasses can opt out.  Override in
+transports whose <code>writelines</code> does vectored I/O (<code>writev</code> /
+<code>sendmsg</code>) to skip the full-body memcpy on the static-file
+cache-hit path.</p>
+
+
+    </div>
+
+</div>
+
 
 
   </div>
@@ -4005,6 +4075,34 @@ the kernel can't see the plaintext to copy.  Callers must catch
 that and fall back to a read+write loop.</p>
 <p>Drains any pending writes first so headers we already buffered
 precede the file bytes in wire order.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.server.sender.AsyncioWriter.writelines" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">writelines</span><span class="p">(</span><span class="n">parts</span><span class="p">)</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-async"><code>async</code></small>
+  </span>
+
+<a href="#blackbull.server.sender.AsyncioWriter.writelines" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Vectored write via the underlying StreamWriter.</p>
+<p><code>asyncio.StreamWriter.writelines</code> hands the iterable to
+<code>transport.writelines</code>, which on the selector transport uses
+<code>socket.sendmsg(iovec, …)</code> for the immediate-send case and on
+uvloop is implemented as a real vectored write.  Either way the
+body bytes never get copied into a fresh <code>bytes</code> object before
+the syscall.</p>
 
 
     </div>
