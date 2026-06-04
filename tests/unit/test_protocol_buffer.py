@@ -214,10 +214,7 @@ async def test_suspended_read_can_be_cancelled():
     await asyncio.sleep(0)   # let it suspend
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
-        # Await raises CancelledError (captured by pytest.raises);
-        # bind to ``_`` so CodeQL's "ineffectual statement" rule
-        # doesn't trip on the discarded-await pattern.
-        _ = await task
+        await task
     # Buffer's waiter slot is released; a fresh consumer can read.
     buf.feed(b'recovered')
     # Note: we can't readuntil for sep that's not there without another
@@ -235,10 +232,10 @@ async def test_concurrent_suspend_is_rejected():
     await asyncio.sleep(0)   # let first suspend
     second = asyncio.create_task(buf.read_exactly(5))
     with pytest.raises(RuntimeError, match='concurrent suspends'):
-        _ = await second                   # raises (captured)
+        await second
     first.cancel()
     with pytest.raises(asyncio.CancelledError):
-        _ = await first                    # raises (captured)
+        await first
 
 
 # ---------------------------------------------------------------------------
@@ -255,7 +252,7 @@ async def test_close_wakes_pending_consumer_with_incomplete_read():
     await asyncio.sleep(0)
     buf.close()
     with pytest.raises(IncompleteReadError):
-        _ = await task                     # raises (captured)
+        await task
 
 
 @pytest.mark.asyncio

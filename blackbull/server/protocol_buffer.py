@@ -259,17 +259,3 @@ class ProtocolBuffer:
             await self._waiter
         finally:
             self._waiter = None
-
-    # ------------------------------------------------------------------
-    # Asyncio-compatible aliases
-    #
-    # ``AsyncioReader`` (recipient.py) duck-types on ``readuntil`` /
-    # ``readexactly`` / ``read``.  ProtocolBuffer keeps the
-    # snake_case names for the public API per the Python style guide,
-    # but the aliases below let the existing reader-adapter wrap the
-    # buffer without translation.  Step 3 (server.py wiring) relies on
-    # this.
-    # ------------------------------------------------------------------
-
-    readuntil = read_until
-    readexactly = read_exactly
