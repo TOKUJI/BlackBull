@@ -74,6 +74,16 @@ class AbstractWriter(ABC):
         """Write *data* to the transport and ensure it is flushed."""
         ...
 
+    async def writelines(self, parts) -> None:
+        """Write multiple byte segments without joining them in user space.
+
+        Default joins-and-writes so subclasses can opt out.  Override in
+        transports whose ``writelines`` does vectored I/O (``writev`` /
+        ``sendmsg``) to skip the full-body memcpy on the static-file
+        cache-hit path.
+        """
+        await self.write(b''.join(parts))
+
     async def close(self) -> None:
         """Close the underlying transport. Default: no-op."""
 
@@ -145,6 +155,37 @@ class AsyncioWriter(AbstractWriter):
                     # lets us still raise ConnectionResetError below so
                     # the sender's existing peer-disconnect handling
                     # runs uniformly.
+                    logger.debug(
+                        'write timeout: transport.close() also failed (%s) — '
+                        'continuing with ConnectionResetError', close_exc)
+                raise ConnectionResetError(
+                    f'write timeout after {self._write_timeout:.1f}s'
+                ) from None
+        else:
+            await self._sw.drain()
+
+    async def writelines(self, parts) -> None:
+        """Vectored write via the underlying StreamWriter.
+
+        ``asyncio.StreamWriter.writelines`` hands the iterable to
+        ``transport.writelines``, which on the selector transport uses
+        ``socket.sendmsg(iovec, …)`` for the immediate-send case and on
+        uvloop is implemented as a real vectored write.  Either way the
+        body bytes never get copied into a fresh ``bytes`` object before
+        the syscall.
+        """
+        self._sw.writelines(parts)
+        if self._write_timeout > 0:
+            try:
+                await asyncio.wait_for(self._sw.drain(),
+                                       timeout=self._write_timeout)
+            except (asyncio.TimeoutError, TimeoutError):
+                logger.warning(
+                    'write timeout (%.1fs) exceeded — closing connection',
+                    self._write_timeout)
+                try:
+                    self._sw.close()
+                except Exception as close_exc:
                     logger.debug(
                         'write timeout: transport.close() also failed (%s) — '
                         'continuing with ConnectionResetError', close_exc)
@@ -229,6 +270,24 @@ class BaseSender(ABC):
         except OSError as exc:
             # SSLEOFError / SSLZeroReturnError land here on TLS connections
             # whose peer dropped without a proper close-notify.
+            self._closed = True
+            logger.debug('sender: write failed on closed TLS transport (%s)', exc.__class__.__name__)
+
+    async def _write_many(self, parts) -> None:
+        """Vectored variant of :meth:`_write` — avoids joining the parts.
+
+        Used by the HTTP/1.1 ``_flush`` for the headers+body cache-hit
+        path: the body bytes already live in the static-file cache, and
+        ``head + body`` would allocate a full-body copy on every hit.
+        """
+        if getattr(self, '_closed', False):
+            return
+        try:
+            await self._writer.writelines(parts)
+        except (ConnectionResetError, BrokenPipeError) as exc:
+            self._closed = True
+            logger.debug('sender: peer closed write side (%s)', exc.__class__.__name__)
+        except OSError as exc:
             self._closed = True
             logger.debug('sender: write failed on closed TLS transport (%s)', exc.__class__.__name__)
 
@@ -390,8 +449,14 @@ class HTTP1Sender(BaseSender):
             if not more_body and not self._expect_trailers:
                 chunk += b'0\r\n\r\n'
             await self._write(chunk)
+        elif body:
+            # Vectored write: avoids the full-body memcpy that ``head + body``
+            # forced.  At static-file rates of ~5k req/s × ~17 KB on average,
+            # that allocation was ~88 MB/s of pure user-space copy before the
+            # bytes even reached the transport.
+            await self._write_many((head, body))
         else:
-            await self._write(head + body if body else head)
+            await self._write(head)
 
     def _render_start(self, status: HTTPStatus, headers: HeaderList) -> bytes:
         """Build the status line + headers + blank-line as a single bytes blob."""
