@@ -96,6 +96,13 @@ class Compression:
         self._executor_max_inflight = executor_max_inflight
         self._executor_inflight: int = 0
         self._available = _detect_codecs()
+        # ``Accept-Encoding`` header bytes → selection.  Real-world traffic
+        # has very few distinct Accept-Encoding values (browsers send a
+        # constant string; benchmark generators send one); parsing the
+        # q-values + iterating the server-preference list on every request
+        # showed up in the Sprint 33 py-spy profile.  Bounded so a hostile
+        # peer can't grow it unboundedly.
+        self._codec_cache: dict[bytes, tuple[str, Callable[[bytes], bytes]] | None] = {}
 
     @staticmethod
     def _parse_accept_encoding(header: bytes) -> list[str]:
@@ -128,11 +135,18 @@ class Compression:
         server knows which codec yields better compression.
         Returns ``None`` when there is no overlap.
         """
+        cache = self._codec_cache
+        if accept_header in cache:
+            return cache[accept_header]
         accepted = set(self._parse_accept_encoding(accept_header))
+        result: tuple[str, Callable[[bytes], bytes]] | None = None
         for codec in _SERVER_PREFERENCE:
             if codec in accepted and codec in self._available:
-                return codec, self._available[codec]
-        return None
+                result = (codec, self._available[codec])
+                break
+        if len(cache) < 256:
+            cache[accept_header] = result
+        return result
 
     async def __call__(self, scope, receive, send, call_next):
         if scope.get('type') != 'http':
@@ -157,6 +171,16 @@ class Compression:
 
         async def intercepting_send(event: dict) -> None:
             nonlocal streaming, skip_compression, start_forwarded
+            # Fast path: once the start event has been forwarded under a
+            # pass-through decision (already-encoded response, non-
+            # compressible Content-Type, or streaming chunks), subsequent
+            # events are forwarded verbatim — no parse, no re-wrap, no
+            # match.  Sprint 33 py-spy showed this overhead at ~35 % of
+            # the static-path CPU on responses StaticFiles already
+            # encoded via a precompressed sibling.
+            if start_forwarded and (skip_compression or streaming):
+                await send(event)
+                return
             parsed = parse_response_event(event)
             match parsed:
                 case ResponseStart():
