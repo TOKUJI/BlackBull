@@ -129,15 +129,26 @@ needs to reflect production-shape traffic.
 
 ## What BlackBull doesn't do
 
-### Static-file serving has no `sendfile()` or `aiofiles`
+### Static-file serving is not a production CDN
 
 [`blackbull/middleware/static.py`](blackbull/middleware/static.py)
-calls `path.read_bytes()` synchronously and returns the full
-body in one ASGI event.  For small files (≤ ~1 MiB) this is
-fast; for multi-MiB files it blocks the event loop during the
-read and pins the whole body in memory before sending.  Not a
-production-ready static-file server — front a real one
-(nginx, S3 + CloudFront) for anything user-visible.
+serves files three ways:
+
+- Cached in-memory (≤ 4 MiB) — first hit reads sync, subsequent
+  hits serve from a per-process LRU.
+- Zero-copy via `loop.sendfile` (cleartext HTTP/1.1, > 4 MiB,
+  no Range) — single kernel-side transfer, no per-chunk
+  event-loop dispatch.  Opted in via the `http.response.pathsend`
+  ASGI extension; cleartext HTTP/1.1 advertises it.
+- Chunked through `asyncio.to_thread` (TLS, HTTP/2, Range
+  requests) — correct, but the per-chunk thread-pool dispatch
+  costs roughly 64 µs each.  Use the fronting nginx path below if
+  this is on the critical path for you.
+
+There is still no in-process file watcher, ETag-driven
+revalidation, byte-range-multipart, or CDN edge-cache
+invalidation glue.  For anything user-visible, front a real
+static-file server (nginx, S3 + CloudFront).
 
 ### No internal database layer
 
