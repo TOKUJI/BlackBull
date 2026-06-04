@@ -1,5 +1,7 @@
 import asyncio
 import mimetypes
+import os
+import time
 from collections import OrderedDict
 from pathlib import Path
 from urllib.parse import unquote
@@ -17,6 +19,14 @@ class StaticFiles:
     _CACHE_MAX_ENTRIES = 256
     # 64 KiB streaming chunk for files above the cache threshold.
     _CHUNK = 64 * 1024
+    # Per-entry stat throttle.  Once a cached entry is validated by
+    # ``stat()``, skip the syscall on subsequent requests until the
+    # monotonic clock has advanced this many seconds.  Default 1 s keeps
+    # edit-on-disk visibility under a second while removing the per-
+    # request stat from the cache-hit hot path.  Override via
+    # ``BB_STATIC_STAT_TTL_S`` (env var, float seconds); set to ``0`` to
+    # restore the pre-Sprint-33 every-request behaviour.
+    _STAT_TTL_S = float(os.environ.get('BB_STATIC_STAT_TTL_S', '1.0'))
 
     # Server preference order for precompressed variant selection.
     # Matches blackbull.middleware.compression's order (br > zstd > gzip).
@@ -34,11 +44,13 @@ class StaticFiles:
         self._root = Path(resolved).resolve()
         self._url_prefix = url_prefix.rstrip('/')
         # cache key = the actual file path served (original or sibling).
-        # value = (mtime_ns, size, body, mime, content_encoding).
+        # value = (mtime_ns, size, body, mime, content_encoding, last_stat).
         # content_encoding is b'' for uncompressed; b'br'/b'gzip'/b'zstd'
-        # for precompressed siblings.
+        # for precompressed siblings.  ``last_stat`` is the monotonic
+        # clock when ``stat()`` last confirmed the entry was still fresh
+        # — used to throttle the per-request stat syscall.
         self._cache: OrderedDict[
-            Path, tuple[int, int, bytes, bytes, bytes]
+            Path, tuple[int, int, bytes, bytes, bytes, float]
         ] = OrderedDict()
 
     async def __call__(self, scope, receive, send, call_next=None):
@@ -136,36 +148,63 @@ class StaticFiles:
     async def _serve(self, scope, send, path: Path):
         # Pick variant (precompressed sibling if available + accepted).
         served_path, content_encoding = self._negotiate(scope, path)
-        # Content-Type derives from the original path's extension, not
-        # the .br/.gz/.zst suffix — e.g. text/javascript for app.js.br.
-        mime = (mimetypes.guess_type(path.name)[0]
-                or 'application/octet-stream').encode()
 
-        # stat() is one cheap syscall (~µs).  Running it sync in the event
-        # loop avoids the asyncio thread-pool dispatch that became the
-        # bottleneck under HttpArena's c=1024-6800 load (Sprint 28).
-        try:
-            st = served_path.stat()
-        except OSError:
-            await self._respond(send, HTTPStatus.NOT_FOUND)
-            return
-        size = st.st_size
-        mtime_ns = st.st_mtime_ns
-
-        cached = self._lookup(served_path, mtime_ns, size)
         body: bytes | None
-        if cached is not None:
-            body = cached
-        elif size <= self._CACHE_MAX_BYTES_PER_FILE:
+        mime: bytes
+        size: int
+
+        # Fast path: cached entry, still within the per-entry stat TTL.
+        # No syscall, no ``mimetypes.guess_type`` regex.
+        cached_entry = self._cache.get(served_path)
+        now = time.monotonic()
+        if (cached_entry is not None
+                and self._STAT_TTL_S > 0
+                and now - cached_entry[5] < self._STAT_TTL_S):
+            _, size, body, mime, _, _ = cached_entry
+            self._cache.move_to_end(served_path)
+        else:
+            # Cache miss, stale TTL, or TTL disabled — re-stat to
+            # confirm the entry is still valid.
             try:
-                with open(served_path, 'rb') as f:
-                    body = f.read()
+                st = served_path.stat()
             except OSError:
                 await self._respond(send, HTTPStatus.NOT_FOUND)
                 return
-            self._store(served_path, mtime_ns, size, body, mime, content_encoding)
-        else:
-            body = None  # streaming path below
+            size = st.st_size
+            mtime_ns = st.st_mtime_ns
+
+            if (cached_entry is not None
+                    and cached_entry[0] == mtime_ns
+                    and cached_entry[1] == size):
+                # Entry still matches the file on disk: reuse body + mime
+                # and refresh ``last_stat`` so the next request can take
+                # the fast path again.
+                _, _, body, mime, _, _ = cached_entry
+                self._cache[served_path] = (
+                    mtime_ns, size, body, mime, content_encoding, now)
+                self._cache.move_to_end(served_path)
+            elif size <= self._CACHE_MAX_BYTES_PER_FILE:
+                # First fill or stale entry — read once and store.
+                # Content-Type derives from the original path's extension,
+                # not the .br/.gz/.zst suffix — e.g. text/javascript for
+                # app.js.br.
+                mime = (mimetypes.guess_type(path.name)[0]
+                        or 'application/octet-stream').encode()
+                try:
+                    with open(served_path, 'rb') as f:
+                        body = f.read()
+                except OSError:
+                    await self._respond(send, HTTPStatus.NOT_FOUND)
+                    return
+                self._store(served_path, mtime_ns, size, body, mime,
+                            content_encoding, now)
+            else:
+                # Above the cache threshold — drop any stale entry and
+                # fall through to the streaming/pathsend branch.
+                self._cache.pop(served_path, None)
+                mime = (mimetypes.guess_type(path.name)[0]
+                        or 'application/octet-stream').encode()
+                body = None
 
         range_hdr = None
         for k, v in scope.get('headers', []):
@@ -266,21 +305,11 @@ class StaticFiles:
         finally:
             await asyncio.to_thread(fobj.close)
 
-    def _lookup(self, path: Path, mtime_ns: int, size: int) -> bytes | None:
-        entry = self._cache.get(path)
-        if entry is None:
-            return None
-        if entry[0] != mtime_ns or entry[1] != size:
-            # stale — drop and force refill
-            self._cache.pop(path, None)
-            return None
-        # mark as recently used
-        self._cache.move_to_end(path)
-        return entry[2]
-
     def _store(self, path: Path, mtime_ns: int, size: int,
-               body: bytes, mime: bytes, content_encoding: bytes):
-        self._cache[path] = (mtime_ns, size, body, mime, content_encoding)
+               body: bytes, mime: bytes, content_encoding: bytes,
+               last_stat: float):
+        self._cache[path] = (mtime_ns, size, body, mime, content_encoding,
+                             last_stat)
         self._cache.move_to_end(path)
         while len(self._cache) > self._CACHE_MAX_ENTRIES:
             self._cache.popitem(last=False)
