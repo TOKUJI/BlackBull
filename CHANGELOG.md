@@ -28,6 +28,44 @@ so the editable install's metadata catches up.
 
 ---
 
+## [0.31.1] — 2026-06-10
+
+**Sprint 33 static-path perf fixes reach PyPI.**  `v0.31.0` shipped
+on 2026-06-04 and predates Sprint 33's static-middleware work; the
+three landed PRs below were on master but never made it into a
+published wheel.  Sprint 34's release-management audit surfaced
+the gap (see `bench/sprint-logs/sprint-34.md`).  No new code in
+this release — just the cut from the correct git revision.
+
+### Changed
+
+- **Static cache documents `stat()`-based invalidation, not
+  permanent staleness** (PR #47, `docs(known-limitations): clarify
+  static cache is stat-invalidated`).
+- **Static cache hits avoid `mimetypes.guess_type()` regex on every
+  request** — mime is computed once at cache-store and held in the
+  cache entry; `stat()` is throttled by `BB_STATIC_STAT_TTL_S`
+  (default 1 s); response body + headers go out as a single
+  `writelines()` vectored write instead of two `write()` calls
+  (PR #48, `perf(static): cache mime + throttle stat + vectored
+  write on cache hit`).
+- **Static middleware hot path uses `os.path` instead of
+  `pathlib.Path`** — `_root` is a `str`; traversal check is a
+  single string-prefix comparison against the pre-computed
+  `<root>/` form; precompressed-sibling existence is
+  `os.path.isfile(target + suffix)`; `_root: Path` is kept as a
+  back-compat property (commit `7b63fbe`,
+  `perf(static): replace pathlib with os.path on the hot path`).
+
+### Notes
+
+- Public surface unchanged.  No deprecations; no migration needed.
+- `v0.32.0` (Sprint 33 close release) will fold in the
+  phase-trace API and Compression pass-through fast-path PRs
+  currently in review.
+
+---
+
 ## [0.31.0] — 2026-06-04
 
 **Sprint 32 close — HTTP/2 stream-info ASGI extensions.**  Moves
