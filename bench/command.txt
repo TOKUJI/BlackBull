@@ -1,0 +1,40 @@
+ts=$(date -Is)
+
+ps -eLo pid,comm --no-headers 2>/dev/null | \
+    awk '$2 ~ /^(wrk|gcannon|h2load)$/ {print $1, $2}' | \
+while read -r pid cmd; do
+
+    [ -d "/proc/$pid/fd" ] || continue
+
+    fd_count=$(find "/proc/$pid/fd" \
+        -mindepth 1 -maxdepth 1 2>/dev/null | wc -l)
+
+    socket_count=$(find "/proc/$pid/fd" \
+        -mindepth 1 -maxdepth 1 \
+        -lname 'socket:*' 2>/dev/null | wc -l)
+
+    printf '%s\t%s\t%s\t%s\n' \
+        "$pid" "$cmd" "$fd_count" "$socket_count"
+
+done | \
+awk -v ts="$ts" -v fw="$fw" -v prof="$prof" '
+BEGIN {
+    printf("{\"ts\":\"%s\",\"fw\":\"%s\",\"prof\":\"%s\",\"data\":[",
+           ts, fw, prof)
+}
+
+NR > 1 {
+    printf(",")
+}
+
+{
+    printf(
+        "{\"pid\":%s,\"cmd\":\"%s\",\"fd_count\":%s,\"socket_count\":%s}",
+        $1, $2, $3, $4
+    )
+}
+
+END {
+    print "]}"
+}
+' >> "${fw}-${prof}_FD.json"

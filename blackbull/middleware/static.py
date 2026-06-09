@@ -62,6 +62,12 @@ class StaticFiles:
         self._cache: OrderedDict[
             str, tuple[int, int, bytes, bytes, bytes, float]
         ] = OrderedDict()
+        # Per-path sibling-availability cache: target → {b'br': sibling_path, ...}.
+        # _negotiate calls os.path.isfile for each encoding suffix on every
+        # request; the file-existence answer is deterministic for the lifetime
+        # of the server, so we memoise it after the first lookup.
+        # Key = original request path string, Value = dict of available encodings.
+        self._sibling_cache: dict[str, dict[bytes, str]] = {}
 
     @property
     def _root(self) -> Path:
@@ -146,6 +152,10 @@ class StaticFiles:
         bodies have a different size than the original and serving a
         Range over an encoded variant is messy.  Matches what nginx
         does with ``gzip_static`` + Range.
+
+        Sibling file-existence is memoised in ``_sibling_cache`` so the
+        per-request ``os.path.isfile`` syscalls for ``.br`` / ``.zst`` /
+        ``.gz`` siblings happen only once per path.
         """
         accept = b''
         for k, v in scope.get('headers', []):
@@ -156,11 +166,20 @@ class StaticFiles:
                 accept = v.lower()
         if not accept:
             return target, b''
-        for enc, suffix in self._ENCODING_SUFFIXES:
-            if not self._client_accepts(accept, enc):
-                continue
-            sibling = target + suffix
-            if os.path.isfile(sibling):
+
+        # Fast path: cached sibling set for this target path.
+        siblings = self._sibling_cache.get(target)
+        if siblings is None:
+            siblings = {}
+            for enc, suffix in self._ENCODING_SUFFIXES:
+                sibling = target + suffix
+                if os.path.isfile(sibling):
+                    siblings[enc] = sibling
+            self._sibling_cache[target] = siblings
+
+        for enc, _suffix in self._ENCODING_SUFFIXES:
+            sibling = siblings.get(enc)
+            if sibling is not None and self._client_accepts(accept, enc):
                 return sibling, enc
         return target, b''
 
