@@ -290,7 +290,9 @@ class HTTP1Actor(Actor):
     async def run(self) -> None:
         """Keep-alive loop — process requests until connection closes."""
         import asyncio  # noqa: PLC0415
+        import time as _time  # noqa: PLC0415
         from ..env import get_settings as _get_settings  # noqa: PLC0415
+        from .access_log import PHASE_TRACE as _PHASE_TRACE  # noqa: PLC0415
         cfg = _get_settings()
         # Sprint 23: one rescheduled TimerHandle per connection drives
         # all phase deadlines (headers / body / keep-alive).  Created
@@ -300,8 +302,18 @@ class HTTP1Actor(Actor):
             self._deadline = ConnectionDeadline()
         dl = self._deadline
         send = SenderFactory.http1(self._writer)
+        # Sprint 33 investigation: capture loop_start at the very top
+        # of each iteration so we can quantify the between-request gap
+        # (dispatch_done(N) → loop_start(N+1)) on a keep-alive
+        # connection.  Plain locals — assigned to log_record.phases
+        # below once the record exists.
+        _loop_start_perf: float = 0.0
+        _loop_start_cpu: float = 0.0
         try:
             while True:
+                if _PHASE_TRACE:
+                    _loop_start_perf = _time.perf_counter()
+                    _loop_start_cpu = _time.process_time()
                 # Slowloris defence (RFC 9110 §15.5.9 — 408 Request Timeout).
                 # The peer has a bounded window to send the complete header
                 # block; if it elapses we close the connection with 408 so a
@@ -412,6 +424,10 @@ class HTTP1Actor(Actor):
                     await send(b'', HTTPStatus.CONTINUE)
 
                 log_record = _AccessLogRecord.from_scope(scope)
+                if _PHASE_TRACE:
+                    log_record.phases['loop_start'] = (
+                        _loop_start_perf, _loop_start_cpu)
+                log_record.mark('parsed')
                 scope['state']['access_log'] = log_record
                 # Inline access-log capture into the sender itself —
                 # avoids the per-event coroutine dispatch through a
@@ -768,6 +784,7 @@ class HTTP1Actor(Actor):
             except BaseException:
                 return False
             finally:
+                log_record.mark('dispatch_done')
                 _emit_access_log(log_record)
         else:
             _dispatcher = getattr(self._app, '_dispatcher', None)
@@ -791,6 +808,7 @@ class HTTP1Actor(Actor):
                     ))
                 await self._app(scope, detecting_receive, capturing_send)
             finally:
+                log_record.mark('dispatch_done')
                 _emit_access_log(log_record)
                 if (_dispatcher is not None
                         and scope.get('type') == 'http'
