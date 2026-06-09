@@ -28,6 +28,28 @@ so the editable install's metadata catches up.
 
 ---
 
+## [0.31.2] — 2026-06-10
+
+**README documentation links on PyPI now resolve.**  `v0.31.1`'s
+README used GitHub-relative paths (`docs/guide.md`, `CHANGELOG.md`,
+…) which render correctly on github.com but 404 under
+`pypi.org/project/blackbull/`.  Rewritten as absolute
+`https://github.com/TOKUJI/BlackBull/blob/master/<path>` URLs.
+
+### Fixed
+
+- Six relative documentation links in `README.md`
+  (`docs/about/conformance.md`, `KNOWN_LIMITATIONS.md`,
+  `docs/guide.md`, `docs/ActorDesign.md`, two refs to
+  `CHANGELOG.md`) now point at GitHub so PyPI's rendered
+  project page resolves them.
+
+### Notes
+
+- No code change; no API surface change; no migration needed.
+
+---
+
 ## [0.31.1] — 2026-06-10
 
 **Sprint 33 static-path perf fixes reach PyPI.**  `v0.31.0` shipped

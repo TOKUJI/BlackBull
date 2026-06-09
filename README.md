@@ -1,8 +1,8 @@
 # BlackBull
 
 > ⚠ **Early Alpha — API may break between MINOR versions.**
-> Conformance evidence: [`docs/about/conformance.md`](docs/about/conformance.md).
-> Things to know before adopting: [`KNOWN_LIMITATIONS.md`](KNOWN_LIMITATIONS.md).
+> Conformance evidence: [`docs/about/conformance.md`](https://github.com/TOKUJI/BlackBull/blob/master/docs/about/conformance.md).
+> Things to know before adopting: [`KNOWN_LIMITATIONS.md`](https://github.com/TOKUJI/BlackBull/blob/master/KNOWN_LIMITATIONS.md).
 
 **Async ASGI 3.0 framework** with a from-scratch HTTP/1.1 parser,
 HTTP/2 frame layer, and WebSocket codec — no `httptools`, no
@@ -148,15 +148,15 @@ instance, no manual `json.loads`.
 
 ## Documentation
 
-- **Guide**: [`docs/guide.md`](docs/guide.md)
-- **Architecture**: [`docs/ActorDesign.md`](docs/ActorDesign.md)
-- **Changelog**: [`CHANGELOG.md`](CHANGELOG.md)
+- **Guide**: [`docs/guide.md`](https://github.com/TOKUJI/BlackBull/blob/master/docs/guide.md)
+- **Architecture**: [`docs/ActorDesign.md`](https://github.com/TOKUJI/BlackBull/blob/master/docs/ActorDesign.md)
+- **Changelog**: [`CHANGELOG.md`](https://github.com/TOKUJI/BlackBull/blob/master/CHANGELOG.md)
 
 ## Versioning
 
 BlackBull uses [ZeroVer](https://0ver.org/) prior to a 1.0 commitment.
 `MINOR` advances at each sprint close; `PATCH` is for bug fixes and
-harness work between sprints.  See [`CHANGELOG.md`](CHANGELOG.md) for
+harness work between sprints.  See [`CHANGELOG.md`](https://github.com/TOKUJI/BlackBull/blob/master/CHANGELOG.md) for
 the full release history.
 
 ## License
