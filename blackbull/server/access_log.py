@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import time
 from dataclasses import dataclass, field
 
@@ -13,6 +14,13 @@ from ..asgi import ASGIEvent
 from ..event_aggregator import EventAggregator  # noqa: TC002
 
 _access_logger = logging.getLogger('blackbull.access')
+
+# Sprint 33 investigation knob: capture per-request phase wall + CPU
+# checkpoints into AccessLogRecord.phases.  Off by default — the
+# extra time.perf_counter() + time.process_time() calls would otherwise
+# show up in benchmark numbers.  Set ``BB_PHASE_TRACE=1`` to turn on
+# (intended for one-off perf investigation runs, not production).
+PHASE_TRACE: bool = os.environ.get('BB_PHASE_TRACE', '0') == '1'
 
 
 def emit_access_log(record: 'AccessLogRecord') -> None:
@@ -46,6 +54,29 @@ class AccessLogRecord:
     response_bytes: int       = 0
     close_code:     int | None = None
     _started_at:    float     = field(default_factory=time.monotonic, repr=False)
+    # name → (perf_counter_seconds, process_time_seconds).  Only written
+    # when PHASE_TRACE is on; empty otherwise.
+    phases: dict[str, tuple[float, float]] = field(default_factory=dict, repr=False)
+
+    def mark(self, name: str) -> None:
+        """Capture wall + CPU clocks for *name*.  No-op when phase
+        tracing is disabled, so callers don't need to guard themselves."""
+        if PHASE_TRACE:
+            self.phases[name] = (time.perf_counter(), time.process_time())
+
+    def phase_summary(self) -> str:
+        """Format the phase deltas as ``a→b=Wus|Cus a→b=...``."""
+        if not self.phases:
+            return ''
+        items = list(self.phases.items())
+        parts = []
+        for i in range(1, len(items)):
+            (an, (ap, ac)) = items[i - 1]
+            (bn, (bp, bc)) = items[i]
+            wall_us = int((bp - ap) * 1_000_000)
+            cpu_us = int((bc - ac) * 1_000_000)
+            parts.append(f'{an}→{bn}={wall_us}w/{cpu_us}c')
+        return ' '.join(parts)
 
     @classmethod
     def from_scope(cls, scope: dict) -> 'AccessLogRecord':
@@ -66,6 +97,15 @@ class AccessLogRecord:
                     f'"{self.method} {self.path} WS/{self.http_version}" '
                     f'101 close={self.close_code} '
                     f'{self.duration_ms():.0f}ms')
+        # Default to %.0f ms (existing access-log format).  When phase
+        # tracing is on, bump to %.3f and append the per-phase deltas —
+        # the investigation needs sub-millisecond resolution.
+        if PHASE_TRACE and self.phases:
+            return (f'{self.client_ip} '
+                    f'"{self.method} {self.path} HTTP/{self.http_version}" '
+                    f'{self.status} {self.response_bytes} '
+                    f'{self.duration_ms():.3f}ms  '
+                    f'[{self.phase_summary()}]')
         return (f'{self.client_ip} '
                 f'"{self.method} {self.path} HTTP/{self.http_version}" '
                 f'{self.status} {self.response_bytes} '
