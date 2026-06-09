@@ -2622,6 +2622,34 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="AccessLogRecord">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.access_log.AccessLogRecord.mark" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        mark
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.access_log.AccessLogRecord.phase_summary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        phase_summary
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
         
           <li class="md-nav__item">
@@ -3397,6 +3425,34 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="AccessLogRecord">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.access_log.AccessLogRecord.mark" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        mark
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.access_log.AccessLogRecord.phase_summary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        phase_summary
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
         
           <li class="md-nav__item">
@@ -3516,6 +3572,43 @@ Emitted as one INFO line on 'blackbull.access' after the response completes.</p>
 
 
 
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.server.access_log.AccessLogRecord.mark" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">mark</span><span class="p">(</span><span class="n">name</span><span class="p">)</span></code>
+
+<a href="#blackbull.server.access_log.AccessLogRecord.mark" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Capture wall + CPU clocks for <em>name</em>.  No-op when phase
+tracing is disabled, so callers don't need to guard themselves.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.server.access_log.AccessLogRecord.phase_summary" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">phase_summary</span><span class="p">()</span></code>
+
+<a href="#blackbull.server.access_log.AccessLogRecord.phase_summary" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Format the phase deltas as <code>a→b=Wus|Cus a→b=...</code>.</p>
+
+
+    </div>
+
+</div>
 
 
 
