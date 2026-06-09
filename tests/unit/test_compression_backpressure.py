@@ -209,3 +209,96 @@ async def test_small_body_under_threshold_ignores_inflight_cap():
     res = await _run_through(mw, small, accept=b'gzip')
     # Compression still happens — it's on the event loop, no executor offload.
     assert res['headers'].get(b'content-encoding') == b'gzip'
+
+
+# ---------------------------------------------------------------------------
+# Sprint 33 — pass-through fast path + Accept-Encoding selection cache
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_passthrough_skips_event_reparsing(monkeypatch):
+    """When the inner handler already sets ``Content-Encoding`` (e.g.
+    StaticFiles serving a precompressed sibling), the middleware's
+    ``intercepting_send`` must forward subsequent body events verbatim —
+    no second ``parse_response_event`` call.
+
+    This is what gives the static-file cache-hit path its Sprint 33 win.
+    Without the fast path, ``parse_response_event`` runs once per ASGI
+    event; the precompressed-sibling response is 2 events so the cost
+    doubles for no useful work."""
+    from blackbull.middleware import compression as _compression
+
+    calls: list[bytes] = []
+    real_parse = _compression.parse_response_event
+
+    def counting_parse(event):
+        calls.append(event.get('type', b''))
+        return real_parse(event)
+
+    monkeypatch.setattr(_compression, 'parse_response_event', counting_parse)
+
+    async def already_encoded_handler(scope, receive, send):
+        await send({
+            'type': 'http.response.start',
+            'status': 200,
+            'headers': [
+                (b'content-type', b'text/javascript'),
+                (b'content-encoding', b'br'),
+                (b'content-length', b'19'),
+            ],
+        })
+        await send({'type': 'http.response.body',
+                    'body': b'BR-COMPRESSED-BYTES', 'more_body': False})
+
+    events: list[dict] = []
+
+    async def out_send(event):
+        events.append(event)
+
+    async def call_next(scope, receive, send):
+        await already_encoded_handler(scope, receive, send)
+
+    mw = Compression()
+    await mw(_scope(b'br, gzip'), _noop_receive, out_send, call_next)
+
+    # The start event must be parsed (we need to inspect Content-Encoding
+    # to decide to skip).  The body event must NOT be parsed — that's the
+    # fast path.
+    assert 'http.response.start' in calls, \
+        f'expected start to be parsed; got {calls!r}'
+    assert 'http.response.body' not in calls, \
+        f'fast path bypassed: body event re-parsed; got {calls!r}'
+
+    # Sanity: response still round-trips correctly.
+    starts = [e for e in events if e['type'] == 'http.response.start']
+    bodies = [e for e in events if e['type'] == 'http.response.body']
+    assert len(starts) == 1 and len(bodies) == 1
+    assert bodies[0]['body'] == b'BR-COMPRESSED-BYTES'
+
+
+@pytest.mark.asyncio
+async def test_codec_selection_cache_returns_same_result_on_repeat():
+    """Same ``Accept-Encoding`` header → same selection.  The cache must
+    not affect correctness; it just avoids re-parsing q-values on every
+    request when clients send a constant header (browsers, benchmarks)."""
+    mw = Compression()
+    header = b'br;q=1, gzip;q=0.8'
+    first = mw._select_codec(header)
+    second = mw._select_codec(header)
+    third = mw._select_codec(header)
+    assert first == second == third
+    assert first is not None and first[0] == 'br'
+    # Different header → different cache entry (still correct).
+    gzip_only = mw._select_codec(b'gzip')
+    assert gzip_only is not None and gzip_only[0] == 'gzip'
+
+
+@pytest.mark.asyncio
+async def test_codec_selection_cache_bounded():
+    """The cache must not grow unboundedly under hostile-peer load that
+    rotates Accept-Encoding header values."""
+    mw = Compression()
+    for i in range(300):
+        mw._select_codec(f'gzip;q=0.{i:03d}'.encode())
+    assert len(mw._codec_cache) <= 256, \
+        f'cache exceeded bound: {len(mw._codec_cache)}'

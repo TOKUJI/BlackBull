@@ -20,9 +20,14 @@ def _normalize_send(inner_send):
     would otherwise need an ``isinstance`` guard for every response type.
     This wrapper intercepts ``Response`` objects and emits the two ASGI events
     (``http.response.start`` + ``http.response.body``) that ``inner_send``
-    expects, forwarding all other arguments unchanged.
+    expects, forwarding all other event dicts unchanged.
+
+    ASGI ``send`` is always called with a single positional event — no
+    ``*args/**kwargs`` form needs to be preserved here, and dropping it
+    shaves a per-event call-frame setup that showed in the Sprint 33
+    py-spy profile on the static path.
     """
-    async def normalized(event, *args, **kwargs):
+    async def normalized(event):
         if isinstance(event, Response):
             await inner_send({
                 'type': ASGIEvent.HTTP_RESPONSE_START,
@@ -35,7 +40,7 @@ def _normalize_send(inner_send):
                 'more_body': False,
             })
         else:
-            await inner_send(event, *args, **kwargs)
+            await inner_send(event)
 
     return normalized
 
