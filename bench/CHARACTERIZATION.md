@@ -339,23 +339,6 @@ Cross-sprint coverage:
   executor-inflight backpressure in `Compression`.  EC2 c7i.2xlarge
   cross-check confirms collapse-to-zero is gone; ~30-50%
   between-runs degradation under c≥4096 remains as Sprint 30 anchor.
-- **Sprint 33**: Static-file path optimisation — replaced `pathlib.Path`
-  with `os.path` on the hot path (PR #49), vectored cache-hit write
-  (PR #48), `BB_PHASE_TRACE` per-request phase-timing API (PR #51).
-  HttpArena static-profile baseline established; synthetic-dataset
-  artefact identified and corrected in Sprint 34.
-- **Sprint 34**: Root-cause investigation of BB-vs-FastAPI static gap.
-  Seven controlled experiments (Cells A–G) on c7i.8xlarge narrowed the
-  gap to a path-specific CPU bottleneck: BB is 2.5–6.4× faster on
-  `baseline` and 2.3–3.0× slower on `static` (real ~17 KB compressed
-  payloads).  Synthetic-dataset inflate confirmed and retired.  Cell G
-  apples-to-apples framework installed as the regression-test posture.
-- **Sprint 35**: py-spy profiling identified `os.path.realpath` (19%
-  of CPU) as the single largest bottleneck on the static hot path.
-  Candidate B (Accept-Encoding sibling-availability cache, `b47c92e`)
-  implemented and Cell G-measured — no improvement on the BB/FA ratio.
-  Candidate A (`realpath` → `abspath`) deferred to Sprint 36 for
-  security audit.
 
 ## File layout (target)
 
