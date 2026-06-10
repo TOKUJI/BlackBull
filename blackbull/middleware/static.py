@@ -11,6 +11,32 @@ from blackbull.env import get_settings, Environment
 from blackbull.asgi import ASGIEvent
 
 
+# Common web-asset MIME types that may be missing from the host's
+# ``/etc/mime.types`` file.  Without this registration, slim container
+# images (e.g. ``python:3.13-slim`` ships no mime-support package) make
+# ``mimetypes.guess_type('foo.woff2')`` return ``None``; StaticFiles
+# falls back to ``application/octet-stream``; downstream Compression
+# middleware then runs brotli on already-compressed font/image bytes —
+# Sprint 35 phase-trace traced this to a 30-60 ms per-request CPU tail
+# on HttpArena's ``regular.woff2`` and ``bold.woff2`` files.
+#
+# ``mimetypes.add_type`` is idempotent, runs once at module import, and
+# integrates with the standard machinery so ``mimetypes.guess_type``
+# returns the right answer everywhere — including for callers other
+# than StaticFiles.  Keep this list conservative: only entries that are
+# both (a) commonly served by static-files mounts and (b) standardised
+# IANA / WHATWG types.
+for _ext, _mime in (
+    ('.woff',  'font/woff'),
+    ('.woff2', 'font/woff2'),
+    ('.webp',  'image/webp'),
+    ('.avif',  'image/avif'),
+    ('.wasm',  'application/wasm'),
+):
+    mimetypes.add_type(_mime, _ext)
+del _ext, _mime
+
+
 class StaticFiles:
     # Files at or below this size are read once and held in memory.
     # Static assets in the wild (CSS/JS/manifest/small images) cluster
@@ -62,6 +88,12 @@ class StaticFiles:
         self._cache: OrderedDict[
             str, tuple[int, int, bytes, bytes, bytes, float]
         ] = OrderedDict()
+        # Per-path sibling-availability cache: target → {b'br': sibling_path, ...}.
+        # _negotiate calls os.path.isfile for each encoding suffix on every
+        # request; the file-existence answer is deterministic for the lifetime
+        # of the server, so we memoise it after the first lookup.
+        # Key = original request path string, Value = dict of available encodings.
+        self._sibling_cache: dict[str, dict[bytes, str]] = {}
 
     @property
     def _root(self) -> Path:
@@ -146,6 +178,10 @@ class StaticFiles:
         bodies have a different size than the original and serving a
         Range over an encoded variant is messy.  Matches what nginx
         does with ``gzip_static`` + Range.
+
+        Sibling file-existence is memoised in ``_sibling_cache`` so the
+        per-request ``os.path.isfile`` syscalls for ``.br`` / ``.zst`` /
+        ``.gz`` siblings happen only once per path.
         """
         accept = b''
         for k, v in scope.get('headers', []):
@@ -156,11 +192,20 @@ class StaticFiles:
                 accept = v.lower()
         if not accept:
             return target, b''
-        for enc, suffix in self._ENCODING_SUFFIXES:
-            if not self._client_accepts(accept, enc):
-                continue
-            sibling = target + suffix
-            if os.path.isfile(sibling):
+
+        # Fast path: cached sibling set for this target path.
+        siblings = self._sibling_cache.get(target)
+        if siblings is None:
+            siblings = {}
+            for enc, suffix in self._ENCODING_SUFFIXES:
+                sibling = target + suffix
+                if os.path.isfile(sibling):
+                    siblings[enc] = sibling
+            self._sibling_cache[target] = siblings
+
+        for enc, _suffix in self._ENCODING_SUFFIXES:
+            sibling = siblings.get(enc)
+            if sibling is not None and self._client_accepts(accept, enc):
                 return sibling, enc
         return target, b''
 

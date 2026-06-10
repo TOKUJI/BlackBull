@@ -366,12 +366,35 @@ class HTTP1Sender(BaseSender):
                 self._expect_trailers = bool(body.get('trailers', False))
                 if self._log_record is not None:
                     self._log_record.status = body.get('status', '-')
+                    # Sprint 35 phase-trace: capture response headers
+                    # inline (same pattern as response_bytes capture) so
+                    # we can correlate per-phase µs against negotiated
+                    # Content-Type / Content-Encoding without re-walking
+                    # the headers list elsewhere.  No-op when PHASE_TRACE
+                    # is off because the AccessLogRecord fields are
+                    # already empty defaults.
+                    self._log_record.mark('start_arm_in')
+                    for hk, hv in body.get('headers', []):
+                        if isinstance(hk, bytes):
+                            hkl = hk.lower()
+                            if hkl == b'content-type':
+                                self._log_record.resp_content_type = hv
+                            elif hkl == b'content-encoding':
+                                self._log_record.resp_content_encoding = hv
+                    self._log_record.mark('start_arm_out')
 
             case {'type': ASGIEvent.HTTP_RESPONSE_BODY}:
                 content = body.get('body', b'')
                 more_body = body.get('more_body', False)
                 if self._log_record is not None and content:
                     self._log_record.response_bytes += len(content)
+                # Sprint 35 phase trace: bracket the actual transport
+                # write for the last body event so we can see whether the
+                # 30-60 ms woff2 tail lives in middleware/handler work
+                # before the write (``start_arm_out → body_arm_in``) or
+                # inside the write + drain (``body_arm_in → body_arm_out``).
+                if self._log_record is not None and not more_body:
+                    self._log_record.mark('body_arm_in')
                 if self._buffered_status is not None:
                     assert self._buffered_headers is not None
                     await self._flush(self._buffered_status, self._buffered_headers, content, more_body)
@@ -380,6 +403,8 @@ class HTTP1Sender(BaseSender):
                 else:
                     if self._head_mode:
                         # already wrote headers; HEAD response carries no body
+                        if self._log_record is not None and not more_body:
+                            self._log_record.mark('body_arm_out')
                         return
                     if self._chunked:
                         if content:
@@ -391,6 +416,8 @@ class HTTP1Sender(BaseSender):
                             await self._write(b'0\r\n\r\n')
                     elif content:
                         await self._write(content)
+                if self._log_record is not None and not more_body:
+                    self._log_record.mark('body_arm_out')
 
             case {'type': ASGIEvent.HTTP_RESPONSE_TRAILERS}:
                 await self._write(b'0\r\n')

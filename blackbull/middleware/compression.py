@@ -17,10 +17,23 @@ _SERVER_PREFERENCE = ['br', 'zstd', 'gzip']  # server-side priority order
 
 # Content-Type prefixes whose payloads are already compressed or binary and
 # should not be re-compressed (compressing them wastes CPU with no size gain).
+#
+# ``font/woff`` and ``font/woff2`` are intentionally listed but ``font/``
+# is not blanket-skipped: ``font/ttf``, ``font/otf``, and ``font/sfnt`` are
+# uncompressed font tables that DO benefit from gzip/brotli, so they stay
+# off this list and run through the codec like any other text-shaped
+# payload.  WOFF wraps zlib internally; WOFF2 wraps brotli internally —
+# re-compressing them is the worst case (high-entropy input at default
+# quality 11) and contributes a measurable per-request CPU tail in
+# Sprint 35's HttpArena static-rotate probe.
 _SKIP_CONTENT_TYPES = (
     'image/',
     'audio/',
     'video/',
+    'font/woff',
+    'font/woff2',
+    'application/font-woff',
+    'application/font-woff2',
     'application/zip',
     'application/gzip',
     'application/x-gzip',

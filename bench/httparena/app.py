@@ -74,7 +74,14 @@ app = BlackBull()
 # BlackBull's Compression middleware picks br > zstd > gzip from the codecs
 # the container has installed.  Bodies below min_size (default 100 bytes)
 # pass through, so /baseline11 + /pipeline aren't affected.
-app.use(Compression())
+#
+# Sprint 35 probe toggle: BB_NO_COMPRESSION=1 skips registering Compression
+# entirely.  Used to isolate the cost of on-the-fly brotli encoding for
+# already-compressed payloads (e.g. .woff2 fonts) that lack a precompressed
+# sibling.  NOT for benchmark publication — disabling a default-on feature
+# violates the apples-to-apples rule.
+if os.environ.get('BB_NO_COMPRESSION', '0') != '1':
+    app.use(Compression())
 
 # HttpArena's static profile expects /static/<asset> to serve files from
 # /data/static/.  app.static() registers a StaticFiles middleware with the
@@ -236,6 +243,25 @@ if __name__ == '__main__':
     args = _parse_args()
     # Match peer benchmark posture: access log off (apples-to-apples).
     os.environ.setdefault('BB_ACCESS_LOG', '0')
+    # Sprint 35 phase-trace probe needs the access logger to actually
+    # emit at INFO so AccessLogRecord.format() lines (with the
+    # ``[loop_start→parsed=Xw/Yc ...]`` trailer when BB_PHASE_TRACE=1)
+    # reach stderr where ``docker logs`` can capture them.  BlackBull's
+    # default level inheritance leaves ``blackbull.access`` at WARNING
+    # (effective), so emit_access_log() is gated off even when
+    # cfg.access_log is True.  Wire a dedicated stderr handler with
+    # propagate=False so the access stream is self-contained and
+    # doesn't double-emit through the QueueHandler on the parent
+    # 'blackbull' logger.
+    if os.environ.get('BB_ACCESS_LOG') == '1':
+        import logging as _bb_logging
+        _bb_access = _bb_logging.getLogger('blackbull.access')
+        _bb_access.setLevel(_bb_logging.INFO)
+        _h = _bb_logging.StreamHandler(sys.stderr)
+        _h.setLevel(_bb_logging.INFO)
+        _h.setFormatter(_bb_logging.Formatter('[ACCESS] %(message)s'))
+        _bb_access.addHandler(_h)
+        _bb_access.propagate = False
     if args.cert and args.key:
         app.run(port=args.port, certfile=args.cert, keyfile=args.key,
                 workers=args.workers)
