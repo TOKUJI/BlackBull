@@ -11,6 +11,32 @@ from blackbull.env import get_settings, Environment
 from blackbull.asgi import ASGIEvent
 
 
+# Common web-asset MIME types that may be missing from the host's
+# ``/etc/mime.types`` file.  Without this registration, slim container
+# images (e.g. ``python:3.13-slim`` ships no mime-support package) make
+# ``mimetypes.guess_type('foo.woff2')`` return ``None``; StaticFiles
+# falls back to ``application/octet-stream``; downstream Compression
+# middleware then runs brotli on already-compressed font/image bytes —
+# Sprint 35 phase-trace traced this to a 30-60 ms per-request CPU tail
+# on HttpArena's ``regular.woff2`` and ``bold.woff2`` files.
+#
+# ``mimetypes.add_type`` is idempotent, runs once at module import, and
+# integrates with the standard machinery so ``mimetypes.guess_type``
+# returns the right answer everywhere — including for callers other
+# than StaticFiles.  Keep this list conservative: only entries that are
+# both (a) commonly served by static-files mounts and (b) standardised
+# IANA / WHATWG types.
+for _ext, _mime in (
+    ('.woff',  'font/woff'),
+    ('.woff2', 'font/woff2'),
+    ('.webp',  'image/webp'),
+    ('.avif',  'image/avif'),
+    ('.wasm',  'application/wasm'),
+):
+    mimetypes.add_type(_mime, _ext)
+del _ext, _mime
+
+
 class StaticFiles:
     # Files at or below this size are read once and held in memory.
     # Static assets in the wild (CSS/JS/manifest/small images) cluster

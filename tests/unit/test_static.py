@@ -112,6 +112,34 @@ class TestStaticFilesBasic:
             f'Expected text/html; got {headers.get(b"content-type")!r}'
         )
 
+    @pytest.mark.parametrize('filename,expected_ct', [
+        ('asset.woff',  b'font/woff'),
+        ('asset.woff2', b'font/woff2'),
+        ('asset.webp',  b'image/webp'),
+        ('asset.avif',  b'image/avif'),
+        ('asset.wasm',  b'application/wasm'),
+    ])
+    async def test_content_type_web_assets_independent_of_system_db(
+            self, static_dir, filename, expected_ct):
+        """Common web asset MIME types must resolve correctly even when
+        the host's ``/etc/mime.types`` is missing or sparse (e.g.
+        ``python:3.13-slim`` containers).  Sprint 35 phase-trace traced
+        a 30-60 ms per-request CPU tail on woff2 files to this case:
+        no mime entry → ``application/octet-stream`` Content-Type →
+        Compression middleware brotli-encoded already-compressed bytes.
+        ``blackbull.middleware.static`` registers these at import to
+        keep the deployed Content-Type accurate without forcing
+        operators to install ``mime-support``."""
+        from blackbull.middleware.static import StaticFiles
+        (static_dir / filename).write_bytes(b'opaque-bytes' * 200)
+        app = StaticFiles(directory=str(static_dir))
+        start, _ = await _collect(app, _scope(path=f'/{filename}'))
+        headers = {k.lower(): v for k, v in start.get('headers', [])}
+        assert headers.get(b'content-type') == expected_ct, (
+            f'{filename}: expected {expected_ct!r}, '
+            f'got {headers.get(b"content-type")!r}'
+        )
+
     async def test_content_length_header_present(self, static_dir):
         """Response must include Content-Length matching the file size."""
         from blackbull.middleware.static import StaticFiles
