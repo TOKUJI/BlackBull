@@ -53,6 +53,15 @@ class AccessLogRecord:
     status:         int | str = '-'
     response_bytes: int       = 0
     close_code:     int | None = None
+    # Sprint 35 phase-trace diagnostic — request/response headers we want
+    # to correlate against per-phase timing.  Empty bytes are interpreted
+    # as "header absent" in ``format()``.  Populated only when
+    # ``PHASE_TRACE=1`` so production responses don't pay the bytes
+    # capture per request.
+    req_accept_encoding:   bytes = b''
+    req_range:             bytes = b''
+    resp_content_type:     bytes = b''
+    resp_content_encoding: bytes = b''
     _started_at:    float     = field(default_factory=time.monotonic, repr=False)
     # name → (perf_counter_seconds, process_time_seconds).  Only written
     # when PHASE_TRACE is on; empty otherwise.
@@ -81,11 +90,23 @@ class AccessLogRecord:
     @classmethod
     def from_scope(cls, scope: dict) -> 'AccessLogRecord':
         client = scope.get('client') or ['-']
+        ae = b''
+        rng = b''
+        if PHASE_TRACE:
+            for k, v in scope.get('headers', []):
+                if isinstance(k, bytes):
+                    kl = k.lower()
+                    if kl == b'accept-encoding':
+                        ae = v
+                    elif kl == b'range':
+                        rng = v
         return cls(
-            client_ip    = str(client[0]),
-            method       = scope.get('method', '-'),
-            path         = scope.get('path', '-'),
-            http_version = scope.get('http_version', '-'),
+            client_ip            = str(client[0]),
+            method               = scope.get('method', '-'),
+            path                 = scope.get('path', '-'),
+            http_version         = scope.get('http_version', '-'),
+            req_accept_encoding  = ae,
+            req_range            = rng,
         )
 
     def duration_ms(self) -> float:
@@ -98,13 +119,21 @@ class AccessLogRecord:
                     f'101 close={self.close_code} '
                     f'{self.duration_ms():.0f}ms')
         # Default to %.0f ms (existing access-log format).  When phase
-        # tracing is on, bump to %.3f and append the per-phase deltas —
-        # the investigation needs sub-millisecond resolution.
+        # tracing is on, bump to %.3f and append the per-phase deltas
+        # plus request / response headers we want to correlate against
+        # per-phase timing — the investigation needs sub-millisecond
+        # resolution and header-level visibility into negotiation.
         if PHASE_TRACE and self.phases:
+            def _h(b: bytes) -> str:
+                return b.decode('ascii', errors='replace') if b else '-'
             return (f'{self.client_ip} '
                     f'"{self.method} {self.path} HTTP/{self.http_version}" '
                     f'{self.status} {self.response_bytes} '
                     f'{self.duration_ms():.3f}ms  '
+                    f'req[ae={_h(self.req_accept_encoding)} '
+                    f'range={_h(self.req_range)}] '
+                    f'resp[ct={_h(self.resp_content_type)} '
+                    f'ce={_h(self.resp_content_encoding)}] '
                     f'[{self.phase_summary()}]')
         return (f'{self.client_ip} '
                 f'"{self.method} {self.path} HTTP/{self.http_version}" '
@@ -144,13 +173,49 @@ def _make_disconnect_detecting_receive(receive, scope: dict, aggregator: 'EventA
 
 
 def _make_capturing_send(send, record: AccessLogRecord):
-    """Wrap *send* to update *record* with status and response size as events flow through."""
+    """Wrap *send* to update *record* with status and response size as events flow through.
+
+    When ``BB_PHASE_TRACE=1``, also captures four extra checkpoints around
+    the outer send call:
+      - ``pre_start_send`` / ``post_start_send`` — bracket the
+        ``http.response.start`` write (so ``parsed → pre_start_send``
+        attributes to handler + on-entry middleware work, and
+        ``pre_start_send → post_start_send`` attributes to the sender's
+        header serialise + drain).
+      - ``pre_body_send`` / ``post_body_send`` — bracket the last
+        ``http.response.body`` write (``more_body=False``).  For chunked
+        streaming paths only the final chunk is marked.
+
+    The marks are dict-keyed, so they're free-noop when PHASE_TRACE is off
+    (``record.mark()`` returns immediately).
+    """
     async def capturing_send(event, *args, **kwargs):
         if isinstance(event, dict):
-            if event.get('type') == ASGIEvent.HTTP_RESPONSE_START:
+            ev_type = event.get('type')
+            if ev_type == ASGIEvent.HTTP_RESPONSE_START:
                 record.status = event.get('status', '-')
-            elif event.get('type') == ASGIEvent.HTTP_RESPONSE_BODY:
+                if PHASE_TRACE:
+                    for k, v in event.get('headers', []):
+                        if isinstance(k, bytes):
+                            kl = k.lower()
+                            if kl == b'content-type':
+                                record.resp_content_type = v
+                            elif kl == b'content-encoding':
+                                record.resp_content_encoding = v
+                record.mark('pre_start_send')
+                await send(event, *args, **kwargs)
+                record.mark('post_start_send')
+                return
+            elif ev_type == ASGIEvent.HTTP_RESPONSE_BODY:
                 record.response_bytes += len(event.get('body', b''))
+                # Only mark the final chunk so the wall delta lines up with
+                # ``dispatch_done`` for both the cache-hit single-body and
+                # the streaming/pathsend last-chunk path.
+                if not event.get('more_body', False):
+                    record.mark('pre_body_send')
+                    await send(event, *args, **kwargs)
+                    record.mark('post_body_send')
+                    return
         elif isinstance(event, bytes) and args:
             # _wrap_send calls send(body, status, headers) for simplified handlers
             record.status = int(args[0])
