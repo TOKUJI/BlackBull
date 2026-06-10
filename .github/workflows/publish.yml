@@ -87,3 +87,60 @@ jobs:
         uses: pypa/gh-action-pypi-publish@v1.14.0
         # No ``with: password:`` — Trusted Publishing exchanges the
         # GitHub OIDC token for a short-lived PyPI token automatically.
+
+  release:
+    name: Create GitHub Release
+    # Only run when the PyPI publish job succeeded.  If publish failed
+    # (e.g. version already exists on PyPI, OIDC token rejected, build
+    # divergence), don't create a Release pointing at a tag whose
+    # wheels never shipped.
+    needs: publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    # The default workflow ``permissions: contents: read`` at the top
+    # of this file is read-only for least-privilege.  Creating a
+    # Release writes to the repository, so locally upgrade contents
+    # to ``write`` for this job only.
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        # Needs CHANGELOG.md for the release notes; default fetch-depth
+        # of 1 is enough since we read the file at HEAD of the tag.
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10   # v6.0.3
+
+      - name: Extract changelog section for this tag
+        # Pull the ``## [x.y.z]`` block out of CHANGELOG.md so the
+        # GitHub Release notes mirror the changelog without manual
+        # copy-paste.  ``GITHUB_REF_NAME`` is the tag name (e.g.
+        # ``v0.31.3``); the changelog headings drop the leading ``v``.
+        # If the changelog has no matching section, the notes file
+        # will be empty — ``gh release create`` handles that gracefully
+        # by creating a release with no body, which is still better
+        # than failing the release publication.
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          awk -v v="$version" '
+            $0 ~ "^## \\[" v "\\]" { in_section=1; next }
+            in_section && /^## \[/ { exit }
+            in_section
+          ' CHANGELOG.md > /tmp/notes.md
+          echo "--- extracted notes (first 40 lines) ---"
+          head -40 /tmp/notes.md
+
+      - name: Create GitHub Release
+        # ``gh`` is preinstalled on ubuntu-latest runners; we just need
+        # to give it a token with ``contents: write`` (granted above).
+        # Title format intentionally minimal — just the tag.  Past
+        # releases used descriptive titles ("v0.31.0 — Sprint 32 close
+        # …"); those don't survive automation cleanly.  Use
+        # ``gh release edit`` after the fact if a descriptive title is
+        # wanted for a specific release.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --title "$GITHUB_REF_NAME" \
+            --notes-file /tmp/notes.md \
+            --verify-tag
