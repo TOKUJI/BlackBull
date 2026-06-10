@@ -28,6 +28,60 @@ so the editable install's metadata catches up.
 
 ---
 
+## [0.31.3] — 2026-06-10
+
+**Static-path perf fix.**  `StaticFiles` + `Compression` middleware
+chain on slim container images (`python:3.13-slim`, distroless, etc.)
+no longer runs inline brotli at default quality 11 on already-
+compressed font payloads.  Slim images ship no system MIME database,
+so `mimetypes.guess_type('foo.woff2')` returned `None`,
+`StaticFiles` fell back to `application/octet-stream`, and
+`Compression`'s skip list did not recognise the type — brotli ran on
+~22 KB WOFF2 bodies, blocking the worker for tens of ms per request.
+
+### Changed
+
+- [`blackbull/middleware/static.py`](blackbull/middleware/static.py)
+  registers common web-asset MIME types at module import via
+  `mimetypes.add_type`: `font/woff`, `font/woff2`, `image/webp`,
+  `image/avif`, `application/wasm`.  Idempotent; benefits every
+  `mimetypes.guess_type` caller — not just `StaticFiles`.
+- [`blackbull/middleware/compression.py`](blackbull/middleware/compression.py)
+  adds `font/woff`, `font/woff2`, `application/font-woff`,
+  `application/font-woff2` to `_SKIP_CONTENT_TYPES`.  Belt-and-braces
+  — the mime fix on its own resolves the deployed case, but the skip
+  list keeps the middleware honest if a caller hand-sets a font
+  Content-Type without the registration happening first.  `font/ttf`
+  / `font/otf` / `font/sfnt` are intentionally NOT skipped — those
+  are uncompressed font tables that do benefit from gzip / brotli.
+
+### Added
+
+- Phase-trace observability (`BB_PHASE_TRACE=1`) gains finer marks
+  inline in the HTTP/1 sender (`start_arm_in`, `start_arm_out`,
+  `body_arm_in`, `body_arm_out`) and new `AccessLogRecord` fields for
+  request `Accept-Encoding` / `Range` and response `Content-Type` /
+  `Content-Encoding`.  Each access-log line gains a
+  `req[ae=… range=…] resp[ct=… ce=…]` trailer when phase trace is
+  on.  Off by default; no per-request overhead in production.
+- `publish.yml` now auto-creates a GitHub Release after the PyPI
+  publish job succeeds, sourcing release notes from the matching
+  `## [x.y.z]` section in this file.  v0.31.3 is the first release
+  exercising this — the Release should appear at
+  `https://github.com/TOKUJI/BlackBull/releases/tag/v0.31.3`
+  automatically.
+
+### Notes
+
+- No public API change.  No migration needed.
+- The static-path perf characteristics improve materially when
+  serving WOFF / WOFF2 fonts behind `Compression` middleware on slim
+  container images; deployments on hosts with a populated
+  `/etc/mime.types` (Debian with `mime-support`, Ubuntu, macOS) were
+  already fine and see no change.
+
+---
+
 ## [0.31.2] — 2026-06-10
 
 **README documentation links on PyPI now resolve.**  `v0.31.1`'s
