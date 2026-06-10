@@ -421,6 +421,86 @@ class TestHTTPCompression:
         body_event = next(e for e in events if e.get('type') == 'http.response.body')
         assert body_event['body'] == body, 'Body must be unmodified for already-compressed type'
 
+    @pytest.mark.parametrize('content_type', [
+        b'font/woff',
+        b'font/woff2',
+        b'application/font-woff',
+        b'application/font-woff2',
+    ])
+    async def test_woff_font_types_not_recompressed(self, content_type):
+        """WOFF (zlib-wrapped) and WOFF2 (brotli-wrapped) are pre-compressed —
+        re-running brotli on them is high-entropy worst-case CPU work for ~zero
+        size gain.  Sprint 35 phase trace traced a 30-60 ms per-request CPU tail
+        on HttpArena's regular.woff2 / bold.woff2 to this case.  ``font/ttf``
+        and ``font/otf`` stay OFF the skip list — those are uncompressed font
+        tables and DO benefit from gzip/brotli."""
+        body = b'wOFF' + b'\x01' * 2000  # opaque high-entropy bytes
+
+        async def handler(_scope, _receive, send):
+            await send({'type': 'http.response.start', 'status': 200,
+                        'headers': [(b'content-type', content_type)]})
+            await send({'type': 'http.response.body', 'body': body, 'more_body': False})
+
+        scope = {
+            'type': 'http',
+            'headers': Headers([(b'accept-encoding', b'br, gzip')]),
+        }
+        events = []
+
+        async def capture_send(event):
+            events.append(event)
+
+        await compress(scope, AsyncMock(return_value={'type': 'http.disconnect'}),
+                       capture_send, call_next=handler)
+
+        start = next(e for e in events if e.get('type') == 'http.response.start')
+        header_dict = {k.lower(): v for k, v in start.get('headers', [])}
+        assert b'content-encoding' not in header_dict, (
+            f'{content_type!r} must not have Content-Encoding; '
+            f'headers: {header_dict}'
+        )
+        body_event = next(e for e in events if e.get('type') == 'http.response.body')
+        assert body_event['body'] == body, (
+            f'{content_type!r} body must be unmodified; got {body_event["body"]!r}'
+        )
+
+    @pytest.mark.parametrize('content_type', [b'font/ttf', b'font/otf', b'font/sfnt'])
+    async def test_uncompressed_font_types_are_compressed(self, content_type):
+        """Uncompressed font tables (TTF, OTF, SFNT) must still go through the
+        codec — they are NOT pre-compressed and benefit from gzip/brotli.
+        Regression guard against an over-eager ``font/`` blanket skip."""
+        body = b'\x00\x01\x00\x00' + b'Hello, world!\n' * 200  # easily compressible
+
+        async def handler(_scope, _receive, send):
+            await send({'type': 'http.response.start', 'status': 200,
+                        'headers': [(b'content-type', content_type)]})
+            await send({'type': 'http.response.body', 'body': body, 'more_body': False})
+
+        scope = {
+            'type': 'http',
+            'headers': Headers([(b'accept-encoding', b'gzip')]),
+        }
+        events = []
+
+        async def capture_send(event):
+            events.append(event)
+
+        await compress(scope, AsyncMock(return_value={'type': 'http.disconnect'}),
+                       capture_send, call_next=handler)
+
+        start = next(e for e in events if e.get('type') == 'http.response.start')
+        header_dict = {k.lower(): v for k, v in start.get('headers', [])}
+        assert header_dict.get(b'content-encoding') == b'gzip', (
+            f'{content_type!r} must be gzip-encoded; headers: {header_dict}'
+        )
+        body_event = next(e for e in events if e.get('type') == 'http.response.body')
+        assert body_event['body'] != body, (
+            f'{content_type!r} body must differ from raw after compression'
+        )
+        assert len(body_event['body']) < len(body), (
+            f'{content_type!r} gzip body must be smaller than raw'
+        )
+
 
 @pytest.mark.asyncio
 @pytest.mark.skipif(not _HAVE_BROTLI, reason='brotli not installed')
