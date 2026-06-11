@@ -1,26 +1,17 @@
-"""Integration tests for helloworld-cors.py.
+"""Integration tests for the helloworld-cors example.
 
-Starts the app in a child process on a random port (HTTP/1.1, no TLS) and
-exercises the CORS middleware end-to-end through real network calls.
+Re-creates the helloworld-cors app inline and exercises the CORS
+middleware end-to-end through the full app stack.
 """
-import asyncio
 import json
 from http import HTTPMethod
-from multiprocessing import Process
 
-import httpx
 import pytest
-import pytest_asyncio
 
 from blackbull import CORS, BlackBull, JSONResponse
 from blackbull.request import read_body
-from .conftest import live_server
+from blackbull.testing import TestClient
 
-
-# ---------------------------------------------------------------------------
-# Re-create the helloworld-cors app inline so the test is self-contained.
-# Using the same routes and CORS config as the example file.
-# ---------------------------------------------------------------------------
 
 def _make_app(allow_origins) -> BlackBull:
     app = BlackBull()
@@ -44,46 +35,32 @@ def _make_app(allow_origins) -> BlackBull:
     return app
 
 
-def _run(app):
-    asyncio.run(app.run())
+@pytest.fixture(scope="module")
+def cors_client():
+    """Explicit-origin CORS config."""
+    with TestClient(_make_app(allow_origins=['https://example.com'])) as c:
+        yield c
 
 
-@pytest_asyncio.fixture
-async def cors_app():
-    """BlackBull app with explicit CORS origin; runs in a child process."""
-    app = _make_app(allow_origins=['https://example.com'])
-    with live_server(app) as handle:
-        yield handle
-@pytest_asyncio.fixture
-async def cors_wildcard_app():
-    """BlackBull app with wildcard CORS origin; runs in a child process."""
-    app = _make_app(allow_origins=['*'])
-    with live_server(app) as handle:
-        yield handle
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-def _base(app) -> str:
-    return f'http://127.0.0.1:{app.port}'
+@pytest.fixture(scope="module")
+def cors_wildcard_client():
+    """Wildcard-origin CORS config."""
+    with TestClient(_make_app(allow_origins=['*'])) as c:
+        yield c
 
 
 # ---------------------------------------------------------------------------
 # No Origin header — CORS middleware passes through, no CORS headers added
 # ---------------------------------------------------------------------------
 
-@pytest.mark.asyncio
-async def test_no_origin_no_cors_headers(cors_app):
-    async with httpx.AsyncClient() as c:
-        r = await c.get(f'{_base(cors_app)}/api/hello')
+def test_no_origin_no_cors_headers(cors_client):
+    r = cors_client.get('/api/hello')
     assert r.status_code == 200
     assert 'access-control-allow-origin' not in r.headers
 
 
-@pytest.mark.asyncio
-async def test_no_origin_body_still_returned(cors_app):
-    async with httpx.AsyncClient() as c:
-        r = await c.get(f'{_base(cors_app)}/api/hello')
+def test_no_origin_body_still_returned(cors_client):
+    r = cors_client.get('/api/hello')
     assert r.json()['greeting'] == 'Hello, world!'
 
 
@@ -91,24 +68,14 @@ async def test_no_origin_body_still_returned(cors_app):
 # Allowed origin — CORS headers present in response
 # ---------------------------------------------------------------------------
 
-@pytest.mark.asyncio
-async def test_allowed_origin_acao_header(cors_app):
-    async with httpx.AsyncClient() as c:
-        r = await c.get(
-            f'{_base(cors_app)}/api/hello',
-            headers={'Origin': 'https://example.com'},
-        )
+def test_allowed_origin_acao_header(cors_client):
+    r = cors_client.get('/api/hello', headers={'Origin': 'https://example.com'})
     assert r.status_code == 200
     assert r.headers['access-control-allow-origin'] == 'https://example.com'
 
 
-@pytest.mark.asyncio
-async def test_allowed_origin_vary_origin(cors_app):
-    async with httpx.AsyncClient() as c:
-        r = await c.get(
-            f'{_base(cors_app)}/api/hello',
-            headers={'Origin': 'https://example.com'},
-        )
+def test_allowed_origin_vary_origin(cors_client):
+    r = cors_client.get('/api/hello', headers={'Origin': 'https://example.com'})
     assert r.headers.get('vary', '').lower() == 'origin'
 
 
@@ -116,13 +83,8 @@ async def test_allowed_origin_vary_origin(cors_app):
 # Disallowed origin — response goes through, but without CORS headers
 # ---------------------------------------------------------------------------
 
-@pytest.mark.asyncio
-async def test_disallowed_origin_no_cors_headers(cors_app):
-    async with httpx.AsyncClient() as c:
-        r = await c.get(
-            f'{_base(cors_app)}/api/hello',
-            headers={'Origin': 'https://evil.com'},
-        )
+def test_disallowed_origin_no_cors_headers(cors_client):
+    r = cors_client.get('/api/hello', headers={'Origin': 'https://evil.com'})
     assert r.status_code == 200
     assert 'access-control-allow-origin' not in r.headers
 
@@ -131,13 +93,8 @@ async def test_disallowed_origin_no_cors_headers(cors_app):
 # Wildcard origin
 # ---------------------------------------------------------------------------
 
-@pytest.mark.asyncio
-async def test_wildcard_origin_returns_star(cors_wildcard_app):
-    async with httpx.AsyncClient() as c:
-        r = await c.get(
-            f'{_base(cors_wildcard_app)}/api/hello',
-            headers={'Origin': 'https://any-origin.com'},
-        )
+def test_wildcard_origin_returns_star(cors_wildcard_client):
+    r = cors_wildcard_client.get('/api/hello', headers={'Origin': 'https://any-origin.com'})
     assert r.headers['access-control-allow-origin'] == '*'
     assert 'vary' not in r.headers
 
@@ -146,45 +103,30 @@ async def test_wildcard_origin_returns_star(cors_wildcard_app):
 # Preflight OPTIONS
 # ---------------------------------------------------------------------------
 
-@pytest.mark.asyncio
-async def test_preflight_returns_200(cors_app):
-    async with httpx.AsyncClient() as c:
-        r = await c.options(
-            f'{_base(cors_app)}/api/hello',
-            headers={
-                'Origin': 'https://example.com',
-                'Access-Control-Request-Method': 'GET',
-            },
-        )
+def test_preflight_returns_200(cors_client):
+    r = cors_client.options('/api/hello', headers={
+        'Origin': 'https://example.com',
+        'Access-Control-Request-Method': 'GET',
+    })
     assert r.status_code == 200
 
 
-@pytest.mark.asyncio
-async def test_preflight_cors_headers_present(cors_app):
-    async with httpx.AsyncClient() as c:
-        r = await c.options(
-            f'{_base(cors_app)}/api/hello',
-            headers={
-                'Origin': 'https://example.com',
-                'Access-Control-Request-Method': 'POST',
-            },
-        )
+def test_preflight_cors_headers_present(cors_client):
+    r = cors_client.options('/api/hello', headers={
+        'Origin': 'https://example.com',
+        'Access-Control-Request-Method': 'POST',
+    })
     assert r.headers['access-control-allow-origin'] == 'https://example.com'
     assert 'GET' in r.headers['access-control-allow-methods']
     assert 'POST' in r.headers['access-control-allow-methods']
     assert r.headers['access-control-max-age'] == '3600'
 
 
-@pytest.mark.asyncio
-async def test_preflight_body_is_empty(cors_app):
-    async with httpx.AsyncClient() as c:
-        r = await c.options(
-            f'{_base(cors_app)}/api/hello',
-            headers={
-                'Origin': 'https://example.com',
-                'Access-Control-Request-Method': 'GET',
-            },
-        )
+def test_preflight_body_is_empty(cors_client):
+    r = cors_client.options('/api/hello', headers={
+        'Origin': 'https://example.com',
+        'Access-Control-Request-Method': 'GET',
+    })
     assert r.content == b''
 
 
@@ -192,15 +134,9 @@ async def test_preflight_body_is_empty(cors_app):
 # POST /api/echo with CORS
 # ---------------------------------------------------------------------------
 
-@pytest.mark.asyncio
-async def test_post_echo_with_cors(cors_app):
+def test_post_echo_with_cors(cors_client):
     payload = {'message': 'hello'}
-    async with httpx.AsyncClient() as c:
-        r = await c.post(
-            f'{_base(cors_app)}/api/echo',
-            json=payload,
-            headers={'Origin': 'https://example.com'},
-        )
+    r = cors_client.post('/api/echo', json=payload, headers={'Origin': 'https://example.com'})
     assert r.status_code == 200
     assert r.json()['echo'] == payload
     assert r.headers['access-control-allow-origin'] == 'https://example.com'

@@ -1,14 +1,11 @@
 """Integration tests for Response variations — content-type, headers, redirects, cookies."""
-import asyncio
 from http import HTTPStatus
-from multiprocessing import Process
 
-import httpx
 import pytest
 
 from blackbull import BlackBull, JSONResponse
 from blackbull.response import Response, cookie_header
-from .conftest import live_server
+from blackbull.testing import TestClient
 
 
 def _make_app() -> BlackBull:
@@ -49,57 +46,44 @@ def _make_app() -> BlackBull:
 
 
 @pytest.fixture(scope="module")
-def live():
-    app = _make_app()
-    with live_server(app) as handle:
-        yield handle
-def _base(app) -> str:
-    return f'http://127.0.0.1:{app.port}'
+def client():
+    with TestClient(_make_app()) as c:
+        yield c
 
 
 @pytest.mark.integration
-@pytest.mark.asyncio
-async def test_plain_text_response(live):
-    async with httpx.AsyncClient() as c:
-        r = await c.get(f'{_base(live)}/text')
+def test_plain_text_response(client):
+    r = client.get('/text')
     assert r.status_code == 200
     assert 'text/plain' in r.headers['content-type']
     assert r.text == 'hello'
 
 
 @pytest.mark.integration
-@pytest.mark.asyncio
-async def test_custom_content_type(live):
-    async with httpx.AsyncClient() as c:
-        r = await c.get(f'{_base(live)}/xml')
+def test_custom_content_type(client):
+    r = client.get('/xml')
     assert r.status_code == 200
     assert 'application/xml' in r.headers['content-type']
     assert r.content == b'<root/>'
 
 
 @pytest.mark.integration
-@pytest.mark.asyncio
-async def test_redirect(live):
-    async with httpx.AsyncClient(follow_redirects=False) as c:
-        r = await c.get(f'{_base(live)}/redirect')
+def test_redirect(client):
+    r = client.get('/redirect')  # follow_redirects defaults to False
     assert r.status_code == 302
     assert r.headers['location'] == '/text'
 
 
 @pytest.mark.integration
-@pytest.mark.asyncio
-async def test_custom_response_header(live):
-    async with httpx.AsyncClient() as c:
-        r = await c.get(f'{_base(live)}/custom-header')
+def test_custom_response_header(client):
+    r = client.get('/custom-header')
     assert r.status_code == 200
     assert r.headers.get('x-request-id') == 'abc123'
 
 
 @pytest.mark.integration
-@pytest.mark.asyncio
-async def test_set_cookie_httponly_and_samesite(live):
-    async with httpx.AsyncClient() as c:
-        r = await c.get(f'{_base(live)}/set-cookie')
+def test_set_cookie_httponly_and_samesite(client):
+    r = client.get('/set-cookie')
     assert r.status_code == 200
     cookie = r.headers.get('set-cookie', '')
     assert 'session=tok123' in cookie
@@ -108,10 +92,8 @@ async def test_set_cookie_httponly_and_samesite(live):
 
 
 @pytest.mark.integration
-@pytest.mark.asyncio
-async def test_set_cookie_no_httponly(live):
-    async with httpx.AsyncClient() as c:
-        r = await c.get(f'{_base(live)}/set-cookie-no-httponly')
+def test_set_cookie_no_httponly(client):
+    r = client.get('/set-cookie-no-httponly')
     cookie = r.headers.get('set-cookie', '')
     assert 'pref=dark' in cookie
     assert 'HttpOnly' not in cookie

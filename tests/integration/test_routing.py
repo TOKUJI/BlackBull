@@ -1,17 +1,16 @@
 """Integration tests for URL routing — path parameters and named routes.
 
-Unit tests mock the scope dict; these tests prove that the router, parser,
-and simplified-handler wiring work together over a real TCP connection.
+These run in-process through :class:`blackbull.testing.TestClient`; the
+router, parser, and simplified-handler wiring are exercised end-to-end
+but no TCP socket is bound.  See ``tests/conformance/`` for the
+real-wire equivalents.
 """
-import asyncio
 import uuid
-from multiprocessing import Process
 
-import httpx
 import pytest
 
-from blackbull import BlackBull, JSONResponse
-from .conftest import live_server
+from blackbull import BlackBull
+from blackbull.testing import TestClient
 
 
 def _make_app() -> BlackBull:
@@ -41,68 +40,52 @@ def _make_app() -> BlackBull:
 
 
 @pytest.fixture(scope="module")
-def live():
-    app = _make_app()
-    with live_server(app) as handle:
-        yield handle
-def _base(app) -> str:
-    return f'http://127.0.0.1:{app.port}'
+def client():
+    with TestClient(_make_app()) as c:
+        yield c
 
 
 @pytest.mark.integration
-@pytest.mark.asyncio
-async def test_int_path_param(live):
-    async with httpx.AsyncClient() as c:
-        r = await c.get(f'{_base(live)}/users/42')
+def test_int_path_param(client):
+    r = client.get('/users/42')
     assert r.status_code == 200
     assert r.json() == {'id': 42}
 
 
 @pytest.mark.integration
-@pytest.mark.asyncio
-async def test_str_path_param(live):
-    async with httpx.AsyncClient() as c:
-        r = await c.get(f'{_base(live)}/items/hello-world')
+def test_str_path_param(client):
+    r = client.get('/items/hello-world')
     assert r.status_code == 200
     assert r.json() == {'slug': 'hello-world'}
 
 
 @pytest.mark.integration
-@pytest.mark.asyncio
-async def test_uuid_path_param_valid(live):
+def test_uuid_path_param_valid(client):
     doc_id = '12345678-1234-5678-1234-567812345678'
-    async with httpx.AsyncClient() as c:
-        r = await c.get(f'{_base(live)}/docs/{doc_id}')
+    r = client.get(f'/docs/{doc_id}')
     assert r.status_code == 200
     assert r.json()['doc_id'] == doc_id
 
 
 @pytest.mark.integration
-@pytest.mark.asyncio
-async def test_uuid_path_param_malformed_is_404(live):
-    async with httpx.AsyncClient() as c:
-        r = await c.get(f'{_base(live)}/docs/not-a-uuid')
+def test_uuid_path_param_malformed_is_404(client):
+    r = client.get('/docs/not-a-uuid')
     assert r.status_code == 404
 
 
 @pytest.mark.integration
-@pytest.mark.asyncio
-async def test_path_converter_preserves_slashes(live):
-    async with httpx.AsyncClient() as c:
-        r = await c.get(f'{_base(live)}/files/a/b/c.txt')
+def test_path_converter_preserves_slashes(client):
+    r = client.get('/files/a/b/c.txt')
     assert r.status_code == 200
     assert r.json() == {'path': 'a/b/c.txt'}
 
 
 @pytest.mark.integration
-@pytest.mark.asyncio
-async def test_named_route_url_for(live):
-    assert live.url_path_for('search') == '/search'
+def test_named_route_url_for(client):
+    assert client.app.url_path_for('search') == '/search'
 
 
 @pytest.mark.integration
-@pytest.mark.asyncio
-async def test_unknown_route_404(live):
-    async with httpx.AsyncClient() as c:
-        r = await c.get(f'{_base(live)}/not-found')
+def test_unknown_route_404(client):
+    r = client.get('/not-found')
     assert r.status_code == 404

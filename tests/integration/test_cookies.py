@@ -1,14 +1,10 @@
-"""Integration tests for cookie_header() and parse_cookies() over HTTP."""
-import asyncio
-from multiprocessing import Process
-
-import httpx
+"""Integration tests for cookie_header() and parse_cookies()."""
 import pytest
 
 from blackbull import BlackBull, JSONResponse
 from blackbull.response import cookie_header
 from blackbull.request import parse_cookies
-from .conftest import live_server
+from blackbull.testing import TestClient
 
 
 def _make_app() -> BlackBull:
@@ -30,35 +26,27 @@ def _make_app() -> BlackBull:
 
     @app.route(path='/read-cookies')
     async def read_cookies(scope):
-        jar = parse_cookies(scope)
-        return jar
+        return parse_cookies(scope)
 
     return app
 
 
 @pytest.fixture(scope="module")
-def live():
-    app = _make_app()
-    with live_server(app) as handle:
-        yield handle
-def _base(app) -> str:
-    return f'http://127.0.0.1:{app.port}'
+def client():
+    with TestClient(_make_app()) as c:
+        yield c
 
 
 @pytest.mark.integration
-@pytest.mark.asyncio
-async def test_set_cookie_present_in_response(live):
-    async with httpx.AsyncClient() as c:
-        r = await c.get(f'{_base(live)}/set-cookie')
+def test_set_cookie_present_in_response(client):
+    r = client.get('/set-cookie')
     assert r.status_code == 200
     assert 'set-cookie' in r.headers
 
 
 @pytest.mark.integration
-@pytest.mark.asyncio
-async def test_set_cookie_httponly_and_samesite(live):
-    async with httpx.AsyncClient() as c:
-        r = await c.get(f'{_base(live)}/set-cookie')
+def test_set_cookie_httponly_and_samesite(client):
+    r = client.get('/set-cookie')
     cookie = r.headers.get('set-cookie', '')
     assert 'session=abc123' in cookie
     assert 'HttpOnly' in cookie
@@ -66,23 +54,16 @@ async def test_set_cookie_httponly_and_samesite(live):
 
 
 @pytest.mark.integration
-@pytest.mark.asyncio
-async def test_set_cookie_no_httponly(live):
-    async with httpx.AsyncClient() as c:
-        r = await c.get(f'{_base(live)}/set-cookie-no-httponly')
+def test_set_cookie_no_httponly(client):
+    r = client.get('/set-cookie-no-httponly')
     cookie = r.headers.get('set-cookie', '')
     assert 'pref=dark' in cookie
     assert 'HttpOnly' not in cookie
 
 
 @pytest.mark.integration
-@pytest.mark.asyncio
-async def test_multi_cookie_parsed(live):
-    async with httpx.AsyncClient() as c:
-        r = await c.get(
-            f'{_base(live)}/read-cookies',
-            headers={'Cookie': 'a=1; b=hello'},
-        )
+def test_multi_cookie_parsed(client):
+    r = client.get('/read-cookies', headers={'Cookie': 'a=1; b=hello'})
     assert r.status_code == 200
     data = r.json()
     assert data.get('a') == '1'
@@ -90,20 +71,12 @@ async def test_multi_cookie_parsed(live):
 
 
 @pytest.mark.integration
-@pytest.mark.asyncio
-async def test_cookie_roundtrip(live):
+def test_cookie_roundtrip(client):
     """Browser flow: server sets cookie, client sends it back, handler reads it."""
-    async with httpx.AsyncClient() as c:
-        # Get the Set-Cookie
-        r1 = await c.get(f'{_base(live)}/set-cookie')
-        set_cookie = r1.headers.get('set-cookie', '')
-        # Extract name=value (before the first ';')
-        name_value = set_cookie.split(';')[0].strip()
+    r1 = client.get('/set-cookie')
+    set_cookie = r1.headers.get('set-cookie', '')
+    name_value = set_cookie.split(';')[0].strip()
 
-        # Send it back as a Cookie header
-        r2 = await c.get(
-            f'{_base(live)}/read-cookies',
-            headers={'Cookie': name_value},
-        )
+    r2 = client.get('/read-cookies', headers={'Cookie': name_value})
     assert r2.status_code == 200
     assert r2.json().get('session') == 'abc123'
