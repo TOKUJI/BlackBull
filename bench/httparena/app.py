@@ -15,19 +15,17 @@ profiles BlackBull supports today:
 Dataset is read from $DATASET_PATH (default /data/dataset.json — the
 read-only mount HttpArena's harness provides).
 
-Profiles intentionally NOT implemented yet (out of scope for Sprint 27
-Task 4 — local-only environment prep):
+Profiles intentionally NOT implemented:
   - async-db / crud   (no asyncpg integration)
-  - static / static-h2 (no static-file middleware yet)
   - api-4 / api-16    (multi-endpoint compositions)
   - *-h3              (no HTTP/3 transport)
   - *-grpc            (no gRPC support)
   - production-stack / gateway / fortunes
 
-The container starts two BlackBull processes via ``launcher.py``:
-one cleartext on :8080, one TLS on :8081.  Cleartext also serves the
-``baseline-h2c`` and ``json-h2c`` profiles via h2c prior-knowledge (no
-upgrade dance — BlackBull negotiates HTTP/2 on first preface bytes).
+The container starts four BlackBull processes via ``launcher.py``:
+cleartext on :8080, h2c on :8082, TLS HTTP/1.1 on :8081, TLS HTTP/2
+on :8443.  Cleartext also serves h2c via prior-knowledge — BlackBull
+negotiates HTTP/2 on first preface bytes.
 """
 import argparse
 import json
@@ -36,9 +34,8 @@ import sys
 from http import HTTPMethod
 from urllib.parse import parse_qs
 
-# bench/httparena/app.py imports Scheme to register the WebSocket route
-# (`echo-ws` HttpArena profile).  Use the same Scheme.websocket sentinel
-# as bench/app.py / examples/ChatServer/.
+# Scheme.websocket is the BlackBull marker used by `@app.route` to
+# register the `echo-ws` HttpArena profile handler.
 from blackbull.utils import Scheme
 
 # Ensure the BlackBull source tree is importable when the Docker image
@@ -75,11 +72,11 @@ app = BlackBull()
 # the container has installed.  Bodies below min_size (default 100 bytes)
 # pass through, so /baseline11 + /pipeline aren't affected.
 #
-# Sprint 35 probe toggle: BB_NO_COMPRESSION=1 skips registering Compression
-# entirely.  Used to isolate the cost of on-the-fly brotli encoding for
-# already-compressed payloads (e.g. .woff2 fonts) that lack a precompressed
-# sibling.  NOT for benchmark publication — disabling a default-on feature
-# violates the apples-to-apples rule.
+# Diagnostic toggle: BB_NO_COMPRESSION=1 skips registering Compression
+# entirely.  Useful for isolating the cost of on-the-fly brotli encoding
+# on already-compressed payloads (e.g. .woff2 fonts) that lack a
+# precompressed sibling.  Not for benchmark publication — disabling a
+# default-on feature breaks the apples-to-apples convention.
 if os.environ.get('BB_NO_COMPRESSION', '0') != '1':
     app.use(Compression())
 
@@ -167,10 +164,9 @@ async def json_endpoint(count: int, scope):
 
 @app.route(path='/json-comp/{count:int}', methods=[HTTPMethod.GET])
 async def json_comp_endpoint(count: int, scope):
-    # Same payload as /json; compression middleware (gzip/brotli) is
-    # supposed to wrap the response.  Sprint 27 Task 4 leaves
-    # compression off — the json-comp profile won't be exercised
-    # against this image until a compression-mw pass is wired up.
+    # Same payload as /json; the Compression middleware registered
+    # at module top wraps the response with gzip / brotli / zstd per
+    # the client's Accept-Encoding.
     if not DATASET_ITEMS:
         return Response(_NO_DATASET, status=500, content_type=_PLAIN)
     try:
@@ -202,9 +198,9 @@ async def healthz():
     return Response(b'ok', content_type=_PLAIN)
 
 
-# HttpArena `echo-ws` profile — RFC 6455 WebSocket echo.  Mirrors
-# ws_echo in bench/app.py — first message after accept is the receive
-# loop; text frames echo as text, binary frames echo as bytes.
+# HttpArena `echo-ws` profile — RFC 6455 WebSocket echo.  First
+# message after accept is the receive loop; text frames echo as text,
+# binary frames echo as bytes.
 @app.route(path='/ws', methods=[HTTPMethod.GET], scheme=Scheme.websocket)
 async def ws_echo(scope, receive, send):
     event = await receive()
@@ -227,7 +223,7 @@ async def ws_echo(scope, receive, send):
 
 
 # ---------------------------------------------------------------------------
-# Entry point — invoked by launcher.py twice (cleartext and TLS).
+# Entry point — invoked by launcher.py once per listener port.
 # ---------------------------------------------------------------------------
 
 def _parse_args():
@@ -243,16 +239,14 @@ if __name__ == '__main__':
     args = _parse_args()
     # Match peer benchmark posture: access log off (apples-to-apples).
     os.environ.setdefault('BB_ACCESS_LOG', '0')
-    # Sprint 35 phase-trace probe needs the access logger to actually
-    # emit at INFO so AccessLogRecord.format() lines (with the
-    # ``[loop_start→parsed=Xw/Yc ...]`` trailer when BB_PHASE_TRACE=1)
-    # reach stderr where ``docker logs`` can capture them.  BlackBull's
-    # default level inheritance leaves ``blackbull.access`` at WARNING
-    # (effective), so emit_access_log() is gated off even when
-    # cfg.access_log is True.  Wire a dedicated stderr handler with
-    # propagate=False so the access stream is self-contained and
-    # doesn't double-emit through the QueueHandler on the parent
-    # 'blackbull' logger.
+    # When BB_ACCESS_LOG=1 is opted in (e.g. for diagnostic phase
+    # tracing under BB_PHASE_TRACE=1), the access logger needs an
+    # explicit INFO handler — BlackBull's default level inheritance
+    # leaves ``blackbull.access`` at WARNING (effective), so
+    # emit_access_log() is gated off even when cfg.access_log is True.
+    # Wire a dedicated stderr handler with propagate=False so the
+    # access stream is self-contained and doesn't double-emit through
+    # the QueueHandler on the parent 'blackbull' logger.
     if os.environ.get('BB_ACCESS_LOG') == '1':
         import logging as _bb_logging
         _bb_access = _bb_logging.getLogger('blackbull.access')

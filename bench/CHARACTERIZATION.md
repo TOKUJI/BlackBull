@@ -329,3 +329,63 @@ References:
 - TechEmpower Framework Benchmarks — <https://www.techempower.com/benchmarks/>
 - Granian benchmarks — <https://github.com/emmett-framework/granian/tree/master/benchmarks>
 - Vibora benchmarks — <https://github.com/vibora-io/benchmarks>
+
+## HttpArena submission scope and KNOWN_LIMITATIONS
+
+BlackBull's HttpArena framework directory lives at
+[`bench/httparena/`](httparena/) and is structured to be vendorable
+under [`MDA2AV/HttpArena`](https://github.com/MDA2AV/HttpArena) at
+`frameworks/blackbull/`.
+
+### Profiles claimed
+
+The `meta.json` `tests` array enumerates exactly what BlackBull
+claims:
+
+```
+baseline, pipelined, limited-conn, json, json-comp, json-tls,
+upload, static, baseline-h2, static-h2, echo-ws
+```
+
+`validate.sh blackbull` passes 47/47 on this set (last run:
+2026-06-11 on WSL2 against MDA2AV/HttpArena HEAD).
+
+### Profiles BlackBull does NOT claim, and why
+
+| Profile | Why not |
+|---|---|
+| `baseline-h2c`, `json-h2c` | Runtime-capable on the `:8082` listener BlackBull opens (see below), but not yet characterised on EC2.  Hold until the core set lands, then revisit. |
+| `static-h3`, `baseline-h3` | HTTP/3 / QUIC transport is intentionally out-of-scope per the roadmap "Items intentionally out of scope" table.  Not coming. |
+| `async-db`, `crud`, `fortunes`, `api-4`, `api-16` | BlackBull is a protocol-layer framework, not full-stack.  No Postgres integration.  See the same out-of-scope table for the rationale. |
+| `*-grpc` | No gRPC support.  HTTP/2 trailers are queued for Sprint 38 as the prerequisite primitive; a full gRPC product is a multi-sprint decision deferred until a real user need surfaces. |
+| `gateway-*`, `production-stack` | Need sidecar + DB work first; same scope rationale as the DB profiles. |
+
+### The `:8082` h2c listener strategy
+
+HttpArena's `validate.sh` opens a port-existence probe on `:8082`
+for every framework regardless of which profiles the framework
+claims.  Pre-Sprint-37, BlackBull's launcher spawned only :8080 /
+:8081 / :8443 — auto-detect on :8080 *could* answer h2c
+prior-knowledge, but :8082 was closed, so validate.sh would mark
+the port unreachable.
+
+Sprint 37 added a 4th cleartext listener on :8082 using the same
+`app.py` + worker count.  BlackBull's HTTP/2 preface auto-detect
+handles h2c on the same code path as :8080; the port stays idle
+during benchmark runs that don't exercise it.  Claiming
+`baseline-h2c` / `json-h2c` in `meta.json` is deferred — see the
+table above.
+
+### Submission-mode files vs in-repo files
+
+The `bench/httparena/` directory contains both submission-bound
+files (`app.py`, `launcher.py`, `Dockerfile`, `requirements.txt`,
+`meta.json`, `README.md`) and sprint-internal tooling
+(`sprint37/`, throwaway probes from past sprints).  When vendoring,
+strip the sprint-internal subset.  The vendor command sequence is
+documented at [`bench/httparena/sprint37/README.md`](httparena/sprint37/README.md).
+
+`bench/httparena/meta.json` carries `enabled: false` in the
+BlackBull repo; the flip to `enabled: true` happens on the
+*vendored* copy at submission time, gated on two clean
+c7i.8xlarge benchmark runs reproducing within ±5 %.

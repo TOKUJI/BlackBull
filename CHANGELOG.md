@@ -28,6 +28,109 @@ so the editable install's metadata catches up.
 
 ---
 
+## [0.33.0] — 2026-06-12
+
+**Sprint 37 — defaults reset to RFC / kernel baselines; static
+body cache becomes opt-in.**
+
+This release moves BlackBull's defaults from a benchmark-tuned
+posture to RFC 7540 / Linux kernel baselines, so a fresh install
+behaves predictably regardless of host tuning state and the
+framework can stand on its architecture alone.  The previous
+tuned values are preserved as documented production
+recommendations.
+
+### Changed
+
+- **`StaticFiles` body cache is now opt-in** (default
+  `cache=False`).  `app.static(url_prefix, root_dir)` reads files
+  from disk on every request unless explicitly opted in via
+  `app.static(url_prefix, root_dir, cache=True)`.  Sibling
+  existence (for `.br` / `.zst` / `.gz` precompressed serving) is
+  recomputed per-request when the cache is off; memoised when on.
+  Most production deployments terminate static traffic at nginx
+  or a CDN and won't notice — standalone setups that previously
+  benefitted from the in-process cache should opt in to keep
+  prior performance.  See
+  [`docs/guide/static-files.md`](docs/guide/static-files.md) for
+  the full discussion.
+
+- **Seven framework defaults reset to platform baselines**:
+
+  | Setting | Pre-0.33 | 0.33 | Baseline source |
+  |---|---|---|---|
+  | `BB_SOCKET_BACKLOG` | 4096 | 128 | kernel `net.core.somaxconn` traditional default |
+  | `BB_SOCKET_SNDBUF` | 262144 | 0 | kernel default (unchanged unless set) |
+  | `BB_SOCKET_RCVBUF` | 262144 | 0 | kernel default (unchanged unless set) |
+  | `BB_SOCKET_REUSEPORT` | True | False | kernel default |
+  | `BB_TCP_USER_TIMEOUT_MS` | 60000 | 0 | kernel default (off) |
+  | `BB_H2_INITIAL_WINDOW_SIZE` | 1048576 | 65535 | RFC 7540 §6.9.2 |
+  | `BB_H2_CONNECTION_WINDOW_SIZE` | 4194304 | 65535 | RFC 7540 §6.9.2 minimum |
+
+  Production deployments that need throughput should set these
+  explicitly — the previous values plus per-variable rationale
+  are documented under "Performance recommendations" in
+  [`docs/reference/env-vars.md`](docs/reference/env-vars.md).
+
+- **`BB_FRAME_YIELD_EVERY`, `BB_COMPRESSION_MAX_INFLIGHT`,
+  `BB_KEEP_ALIVE_TIMEOUT` deliberately kept** at their previous
+  values (8, `cpu*2`, 5.0 respectively).  These are
+  correctness / fairness / safety mechanisms (cooperative-yield
+  fairness, compression-offload backpressure cap, keep-alive
+  idle timer), not numerical optimisations above a platform
+  baseline.
+
+### Added
+
+- `cache` keyword parameter on
+  [`StaticFiles.__init__`](blackbull/middleware/static.py) and
+  [`app.static()`](blackbull/app.py) — opt in to the in-process
+  body cache for standalone deployments that serve static
+  traffic directly.
+
+- [`docs/guide/static-files.md`](docs/guide/static-files.md) —
+  rewrote "In-memory cache" as an opt-in feature with explicit
+  when-to-turn-on / when-to-leave-off guidance.  New
+  "Precompressed sibling serving" section documenting
+  `.br` / `.zst` / `.gz` lookup as an official feature (same
+  pattern as nginx's `gzip_static` / `brotli_static`), including
+  the Range-bypass and `Vary: Accept-Encoding` behaviour.
+
+- [`docs/reference/env-vars.md`](docs/reference/env-vars.md) —
+  new "Performance recommendations" section that documents the
+  pre-0.33 tuned values as production tuning targets with
+  per-variable rationale.
+
+### Tests
+
+- 1,268 tests pass on the release commit, 196 skipped
+  (testcontainer-gated), 0 failures.
+- Two H/2 architecture handshake tests reshaped to set non-default
+  values via `monkeypatch.setenv` + `reset_settings_cache()` and
+  assert the actor honours the configured value, instead of
+  tautologically asserting "value > RFC default" (which used to
+  pass by coincidence on the tuned defaults).  The new shape is
+  the right pattern for any future test reading framework-default
+  numerics — assert behaviour, not magic constants.
+
+### Notes
+
+- **Migration**: standalone deployments serving static files
+  directly should pass `cache=True` to `app.static(...)` to keep
+  prior performance.  Deployments behind nginx / a CDN are
+  unaffected — static traffic doesn't reach the framework on
+  that topology.
+- **Production tuning**: deployments that previously implicitly
+  benefitted from the tuned socket / H/2 window defaults should
+  set the recommended env vars explicitly — see
+  `docs/reference/env-vars.md` "Performance recommendations" for
+  the recipe.
+- BlackBull has no production users yet (per `CLAUDE.md`, this
+  is a personal learning project) so the default flip doesn't
+  break anyone in the wild.
+
+---
+
 ## [0.32.0] — 2026-06-11
 
 **Sprint 36 close — `TestClient`, per-stream `__slots__`, ASGI 3.0

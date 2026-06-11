@@ -1,12 +1,10 @@
-# BlackBull on HttpArena — local-only prep
+# BlackBull on HttpArena
 
-Sprint 27 Task 4 scaffold for cross-checking BlackBull numbers against
-the [HttpArena](https://www.http-arena.com/) benchmark harness.
-**Not yet a leaderboard submission** — `meta.json` keeps
-`"enabled": false`; the directory is here so future sprints can lift
-the contents into a `frameworks/blackbull/` PR against
-[`MDA2AV/HttpArena`](https://github.com/MDA2AV/HttpArena) without
-re-deriving the integration.
+BlackBull's framework integration for the
+[HttpArena](https://www.http-arena.com/) benchmark harness.  The
+directory is structured so it can be vendored under
+[`MDA2AV/HttpArena`](https://github.com/MDA2AV/HttpArena) at
+`frameworks/blackbull/` without further modification.
 
 ## Layout
 
@@ -33,10 +31,18 @@ profiles BlackBull's runtime supports today:
 | json            | GET `/json/{count}`    | ✓ |
 | json-tls        | GET `/json/{count}` on :8081 | ✓ |
 | upload          | POST `/upload`         | ✓ |
-| baseline-h2     | GET/POST `/baseline11` on :8081 (TLS, ALPN h2) | ✓ |
-| baseline-h2c    | GET `/baseline11`  on :8080 (h2 prior-knowledge) | ✓ |
-| json-h2c        | GET `/json/{count}` on :8080 (h2 prior-knowledge) | ✓ |
+| baseline-h2     | GET/POST `/baseline11` on :8443 (TLS, ALPN h2) | ✓ (claimed in `meta.json`) |
+| baseline-h2c    | GET `/baseline11`  on :8082 (h2 prior-knowledge) | runtime-capable; not claimed in `meta.json` yet |
+| json-h2c        | GET `/json/{count}` on :8082 (h2 prior-knowledge) | runtime-capable; not claimed in `meta.json` yet |
 | echo-ws         | GET `/ws` upgrade      | ✓ (re-exported via the standard BlackBull WS handler — TODO mount at `/ws` here) |
+
+A dedicated `:8082` cleartext listener is opened so HttpArena's
+`validate.sh` port-open probe succeeds.  BlackBull's preface
+auto-detect dispatches h2c connections through the HTTP/2 actor on
+the same app/workers as `:8080`; the port stays idle during
+benchmark runs that do not exercise h2c.  `baseline-h2c` /
+`json-h2c` are runtime-capable on `:8082` but currently unclaimed in
+`meta.json`.
 
 Profiles **not** implemented (intentional carve-out):
 
@@ -64,8 +70,8 @@ curl -fL -o bench/httparena/_local/data/dataset.json \
 cp tests/cert.pem bench/httparena/_local/certs/server.crt
 cp tests/key.pem  bench/httparena/_local/certs/server.key
 
-# Build (context = repo root).
-docker build -f bench/httparena/Dockerfile -t blackbull-httparena .
+# Build (context = this directory; BlackBull is pip-installed from PyPI).
+docker build -t blackbull-httparena bench/httparena/
 
 # Run with the documented mounts.
 docker run --rm --network host \
@@ -101,19 +107,13 @@ cd ~/work/HttpArena
 ./scripts/benchmark.sh blackbull baseline # one profile
 ```
 
-A future sprint will automate the vendoring step
-(`bench/httparena/sync.sh`) once we commit to a leaderboard PR.
-
 ## Versioning + apples-to-apples
 
-The container build pulls `pyproject.toml` from the repo root, so the
-image's `blackbull.__version__` matches whatever sprint commit was
-checked out at `docker build` time.  Record the commit SHA in
-`bench/results/httparena/<scenario>-<ts>/` alongside any captured
-numbers.
+The Dockerfile pins `blackbull[compression]` to an explicit PyPI
+version (currently `0.33.0`).  Bump the pin in lockstep with the
+upstream release whose behaviour you intend the container to
+exercise.
 
 `BB_ACCESS_LOG=0` is set by `app.py` to match the peer benchmark
-convention documented in
-[.claude/patterns/cautions.md](../../.claude/patterns/cautions.md)
-(Sprint 9 lesson — every peer disables access logging during
-benchmarks).
+convention — every peer in the HttpArena framework set disables
+access logging during benchmark runs.

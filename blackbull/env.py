@@ -40,25 +40,30 @@ BB_SOCKET_BACKLOG
     ``listen()`` backlog depth for the server socket.  Increasing this reduces
     silent connection drops during burst traffic when the accept loop falls
     behind.  Capped by ``net.core.somaxconn`` on Linux.
-    Default: ``1024``.
+    Default: ``128`` (matches the Linux ``net.core.somaxconn`` traditional
+    default).  Bump to 4096 for production traffic — see
+    docs/reference/env-vars.md "Performance recommendations".
 BB_SOCKET_SNDBUF
     Kernel send-buffer size (bytes) set on each accepted TCP socket via
     ``SO_SNDBUF``.  The kernel doubles the requested value internally.
     Larger values improve throughput for large responses (≥64 kB).
     ``0`` leaves the kernel default unchanged.
-    Default: ``262144`` (256 kB requested → ~512 kB effective).
+    Default: ``0`` (kernel default).  ``262144`` (256 kB) is a common
+    production value — see docs/reference/env-vars.md.
 BB_SOCKET_RCVBUF
     Kernel receive-buffer size (bytes) set on each accepted TCP socket via
     ``SO_RCVBUF``.  Same doubling rule as ``BB_SOCKET_SNDBUF``.
     ``0`` leaves the kernel default unchanged.
-    Default: ``262144`` (256 kB requested → ~512 kB effective).
+    Default: ``0`` (kernel default).  ``262144`` (256 kB) is a common
+    production value — see docs/reference/env-vars.md.
 BB_SOCKET_REUSEPORT
     ``1`` | ``true`` | ``yes`` to enable; ``0`` | ``false`` | ``no`` to disable.
     When enabled and the OS supports ``SO_REUSEPORT``, each worker binds its own
     listening socket so the kernel distributes incoming connections across workers
     independently, eliminating thundering-herd and improving CPU affinity.
     Has no effect with a single worker or on platforms without ``SO_REUSEPORT``.
-    Default: ``true``.
+    Default: ``false`` (kernel default).  Enable on multi-worker production
+    deployments — see docs/reference/env-vars.md.
 BB_REQUEST_TIMEOUT
     Maximum seconds a single HTTP/2 stream (request + response) is allowed to
     run before it is forcibly cancelled with RST_STREAM CANCEL.  Prevents slow
@@ -67,12 +72,17 @@ BB_REQUEST_TIMEOUT
 BB_H2_INITIAL_WINDOW_SIZE
     Per-stream flow-control window size (bytes) advertised to HTTP/2 peers in the
     server's initial SETTINGS frame.  Larger values allow peers to send more data
-    per stream before waiting for WINDOW_UPDATE.  Default: ``1048576`` (1 MiB).
+    per stream before waiting for WINDOW_UPDATE.
+    Default: ``65535`` (RFC 7540 §6.9.2 default).  ``1048576`` (1 MiB) is a
+    common tuned value for upload-heavy or multiplexed workloads — see
+    docs/reference/env-vars.md.
 BB_H2_CONNECTION_WINDOW_SIZE
     Connection-level flow-control window size (bytes) advertised to HTTP/2 peers
     via an initial WINDOW_UPDATE on stream 0 after the SETTINGS handshake.
     Must be ≥ 65535 (the RFC default); values below that are silently ignored.
-    Default: ``4194304`` (4 MiB).
+    Default: ``65535`` (RFC 7540 §6.9.2 minimum).  ``4194304`` (4 MiB) is a
+    common tuned value to allow concurrent streams to share the connection
+    budget without head-of-line stalls — see docs/reference/env-vars.md.
 BB_H2_MAX_CONCURRENT_STREAMS
     Maximum number of HTTP/2 streams the server accepts at the same time per
     connection, advertised to peers in the initial SETTINGS frame
@@ -409,20 +419,26 @@ def get_settings() -> Settings:
         ws_queue_depth=_int_env('BB_WS_QUEUE_DEPTH', 256),
         async_logging=_bool_env('BB_ASYNC_LOGGING', True),
         access_log=_bool_env('BB_ACCESS_LOG', True),
-        socket_backlog=_int_env('BB_SOCKET_BACKLOG', 4096),
-        socket_sndbuf=_int_env_nonneg('BB_SOCKET_SNDBUF', 262144),
-        socket_rcvbuf=_int_env_nonneg('BB_SOCKET_RCVBUF', 262144),
-        socket_reuseport=_bool_env('BB_SOCKET_REUSEPORT', True),
+        # Defaults match the Linux kernel baseline.  See
+        # docs/reference/env-vars.md "Performance recommendations"
+        # for the values to override these with on a tuned deployment.
+        socket_backlog=_int_env('BB_SOCKET_BACKLOG', 128),
+        socket_sndbuf=_int_env_nonneg('BB_SOCKET_SNDBUF', 0),
+        socket_rcvbuf=_int_env_nonneg('BB_SOCKET_RCVBUF', 0),
+        socket_reuseport=_bool_env('BB_SOCKET_REUSEPORT', False),
         keep_alive_timeout=_float_env_nonneg('BB_KEEP_ALIVE_TIMEOUT', 5.0),
-        tcp_user_timeout_ms=_int_env_nonneg('BB_TCP_USER_TIMEOUT_MS', 60_000),
+        tcp_user_timeout_ms=_int_env_nonneg('BB_TCP_USER_TIMEOUT_MS', 0),
         request_timeout=_float_env_nonneg('BB_REQUEST_TIMEOUT', 0.0),
         header_timeout=_float_env_nonneg('BB_HEADER_TIMEOUT', 10.0),
         body_timeout=_float_env_nonneg('BB_BODY_TIMEOUT', 30.0),
         write_timeout=_float_env_nonneg('BB_WRITE_TIMEOUT', 30.0),
         header_max_line=_int_env_nonneg('BB_HEADER_MAX_LINE', 8192),
         header_max_total=_int_env_nonneg('BB_HEADER_MAX_TOTAL', 65536),
-        h2_initial_window_size=_int_env('BB_H2_INITIAL_WINDOW_SIZE', 1048576),
-        h2_connection_window_size=_int_env('BB_H2_CONNECTION_WINDOW_SIZE', 4194304),
+        # RFC 7540 §6.9.2 default initial window size.  See
+        # docs/reference/env-vars.md "Performance recommendations" for the
+        # values commonly used on tuned production deployments.
+        h2_initial_window_size=_int_env('BB_H2_INITIAL_WINDOW_SIZE', 65535),
+        h2_connection_window_size=_int_env('BB_H2_CONNECTION_WINDOW_SIZE', 65535),
         h2_max_concurrent_streams=_int_env('BB_H2_MAX_CONCURRENT_STREAMS', 100),
         h2_enable_websocket=_bool_env('BB_H2_ENABLE_WEBSOCKET', False),
         ws_permessage_deflate=_bool_env('BB_WS_PERMESSAGE_DEFLATE', True),

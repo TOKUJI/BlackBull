@@ -6,8 +6,8 @@
 #
 #   docker build -t blackbull-httparena bench/httparena/
 #
-# Run with HttpArena-shaped mounts (cleartext on :8080, TLS on :8081
-# and :8443):
+# Run with HttpArena-shaped mounts (cleartext HTTP/1.1 on :8080, h2c
+# on :8082, TLS HTTP/1.1 on :8081, TLS HTTP/2 on :8443):
 #
 #   docker run --rm --network host \
 #     -v $PWD/bench/httparena/_local/data:/data:ro \
@@ -17,22 +17,21 @@
 FROM python:3.13-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
+    PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
 # Install BlackBull from PyPI — same install path real users follow.
-# Pin the version so the container is reproducible; bump in lockstep
-# with pyproject.toml on each release.  The [compression] extra pulls
-# brotli + zstandard for the json-comp profile.
-RUN pip install 'blackbull[compression]==0.28.0'
+# Pins live in requirements.txt; bump in lockstep with each release.
+# The [compression] extra pulls brotli + zstandard for the json-comp
+# profile.  --no-cache-dir keeps the pip cache out of the image layer.
+COPY requirements.txt ./
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy framework files last so app/launcher edits don't bust the
 # slow pip layer.
 COPY app.py launcher.py ./
 
-EXPOSE 8080 8081 8443
+EXPOSE 8080 8081 8082 8443
 
 CMD ["python", "launcher.py"]

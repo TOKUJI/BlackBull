@@ -59,13 +59,45 @@ double-serving the same files.
 
 ## How it serves files
 
-### In-memory cache
+### In-memory cache (opt-in)
 
-Small files (default ≤ 4 MiB each, up to 256 entries) are cached
-in process memory keyed on `(path, mtime, size)`.  Cache hits
-serve directly — no disk I/O on the hot path.  When a file's
-modification time or size changes on disk, the next request
-re-reads it and replaces the cached copy.
+`StaticFiles` supports an in-process body cache for fast cache-hit
+serving.  It is **off by default**: every request does a fresh
+`stat()` and reads the body from disk.  This matches the behaviour
+of Starlette / FastAPI / Flask static serving and keeps BlackBull's
+default behaviour compatible with standards that require "read
+files from disk on every request, no in-memory caching" (e.g. the
+HttpArena standard-mode static profile).
+
+Opt in by passing `cache=True`:
+
+```python
+# Default — read from disk every request.
+app.static('/assets', 'public/assets')
+
+# Opt-in — small files (≤ 4 MiB each, up to 256 entries) held in
+# process memory; stat() syscall throttled to once per second per
+# entry; sibling-existence answers memoised across requests.
+app.static('/assets', 'public/assets', cache=True)
+```
+
+When you should turn it on:
+
+- BlackBull terminates static traffic directly (no nginx / no CDN
+  in front).
+- The asset set is small enough that all files fit in 256 × 4 MiB
+  of process memory and small enough that the cache hit rate is
+  high.
+- You're OK with edit-on-disk visibility up to ~1 second behind
+  (the stat-throttle window, override via `BB_STATIC_STAT_TTL_S`).
+
+When to leave it off (the default):
+
+- nginx / a CDN fronts the framework — they handle the static path
+  far more efficiently than any in-process cache can.
+- You want edit-on-disk visibility to be immediate.
+- You're running the benchmark suites HttpArena's standard-mode
+  rules describe.
 
 The cache is per-process — multi-worker deployments hold a
 separate cache in each worker.
@@ -73,6 +105,42 @@ separate cache in each worker.
 For files above the cache threshold, `StaticFiles` streams the
 body in chunks so peak per-request memory stays bounded
 regardless of file size.
+
+### Precompressed sibling serving
+
+If a file `app.js` has a sibling on disk like `app.js.br`,
+`app.js.zst`, or `app.js.gz`, `StaticFiles` will serve the
+sibling (with the right `Content-Encoding` header) when the
+client's `Accept-Encoding` allows it.  Preference order is
+`br > zstd > gzip`.
+
+```
+public/
+  app.js          # 50 KiB original
+  app.js.br       # 12 KiB pre-compressed (served when Accept-Encoding: br)
+  app.js.gz       # 17 KiB pre-compressed (served when Accept-Encoding: gzip)
+```
+
+This is the same pattern as nginx's
+[`gzip_static`](https://nginx.org/en/docs/http/ngx_http_gzip_static_module.html)
+/ `brotli_static` modules and ASP.NET's `MapStaticAssets`.
+Generating the siblings is a build-time concern (CI script, asset
+pipeline) — BlackBull does not produce them at runtime.
+
+Range requests bypass sibling lookup — encoded bodies have a
+different size than the original and serving a `Range` over an
+encoded variant is messy.  Matches nginx's `gzip_static` +
+`Range` behaviour.
+
+`StaticFiles` always advertises `Vary: Accept-Encoding` on
+responses where a precompressed sibling was selected, so HTTP
+caches don't mis-cache an encoded body to a client that didn't
+ask for it.
+
+When `cache=True` is set, the per-path sibling-existence answer
+is memoised after the first lookup (the file set is deterministic
+for the lifetime of the server).  When `cache=False`, sibling
+existence is rechecked on every request.
 
 ### Range requests (RFC 7233)
 

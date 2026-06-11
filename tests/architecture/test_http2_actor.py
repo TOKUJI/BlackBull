@@ -220,8 +220,23 @@ def _parse_frames(data: bytes) -> list:
 
 
 @pytest.mark.asyncio
-async def test_handshake_sends_settings_initial_window_size(fake_h2_reader, mock_app):
-    """HTTP2Actor.run() must include SETTINGS_INITIAL_WINDOW_SIZE in the server's SETTINGS."""
+async def test_handshake_sends_settings_initial_window_size(
+        fake_h2_reader, mock_app, monkeypatch):
+    """HTTP2Actor.run() must advertise the configured
+    ``BB_H2_INITIAL_WINDOW_SIZE`` in the server's SETTINGS frame.
+
+    Sprint 37 lowered BlackBull's default to the RFC 7540 §6.9.2
+    baseline (65535).  This test sets a non-default value via env so
+    the emitted frame is unambiguously distinguishable from the RFC
+    default and the test asserts the actor honours the configured
+    value rather than asserting "larger than the default" (which
+    would tautologically pass on the old default and fail on the new
+    one without exercising the actual code path).
+    """
+    monkeypatch.setenv('BB_H2_INITIAL_WINDOW_SIZE', '1048576')
+    from blackbull.env import reset_settings_cache
+    reset_settings_cache()
+
     writer = _FakeWriter()
     aggregator = AsyncMock(spec=EventAggregator)
     actor = HTTP2Actor(fake_h2_reader, writer, mock_app, aggregator)
@@ -231,12 +246,25 @@ async def test_handshake_sends_settings_initial_window_size(fake_h2_reader, mock
                        if f.FrameType() == FrameTypes.SETTINGS
                        and getattr(f, 'initial_window_size', None) is not None]
     assert settings_frames, 'Server must send SETTINGS with INITIAL_WINDOW_SIZE'
-    assert settings_frames[0].initial_window_size > DEFAULT_INITIAL_WINDOW_SIZE
+    assert settings_frames[0].initial_window_size == 1048576
+    reset_settings_cache()
 
 
 @pytest.mark.asyncio
-async def test_handshake_sends_connection_window_update(fake_h2_reader, mock_app):
-    """HTTP2Actor.run() must send WINDOW_UPDATE(stream_id=0) to expand the inbound window."""
+async def test_handshake_sends_connection_window_update(
+        fake_h2_reader, mock_app, monkeypatch):
+    """HTTP2Actor.run() must send WINDOW_UPDATE(stream_id=0) when the
+    configured connection window exceeds the RFC 7540 default (65535).
+
+    Sprint 37 lowered BlackBull's default to 65535 (no
+    WINDOW_UPDATE needed at handshake — peer's connection window
+    already starts there).  This test sets a non-default to assert
+    the actor emits the expansion frame when one is required.
+    """
+    monkeypatch.setenv('BB_H2_CONNECTION_WINDOW_SIZE', '4194304')
+    from blackbull.env import reset_settings_cache
+    reset_settings_cache()
+
     writer = _FakeWriter()
     aggregator = AsyncMock(spec=EventAggregator)
     actor = HTTP2Actor(fake_h2_reader, writer, mock_app, aggregator)
@@ -246,6 +274,7 @@ async def test_handshake_sends_connection_window_update(fake_h2_reader, mock_app
                 if f.FrameType() == FrameTypes.WINDOW_UPDATE and f.stream_id == 0]
     assert conn_wus, 'Server must send a connection-level WINDOW_UPDATE at startup'
     assert conn_wus[0].window_size > 0
+    reset_settings_cache()
 
 
 @pytest.mark.asyncio
