@@ -1241,6 +1241,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#performance-recommendations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Performance recommendations
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#see-also" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3569,6 +3580,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#performance-recommendations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Performance recommendations
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#see-also" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3601,8 +3623,11 @@
 
 <h1 id="environment-variables">Environment variables<a class="headerlink" href="#environment-variables" title="Permanent link">&para;</a></h1>
 <p>Exhaustive table of <code>BB_*</code> and <code>BLACKBULL_*</code> environment
-variables.  Defaults are conservative for development; raise the
-limits and tune the sockets in production.</p>
+variables.  Defaults match Linux kernel / RFC 7540 baselines so a
+fresh BlackBull install behaves predictably regardless of host
+tuning state.  For values that improve throughput / tail latency
+on busy production deployments, see
+<a href="#performance-recommendations">Performance recommendations</a> below.</p>
 <p>For the precedence order (CLI flags &gt; env &gt; TOML), see
 <a href="../../guide/configuration/">Configuration</a>.</p>
 <h2 id="runtime-and-processes">Runtime and processes<a class="headerlink" href="#runtime-and-processes" title="Permanent link">&para;</a></h2>
@@ -3674,8 +3699,8 @@ limits and tune the sockets in production.</p>
 </tr>
 <tr>
 <td><code>BB_TCP_USER_TIMEOUT_MS</code></td>
-<td><code>0</code> (off)</td>
-<td><code>TCP_USER_TIMEOUT</code> socket option (Linux).  Per-connection upper bound on how long an unacknowledged sent segment can linger before the kernel kills the connection.  Useful to evict dead peers behind NATs without waiting for keepalives.</td>
+<td><code>0</code> (off, kernel default)</td>
+<td><code>TCP_USER_TIMEOUT</code> socket option (Linux).  Per-connection upper bound on how long an unacknowledged sent segment can linger before the kernel kills the connection.  Useful to evict dead peers behind NATs without waiting for keepalives.  See "Performance recommendations" below for production tuning.</td>
 </tr>
 <tr>
 <td><code>BB_HEADER_MAX_LINE</code></td>
@@ -3711,23 +3736,23 @@ limits and tune the sockets in production.</p>
 <tbody>
 <tr>
 <td><code>BB_SOCKET_BACKLOG</code></td>
-<td><code>1024</code></td>
-<td><code>listen()</code> backlog depth.  Reduces silent connection drops during burst traffic.  Linux caps the effective value at <code>net.core.somaxconn</code>.</td>
+<td><code>128</code> (kernel <code>somaxconn</code> default)</td>
+<td><code>listen()</code> backlog depth.  Linux caps the effective value at <code>net.core.somaxconn</code>.  See "Performance recommendations" below for production tuning.</td>
 </tr>
 <tr>
 <td><code>BB_SOCKET_REUSEPORT</code></td>
-<td><code>1</code></td>
-<td>When supported by the OS (Linux, modern BSDs), bind each worker to its own listening socket so the kernel hashes incoming connections across workers — eliminates the thundering-herd accept pattern.  No effect with one worker.</td>
+<td><code>0</code> (kernel default)</td>
+<td>When supported by the OS (Linux, modern BSDs), bind each worker to its own listening socket so the kernel hashes incoming connections across workers — eliminates the thundering-herd accept pattern.  No effect with one worker.  Enable on multi-worker deployments.</td>
 </tr>
 <tr>
 <td><code>BB_SOCKET_SNDBUF</code></td>
-<td><code>262144</code></td>
-<td><code>SO_SNDBUF</code> (bytes) on each accepted socket.  Linux doubles the requested value internally.  Larger helps throughput for responses ≥ 64 kB.  <code>0</code> keeps the kernel default.</td>
+<td><code>0</code> (kernel default)</td>
+<td><code>SO_SNDBUF</code> (bytes) on each accepted socket.  <code>0</code> leaves the kernel default unchanged.  Linux doubles the requested value internally; larger values help throughput for responses ≥ 64 kB.</td>
 </tr>
 <tr>
 <td><code>BB_SOCKET_RCVBUF</code></td>
-<td><code>262144</code></td>
-<td><code>SO_RCVBUF</code> (bytes) on each accepted socket.  Same doubling rule.  <code>0</code> keeps the kernel default.</td>
+<td><code>0</code> (kernel default)</td>
+<td><code>SO_RCVBUF</code> (bytes) on each accepted socket.  <code>0</code> leaves the kernel default unchanged.  Same doubling rule as <code>BB_SOCKET_SNDBUF</code>.</td>
 </tr>
 </tbody>
 </table>
@@ -3765,13 +3790,13 @@ limits and tune the sockets in production.</p>
 <tbody>
 <tr>
 <td><code>BB_H2_INITIAL_WINDOW_SIZE</code></td>
-<td><code>1048576</code> (1 MiB)</td>
-<td>Per-stream flow-control window advertised in the server's initial <code>SETTINGS</code> frame.  Larger lets peers send more data per stream before waiting for <code>WINDOW_UPDATE</code>.</td>
+<td><code>65535</code> (RFC 7540 §6.9.2 default)</td>
+<td>Per-stream flow-control window advertised in the server's initial <code>SETTINGS</code> frame.  Larger lets peers send more data per stream before waiting for <code>WINDOW_UPDATE</code>.  See "Performance recommendations" below.</td>
 </tr>
 <tr>
 <td><code>BB_H2_CONNECTION_WINDOW_SIZE</code></td>
-<td><code>4194304</code> (4 MiB)</td>
-<td>Connection-level flow-control window advertised via an initial <code>WINDOW_UPDATE</code> on stream 0.  Must be ≥ 65535 (the RFC default); smaller values are silently ignored.</td>
+<td><code>65535</code> (RFC 7540 §6.9.2 minimum)</td>
+<td>Connection-level flow-control window advertised via an initial <code>WINDOW_UPDATE</code> on stream 0.  Must be ≥ 65535; smaller values are silently ignored.  See "Performance recommendations" below.</td>
 </tr>
 <tr>
 <td><code>BB_H2_MAX_CONCURRENT_STREAMS</code></td>
@@ -3873,6 +3898,75 @@ limits and tune the sockets in production.</p>
 </tr>
 </tbody>
 </table>
+<h2 id="performance-recommendations">Performance recommendations<a class="headerlink" href="#performance-recommendations" title="Permanent link">&para;</a></h2>
+<p>The defaults above match Linux kernel / RFC 7540 baselines so a
+fresh BlackBull install behaves predictably regardless of host
+tuning state.  On a busy production deployment — multi-worker,
+high-fan-in, mixed HTTP/1.1 + HTTP/2 — the following values give
+measurably better throughput and tail latency at the cost of more
+kernel/process memory and one custom socket option:</p>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Default</th>
+<th>Recommended</th>
+<th>Why</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>BB_SOCKET_BACKLOG</code></td>
+<td><code>128</code></td>
+<td><code>4096</code></td>
+<td>Reduces silent connection drops during burst arrivals when the accept loop is briefly behind.  Effective value is capped by <code>net.core.somaxconn</code> — bump it too (<code>sysctl -w net.core.somaxconn=4096</code>).</td>
+</tr>
+<tr>
+<td><code>BB_SOCKET_REUSEPORT</code></td>
+<td><code>0</code></td>
+<td><code>1</code></td>
+<td>When running &gt; 1 worker on Linux, lets the kernel hash incoming connections across workers instead of a single accept loop fanning them out.  Eliminates thundering-herd and improves CPU affinity.</td>
+</tr>
+<tr>
+<td><code>BB_SOCKET_SNDBUF</code></td>
+<td><code>0</code></td>
+<td><code>262144</code></td>
+<td>256 kB requested → ~512 kB effective after the kernel doubles.  Helps throughput on responses ≥ 64 kB (static assets, JSON arrays, streamed bodies).</td>
+</tr>
+<tr>
+<td><code>BB_SOCKET_RCVBUF</code></td>
+<td><code>0</code></td>
+<td><code>262144</code></td>
+<td>Same shape as <code>SNDBUF</code>, for inbound traffic (large <code>POST</code> bodies).</td>
+</tr>
+<tr>
+<td><code>BB_TCP_USER_TIMEOUT_MS</code></td>
+<td><code>0</code></td>
+<td><code>60000</code></td>
+<td>Linux <code>TCP_USER_TIMEOUT</code>.  Forces the kernel to drop connections where the peer hasn't ACKed a sent segment within the window.  Evicts dead peers behind NATs / load balancers faster than keepalives.</td>
+</tr>
+<tr>
+<td><code>BB_H2_INITIAL_WINDOW_SIZE</code></td>
+<td><code>65535</code></td>
+<td><code>1048576</code> (1 MiB)</td>
+<td>RFC 7540's 64 kB per-stream window is small for modern broadband; 1 MiB lets peers send a respectable chunk before they have to wait for a <code>WINDOW_UPDATE</code>.</td>
+</tr>
+<tr>
+<td><code>BB_H2_CONNECTION_WINDOW_SIZE</code></td>
+<td><code>65535</code></td>
+<td><code>4194304</code> (4 MiB)</td>
+<td>Same logic at the connection level — letting multiple concurrent streams share a 4 MiB connection budget reduces head-of-line stalls when one stream's flow control is tight.</td>
+</tr>
+</tbody>
+</table>
+<p>For containerised deployments, set the socket-buffer values via
+the container environment (<code>docker run -e BB_SOCKET_SNDBUF=...</code>)
+since the host's <code>net.ipv4.tcp_wmem</code> won't apply inside the
+container's network namespace.</p>
+<p>For benchmarks that compare BlackBull on its own terms (no
+peer-framework framing), leave the defaults alone — RFC / kernel
+baselines are the right starting point and tuning above them is a
+deployment concern, not a framework one.</p>
 <h2 id="see-also">See also<a class="headerlink" href="#see-also" title="Permanent link">&para;</a></h2>
 <ul>
 <li><a href="../../guide/configuration/">Configuration</a> — how environment

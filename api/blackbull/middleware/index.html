@@ -1985,6 +1985,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="StaticFiles">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.middleware.StaticFiles.__init__" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        __init__
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
         
           <li class="md-nav__item">
@@ -3558,6 +3575,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="StaticFiles">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.middleware.StaticFiles.__init__" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        __init__
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
         
           <li class="md-nav__item">
@@ -4029,6 +4063,36 @@ path:
 
 
 
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.middleware.StaticFiles.__init__" class="doc doc-heading">
+            <code class="highlight language-python"><span class="fm">__init__</span><span class="p">(</span><span class="n">directory</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">url_prefix</span><span class="o">=</span><span class="s1">&#39;&#39;</span><span class="p">,</span> <span class="n">root_dir</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">cache</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span></code>
+
+<a href="#blackbull.middleware.StaticFiles.__init__" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Serve files from <code>directory</code> (or <code>root_dir</code>).</p>
+<p><code>cache</code> (default <code>False</code>): when <code>True</code>, file bodies up to
+<code>_CACHE_MAX_BYTES_PER_FILE</code> are held in an in-memory
+<code>OrderedDict</code> (capped at <code>_CACHE_MAX_ENTRIES</code>), and the
+per-request <code>stat()</code> syscall is throttled by
+<code>_STAT_TTL_S</code>.  When <code>False</code> (the default), every request
+does a fresh <code>stat()</code> and reads the body from disk — matching
+the behaviour of Starlette / FastAPI / Flask static serving and
+the requirement HttpArena's standard-mode rules place on static
+profiles ("read files from disk on every request, no in-memory
+caching").  Set <code>cache=True</code> only for standalone deployments
+where BlackBull terminates static traffic directly (i.e. no
+nginx / CDN in front).</p>
+
+
+    </div>
+
+</div>
 
 
 

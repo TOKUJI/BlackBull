@@ -799,10 +799,21 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#in-memory-cache" class="md-nav__link">
+  <a href="#in-memory-cache-opt-in" class="md-nav__link">
     <span class="md-ellipsis">
       
-        In-memory cache
+        In-memory cache (opt-in)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#precompressed-sibling-serving" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Precompressed sibling serving
       
     </span>
   </a>
@@ -3521,10 +3532,21 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#in-memory-cache" class="md-nav__link">
+  <a href="#in-memory-cache-opt-in" class="md-nav__link">
     <span class="md-ellipsis">
       
-        In-memory cache
+        In-memory cache (opt-in)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#precompressed-sibling-serving" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Precompressed sibling serving
       
     </span>
   </a>
@@ -3672,17 +3694,74 @@ deployments typically front BlackBull with nginx or a CDN that
 serves static assets directly, and you don't want the framework
 double-serving the same files.</p>
 <h2 id="how-it-serves-files">How it serves files<a class="headerlink" href="#how-it-serves-files" title="Permanent link">&para;</a></h2>
-<h3 id="in-memory-cache">In-memory cache<a class="headerlink" href="#in-memory-cache" title="Permanent link">&para;</a></h3>
-<p>Small files (default ≤ 4 MiB each, up to 256 entries) are cached
-in process memory keyed on <code>(path, mtime, size)</code>.  Cache hits
-serve directly — no disk I/O on the hot path.  When a file's
-modification time or size changes on disk, the next request
-re-reads it and replaces the cached copy.</p>
+<h3 id="in-memory-cache-opt-in">In-memory cache (opt-in)<a class="headerlink" href="#in-memory-cache-opt-in" title="Permanent link">&para;</a></h3>
+<p><code>StaticFiles</code> supports an in-process body cache for fast cache-hit
+serving.  It is <strong>off by default</strong>: every request does a fresh
+<code>stat()</code> and reads the body from disk.  This matches the behaviour
+of Starlette / FastAPI / Flask static serving and keeps BlackBull's
+default behaviour compatible with standards that require "read
+files from disk on every request, no in-memory caching" (e.g. the
+HttpArena standard-mode static profile).</p>
+<p>Opt in by passing <code>cache=True</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># Default — read from disk every request.</span>
+<span class="n">app</span><span class="o">.</span><span class="n">static</span><span class="p">(</span><span class="s1">&#39;/assets&#39;</span><span class="p">,</span> <span class="s1">&#39;public/assets&#39;</span><span class="p">)</span>
+
+<span class="c1"># Opt-in — small files (≤ 4 MiB each, up to 256 entries) held in</span>
+<span class="c1"># process memory; stat() syscall throttled to once per second per</span>
+<span class="c1"># entry; sibling-existence answers memoised across requests.</span>
+<span class="n">app</span><span class="o">.</span><span class="n">static</span><span class="p">(</span><span class="s1">&#39;/assets&#39;</span><span class="p">,</span> <span class="s1">&#39;public/assets&#39;</span><span class="p">,</span> <span class="n">cache</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+</code></pre></div>
+<p>When you should turn it on:</p>
+<ul>
+<li>BlackBull terminates static traffic directly (no nginx / no CDN
+  in front).</li>
+<li>The asset set is small enough that all files fit in 256 × 4 MiB
+  of process memory and small enough that the cache hit rate is
+  high.</li>
+<li>You're OK with edit-on-disk visibility up to ~1 second behind
+  (the stat-throttle window, override via <code>BB_STATIC_STAT_TTL_S</code>).</li>
+</ul>
+<p>When to leave it off (the default):</p>
+<ul>
+<li>nginx / a CDN fronts the framework — they handle the static path
+  far more efficiently than any in-process cache can.</li>
+<li>You want edit-on-disk visibility to be immediate.</li>
+<li>You're running the benchmark suites HttpArena's standard-mode
+  rules describe.</li>
+</ul>
 <p>The cache is per-process — multi-worker deployments hold a
 separate cache in each worker.</p>
 <p>For files above the cache threshold, <code>StaticFiles</code> streams the
 body in chunks so peak per-request memory stays bounded
 regardless of file size.</p>
+<h3 id="precompressed-sibling-serving">Precompressed sibling serving<a class="headerlink" href="#precompressed-sibling-serving" title="Permanent link">&para;</a></h3>
+<p>If a file <code>app.js</code> has a sibling on disk like <code>app.js.br</code>,
+<code>app.js.zst</code>, or <code>app.js.gz</code>, <code>StaticFiles</code> will serve the
+sibling (with the right <code>Content-Encoding</code> header) when the
+client's <code>Accept-Encoding</code> allows it.  Preference order is
+<code>br &gt; zstd &gt; gzip</code>.</p>
+<div class="highlight"><pre><span></span><code>public/
+  app.js          # 50 KiB original
+  app.js.br       # 12 KiB pre-compressed (served when Accept-Encoding: br)
+  app.js.gz       # 17 KiB pre-compressed (served when Accept-Encoding: gzip)
+</code></pre></div>
+<p>This is the same pattern as nginx's
+<a href="https://nginx.org/en/docs/http/ngx_http_gzip_static_module.html"><code>gzip_static</code></a>
+/ <code>brotli_static</code> modules and ASP.NET's <code>MapStaticAssets</code>.
+Generating the siblings is a build-time concern (CI script, asset
+pipeline) — BlackBull does not produce them at runtime.</p>
+<p>Range requests bypass sibling lookup — encoded bodies have a
+different size than the original and serving a <code>Range</code> over an
+encoded variant is messy.  Matches nginx's <code>gzip_static</code> +
+<code>Range</code> behaviour.</p>
+<p><code>StaticFiles</code> always advertises <code>Vary: Accept-Encoding</code> on
+responses where a precompressed sibling was selected, so HTTP
+caches don't mis-cache an encoded body to a client that didn't
+ask for it.</p>
+<p>When <code>cache=True</code> is set, the per-path sibling-existence answer
+is memoised after the first lookup (the file set is deterministic
+for the lifetime of the server).  When <code>cache=False</code>, sibling
+existence is rechecked on every request.</p>
 <h3 id="range-requests-rfc-7233">Range requests (RFC 7233)<a class="headerlink" href="#range-requests-rfc-7233" title="Permanent link">&para;</a></h3>
 <p><code>StaticFiles</code> supports <code>Range</code> requests:</p>
 <div class="highlight"><pre><span></span><code>GET /assets/video.mp4 HTTP/1.1

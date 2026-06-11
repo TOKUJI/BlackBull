@@ -3581,25 +3581,30 @@ BB_SOCKET_BACKLOG
     <code>listen()</code> backlog depth for the server socket.  Increasing this reduces
     silent connection drops during burst traffic when the accept loop falls
     behind.  Capped by <code>net.core.somaxconn</code> on Linux.
-    Default: <code>1024</code>.
+    Default: <code>128</code> (matches the Linux <code>net.core.somaxconn</code> traditional
+    default).  Bump to 4096 for production traffic — see
+    docs/reference/env-vars.md "Performance recommendations".
 BB_SOCKET_SNDBUF
     Kernel send-buffer size (bytes) set on each accepted TCP socket via
     <code>SO_SNDBUF</code>.  The kernel doubles the requested value internally.
     Larger values improve throughput for large responses (≥64 kB).
     <code>0</code> leaves the kernel default unchanged.
-    Default: <code>262144</code> (256 kB requested → ~512 kB effective).
+    Default: <code>0</code> (kernel default).  <code>262144</code> (256 kB) is a common
+    production value — see docs/reference/env-vars.md.
 BB_SOCKET_RCVBUF
     Kernel receive-buffer size (bytes) set on each accepted TCP socket via
     <code>SO_RCVBUF</code>.  Same doubling rule as <code>BB_SOCKET_SNDBUF</code>.
     <code>0</code> leaves the kernel default unchanged.
-    Default: <code>262144</code> (256 kB requested → ~512 kB effective).
+    Default: <code>0</code> (kernel default).  <code>262144</code> (256 kB) is a common
+    production value — see docs/reference/env-vars.md.
 BB_SOCKET_REUSEPORT
     <code>1</code> | <code>true</code> | <code>yes</code> to enable; <code>0</code> | <code>false</code> | <code>no</code> to disable.
     When enabled and the OS supports <code>SO_REUSEPORT</code>, each worker binds its own
     listening socket so the kernel distributes incoming connections across workers
     independently, eliminating thundering-herd and improving CPU affinity.
     Has no effect with a single worker or on platforms without <code>SO_REUSEPORT</code>.
-    Default: <code>true</code>.
+    Default: <code>false</code> (kernel default).  Enable on multi-worker production
+    deployments — see docs/reference/env-vars.md.
 BB_REQUEST_TIMEOUT
     Maximum seconds a single HTTP/2 stream (request + response) is allowed to
     run before it is forcibly cancelled with RST_STREAM CANCEL.  Prevents slow
@@ -3608,12 +3613,17 @@ BB_REQUEST_TIMEOUT
 BB_H2_INITIAL_WINDOW_SIZE
     Per-stream flow-control window size (bytes) advertised to HTTP/2 peers in the
     server's initial SETTINGS frame.  Larger values allow peers to send more data
-    per stream before waiting for WINDOW_UPDATE.  Default: <code>1048576</code> (1 MiB).
+    per stream before waiting for WINDOW_UPDATE.
+    Default: <code>65535</code> (RFC 7540 §6.9.2 default).  <code>1048576</code> (1 MiB) is a
+    common tuned value for upload-heavy or multiplexed workloads — see
+    docs/reference/env-vars.md.
 BB_H2_CONNECTION_WINDOW_SIZE
     Connection-level flow-control window size (bytes) advertised to HTTP/2 peers
     via an initial WINDOW_UPDATE on stream 0 after the SETTINGS handshake.
     Must be ≥ 65535 (the RFC default); values below that are silently ignored.
-    Default: <code>4194304</code> (4 MiB).
+    Default: <code>65535</code> (RFC 7540 §6.9.2 minimum).  <code>4194304</code> (4 MiB) is a
+    common tuned value to allow concurrent streams to share the connection
+    budget without head-of-line stalls — see docs/reference/env-vars.md.
 BB_H2_MAX_CONCURRENT_STREAMS
     Maximum number of HTTP/2 streams the server accepts at the same time per
     connection, advertised to peers in the initial SETTINGS frame
