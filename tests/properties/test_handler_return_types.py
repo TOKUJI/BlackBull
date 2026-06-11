@@ -23,13 +23,16 @@ def _make_send():
     """Return a (_wrap_send-wrapped send, body_parts list).
 
     _adapt_handler passes Response/JSONResponse objects to send; _wrap_send
-    unpacks them into (body, status, headers) calls on the underlying raw_send.
+    decomposes them into standard ASGI ``http.response.start`` +
+    ``http.response.body`` event dicts on the underlying raw_send.
     """
     body_parts = []
 
-    async def raw_send(body_or_event, status=None, headers=None):
-        if isinstance(body_or_event, (bytes, bytearray)):
-            body_parts.append(bytes(body_or_event))
+    async def raw_send(event):
+        if isinstance(event, dict) and event.get('type') == 'http.response.body':
+            body = event.get('body', b'')
+            if body:
+                body_parts.append(bytes(body))
 
     return _wrap_send(raw_send), body_parts
 
