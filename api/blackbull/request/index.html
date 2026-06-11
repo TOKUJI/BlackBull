@@ -3166,6 +3166,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../testing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    testing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../utils/" class="md-nav__link">
         
   
@@ -3489,9 +3517,18 @@
         <p>Parse the <code>Cookie</code> request header from an ASGI scope into a dict.</p>
 <p>Works identically for HTTP/1.1, HTTP/2, and WebSocket scopes.
 HTTP/1.1 sends a single combined <code>Cookie</code> header; HTTP/2 may split it
-into multiple fields (RFC 7540 §8.1.2.5).  This function uses
-<code>Headers.getlist</code> to collect all <code>cookie</code> fields before joining and
-parsing, so both wire formats produce the same result.</p>
+into multiple fields (RFC 7540 §8.1.2.5).  All <code>cookie</code> fields are
+collected and joined before parsing, so both wire formats produce the
+same result.</p>
+<p>Accepts either of the two header shapes that may appear on
+<code>scope['headers']</code>:</p>
+<ul>
+<li>A plain list/iterable of <code>(name, value)</code> bytes tuples — the
+  standard ASGI 3.0 form, used by external servers (uvicorn,
+  hypercorn, <code>httpx.ASGITransport</code>).</li>
+<li>A :class:<code>blackbull.headers.Headers</code> instance — what BlackBull's
+  own server attaches as a handler ergonomics enhancement.</li>
+</ul>
 
 
     </div>

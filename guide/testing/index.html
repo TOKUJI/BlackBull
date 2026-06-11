@@ -849,6 +849,78 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#quick-start-with-testclient" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Quick start with TestClient
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Quick start with TestClient">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#post-and-json-bodies" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        POST and JSON bodies
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#file-uploads-auth-timeouts-and-other-httpx-parameters" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        File uploads, auth, timeouts, and other httpx parameters
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#websocket-sessions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WebSocket sessions
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#lifespan-startup-and-shutdown" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Lifespan startup and shutdown
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#construction-options" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Construction options
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#end-to-end-with-blackbulls-clients" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3261,6 +3333,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../api/blackbull/testing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    testing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../api/blackbull/utils/" class="md-nav__link">
         
   
@@ -3481,6 +3581,78 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#quick-start-with-testclient" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Quick start with TestClient
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Quick start with TestClient">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#post-and-json-bodies" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        POST and JSON bodies
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#file-uploads-auth-timeouts-and-other-httpx-parameters" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        File uploads, auth, timeouts, and other httpx parameters
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#websocket-sessions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WebSocket sessions
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#lifespan-startup-and-shutdown" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Lifespan startup and shutdown
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#construction-options" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Construction options
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#end-to-end-with-blackbulls-clients" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3628,17 +3800,20 @@
 
 
 <h1 id="testing">Testing<a class="headerlink" href="#testing" title="Permanent link">&para;</a></h1>
-<p>BlackBull's <code>app</code> is a plain ASGI 3.0 callable and ships its own
-async HTTP/1.1, HTTP/2, and WebSocket clients, so there are three
-useful shapes for tests:</p>
+<p>BlackBull's <code>app</code> is a plain ASGI 3.0 callable, so most application
+tests can drive it in-memory through a synchronous client and never
+touch a TCP socket.  Four useful shapes exist:</p>
 <ul>
+<li><strong><code>blackbull.testing.TestClient</code></strong> — synchronous, in-memory,
+  lifespan-aware.  The default starting point: ordinary
+  <code>pytest</code> style, no <code>async def</code>, no fixture overhead.</li>
 <li><strong>End-to-end with BlackBull's own clients</strong> — start the server
   on an ephemeral port, drive it through real sockets via
   <code>HTTP1Client</code> / <code>HTTP2Client</code> / <code>Client</code> / <code>WebSocketClient</code>.
   Best fidelity: exercises the wire, ALPN, TLS, framing.</li>
-<li><strong>In-process integration via <code>httpx.ASGITransport</code></strong> — no
-  sockets, no ports.  Drives the app object directly.  Good for
-  fast, hermetic suites where transport detail doesn't matter.</li>
+<li><strong>In-process integration via <code>httpx.ASGITransport</code></strong> — async
+  variant of <code>TestClient</code> for tests that want full control over
+  the loop or the underlying <code>httpx.AsyncClient</code>.</li>
 <li><strong>Direct handler / middleware unit tests</strong> — hand-rolled
   scope dict + stub callables.  For asserting a single
   function's behaviour without involving routing or transport.</li>
@@ -3655,7 +3830,215 @@ useful shapes for tests:</p>
 <p>Strict mode requires every async test to carry
 <code>@pytest.mark.asyncio</code> explicitly — matching BlackBull's own
 suite — so tests don't accidentally run in the wrong loop
-shape.</p>
+shape.  Tests written against <code>TestClient</code> are synchronous and
+don't need this mark.</p>
+<h2 id="quick-start-with-testclient">Quick start with <code>TestClient</code><a class="headerlink" href="#quick-start-with-testclient" title="Permanent link">&para;</a></h2>
+<p><code>blackbull.testing.TestClient</code> is a synchronous in-memory client
+modelled on <code>httpx.Client</code>: GET / POST / PUT / DELETE all work
+the same way they would over the network, but the request is
+dispatched directly into the ASGI app — no socket, no port.
+The ASGI <code>lifespan</code> protocol runs around the <code>with</code> block, so
+<code>@app.on_startup</code> / <code>@app.on_shutdown</code> handlers fire in the
+expected order.</p>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">blackbull</span><span class="w"> </span><span class="kn">import</span> <span class="n">BlackBull</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">blackbull.testing</span><span class="w"> </span><span class="kn">import</span> <span class="n">TestClient</span>
+
+<span class="n">app</span> <span class="o">=</span> <span class="n">BlackBull</span><span class="p">()</span>
+
+
+<span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">&#39;/&#39;</span><span class="p">)</span>
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">hello</span><span class="p">():</span>
+    <span class="k">return</span> <span class="s2">&quot;hello, world&quot;</span>
+
+
+<span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">&#39;/items/{item_id:int}&#39;</span><span class="p">)</span>
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">get_item</span><span class="p">(</span><span class="n">item_id</span><span class="p">:</span> <span class="nb">int</span><span class="p">):</span>
+    <span class="k">return</span> <span class="p">{</span><span class="s2">&quot;id&quot;</span><span class="p">:</span> <span class="n">item_id</span><span class="p">,</span> <span class="s2">&quot;kind&quot;</span><span class="p">:</span> <span class="s2">&quot;widget&quot;</span><span class="p">}</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">test_hello</span><span class="p">():</span>
+    <span class="k">with</span> <span class="n">TestClient</span><span class="p">(</span><span class="n">app</span><span class="p">)</span> <span class="k">as</span> <span class="n">client</span><span class="p">:</span>
+        <span class="n">response</span> <span class="o">=</span> <span class="n">client</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;/&#39;</span><span class="p">)</span>
+    <span class="k">assert</span> <span class="n">response</span><span class="o">.</span><span class="n">status_code</span> <span class="o">==</span> <span class="mi">200</span>
+    <span class="k">assert</span> <span class="n">response</span><span class="o">.</span><span class="n">text</span> <span class="o">==</span> <span class="s2">&quot;hello, world&quot;</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">test_get_item</span><span class="p">():</span>
+    <span class="k">with</span> <span class="n">TestClient</span><span class="p">(</span><span class="n">app</span><span class="p">)</span> <span class="k">as</span> <span class="n">client</span><span class="p">:</span>
+        <span class="n">response</span> <span class="o">=</span> <span class="n">client</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;/items/42&#39;</span><span class="p">)</span>
+    <span class="k">assert</span> <span class="n">response</span><span class="o">.</span><span class="n">json</span><span class="p">()</span> <span class="o">==</span> <span class="p">{</span><span class="s2">&quot;id&quot;</span><span class="p">:</span> <span class="mi">42</span><span class="p">,</span> <span class="s2">&quot;kind&quot;</span><span class="p">:</span> <span class="s2">&quot;widget&quot;</span><span class="p">}</span>
+</code></pre></div>
+<p>The response object is <code>httpx.Response</code> — same shape as a
+production HTTP client, so <code>.status_code</code>, <code>.headers</code>,
+<code>.json()</code>, <code>.text</code>, <code>.content</code>, cookies, redirects all work
+unchanged.</p>
+<h3 id="post-and-json-bodies">POST and JSON bodies<a class="headerlink" href="#post-and-json-bodies" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">test_create_item</span><span class="p">():</span>
+    <span class="k">with</span> <span class="n">TestClient</span><span class="p">(</span><span class="n">app</span><span class="p">)</span> <span class="k">as</span> <span class="n">client</span><span class="p">:</span>
+        <span class="n">response</span> <span class="o">=</span> <span class="n">client</span><span class="o">.</span><span class="n">post</span><span class="p">(</span><span class="s1">&#39;/items&#39;</span><span class="p">,</span> <span class="n">json</span><span class="o">=</span><span class="p">{</span><span class="s1">&#39;name&#39;</span><span class="p">:</span> <span class="s1">&#39;widget&#39;</span><span class="p">})</span>
+    <span class="k">assert</span> <span class="n">response</span><span class="o">.</span><span class="n">status_code</span> <span class="o">==</span> <span class="mi">201</span>
+</code></pre></div>
+<p><code>client.post</code>, <code>.put</code>, <code>.patch</code>, <code>.delete</code>, <code>.head</code>,
+<code>.options</code>, and the underlying <code>client.request(method, url, ...)</code>
+all accept the same arguments as <code>httpx.Client</code>:</p>
+<ul>
+<li><code>content=</code> for raw bytes</li>
+<li><code>data=</code> for form-encoded fields</li>
+<li><code>json=</code> for JSON-encoded bodies</li>
+<li><code>headers=</code> for request headers</li>
+<li><code>cookies=</code> for cookies</li>
+<li><code>params=</code> for query parameters</li>
+<li><code>follow_redirects=False</code> (default) to assert on 3xx
+  responses directly; pass <code>follow_redirects=True</code> on the
+  <code>TestClient</code> constructor or per-call kwarg to traverse them.</li>
+</ul>
+<h3 id="file-uploads-auth-timeouts-and-other-httpx-parameters">File uploads, auth, timeouts, and other httpx parameters<a class="headerlink" href="#file-uploads-auth-timeouts-and-other-httpx-parameters" title="Permanent link">&para;</a></h3>
+<p><code>TestClient</code>'s HTTP methods forward <code>**kwargs</code> straight to the
+underlying <code>httpx.AsyncClient</code>, so anything httpx accepts works
+unchanged.  Patterns worth knowing:</p>
+<p><strong>Multipart file upload</strong> — pass <code>files=</code> (and optional <code>data=</code>
+for accompanying form fields).  Each <code>files</code> entry is
+<code>(field_name, (filename, fileobj, content_type))</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">test_upload</span><span class="p">():</span>
+    <span class="k">with</span> <span class="n">TestClient</span><span class="p">(</span><span class="n">app</span><span class="p">)</span> <span class="k">as</span> <span class="n">client</span><span class="p">:</span>
+        <span class="n">response</span> <span class="o">=</span> <span class="n">client</span><span class="o">.</span><span class="n">post</span><span class="p">(</span>
+            <span class="s1">&#39;/upload&#39;</span><span class="p">,</span>
+            <span class="n">files</span><span class="o">=</span><span class="p">{</span><span class="s1">&#39;attachment&#39;</span><span class="p">:</span> <span class="p">(</span><span class="s1">&#39;report.pdf&#39;</span><span class="p">,</span> <span class="sa">b</span><span class="s1">&#39;%PDF-1.4...&#39;</span><span class="p">,</span> <span class="s1">&#39;application/pdf&#39;</span><span class="p">)},</span>
+            <span class="n">data</span><span class="o">=</span><span class="p">{</span><span class="s1">&#39;note&#39;</span><span class="p">:</span> <span class="s1">&#39;monthly&#39;</span><span class="p">},</span>
+        <span class="p">)</span>
+    <span class="k">assert</span> <span class="n">response</span><span class="o">.</span><span class="n">status_code</span> <span class="o">==</span> <span class="mi">201</span>
+</code></pre></div>
+<p><strong>HTTP authentication</strong> — pass <code>auth=</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># Basic auth</span>
+<span class="n">response</span> <span class="o">=</span> <span class="n">client</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;/private&#39;</span><span class="p">,</span> <span class="n">auth</span><span class="o">=</span><span class="p">(</span><span class="s1">&#39;alice&#39;</span><span class="p">,</span> <span class="s1">&#39;hunter2&#39;</span><span class="p">))</span>
+
+<span class="c1"># Custom scheme via httpx.Auth subclass — e.g. a bearer token</span>
+<span class="n">response</span> <span class="o">=</span> <span class="n">client</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;/api/me&#39;</span><span class="p">,</span> <span class="n">headers</span><span class="o">=</span><span class="p">{</span><span class="s1">&#39;Authorization&#39;</span><span class="p">:</span> <span class="s1">&#39;Bearer abc.def.ghi&#39;</span><span class="p">})</span>
+</code></pre></div>
+<p><strong>Per-request timeout</strong> — pass <code>timeout=</code> (seconds, or an
+<code>httpx.Timeout</code> for finer control):</p>
+<div class="highlight"><pre><span></span><code><span class="n">response</span> <span class="o">=</span> <span class="n">client</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;/slow&#39;</span><span class="p">,</span> <span class="n">timeout</span><span class="o">=</span><span class="mf">5.0</span><span class="p">)</span>
+</code></pre></div>
+<p>Default timeouts can be passed on the <code>TestClient</code> constructor
+via the <code>headers=</code> / <code>cookies=</code> / <code>follow_redirects=</code> options,
+or set after construction by mutating <code>client.headers</code> /
+<code>client.cookies</code> — both forward to the underlying
+<code>httpx.AsyncClient</code>, so the standard httpx jar semantics apply
+(cookies set by responses persist across subsequent requests on
+the same client).</p>
+<div class="highlight"><pre><span></span><code><span class="k">with</span> <span class="n">TestClient</span><span class="p">(</span><span class="n">app</span><span class="p">,</span> <span class="n">headers</span><span class="o">=</span><span class="p">{</span><span class="s1">&#39;X-Test-Tag&#39;</span><span class="p">:</span> <span class="s1">&#39;integration&#39;</span><span class="p">})</span> <span class="k">as</span> <span class="n">client</span><span class="p">:</span>
+    <span class="c1"># X-Test-Tag goes out on every request below</span>
+    <span class="n">client</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;/api/one&#39;</span><span class="p">)</span>
+    <span class="n">client</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;/api/two&#39;</span><span class="p">)</span>
+</code></pre></div>
+<h3 id="websocket-sessions">WebSocket sessions<a class="headerlink" href="#websocket-sessions" title="Permanent link">&para;</a></h3>
+<p><code>client.websocket_connect(path)</code> returns a synchronous
+context-managed session.  The session lives inside its own
+background event loop, so all of <code>send_text</code> / <code>send_bytes</code> /
+<code>send_json</code> and the matching receive methods are blocking
+synchronous calls:</p>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">blackbull.router</span><span class="w"> </span><span class="kn">import</span> <span class="n">Scheme</span>
+
+
+<span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">&#39;/ws&#39;</span><span class="p">,</span> <span class="n">scheme</span><span class="o">=</span><span class="n">Scheme</span><span class="o">.</span><span class="n">websocket</span><span class="p">)</span>
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">ws_echo</span><span class="p">(</span><span class="n">scope</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
+    <span class="k">await</span> <span class="n">receive</span><span class="p">()</span>                              <span class="c1"># websocket.connect</span>
+    <span class="k">await</span> <span class="n">send</span><span class="p">({</span><span class="s1">&#39;type&#39;</span><span class="p">:</span> <span class="s1">&#39;websocket.accept&#39;</span><span class="p">})</span>
+    <span class="k">while</span> <span class="kc">True</span><span class="p">:</span>
+        <span class="n">event</span> <span class="o">=</span> <span class="k">await</span> <span class="n">receive</span><span class="p">()</span>
+        <span class="k">if</span> <span class="n">event</span><span class="p">[</span><span class="s1">&#39;type&#39;</span><span class="p">]</span> <span class="o">==</span> <span class="s1">&#39;websocket.disconnect&#39;</span><span class="p">:</span>
+            <span class="k">return</span>
+        <span class="k">if</span> <span class="n">event</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;text&#39;</span><span class="p">)</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">await</span> <span class="n">send</span><span class="p">({</span><span class="s1">&#39;type&#39;</span><span class="p">:</span> <span class="s1">&#39;websocket.send&#39;</span><span class="p">,</span> <span class="s1">&#39;text&#39;</span><span class="p">:</span> <span class="n">event</span><span class="p">[</span><span class="s1">&#39;text&#39;</span><span class="p">]})</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">test_ws_echo</span><span class="p">():</span>
+    <span class="k">with</span> <span class="n">TestClient</span><span class="p">(</span><span class="n">app</span><span class="p">)</span> <span class="k">as</span> <span class="n">client</span><span class="p">:</span>
+        <span class="k">with</span> <span class="n">client</span><span class="o">.</span><span class="n">websocket_connect</span><span class="p">(</span><span class="s1">&#39;/ws&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">ws</span><span class="p">:</span>
+            <span class="n">ws</span><span class="o">.</span><span class="n">send_text</span><span class="p">(</span><span class="s1">&#39;ping&#39;</span><span class="p">)</span>
+            <span class="k">assert</span> <span class="n">ws</span><span class="o">.</span><span class="n">receive_text</span><span class="p">()</span> <span class="o">==</span> <span class="s1">&#39;ping&#39;</span>
+</code></pre></div>
+<p>When the application closes (or rejects) the WebSocket,
+<code>receive_text</code> / <code>receive_bytes</code> raise
+<code>blackbull.testing.WebSocketDisconnect</code> carrying the RFC 6455
+close code:</p>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">blackbull.testing</span><span class="w"> </span><span class="kn">import</span> <span class="n">WebSocketDisconnect</span>
+
+
+<span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">&#39;/ws-auth&#39;</span><span class="p">,</span> <span class="n">scheme</span><span class="o">=</span><span class="n">Scheme</span><span class="o">.</span><span class="n">websocket</span><span class="p">)</span>
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">ws_auth</span><span class="p">(</span><span class="n">scope</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
+    <span class="k">await</span> <span class="n">receive</span><span class="p">()</span>
+    <span class="k">await</span> <span class="n">send</span><span class="p">({</span><span class="s1">&#39;type&#39;</span><span class="p">:</span> <span class="s1">&#39;websocket.close&#39;</span><span class="p">,</span> <span class="s1">&#39;code&#39;</span><span class="p">:</span> <span class="mi">4401</span><span class="p">})</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">test_ws_rejects_unauthenticated</span><span class="p">():</span>
+    <span class="k">with</span> <span class="n">TestClient</span><span class="p">(</span><span class="n">app</span><span class="p">)</span> <span class="k">as</span> <span class="n">client</span><span class="p">:</span>
+        <span class="k">with</span> <span class="n">pytest</span><span class="o">.</span><span class="n">raises</span><span class="p">(</span><span class="n">WebSocketDisconnect</span><span class="p">)</span> <span class="k">as</span> <span class="n">excinfo</span><span class="p">:</span>
+            <span class="k">with</span> <span class="n">client</span><span class="o">.</span><span class="n">websocket_connect</span><span class="p">(</span><span class="s1">&#39;/ws-auth&#39;</span><span class="p">):</span>
+                <span class="k">pass</span>
+        <span class="k">assert</span> <span class="n">excinfo</span><span class="o">.</span><span class="n">value</span><span class="o">.</span><span class="n">code</span> <span class="o">==</span> <span class="mi">4401</span>
+</code></pre></div>
+<p>For server-streamed sessions where the handler emits a sequence
+of frames and then closes, <code>ws.iter_text()</code> and
+<code>ws.iter_bytes()</code> consume the stream until the close arrives —
+the <code>WebSocketDisconnect</code> is caught and turned into normal
+iterator termination so the test reads as a single <code>for</code> loop:</p>
+<div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">&#39;/notifications&#39;</span><span class="p">,</span> <span class="n">scheme</span><span class="o">=</span><span class="n">Scheme</span><span class="o">.</span><span class="n">websocket</span><span class="p">)</span>
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">notifications</span><span class="p">(</span><span class="n">scope</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
+    <span class="k">await</span> <span class="n">receive</span><span class="p">()</span>                              <span class="c1"># websocket.connect</span>
+    <span class="k">await</span> <span class="n">send</span><span class="p">({</span><span class="s1">&#39;type&#39;</span><span class="p">:</span> <span class="s1">&#39;websocket.accept&#39;</span><span class="p">})</span>
+    <span class="k">for</span> <span class="n">n</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">3</span><span class="p">):</span>
+        <span class="k">await</span> <span class="n">send</span><span class="p">({</span><span class="s1">&#39;type&#39;</span><span class="p">:</span> <span class="s1">&#39;websocket.send&#39;</span><span class="p">,</span> <span class="s1">&#39;text&#39;</span><span class="p">:</span> <span class="sa">f</span><span class="s1">&#39;event-</span><span class="si">{</span><span class="n">n</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">})</span>
+    <span class="k">await</span> <span class="n">send</span><span class="p">({</span><span class="s1">&#39;type&#39;</span><span class="p">:</span> <span class="s1">&#39;websocket.close&#39;</span><span class="p">,</span> <span class="s1">&#39;code&#39;</span><span class="p">:</span> <span class="mi">1000</span><span class="p">})</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">test_notifications_stream</span><span class="p">():</span>
+    <span class="k">with</span> <span class="n">TestClient</span><span class="p">(</span><span class="n">app</span><span class="p">)</span> <span class="k">as</span> <span class="n">client</span><span class="p">:</span>
+        <span class="k">with</span> <span class="n">client</span><span class="o">.</span><span class="n">websocket_connect</span><span class="p">(</span><span class="s1">&#39;/notifications&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">ws</span><span class="p">:</span>
+            <span class="n">messages</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">ws</span><span class="o">.</span><span class="n">iter_text</span><span class="p">())</span>
+    <span class="k">assert</span> <span class="n">messages</span> <span class="o">==</span> <span class="p">[</span><span class="s1">&#39;event-0&#39;</span><span class="p">,</span> <span class="s1">&#39;event-1&#39;</span><span class="p">,</span> <span class="s1">&#39;event-2&#39;</span><span class="p">]</span>
+</code></pre></div>
+<h3 id="lifespan-startup-and-shutdown">Lifespan startup and shutdown<a class="headerlink" href="#lifespan-startup-and-shutdown" title="Permanent link">&para;</a></h3>
+<p><code>TestClient</code> drives the ASGI <code>lifespan</code> protocol automatically
+around the <code>with</code> block:</p>
+<div class="highlight"><pre><span></span><code><span class="n">events</span> <span class="o">=</span> <span class="p">[]</span>
+
+<span class="nd">@app</span><span class="o">.</span><span class="n">on_startup</span>
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">_start</span><span class="p">():</span>
+    <span class="n">events</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="s1">&#39;startup&#39;</span><span class="p">)</span>
+
+<span class="nd">@app</span><span class="o">.</span><span class="n">on_shutdown</span>
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">_stop</span><span class="p">():</span>
+    <span class="n">events</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="s1">&#39;shutdown&#39;</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">test_lifespan_runs</span><span class="p">():</span>
+    <span class="k">with</span> <span class="n">TestClient</span><span class="p">(</span><span class="n">app</span><span class="p">)</span> <span class="k">as</span> <span class="n">client</span><span class="p">:</span>
+        <span class="k">assert</span> <span class="n">events</span> <span class="o">==</span> <span class="p">[</span><span class="s1">&#39;startup&#39;</span><span class="p">]</span>
+        <span class="n">client</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;/&#39;</span><span class="p">)</span>
+    <span class="k">assert</span> <span class="n">events</span> <span class="o">==</span> <span class="p">[</span><span class="s1">&#39;startup&#39;</span><span class="p">,</span> <span class="s1">&#39;shutdown&#39;</span><span class="p">]</span>
+</code></pre></div>
+<p>If a startup handler raises, <code>TestClient.__enter__</code> re-raises a
+<code>RuntimeError</code> describing the failure, so a broken startup
+fails the test rather than silently leaving the app in a
+half-initialised state.  Apps that don't implement the
+lifespan protocol (i.e. legacy ASGI-2.0-style callables) are
+tolerated silently.</p>
+<h3 id="construction-options">Construction options<a class="headerlink" href="#construction-options" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="n">TestClient</span><span class="p">(</span>
+    <span class="n">app</span><span class="p">,</span>
+    <span class="n">base_url</span><span class="o">=</span><span class="s1">&#39;http://testserver&#39;</span><span class="p">,</span>
+    <span class="n">raise_app_exceptions</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>    <span class="c1"># let handler exceptions bubble up</span>
+    <span class="n">root_path</span><span class="o">=</span><span class="s1">&#39;&#39;</span><span class="p">,</span>                 <span class="c1"># ASGI scope[&#39;root_path&#39;]</span>
+    <span class="n">cookies</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+    <span class="n">headers</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+    <span class="n">follow_redirects</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+<span class="p">)</span>
+</code></pre></div>
+<p><code>raise_app_exceptions=True</code> (the default) is what you want in
+tests — handler tracebacks surface as the test failure.  Set it
+to <code>False</code> to assert on the 500 response the framework would
+emit to a real client.</p>
 <h2 id="end-to-end-with-blackbulls-clients">End-to-end with BlackBull's clients<a class="headerlink" href="#end-to-end-with-blackbulls-clients" title="Permanent link">&para;</a></h2>
 <p>BlackBull exports four async clients from <code>blackbull.client</code>:</p>
 <table>
@@ -3858,9 +4241,10 @@ path through the same in-process adapter.</p>
 <h2 id="direct-handler-tests">Direct handler tests<a class="headerlink" href="#direct-handler-tests" title="Permanent link">&para;</a></h2>
 <p>For unit-level assertions on a single handler — no transport,
 no routing — call the app callable directly with a hand-rolled
-scope:</p>
+scope.  <code>BlackBull.__call__</code> is a standard ASGI 3.0 callable so
+the stub <code>send</code> is a single-argument coroutine that receives
+event dicts:</p>
 <div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">pytest</span>
-<span class="kn">from</span><span class="w"> </span><span class="nn">http</span><span class="w"> </span><span class="kn">import</span> <span class="n">HTTPStatus</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">blackbull</span><span class="w"> </span><span class="kn">import</span> <span class="n">BlackBull</span><span class="p">,</span> <span class="n">JSONResponse</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">blackbull.server.headers</span><span class="w"> </span><span class="kn">import</span> <span class="n">Headers</span>
 
@@ -3889,19 +4273,21 @@ scope:</p>
 
 <span class="nd">@pytest</span><span class="o">.</span><span class="n">mark</span><span class="o">.</span><span class="n">asyncio</span>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">test_ping_handler</span><span class="p">():</span>
-    <span class="n">responses</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="n">events</span> <span class="o">=</span> <span class="p">[]</span>
 
-    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">fake_send</span><span class="p">(</span><span class="n">body</span><span class="p">,</span> <span class="n">status</span><span class="o">=</span><span class="n">HTTPStatus</span><span class="o">.</span><span class="n">OK</span><span class="p">,</span> <span class="n">headers</span><span class="o">=</span><span class="p">[]):</span>
-        <span class="n">responses</span><span class="o">.</span><span class="n">append</span><span class="p">({</span><span class="s1">&#39;body&#39;</span><span class="p">:</span> <span class="n">body</span><span class="p">,</span> <span class="s1">&#39;status&#39;</span><span class="p">:</span> <span class="n">status</span><span class="p">})</span>
+    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">fake_send</span><span class="p">(</span><span class="n">event</span><span class="p">):</span>
+        <span class="n">events</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">event</span><span class="p">)</span>
 
     <span class="k">await</span> <span class="n">app</span><span class="p">(</span><span class="n">make_scope</span><span class="p">(),</span> <span class="n">fake_receive</span><span class="p">,</span> <span class="n">fake_send</span><span class="p">)</span>
-    <span class="k">assert</span> <span class="n">responses</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="s1">&#39;status&#39;</span><span class="p">]</span> <span class="o">==</span> <span class="n">HTTPStatus</span><span class="o">.</span><span class="n">OK</span>
-    <span class="k">assert</span> <span class="sa">b</span><span class="s1">&#39;&quot;pong&quot;&#39;</span> <span class="ow">in</span> <span class="n">responses</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="s1">&#39;body&#39;</span><span class="p">]</span>
+    <span class="n">start</span> <span class="o">=</span> <span class="nb">next</span><span class="p">(</span><span class="n">e</span> <span class="k">for</span> <span class="n">e</span> <span class="ow">in</span> <span class="n">events</span> <span class="k">if</span> <span class="n">e</span><span class="p">[</span><span class="s1">&#39;type&#39;</span><span class="p">]</span> <span class="o">==</span> <span class="s1">&#39;http.response.start&#39;</span><span class="p">)</span>
+    <span class="n">body</span> <span class="o">=</span> <span class="nb">next</span><span class="p">(</span><span class="n">e</span> <span class="k">for</span> <span class="n">e</span> <span class="ow">in</span> <span class="n">events</span> <span class="k">if</span> <span class="n">e</span><span class="p">[</span><span class="s1">&#39;type&#39;</span><span class="p">]</span> <span class="o">==</span> <span class="s1">&#39;http.response.body&#39;</span><span class="p">)</span>
+    <span class="k">assert</span> <span class="n">start</span><span class="p">[</span><span class="s1">&#39;status&#39;</span><span class="p">]</span> <span class="o">==</span> <span class="mi">200</span>
+    <span class="k">assert</span> <span class="sa">b</span><span class="s1">&#39;&quot;pong&quot;&#39;</span> <span class="ow">in</span> <span class="n">body</span><span class="p">[</span><span class="s1">&#39;body&#39;</span><span class="p">]</span>
 </code></pre></div>
-<p>Useful when you want to assert on response shape without
-involving HTTP framing or transport.  Prefer the integration
-patterns above for anything routing-shaped — they cost almost
-nothing more and exercise more of the framework.</p>
+<p>Useful when you want to assert on the raw ASGI event sequence.
+Prefer the <code>TestClient</code> pattern above for anything routing-
+shaped — it costs almost nothing more and exercises more of the
+framework.</p>
 <h2 id="middleware-in-isolation">Middleware in isolation<a class="headerlink" href="#middleware-in-isolation" title="Permanent link">&para;</a></h2>
 <p>Middleware is an async function — test it by passing stub
 callables.  Useful for asserting short-circuit behaviour,
@@ -3910,14 +4296,13 @@ header mutation, or scope injection:</p>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">test_auth_mw_rejects_missing_token</span><span class="p">():</span>
     <span class="kn">from</span><span class="w"> </span><span class="nn">myapp</span><span class="w"> </span><span class="kn">import</span> <span class="n">auth_mw</span>
     <span class="kn">from</span><span class="w"> </span><span class="nn">blackbull.server.headers</span><span class="w"> </span><span class="kn">import</span> <span class="n">Headers</span>
-    <span class="kn">from</span><span class="w"> </span><span class="nn">http</span><span class="w"> </span><span class="kn">import</span> <span class="n">HTTPStatus</span>
 
     <span class="n">scope</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;type&#39;</span><span class="p">:</span> <span class="s1">&#39;http&#39;</span><span class="p">,</span> <span class="s1">&#39;method&#39;</span><span class="p">:</span> <span class="s1">&#39;GET&#39;</span><span class="p">,</span> <span class="s1">&#39;path&#39;</span><span class="p">:</span> <span class="s1">&#39;/tasks&#39;</span><span class="p">,</span>
              <span class="s1">&#39;headers&#39;</span><span class="p">:</span> <span class="n">Headers</span><span class="p">([]),</span> <span class="s1">&#39;state&#39;</span><span class="p">:</span> <span class="p">{}}</span>
 
-    <span class="n">responses</span> <span class="o">=</span> <span class="p">[]</span>
-    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">fake_send</span><span class="p">(</span><span class="n">body</span><span class="p">,</span> <span class="n">status</span><span class="o">=</span><span class="n">HTTPStatus</span><span class="o">.</span><span class="n">OK</span><span class="p">,</span> <span class="n">headers</span><span class="o">=</span><span class="p">[]):</span>
-        <span class="n">responses</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">status</span><span class="p">)</span>
+    <span class="n">events</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">fake_send</span><span class="p">(</span><span class="n">event</span><span class="p">):</span>
+        <span class="n">events</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">event</span><span class="p">)</span>
 
     <span class="n">call_next_called</span> <span class="o">=</span> <span class="kc">False</span>
     <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">fake_call_next</span><span class="p">(</span><span class="n">scope</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
@@ -3927,7 +4312,8 @@ header mutation, or scope injection:</p>
     <span class="k">await</span> <span class="n">auth_mw</span><span class="p">(</span><span class="n">scope</span><span class="p">,</span> <span class="kc">None</span><span class="p">,</span> <span class="n">fake_send</span><span class="p">,</span> <span class="n">fake_call_next</span><span class="p">)</span>
 
     <span class="k">assert</span> <span class="ow">not</span> <span class="n">call_next_called</span>          <span class="c1"># short-circuited</span>
-    <span class="k">assert</span> <span class="n">responses</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">==</span> <span class="n">HTTPStatus</span><span class="o">.</span><span class="n">UNAUTHORIZED</span>
+    <span class="n">start</span> <span class="o">=</span> <span class="nb">next</span><span class="p">(</span><span class="n">e</span> <span class="k">for</span> <span class="n">e</span> <span class="ow">in</span> <span class="n">events</span> <span class="k">if</span> <span class="n">e</span><span class="p">[</span><span class="s1">&#39;type&#39;</span><span class="p">]</span> <span class="o">==</span> <span class="s1">&#39;http.response.start&#39;</span><span class="p">)</span>
+    <span class="k">assert</span> <span class="n">start</span><span class="p">[</span><span class="s1">&#39;status&#39;</span><span class="p">]</span> <span class="o">==</span> <span class="mi">401</span>
 </code></pre></div>
 <p>The pattern works for async-function middleware and
 <code>@as_middleware</code> classes alike.</p>
