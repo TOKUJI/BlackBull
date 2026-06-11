@@ -28,6 +28,98 @@ so the editable install's metadata catches up.
 
 ---
 
+## [0.32.0] — 2026-06-11
+
+**Sprint 36 close — `TestClient`, per-stream `__slots__`, ASGI 3.0
+compliance fixes.**
+
+This release ships a new public surface
+[`blackbull.testing.TestClient`](blackbull/testing.py) for in-memory
+ASGI 3.0 testing, applies `__slots__` to the per-HTTP-stream and
+per-frame hot path, and fixes three latent bugs that had silently
+prevented BlackBull apps from running behind any external ASGI
+server (uvicorn, hypercorn, `httpx.ASGITransport`).
+
+### Added
+
+- New module [`blackbull/testing.py`](blackbull/testing.py)
+  exposing `TestClient`, `WebSocketTestSession`, and
+  `WebSocketDisconnect`.  Synchronous façade over
+  `httpx.AsyncClient` + `httpx.ASGITransport` with a dedicated
+  background-thread event loop bridging sync calls, the ASGI
+  lifespan protocol, and WebSocket sessions.  Full pass-through of
+  httpx kwargs (`json=`, `content=`, `data=`, `files=`, `auth=`,
+  `params=`, `headers=`, `cookies=`, `timeout=`,
+  `follow_redirects=`); cookie / header jars exposed via
+  `client.cookies` / `client.headers`.  Streaming WebSocket
+  receives via `ws.iter_text()` / `ws.iter_bytes()`.
+
+- `__slots__` on per-stream / per-frame hot-path classes —
+  [`Stream`](blackbull/protocol/stream.py),
+  [`BaseSender`](blackbull/server/sender.py),
+  [`HTTP1Sender`](blackbull/server/sender.py),
+  [`HTTP2Sender`](blackbull/server/sender.py),
+  [`WebSocketSender`](blackbull/server/sender.py).  Removes the
+  per-instance `__dict__` on the per-HTTP/2-stream and
+  per-HTTP/1.1-request hot path.
+
+- New doc page [`docs/guide/testing.md`](docs/guide/testing.md)
+  leading with the `TestClient` pattern, with worked examples for
+  HTTP, WebSocket streaming, lifespan, file upload, auth, timeout,
+  and per-request kwargs.
+
+### Fixed
+
+- `BlackBull.__call__` is now correctly ASGI 3.0 compliant under
+  external transports.  Three independent bugs that had locked the
+  framework to its own server:
+
+  - [`blackbull/app.py`](blackbull/app.py) `_wrap_send` was
+    calling the external send with three positional args (the
+    BlackBull-internal sender signature).  Now emits standard
+    ASGI 3.0 `http.response.start` + `http.response.body` event
+    dicts.
+
+  - `scope['headers']` is normalised to a
+    [`Headers`](blackbull/headers.py) instance once at the entry
+    point.  External transports deliver the standard
+    list-of-tuples; BlackBull handlers and helpers
+    (`parse_cookies`, `TrustedProxy`, `StaticFiles`) reach into
+    `Headers.get` / `.getlist`.
+
+  - [`blackbull/request.py`](blackbull/request.py) `parse_cookies`
+    now accepts both the `Headers` shape and the standard
+    list-of-tuples — belt-and-braces with the `__call__`
+    normalisation.
+
+### Changed
+
+- [`KNOWN_LIMITATIONS.md`](KNOWN_LIMITATIONS.md) rewritten to
+  user-facing content only.  209 → 157 lines.  WSL2 measurement
+  specifics, sprint references, and maintainer roadmap items moved
+  into [`bench/CHARACTERIZATION.md`](bench/CHARACTERIZATION.md) and
+  the sprint logs.  Renamed "Benchmark + measurement caveats" to
+  "Deployment notes" with just the multi-worker scaling guidance.
+
+- 14 integration test files migrated from `live_server` +
+  `httpx.AsyncClient` to `TestClient` (net −271 lines).  Files
+  testing the wire (HTTP/2, WebSocket, TLS, chunked streaming,
+  static-file serving) stay socket-bound.
+
+### Notes
+
+- The `_wrap_send` fix means BlackBull apps now run unchanged
+  under uvicorn / hypercorn / granian / any other ASGI 3.0
+  server.  Before this release, they did not — every response
+  crashed with a `TypeError` on the external send signature.
+- BlackBull's own server is unchanged in behaviour; its internal
+  sender already handled the dict event shape on its match arms.
+- Second regression test for the Sprint 35 auto-release tooling:
+  pushing the `v0.32.0` tag should automatically create the
+  GitHub Release from this CHANGELOG section.
+
+---
+
 ## [0.31.3] — 2026-06-10
 
 **Static-path perf fix.**  `StaticFiles` + `Compression` middleware
