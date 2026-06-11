@@ -245,8 +245,19 @@ class BaseSender(ABC):
     logic is decoupled from asyncio internals.
     """
 
+    # Per-stream / per-request senders are allocated on the hot path; ABCs
+    # provide ``__slots__ = ()`` so adding slots here drops the per-instance
+    # ``__dict__``.  Subclasses extend with their own protocol-specific
+    # slots; together they declare every attribute referenced by the class.
+    __slots__ = ('_writer', '_closed')
+
     def __init__(self, writer: AbstractWriter):
         self._writer = writer
+        # ``_write`` / ``_write_many`` flip this to True on a peer-closed
+        # transport and silently drop further writes.  Initialised here so
+        # that the slot is bound from construction; the ``getattr(...,
+        # False)`` reads in the write methods remain compatible.
+        self._closed = False
 
     @abstractmethod
     async def __call__(self, body, status: HTTPStatus = HTTPStatus.OK, headers: HeaderList = []): ...
@@ -309,6 +320,11 @@ class HTTP1Sender(BaseSender):
     that Content-Length can be injected when the app omits it.
     """
 
+    __slots__ = (
+        '_buffered_status', '_buffered_headers', '_chunked',
+        '_expect_trailers', '_head_mode', '_log_record',
+    )
+
     def __init__(self, writer: AbstractWriter):
         super().__init__(writer)
         self._buffered_status: HTTPStatus | None = None
@@ -319,10 +335,6 @@ class HTTP1Sender(BaseSender):
         # have the same headers (including Content-Length) as a GET would
         # but no body.  HTTP1Actor sets this before dispatch.
         self._head_mode: bool = False
-        # Set once an http.disconnect arrives or a write hits broken-pipe.
-        # All subsequent writes silently drop — the peer is gone, there's
-        # nothing useful to do with the bytes.
-        self._closed: bool = False
         # Optional access-log record; set by the actor before dispatch.
         # When non-None, ``__call__`` updates ``status`` and
         # ``response_bytes`` inline as events flow through — this saves
@@ -567,6 +579,12 @@ class HTTP2Sender(BaseSender):
       Serialises and writes the frame directly.
     """
 
+    __slots__ = (
+        '_factory', '_stream_id', '_push_callback',
+        'connection_window_size', 'stream_window_size',
+        'max_frame_size', '_window_open',
+    )
+
     def __init__(self, writer: AbstractWriter, factory, stream_id: int,
                  push_callback=None):
         super().__init__(writer)
@@ -745,6 +763,9 @@ class WebSocketSender(BaseSender):
     The ``status`` and ``headers`` parameters are accepted for interface
     consistency but are unused for WebSocket connections.
     """
+
+    __slots__ = ('has_received_closed', '_compressor')
+
     def __init__(self, writer: AbstractWriter, *, compressor=None):
         super().__init__(writer)
         self.has_received_closed = False

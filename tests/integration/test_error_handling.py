@@ -1,13 +1,10 @@
 """Integration tests for error handling — on_error() and default error responses."""
-import asyncio
 from http import HTTPMethod, HTTPStatus
-from multiprocessing import Process
 
-import httpx
 import pytest
 
 from blackbull import BlackBull, JSONResponse
-from .conftest import live_server
+from blackbull.testing import TestClient
 
 
 def _make_app() -> BlackBull:
@@ -49,55 +46,42 @@ def _make_app() -> BlackBull:
 
 
 @pytest.fixture(scope="module")
-def live():
-    app = _make_app()
-    with live_server(app) as handle:
-        yield handle
-def _base(app) -> str:
-    return f'http://127.0.0.1:{app.port}'
+def client():
+    with TestClient(_make_app()) as c:
+        yield c
 
 
 @pytest.mark.integration
-@pytest.mark.asyncio
-async def test_custom_404(live):
-    async with httpx.AsyncClient() as c:
-        r = await c.get(f'{_base(live)}/unknown-path')
+def test_custom_404(client):
+    r = client.get('/unknown-path')
     assert r.status_code == 404
     assert r.json() == {'error': 'not_found'}
 
 
 @pytest.mark.integration
-@pytest.mark.asyncio
-async def test_default_405_has_allow_header(live):
-    async with httpx.AsyncClient() as c:
-        r = await c.post(f'{_base(live)}/get-only')
+def test_default_405_has_allow_header(client):
+    r = client.post('/get-only')
     assert r.status_code == 405
     assert 'allow' in r.headers
 
 
 @pytest.mark.integration
-@pytest.mark.asyncio
-async def test_custom_exception_handler(live):
-    async with httpx.AsyncClient() as c:
-        r = await c.get(f'{_base(live)}/raises-value-error')
+def test_custom_exception_handler(client):
+    r = client.get('/raises-value-error')
     assert r.status_code == 400
     assert r.json() == {'error': 'value_error'}
 
 
 @pytest.mark.integration
-@pytest.mark.asyncio
-async def test_mro_dispatch_catches_subclass(live):
+def test_mro_dispatch_catches_subclass(client):
     """on_error(Exception) must catch TypeError even though only Exception is registered."""
-    async with httpx.AsyncClient() as c:
-        r = await c.get(f'{_base(live)}/raises-type-error')
+    r = client.get('/raises-type-error')
     assert r.status_code == 500
     assert r.json() == {'error': 'exception'}
 
 
 @pytest.mark.integration
-@pytest.mark.asyncio
-async def test_unhandled_exception_uses_fallback_500(live):
+def test_unhandled_exception_uses_fallback_500(client):
     """RuntimeError has no specific handler; the Exception base handler fires."""
-    async with httpx.AsyncClient() as c:
-        r = await c.get(f'{_base(live)}/raises-runtime-error')
+    r = client.get('/raises-runtime-error')
     assert r.status_code == 500

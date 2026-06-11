@@ -42,6 +42,18 @@ class Stream:
     when omitted (the value lives on the sender, not the stream).
     """
 
+    # Per-stream object — allocated once per HTTP/2 stream and stored in the
+    # priority tree.  ``__slots__`` saves the ~56-byte ``__dict__`` overhead
+    # at the cost of forbidding dynamic attribute assignment.  Every
+    # attribute referenced anywhere on the class must be declared here.
+    __slots__ = (
+        'parent', 'weight', 'stream_id', 'window_size',
+        'children', 'scope', 'event', '_lock',
+        'end_stream', 'state', 'priority_hint',
+        'closed_via_rst',
+        'expected_content_length', 'received_data_bytes',
+    )
+
     def __init__(self, stream_id: int, parent: 'Stream | None' = None,
                  weight: int = 1, window_size: int | None = None):
         self.parent = parent

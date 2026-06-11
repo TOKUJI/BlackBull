@@ -116,40 +116,44 @@ def test_cookie_header_path():
 
 @pytest.mark.asyncio
 async def test_wrap_send_unpacks_response():
+    """A Response object becomes a standard ASGI start + body event pair."""
     calls = []
 
-    async def raw(body, status=HTTPStatus.OK, headers=[]):
-        calls.append((body, status, headers))
+    async def raw(event):
+        calls.append(event)
 
     r = Response(b'hi', status=HTTPStatus.CREATED)
     await _wrap_send(raw)(r)
-    assert len(calls) == 1
-    body, status, headers = calls[0]
-    assert body == b'hi'
-    assert status == HTTPStatus.CREATED
-    assert (b'content-type', b'text/html; charset=utf-8') in headers
+    assert len(calls) == 2
+    start, body = calls
+    assert start['type'] == 'http.response.start'
+    assert start['status'] == int(HTTPStatus.CREATED)
+    assert (b'content-type', b'text/html; charset=utf-8') in start['headers']
+    assert body == {'type': 'http.response.body', 'body': b'hi'}
 
 
 @pytest.mark.asyncio
 async def test_wrap_send_unpacks_jsonresponse():
     calls = []
 
-    async def raw(body, status=HTTPStatus.OK, headers=[]):
-        calls.append((body, status, headers))
+    async def raw(event):
+        calls.append(event)
 
     r = JSONResponse({'ok': True}, status=HTTPStatus.UNAUTHORIZED)
     await _wrap_send(raw)(r)
-    body, status, headers = calls[0]
-    assert body == b'{"ok": true}'
-    assert status == HTTPStatus.UNAUTHORIZED
-    assert (b'content-type', b'application/json') in headers
+    assert len(calls) == 2
+    start, body = calls
+    assert start['status'] == int(HTTPStatus.UNAUTHORIZED)
+    assert (b'content-type', b'application/json') in start['headers']
+    assert body['body'] == b'{"ok": true}'
 
 
 @pytest.mark.asyncio
 async def test_wrap_send_passes_dict_through():
+    """Standard ASGI event dicts forward unchanged to the raw send callable."""
     calls = []
 
-    async def raw(event, status=HTTPStatus.OK, headers=[]):
+    async def raw(event):
         calls.append(event)
 
     evt = {'type': 'http.response.start', 'status': 200, 'headers': []}
@@ -159,13 +163,16 @@ async def test_wrap_send_passes_dict_through():
 
 @pytest.mark.asyncio
 async def test_wrap_send_passes_bytes_through():
+    """Bytes are emitted as a start + body event pair carrying the bytes payload."""
     calls = []
 
-    async def raw(body, status=HTTPStatus.OK, headers=[]):
-        calls.append(body)
+    async def raw(event):
+        calls.append(event)
 
     await _wrap_send(raw)(b'raw bytes')
-    assert calls[0] == b'raw bytes'
+    assert len(calls) == 2
+    assert calls[0]['type'] == 'http.response.start'
+    assert calls[1] == {'type': 'http.response.body', 'body': b'raw bytes'}
 
 
 # ---------------------------------------------------------------------------

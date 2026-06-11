@@ -1,13 +1,9 @@
 """Integration tests for request header access, cookie parsing, and query strings."""
-import asyncio
-from multiprocessing import Process
-
-import httpx
 import pytest
 
-from blackbull import BlackBull, JSONResponse
+from blackbull import BlackBull
 from blackbull.request import parse_cookies
-from .conftest import live_server
+from blackbull.testing import TestClient
 
 
 def _make_app() -> BlackBull:
@@ -25,58 +21,38 @@ def _make_app() -> BlackBull:
 
     @app.route(path='/cookies')
     async def cookies(scope):
-        jar = parse_cookies(scope)
-        return jar
+        return parse_cookies(scope)
 
     @app.route(path='/query')
     async def query(scope):
-        qs = scope.get('query_string', b'').decode()
-        return {'query_string': qs}
+        return {'query_string': scope.get('query_string', b'').decode()}
 
     return app
 
 
 @pytest.fixture(scope="module")
-def live():
-    app = _make_app()
-    with live_server(app) as handle:
-        yield handle
-def _base(app) -> str:
-    return f'http://127.0.0.1:{app.port}'
+def client():
+    with TestClient(_make_app()) as c:
+        yield c
 
 
 @pytest.mark.integration
-@pytest.mark.asyncio
-async def test_case_insensitive_header(live):
-    async with httpx.AsyncClient() as c:
-        r = await c.get(
-            f'{_base(live)}/header-echo',
-            headers={'X-Custom-Header': 'hello'},
-        )
+def test_case_insensitive_header(client):
+    r = client.get('/header-echo', headers={'X-Custom-Header': 'hello'})
     assert r.status_code == 200
     assert r.json()['value'] == 'hello'
 
 
 @pytest.mark.integration
-@pytest.mark.asyncio
-async def test_multi_value_header_getlist(live):
-    async with httpx.AsyncClient() as c:
-        r = await c.get(
-            f'{_base(live)}/header-multivalue',
-            headers={'Accept': 'text/html, application/json'},
-        )
+def test_multi_value_header_getlist(client):
+    r = client.get('/header-multivalue', headers={'Accept': 'text/html, application/json'})
     assert r.status_code == 200
     assert len(r.json()['values']) >= 1
 
 
 @pytest.mark.integration
-@pytest.mark.asyncio
-async def test_cookie_parsed(live):
-    async with httpx.AsyncClient() as c:
-        r = await c.get(
-            f'{_base(live)}/cookies',
-            headers={'Cookie': 'a=1; b=2'},
-        )
+def test_cookie_parsed(client):
+    r = client.get('/cookies', headers={'Cookie': 'a=1; b=2'})
     assert r.status_code == 200
     data = r.json()
     assert data.get('a') == '1'
@@ -84,10 +60,8 @@ async def test_cookie_parsed(live):
 
 
 @pytest.mark.integration
-@pytest.mark.asyncio
-async def test_query_string(live):
-    async with httpx.AsyncClient() as c:
-        r = await c.get(f'{_base(live)}/query', params={'q': 'hello', 'page': '2'})
+def test_query_string(client):
+    r = client.get('/query', params={'q': 'hello', 'page': '2'})
     assert r.status_code == 200
     qs = r.json()['query_string']
     assert 'q=hello' in qs

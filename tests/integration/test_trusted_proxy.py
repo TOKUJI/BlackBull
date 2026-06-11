@@ -1,17 +1,18 @@
 """Integration tests for TrustedProxy — X-Forwarded-* header rewriting."""
-import asyncio
-from multiprocessing import Process
-
-import httpx
 import pytest
 
-from blackbull import BlackBull, JSONResponse
+from blackbull import BlackBull
 from blackbull.middleware.proxy import TrustedProxy
-from .conftest import live_server
+from blackbull.testing import TestClient
 
 
 def _make_app_trusted() -> BlackBull:
-    """App that trusts 127.0.0.1 (the loopback default)."""
+    """App that trusts 127.0.0.1 (the loopback default).
+
+    ``httpx.ASGITransport`` sets ``scope['client']`` to ``('127.0.0.1', 123)``
+    by default, so 127.0.0.1 in the trust list is what makes TestClient
+    requests appear to come from a trusted peer.
+    """
     app = BlackBull()
     app.use(TrustedProxy(['127.0.0.1', '::1']))
 
@@ -27,7 +28,8 @@ def _make_app_trusted() -> BlackBull:
 
 
 def _make_app_untrusted() -> BlackBull:
-    """App that trusts only 10.0.0.1 — so 127.0.0.1 is NOT trusted."""
+    """App that trusts only 10.0.0.1 — so 127.0.0.1 (TestClient's default
+    peer) is NOT trusted."""
     app = BlackBull()
     app.use(TrustedProxy(['10.0.0.1']))
 
@@ -39,52 +41,35 @@ def _make_app_untrusted() -> BlackBull:
 
 
 @pytest.fixture(scope="module")
-def live_trusted():
-    app = _make_app_trusted()
-    with live_server(app) as handle:
-        yield handle
+def trusted():
+    with TestClient(_make_app_trusted()) as c:
+        yield c
+
+
 @pytest.fixture(scope="module")
-def live_untrusted():
-    app = _make_app_untrusted()
-    with live_server(app) as handle:
-        yield handle
-def _base(app) -> str:
-    return f'http://127.0.0.1:{app.port}'
+def untrusted():
+    with TestClient(_make_app_untrusted()) as c:
+        yield c
 
 
 @pytest.mark.integration
-@pytest.mark.asyncio
-async def test_x_forwarded_for_rewritten(live_trusted):
-    async with httpx.AsyncClient() as c:
-        r = await c.get(
-            f'{_base(live_trusted)}/client-ip',
-            headers={'X-Forwarded-For': '203.0.113.1'},
-        )
+def test_x_forwarded_for_rewritten(trusted):
+    r = trusted.get('/client-ip', headers={'X-Forwarded-For': '203.0.113.1'})
     assert r.status_code == 200
     assert r.json()['ip'] == '203.0.113.1'
 
 
 @pytest.mark.integration
-@pytest.mark.asyncio
-async def test_x_forwarded_proto_rewritten(live_trusted):
-    async with httpx.AsyncClient() as c:
-        r = await c.get(
-            f'{_base(live_trusted)}/scheme',
-            headers={'X-Forwarded-Proto': 'https'},
-        )
+def test_x_forwarded_proto_rewritten(trusted):
+    r = trusted.get('/scheme', headers={'X-Forwarded-Proto': 'https'})
     assert r.status_code == 200
     assert r.json()['scheme'] == 'https'
 
 
 @pytest.mark.integration
-@pytest.mark.asyncio
-async def test_untrusted_sender_header_ignored(live_untrusted):
+def test_untrusted_sender_header_ignored(untrusted):
     """When the peer is not trusted, X-Forwarded-For must not rewrite scope['client']."""
-    async with httpx.AsyncClient() as c:
-        r = await c.get(
-            f'{_base(live_untrusted)}/client-ip',
-            headers={'X-Forwarded-For': '203.0.113.99'},
-        )
+    r = untrusted.get('/client-ip', headers={'X-Forwarded-For': '203.0.113.99'})
     assert r.status_code == 200
-    # The IP should be 127.0.0.1 (the actual peer), not the forwarded value
+    # The IP should be the actual peer (127.0.0.1), not the forwarded value.
     assert r.json()['ip'] != '203.0.113.99'

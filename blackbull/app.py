@@ -27,6 +27,7 @@ import traceback
 # import from this package
 import logging
 from .event import Event, EventDispatcher, EventHandler
+from .headers import Headers
 from .utils import Scheme
 from .router import Router, ErrorRouter, MethodNotApplicable, PathNotRegistered, ConfigurationError, has_middleware_param
 logger = logging.getLogger(__name__)
@@ -35,17 +36,48 @@ logger = logging.getLogger(__name__)
 def _wrap_send(raw_send):
     """Wrap an ASGI send callable to also accept Response objects.
 
-    When a Response (or JSONResponse) is passed, unpacks it to
-    (body, status, headers) for the underlying sender.  All other arguments
-    (dicts, bytes) are forwarded unchanged.
+    Normalises every form a BlackBull handler may produce — Response
+    object, ASGI event dict, or raw ``bytes`` body — into the standard
+    ASGI 3.0 ``http.response.start`` + ``http.response.body`` event
+    pair forwarded to ``raw_send`` one event at a time.  This keeps
+    ``BlackBull.__call__`` truly ASGI 3.0 compliant so the app runs
+    unchanged under external ASGI servers (uvicorn, hypercorn,
+    httpx.ASGITransport, …) while BlackBull's own ``HTTP1Sender`` /
+    ``HTTP2Sender`` (which also accept dict events natively) handle
+    the same canonical sequence.
     """
     from .response import Response as _Response
 
     async def _send(event, status=HTTPStatus.OK, headers=[]):
         if isinstance(event, _Response):
-            await raw_send(event.body, event.status, event.headers)
+            await raw_send({
+                'type': 'http.response.start',
+                'status': int(event.status),
+                'headers': list(event.headers),
+            })
+            await raw_send({
+                'type': 'http.response.body',
+                'body': event.body,
+            })
+        elif isinstance(event, dict):
+            # Standard ASGI event from full-form handlers or middleware.
+            await raw_send(event)
+        elif isinstance(event, (bytes, bytearray, memoryview)):
+            # Legacy "bytes body + status + headers" form used by simplified
+            # handlers when they pass through the wrap from inside BlackBull.
+            await raw_send({
+                'type': 'http.response.start',
+                'status': int(status),
+                'headers': list(headers),
+            })
+            await raw_send({
+                'type': 'http.response.body',
+                'body': bytes(event) if not isinstance(event, bytes) else event,
+            })
         else:
-            await raw_send(event, status, headers)
+            # Unknown shapes are passed through; the underlying sender's
+            # type checking decides what to do with them.
+            await raw_send(event)
 
     return _send
 
@@ -473,6 +505,19 @@ class BlackBull:
 
         if self._chain is None:
             self._build_chain()
+
+        # BlackBull handlers and helpers (``parse_cookies``,
+        # ``TrustedProxy``, ``static.StaticFiles``) read ``scope['headers']``
+        # via the ``Headers.get`` / ``.getlist`` API.  BlackBull's own
+        # server attaches a :class:`Headers` instance in
+        # ``parser.py``; external ASGI transports (uvicorn, hypercorn,
+        # ``httpx.ASGITransport``) deliver the standard list-of-tuples
+        # form per the ASGI 3.0 spec.  Normalise once at the entry
+        # point so handlers don't need to care which side they're
+        # running under.
+        raw_headers = scope.get('headers')
+        if raw_headers is not None and not isinstance(raw_headers, Headers):
+            scope['headers'] = Headers(raw_headers)
 
         await self._chain(scope, receive, _wrap_send(send))
 

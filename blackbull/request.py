@@ -23,15 +23,28 @@ def parse_cookies(scope) -> dict[str, str]:
 
     Works identically for HTTP/1.1, HTTP/2, and WebSocket scopes.
     HTTP/1.1 sends a single combined ``Cookie`` header; HTTP/2 may split it
-    into multiple fields (RFC 7540 §8.1.2.5).  This function uses
-    ``Headers.getlist`` to collect all ``cookie`` fields before joining and
-    parsing, so both wire formats produce the same result.
+    into multiple fields (RFC 7540 §8.1.2.5).  All ``cookie`` fields are
+    collected and joined before parsing, so both wire formats produce the
+    same result.
+
+    Accepts either of the two header shapes that may appear on
+    ``scope['headers']``:
+
+    - A plain list/iterable of ``(name, value)`` bytes tuples — the
+      standard ASGI 3.0 form, used by external servers (uvicorn,
+      hypercorn, ``httpx.ASGITransport``).
+    - A :class:`blackbull.headers.Headers` instance — what BlackBull's
+      own server attaches as a handler ergonomics enhancement.
     """
-    # getlist returns [(name, value), ...]; join all values with "; "
-    cookie_pairs = scope['headers'].getlist(b'cookie')
-    if not cookie_pairs:
+    headers = scope.get('headers', ())
+    getlist = getattr(headers, 'getlist', None)
+    if getlist is not None:
+        cookie_values = [v for _, v in getlist(b'cookie')]
+    else:
+        cookie_values = [v for (k, v) in headers if k.lower() == b'cookie']
+    if not cookie_values:
         return {}
-    raw = b'; '.join(v for _, v in cookie_pairs)
+    raw = b'; '.join(cookie_values)
     result = {}
     for part in raw.split(b';'):
         k, _, v = part.strip().partition(b'=')

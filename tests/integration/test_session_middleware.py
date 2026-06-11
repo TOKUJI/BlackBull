@@ -1,20 +1,15 @@
 """Integration test for the signed-cookie session middleware.
 
-Drives a real BlackBull server with the session middleware installed and
-sends two HTTP/1.1 requests over the same client: one to set a session
-value, one to read it back.  Confirms the Set-Cookie / Cookie round-trip
-works end-to-end.
+Drives the full app stack through TestClient — sends sequenced requests
+sharing httpx's cookie jar to confirm the Set-Cookie / Cookie round-trip
+works end-to-end, including session clear, tamper rejection, and the
+no-Set-Cookie-when-unmodified optimisation.
 """
-import asyncio
-from multiprocessing import Process
-
-import httpx
 import pytest
-import pytest_asyncio
 
 from blackbull import BlackBull
 from blackbull.middleware.session import Session
-from .conftest import live_server
+from blackbull.testing import TestClient
 
 
 def _make_app() -> BlackBull:
@@ -65,80 +60,67 @@ def _make_app() -> BlackBull:
     return app
 
 
-@pytest_asyncio.fixture
-async def session_app():
-    app = _make_app()
-    with live_server(app) as handle:
-        yield handle
-@pytest.mark.integration
-@pytest.mark.asyncio
-async def test_round_trip_sets_then_reads(session_app):
-    base = f'http://127.0.0.1:{session_app.port}'
-    async with httpx.AsyncClient() as c:
-        r1 = await c.get(f'{base}/set')
-        assert r1.status_code == 200
-        # The client follows Set-Cookie automatically via the Cookie jar.
-        assert 'session' in (r1.cookies or {})
-
-        r2 = await c.get(f'{base}/get')
-        assert r2.status_code == 200
-        assert r2.text == 'user=alice count=1'
+@pytest.fixture
+def client():
+    # Per-test so each starts with a fresh cookie jar.
+    with TestClient(_make_app()) as c:
+        yield c
 
 
 @pytest.mark.integration
-@pytest.mark.asyncio
-async def test_session_survives_across_requests(session_app):
-    base = f'http://127.0.0.1:{session_app.port}'
-    async with httpx.AsyncClient() as c:
-        for expected in (1, 2, 3, 4):
-            r = await c.get(f'{base}/bump')
-            assert r.text == str(expected)
+def test_round_trip_sets_then_reads(client):
+    r1 = client.get('/set')
+    assert r1.status_code == 200
+    # httpx.Client persists the Set-Cookie in its jar automatically.
+    assert 'session' in client.cookies
+
+    r2 = client.get('/get')
+    assert r2.status_code == 200
+    assert r2.text == 'user=alice count=1'
 
 
 @pytest.mark.integration
-@pytest.mark.asyncio
-async def test_clear_emits_tombstone(session_app):
-    base = f'http://127.0.0.1:{session_app.port}'
-    async with httpx.AsyncClient() as c:
-        await c.get(f'{base}/set')
-        assert 'session' in c.cookies
-
-        r = await c.get(f'{base}/clear')
-        assert r.status_code == 200
-        # After /clear the server has set Max-Age=0 → httpx's cookie jar
-        # interprets that as expiration and drops it.
-        assert 'session' not in c.cookies, (
-            f'cleared session must not persist; jar={dict(c.cookies)}')
+def test_session_survives_across_requests(client):
+    for expected in (1, 2, 3, 4):
+        r = client.get('/bump')
+        assert r.text == str(expected)
 
 
 @pytest.mark.integration
-@pytest.mark.asyncio
-async def test_unmodified_session_does_not_emit_set_cookie(session_app):
-    base = f'http://127.0.0.1:{session_app.port}'
-    async with httpx.AsyncClient() as c:
-        r = await c.get(f'{base}/noop')
-        assert r.status_code == 200
-        # No Set-Cookie header in the response — the session was read but
-        # never modified, so no need to round-trip a new cookie.
-        assert 'set-cookie' not in {k.lower() for k in r.headers}, (
-            f'unmodified session must not emit Set-Cookie; got headers={dict(r.headers)}')
+def test_clear_emits_tombstone(client):
+    client.get('/set')
+    assert 'session' in client.cookies
+
+    r = client.get('/clear')
+    assert r.status_code == 200
+    # After /clear the server sets Max-Age=0 → httpx's cookie jar
+    # interprets that as expiration and drops it.
+    assert 'session' not in client.cookies, (
+        f'cleared session must not persist; jar={dict(client.cookies)}')
 
 
 @pytest.mark.integration
-@pytest.mark.asyncio
-async def test_tampered_cookie_treated_as_empty(session_app):
-    base = f'http://127.0.0.1:{session_app.port}'
-    async with httpx.AsyncClient() as c:
-        # Set a real cookie first, then mangle the MAC.
-        await c.get(f'{base}/set')
-        real = c.cookies.get('session')
+def test_unmodified_session_does_not_emit_set_cookie(client):
+    r = client.get('/noop')
+    assert r.status_code == 200
+    # No Set-Cookie header in the response — the session was read but
+    # never modified, so no need to round-trip a new cookie.
+    assert 'set-cookie' not in {k.lower() for k in r.headers}, (
+        f'unmodified session must not emit Set-Cookie; got headers={dict(r.headers)}')
+
+
+@pytest.mark.integration
+def test_tampered_cookie_treated_as_empty():
+    # New client so the tampered cookie is the only one in the jar.
+    with TestClient(_make_app()) as c1:
+        c1.get('/set')
+        real = c1.cookies.get('session')
         assert real is not None
-        # Replace the MAC half with zeros.
         payload, _, mac = real.partition('.')
         tampered = payload + '.' + '0' * len(mac)
-        # New client with the tampered cookie only.
-        async with httpx.AsyncClient(cookies={'session': tampered}) as c2:
-            r = await c2.get(f'{base}/get')
-            # The middleware silently drops the tampered session →
-            # empty dict → handler sees None for both keys.
-            assert r.text == 'user=None count=None'
+
+    with TestClient(_make_app(), cookies={'session': tampered}) as c2:
+        r = c2.get('/get')
+        # The middleware silently drops the tampered session →
+        # empty dict → handler sees None for both keys.
+        assert r.text == 'user=None count=None'

@@ -8,9 +8,17 @@ Unit tests for registration and lookup by HTTPStatus and exception class/instanc
 
 BlackBull error dispatch
 ------------------------
-Integration tests that verify the correct handler is called for 404, 405,
-and custom on_error registrations, using an in-process ASGI call rather than
-a real server so there are no port or subprocess concerns.
+Two layers of coverage:
+
+* **TestClient-based** (``TestBlackBullErrorDispatchViaTestClient``) —
+  exercises 404 / 405 / exception dispatch through the public
+  ``blackbull.testing.TestClient`` surface.  These are the
+  dogfooding tests for the TestClient feature.
+
+* **Raw ASGI** (``TestBlackBullErrorDispatch``) — exercises scope
+  inspection (``scope['state']['allowed_methods']``,
+  ``scope['state']['error_exception']``) that the TestClient public
+  API does not expose.  Kept for internal error-routing coverage.
 """
 
 import pytest
@@ -18,6 +26,7 @@ from http import HTTPStatus, HTTPMethod
 
 from blackbull.router import ErrorRouter
 from blackbull.app import BlackBull, _default_error_handler
+from blackbull.testing import TestClient
 from blackbull.utils import Scheme
 
 
@@ -300,95 +309,79 @@ class TestBlackBullErrorDispatch:
         app = BlackBull()
 
         @app.route(path='/hello', methods=[HTTPMethod.GET])
-        async def hello(scope, receive, send):
-            await send(b'hello', HTTPStatus.OK)
+        async def hello():
+            return 'hello'
 
         @app.route(path='/post-only', methods=[HTTPMethod.POST])
-        async def post_only(scope, receive, send):
-            await send(b'posted', HTTPStatus.OK)
+        async def post_only():
+            return 'posted'
 
         return app
 
-    @pytest.mark.asyncio
-    async def test_404_calls_default_handler(self):
-        app = self._make_app()
-        scope = _make_scope('/nonexistent')
-        send = _CaptureSend()
-        await app(scope, None, send)
-        assert send.status == 404
+    # -- Tests replaced with TestClient (same guarantees, public API) -----
 
-    @pytest.mark.asyncio
-    async def test_404_calls_custom_on_error_handler(self):
+    def test_404_calls_default_handler(self):
         app = self._make_app()
-        called = []
+        with TestClient(app) as client:
+            response = client.get('/nonexistent')
+        assert response.status_code == 404
+
+    def test_404_calls_custom_on_error_handler(self):
+        app = self._make_app()
 
         @app.on_error(HTTPStatus.NOT_FOUND)
         async def custom_404(scope, receive, send):
-            called.append(True)
             await send(b'custom not found', HTTPStatus.NOT_FOUND)
 
-        scope = _make_scope('/nonexistent')
-        send = _CaptureSend()
-        await app(scope, None, send)
-        assert called, "custom on_error handler was not called"
-        assert send.status == 404
-        assert send.body == b'custom not found'
+        with TestClient(app) as client:
+            response = client.get('/nonexistent')
+        assert response.status_code == 404
+        assert response.text == 'custom not found'
 
-    @pytest.mark.asyncio
-    async def test_405_returns_method_not_allowed(self):
+    def test_405_returns_method_not_allowed(self):
         """GET to a POST-only route must yield 405, not 404."""
         app = self._make_app()
-        scope = _make_scope('/post-only', method='GET')
-        send = _CaptureSend()
-        await app(scope, None, send)
-        assert send.status == 405
+        with TestClient(app) as client:
+            response = client.get('/post-only')
+        assert response.status_code == 405
 
-    @pytest.mark.asyncio
-    async def test_405_allow_header_lists_registered_methods(self):
+    def test_405_allow_header_lists_registered_methods(self):
         app = self._make_app()
-        scope = _make_scope('/post-only', method='GET')
-        send = _CaptureSend()
-        await app(scope, None, send)
-        start = next(e for e in send.events if e['type'] == 'http.response.start')
-        headers = dict(start['headers'])
-        assert b'allow' in headers
-        assert b'POST' in headers[b'allow'].upper()
+        with TestClient(app) as client:
+            response = client.get('/post-only')
+        assert response.status_code == 405
+        assert 'allow' in response.headers
+        assert 'POST' in response.headers['allow'].upper()
 
-    @pytest.mark.asyncio
-    async def test_405_calls_custom_on_error_handler(self):
+    def test_405_calls_custom_on_error_handler(self):
         app = self._make_app()
-        called = []
 
         @app.on_error(HTTPStatus.METHOD_NOT_ALLOWED)
         async def custom_405(scope, receive, send):
-            called.append(scope['state'].get('allowed_methods'))
             await send(b'custom 405', HTTPStatus.METHOD_NOT_ALLOWED)
 
-        scope = _make_scope('/post-only', method='GET')
-        send = _CaptureSend()
-        await app(scope, None, send)
-        assert called, "custom 405 handler was not called"
-        assert send.body == b'custom 405'
+        with TestClient(app) as client:
+            response = client.get('/post-only')
+        assert response.status_code == 405
+        assert response.text == 'custom 405'
 
-    @pytest.mark.asyncio
-    async def test_exception_in_handler_calls_error_router(self):
+    def test_exception_in_handler_calls_error_router(self):
         app = self._make_app()
-        caught = []
 
         @app.on_error(RuntimeError)
         async def handle_runtime(scope, receive, send):
-            caught.append(scope['state'].get('error_exception'))
             await send(b'runtime error caught', HTTPStatus.INTERNAL_SERVER_ERROR)
 
         @app.route(path='/boom')
-        async def boom(scope, receive, send):
+        async def boom():
             raise RuntimeError("kaboom")
 
-        scope = _make_scope('/boom')
-        send = _CaptureSend()
-        await app(scope, None, send)
-        assert caught, "error handler for RuntimeError was not called"
-        assert isinstance(caught[0], RuntimeError)
+        with TestClient(app) as client:
+            response = client.get('/boom')
+        assert response.status_code == 500
+        assert response.text == 'runtime error caught'
+
+    # -- Tests kept as raw ASGI (need scope['state'] inspection) -----------
 
     @pytest.mark.asyncio
     async def test_on_error_with_exception_base_class_catches_subclass(self):

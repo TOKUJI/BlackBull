@@ -1,16 +1,19 @@
 # Testing
 
-BlackBull's `app` is a plain ASGI 3.0 callable and ships its own
-async HTTP/1.1, HTTP/2, and WebSocket clients, so there are three
-useful shapes for tests:
+BlackBull's `app` is a plain ASGI 3.0 callable, so most application
+tests can drive it in-memory through a synchronous client and never
+touch a TCP socket.  Four useful shapes exist:
 
+- **`blackbull.testing.TestClient`** — synchronous, in-memory,
+  lifespan-aware.  The default starting point: ordinary
+  `pytest` style, no `async def`, no fixture overhead.
 - **End-to-end with BlackBull's own clients** — start the server
   on an ephemeral port, drive it through real sockets via
   `HTTP1Client` / `HTTP2Client` / `Client` / `WebSocketClient`.
   Best fidelity: exercises the wire, ALPN, TLS, framing.
-- **In-process integration via `httpx.ASGITransport`** — no
-  sockets, no ports.  Drives the app object directly.  Good for
-  fast, hermetic suites where transport detail doesn't matter.
+- **In-process integration via `httpx.ASGITransport`** — async
+  variant of `TestClient` for tests that want full control over
+  the loop or the underlying `httpx.AsyncClient`.
 - **Direct handler / middleware unit tests** — hand-rolled
   scope dict + stub callables.  For asserting a single
   function's behaviour without involving routing or transport.
@@ -34,7 +37,256 @@ asyncio_mode = strict
 Strict mode requires every async test to carry
 `@pytest.mark.asyncio` explicitly — matching BlackBull's own
 suite — so tests don't accidentally run in the wrong loop
-shape.
+shape.  Tests written against `TestClient` are synchronous and
+don't need this mark.
+
+## Quick start with `TestClient`
+
+`blackbull.testing.TestClient` is a synchronous in-memory client
+modelled on `httpx.Client`: GET / POST / PUT / DELETE all work
+the same way they would over the network, but the request is
+dispatched directly into the ASGI app — no socket, no port.
+The ASGI `lifespan` protocol runs around the `with` block, so
+`@app.on_startup` / `@app.on_shutdown` handlers fire in the
+expected order.
+
+```python
+from blackbull import BlackBull
+from blackbull.testing import TestClient
+
+app = BlackBull()
+
+
+@app.route(path='/')
+async def hello():
+    return "hello, world"
+
+
+@app.route(path='/items/{item_id:int}')
+async def get_item(item_id: int):
+    return {"id": item_id, "kind": "widget"}
+
+
+def test_hello():
+    with TestClient(app) as client:
+        response = client.get('/')
+    assert response.status_code == 200
+    assert response.text == "hello, world"
+
+
+def test_get_item():
+    with TestClient(app) as client:
+        response = client.get('/items/42')
+    assert response.json() == {"id": 42, "kind": "widget"}
+```
+
+The response object is `httpx.Response` — same shape as a
+production HTTP client, so `.status_code`, `.headers`,
+`.json()`, `.text`, `.content`, cookies, redirects all work
+unchanged.
+
+### POST and JSON bodies
+
+```python
+def test_create_item():
+    with TestClient(app) as client:
+        response = client.post('/items', json={'name': 'widget'})
+    assert response.status_code == 201
+```
+
+`client.post`, `.put`, `.patch`, `.delete`, `.head`,
+`.options`, and the underlying `client.request(method, url, ...)`
+all accept the same arguments as `httpx.Client`:
+
+- `content=` for raw bytes
+- `data=` for form-encoded fields
+- `json=` for JSON-encoded bodies
+- `headers=` for request headers
+- `cookies=` for cookies
+- `params=` for query parameters
+- `follow_redirects=False` (default) to assert on 3xx
+  responses directly; pass `follow_redirects=True` on the
+  `TestClient` constructor or per-call kwarg to traverse them.
+
+### File uploads, auth, timeouts, and other httpx parameters
+
+`TestClient`'s HTTP methods forward `**kwargs` straight to the
+underlying `httpx.AsyncClient`, so anything httpx accepts works
+unchanged.  Patterns worth knowing:
+
+**Multipart file upload** — pass `files=` (and optional `data=`
+for accompanying form fields).  Each `files` entry is
+`(field_name, (filename, fileobj, content_type))`:
+
+```python
+def test_upload():
+    with TestClient(app) as client:
+        response = client.post(
+            '/upload',
+            files={'attachment': ('report.pdf', b'%PDF-1.4...', 'application/pdf')},
+            data={'note': 'monthly'},
+        )
+    assert response.status_code == 201
+```
+
+**HTTP authentication** — pass `auth=`:
+
+```python
+# Basic auth
+response = client.get('/private', auth=('alice', 'hunter2'))
+
+# Custom scheme via httpx.Auth subclass — e.g. a bearer token
+response = client.get('/api/me', headers={'Authorization': 'Bearer abc.def.ghi'})
+```
+
+**Per-request timeout** — pass `timeout=` (seconds, or an
+`httpx.Timeout` for finer control):
+
+```python
+response = client.get('/slow', timeout=5.0)
+```
+
+Default timeouts can be passed on the `TestClient` constructor
+via the `headers=` / `cookies=` / `follow_redirects=` options,
+or set after construction by mutating `client.headers` /
+`client.cookies` — both forward to the underlying
+`httpx.AsyncClient`, so the standard httpx jar semantics apply
+(cookies set by responses persist across subsequent requests on
+the same client).
+
+```python
+with TestClient(app, headers={'X-Test-Tag': 'integration'}) as client:
+    # X-Test-Tag goes out on every request below
+    client.get('/api/one')
+    client.get('/api/two')
+```
+
+### WebSocket sessions
+
+`client.websocket_connect(path)` returns a synchronous
+context-managed session.  The session lives inside its own
+background event loop, so all of `send_text` / `send_bytes` /
+`send_json` and the matching receive methods are blocking
+synchronous calls:
+
+```python
+from blackbull.router import Scheme
+
+
+@app.route(path='/ws', scheme=Scheme.websocket)
+async def ws_echo(scope, receive, send):
+    await receive()                              # websocket.connect
+    await send({'type': 'websocket.accept'})
+    while True:
+        event = await receive()
+        if event['type'] == 'websocket.disconnect':
+            return
+        if event.get('text') is not None:
+            await send({'type': 'websocket.send', 'text': event['text']})
+
+
+def test_ws_echo():
+    with TestClient(app) as client:
+        with client.websocket_connect('/ws') as ws:
+            ws.send_text('ping')
+            assert ws.receive_text() == 'ping'
+```
+
+When the application closes (or rejects) the WebSocket,
+`receive_text` / `receive_bytes` raise
+`blackbull.testing.WebSocketDisconnect` carrying the RFC 6455
+close code:
+
+```python
+from blackbull.testing import WebSocketDisconnect
+
+
+@app.route(path='/ws-auth', scheme=Scheme.websocket)
+async def ws_auth(scope, receive, send):
+    await receive()
+    await send({'type': 'websocket.close', 'code': 4401})
+
+
+def test_ws_rejects_unauthenticated():
+    with TestClient(app) as client:
+        with pytest.raises(WebSocketDisconnect) as excinfo:
+            with client.websocket_connect('/ws-auth'):
+                pass
+        assert excinfo.value.code == 4401
+```
+
+For server-streamed sessions where the handler emits a sequence
+of frames and then closes, `ws.iter_text()` and
+`ws.iter_bytes()` consume the stream until the close arrives —
+the `WebSocketDisconnect` is caught and turned into normal
+iterator termination so the test reads as a single `for` loop:
+
+```python
+@app.route(path='/notifications', scheme=Scheme.websocket)
+async def notifications(scope, receive, send):
+    await receive()                              # websocket.connect
+    await send({'type': 'websocket.accept'})
+    for n in range(3):
+        await send({'type': 'websocket.send', 'text': f'event-{n}'})
+    await send({'type': 'websocket.close', 'code': 1000})
+
+
+def test_notifications_stream():
+    with TestClient(app) as client:
+        with client.websocket_connect('/notifications') as ws:
+            messages = list(ws.iter_text())
+    assert messages == ['event-0', 'event-1', 'event-2']
+```
+
+### Lifespan startup and shutdown
+
+`TestClient` drives the ASGI `lifespan` protocol automatically
+around the `with` block:
+
+```python
+events = []
+
+@app.on_startup
+async def _start():
+    events.append('startup')
+
+@app.on_shutdown
+async def _stop():
+    events.append('shutdown')
+
+
+def test_lifespan_runs():
+    with TestClient(app) as client:
+        assert events == ['startup']
+        client.get('/')
+    assert events == ['startup', 'shutdown']
+```
+
+If a startup handler raises, `TestClient.__enter__` re-raises a
+`RuntimeError` describing the failure, so a broken startup
+fails the test rather than silently leaving the app in a
+half-initialised state.  Apps that don't implement the
+lifespan protocol (i.e. legacy ASGI-2.0-style callables) are
+tolerated silently.
+
+### Construction options
+
+```python
+TestClient(
+    app,
+    base_url='http://testserver',
+    raise_app_exceptions=True,    # let handler exceptions bubble up
+    root_path='',                 # ASGI scope['root_path']
+    cookies=None,
+    headers=None,
+    follow_redirects=False,
+)
+```
+
+`raise_app_exceptions=True` (the default) is what you want in
+tests — handler tracebacks surface as the test failure.  Set it
+to `False` to assert on the 500 response the framework would
+emit to a real client.
 
 ## End-to-end with BlackBull's clients
 
@@ -246,11 +498,12 @@ When to pick which:
 
 For unit-level assertions on a single handler — no transport,
 no routing — call the app callable directly with a hand-rolled
-scope:
+scope.  `BlackBull.__call__` is a standard ASGI 3.0 callable so
+the stub `send` is a single-argument coroutine that receives
+event dicts:
 
 ```python
 import pytest
-from http import HTTPStatus
 from blackbull import BlackBull, JSONResponse
 from blackbull.server.headers import Headers
 
@@ -279,20 +532,22 @@ async def fake_receive():
 
 @pytest.mark.asyncio
 async def test_ping_handler():
-    responses = []
+    events = []
 
-    async def fake_send(body, status=HTTPStatus.OK, headers=[]):
-        responses.append({'body': body, 'status': status})
+    async def fake_send(event):
+        events.append(event)
 
     await app(make_scope(), fake_receive, fake_send)
-    assert responses[0]['status'] == HTTPStatus.OK
-    assert b'"pong"' in responses[0]['body']
+    start = next(e for e in events if e['type'] == 'http.response.start')
+    body = next(e for e in events if e['type'] == 'http.response.body')
+    assert start['status'] == 200
+    assert b'"pong"' in body['body']
 ```
 
-Useful when you want to assert on response shape without
-involving HTTP framing or transport.  Prefer the integration
-patterns above for anything routing-shaped — they cost almost
-nothing more and exercise more of the framework.
+Useful when you want to assert on the raw ASGI event sequence.
+Prefer the `TestClient` pattern above for anything routing-
+shaped — it costs almost nothing more and exercises more of the
+framework.
 
 ## Middleware in isolation
 
@@ -305,14 +560,13 @@ header mutation, or scope injection:
 async def test_auth_mw_rejects_missing_token():
     from myapp import auth_mw
     from blackbull.server.headers import Headers
-    from http import HTTPStatus
 
     scope = {'type': 'http', 'method': 'GET', 'path': '/tasks',
              'headers': Headers([]), 'state': {}}
 
-    responses = []
-    async def fake_send(body, status=HTTPStatus.OK, headers=[]):
-        responses.append(status)
+    events = []
+    async def fake_send(event):
+        events.append(event)
 
     call_next_called = False
     async def fake_call_next(scope, receive, send):
@@ -322,7 +576,8 @@ async def test_auth_mw_rejects_missing_token():
     await auth_mw(scope, None, fake_send, fake_call_next)
 
     assert not call_next_called          # short-circuited
-    assert responses[0] == HTTPStatus.UNAUTHORIZED
+    start = next(e for e in events if e['type'] == 'http.response.start')
+    assert start['status'] == 401
 ```
 
 The pattern works for async-function middleware and
