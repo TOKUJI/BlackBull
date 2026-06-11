@@ -544,12 +544,24 @@ class BlackBull:
         self._global_middlewares.append(mw)
         self._chain = None  # invalidate cached chain
 
-    def static(self, url_prefix: str, root_dir: str | Path) -> None:
-        """Serve static files from *root_dir* under *url_prefix* via global middleware."""
+    def static(self, url_prefix: str, root_dir: str | Path, *,
+               cache: bool = False) -> None:
+        """Serve static files from *root_dir* under *url_prefix* via global middleware.
+
+        ``cache`` (default ``False``): when ``True``, file bodies are
+        held in-memory for fast cache-hit serving.  Useful for
+        standalone deployments where BlackBull terminates static
+        traffic directly.  Most production deployments place nginx /
+        a CDN in front of the framework for static traffic and don't
+        need the in-process cache; the default off is calibrated to
+        that majority.  See ``docs/guide/static-files.md`` for the
+        full discussion.
+        """
         from blackbull.middleware.static import StaticFiles
         root = Path(root_dir).resolve()
         self._static_roots.append((url_prefix, root))
-        self._global_middlewares.append(StaticFiles(url_prefix=url_prefix, root_dir=root))
+        self._global_middlewares.append(
+            StaticFiles(url_prefix=url_prefix, root_dir=root, cache=cache))
         self._chain = None  # invalidate cached chain
 
     def on_error(self, key):

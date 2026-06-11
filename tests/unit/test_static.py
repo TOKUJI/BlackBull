@@ -461,8 +461,10 @@ class TestPrecompressedVariant:
         assert body == b'console.log("hi");' * 200
 
     async def test_cache_hit_returns_same_sibling(self, precompressed_dir):
+        """Opting in to caching (``cache=True``): the second request
+        serves the cached body of the first, no re-read from disk."""
         from blackbull.middleware.static import StaticFiles
-        app = StaticFiles(directory=str(precompressed_dir))
+        app = StaticFiles(directory=str(precompressed_dir), cache=True)
         # First request fills the cache
         start1, body1 = await _collect(
             app, _scope(path='/app.js', headers={'accept-encoding': 'br'}))
@@ -474,8 +476,11 @@ class TestPrecompressedVariant:
         assert dict(start2['headers'])[b'content-encoding'] == b'br'
 
     async def test_different_encoding_uses_different_cache_entries(self, precompressed_dir):
+        """With caching opted in, requesting a different encoding
+        than the previously-cached one still serves the right
+        sibling (cache key includes the served path)."""
         from blackbull.middleware.static import StaticFiles
-        app = StaticFiles(directory=str(precompressed_dir))
+        app = StaticFiles(directory=str(precompressed_dir), cache=True)
         # Fill cache with br
         _, body_br = await _collect(
             app, _scope(path='/app.js', headers={'accept-encoding': 'br'}))
@@ -484,6 +489,30 @@ class TestPrecompressedVariant:
             app, _scope(path='/app.js', headers={'accept-encoding': 'gzip'}))
         assert body_br == b'BR-COMPRESSED-BYTES'
         assert body_gz == b'GZ-COMPRESSED-BYTES'
+
+    async def test_default_cache_off_no_body_stored(self, precompressed_dir):
+        """Default (``cache=False``): the ``_cache`` dict stays empty
+        even after multiple requests — every response is freshly read
+        from disk."""
+        from blackbull.middleware.static import StaticFiles
+        app = StaticFiles(directory=str(precompressed_dir))
+        assert app._cache_enabled is False
+        for _ in range(3):
+            _, body = await _collect(
+                app, _scope(path='/app.js', headers={'accept-encoding': 'br'}))
+            assert body == b'BR-COMPRESSED-BYTES'
+        assert len(app._cache) == 0
+        assert len(app._sibling_cache) == 0
+
+    async def test_cache_true_populates_cache(self, precompressed_dir):
+        """Sanity-check the opt-in: a single request with
+        ``cache=True`` leaves an entry in ``_cache``."""
+        from blackbull.middleware.static import StaticFiles
+        app = StaticFiles(directory=str(precompressed_dir), cache=True)
+        assert app._cache_enabled is True
+        await _collect(
+            app, _scope(path='/app.js', headers={'accept-encoding': 'br'}))
+        assert len(app._cache) == 1
 
 
 # ---------------------------------------------------------------------------
@@ -555,9 +584,10 @@ class TestStaticFilesPathsend:
         assert all(e.get('type') != 'http.response.pathsend' for e in events)
 
     async def test_small_file_does_not_use_pathsend(self, static_dir):
-        """Cached (small) files stay on the in-memory body path even
-        when pathsend is advertised — no point opening a file we already
-        have in RAM."""
+        """Small files (≤ ``_CACHE_MAX_BYTES_PER_FILE``) stay on the
+        in-memory body path even when pathsend is advertised — the body
+        is read into memory either way, so there's no point handing
+        the file path to the sender for a second open."""
         from blackbull.middleware.static import StaticFiles
         app = StaticFiles(directory=str(static_dir))
         events: list = []

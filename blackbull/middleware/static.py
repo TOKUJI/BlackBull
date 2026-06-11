@@ -63,7 +63,23 @@ class StaticFiles:
     )
 
     def __init__(self, directory: str | None = None, *,
-                 url_prefix: str = '', root_dir: str | Path | None = None):
+                 url_prefix: str = '', root_dir: str | Path | None = None,
+                 cache: bool = False):
+        """Serve files from ``directory`` (or ``root_dir``).
+
+        ``cache`` (default ``False``): when ``True``, file bodies up to
+        ``_CACHE_MAX_BYTES_PER_FILE`` are held in an in-memory
+        ``OrderedDict`` (capped at ``_CACHE_MAX_ENTRIES``), and the
+        per-request ``stat()`` syscall is throttled by
+        ``_STAT_TTL_S``.  When ``False`` (the default), every request
+        does a fresh ``stat()`` and reads the body from disk — matching
+        the behaviour of Starlette / FastAPI / Flask static serving and
+        the requirement HttpArena's standard-mode rules place on static
+        profiles ("read files from disk on every request, no in-memory
+        caching").  Set ``cache=True`` only for standalone deployments
+        where BlackBull terminates static traffic directly (i.e. no
+        nginx / CDN in front).
+        """
         resolved = directory or root_dir
         if resolved is None:
             raise ValueError('directory or root_dir is required')
@@ -77,6 +93,7 @@ class StaticFiles:
         # ``<root>/...`` exactly, reject ``<root>x/...``.
         self._root_sep: str = self._root_str + os.sep
         self._url_prefix = url_prefix.rstrip('/')
+        self._cache_enabled: bool = cache
         # cache key = the actual filesystem path served (original or
         # sibling), held as a ``str`` so the hash is cheap and the
         # key matches the value returned by ``os.path.realpath``.
@@ -85,13 +102,19 @@ class StaticFiles:
         # for precompressed siblings.  ``last_stat`` is the monotonic
         # clock when ``stat()`` last confirmed the entry was still fresh
         # — used to throttle the per-request stat syscall.
+        # Allocated even when caching is disabled so the read sites can
+        # check membership without a None-guard; the cache simply never
+        # gets populated.
         self._cache: OrderedDict[
             str, tuple[int, int, bytes, bytes, bytes, float]
         ] = OrderedDict()
         # Per-path sibling-availability cache: target → {b'br': sibling_path, ...}.
         # _negotiate calls os.path.isfile for each encoding suffix on every
-        # request; the file-existence answer is deterministic for the lifetime
-        # of the server, so we memoise it after the first lookup.
+        # request; when caching is enabled we memoise the answer after the
+        # first lookup (deterministic for the lifetime of the server).
+        # When caching is disabled we recompute siblings every request so
+        # the from-disk-every-request contract extends to the sibling
+        # existence check.
         # Key = original request path string, Value = dict of available encodings.
         self._sibling_cache: dict[str, dict[bytes, str]] = {}
 
@@ -193,15 +216,24 @@ class StaticFiles:
         if not accept:
             return target, b''
 
-        # Fast path: cached sibling set for this target path.
-        siblings = self._sibling_cache.get(target)
-        if siblings is None:
+        # Sibling existence: cached if `cache=True`, recomputed every
+        # request otherwise (so the from-disk-every-request contract
+        # extends to the sibling existence check).
+        if self._cache_enabled:
+            siblings = self._sibling_cache.get(target)
+            if siblings is None:
+                siblings = {}
+                for enc, suffix in self._ENCODING_SUFFIXES:
+                    sibling = target + suffix
+                    if os.path.isfile(sibling):
+                        siblings[enc] = sibling
+                self._sibling_cache[target] = siblings
+        else:
             siblings = {}
             for enc, suffix in self._ENCODING_SUFFIXES:
                 sibling = target + suffix
                 if os.path.isfile(sibling):
                     siblings[enc] = sibling
-            self._sibling_cache[target] = siblings
 
         for enc, _suffix in self._ENCODING_SUFFIXES:
             sibling = siblings.get(enc)
@@ -218,8 +250,9 @@ class StaticFiles:
         size: int
 
         # Fast path: cached entry, still within the per-entry stat TTL.
-        # No syscall, no ``mimetypes.guess_type`` regex.
-        cached_entry = self._cache.get(served_path)
+        # Only consulted when caching is enabled — when ``cache=False``
+        # every request flows through the stat + read branch below.
+        cached_entry = self._cache.get(served_path) if self._cache_enabled else None
         now = time.monotonic()
         if (cached_entry is not None
                 and self._STAT_TTL_S > 0
@@ -227,8 +260,9 @@ class StaticFiles:
             _, size, body, mime, _, _ = cached_entry
             self._cache.move_to_end(served_path)
         else:
-            # Cache miss, stale TTL, or TTL disabled — re-stat to
-            # confirm the entry is still valid.
+            # Cache miss, stale TTL, or caching disabled — re-stat to
+            # confirm the entry is still valid (or to learn it for the
+            # first time when caching is off).
             try:
                 st = os.stat(served_path)
             except OSError:
@@ -242,13 +276,16 @@ class StaticFiles:
                     and cached_entry[1] == size):
                 # Entry still matches the file on disk: reuse body + mime
                 # and refresh ``last_stat`` so the next request can take
-                # the fast path again.
+                # the fast path again.  Only reachable when caching is on.
                 _, _, body, mime, _, _ = cached_entry
                 self._cache[served_path] = (
                     mtime_ns, size, body, mime, content_encoding, now)
                 self._cache.move_to_end(served_path)
             elif size <= self._CACHE_MAX_BYTES_PER_FILE:
-                # First fill or stale entry — read once and store.
+                # Read from disk.  When caching is enabled, also store
+                # the body for next time.  When caching is disabled,
+                # this branch fires on every request and the read is
+                # always fresh.
                 # Content-Type derives from the ORIGINAL request's path
                 # extension, not the .br/.gz/.zst suffix — e.g. app.js.br
                 # is still ``text/javascript``.  ``mimetypes.guess_type``
@@ -263,12 +300,14 @@ class StaticFiles:
                 except OSError:
                     await self._respond(send, HTTPStatus.NOT_FOUND)
                     return
-                self._store(served_path, mtime_ns, size, body, mime,
-                            content_encoding, now)
+                if self._cache_enabled:
+                    self._store(served_path, mtime_ns, size, body, mime,
+                                content_encoding, now)
             else:
                 # Above the cache threshold — drop any stale entry and
                 # fall through to the streaming/pathsend branch.
-                self._cache.pop(served_path, None)
+                if self._cache_enabled:
+                    self._cache.pop(served_path, None)
                 mime = (mimetypes.guess_type(path)[0]
                         or 'application/octet-stream').encode()
                 body = None
