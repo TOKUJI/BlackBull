@@ -3659,6 +3659,14 @@ BB_COMPRESSION_MAX_INFLIGHT
     + 4</code> provides no benefit (Python's default executor pool size).
     <code>0</code> disables backpressure (unbounded queue, pre-0.29 behaviour).
     Default: <code>os.cpu_count() * 2</code>.
+BB_BROTLI_QUALITY
+    Brotli quality level (0–11) for dynamic-response compression.  The
+    brotli library's own default is 11 — designed for build-time/static
+    pre-compression and far too expensive on the request path.  4 matches
+    Google's and Cloudflare's dynamic-content recommendation; 5 matches
+    Apache mod_brotli's default; 6 matches nginx ngx_brotli's default; 11
+    is appropriate only for offline pre-compression of static siblings.
+    Default: <code>4</code>.
 BB_FRAME_YIELD_EVERY
     Number of stream tasks spawned per connection before the frame loop
     inserts <code>await asyncio.sleep(0)</code> to let the event loop dispatch the

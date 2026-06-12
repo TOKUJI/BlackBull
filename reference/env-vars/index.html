@@ -3862,6 +3862,11 @@ on busy production deployments, see
 <td><code>65536</code> (64 KiB)</td>
 <td>Body size above which compression is offloaded to a thread-pool executor so the event loop stays responsive during the (CPU-bound) compress call.  <code>0</code> always compresses on the event loop.</td>
 </tr>
+<tr>
+<td><code>BB_BROTLI_QUALITY</code></td>
+<td><code>4</code></td>
+<td>Brotli quality level (0–11) for dynamic-response compression.  4 matches Google/Cloudflare's recommendation for dynamic content; 5 matches Apache <code>mod_brotli</code>; 6 matches nginx <code>ngx_brotli</code>.  11 is appropriate only for build-time / static pre-compression — far too expensive on the request path.</td>
+</tr>
 </tbody>
 </table>
 <h2 id="sessions">Sessions<a class="headerlink" href="#sessions" title="Permanent link">&para;</a></h2>
