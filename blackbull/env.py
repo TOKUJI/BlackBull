@@ -65,9 +65,11 @@ BB_SOCKET_REUSEPORT
     Default: ``false`` (kernel default).  Enable on multi-worker production
     deployments — see docs/reference/env-vars.md.
 BB_REQUEST_TIMEOUT
-    Maximum seconds a single HTTP/2 stream (request + response) is allowed to
-    run before it is forcibly cancelled with RST_STREAM CANCEL.  Prevents slow
-    or stalled handlers from holding stream slots indefinitely.
+    Maximum seconds a single request handler is allowed to run.  Applied on
+    both protocols: HTTP/2 cancels the stream with RST_STREAM CANCEL; HTTP/1.1
+    emits ``408 Request Timeout`` with ``Connection: close`` and closes the
+    connection (no keep-alive across a timed-out request).  Prevents slow or
+    stalled handlers from holding stream / connection slots indefinitely.
     ``0`` disables the timeout.  Default: ``0`` (disabled).
 BB_H2_INITIAL_WINDOW_SIZE
     Per-stream flow-control window size (bytes) advertised to HTTP/2 peers in the

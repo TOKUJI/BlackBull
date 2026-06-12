@@ -396,6 +396,58 @@ Per-IP in-process limiting is fine for a single-worker deployment.
 For multi-worker or multi-host setups, use a shared store (Redis,
 Memcached) so the bucket survives across workers.
 
+### Post-response middleware (inspect / modify the response)
+
+The middleware shape `(scope, receive, send, call_next)` runs
+*around* the handler — code before `await call_next(...)` sees the
+request, code after sees that the handler returned but **not** what
+the handler sent.  Response status, headers, and body all flow
+through `send`, not through `call_next`'s return value.
+
+To inspect or modify the response, wrap `send` and forward each
+ASGI event yourself:
+
+```python
+async def log_status_mw(scope, receive, send, call_next):
+    captured_status = None
+
+    async def intercepting_send(event):
+        nonlocal captured_status
+        if event['type'] == 'http.response.start':
+            captured_status = event['status']
+        await send(event)
+
+    await call_next(scope, receive, intercepting_send)
+    print(f"{scope['method']} {scope['path']} → {captured_status}")
+```
+
+The handler now sends to `intercepting_send`, which records the
+status off the `http.response.start` event and forwards every event
+to the outer `send` unchanged.  Once `call_next` returns, you have
+the captured value.
+
+The pattern generalises to any modification:
+
+| Goal | Where to act in `intercepting_send` |
+|---|---|
+| Add a response header | rewrite `event['headers']` on `http.response.start` before forwarding |
+| Compute a checksum / size | accumulate `event['body']` on `http.response.body`, finalise when `more_body=False` |
+| Replace the body | buffer body parts; on the final body event, emit your replacement and skip the original |
+| Short-circuit a status code | on `http.response.start`, decide whether to forward as-is or synthesise a different response |
+
+`Compression` ([`blackbull/middleware/compression.py`](https://github.com/TOKUJI/BlackBull/blob/master/blackbull/middleware/compression.py))
+is the reference implementation: it buffers body parts, compresses
+the joined payload, and emits replacement headers + body when the
+handler finishes.
+
+!!! note "Streaming responses"
+    `intercepting_send` receives every body event, including chunks
+    sent with `more_body=True`.  If your goal is to inspect the
+    *complete* response, either buffer until `more_body=False` (as
+    `Compression` does for non-streaming payloads) or fall back to
+    pass-through when streaming is detected — buffering an unbounded
+    stream defeats the point.
+
 ### Injecting values into scope
 
 Middleware may add any key to `scope` for inner layers to consume:
