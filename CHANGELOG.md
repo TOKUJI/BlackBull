@@ -28,6 +28,109 @@ so the editable install's metadata catches up.
 
 ---
 
+## [0.34.0] — 2026-06-13
+
+**Sprint 38 close: cross-protocol parity.**
+
+Two of the same family of HTTP/1.1 ↔ HTTP/2 inconsistencies, one
+direction in each path — closed in one sprint.
+
+### Added
+
+- **HTTP/2 response trailers** (`http.response.trailers`).  The
+  HTTP/2 sender at `blackbull/server/sender.py` now emits a
+  `HEADERS` frame with `END_STREAM | END_HEADERS` and regular
+  fields only (no pseudo-headers, per RFC 9113 §8.1).  Previously
+  this event logged `HTTP2Sender: unhandled event type` and was
+  silently dropped — an ASGI 3.0 conformance gap and the
+  prerequisite primitive for any future gRPC work.  Receive-side
+  trailers (scope-passed-to-handler) remain out of scope.
+- **`BB_REQUEST_TIMEOUT` on the HTTP/1.1 path.**  Previously the
+  env var applied only to HTTP/2 streams (via
+  `HTTP2Actor._spawn_stream_task`'s `asyncio.wait_for` wrapper);
+  the HTTP/1.1 path ran handlers unbounded.  Now the HTTP/1.1
+  keep-alive loop wraps each dispatch with the same
+  `asyncio.wait_for` guard.  On expiry the server emits
+  `408 Request Timeout` with `Connection: close` (and synthesises
+  the response cleanly when the handler had only buffered
+  `http.response.start` without flushing it to the wire) and
+  closes the connection — no keep-alive across a timed-out
+  request.  `0` (the default) preserves the pre-Sprint-38
+  unbounded behaviour.
+- **Defensive `END_STREAM`-already-sent guard on `HTTP2Sender`.**
+  RFC 9113 §8.1 — frames after `END_STREAM` are a connection
+  error.  If an ASGI application erroneously sends another
+  `http.response.body` / `http.response.start` /
+  `http.response.trailers` event after the response is complete,
+  the sender now logs a warning and drops the event rather than
+  writing a frame the peer would treat as a protocol violation.
+  Control-plane frames (`WINDOW_UPDATE`, `RST_STREAM`, `GOAWAY`,
+  …) bypass the guard since the framework needs to send those
+  after the response ends.
+
+### Fixed
+
+- **`HTTP1Sender` per-request state was sticky across keep-alive
+  requests.**  The sender is constructed once per TCP connection
+  and reused across N keep-alive requests, but
+  `_started`/`_chunked`/`_buffered_status`/`_buffered_headers`/
+  `_expect_trailers` were never reset between requests.  After
+  the first response, the `_started` flag stayed `True`, which
+  caused the new `BB_REQUEST_TIMEOUT` synthesis to silently skip
+  the 408 emit on a second-or-later keep-alive request (because
+  the timeout branch checks `if not send._started`).  Reset
+  inline in HTTP1Actor's keep-alive loop alongside the existing
+  `send._head_mode` / `send._log_record` resets.  Pre-Sprint 38
+  this had no externally observable effect because no caller
+  consulted `_started`; the new timeout path required it.
+- **`HTTP1Actor._dispatch_request` was swallowing
+  `CancelledError`.**  The aggregator path's
+  `try: await request_actor.run() except BaseException: return
+  False` deliberately catches handler errors to keep the
+  keep-alive loop alive — but `asyncio.wait_for`'s cancellation
+  mechanism IS a `CancelledError`, so the swallow silently
+  turned timeouts into normal close-without-response.  Inserted
+  `except asyncio.CancelledError: raise` ahead of the
+  `BaseException` catch so `wait_for` sees the cancellation and
+  raises `TimeoutError` to the outer keep-alive loop.
+
+### Docs
+
+- **`intercepting_send` middleware pattern documented.**  Added a
+  "Post-response middleware (inspect / modify the response)"
+  subsection to [`docs/guide/middleware.md`](docs/guide/middleware.md)
+  showing the worked status-logger example, a table mapping
+  common goals (add a response header, compute a checksum,
+  replace the body, short-circuit a status code) to the right
+  hook point inside the wrapped `send`, a pointer to
+  `Compression` as the reference implementation, and a
+  streaming-buffering caveat.  Previously this pattern was used
+  internally by `Compression` and `Cache` but only discoverable
+  by reading their source.
+- **`BB_REQUEST_TIMEOUT` doc framing updated.**  `docs/reference/
+  env-vars.md` and the `blackbull/env.py` module docstring no
+  longer describe it as a "Per-HTTP/2-stream deadline" — the
+  cross-protocol behaviour is the new framing, with the
+  protocol-specific cancellation mechanism described inline
+  (RST_STREAM CANCEL on HTTP/2; 408 + `Connection: close` on
+  HTTP/1.1).
+
+### Conformance
+
+- 19 new tests under
+  [`tests/conformance/http2/test_rfc9113_trailers.py`](tests/conformance/http2/test_rfc9113_trailers.py)
+  (frame shape, no-pseudo-headers, empty trailers,
+  body-then-trailers, field encoding, trailers-only response,
+  sender contract, cross-protocol symmetry,
+  no-longer-unhandled).
+- 20 new tests under
+  [`tests/conformance/http1/test_http1_request_timeout.py`](tests/conformance/http1/test_http1_request_timeout.py)
+  (408 + close, fast-handler unaffected, disabled-by-zero,
+  boundary, isolation, pipelining, custom value, buffered-start
+  + timeout, keep-alive second-request reset).
+
+---
+
 ## [0.33.1] — 2026-06-12
 
 **Brotli default quality aligned with documented dynamic-content

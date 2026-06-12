@@ -448,6 +448,18 @@ class HTTP1Actor(Actor):
                 # the method on this request is HEAD.  The sender uses the
                 # flag in _flush to skip body bytes while keeping the
                 # framing headers a GET would have emitted.
+                # Sprint 38 Task B — reset per-request sender state.  The
+                # HTTP1Sender instance is shared across keep-alive requests
+                # on this connection; without this reset ``_started`` stays
+                # True after the first response, and the timeout branch's
+                # ``if not send._started`` check would skip the synthetic
+                # 408 on a second-or-later request.  ``_chunked`` /
+                # ``_buffered_status`` similarly outlive their request.
+                send._started = False
+                send._chunked = False
+                send._buffered_status = None
+                send._buffered_headers = None
+                send._expect_trailers = False
                 send._head_mode = (scope['method'] == 'HEAD')
                 if send._head_mode:
                     scope['method'] = 'GET'
@@ -457,7 +469,38 @@ class HTTP1Actor(Actor):
                     deadline=dl,
                 )
 
-                if not await self._dispatch_request(scope, inner_receive, capturing_send, log_record):
+                # Sprint 38 Task B — BB_REQUEST_TIMEOUT parity with the
+                # HTTP/2 path.  ``HTTP2Actor._spawn_stream_task`` wraps each
+                # stream coroutine with ``asyncio.wait_for``; the HTTP/1.1
+                # path mirrors that here.  On expiry: synthesise 408 if
+                # headers haven't shipped yet, then close the connection
+                # (no keep-alive across a timed-out request).
+                try:
+                    if cfg.request_timeout > 0:
+                        ok = await asyncio.wait_for(
+                            self._dispatch_request(
+                                scope, inner_receive, capturing_send, log_record),
+                            timeout=cfg.request_timeout,
+                        )
+                    else:
+                        ok = await self._dispatch_request(
+                            scope, inner_receive, capturing_send, log_record)
+                except (asyncio.TimeoutError, TimeoutError):
+                    logger.warning(
+                        '408 Request Timeout — handler on %s %s exceeded '
+                        'BB_REQUEST_TIMEOUT=%.1fs; closing connection',
+                        scope.get('method', '?'), scope.get('path', '?'),
+                        cfg.request_timeout,
+                    )
+                    if not send._started:
+                        await send(
+                            b'408 Request Timeout',
+                            HTTPStatus.REQUEST_TIMEOUT,
+                            [(b'connection', b'close'),
+                             (b'content-type', b'text/plain')],
+                        )
+                    break
+                if not ok:
                     break  # unhandled error — close connection
 
                 # RFC 9112 §9.1 — honour Connection: close.  HTTP/1.0
@@ -772,6 +815,7 @@ class HTTP1Actor(Actor):
 
         Returns True on success, False if an unhandled error should close the connection.
         """
+        import asyncio  # noqa: PLC0415
         if self._aggregator is not None:
             detecting_receive = _make_disconnect_detecting_receive(
                 inner_receive, scope, self._aggregator)
@@ -781,6 +825,11 @@ class HTTP1Actor(Actor):
             )
             try:
                 await request_actor.run()
+            except asyncio.CancelledError:
+                # Sprint 38 Task B — let BB_REQUEST_TIMEOUT's wait_for see
+                # the cancellation; swallowing it here would convert a
+                # timeout into a normal close without the 408 synthesis.
+                raise
             except BaseException:
                 return False
             finally:

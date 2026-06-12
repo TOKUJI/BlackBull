@@ -322,7 +322,7 @@ class HTTP1Sender(BaseSender):
 
     __slots__ = (
         '_buffered_status', '_buffered_headers', '_chunked',
-        '_expect_trailers', '_head_mode', '_log_record',
+        '_expect_trailers', '_head_mode', '_log_record', '_started',
     )
 
     def __init__(self, writer: AbstractWriter):
@@ -331,6 +331,11 @@ class HTTP1Sender(BaseSender):
         self._buffered_headers: Headers | None = None
         self._chunked: bool = False
         self._expect_trailers: bool = False
+        # Set True once the status line + headers have hit the wire
+        # (any path through ``_flush`` / ``_pathsend``).  HTTP1Actor
+        # consults this after BB_REQUEST_TIMEOUT expiry to decide
+        # whether a synthetic 408 can still be emitted.
+        self._started: bool = False
         # RFC 9110 §9.3.2 — when the request was HEAD, the response must
         # have the same headers (including Content-Length) as a GET would
         # but no body.  HTTP1Actor sets this before dispatch.
@@ -455,6 +460,7 @@ class HTTP1Sender(BaseSender):
                 raise TypeError(f'HTTP1Sender expected bytes or dict, got {type(body)!r}')
 
     async def _flush(self, status: HTTPStatus, headers: Headers, body: bytes, more_body: bool = False) -> None:
+        self._started = True
         if more_body:
             if b'transfer-encoding' not in headers:
                 headers.append(b'transfer-encoding', b'chunked')
@@ -524,6 +530,7 @@ class HTTP1Sender(BaseSender):
             logger.warning('HTTP1Sender: pathsend without buffered start; dropping')
             return
 
+        self._started = True
         size = os.path.getsize(path)
         headers = self._buffered_headers
         if b'content-length' not in headers:
@@ -582,7 +589,7 @@ class HTTP2Sender(BaseSender):
     __slots__ = (
         '_factory', '_stream_id', '_push_callback',
         'connection_window_size', 'stream_window_size',
-        'max_frame_size', '_window_open',
+        'max_frame_size', '_window_open', '_end_stream_sent',
     )
 
     def __init__(self, writer: AbstractWriter, factory, stream_id: int,
@@ -595,6 +602,13 @@ class HTTP2Sender(BaseSender):
         self.stream_window_size = {stream_id: DEFAULT_INITIAL_WINDOW_SIZE}
         self.max_frame_size = DEFAULT_MAX_FRAME_SIZE
         self._window_open: asyncio.Event | None = None  # created lazily on first stall
+        # RFC 9113 §8.1 — once END_STREAM is set on a frame this stream is
+        # closed; any further frames would be a connection error.  Track
+        # this so a misbehaving ASGI application sending events after
+        # ``http.response.trailers`` (or after a body event with
+        # ``more_body=False``) gets a logged warning instead of a wire
+        # protocol violation.
+        self._end_stream_sent: bool = False
 
     async def _write(self, data: bytes):
         """Write a frame to the transport.
@@ -714,10 +728,22 @@ class HTTP2Sender(BaseSender):
             else:
                 await super()._write(h_bytes)
                 await self._write_data(body, end_stream=True)
+            self._end_stream_sent = True
 
         elif isinstance(body, dict):
             event_type = body.get('type', '')
             logger.debug('HTTP2Sender event: %r', event_type)
+
+            # RFC 9113 §8.1 — frames after END_STREAM are a protocol error.
+            # Drop the event with a warning rather than writing a frame that
+            # the peer would treat as a stream error.  Application bug to
+            # surface; sender's job is to not make it worse on the wire.
+            if self._end_stream_sent:
+                logger.warning(
+                    'HTTP2Sender: dropping %r on stream %d — END_STREAM already '
+                    'sent (ASGI app sent an event after the response was complete)',
+                    event_type, self._stream_id)
+                return
 
             if event_type == ASGIEvent.HTTP_RESPONSE_START:
                 frame = self._factory.create(
@@ -736,6 +762,26 @@ class HTTP2Sender(BaseSender):
                 payload = body.get('body', b'')
                 end_stream = not body.get('more_body', False)
                 await self._write_data(payload, end_stream=end_stream)
+                if end_stream:
+                    self._end_stream_sent = True
+
+            elif event_type == ASGIEvent.HTTP_RESPONSE_TRAILERS:
+                # RFC 9113 §8.1 — trailers are a HEADERS frame with
+                # END_STREAM set, carrying only regular fields (no
+                # pseudo-headers).  Mirrors the HTTP/1.1 sender's
+                # chunked-trailer case ~line 434.  The caller is
+                # responsible for setting ``more_body: True`` on the
+                # preceding body event so the DATA frame doesn't
+                # close the stream prematurely.
+                frame = self._factory.create(
+                    FrameTypes.HEADERS,
+                    HeaderFrameFlags.END_HEADERS | HeaderFrameFlags.END_STREAM,
+                    self._stream_id,
+                )
+                for k, v in body.get('headers', []):
+                    frame.headers.append((k, v))
+                await self._write(frame.save())
+                self._end_stream_sent = True
 
             elif event_type == ASGIEvent.HTTP_RESPONSE_PUSH:
                 if self._push_callback is not None:
