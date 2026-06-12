@@ -24,7 +24,55 @@ so the editable install's metadata catches up.
 
 ## [Unreleased]
 
-(Nothing yet — next sprint pending.)
+(Nothing yet.)
+
+---
+
+## [0.33.1] — 2026-06-12
+
+**Brotli default quality aligned with documented dynamic-content
+usage.**
+
+The brotli library's own default — used implicitly by the
+`Compression` middleware in 0.33.0 and earlier — is quality 11,
+designed for build-time / static pre-compression of assets that
+will be served thousands of times from disk.  Applied to live
+dynamic responses, q=11 spends 5–15 ms of CPU per response on
+small payloads, saturating the event loop under any load.
+
+This release sets the dynamic-response default to **q=4** and
+makes the value configurable.  The fix follows the brotli
+library's intended usage modes (q=4–6 dynamic, q=11 offline
+static) rather than introducing a benchmark-mode toggle.
+
+### Changed
+
+- **Brotli default quality lowered from 11 to 4** for the
+  `Compression` middleware's dynamic-response path.  q=4 matches
+  Google's and Cloudflare's recommendation for dynamic content;
+  q=5 matches Apache `mod_brotli`'s default; q=6 matches nginx
+  `ngx_brotli`'s default.  q=11 remains the right pick for
+  build-time pre-compression of static sibling assets (`.br`
+  files served from disk) — never on live responses.
+
+  Configurable via `BB_BROTLI_QUALITY` (env var) or
+  `Compression(brotli_quality=...)` (constructor kwarg).
+  Behavioural wire output is unchanged (still valid brotli);
+  only CPU cost on the request path drops.
+
+### Added
+
+- `BB_BROTLI_QUALITY` env var and `Settings.brotli_quality`
+  field.  Documented in
+  [`docs/reference/env-vars.md`](docs/reference/env-vars.md).
+
+### Tests
+
+- `tests/unit/test_compression_brotli_quality.py` pins the
+  module-level default (4), verifies the constructor kwarg
+  propagates to the bound brotli callable via
+  `functools.partial`, and round-trips the env var →
+  `Settings` → middleware path.
 
 ---
 
