@@ -182,7 +182,7 @@ The actor hierarchy is the *control* side.  The *data* side is
 the protocol stack:
 
 - **HTTP/1.1 parser** — `blackbull/server/parser.py`.  Pure
-  Python; no `httptools` dependency.
+  Python.
 - **HTTP/2 frame layer** — `blackbull/protocol/` (frame types,
   flow-control windows, RFC 9218 `PRIORITY_UPDATE`).  Header
   compression delegates to the `hpack` library — the only
@@ -209,8 +209,8 @@ source of truth.
 
 `blackbull[speed]` adds `uvloop` as an optional dependency.
 The HTTP/1.1 parser, HTTP/2 frame layer, and WebSocket codec
-are all BlackBull's own code — no `httptools`, no `h2` library
-for framing.  The one exception is HPACK header compression,
+are all BlackBull's own code in pure Python.  The one exception
+is HPACK header compression,
 which delegates to the [`hpack`](https://pypi.org/project/hpack/)
 library (pure Python, layered under the BlackBull-owned
 `hpack_fastpath.py`); re-implementing a conformant HPACK
@@ -224,7 +224,7 @@ pure Python:
   applies to `hpack` too — it is itself pure Python, so HPACK
   bugs remain debuggable in-process.
 - **Identity.**  BlackBull exists in part to demonstrate that
-  CPython is fast enough for a from-scratch ASGI implementation
+  CPython is fast enough for a pure-Python ASGI implementation
   when the framework itself stays out of the way.  Swapping in
   a C parser would make it a different project.
 

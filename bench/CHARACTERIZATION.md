@@ -42,7 +42,7 @@ In order of priority:
    this matrix.
 4. **Predictable multi-worker scaling** on commodity Linux —
    characterised by Sprint 21 Phase B's closed-form `R(W)` formula.
-5. **Implementation clarity / from-scratch identity.**
+5. **Implementation clarity / pure-Python identity.**
 
 Peak req/s comes after all five.  External servers in the matrix are
 diagnostic references — see "Reference servers and diagnostic roles"

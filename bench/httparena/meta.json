@@ -4,7 +4,7 @@
   "type": "emerging",
   "mode": "standard",
   "engine": "blackbull",
-  "description": "BlackBull — from-scratch async ASGI 3.0 framework with native HTTP/1.1, HTTP/2 and WebSocket implementations.  Pure-Python protocol stack; ALPN negotiates HTTP/2 on the same listener that serves HTTP/1.1.",
+  "description": "BlackBull — pure-Python async ASGI 3.0 framework supporting HTTP/1.1, HTTP/2, and WebSocket. ALPN negotiates HTTP/2 on the same listener that serves HTTP/1.1.",
   "repo": "https://github.com/TOKUJI/BlackBull",
   "enabled": false,
   "tests": [

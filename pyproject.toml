@@ -5,7 +5,7 @@ name = "blackbull"
 # between sprints.  No 1.0 commitment until the framework's identity
 # and surface have stabilised across several sprints.  See CHANGELOG.md.
 version = "0.33.1"
-description = "Async ASGI 3.0 framework with a from-scratch HTTP/1.1 parser, HTTP/2 frame layer, and WebSocket codec. HPACK delegates to the hpack library."
+description = "Async ASGI 3.0 framework with pure-Python HTTP/1.1, HTTP/2 framing, and WebSocket implementations. HPACK delegates to the hpack library."
 readme = "README.md"
 requires-python = ">=3.11"
 
