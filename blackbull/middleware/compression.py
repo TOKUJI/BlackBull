@@ -31,9 +31,10 @@ _SERVER_PREFERENCE = ['br', 'zstd', 'gzip']  # server-side priority order
 # uncompressed font tables that DO benefit from gzip/brotli, so they stay
 # off this list and run through the codec like any other text-shaped
 # payload.  WOFF wraps zlib internally; WOFF2 wraps brotli internally —
-# re-compressing them is the worst case (high-entropy input at default
-# quality 11) and contributes a measurable per-request CPU tail in
-# Sprint 35's HttpArena static-rotate probe.
+# re-compressing them is the worst case (high-entropy input; under the
+# brotli library's bare-call default of quality 11 — BlackBull's own
+# default is q=4 via ``BB_BROTLI_QUALITY``) and contributes a measurable
+# per-request CPU tail in Sprint 35's HttpArena static-rotate probe.
 _SKIP_CONTENT_TYPES = (
     'image/',
     'audio/',

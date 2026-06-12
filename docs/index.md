@@ -2,10 +2,9 @@
 
 BlackBull is a Python web framework that speaks the
 [**ASGI 3.0**](https://asgi.readthedocs.io/en/latest/specs/main.html)
-interface[^asgi], with native implementations of HTTP/1.1, HTTP/2 (with
-ALPN), and WebSocket.  Pure-Python protocol stack, no required C
-extensions outside the standard library, one `pip install`, one
-deployable.
+interface[^asgi], with pure-Python implementations of HTTP/1.1, HTTP/2
+(with ALPN), and WebSocket.  No required C extensions outside the
+standard library, one `pip install`, one deployable.
 
 [^asgi]: ASGI is the async successor to WSGI — a single small interface
     that lets the same app object speak HTTP and WebSocket without

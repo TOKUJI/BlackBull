@@ -4,9 +4,8 @@
 > Conformance evidence: [`docs/about/conformance.md`](https://github.com/TOKUJI/BlackBull/blob/master/docs/about/conformance.md).
 > Things to know before adopting: [`KNOWN_LIMITATIONS.md`](https://github.com/TOKUJI/BlackBull/blob/master/KNOWN_LIMITATIONS.md).
 
-**Async ASGI 3.0 framework** with a from-scratch HTTP/1.1 parser,
-HTTP/2 frame layer, and WebSocket codec — no `httptools`, no
-`uvicorn`, no `hypercorn` underneath.  HPACK header compression
+**Async ASGI 3.0 framework** with pure-Python HTTP/1.1, HTTP/2
+framing, and WebSocket implementations.  HPACK header compression
 delegates to the [`hpack`](https://github.com/python-hyper/hpack)
 library (re-implementing a conformant HPACK encoder/decoder is a
 project of its own); everything else, including the ASGI server,
@@ -22,14 +21,13 @@ third-party C extensions in the protocol stack.
 
 - **One package, one process** — the framework *is* the server.  No
   separate ASGI runner; `app.run()` opens the socket and serves.
-- **From-scratch protocol stack** for HTTP/1.1 (RFC 9112) parser,
+- **Pure-Python protocol stack** for HTTP/1.1 (RFC 9112) parser,
   HTTP/2 (RFC 9113) frame layer + flow control + RFC 9218
   prioritisation + push, and WebSocket (RFC 6455) codec.  HPACK
   (RFC 7541) is the one exception — see headline above.
-- **Pure-Python identity** — no `httptools`, no `uvloop` dependency
-  (uvloop available as an optional `[speed]` extra).  The single
-  third-party dependency in the protocol stack is `hpack`, also
-  pure Python.
+- **Pure-Python identity** — uvloop is available as an optional
+  `[speed]` extra.  The single third-party dependency in the
+  protocol stack is `hpack`, also pure Python.
 - **Conformance-tested** against `h2spec`, Autobahn, and a
   differential nginx fuzz corpus.
 - **Modern Python** — requires 3.11+, full type hints, PEP 561 typed

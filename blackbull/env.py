@@ -16,7 +16,11 @@ BB_MAX_CONNECTIONS
     cap is reached, new connections receive HTTP/1.1 ``503 Service
     Unavailable`` with ``Retry-After: 1`` (a load-balancer-friendly
     response, not a silent reset).  ``0`` disables the cap and relies
-    on the OS file-descriptor limit instead.  Default: ``1024``.
+    on the OS file-descriptor limit instead.  Default: ``0`` (uncapped).
+    Production deployments on untrusted hosts should set this to a
+    finite ceiling — 1024 is a sensible single-loop value; multi-worker
+    deployments multiply (so ``workers=8`` × ``BB_MAX_CONNECTIONS=1024``
+    → 8K connections per process).
 BB_STREAM_QUEUE_DEPTH
     ``asyncio.Queue`` depth for HTTP/2 per-stream request-body events.
     Limits memory growth when an ASGI handler is slower than the client.
@@ -64,6 +68,35 @@ BB_SOCKET_REUSEPORT
     Has no effect with a single worker or on platforms without ``SO_REUSEPORT``.
     Default: ``false`` (kernel default).  Enable on multi-worker production
     deployments — see docs/reference/env-vars.md.
+BB_KEEP_ALIVE_TIMEOUT
+    Idle timeout (seconds) on a keep-alive HTTP/1.1 connection that is
+    awaiting the *next* request.  Application-level timer; same
+    ghost-eviction guarantee as ``SO_KEEPALIVE`` without the per-accept
+    syscall cost.  ``0`` disables the timer.  Default: ``5.0``.
+BB_TCP_USER_TIMEOUT_MS
+    ``TCP_USER_TIMEOUT`` value in **milliseconds** for accepted sockets
+    (Linux only).  Forces a connection-level error if a peer fails to
+    ACK in this window — defends against dead-mid-write peers that
+    ``SO_KEEPALIVE`` misses.  ``0`` leaves the kernel default
+    unchanged.  Default: ``0``.
+BB_HEADER_TIMEOUT
+    Maximum seconds the server will wait for a complete HTTP/1.1
+    request-header block (request-line + headers + CRLFCRLF).  Primary
+    slowloris defence.  When the deadline elapses the server returns
+    ``408 Request Timeout`` and closes.  ``0`` disables.
+    Default: ``10.0``.
+BB_BODY_TIMEOUT
+    Maximum seconds for the HTTP/1.1 request body to arrive once headers
+    are parsed.  Mirrors ``BB_HEADER_TIMEOUT`` for the body half;
+    defeats slowloris-style ``Content-Length: N`` connections that drip
+    body bytes after the headers have arrived.  ``0`` disables.
+    Default: ``30.0``.
+BB_WRITE_TIMEOUT
+    Maximum seconds the server will wait for a single write to flush to
+    the peer (via ``StreamWriter.drain()``).  Defends against the
+    *slow-read* shape of slowloris: a client that reads 1 byte/sec
+    eventually fills the kernel send buffer and ``drain()`` would block
+    indefinitely.  ``0`` disables.  Default: ``30.0``.
 BB_REQUEST_TIMEOUT
     Maximum seconds a single request handler is allowed to run.  Applied on
     both protocols: HTTP/2 cancels the stream with RST_STREAM CANCEL; HTTP/1.1
@@ -71,35 +104,57 @@ BB_REQUEST_TIMEOUT
     connection (no keep-alive across a timed-out request).  Prevents slow or
     stalled handlers from holding stream / connection slots indefinitely.
     ``0`` disables the timeout.  Default: ``0`` (disabled).
+BB_HEADER_MAX_LINE
+    Maximum bytes in a single HTTP/1.1 request-line or header line.
+    Enforced before parsing so an attacker cannot exhaust memory with a
+    pathological 1 GB header.  Default: ``8192`` (matches Apache
+    ``LimitRequestLine`` / nginx ``large_client_header_buffers``).
+BB_HEADER_MAX_TOTAL
+    Maximum total bytes in the entire HTTP/1.1 request header block
+    (request-line + all headers + CRLFCRLF).  Default: ``65536``
+    (matches typical reverse-proxy defaults).
 BB_H2_INITIAL_WINDOW_SIZE
     Per-stream flow-control window size (bytes) advertised to HTTP/2 peers in the
     server's initial SETTINGS frame.  Larger values allow peers to send more data
     per stream before waiting for WINDOW_UPDATE.
-    Default: ``65535`` (RFC 7540 §6.9.2 default).  ``1048576`` (1 MiB) is a
+    Default: ``65535`` (RFC 9113 §6.9.2 default).  ``1048576`` (1 MiB) is a
     common tuned value for upload-heavy or multiplexed workloads — see
     docs/reference/env-vars.md.
 BB_H2_CONNECTION_WINDOW_SIZE
     Connection-level flow-control window size (bytes) advertised to HTTP/2 peers
     via an initial WINDOW_UPDATE on stream 0 after the SETTINGS handshake.
     Must be ≥ 65535 (the RFC default); values below that are silently ignored.
-    Default: ``65535`` (RFC 7540 §6.9.2 minimum).  ``4194304`` (4 MiB) is a
+    Default: ``65535`` (RFC 9113 §6.9.2 minimum).  ``4194304`` (4 MiB) is a
     common tuned value to allow concurrent streams to share the connection
     budget without head-of-line stalls — see docs/reference/env-vars.md.
 BB_H2_MAX_CONCURRENT_STREAMS
     Maximum number of HTTP/2 streams the server accepts at the same time per
     connection, advertised to peers in the initial SETTINGS frame
-    (RFC 7540 §6.5.2 — SETTINGS_MAX_CONCURRENT_STREAMS, identifier 0x0003).
+    (RFC 9113 §6.5.2 — SETTINGS_MAX_CONCURRENT_STREAMS, identifier 0x0003).
     Incoming streams that would exceed this limit receive RST_STREAM
     REFUSED_STREAM and are not dispatched to the application.
     Default: ``100``.
+BB_H2_ACTIVE_STREAMS_1W
+    Per-connection ``asyncio.Semaphore`` cap on running stream handlers
+    when ``workers == 1``.  Counterpart of ``BB_H2_ACTIVE_STREAMS`` for
+    the single-worker case (where one event loop sees all connections).
+    ``0`` disables the cap.  Default: ``20``.
 BB_H2_ACTIVE_STREAMS
-    Maximum number of HTTP/2 stream handlers that run concurrently per
-    connection.  When > 0, each connection gets an ``asyncio.Semaphore``
-    of this size; newly-spawned stream tasks queue for the semaphore instead
-    of running immediately.  This prevents one high-mux connection from
-    monopolising the event loop and starving other connections on the same
-    worker.  ``0`` disables the semaphore (no cap beyond
-    ``BB_H2_MAX_CONCURRENT_STREAMS``).  Default: ``0`` (disabled).
+    Per-connection ``asyncio.Semaphore`` cap on running stream handlers
+    when ``workers > 1``.  Newly-spawned stream tasks queue for the
+    semaphore instead of running immediately, which prevents one high-mux
+    connection from monopolising the event loop and starving other
+    connections on the same worker.  ``0`` disables the cap (no upper
+    bound beyond ``BB_H2_MAX_CONCURRENT_STREAMS``).  Default: ``20``.
+BB_H2_ENABLE_WEBSOCKET
+    Advertise ``SETTINGS_ENABLE_CONNECT_PROTOCOL=1`` (RFC 8441 §3) so
+    peers may bootstrap WebSocket over HTTP/2 via Extended CONNECT.
+    Off by default — this path has fewer conformance tests than the
+    HTTP/1.1 upgrade path.  Default: ``false``.
+BB_WS_PERMESSAGE_DEFLATE
+    Negotiate ``permessage-deflate`` (RFC 7692) on incoming WebSocket
+    handshakes when the peer offers it.  Matches modern browsers and
+    major WebSocket libraries.  Default: ``true``.
 BB_COMPRESSION_MIN_SIZE
     Minimum response body size in bytes below which
     :class:`~blackbull.middleware.compression.Compression` skips
@@ -116,8 +171,10 @@ BB_COMPRESSION_MAX_INFLIGHT
     concurrently in the asyncio default thread pool.  When at or above
     this cap, additional eligible responses are served **uncompressed**
     rather than queued — bounded fall-back rather than unbounded queue
-    growth.  Tied to executor size: setting this above ``os.cpu_count()
-    + 4`` provides no benefit (Python's default executor pool size).
+    growth.  Tied to executor size: setting this above Python's default
+    ``ThreadPoolExecutor`` ``max_workers`` provides no benefit.  That
+    default is ``min(32, os.cpu_count() + 4)`` on Python ≤ 3.12 and
+    ``min(128, os.cpu_count() * 5)`` on Python ≥ 3.13.
     ``0`` disables backpressure (unbounded queue, pre-0.29 behaviour).
     Default: ``os.cpu_count() * 2``.
 BB_BROTLI_QUALITY
@@ -137,6 +194,22 @@ BB_FRAME_YIELD_EVERY
     spawns caps the maximum synchronous run to N × ~50 µs regardless of
     burst size.  ``0`` disables cooperative yielding (legacy behaviour).
     Default: ``8``.
+BB_UVLOOP
+    Install the ``uvloop`` event loop policy before each
+    ``asyncio.run()`` when the optional ``[speed]`` extra is installed.
+    Falls back to the standard asyncio loop with a warning if uvloop is
+    not importable.  Default: ``false``.
+BB_DEADLINE_TICK_MS
+    Polling interval (milliseconds) for the per-process deadline scanner
+    that enforces connection timeouts (``BB_HEADER_TIMEOUT``,
+    ``BB_BODY_TIMEOUT``, ``BB_WRITE_TIMEOUT``, ``BB_KEEP_ALIVE_TIMEOUT``).
+    Smaller = tighter timeout granularity at a small CPU cost; larger =
+    more slack but cheaper.  Default: ``300``.
+BB_SESSION_SECRET
+    HMAC secret used by the :class:`~blackbull.middleware.session.Session`
+    middleware to sign cookies.  Pass ``secret=`` to the constructor or
+    set this env var; if neither is set, ``Session()`` construction
+    raises (no insecure default).  Default: *(unset)*.
 """
 import dataclasses
 import functools as _functools
@@ -233,13 +306,12 @@ class Settings:
     #: integrity).  Unbounded per-worker concurrency lets a single
     #: client (or burst, or slowloris-class workload) park thousands of
     #: suspended-readuntil tasks on the event loop, amplifying drain
-    #: time on burst-close and inflating worst-case latency.  1024 is
-    #: the typical ceiling for a single asyncio loop on commodity
-    #: hardware; the multi-worker ``workers=N`` setting multiplies the
-    #: ceiling (so N=8 workers → 8K concurrent connections per
-    #: process).  Set ``BB_MAX_CONNECTIONS=0`` to opt back into
-    #: unbounded behaviour on trusted hosts.
-    max_connections: int = 1024
+    #: time on burst-close and inflating worst-case latency.  Set
+    #: ``BB_MAX_CONNECTIONS`` to a finite ceiling on untrusted hosts;
+    #: 1024 is a typical single-asyncio-loop ceiling, and multi-worker
+    #: deployments multiply (so ``workers=8`` × ``BB_MAX_CONNECTIONS=1024``
+    #: → 8K connections per process).
+    max_connections: int = 0
 
     #: asyncio.Queue depth for HTTP/2 per-stream request-body events.
     stream_queue_depth: int = 64
@@ -253,20 +325,23 @@ class Settings:
     #: Emit one access log record per completed request on blackbull.access.
     access_log: bool = True
 
-    #: listen() backlog depth for the server socket.  4096 matches the
-    #: Linux >=5.4 default for ``net.core.somaxconn`` (the kernel silently
-    #: caps to that anyway).  Raised from 1024 because a c=1024 wrk burst
-    #: was overflowing the queue and producing connect-RSTs.
-    socket_backlog: int = 4096
+    #: listen() backlog depth for the server socket.  128 is the
+    #: traditional kernel ``SOMAXCONN`` default.  Production deployments
+    #: under burst load should raise this — see
+    #: docs/reference/env-vars.md "Performance recommendations".
+    socket_backlog: int = 128
 
     #: SO_SNDBUF for accepted sockets (0 = leave kernel default).
-    socket_sndbuf: int = 262144  # 256 kB requested → ~512 kB effective
+    socket_sndbuf: int = 0
 
     #: SO_RCVBUF for accepted sockets (0 = leave kernel default).
-    socket_rcvbuf: int = 262144  # 256 kB requested → ~512 kB effective
+    socket_rcvbuf: int = 0
 
     #: Use SO_REUSEPORT to give each worker its own kernel accept queue.
-    socket_reuseport: bool = True
+    #: Off by default — only meaningful under ``workers > 1``.  Production
+    #: multi-worker deployments should enable it; see
+    #: docs/reference/env-vars.md "Performance recommendations".
+    socket_reuseport: bool = False
 
     #: Idle timeout (seconds) on a keep-alive connection that is awaiting
     #: the *next* request.  Replaces per-accept ``SO_KEEPALIVE`` syscalls
@@ -280,10 +355,9 @@ class Settings:
     #: integrity).  60 s parks ghost / idle connections in the loop's
     #: ``readuntil`` for far longer than necessary, inflating the
     #: suspended-task count and amplifying burst-close drain time.
-    #: 5 s matches uvicorn / granian / Caddy / Go-net/http and is the
-    #: industry-standard short-idle value.  Long-lived clients on slow
-    #: links should set ``BB_KEEP_ALIVE_TIMEOUT`` explicitly to a
-    #: higher value.
+    #: 5 s is a common short-idle value for request-pipeline keep-alive.
+    #: Long-lived clients on slow links should set
+    #: ``BB_KEEP_ALIVE_TIMEOUT`` explicitly to a higher value.
     keep_alive_timeout: float = 5.0
 
     #: ``TCP_USER_TIMEOUT`` value in **milliseconds** for accepted sockets.
@@ -291,7 +365,7 @@ class Settings:
     #: Forces a connection-level error if a peer fails to ACK in this
     #: window — protects against dead-mid-write peers that ``SO_KEEPALIVE``
     #: misses.  0 leaves the kernel default unchanged.
-    tcp_user_timeout_ms: int = 60_000
+    tcp_user_timeout_ms: int = 0
 
     #: Per-request timeout in seconds for HTTP/2 streams (0 = disabled).
     request_timeout: float = 0.0
@@ -338,10 +412,15 @@ class Settings:
     header_max_total: int = 65536
 
     #: Per-stream HTTP/2 flow-control window advertised in the server's SETTINGS.
-    h2_initial_window_size: int = 1048576  # 1 MiB
+    #: 65535 is the RFC 9113 §6.9.2 default.  Production deployments serving
+    #: large responses should raise this — see
+    #: docs/reference/env-vars.md "Performance recommendations".
+    h2_initial_window_size: int = 65535
 
     #: Connection-level HTTP/2 flow-control window advertised via WINDOW_UPDATE(stream_id=0).
-    h2_connection_window_size: int = 4194304  # 4 MiB
+    #: 65535 is the RFC 9113 §6.9.2 connection-window minimum.  Production
+    #: deployments should raise this — see env-vars.md recommendations.
+    h2_connection_window_size: int = 65535
 
     #: Maximum concurrent HTTP/2 streams per connection (SETTINGS_MAX_CONCURRENT_STREAMS).
     h2_max_concurrent_streams: int = 100
@@ -454,7 +533,7 @@ def get_settings() -> Settings:
         write_timeout=_float_env_nonneg('BB_WRITE_TIMEOUT', 30.0),
         header_max_line=_int_env_nonneg('BB_HEADER_MAX_LINE', 8192),
         header_max_total=_int_env_nonneg('BB_HEADER_MAX_TOTAL', 65536),
-        # RFC 7540 §6.9.2 default initial window size.  See
+        # RFC 9113 §6.9.2 default initial window size.  See
         # docs/reference/env-vars.md "Performance recommendations" for the
         # values commonly used on tuned production deployments.
         h2_initial_window_size=_int_env('BB_H2_INITIAL_WINDOW_SIZE', 65535),

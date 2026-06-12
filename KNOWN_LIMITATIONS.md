@@ -98,10 +98,12 @@ capacity against `nproc / 2` on typical SMT-enabled hardware.
 ### Static-file serving is not a production CDN
 
 [`blackbull/middleware/static.py`](blackbull/middleware/static.py)
-serves files three ways:
+serves files three ways at runtime:
 
-- Cached in-memory (≤ 4 MiB) — first hit reads sync, subsequent
-  hits serve from a per-process LRU.
+- Read from disk on every request (the default since 0.33) — each
+  hit runs `path.stat()` + `open().read()`.  Correct under file
+  edits with no staleness window, but pays the per-request syscall
+  cost.
 - Zero-copy via `loop.sendfile` (cleartext HTTP/1.1, > 4 MiB,
   no Range) — single kernel-side transfer, no per-chunk
   event-loop dispatch.  Opted in via the `http.response.pathsend`
@@ -111,13 +113,18 @@ serves files three ways:
   overhead.  Use the fronting nginx path below if this is on the
   critical path for you.
 
-The in-memory cache is stat-invalidated per request — every
-request runs `path.stat()` and refills the entry when mtime or
-size changes, so edits on disk show up on the next request with
-no staleness window.  What's still missing: ETag-driven
-revalidation, byte-range-multipart, and CDN edge-cache
-invalidation glue.  For anything user-visible, front a real
-static-file server (nginx, S3 + CloudFront).
+An optional in-memory cache (≤ 4 MiB) is available with
+`app.static(prefix, root, cache=True)`: first hit reads sync,
+subsequent hits serve from a per-process LRU, and the entry is
+stat-invalidated per request so edits on disk show up on the
+next request with no staleness window.  Default is `cache=False`;
+standalone deployments serving static traffic directly should opt
+in to keep prior performance.
+
+What's still missing across all paths: ETag-driven revalidation,
+byte-range-multipart, and CDN edge-cache invalidation glue.  For
+anything user-visible, front a real static-file server (nginx,
+S3 + CloudFront).
 
 ### No internal database layer
 
