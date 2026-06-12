@@ -30,8 +30,7 @@ Hello, world!
 
 That's a complete server: an HTTP/1.1 listener bound on
 `127.0.0.1:8000` with one route registered.  No external server
-process (no `uvicorn`, no `gunicorn`) and no separate framework
-package — `BlackBull` is both.
+process and no separate framework package — `BlackBull` is both.
 
 ## The ASGI triplet
 

@@ -2,8 +2,8 @@
 
 ## Project overview
 
-BlackBull is a Python ASGI 3.0 web framework built from scratch.
-It handles HTTP/1.1, HTTP/2, and WebSocket at the protocol level.
+BlackBull is a Python ASGI 3.0 web framework with pure-Python
+HTTP/1.1, HTTP/2, and WebSocket implementations at the protocol level.
 The codebase is a personal learning project, so correctness over the wire matters more than API stability.
 
 ---

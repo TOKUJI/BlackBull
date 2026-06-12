@@ -22,7 +22,7 @@ For the precedence order (CLI flags > env > TOML), see
 
 | Variable | Default | Controls |
 |---|---|---|
-| `BB_MAX_CONNECTIONS` | `1024` | Maximum simultaneous TCP connections **per worker**.  When the cap is reached, new connections receive HTTP/1.1 `503 Service Unavailable` with `Retry-After: 1` before close — a well-formed response so load-balancers / health-checks can interpret it correctly.  `0` disables the cap (rely on OS file-descriptor limit instead).  Multi-worker servers multiply the ceiling (`workers × max_connections`). |
+| `BB_MAX_CONNECTIONS` | `0` (uncapped) | Maximum simultaneous TCP connections **per worker**.  When the cap is reached, new connections receive HTTP/1.1 `503 Service Unavailable` with `Retry-After: 1` before close — a well-formed response so load-balancers / health-checks can interpret it correctly.  `0` disables the cap (rely on OS file-descriptor limit instead).  Multi-worker servers multiply the ceiling (`workers × max_connections`).  Production deployments on untrusted hosts should set this to a finite ceiling — 1024 is a typical single-loop value. |
 | `BB_REQUEST_TIMEOUT` | `0` (off) | Per-HTTP/2-stream deadline in seconds.  When the deadline elapses the stream is forcibly cancelled with `RST_STREAM CANCEL`.  Use a positive value (e.g. `30`) in production to evict stalled handlers from stream slots. |
 | `BB_HEADER_TIMEOUT` | `10.0` | Seconds an HTTP/1.1 client has to deliver the complete header block (request-line + headers + `CRLFCRLF`).  Primary slowloris defence — without it, an attacker can hold a connection open indefinitely by dripping bytes.  Server answers `408 Request Timeout` and closes.  `0` disables. |
 | `BB_BODY_TIMEOUT` | `30.0` | Per-chunk deadline for the request body once headers are parsed.  Slowloris body-half defence.  Each `await receive()` is bounded by this; exceed → the recipient surfaces `http.disconnect` and the connection tears down.  `0` disables. |
@@ -74,6 +74,7 @@ For the precedence order (CLI flags > env > TOML), see
 |---|---|---|
 | `BB_COMPRESSION_MIN_SIZE` | `100` | Minimum body size in bytes below which the `Compression` middleware skips compression entirely. |
 | `BB_COMPRESSION_EXECUTOR_THRESHOLD` | `65536` (64 KiB) | Body size above which compression is offloaded to a thread-pool executor so the event loop stays responsive during the (CPU-bound) compress call.  `0` always compresses on the event loop. |
+| `BB_COMPRESSION_MAX_INFLIGHT` | `os.cpu_count() * 2` | Maximum concurrent compression offloads to the asyncio default thread pool.  When at or above this cap, additional eligible responses are served **uncompressed** rather than queued — bounded fall-back rather than unbounded queue growth.  `0` disables the cap (unbounded queue, pre-0.29 behaviour). |
 | `BB_BROTLI_QUALITY` | `4` | Brotli quality level (0–11) for dynamic-response compression.  4 matches Google/Cloudflare's recommendation for dynamic content; 5 matches Apache `mod_brotli`; 6 matches nginx `ngx_brotli`.  11 is appropriate only for build-time / static pre-compression — far too expensive on the request path. |
 
 ## Sessions
