@@ -1,4 +1,5 @@
 import asyncio
+import functools
 import gzip
 from collections.abc import Callable
 from ..asgi import ASGIEvent
@@ -8,6 +9,13 @@ from .utils import as_middleware
 
 _MIN_SIZE = 100  # default minimum body size to bother compressing
 _EXECUTOR_THRESHOLD = 65536  # default body size above which compression is offloaded
+# Default brotli quality level for dynamic responses.  The brotli library's
+# own default is 11 (max compression, designed for build-time / static
+# pre-compression) — for sub-KB dynamic JSON that's ~5–15 ms of CPU per
+# response, which pegs the loop.  4 matches Google's and Cloudflare's
+# recommendation for dynamic content; 5 matches Apache mod_brotli;
+# 6 matches nginx ngx_brotli.  Configurable via ``BB_BROTLI_QUALITY``.
+_BROTLI_QUALITY = 4
 # Default cap on concurrent executor offloads.  When at the cap, additional
 # eligible responses are served *uncompressed* rather than queued — bounded
 # fall-back instead of unbounded executor queue growth.  ``0`` disables.
@@ -49,12 +57,16 @@ _SKIP_CONTENT_TYPES = (
 # Codec detection and selection
 # ---------------------------------------------------------------------------
 
-def _detect_codecs() -> dict[str, Callable[[bytes], bytes]]:
-    """Return a dict of codec-name → compress-callable for every available encoder."""
+def _detect_codecs(brotli_quality: int = _BROTLI_QUALITY) -> dict[str, Callable[[bytes], bytes]]:
+    """Return a dict of codec-name → compress-callable for every available encoder.
+
+    ``brotli_quality`` is bound into the ``br`` callable so each request
+    pays only the dict lookup + call, with no per-call kwarg setup.
+    """
     available: dict[str, Callable[[bytes], bytes]] = {}
     try:
         import brotli  # type: ignore[import-untyped]
-        available['br'] = brotli.compress
+        available['br'] = functools.partial(brotli.compress, quality=brotli_quality)
     except ImportError:
         pass
     try:
@@ -99,7 +111,8 @@ class Compression:
 
     def __init__(self, min_size: int = _MIN_SIZE,
                  executor_threshold: int = _EXECUTOR_THRESHOLD,
-                 executor_max_inflight: int = _MAX_INFLIGHT):
+                 executor_max_inflight: int = _MAX_INFLIGHT,
+                 brotli_quality: int = _BROTLI_QUALITY):
         self._min_size = min_size
         self._executor_threshold = executor_threshold
         # Concurrency cap on executor offloads.  When at cap, fall back to
@@ -108,7 +121,8 @@ class Compression:
         # (the HttpArena `static` profile collapse mode, Sprint 29).
         self._executor_max_inflight = executor_max_inflight
         self._executor_inflight: int = 0
-        self._available = _detect_codecs()
+        self._brotli_quality = brotli_quality
+        self._available = _detect_codecs(brotli_quality=brotli_quality)
         # ``Accept-Encoding`` header bytes → selection.  Real-world traffic
         # has very few distinct Accept-Encoding values (browsers send a
         # constant string; benchmark generators send one); parsing the
@@ -305,6 +319,7 @@ def _make_default_compress() -> 'Compression':
             min_size=cfg.compression_min_size,
             executor_threshold=cfg.compression_executor_threshold,
             executor_max_inflight=cfg.compression_max_inflight,
+            brotli_quality=cfg.brotli_quality,
         )
     except Exception:
         return Compression()

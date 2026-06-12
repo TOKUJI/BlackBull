@@ -118,6 +118,14 @@ BB_COMPRESSION_MAX_INFLIGHT
     + 4`` provides no benefit (Python's default executor pool size).
     ``0`` disables backpressure (unbounded queue, pre-0.29 behaviour).
     Default: ``os.cpu_count() * 2``.
+BB_BROTLI_QUALITY
+    Brotli quality level (0–11) for dynamic-response compression.  The
+    brotli library's own default is 11 — designed for build-time/static
+    pre-compression and far too expensive on the request path.  4 matches
+    Google's and Cloudflare's dynamic-content recommendation; 5 matches
+    Apache mod_brotli's default; 6 matches nginx ngx_brotli's default; 11
+    is appropriate only for offline pre-compression of static siblings.
+    Default: ``4``.
 BB_FRAME_YIELD_EVERY
     Number of stream tasks spawned per connection before the frame loop
     inserts ``await asyncio.sleep(0)`` to let the event loop dispatch the
@@ -384,6 +392,16 @@ class Settings:
     #: Default is set in get_settings() to ``os.cpu_count() * 2``.
     compression_max_inflight: int = 0
 
+    #: Brotli quality level (0–11) for dynamic-response compression.  The
+    #: brotli library's own default is 11 (max compression, designed for
+    #: build-time / static pre-compression) — too expensive on the request
+    #: path for tiny dynamic payloads.  4 matches Google's and Cloudflare's
+    #: recommendation for dynamic content; 5 matches Apache mod_brotli's
+    #: default; 6 matches nginx ngx_brotli's default.  Raise to 11 only when
+    #: producing pre-compressed sibling assets out-of-band, not on live
+    #: responses.
+    brotli_quality: int = 4
+
     #: Cooperative yield interval for the HTTP/2 frame loop.  After this many
     #: stream tasks are spawned without a natural yield, ``asyncio.sleep(0)``
     #: is inserted so the event loop can dispatch queued tasks.
@@ -449,6 +467,7 @@ def get_settings() -> Settings:
         compression_executor_threshold=_int_env_nonneg('BB_COMPRESSION_EXECUTOR_THRESHOLD', 65536),
         compression_max_inflight=_int_env_nonneg(
             'BB_COMPRESSION_MAX_INFLIGHT', max((os.cpu_count() or 1) * 2, 4)),
+        brotli_quality=_int_env_nonneg('BB_BROTLI_QUALITY', 4),
         frame_yield_every=_int_env_nonneg('BB_FRAME_YIELD_EVERY', 8),
     )
 

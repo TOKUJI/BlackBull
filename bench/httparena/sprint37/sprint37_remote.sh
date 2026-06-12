@@ -15,6 +15,9 @@
 set -euo pipefail
 
 RUN_ID="${1:?run_id required, eg run1 / run2}"
+# Optional 2nd arg: comma-separated profile subset to run instead of
+# the full list from meta.json["tests"].  Empty string = use meta.json.
+PROFILES_OVERRIDE="${2:-}"
 HARENA_DIR="${HOME}/HttpArena"
 FRAMEWORK=blackbull
 OUT_DIR="${HOME}/sprint37-results-${RUN_ID}"
@@ -56,15 +59,23 @@ docker build -t "httparena-${FRAMEWORK}" "frameworks/${FRAMEWORK}/"
 echo "=== validate ==="
 bash scripts/validate.sh "$FRAMEWORK" | tee "$OUT_DIR/validate.log"
 
-# ── 3. Run benchmark.sh per claimed profile ─────────────────────────────────
-# Extract the profile list from meta.json so this script doesn't drift if
-# we change what we claim.
-PROFILES=$(python3 -c "
+# ── 3. Run benchmark.sh per profile ─────────────────────────────────────────
+# Profile list source:
+#   - If $PROFILES_OVERRIDE was passed in (2nd arg), use that comma-separated
+#     subset — cheap-tier validation runs.
+#   - Otherwise extract from meta.json["tests"] so the script doesn't drift
+#     when we change what we claim upstream.
+if [ -n "$PROFILES_OVERRIDE" ]; then
+    PROFILES=$(echo "$PROFILES_OVERRIDE" | tr ',' ' ')
+    echo "=== profile override: $PROFILES ==="
+else
+    PROFILES=$(python3 -c "
 import json
 with open('frameworks/${FRAMEWORK}/meta.json') as f:
     print(' '.join(json.load(f)['tests']))
 ")
-echo "=== claimed profiles: $PROFILES ==="
+    echo "=== claimed profiles (from meta.json): $PROFILES ==="
+fi
 
 for prof in $PROFILES; do
     echo "=== benchmark: $prof ==="
@@ -140,11 +151,14 @@ if [ "$SANITY_FAILED" = 0 ]; then
 fi
 
 # Snapshot system + docker info so the run is self-describing.
+# Pipelines that feed `head` need `|| true` to mask the SIGPIPE the
+# producer gets when head closes the pipe early — `set -o pipefail`
+# at the top of the script would otherwise propagate exit 141.
 {
     echo '--- uname ---';        uname -a
     echo '--- nproc ---';        nproc
-    echo '--- /proc/meminfo ---'; head -5 /proc/meminfo
-    echo '--- docker info ---';  docker info 2>/dev/null | head -30
+    echo '--- /proc/meminfo ---'; head -5 /proc/meminfo || true
+    echo '--- docker info ---';  docker info 2>/dev/null | head -30 || true
     echo '--- ulimit -a ---';    bash -c 'ulimit -a'
     echo '--- git head ---';     git -C "$HARENA_DIR" rev-parse HEAD 2>/dev/null || echo 'not a git repo'
 } > "$OUT_DIR/system.txt"

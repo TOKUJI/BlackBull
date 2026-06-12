@@ -74,6 +74,7 @@ For the precedence order (CLI flags > env > TOML), see
 |---|---|---|
 | `BB_COMPRESSION_MIN_SIZE` | `100` | Minimum body size in bytes below which the `Compression` middleware skips compression entirely. |
 | `BB_COMPRESSION_EXECUTOR_THRESHOLD` | `65536` (64 KiB) | Body size above which compression is offloaded to a thread-pool executor so the event loop stays responsive during the (CPU-bound) compress call.  `0` always compresses on the event loop. |
+| `BB_BROTLI_QUALITY` | `4` | Brotli quality level (0–11) for dynamic-response compression.  4 matches Google/Cloudflare's recommendation for dynamic content; 5 matches Apache `mod_brotli`; 6 matches nginx `ngx_brotli`.  11 is appropriate only for build-time / static pre-compression — far too expensive on the request path. |
 
 ## Sessions
 
