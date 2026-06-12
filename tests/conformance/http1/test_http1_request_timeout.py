@@ -121,6 +121,9 @@ def timeout_server():
                 try:
                     duration = float(param[2:])
                 except ValueError:
+                    # Non-numeric ?s= → fall back to duration=0.0; test
+                    # fixture only sends numeric values so this is just
+                    # defensive.
                     pass
         await asyncio.sleep(duration)
         await send({
@@ -154,6 +157,8 @@ def timeout_server():
                 try:
                     duration = float(param[2:])
                 except ValueError:
+                    # Non-numeric ?s= → fall back to duration=0.0;
+                    # test fixture only sends numeric values.
                     pass
         # Emit the start immediately — this buffers headers in the
         # sender without writing anything to the wire.
@@ -505,6 +510,10 @@ class TestRequestTimeoutPipelining:
                         break
                     raw += buf
             except (socket.timeout, TimeoutError):
+                # Peer stopped writing within the recv deadline; treat
+                # whatever we collected so far as the full response.
+                # Drives the "server closed after 408" + "pipelined
+                # second request never answered" assertions below.
                 pass
         finally:
             sock.close()
@@ -551,6 +560,8 @@ class TestRequestTimeoutCustomValue:
                     try:
                         duration = float(param[2:])
                     except ValueError:
+                        # Non-numeric ?s= → fall back to duration=0.0;
+                        # test fixture only sends numeric values.
                         pass
             await asyncio.sleep(duration)
             await send({
@@ -622,6 +633,10 @@ def _recv_until_close_or_idle(sock: socket.socket, timeout: float = 2.0) -> byte
                 break
             chunks.append(buf)
     except (socket.timeout, TimeoutError):
+        # Peer went idle within the recv deadline; return whatever
+        # we collected so the caller can inspect it.  Used by the
+        # keep-alive multi-request tests where the second response
+        # may never arrive (server closed after 408).
         pass
     return b''.join(chunks)
 

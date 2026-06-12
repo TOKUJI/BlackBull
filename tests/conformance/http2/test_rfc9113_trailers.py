@@ -34,8 +34,7 @@ from blackbull.asgi import ASGIEvent
 from blackbull.server.sender import HTTP2Sender, AsyncioWriter
 from blackbull.protocol.frame import FrameFactory
 from blackbull.protocol.frame_types import (
-    FrameTypes, FrameFlags, HeaderFrameFlags,
-    DataFrameFlags, PseudoHeaders,
+    FrameTypes, HeaderFrameFlags, DataFrameFlags,
 )
 
 
