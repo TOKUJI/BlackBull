@@ -3970,7 +3970,7 @@ respective actors.</p>
 the protocol stack:</p>
 <ul>
 <li><strong>HTTP/1.1 parser</strong> — <code>blackbull/server/parser.py</code>.  Pure
-  Python; no <code>httptools</code> dependency.</li>
+  Python.</li>
 <li><strong>HTTP/2 frame layer</strong> — <code>blackbull/protocol/</code> (frame types,
   flow-control windows, RFC 9218 <code>PRIORITY_UPDATE</code>).  Header
   compression delegates to the <code>hpack</code> library — the only
@@ -3995,8 +3995,8 @@ source of truth.</p>
 <h2 id="why-pure-python">Why pure-Python<a class="headerlink" href="#why-pure-python" title="Permanent link">&para;</a></h2>
 <p><code>blackbull[speed]</code> adds <code>uvloop</code> as an optional dependency.
 The HTTP/1.1 parser, HTTP/2 frame layer, and WebSocket codec
-are all BlackBull's own code — no <code>httptools</code>, no <code>h2</code> library
-for framing.  The one exception is HPACK header compression,
+are all BlackBull's own code in pure Python.  The one exception
+is HPACK header compression,
 which delegates to the <a href="https://pypi.org/project/hpack/"><code>hpack</code></a>
 library (pure Python, layered under the BlackBull-owned
 <code>hpack_fastpath.py</code>); re-implementing a conformant HPACK
@@ -4010,7 +4010,7 @@ pure Python:</p>
   applies to <code>hpack</code> too — it is itself pure Python, so HPACK
   bugs remain debuggable in-process.</li>
 <li><strong>Identity.</strong>  BlackBull exists in part to demonstrate that
-  CPython is fast enough for a from-scratch ASGI implementation
+  CPython is fast enough for a pure-Python ASGI implementation
   when the framework itself stays out of the way.  Swapping in
   a C parser would make it a different project.</li>
 </ul>

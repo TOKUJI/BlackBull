@@ -3669,8 +3669,8 @@ on busy production deployments, see
 <tbody>
 <tr>
 <td><code>BB_MAX_CONNECTIONS</code></td>
-<td><code>1024</code></td>
-<td>Maximum simultaneous TCP connections <strong>per worker</strong>.  When the cap is reached, new connections receive HTTP/1.1 <code>503 Service Unavailable</code> with <code>Retry-After: 1</code> before close — a well-formed response so load-balancers / health-checks can interpret it correctly.  <code>0</code> disables the cap (rely on OS file-descriptor limit instead).  Multi-worker servers multiply the ceiling (<code>workers × max_connections</code>).</td>
+<td><code>0</code> (uncapped)</td>
+<td>Maximum simultaneous TCP connections <strong>per worker</strong>.  When the cap is reached, new connections receive HTTP/1.1 <code>503 Service Unavailable</code> with <code>Retry-After: 1</code> before close — a well-formed response so load-balancers / health-checks can interpret it correctly.  <code>0</code> disables the cap (rely on OS file-descriptor limit instead).  Multi-worker servers multiply the ceiling (<code>workers × max_connections</code>).  Production deployments on untrusted hosts should set this to a finite ceiling — 1024 is a typical single-loop value.</td>
 </tr>
 <tr>
 <td><code>BB_REQUEST_TIMEOUT</code></td>
@@ -3861,6 +3861,11 @@ on busy production deployments, see
 <td><code>BB_COMPRESSION_EXECUTOR_THRESHOLD</code></td>
 <td><code>65536</code> (64 KiB)</td>
 <td>Body size above which compression is offloaded to a thread-pool executor so the event loop stays responsive during the (CPU-bound) compress call.  <code>0</code> always compresses on the event loop.</td>
+</tr>
+<tr>
+<td><code>BB_COMPRESSION_MAX_INFLIGHT</code></td>
+<td><code>os.cpu_count() * 2</code></td>
+<td>Maximum concurrent compression offloads to the asyncio default thread pool.  When at or above this cap, additional eligible responses are served <strong>uncompressed</strong> rather than queued — bounded fall-back rather than unbounded queue growth.  <code>0</code> disables the cap (unbounded queue, pre-0.29 behaviour).</td>
 </tr>
 <tr>
 <td><code>BB_BROTLI_QUALITY</code></td>
