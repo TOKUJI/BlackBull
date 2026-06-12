@@ -719,6 +719,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#post-response-middleware-inspect-modify-the-response" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Post-response middleware (inspect / modify the response)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#injecting-values-into-scope" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3709,6 +3720,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#post-response-middleware-inspect-modify-the-response" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Post-response middleware (inspect / modify the response)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#injecting-values-into-scope" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4177,6 +4199,70 @@ routes need CORS:</p>
 <p>Per-IP in-process limiting is fine for a single-worker deployment.
 For multi-worker or multi-host setups, use a shared store (Redis,
 Memcached) so the bucket survives across workers.</p>
+<h3 id="post-response-middleware-inspect-modify-the-response">Post-response middleware (inspect / modify the response)<a class="headerlink" href="#post-response-middleware-inspect-modify-the-response" title="Permanent link">&para;</a></h3>
+<p>The middleware shape <code>(scope, receive, send, call_next)</code> runs
+<em>around</em> the handler — code before <code>await call_next(...)</code> sees the
+request, code after sees that the handler returned but <strong>not</strong> what
+the handler sent.  Response status, headers, and body all flow
+through <code>send</code>, not through <code>call_next</code>'s return value.</p>
+<p>To inspect or modify the response, wrap <code>send</code> and forward each
+ASGI event yourself:</p>
+<div class="highlight"><pre><span></span><code><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">log_status_mw</span><span class="p">(</span><span class="n">scope</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">,</span> <span class="n">call_next</span><span class="p">):</span>
+    <span class="n">captured_status</span> <span class="o">=</span> <span class="kc">None</span>
+
+    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">intercepting_send</span><span class="p">(</span><span class="n">event</span><span class="p">):</span>
+        <span class="k">nonlocal</span> <span class="n">captured_status</span>
+        <span class="k">if</span> <span class="n">event</span><span class="p">[</span><span class="s1">&#39;type&#39;</span><span class="p">]</span> <span class="o">==</span> <span class="s1">&#39;http.response.start&#39;</span><span class="p">:</span>
+            <span class="n">captured_status</span> <span class="o">=</span> <span class="n">event</span><span class="p">[</span><span class="s1">&#39;status&#39;</span><span class="p">]</span>
+        <span class="k">await</span> <span class="n">send</span><span class="p">(</span><span class="n">event</span><span class="p">)</span>
+
+    <span class="k">await</span> <span class="n">call_next</span><span class="p">(</span><span class="n">scope</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">intercepting_send</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">scope</span><span class="p">[</span><span class="s1">&#39;method&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">scope</span><span class="p">[</span><span class="s1">&#39;path&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2"> → </span><span class="si">{</span><span class="n">captured_status</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+</code></pre></div>
+<p>The handler now sends to <code>intercepting_send</code>, which records the
+status off the <code>http.response.start</code> event and forwards every event
+to the outer <code>send</code> unchanged.  Once <code>call_next</code> returns, you have
+the captured value.</p>
+<p>The pattern generalises to any modification:</p>
+<table>
+<thead>
+<tr>
+<th>Goal</th>
+<th>Where to act in <code>intercepting_send</code></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Add a response header</td>
+<td>rewrite <code>event['headers']</code> on <code>http.response.start</code> before forwarding</td>
+</tr>
+<tr>
+<td>Compute a checksum / size</td>
+<td>accumulate <code>event['body']</code> on <code>http.response.body</code>, finalise when <code>more_body=False</code></td>
+</tr>
+<tr>
+<td>Replace the body</td>
+<td>buffer body parts; on the final body event, emit your replacement and skip the original</td>
+</tr>
+<tr>
+<td>Short-circuit a status code</td>
+<td>on <code>http.response.start</code>, decide whether to forward as-is or synthesise a different response</td>
+</tr>
+</tbody>
+</table>
+<p><code>Compression</code> (<a href="https://github.com/TOKUJI/BlackBull/blob/master/blackbull/middleware/compression.py"><code>blackbull/middleware/compression.py</code></a>)
+is the reference implementation: it buffers body parts, compresses
+the joined payload, and emits replacement headers + body when the
+handler finishes.</p>
+<div class="admonition note">
+<p class="admonition-title">Streaming responses</p>
+<p><code>intercepting_send</code> receives every body event, including chunks
+sent with <code>more_body=True</code>.  If your goal is to inspect the
+<em>complete</em> response, either buffer until <code>more_body=False</code> (as
+<code>Compression</code> does for non-streaming payloads) or fall back to
+pass-through when streaming is detected — buffering an unbounded
+stream defeats the point.</p>
+</div>
 <h3 id="injecting-values-into-scope">Injecting values into scope<a class="headerlink" href="#injecting-values-into-scope" title="Permanent link">&para;</a></h3>
 <p>Middleware may add any key to <code>scope</code> for inner layers to consume:</p>
 <div class="highlight"><pre><span></span><code><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">auth_mw</span><span class="p">(</span><span class="n">scope</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">,</span> <span class="n">call_next</span><span class="p">):</span>
