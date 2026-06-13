@@ -24,6 +24,10 @@ so the editable install's metadata catches up.
 
 ## [Unreleased]
 
+## [0.36.0] — 2026-06-14
+
+**Sprint 40 close: slim extension surface.**
+
 ### Added
 - `BlackBull.extensions: dict[str, object]` — namespace for
   third-party integrations following the `init_app(app)`
