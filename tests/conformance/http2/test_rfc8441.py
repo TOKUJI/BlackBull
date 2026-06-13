@@ -615,3 +615,145 @@ class TestOptInGating:
             for call in handler.send_frame.call_args_list
         )
         assert rst_seen, 'Server must send RST_STREAM in response to disallowed Extended CONNECT'
+
+
+# ---------------------------------------------------------------------------
+# §6 — BB_H2_WS_MAX_STREAMS_PER_CONNECTION stream-exhaustion guard
+# ---------------------------------------------------------------------------
+
+from blackbull.protocol.frame_types import ErrorCodes  # noqa: E402
+
+
+def _rst_calls(handler) -> list:
+    """Return (stream_id, error_code) tuples for every RST_STREAM frame
+    the actor emitted via ``send_frame``."""
+    out = []
+    for call in handler.send_frame.call_args_list:
+        f = call.args[0]
+        if (hasattr(f, 'FrameType')
+                and f.FrameType() == FrameTypes.RST_STREAM):
+            out.append((f.stream_id, getattr(f, 'error_code', None)))
+    return out
+
+
+@pytest.mark.asyncio
+class TestWebSocketStreamCap:
+    """``BB_H2_WS_MAX_STREAMS_PER_CONNECTION`` caps the number of in-flight
+    Extended CONNECT streams per HTTP/2 connection.  This defends against
+    stream-exhaustion DoS — without the cap, an attacker can hold
+    ``BB_H2_MAX_CONCURRENT_STREAMS`` (default 100) idle WS streams per
+    connection across an unbounded ``BB_MAX_CONNECTIONS`` (default 0).
+
+    Tests use a *blocking* ASGI app so the WS handler tasks stay alive
+    while the receive loop processes subsequent Extended CONNECT frames;
+    ``asyncio.wait_for`` then bounds the test and cancels still-pending
+    WS tasks cleanly through the TaskGroup.
+    """
+
+    @staticmethod
+    def _blocking_app():
+        async def app(scope, receive, send):
+            # Park forever — handler.run() will be cancelled by wait_for.
+            await asyncio.Event().wait()
+        return app
+
+    async def test_ws_streams_within_cap_are_accepted(self, monkeypatch):
+        """With cap=5, five Extended CONNECT streams must all be accepted
+        — no RST_STREAM emitted."""
+        monkeypatch.setenv('BB_H2_WS_MAX_STREAMS_PER_CONNECTION', '5')
+
+        handler, _, _ = _make_h2_actor(app=self._blocking_app())
+        handler.receive = AsyncMock(side_effect=[
+            _client_settings(),
+            *(_make_extended_connect_frame(stream_id=1 + 2 * i)
+              for i in range(5)),
+            None,
+        ])
+        try:
+            await asyncio.wait_for(handler.run(), timeout=1.0)
+        except (asyncio.TimeoutError, TimeoutError):
+            # Expected — blocking app keeps WS tasks alive; cancel via timeout.
+            pass
+
+        rsts = _rst_calls(handler)
+        assert rsts == [], (
+            f'no streams should be refused within the cap; got RSTs={rsts}')
+
+    async def test_ws_streams_exceeding_cap_are_refused(self, monkeypatch):
+        """With cap=5, the 6th Extended CONNECT must receive
+        ``RST_STREAM(REFUSED_STREAM)``."""
+        monkeypatch.setenv('BB_H2_WS_MAX_STREAMS_PER_CONNECTION', '5')
+
+        handler, _, _ = _make_h2_actor(app=self._blocking_app())
+        # Streams 1, 3, 5, 7, 9 are within cap; stream 11 is the 6th.
+        handler.receive = AsyncMock(side_effect=[
+            _client_settings(),
+            *(_make_extended_connect_frame(stream_id=1 + 2 * i)
+              for i in range(6)),
+            None,
+        ])
+        try:
+            await asyncio.wait_for(handler.run(), timeout=1.0)
+        except (asyncio.TimeoutError, TimeoutError):
+            pass
+
+        rsts = _rst_calls(handler)
+        refused = [(sid, ec) for sid, ec in rsts
+                   if ec == ErrorCodes.REFUSED_STREAM]
+        # Exactly the 6th stream (id 11) must be refused; the first 5 pass.
+        assert refused == [(11, ErrorCodes.REFUSED_STREAM)], (
+            f'the 6th Extended CONNECT must be RST_STREAM(REFUSED_STREAM); '
+            f'got refused={refused}, all RSTs={rsts}')
+
+    async def test_ws_stream_cap_is_per_connection(self, monkeypatch):
+        """The cap is per-connection (per HTTP2Actor instance) — two
+        independent connections each get their own quota."""
+        monkeypatch.setenv('BB_H2_WS_MAX_STREAMS_PER_CONNECTION', '5')
+
+        async def drive_connection() -> list:
+            handler, _, _ = _make_h2_actor(app=self._blocking_app())
+            handler.receive = AsyncMock(side_effect=[
+                _client_settings(),
+                *(_make_extended_connect_frame(stream_id=1 + 2 * i)
+                  for i in range(5)),
+                None,
+            ])
+            try:
+                await asyncio.wait_for(handler.run(), timeout=1.0)
+            except (asyncio.TimeoutError, TimeoutError):
+                pass
+            return _rst_calls(handler)
+
+        # Run two independent actors; both should accept 5 streams each.
+        rsts_a, rsts_b = await asyncio.gather(
+            drive_connection(), drive_connection())
+        assert rsts_a == [] and rsts_b == [], (
+            f'cap must be per-connection, not global; '
+            f'actor A RSTs={rsts_a}, actor B RSTs={rsts_b}')
+
+    async def test_cap_zero_disables_per_connection_limit(self, monkeypatch):
+        """``BB_H2_WS_MAX_STREAMS_PER_CONNECTION=0`` disables the cap —
+        well beyond 5 Extended CONNECTs must all be accepted (subject only
+        to ``BB_H2_MAX_CONCURRENT_STREAMS``)."""
+        monkeypatch.setenv('BB_H2_WS_MAX_STREAMS_PER_CONNECTION', '0')
+
+        n = 20
+        handler, _, _ = _make_h2_actor(app=self._blocking_app())
+        handler.receive = AsyncMock(side_effect=[
+            _client_settings(),
+            *(_make_extended_connect_frame(stream_id=1 + 2 * i)
+              for i in range(n)),
+            None,
+        ])
+        try:
+            await asyncio.wait_for(handler.run(), timeout=1.0)
+        except (asyncio.TimeoutError, TimeoutError):
+            pass
+
+        rsts = _rst_calls(handler)
+        refused = [r for r in rsts if r[1] == ErrorCodes.REFUSED_STREAM]
+        assert refused == [], (
+            f'with cap=0, no Extended CONNECT should be REFUSED_STREAM; '
+            f'got refused={refused}')
+
+

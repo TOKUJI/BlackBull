@@ -286,6 +286,15 @@ class HTTP2Actor(Actor):
         # any incoming :method=CONNECT with :protocol=websocket is refused.
         self._ws_over_h2_enabled: bool = False
 
+        # RFC 8441 stream-exhaustion guard — count of in-flight WebSocket
+        # streams on this connection, capped at
+        # ``cfg.h2_ws_max_streams_per_connection``.  Incremented in
+        # :meth:`_handle_h2_websocket` before spawning the actor task;
+        # decremented via :meth:`_make_done_cb` with ``is_ws=True`` when
+        # the WS handler exits (normal close, app raise, or TaskGroup
+        # cancellation).
+        self._ws_stream_count: int = 0
+
         # RFC 9113 §5.1 — closed-stream state, separate from the priority tree.
         # Maps stream_id → True if closed via RST_STREAM, False if closed via
         # END_STREAM / local completion.  This lets us drop closed nodes from
@@ -402,16 +411,26 @@ class HTTP2Actor(Actor):
             logger.debug('writer.close raised on connection-error path',
                          exc_info=True)
 
-    def _make_done_cb(self, stream_id: int) -> Callable[[asyncio.Task], None]:
+    def _make_done_cb(
+        self, stream_id: int, *, is_ws: bool = False,
+    ) -> Callable[[asyncio.Task], None]:
         """Return a done-callback that releases per-stream resources on completion.
 
         Keeps the Stream node in the tree (marked CLOSED) so that the
         frame-loop state validation can detect late frames arriving on the
         same identifier and respond with the appropriate STREAM_CLOSED
         error (RFC 9113 §5.1).
+
+        ``is_ws=True`` additionally decrements ``_ws_stream_count`` —
+        the RFC 8441 per-connection cap.  Tagged at the call site rather
+        than blanket-decremented so regular HTTP stream completions
+        don't silently drift the WS counter below the true in-flight
+        count (which would cause the WS cap to over-admit).
         """
         def _cb(_task: asyncio.Task) -> None:
             self._active_stream_count = max(0, self._active_stream_count - 1)
+            if is_ws:
+                self._ws_stream_count = max(0, self._ws_stream_count - 1)
             self._senders.pop(stream_id, None)
             self._recipients.pop(stream_id, None)
             # Prune the stream node from the tree and remember it as closed-
@@ -926,8 +945,19 @@ class HTTP2Actor(Actor):
         app calls websocket.accept.
         """
         from uuid import uuid4  # noqa: PLC0415
+        from ..env import get_settings as _get_settings  # noqa: PLC0415
         from .websocket_actor import WebSocketActor  # noqa: PLC0415
         from .http2_ws import HTTP2WSReader, HTTP2WSWriter  # noqa: PLC0415
+
+        # RFC 8441 stream-exhaustion guard — without a per-connection cap
+        # an attacker can hold up to ``max_concurrent_streams`` idle WS
+        # streams per connection.  ``0`` disables (legacy / opt-out).
+        cfg = _get_settings()
+        ws_cap = cfg.h2_ws_max_streams_per_connection
+        if ws_cap > 0 and self._ws_stream_count >= ws_cap:
+            await self.send_frame(self.factory.rst_stream(
+                stream.stream_id, ErrorCodes.REFUSED_STREAM))
+            return
 
         scope = stream.scope
         assert scope is not None
@@ -963,12 +993,18 @@ class HTTP2Actor(Actor):
             try:
                 await ws_actor.run()
             finally:
+                # ``_ws_stream_count`` is decremented by
+                # ``_make_done_cb(is_ws=True)`` below, sharing the
+                # single lifecycle hook with ``_active_stream_count`` and
+                # per-stream dicts.
                 log_record.close_code = ws_actor._disconnect_code
                 _emit_access_log(log_record)
 
+        self._ws_stream_count += 1
         self._active_stream_count += 1
         task = tg.create_task(_run_ws())
-        task.add_done_callback(self._make_done_cb(stream.stream_id))
+        task.add_done_callback(
+            self._make_done_cb(stream.stream_id, is_ws=True))
 
     async def _handle_push(self, event: dict, parent_stream_id: int) -> None:
         """Handle an 'http.response.push' ASGI event (RFC 7540 §8.2)."""
