@@ -695,7 +695,7 @@ class TestWebSocketStreamCap:
         try:
             await asyncio.wait_for(handler.run(), timeout=1.0)
         except (asyncio.TimeoutError, TimeoutError):
-            pass
+            pass  # expected — receive iterator exhausted, run() spins until timeout
 
         rsts = _rst_calls(handler)
         refused = [(sid, ec) for sid, ec in rsts
@@ -721,7 +721,7 @@ class TestWebSocketStreamCap:
             try:
                 await asyncio.wait_for(handler.run(), timeout=1.0)
             except (asyncio.TimeoutError, TimeoutError):
-                pass
+                pass  # expected — receive iterator exhausted, run() spins until timeout
             return _rst_calls(handler)
 
         # Run two independent actors; both should accept 5 streams each.
@@ -748,7 +748,7 @@ class TestWebSocketStreamCap:
         try:
             await asyncio.wait_for(handler.run(), timeout=1.0)
         except (asyncio.TimeoutError, TimeoutError):
-            pass
+            pass  # expected — receive iterator exhausted, run() spins until timeout
 
         rsts = _rst_calls(handler)
         refused = [r for r in rsts if r[1] == ErrorCodes.REFUSED_STREAM]
@@ -769,8 +769,6 @@ class TestWebSocketStreamCap:
 # exceeded: bytes are still buffered (no silent data loss), but
 # WINDOW_UPDATE is withheld until ``readexactly`` drains back below
 # the cap.
-
-from types import SimpleNamespace as _NS  # noqa: E402
 
 from blackbull.protocol.frame_types import Data as _DataFrame  # noqa: E402
 from blackbull.server.http2_ws import HTTP2WSReader  # noqa: E402

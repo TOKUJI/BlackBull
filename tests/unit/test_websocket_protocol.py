@@ -911,7 +911,7 @@ class TestFramePayloadSizeGuard:
         try:
             await wrapper._recipient()
         except Exception:
-            pass
+            pass  # expected — fake reader runs out of bytes; we assert on the writer, not the exception
         assert WSCloseCode.MESSAGE_TOO_BIG.to_bytes(2, 'big') not in bytes(wrapper.writer.written), (
             'with the cap raised, the size guard must not fire on '
             'declared lengths within the override')

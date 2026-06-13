@@ -349,7 +349,7 @@ class HTTP1Sender(BaseSender):
 
     async def __call__(self, body,
                        status: HTTPStatus = HTTPStatus.OK,
-                       headers: HeaderList = []):
+                       headers: HeaderList = ()):
         """Dispatch on *body* and write the resulting HTTP/1.1 bytes.
 
         Accepted forms:
