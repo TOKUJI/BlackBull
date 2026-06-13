@@ -748,6 +748,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../../guide/extensions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Extensions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../../guide/openapi/" class="md-nav__link">
         
   
@@ -4118,8 +4146,14 @@ logged; they do not propagate to the emitter or affect other handlers.</p>
     <div class="doc doc-contents ">
 
         <p>Register a custom error handler for an HTTPStatus or exception class.</p>
+<p><code>key</code> may be an :class:<code>HTTPStatus</code>, a plain <code>int</code> status code
+(coerced to <code>HTTPStatus</code>), or an exception class.</p>
 <p>Usage::</p>
 <pre><code>@app.on_error(HTTPStatus.FORBIDDEN)
+async def handle_403(scope, receive, send):
+    ...
+
+@app.on_error(403)            # int shorthand
 async def handle_403(scope, receive, send):
     ...
 
