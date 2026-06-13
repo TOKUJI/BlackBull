@@ -503,3 +503,52 @@ class TestH2TrailersNoLongerUnhandled:
         })
         # Must have produced output (not silently swallowed)
         assert len(written) > 0, 'trailers event produced no wire output'
+
+
+# ---------------------------------------------------------------------------
+# §10 — END_STREAM defensive guard symmetry across both __call__ branches
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+class TestH2EndStreamGuardBytesPath:
+    """RFC 9113 §8.1 — frames after END_STREAM are a protocol error.
+    The guard added in Sprint 38 covered the dict-event branch; this
+    section locks in the symmetric coverage on the bytes branch so a
+    misbehaving ASGI app that bytes-sends after stream end gets a
+    logged warning instead of a wire violation."""
+
+    async def test_bytes_send_after_end_stream_is_dropped(self):
+        import logging
+        from io import StringIO
+
+        sender, written, factory = _make_sender()
+        # First, end the stream via the dict path (trailers).
+        await sender({
+            'type': ASGIEvent.HTTP_RESPONSE_TRAILERS,
+            'headers': [(b'x-test', b'1')],
+        })
+        assert sender._end_stream_sent is True
+        bytes_after_first = len(written)
+
+        stream = StringIO()
+        handler = logging.StreamHandler(stream)
+        handler.setLevel(logging.WARNING)
+        logger = logging.getLogger('blackbull.server.sender')
+        logger.addHandler(handler)
+        old_level = logger.level
+        logger.setLevel(logging.WARNING)
+        try:
+            # Now misbehave: bytes write after the stream has ended.
+            await sender(b'late body')
+            assert len(written) == bytes_after_first, (
+                'bytes write after END_STREAM produced wire bytes')
+            assert 'END_STREAM already sent' in stream.getvalue()
+        finally:
+            logger.removeHandler(handler)
+            logger.setLevel(old_level)
+
+    async def test_reset_per_request_state_clears_end_stream_flag(self):
+        sender, _written, _factory = _make_sender()
+        sender._end_stream_sent = True
+        sender.reset_per_request_state()
+        assert sender._end_stream_sent is False
