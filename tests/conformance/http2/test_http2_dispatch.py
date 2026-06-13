@@ -135,13 +135,33 @@ class TestHTTP2FlowControl:
 
     @staticmethod
     def _wu_increments(handler) -> list[int]:
-        # Only stream-level WINDOW_UPDATEs (stream_id > 0) reflect DATA consumption.
-        # Connection-level ones (stream_id == 0) are sent at startup for flow-control tuning.
+        # Stream-level WINDOW_UPDATEs (stream_id > 0) reflect per-stream
+        # DATA consumption.  Connection-level (stream_id == 0) is
+        # asserted separately via :meth:`_wu_increments_conn` — the
+        # server now emits one of each per DATA frame so both windows
+        # stay credited (RFC 9113 §6.9.1).
         return [call.args[0].window_size
                 for call in handler.send_frame.call_args_list
                 if hasattr(call.args[0], 'FrameType')
                 and call.args[0].FrameType() == FrameTypes.WINDOW_UPDATE
                 and call.args[0].stream_id > 0]
+
+    @staticmethod
+    def _wu_increments_conn(handler) -> list[int]:
+        """Connection-level WINDOW_UPDATE increments emitted by *handler*.
+
+        RFC 9113 §6.9.1 — DATA frames consume both the stream-level and
+        connection-level receive windows; the server must credit both
+        back as it delivers frames to the application, otherwise the
+        connection-level window depletes toward zero across requests
+        and any subsequent body stalls once cumulative inbound traffic
+        reaches the initial 65,535 bytes.
+        """
+        return [call.args[0].window_size
+                for call in handler.send_frame.call_args_list
+                if hasattr(call.args[0], 'FrameType')
+                and call.args[0].FrameType() == FrameTypes.WINDOW_UPDATE
+                and call.args[0].stream_id == 0]
 
     async def test_single_data_frame_window_update_increment(self):
         """Receiving one DATA frame must produce WINDOW_UPDATE with increment
@@ -184,6 +204,85 @@ class TestHTTP2FlowControl:
         assert sum(increments) == total, (
             f'Sum of WINDOW_UPDATE increments must equal total bytes consumed '
             f'({total}); got {sum(increments)} from increments={increments}'
+        )
+
+    # ----- RFC 9113 §6.9.1 connection-level credit (regression lock) ------
+    #
+    # Before Sprint 39, the server only emitted stream-level WINDOW_UPDATE
+    # on inbound DATA.  The connection-level window depleted toward zero
+    # across requests, and any single body — or cumulative inbound across
+    # a keep-alive H2 connection — past 65,535 bytes stalled waiting for
+    # credit that never came.  Surfaced during the WS-over-H2 64 KiB
+    # interop test; the bug was broader than RFC 8441.
+
+    async def test_single_data_frame_emits_connection_window_update(self):
+        """Per RFC 9113 §6.9.1, a DATA frame consumes both the stream
+        and connection windows; the server must credit both back."""
+        payload = b'hello'
+        stream_id = 1
+        h_frame = _make_headers_frame(stream_id=stream_id, end_stream=False)
+        d_frame = _make_h2_frame(FrameTypes.DATA, DataFrameFlags.END_STREAM,
+                                 stream_id, payload)
+
+        handler, _ = _make_h2_actor()
+        handler.receive = AsyncMock(side_effect=[h_frame, d_frame, None])
+        await handler.run()
+
+        conn_increments = self._wu_increments_conn(handler)
+        assert any(inc == len(payload) for inc in conn_increments), (
+            f'connection-level WINDOW_UPDATE with increment {len(payload)} '
+            f'must follow each delivered DATA frame; '
+            f'got conn-level increments={conn_increments}'
+        )
+
+    async def test_cumulative_inbound_exceeds_initial_connection_window(self):
+        """A body larger than the 65,535-byte default connection-level
+        receive window must be delivered in full — the connection-level
+        WINDOW_UPDATEs emitted per DATA must sum to the full body size.
+
+        Without the fix, cumulative inbound past 65,535 would deplete
+        the connection-level receive window to zero and any subsequent
+        DATA on this connection would stall waiting for a
+        ``WINDOW_UPDATE(stream_id=0)`` the server never sent.
+
+        Chunk size stays under RFC 9113 §4.2 ``max_frame_size``
+        (default 16,384); 5 chunks at 16,000 bytes = 80,000 cumulative,
+        which clears the 65,535 threshold.
+        """
+        chunk_size = 16_000  # under max_frame_size
+        n_chunks = 5
+        stream_id = 1
+        h_frame = _make_headers_frame(stream_id=stream_id, end_stream=False)
+        data_frames = []
+        for i in range(n_chunks):
+            is_last = (i == n_chunks - 1)
+            flags = (DataFrameFlags.END_STREAM if is_last
+                     else SettingFrameFlags.INIT)
+            data_frames.append(_make_h2_frame(
+                FrameTypes.DATA, flags, stream_id, bytes([0x60 + i]) * chunk_size))
+        total = n_chunks * chunk_size
+        assert total > 65_535, 'sanity: total must exceed initial conn window'
+
+        handler, _ = _make_h2_actor()
+        handler.receive = AsyncMock(
+            side_effect=[h_frame, *data_frames, None])
+        await handler.run()
+
+        conn_increments = self._wu_increments_conn(handler)
+        # Cumulative connection-level credit returned must cover every
+        # byte the peer sent — otherwise the *next* inbound burst on
+        # this connection would stall.
+        assert sum(conn_increments) >= total, (
+            f'connection-level WINDOW_UPDATEs must cumulatively credit '
+            f'at least the {total} bytes received; got '
+            f'sum={sum(conn_increments)} from increments={conn_increments}'
+        )
+        # Same byte count must also be credited stream-level (RFC 9113
+        # §6.9.1 — both windows are debited and must both be restored).
+        stream_increments = self._wu_increments(handler)
+        assert sum(stream_increments) >= total, (
+            f'stream-level WINDOW_UPDATEs must also cumulatively credit '
+            f'at least {total}; got sum={sum(stream_increments)}'
         )
 
     async def test_zero_window_blocks_app_data_send(self):

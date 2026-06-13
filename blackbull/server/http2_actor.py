@@ -890,8 +890,16 @@ class HTTP2Actor(Actor):
         if stream.stream_id in self._recipients:
             delivered = self._recipients[stream.stream_id].put_DATAFrame(frame)
             if delivered:
+                # RFC 9113 §6.9.1 — DATA frames are subject to BOTH
+                # stream and connection-level flow control.  Crediting
+                # only the stream window leaves the connection-level
+                # window depleting toward zero across requests, which
+                # stalls any subsequent body once it hits 65,535 bytes
+                # cumulative.  Credit both.
                 await self.send_frame(
                     self.factory.window_update(stream.stream_id, frame.length))
+                await self.send_frame(
+                    self.factory.window_update(0, frame.length))
             else:
                 await self.send_frame(
                     self.factory.rst_stream(stream.stream_id, ErrorCodes.ENHANCE_YOUR_CALM))
