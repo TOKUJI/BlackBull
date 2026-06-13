@@ -24,10 +24,21 @@ so the editable install's metadata catches up.
 
 ## [Unreleased]
 
-Sprint 39 in progress — RFC 8441 (WebSocket-over-HTTP/2) interop +
-safety guards in preparation for the default-on flip, plus three
-security-hardening fixes for pre-existing exploitable gaps in
-the HTTP/2 and WebSocket paths.
+## [0.35.0] — 2026-06-14
+
+**Sprint 39 close: RFC 8441 interop, default-on safety guards,
+HTTP/2 + WebSocket security hardening.**
+
+Sprint 39 closed the RFC 8441 (WebSocket-over-HTTP/2) interop
+gap with a public client, then layered in the safety guards
+needed before the eventual `BB_H2_ENABLE_WEBSOCKET` default
+flip — plus three security-hardening fixes for pre-existing
+exploitable gaps in the HTTP/2 and WebSocket paths.  One of
+those fixes (server-side connection-level `WINDOW_UPDATE` on
+inbound DATA) was surfaced during the WS-over-H2 64 KiB interop
+test but turned out to affect any HTTP/2 upload past 65,535
+cumulative bytes per connection — pre-Sprint-39 hangs on
+plain HTTP/2 POST workloads above that boundary.
 
 ### Security
 
