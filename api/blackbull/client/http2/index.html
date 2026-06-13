@@ -1615,6 +1615,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.client.http2.HTTP2Client.register_raw_stream" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        register_raw_stream
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.client.http2.HTTP2Client.request" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1630,6 +1641,17 @@
     <span class="md-ellipsis">
       
         send_raw_frame
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.client.http2.HTTP2Client.unregister_raw_stream" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        unregister_raw_stream
       
     </span>
   </a>
@@ -1754,6 +1776,34 @@
     
   
     websocket
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../websocket_h2/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    websocket_h2
   
 
     
@@ -3490,6 +3540,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.client.http2.HTTP2Client.register_raw_stream" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        register_raw_stream
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.client.http2.HTTP2Client.request" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3505,6 +3566,17 @@
     <span class="md-ellipsis">
       
         send_raw_frame
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.client.http2.HTTP2Client.unregister_raw_stream" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        unregister_raw_stream
       
     </span>
   </a>
@@ -3710,6 +3782,32 @@ odd, monotonically-increasing client-initiated stream ID
 <div class="doc doc-object doc-function">
 
 
+<h4 id="blackbull.client.http2.HTTP2Client.register_raw_stream" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">register_raw_stream</span><span class="p">(</span><span class="n">stream_id</span><span class="p">)</span></code>
+
+<a href="#blackbull.client.http2.HTTP2Client.register_raw_stream" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Mark <em>stream_id</em> as a raw-frame stream.</p>
+<p>Frames arriving on this stream are pushed into the returned
+<code>asyncio.Queue</code> instead of being routed through the
+request/response state machine.  Used by
+:class:<code>blackbull.client.WebSocketH2Client</code> to receive
+WebSocket frames (carried in DATA frames after RFC 8441
+Extended CONNECT) without racing the receive loop.</p>
+<p>Returning a fresh queue each call is intentional — registering
+the same stream twice would be a programming error.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
 <h4 id="blackbull.client.http2.HTTP2Client.request" class="doc doc-heading">
             <code class="highlight language-python"><span class="n">request</span><span class="p">(</span><span class="n">method</span><span class="p">,</span> <span class="n">path</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">headers</span><span class="o">=</span><span class="p">(),</span> <span class="n">body</span><span class="o">=</span><span class="sa">b</span><span class="s1">&#39;&#39;</span><span class="p">)</span></code>
 
@@ -3748,6 +3846,24 @@ and values may be <code>str</code> or <code>bytes</code>; they are normalised to
     <div class="doc doc-contents ">
 
         <p>Escape hatch: write a raw frame to the wire (negative-path tests).</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.client.http2.HTTP2Client.unregister_raw_stream" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">unregister_raw_stream</span><span class="p">(</span><span class="n">stream_id</span><span class="p">)</span></code>
+
+<a href="#blackbull.client.http2.HTTP2Client.unregister_raw_stream" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Stop routing frames for <em>stream_id</em> into its raw-frame queue.</p>
 
 
     </div>

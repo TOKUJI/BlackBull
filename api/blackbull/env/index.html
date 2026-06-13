@@ -13,7 +13,7 @@
         <link rel="canonical" href="https://TOKUJI.github.io/BlackBull/api/blackbull/env/">
       
       
-        <link rel="prev" href="../client/websocket/">
+        <link rel="prev" href="../client/websocket_h2/">
       
       
         <link rel="next" href="../event/">
@@ -1627,6 +1627,34 @@
     
   
     websocket
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../client/websocket_h2/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    websocket_h2
   
 
     
@@ -3692,6 +3720,16 @@ BB_H2_ENABLE_WEBSOCKET
     peers may bootstrap WebSocket over HTTP/2 via Extended CONNECT.
     Off by default — this path has fewer conformance tests than the
     HTTP/1.1 upgrade path.  Default: <code>false</code>.
+BB_H2_WS_MAX_STREAMS_PER_CONNECTION
+    Maximum concurrent WebSocket (RFC 8441 Extended CONNECT) streams
+    per HTTP/2 connection.  <code>0</code> disables the per-connection cap (no
+    upper bound beyond <code>BB_H2_MAX_CONCURRENT_STREAMS</code>).  Only
+    meaningful when <code>BB_H2_ENABLE_WEBSOCKET=1</code> — without that, no
+    WS-over-H2 streams are accepted at all.  Defends against
+    stream-exhaustion DoS: without a per-connection cap, an attacker
+    can hold <code>BB_H2_MAX_CONCURRENT_STREAMS</code> idle WS streams open
+    per connection, multiplied by <code>BB_MAX_CONNECTIONS</code> (default 0 =
+    unbounded).  Default: <code>5</code>.
 BB_WS_PERMESSAGE_DEFLATE
     Negotiate <code>permessage-deflate</code> (RFC 7692) on incoming WebSocket
     handshakes when the peer offers it.  Matches modern browsers and

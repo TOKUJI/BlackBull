@@ -1640,6 +1640,34 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../client/websocket_h2/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    websocket_h2
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -3583,9 +3611,17 @@ orderly HTTP/2 stream termination per RFC 8441 §5.</p>
 
 
         <p>Byte-buffer AbstractReader fed by HTTP/2 DATA frames.</p>
-<p>ws_codec.read_frame_header / read_payload call readexactly(n); this class
-buffers raw DATA frame payloads and serves exact-length reads, blocking
-until enough bytes arrive or EOF is signalled.</p>
+<p>ws_codec.read_frame_header / read_payload call readexactly(n); this
+class buffers raw DATA frame payloads and serves exact-length reads,
+blocking until enough bytes arrive or EOF is signalled.</p>
+<p><strong>Backpressure</strong>: when the buffered byte count crosses
+<code>max_buffer</code>, <code>put_DATAFrame</code> returns <code>False</code> to signal the
+HTTP/2 actor to skip the per-frame <code>WINDOW_UPDATE</code> emission.  The
+bytes are <em>still</em> buffered (the peer's window debited on the wire
+the moment the frame arrived; dropping them would be silent data
+loss).  As soon as :meth:<code>readexactly</code> drains the buffer back under
+<code>max_buffer</code>, the reader replays the withheld credit through
+<code>credit_callback</code>, opening the peer's window again.</p>
 
 
 
@@ -3619,7 +3655,13 @@ until enough bytes arrive or EOF is signalled.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Feed raw payload bytes from an incoming DATA frame. Always returns True.</p>
+        <p>Buffer payload bytes from an incoming DATA frame.</p>
+<p>Always buffers (no silent drop — the peer's window already
+debited <code>frame.length</code> when the frame hit the wire).  Returns
+<code>True</code> when the buffer remained under <code>max_buffer</code> after the
+append; <code>False</code> when the cap was exceeded.  In the <code>False</code>
+case the actor must skip the per-frame <code>WINDOW_UPDATE</code> — the
+bytes are queued for credit replay via <code>readexactly</code>.</p>
 
 
     </div>

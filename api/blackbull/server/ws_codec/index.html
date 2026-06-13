@@ -1640,6 +1640,34 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../client/websocket_h2/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    websocket_h2
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -3118,6 +3146,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#blackbull.server.ws_codec.FramePayloadTooLarge" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        FramePayloadTooLarge
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.server.ws_codec.WSFrameHeader" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3450,6 +3489,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#blackbull.server.ws_codec.FramePayloadTooLarge" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        FramePayloadTooLarge
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.server.ws_codec.WSFrameHeader" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3567,6 +3617,57 @@ module-level functions directly.</p>
 
 
 
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="blackbull.server.ws_codec.FramePayloadTooLarge" class="doc doc-heading">
+            <code>FramePayloadTooLarge</code>
+
+
+<a href="#blackbull.server.ws_codec.FramePayloadTooLarge" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="Exception">Exception</span></code></p>
+
+
+
+        <p>Raised by :func:<code>read_payload</code> when <em>max_length</em> is set and the
+declared payload length exceeds it.  The caller is responsible for
+translating this into a WebSocket-level CLOSE (RFC 6455 §7.4.1
+code 1009 MESSAGE_TOO_BIG) — the codec stays protocol-agnostic.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
 
 <div class="doc doc-object doc-class">
 
@@ -3703,7 +3804,7 @@ Raises <code>asyncio.IncompleteReadError</code> on EOF.</p>
 
 
 <h3 id="blackbull.server.ws_codec.read_payload" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">read_payload</span><span class="p">(</span><span class="n">reader</span><span class="p">,</span> <span class="n">masked</span><span class="p">,</span> <span class="n">length</span><span class="p">)</span></code>
+            <code class="highlight language-python"><span class="n">read_payload</span><span class="p">(</span><span class="n">reader</span><span class="p">,</span> <span class="n">masked</span><span class="p">,</span> <span class="n">length</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">max_length</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
 
   <span class="doc doc-labels">
       <small class="doc doc-label doc-label-async"><code>async</code></small>
@@ -3717,6 +3818,12 @@ Raises <code>asyncio.IncompleteReadError</code> on EOF.</p>
         <p>Read the payload of a WebSocket frame from <em>reader</em>.</p>
 <p>If <em>masked</em> is True, also read the 4-byte mask and unmask the payload.
 Raises <code>asyncio.IncompleteReadError</code> on EOF.</p>
+<p>When <em>max_length</em> is set and the declared payload size — resolved
+from the 16-bit or 64-bit extended-length field per RFC 6455
+§5.2 — exceeds it, raises :class:<code>FramePayloadTooLarge</code> <em>before</em>
+reading any body bytes off the wire.  Defends against
+post-handshake OOM where the peer advertises a 2**63 - 1 payload
+and the server tries to buffer it.</p>
 
 
     </div>

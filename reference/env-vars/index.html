@@ -1804,6 +1804,34 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/client/websocket_h2/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    websocket_h2
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -3838,7 +3866,12 @@ on busy production deployments, see
 <tr>
 <td><code>BB_H2_ENABLE_WEBSOCKET</code></td>
 <td><code>0</code></td>
-<td>Advertise <code>SETTINGS_ENABLE_CONNECT_PROTOCOL=1</code> (RFC 8441 §3) so peers may bootstrap WebSocket over HTTP/2 via Extended CONNECT.  Off by default — this path has fewer conformance tests than the HTTP/1.1 Upgrade path and few clients use it.</td>
+<td>Advertise <code>SETTINGS_ENABLE_CONNECT_PROTOCOL=1</code> (RFC 8441 §3) so peers may bootstrap WebSocket over HTTP/2 via Extended CONNECT.  Off by default — this path has fewer conformance tests than the HTTP/1.1 Upgrade path and few clients use it.  When enabling this on a BlackBull instance that terminates TLS/HTTP/2 directly (no nginx / L7 proxy in front), also set <code>BB_MAX_CONNECTIONS</code> to a finite value and review <code>BB_H2_WS_MAX_STREAMS_PER_CONNECTION</code>.  The recommended production shape (nginx terminating TLS/HTTP/2, BlackBull behind it on HTTP/1.1) eliminates the RFC 8441 attack surface entirely because nginx does not forward Extended CONNECT to the backend.</td>
+</tr>
+<tr>
+<td><code>BB_H2_WS_MAX_STREAMS_PER_CONNECTION</code></td>
+<td><code>5</code></td>
+<td>Maximum concurrent WebSocket (RFC 8441 Extended CONNECT) streams per HTTP/2 connection.  Caps the per-connection blast radius of WS-over-H2 stream-exhaustion attacks.  <code>0</code> disables the cap (no upper bound beyond <code>BB_H2_MAX_CONCURRENT_STREAMS</code>).  Only meaningful when <code>BB_H2_ENABLE_WEBSOCKET=1</code>.</td>
 </tr>
 </tbody>
 </table>
