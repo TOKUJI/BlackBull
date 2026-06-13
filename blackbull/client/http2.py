@@ -97,6 +97,12 @@ class HTTP2Client:
         # In-flight responses keyed by stream_id.
         self._responses: dict[int, _PendingResponse] = {}
 
+        # Streams that bypass ResponderFactory dispatch — used by the
+        # RFC 8441 WebSocket-over-H2 client.  When a frame arrives on a
+        # stream id in this dict, it is pushed into the queue instead of
+        # being routed through the request/response state machine.
+        self._raw_streams: dict[int, asyncio.Queue] = {}
+
         # Receive loop task; created in __aenter__, cancelled in __aexit__.
         self._receive_task: asyncio.Task | None = None
 
@@ -239,6 +245,30 @@ class HTTP2Client:
         """
         return await self._receive_frame()
 
+    def register_raw_stream(self, stream_id: int) -> asyncio.Queue:
+        """Mark *stream_id* as a raw-frame stream.
+
+        Frames arriving on this stream are pushed into the returned
+        ``asyncio.Queue`` instead of being routed through the
+        request/response state machine.  Used by
+        :class:`blackbull.client.WebSocketH2Client` to receive
+        WebSocket frames (carried in DATA frames after RFC 8441
+        Extended CONNECT) without racing the receive loop.
+
+        Returning a fresh queue each call is intentional — registering
+        the same stream twice would be a programming error.
+        """
+        if stream_id in self._raw_streams:
+            raise ValueError(f'stream {stream_id} already registered as raw')
+        q: asyncio.Queue = asyncio.Queue()
+        self._raw_streams[stream_id] = q
+        self.stream_window_size[stream_id] = self.initial_window_size
+        return q
+
+    def unregister_raw_stream(self, stream_id: int) -> None:
+        """Stop routing frames for *stream_id* into its raw-frame queue."""
+        self._raw_streams.pop(stream_id, None)
+
     # ---- internal: senders, streams, frame I/O ---------------------------
 
     def _allocate_stream_id(self) -> int:
@@ -277,6 +307,19 @@ class HTTP2Client:
                 # invariants in Stream stay consistent.
                 if frame.stream_id != 0 and self._root_stream.find_child(frame.stream_id) is None:
                     self._root_stream.add_child(frame.stream_id)
+                # Raw-frame streams (WebSocket-over-H2, etc.) bypass the
+                # request/response dispatcher — the registrant drains
+                # the queue itself.  Connection-level frames
+                # (WINDOW_UPDATE keeps send-side flow control alive,
+                # SETTINGS is connection-wide) must still go through the
+                # normal handler so the per-stream sender wakes when
+                # the peer credits its window.
+                raw_q = self._raw_streams.get(frame.stream_id)
+                if raw_q is not None and frame.FrameType() not in (
+                        FrameTypes.WINDOW_UPDATE, FrameTypes.SETTINGS,
+                ):
+                    raw_q.put_nowait(frame)
+                    continue
                 try:
                     await ResponderFactory.create(frame).respond(self)
                 except Exception:
