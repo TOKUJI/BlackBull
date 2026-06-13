@@ -52,6 +52,7 @@ nav:
     - Logging: guide/logging.md
     - Static files: guide/static-files.md
     - Configuration: guide/configuration.md
+    - Extensions: guide/extensions.md
     - OpenAPI: guide/openapi.md
     - Testing: guide/testing.md
   - Deployment:

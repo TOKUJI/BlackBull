@@ -114,7 +114,7 @@ venv.bak/
 # private development notes (not for end users)
 CLAUDE_DEV.md
 .claude/design/
-.claude/phases/
+.claude/planning/
 .claude/patterns/
 # benchmark result files (keep directory + READMEs, ignore data)
 bench/results/*
