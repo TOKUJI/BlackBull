@@ -5,6 +5,7 @@ StreamActor owns the lifetime of a single HTTP/2 stream.
 """
 import asyncio
 import logging
+import time
 from collections.abc import Awaitable, Callable
 from http import HTTPStatus
 from typing import Any, Protocol, runtime_checkable
@@ -208,6 +209,15 @@ class HTTP2Actor(Actor):
     path (same behaviour as the pre-Actor HTTP2Handler).
     """
 
+    # CVE-2023-44487 (Rapid Reset) rolling-window thresholds.  20
+    # RST_STREAMs per second is generous for legitimate clients
+    # (browser navigation + prefetch cancellation rarely exceeds
+    # ~10/s) and limiting for the attack shape (CVE-2023-44487
+    # exploits routinely hit thousands/s).  Promote to env vars if a
+    # real workload surfaces that legitimately exceeds the threshold.
+    _RST_RATE_LIMIT: int = 20
+    _RST_RATE_WINDOW: float = 1.0  # seconds
+
     def __init__(
         self,
         reader: 'AbstractReader | None',
@@ -244,6 +254,13 @@ class HTTP2Actor(Actor):
         self.max_concurrent_streams: int = _cfg.h2_max_concurrent_streams
         self._request_timeout: float = _cfg.request_timeout
         self._frame_yield_every: int = _cfg.frame_yield_every
+        # RFC 9113 header-block hard ceiling — matches the HTTP/1.1
+        # ``BB_HEADER_MAX_TOTAL`` budget so a CONTINUATION-flood peer
+        # can't grow ``header_frame.raw_block`` without bound.  When
+        # exceeded, the offending stream gets RST_STREAM
+        # ENHANCE_YOUR_CALM (RFC 6585 §5 / RFC 9113 §7) — the same
+        # code nginx and Envoy use for this condition.
+        self._header_max_total: int = _cfg.header_max_total
         # Per-connection semaphore: caps concurrently-running stream handlers to
         # prevent a high-mux connection from starving other connections on the
         # same worker.  None means no cap.
@@ -285,6 +302,28 @@ class HTTP2Actor(Actor):
         # RFC 8441 — set by run() from BB_H2_ENABLE_WEBSOCKET.  When False,
         # any incoming :method=CONNECT with :protocol=websocket is refused.
         self._ws_over_h2_enabled: bool = False
+
+        # CVE-2023-44487 (Rapid Reset) guard — rolling RST_STREAM rate.
+        # Attackers open a stream with HEADERS and immediately RST it,
+        # churning the per-stream allocations (Stream node, sender,
+        # recipient, HPACK context) without hitting
+        # ``max_concurrent_streams`` because the lifecycle is too fast
+        # for the counter to accumulate.  When the inbound RST_STREAM
+        # rate exceeds the threshold, the connection is closed with
+        # GOAWAY ENHANCE_YOUR_CALM.  Cheap counter, no allocation per
+        # RST; threshold/window are class constants today and can be
+        # promoted to env vars if a real workload surfaces that
+        # legitimately exceeds them.
+        self._rst_count: int = 0
+        self._rst_window_start: float = 0.0
+
+        # RFC 8441 stream-exhaustion guard — count of in-flight WebSocket
+        # streams on this connection, capped at
+        # ``cfg.h2_ws_max_streams_per_connection``.  Incremented in
+        # :meth:`_handle_h2_websocket` before spawning the actor task;
+        # decremented in the task's ``finally`` block when the WS handler
+        # exits (normal close, app raise, or TaskGroup cancellation).
+        self._ws_stream_count: int = 0
 
         # RFC 9113 §5.1 — closed-stream state, separate from the priority tree.
         # Maps stream_id → True if closed via RST_STREAM, False if closed via
@@ -402,16 +441,26 @@ class HTTP2Actor(Actor):
             logger.debug('writer.close raised on connection-error path',
                          exc_info=True)
 
-    def _make_done_cb(self, stream_id: int) -> Callable[[asyncio.Task], None]:
+    def _make_done_cb(
+        self, stream_id: int, *, is_ws: bool = False,
+    ) -> Callable[[asyncio.Task], None]:
         """Return a done-callback that releases per-stream resources on completion.
 
         Keeps the Stream node in the tree (marked CLOSED) so that the
         frame-loop state validation can detect late frames arriving on the
         same identifier and respond with the appropriate STREAM_CLOSED
         error (RFC 9113 §5.1).
+
+        ``is_ws=True`` additionally decrements ``_ws_stream_count`` —
+        the RFC 8441 per-connection cap.  Tagged at the call site rather
+        than blanket-decremented so regular HTTP stream completions
+        don't silently drift the WS counter below the true in-flight
+        count (which would cause the WS cap to over-admit).
         """
         def _cb(_task: asyncio.Task) -> None:
             self._active_stream_count = max(0, self._active_stream_count - 1)
+            if is_ws:
+                self._ws_stream_count = max(0, self._ws_stream_count - 1)
             self._senders.pop(stream_id, None)
             self._recipients.pop(stream_id, None)
             # Prune the stream node from the tree and remember it as closed-
@@ -504,6 +553,30 @@ class HTTP2Actor(Actor):
             # are silently ignored.
             if frame_type is None:
                 continue
+
+            # CVE-2023-44487 (Rapid Reset) — bound the per-second
+            # inbound RST_STREAM rate before any per-stream work.
+            # The attack opens a stream with HEADERS and immediately
+            # RSTs it; ``max_concurrent_streams`` never catches it
+            # because the lifecycle is too short to accumulate.
+            # GOAWAY ENHANCE_YOUR_CALM closes the connection; a fresh
+            # handshake is required to retry.  Placed BEFORE stream-
+            # state validation so legitimate RSTs on a real open
+            # stream and abusive RSTs on idle/unknown streams both
+            # count toward the rolling budget.
+            if frame_type == FrameTypes.RST_STREAM:
+                now = time.monotonic()
+                if now - self._rst_window_start > self._RST_RATE_WINDOW:
+                    self._rst_count = 0
+                    self._rst_window_start = now
+                self._rst_count += 1
+                if self._rst_count > self._RST_RATE_LIMIT:
+                    await self._connection_error(
+                        ErrorCodes.ENHANCE_YOUR_CALM,
+                        f'RST_STREAM rate limit exceeded '
+                        f'({self._rst_count} in '
+                        f'{self._RST_RATE_WINDOW}s)')
+                    continue
 
             # RFC 9113 §4.2 — a frame whose payload exceeds the receiver's
             # advertised SETTINGS_MAX_FRAME_SIZE is a FRAME_SIZE_ERROR.  When
@@ -823,6 +896,23 @@ class HTTP2Actor(Actor):
 
         header_frame.raw_block += frame.payload
 
+        # CVE-class CONTINUATION flood — an attacker that opens a
+        # stream with END_HEADERS=0 and follows with unbounded
+        # CONTINUATION frames at DEFAULT_MAX_FRAME_SIZE each would
+        # otherwise grow ``raw_block`` until OOM.  Mirror the H/1.1
+        # 64 KiB cap (BB_HEADER_MAX_TOTAL).  ENHANCE_YOUR_CALM is the
+        # standard error code for "header block too large" (RFC 6585
+        # §5 / RFC 9113 §7); nginx and Envoy use the same.
+        if len(header_frame.raw_block) > self._header_max_total:
+            logger.warning(
+                'Stream %d header block exceeded BB_HEADER_MAX_TOTAL=%d '
+                'across CONTINUATION frames — RST_STREAM ENHANCE_YOUR_CALM',
+                stream.stream_id, self._header_max_total,
+            )
+            await self.send_frame(self.factory.rst_stream(
+                stream.stream_id, ErrorCodes.ENHANCE_YOUR_CALM))
+            return True
+
         if not frame.end_headers:
             return False
 
@@ -888,10 +978,27 @@ class HTTP2Actor(Actor):
 
         stream.on_data_received(end_stream=bool(frame.end_stream))
         if stream.stream_id in self._recipients:
-            delivered = self._recipients[stream.stream_id].put_DATAFrame(frame)
+            recipient = self._recipients[stream.stream_id]
+            delivered = recipient.put_DATAFrame(frame)
             if delivered:
+                # RFC 9113 §6.9.1 — DATA frames are subject to BOTH
+                # stream and connection-level flow control.  Crediting
+                # only the stream window leaves the connection-level
+                # window depleting toward zero across requests, which
+                # stalls any subsequent body once it hits 65,535 bytes
+                # cumulative.  Credit both.
                 await self.send_frame(
                     self.factory.window_update(stream.stream_id, frame.length))
+                await self.send_frame(
+                    self.factory.window_update(0, frame.length))
+            elif getattr(recipient, 'backpressures_via_credit', False):
+                # Recipient buffered the bytes but signalled backpressure
+                # by withholding credit (HTTP2WSReader past its buffer
+                # cap).  The peer's stream window debits by frame.length
+                # and the recipient replays the credit through its own
+                # callback once readexactly drains below the cap.  No
+                # RST_STREAM — the bytes are safe in the buffer.
+                pass
             else:
                 await self.send_frame(
                     self.factory.rst_stream(stream.stream_id, ErrorCodes.ENHANCE_YOUR_CALM))
@@ -918,8 +1025,19 @@ class HTTP2Actor(Actor):
         app calls websocket.accept.
         """
         from uuid import uuid4  # noqa: PLC0415
+        from ..env import get_settings as _get_settings  # noqa: PLC0415
         from .websocket_actor import WebSocketActor  # noqa: PLC0415
         from .http2_ws import HTTP2WSReader, HTTP2WSWriter  # noqa: PLC0415
+
+        # RFC 8441 stream-exhaustion guard — without a per-connection cap
+        # an attacker can hold up to ``max_concurrent_streams`` idle WS
+        # streams per connection.  ``0`` disables (legacy / opt-out).
+        cfg = _get_settings()
+        ws_cap = cfg.h2_ws_max_streams_per_connection
+        if ws_cap > 0 and self._ws_stream_count >= ws_cap:
+            await self.send_frame(self.factory.rst_stream(
+                stream.stream_id, ErrorCodes.REFUSED_STREAM))
+            return
 
         scope = stream.scope
         assert scope is not None
@@ -935,7 +1053,18 @@ class HTTP2Actor(Actor):
 
         scope['_ws_send_101'] = _ws_send_200  # WebSocketActor calls this on websocket.accept
 
-        ws_reader = HTTP2WSReader()
+        sid = stream.stream_id
+
+        async def _replay_credit(n: int) -> None:
+            # HTTP2WSReader hit its buffer cap and withheld credit while
+            # delivering DATA frames; once readexactly drained below the
+            # cap, replay both the stream-level and connection-level
+            # WINDOW_UPDATE so the peer's window reopens symmetrically
+            # with the regular per-frame path.
+            await self.send_frame(self.factory.window_update(sid, n))
+            await self.send_frame(self.factory.window_update(0, n))
+
+        ws_reader = HTTP2WSReader(credit_callback=_replay_credit)
         ws_writer = HTTP2WSWriter(stream_send)
         self._recipients[stream.stream_id] = ws_reader  # DATA frames routed here
 
@@ -955,12 +1084,18 @@ class HTTP2Actor(Actor):
             try:
                 await ws_actor.run()
             finally:
+                # ``_ws_stream_count`` is decremented by
+                # ``_make_done_cb(is_ws=True)`` below, sharing the
+                # single lifecycle hook with ``_active_stream_count`` and
+                # per-stream dicts.
                 log_record.close_code = ws_actor._disconnect_code
                 _emit_access_log(log_record)
 
+        self._ws_stream_count += 1
         self._active_stream_count += 1
         task = tg.create_task(_run_ws())
-        task.add_done_callback(self._make_done_cb(stream.stream_id))
+        task.add_done_callback(
+            self._make_done_cb(stream.stream_id, is_ws=True))
 
     async def _handle_push(self, event: dict, parent_stream_id: int) -> None:
         """Handle an 'http.response.push' ASGI event (RFC 7540 §8.2)."""

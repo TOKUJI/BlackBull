@@ -429,6 +429,17 @@ class HTTP1Actor(Actor):
                         _loop_start_perf, _loop_start_cpu)
                 log_record.mark('parsed')
                 scope['state']['access_log'] = log_record
+                # Sprint 38 Task B — reset per-request sender state.  The
+                # HTTP1Sender instance is shared across keep-alive
+                # requests on this connection; without this reset
+                # ``_started`` stays True after the first response and
+                # the timeout branch's ``if not send._started`` check
+                # would skip the synthetic 408 on a second-or-later
+                # request.  ``_chunked`` / ``_buffered_status`` similarly
+                # outlive their request.  Encapsulated in the sender
+                # so adding a new per-request slot can't be silently
+                # missed at this call site.
+                send.reset_per_request_state()
                 # Inline access-log capture into the sender itself —
                 # avoids the per-event coroutine dispatch through a
                 # wrapper (which was 622 samples / 7% of CPU in the
@@ -437,29 +448,14 @@ class HTTP1Actor(Actor):
                 # about; updating ``log_record`` there is free.
                 send._log_record = log_record
                 capturing_send = send
-                # RFC 9110 §9.3.2 — a HEAD response must be identical to the
-                # GET response except for the absence of the body.  We
-                # synthesise that by dispatching to the GET handler and
-                # stripping body bytes from outgoing events.  ``method`` on
-                # the scope is rewritten so the router (and any handler that
-                # inspects scope['method']) sees ``GET``; the access log
-                # records the original ``HEAD`` from the request line.
-                # RFC 9110 §9.3.2 — reset HEAD mode per request and set when
-                # the method on this request is HEAD.  The sender uses the
-                # flag in _flush to skip body bytes while keeping the
-                # framing headers a GET would have emitted.
-                # Sprint 38 Task B — reset per-request sender state.  The
-                # HTTP1Sender instance is shared across keep-alive requests
-                # on this connection; without this reset ``_started`` stays
-                # True after the first response, and the timeout branch's
-                # ``if not send._started`` check would skip the synthetic
-                # 408 on a second-or-later request.  ``_chunked`` /
-                # ``_buffered_status`` similarly outlive their request.
-                send._started = False
-                send._chunked = False
-                send._buffered_status = None
-                send._buffered_headers = None
-                send._expect_trailers = False
+                # RFC 9110 §9.3.2 — a HEAD response must be identical to
+                # the GET response except for the absence of the body.
+                # We synthesise that by dispatching to the GET handler
+                # and stripping body bytes from outgoing events.
+                # ``method`` on the scope is rewritten so the router
+                # (and any handler that inspects scope['method']) sees
+                # ``GET``; the access log records the original ``HEAD``
+                # from the request line.
                 send._head_mode = (scope['method'] == 'HEAD')
                 if send._head_mode:
                     scope['method'] = 'GET'

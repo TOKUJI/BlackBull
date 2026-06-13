@@ -809,3 +809,109 @@ class TestWebSocketDeflate:
         assert event.get('text') == 'plain', (
             f"Uncompressed frame must not be decompressed; got {event!r}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Payload-size guard (post-handshake OOM defence)
+# ---------------------------------------------------------------------------
+#
+# RFC 6455 §5.2 allows declared frame payload lengths up to 2**63 - 1.
+# Without a cap, an adversary post-handshake can advertise a 2**63 - 1
+# payload in the frame header; ``read_payload`` then attempts to buffer
+# the full declared length and the server OOMs before any body bytes
+# arrive.  ``WebSocketRecipient._MAX_FRAME_PAYLOAD`` caps the accepted
+# declared length at 1 MiB by default (constructor-overridable) and
+# raises ``ProtocolError(close_code=MESSAGE_TOO_BIG)`` which the read
+# loop converts into a CLOSE(1009) frame.
+
+class TestFramePayloadSizeGuard:
+    """Frame header declaring a payload larger than
+    ``_MAX_FRAME_PAYLOAD`` must close the connection with code 1009
+    (MESSAGE_TOO_BIG) before any body bytes are read."""
+
+    @staticmethod
+    def _frame_with_declared_length(declared_length: int,
+                                    actual_payload: bytes,
+                                    mask: bytes = b'\x00\x00\x00\x00') -> bytes:
+        """Build a masked client frame whose 64-bit extended-length
+        field advertises *declared_length* bytes, regardless of what
+        *actual_payload* contains.  The server must reject on header
+        parse alone — no need to send a real megabyte body."""
+        # FIN=1, opcode=BINARY
+        b0 = 0x82
+        # MASK=1, length=127 (extended 64-bit follows)
+        b1 = 0x80 | 127
+        return (bytes([b0, b1])
+                + declared_length.to_bytes(8, 'big')
+                + mask
+                + actual_payload)
+
+    @pytest.mark.asyncio
+    async def test_oversize_declared_length_triggers_close_1009(self):
+        from blackbull.server.constants import WSCloseCode
+        # Declare 2 MiB payload but supply only 16 actual bytes — the
+        # cap is checked on the declared length before read_payload runs.
+        raw = self._frame_with_declared_length(
+            declared_length=2 * 1024 * 1024,
+            actual_payload=b'\x00' * 16,
+        )
+        handler = _RecipientWrapper(raw)
+        await handler.receive()  # synthetic websocket.connect
+
+        # The next call surfaces the ProtocolError raised inside _read_loop;
+        # by then the CLOSE(1009) frame has already been written.
+        with pytest.raises(Exception):
+            await handler.receive()
+
+        written = bytes(handler.writer.written)
+        assert written, 'server must send a CLOSE frame on oversized payload'
+        # CLOSE frames: byte 0 = 0x88, byte 1 = length (no mask from
+        # server) + 0x80 if masked (client-mode wrapper masks).
+        # The payload starts with the 2-byte status code in big-endian.
+        # Find the status-code bytes by scanning past header + mask.
+        # Status code is the first two bytes of the unmasked close payload.
+        # Easier: just assert MESSAGE_TOO_BIG (1009 = 0x03F1) appears in the
+        # outbound bytes — the masking would XOR but the test wrapper uses
+        # an all-zero mask so the payload is unchanged.
+        assert WSCloseCode.MESSAGE_TOO_BIG.to_bytes(2, 'big') in written, (
+            f'CLOSE frame must carry status code 1009 (MESSAGE_TOO_BIG); '
+            f'wire bytes: {written!r}')
+
+    @pytest.mark.asyncio
+    async def test_legitimate_small_frame_unaffected(self):
+        """Sanity: a normal small frame still works.  Regression lock
+        against an overly-aggressive cap implementation."""
+        handler = _RecipientWrapper(_make_client_frame(b'hello', opcode=0x1))
+        await handler.receive()  # websocket.connect
+        event = await handler.receive()
+        assert event.get('text') == 'hello'
+
+    @pytest.mark.asyncio
+    async def test_constructor_override_raises_cap(self):
+        """A caller with known-large workloads can opt into a higher
+        cap via the ``max_frame_payload`` constructor parameter
+        without subclassing."""
+        raw = self._frame_with_declared_length(
+            declared_length=2 * 1024 * 1024,
+            actual_payload=b'\x00' * 16,
+        )
+        wrapper = _RecipientWrapper.__new__(_RecipientWrapper)
+        wrapper.writer = _FakeWriter()
+        wrapper._recipient = WebSocketRecipient(
+            AsyncioReader(_FakeReader(raw)),
+            AsyncioWriter(wrapper.writer),
+            max_frame_payload=4 * 1024 * 1024,  # 4 MiB — well above
+        )
+        await wrapper._recipient()  # connect
+        # Cap is 4 MiB; declared 2 MiB is under the override.  The
+        # frame will eventually fail elsewhere (insufficient body bytes
+        # off the stream), but NOT with the size-guard ProtocolError.
+        # Confirm the writer did NOT receive a 1009 CLOSE.
+        from blackbull.server.constants import WSCloseCode
+        try:
+            await wrapper._recipient()
+        except Exception:
+            pass  # expected — fake reader runs out of bytes; we assert on the writer, not the exception
+        assert WSCloseCode.MESSAGE_TOO_BIG.to_bytes(2, 'big') not in bytes(wrapper.writer.written), (
+            'with the cap raised, the size guard must not fire on '
+            'declared lengths within the override')

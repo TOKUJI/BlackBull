@@ -372,3 +372,53 @@ class TestUseWarning:
             app.use(functools.partial(base_mw, extra='value'))
         user_warnings = [x for x in w if issubclass(x.category, UserWarning)]
         assert not user_warnings
+
+
+# ---------------------------------------------------------------------------
+# TestHTTP1SenderRenderStart  (Sprint refactor — lock the wire format)
+# ---------------------------------------------------------------------------
+
+class TestHTTP1SenderRenderStart:
+    def test_status_line_and_headers_format(self):
+        from http import HTTPStatus
+        s = HTTP1Sender(BytesWriter())
+        out = s._render_start(
+            HTTPStatus.OK,
+            [(b'content-length', b'5'), (b'Date', b'Mon, 01 Jan 2024 00:00:00 GMT')],
+        )
+        assert out == (
+            b'HTTP/1.1 200 OK\r\n'
+            b'content-length: 5\r\n'
+            b'Date: Mon, 01 Jan 2024 00:00:00 GMT\r\n'
+            b'\r\n'
+        )
+
+    def test_empty_headers(self):
+        from http import HTTPStatus
+        s = HTTP1Sender(BytesWriter())
+        out = s._render_start(HTTPStatus.NO_CONTENT, [])
+        assert out == b'HTTP/1.1 204 No Content\r\n\r\n'
+
+    def test_reset_per_request_state_clears_all_slots(self):
+        # Sprint refactor — guard against the "I added a slot and forgot to
+        # reset it" regression that bit Sprint 38 (BB_REQUEST_TIMEOUT 408
+        # skipped on the second keep-alive request because `_started`
+        # stayed True).
+        from http import HTTPStatus
+        from blackbull.headers import Headers
+        s = HTTP1Sender(BytesWriter())
+        s._started = True
+        s._chunked = True
+        s._buffered_status = HTTPStatus.OK
+        s._buffered_headers = Headers([(b'a', b'b')])
+        s._expect_trailers = True
+        s._head_mode = True
+        s._log_record = object()
+        s.reset_per_request_state()
+        assert s._started is False
+        assert s._chunked is False
+        assert s._buffered_status is None
+        assert s._buffered_headers is None
+        assert s._expect_trailers is False
+        assert s._head_mode is False
+        assert s._log_record is None

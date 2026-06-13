@@ -29,6 +29,20 @@ even for `ws://` upgrades; with RFC 8441 off, the upgrade is
 blocked and the browser falls back to HTTP/1.1.  Test coverage
 isn't yet broad enough to promote this to default-on.
 
+**Attack surface when enabled**: with
+`BB_H2_ENABLE_WEBSOCKET=1` and BlackBull terminating HTTP/2
+directly (no nginx / L7 proxy in front), the server is exposed
+to stream-exhaustion attacks — an attacker can open up to
+`BB_H2_MAX_CONCURRENT_STREAMS` (default 100) Extended CONNECT
+streams per connection, multiplied by `BB_MAX_CONNECTIONS`
+(default `0` = unbounded), holding all of them idle.  Mitigate
+by setting `BB_MAX_CONNECTIONS` to a finite value and relying on
+`BB_H2_WS_MAX_STREAMS_PER_CONNECTION` (default `5`).  The
+recommended production shape — nginx terminating TLS/HTTP/2
+with BlackBull on HTTP/1.1 behind it — eliminates this surface
+entirely because nginx does not forward RFC 8441 Extended
+CONNECT to the backend.
+
 ### HTTP/2 multiplex overhead vs HTTP/1.1
 
 The HTTP/2 implementation is conformant (passes `h2spec`,

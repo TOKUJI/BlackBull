@@ -101,16 +101,42 @@ async def read_frame_header(reader) -> WSFrameHeader:
     )
 
 
-async def read_payload(reader, masked: bool, length: int) -> bytes:
+class FramePayloadTooLarge(Exception):
+    """Raised by :func:`read_payload` when *max_length* is set and the
+    declared payload length exceeds it.  The caller is responsible for
+    translating this into a WebSocket-level CLOSE (RFC 6455 §7.4.1
+    code 1009 MESSAGE_TOO_BIG) — the codec stays protocol-agnostic.
+    """
+
+    def __init__(self, declared: int, maximum: int):
+        super().__init__(
+            f'frame payload {declared} exceeds maximum {maximum}')
+        self.declared = declared
+        self.maximum = maximum
+
+
+async def read_payload(
+    reader, masked: bool, length: int, *, max_length: int | None = None,
+) -> bytes:
     """Read the payload of a WebSocket frame from *reader*.
 
     If *masked* is True, also read the 4-byte mask and unmask the payload.
     Raises ``asyncio.IncompleteReadError`` on EOF.
+
+    When *max_length* is set and the declared payload size — resolved
+    from the 16-bit or 64-bit extended-length field per RFC 6455
+    §5.2 — exceeds it, raises :class:`FramePayloadTooLarge` *before*
+    reading any body bytes off the wire.  Defends against
+    post-handshake OOM where the peer advertises a 2**63 - 1 payload
+    and the server tries to buffer it.
     """
     if length == 126:
         length = int.from_bytes(await reader.readexactly(2), 'big')
     elif length == 127:
         length = int.from_bytes(await reader.readexactly(8), 'big')
+
+    if max_length is not None and length > max_length:
+        raise FramePayloadTooLarge(length, max_length)
 
     if not masked:
         return await reader.readexactly(length)

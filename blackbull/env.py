@@ -151,6 +151,16 @@ BB_H2_ENABLE_WEBSOCKET
     peers may bootstrap WebSocket over HTTP/2 via Extended CONNECT.
     Off by default — this path has fewer conformance tests than the
     HTTP/1.1 upgrade path.  Default: ``false``.
+BB_H2_WS_MAX_STREAMS_PER_CONNECTION
+    Maximum concurrent WebSocket (RFC 8441 Extended CONNECT) streams
+    per HTTP/2 connection.  ``0`` disables the per-connection cap (no
+    upper bound beyond ``BB_H2_MAX_CONCURRENT_STREAMS``).  Only
+    meaningful when ``BB_H2_ENABLE_WEBSOCKET=1`` — without that, no
+    WS-over-H2 streams are accepted at all.  Defends against
+    stream-exhaustion DoS: without a per-connection cap, an attacker
+    can hold ``BB_H2_MAX_CONCURRENT_STREAMS`` idle WS streams open
+    per connection, multiplied by ``BB_MAX_CONNECTIONS`` (default 0 =
+    unbounded).  Default: ``5``.
 BB_WS_PERMESSAGE_DEFLATE
     Negotiate ``permessage-deflate`` (RFC 7692) on incoming WebSocket
     handshakes when the peer offers it.  Matches modern browsers and
@@ -432,6 +442,15 @@ class Settings:
     #: main consumer).  Set ``BB_H2_ENABLE_WEBSOCKET=1`` to turn it on.
     h2_enable_websocket: bool = False
 
+    #: Maximum concurrent WebSocket (RFC 8441 Extended CONNECT) streams per
+    #: HTTP/2 connection.  Limits the per-connection blast radius of WS-over-H2
+    #: stream-exhaustion attacks — without this cap, an attacker can hold
+    #: ``h2_max_concurrent_streams`` (default 100) WS streams open per
+    #: connection across ``max_connections`` (default 0 = unbounded)
+    #: connections.  ``0`` disables the per-connection cap.  Only meaningful
+    #: when ``h2_enable_websocket=True``.
+    h2_ws_max_streams_per_connection: int = 5
+
     #: Negotiate ``permessage-deflate`` (RFC 7692) on incoming WebSocket
     #: handshakes when the peer offers it.  On by default — matches modern
     #: browsers and the major library defaults (`ws` for Node, Python
@@ -540,6 +559,8 @@ def get_settings() -> Settings:
         h2_connection_window_size=_int_env('BB_H2_CONNECTION_WINDOW_SIZE', 65535),
         h2_max_concurrent_streams=_int_env('BB_H2_MAX_CONCURRENT_STREAMS', 100),
         h2_enable_websocket=_bool_env('BB_H2_ENABLE_WEBSOCKET', False),
+        h2_ws_max_streams_per_connection=_int_env_nonneg(
+            'BB_H2_WS_MAX_STREAMS_PER_CONNECTION', 5),
         ws_permessage_deflate=_bool_env('BB_WS_PERMESSAGE_DEFLATE', True),
         use_uvloop=_bool_env('BB_UVLOOP', False),
         h2_active_streams_1w=_int_env_nonneg('BB_H2_ACTIVE_STREAMS_1W', 20),

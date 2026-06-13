@@ -340,3 +340,102 @@ class TestContinuationHandling:
         scopes = [call[0][0] for call in app.call_args_list]
         paths = {s['path'] for s in scopes}
         assert paths == {'/first', '/second'}
+
+
+# ---------------------------------------------------------------------------
+# §5 — CONTINUATION-flood guard (BB_HEADER_MAX_TOTAL ceiling)
+# ---------------------------------------------------------------------------
+#
+# Without the guard, an attacker who sends HEADERS with END_HEADERS=0
+# followed by an unbounded stream of CONTINUATION frames can grow
+# ``header_frame.raw_block`` until OOM — the prior code only checked
+# ``frame.end_headers`` to decide when to stop accumulating.  The fix
+# mirrors the HTTP/1.1 ``BB_HEADER_MAX_TOTAL`` cap (64 KiB default)
+# and responds with RST_STREAM ENHANCE_YOUR_CALM (RFC 6585 §5 /
+# RFC 9113 §7 — the standard error code for "header block too large";
+# nginx and Envoy use the same).
+
+from blackbull.protocol.frame_types import ErrorCodes as _ErrorCodes  # noqa: E402
+
+
+@pytest.mark.asyncio
+class TestContinuationFloodGuard:
+
+    async def test_continuation_flood_emits_rst_enhance_your_calm(self):
+        """10 × 16 KiB CONTINUATION frames (160 KiB total) on one
+        stream — above the 64 KiB BB_HEADER_MAX_TOTAL default —
+        must trigger RST_STREAM ENHANCE_YOUR_CALM and the app must
+        NOT be invoked."""
+        called: list[dict] = []
+
+        async def app(scope, receive, send):
+            called.append(scope)
+
+        # Initial HEADERS (END_HEADERS=0) with a tiny valid header block.
+        encoder = Encoder()
+        seed_block = encoder.encode([
+            (b':method', b'GET'),
+            (b':path', b'/'),
+            (b':scheme', b'https'),
+        ])
+        h_frame = _make_h2_frame(
+            FrameTypes.HEADERS, SettingFrameFlags.INIT, 1, seed_block)
+        # Each CONTINUATION carries 16 KiB of arbitrary bytes — the
+        # actor does not parse them until END_HEADERS, so any bytes
+        # work for the size accumulation test.
+        chunk = b'x' * 16384
+        cont = _make_h2_frame(
+            FrameTypes.CONTINUATION, SettingFrameFlags.INIT, 1, chunk)
+
+        handler = _make_handler(app)
+        handler.receive = AsyncMock(side_effect=[
+            h_frame, *(cont for _ in range(10)), None,
+        ])
+        await handler.run()
+
+        assert called == [], (
+            'app handler must not be invoked when CONTINUATION flood '
+            'exceeds the header-block cap')
+
+        rsts = [c.args[0] for c in handler.send_frame.call_args_list
+                if hasattr(c.args[0], 'FrameType')
+                and c.args[0].FrameType() == FrameTypes.RST_STREAM]
+        assert any(
+            getattr(r, 'error_code', None) == _ErrorCodes.ENHANCE_YOUR_CALM
+            and r.stream_id == 1 for r in rsts
+        ), (
+            f'expected RST_STREAM(ENHANCE_YOUR_CALM) on stream 1; '
+            f'got RSTs={[(r.stream_id, getattr(r, "error_code", None)) for r in rsts]}')
+
+    async def test_continuation_within_cap_still_dispatches(self):
+        """The guard must not regress legitimate fragmented HEADERS
+        that stay under BB_HEADER_MAX_TOTAL."""
+        called: list[dict] = []
+
+        async def app(scope, receive, send):
+            called.append(scope)
+
+        encoder = Encoder()
+        block = encoder.encode([
+            (b':method', b'GET'),
+            (b':path', b'/legit'),
+            (b':scheme', b'https'),
+        ])
+        # Split the small valid block in half across HEADERS + CONTINUATION.
+        mid = len(block) // 2 + 1
+        h = _make_h2_frame(FrameTypes.HEADERS, SettingFrameFlags.INIT, 1, block[:mid])
+        c = _make_h2_frame(FrameTypes.CONTINUATION, HeaderFrameFlags.END_HEADERS,
+                           1, block[mid:])
+
+        handler = _make_handler(app)
+        handler.receive = AsyncMock(side_effect=[h, c, None])
+        await handler.run()
+
+        assert len(called) == 1, (
+            f'fragmented HEADERS under cap must dispatch; called={called}')
+        rsts = [c.args[0] for c in handler.send_frame.call_args_list
+                if hasattr(c.args[0], 'FrameType')
+                and c.args[0].FrameType() == FrameTypes.RST_STREAM]
+        assert rsts == [], (
+            f'no RST_STREAM expected on legitimate fragmented HEADERS; '
+            f'got {rsts}')

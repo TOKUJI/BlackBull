@@ -349,7 +349,7 @@ class HTTP1Sender(BaseSender):
 
     async def __call__(self, body,
                        status: HTTPStatus = HTTPStatus.OK,
-                       headers: HeaderList = []):
+                       headers: HeaderList = ()):
         """Dispatch on *body* and write the resulting HTTP/1.1 bytes.
 
         Accepted forms:
@@ -459,17 +459,41 @@ class HTTP1Sender(BaseSender):
             case _:
                 raise TypeError(f'HTTP1Sender expected bytes or dict, got {type(body)!r}')
 
-    async def _flush(self, status: HTTPStatus, headers: Headers, body: bytes, more_body: bool = False) -> None:
-        self._started = True
+    def reset_per_request_state(self) -> None:
+        # Sprint 38 lesson — HTTP1Sender is shared across keep-alive requests;
+        # forgetting a reset silently breaks the next request's framing
+        # (`_started` skipped 408 emission on the second request).  See
+        # `.claude/patterns/cautions.md` — Sprint 38 section.
+        self._buffered_status = None
+        self._buffered_headers = None
+        self._chunked = False
+        self._expect_trailers = False
+        self._started = False
+        self._head_mode = False
+        self._log_record = None
+
+    def _ensure_framing_headers(self, headers: Headers, body_len: int, more_body: bool) -> None:
         if more_body:
             if b'transfer-encoding' not in headers:
                 headers.append(b'transfer-encoding', b'chunked')
             self._chunked = True
         elif b'content-length' not in headers:
-            headers.append(b'content-length', str(len(body)).encode())
+            headers.append(b'content-length', str(body_len).encode())
 
+    @staticmethod
+    def _ensure_date_header(headers: Headers) -> None:
+        # RFC 9110 §6.6.1 — origin server SHOULD generate Date.  The
+        # check is case-sensitive against b'Date' because the HTTP/1.1
+        # path stores headers in the framework's canonical capitalisation;
+        # the HTTP/2 path uses a separate _has_header() lookup because
+        # RFC 9113 §8.2.1 mandates lowercase.
         if b'Date' not in headers:
             headers.append(b'Date', _http_date())
+
+    async def _flush(self, status: HTTPStatus, headers: Headers, body: bytes, more_body: bool = False) -> None:
+        self._started = True
+        self._ensure_framing_headers(headers, len(body), more_body)
+        self._ensure_date_header(headers)
 
         # Coalesce status line + headers + body into a single write so the
         # response is emitted as one TLS record / one drain.  Before this,
@@ -533,10 +557,8 @@ class HTTP1Sender(BaseSender):
         self._started = True
         size = os.path.getsize(path)
         headers = self._buffered_headers
-        if b'content-length' not in headers:
-            headers.append(b'content-length', str(size).encode())
-        if b'Date' not in headers:
-            headers.append(b'Date', _http_date())
+        self._ensure_framing_headers(headers, size, more_body=False)
+        self._ensure_date_header(headers)
 
         head = self._render_start(self._buffered_status, headers)
         self._buffered_status = None
@@ -609,6 +631,13 @@ class HTTP2Sender(BaseSender):
         # ``more_body=False``) gets a logged warning instead of a wire
         # protocol violation.
         self._end_stream_sent: bool = False
+
+    def reset_per_request_state(self) -> None:
+        # Symmetric with HTTP1Sender.reset_per_request_state() — the
+        # HTTP/2 sender is per-stream (constructed fresh by the actor for
+        # each stream id), so today this is only meaningful if a future
+        # refactor reuses a sender across streams.  Keep the contract.
+        self._end_stream_sent = False
 
     async def _write(self, data: bytes):
         """Write a frame to the transport.
@@ -694,6 +723,16 @@ class HTTP2Sender(BaseSender):
             return
 
         if isinstance(body, bytes):
+            # RFC 9113 §8.1 — same defensive guard the dict branch carries.
+            # If the application bytes-sends after the stream has ended,
+            # drop with a warning instead of writing past END_STREAM.
+            if self._end_stream_sent:
+                logger.warning(
+                    'HTTP2Sender: dropping bytes write on stream %d — '
+                    'END_STREAM already sent (ASGI app sent a body after '
+                    'the response was complete)',
+                    self._stream_id)
+                return
             # High-level: build HEADERS + DATA frames from bytes + status
             h_frame = self._factory.create(
                 FrameTypes.HEADERS,

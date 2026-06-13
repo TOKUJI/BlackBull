@@ -4,7 +4,10 @@ from abc import ABC, abstractmethod
 
 from .deadline import ConnectionDeadline
 from .sender import AbstractWriter, AsyncioWriter
-from .ws_codec import WSOpcode, encode_frame, read_frame_header, read_payload
+from .ws_codec import (
+    FramePayloadTooLarge, WSOpcode, encode_frame, read_frame_header,
+    read_payload,
+)
 from .constants import WSCloseCode
 from ..asgi import ASGIEvent
 from ..headers import Headers
@@ -452,16 +455,33 @@ class WebSocketRecipient(BaseRecipient):
     writer is stored alongside the reader.
     """
 
+    # Hard cap on the declared payload length of a single inbound
+    # WebSocket frame.  RFC 6455 §5.2 allows up to 2**63 - 1, which an
+    # adversary post-handshake can use to OOM the server before any
+    # body bytes arrive (``read_payload`` would attempt to buffer the
+    # full declared length).  1 MiB matches HTTP2WSReader's default
+    # buffer cap and the typical production WebSocket-server limit.
+    # ``MESSAGE_TOO_BIG`` (1009) is the RFC 6455 §7.4.1 close code.
+    _MAX_FRAME_PAYLOAD: int = 1024 * 1024
+
     def __init__(self, reader: AbstractReader, writer: AbstractWriter, *,
                  require_masked: bool = True,
                  dispatcher: EventDispatcher | None = None,
                  scope: dict | None = None,
                  ws_queue_depth: int = _WS_EVENT_QUEUE_DEPTH,
-                 decompressor=None):
+                 decompressor=None,
+                 max_frame_payload: int | None = None):
         super().__init__(reader)
         self._writer = writer
         self._connect_sent = False
         self._assembler = FragmentAssembler()
+        # Constructor override for the class default — lets workloads
+        # with known-large frames (binary file upload, etc.) raise the
+        # cap without subclassing.
+        if max_frame_payload is not None:
+            self._max_frame_payload: int = max_frame_payload
+        else:
+            self._max_frame_payload = self._MAX_FRAME_PAYLOAD
         # Server-side: client frames MUST be masked (RFC 6455 §5.1).  Client-side:
         # server frames MUST NOT be masked, so the recipient must not raise when
         # they aren't.  When ``require_masked`` is False, outgoing PONG frames
@@ -511,7 +531,21 @@ class WebSocketRecipient(BaseRecipient):
                         f'RSV1 set on frame (opcode={h.opcode}) without '
                         f'negotiated permessage-deflate')
 
-                payload = await read_payload(self._reader, h.masked, h.length)
+                # Hard cap on declared payload length.  ``h.length`` is
+                # the wire indicator (0–125, 126, or 127); the resolved
+                # extended length is read inside read_payload, which
+                # raises FramePayloadTooLarge before any body bytes are
+                # read off the wire.  Defends against post-handshake
+                # OOM where the peer advertises a 2**63 - 1 payload.
+                try:
+                    payload = await read_payload(
+                        self._reader, h.masked, h.length,
+                        max_length=self._max_frame_payload)
+                except FramePayloadTooLarge as exc:
+                    raise ProtocolError(
+                        str(exc),
+                        close_code=WSCloseCode.MESSAGE_TOO_BIG,
+                    ) from exc
 
                 if self._require_masked and not h.masked:
                     raise ProtocolError('unmasked client frame')

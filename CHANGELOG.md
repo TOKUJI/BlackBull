@@ -24,7 +24,134 @@ so the editable install's metadata catches up.
 
 ## [Unreleased]
 
-(Nothing yet.)
+## [0.35.0] — 2026-06-14
+
+**Sprint 39 close: RFC 8441 interop, default-on safety guards,
+HTTP/2 + WebSocket security hardening.**
+
+Sprint 39 closed the RFC 8441 (WebSocket-over-HTTP/2) interop
+gap with a public client, then layered in the safety guards
+needed before the eventual `BB_H2_ENABLE_WEBSOCKET` default
+flip — plus three security-hardening fixes for pre-existing
+exploitable gaps in the HTTP/2 and WebSocket paths.  One of
+those fixes (server-side connection-level `WINDOW_UPDATE` on
+inbound DATA) was surfaced during the WS-over-H2 64 KiB interop
+test but turned out to affect any HTTP/2 upload past 65,535
+cumulative bytes per connection — pre-Sprint-39 hangs on
+plain HTTP/2 POST workloads above that boundary.
+
+### Security
+
+- **HTTP/2 CONTINUATION header-block size cap** (high severity).
+  `HTTP2Actor._on_continuation_frame` previously appended every
+  CONTINUATION payload to `header_frame.raw_block` with no size
+  limit; an attacker could flood the server with CONTINUATION
+  frames until OOM.  Mirror the HTTP/1.1 `BB_HEADER_MAX_TOTAL`
+  budget (64 KiB default) and emit `RST_STREAM(ENHANCE_YOUR_CALM)`
+  (RFC 6585 §5 / RFC 9113 §7) on over-cap streams — the same
+  error code nginx and Envoy use.
+- **WebSocket frame payload size cap** (medium severity, requires
+  established WebSocket connection).  `WebSocketRecipient._read_loop`
+  did not bound the declared payload length; a post-handshake
+  adversary could advertise a 2**63 - 1 payload (RFC 6455 §5.2
+  maximum) and the server would attempt to buffer it.  New
+  `_MAX_FRAME_PAYLOAD` class attribute (default 1 MiB) +
+  `max_frame_payload` constructor parameter — the check fires
+  *before* any body bytes are read off the wire, raises
+  `FramePayloadTooLarge` from `read_payload`, and the recipient
+  translates it into `CLOSE(1009)` (MESSAGE_TOO_BIG).
+- **HTTP/2 inbound RST_STREAM rate limit** (high severity —
+  CVE-2023-44487 "Rapid Reset").  Per-second rolling counter on
+  inbound `RST_STREAM` frames.  Over `_RST_RATE_LIMIT=20/s`, the
+  connection is closed with `GOAWAY(ENHANCE_YOUR_CALM)`; a fresh
+  handshake is required to retry.  The check is placed before
+  stream-state validation so both the canonical attack shape
+  (`HEADERS`+`RST_STREAM` cycles) and abusive RSTs on idle
+  streams count toward the budget.
+
+### Added
+
+- **`BB_H2_WS_MAX_STREAMS_PER_CONNECTION`** (default `5`) caps
+  concurrent WebSocket (Extended CONNECT) streams per HTTP/2
+  connection.  Defends against stream-exhaustion DoS: without this
+  cap, an attacker can hold up to `BB_H2_MAX_CONCURRENT_STREAMS`
+  (default 100) idle WS streams per connection across an unbounded
+  `BB_MAX_CONNECTIONS` (default 0).  `0` disables the cap (no upper
+  bound beyond `BB_H2_MAX_CONCURRENT_STREAMS`).  Only meaningful
+  when `BB_H2_ENABLE_WEBSOCKET=1`.  Exceeded requests receive
+  `RST_STREAM(REFUSED_STREAM)`; the cap is per-connection, not
+  global.
+- **`blackbull.client.WebSocketH2Client` / `WebSocketH2Session`** —
+  public RFC 8441 client built on `HTTP2Client` and BlackBull's own
+  `ws_codec.encode_frame`.  Splits outgoing WebSocket payloads
+  across multiple H2 DATA frames at `max_frame_size`, emits
+  `WINDOW_UPDATE` for stream + connection-level receive flow control,
+  and runs the Extended CONNECT handshake through a small
+  `register_raw_stream` mechanism on `HTTP2Client`.
+
+### Fixed
+
+- **Server-side connection-level `WINDOW_UPDATE` on inbound DATA**
+  (RFC 9113 §6.9.1).  `HTTP2Actor._on_data_frame` previously
+  credited only the stream-level window when delivering a DATA
+  frame, leaving the connection-level receive window depleting
+  toward zero across requests.  Any single request body — or
+  cumulative inbound across a keep-alive H2 connection — past
+  65,535 bytes stalled waiting for credit that never came.  The
+  server now sends both `WINDOW_UPDATE(stream_id, length)` and
+  `WINDOW_UPDATE(0, length)` after delivery.  Surfaced during the
+  WS-over-H2 64 KiB interop test; the bug was broader than RFC 8441
+  and affects any large H2 upload.
+- **`HTTP2WSReader` unbounded buffer growth**.  Without a cap,
+  ``put_DATAFrame`` credited every incoming DATA frame's window
+  even when the WS actor wasn't draining — a misbehaving peer
+  could grow ``_buffer`` without bound.  Now caps at ``max_buffer``
+  (default 1 MiB) with a credit-on-drain backpressure model: bytes
+  are always buffered (no silent loss — the peer's window already
+  debited on the wire), but ``WINDOW_UPDATE`` is withheld while
+  over the cap and replayed once ``readexactly`` drains back
+  under it.  `_on_data_frame` recognises the
+  `backpressures_via_credit` marker so the backpressure path
+  doesn't `RST_STREAM` the connection; recipients without the
+  marker keep the legacy `ENHANCE_YOUR_CALM` semantics.
+
+### Docs
+
+- `KNOWN_LIMITATIONS.md` — the RFC 8441 section now documents the
+  stream-exhaustion attack surface and the recommended mitigations
+  (nginx frontend or finite `BB_MAX_CONNECTIONS`).
+- `docs/reference/env-vars.md` — new `BB_H2_WS_MAX_STREAMS_PER_CONNECTION`
+  row in the WebSocket table, and a production-posture note on
+  `BB_H2_ENABLE_WEBSOCKET` pointing at the nginx-frontend shape.
+
+### Internal
+
+- `HTTP2Client.register_raw_stream(stream_id)` — per-stream queue
+  for raw frame I/O, used by `WebSocketH2Client` to receive frames
+  on a stream without racing the receive loop.  Connection-level
+  frames (WINDOW_UPDATE, SETTINGS) bypass the raw-stream queue so
+  flow-control state stays consistent.
+- `HTTP2Actor._make_done_cb(stream_id, *, is_ws=False)` —
+  consolidates per-stream lifecycle cleanup (the existing
+  `_active_stream_count` decrement, the sender/recipient dict
+  evictions, and the new RFC 8441 `_ws_stream_count` decrement)
+  in one site.  `is_ws=True` opts the WS counter in at the call
+  site so regular HTTP stream completions don't silently drift
+  the WS counter below the true in-flight count.
+- `HTTP1Sender` / `HTTP2Sender` — `reset_per_request_state()`
+  encapsulates the per-keep-alive-request reset block surfaced by
+  Sprint 38's `BB_REQUEST_TIMEOUT` work.  `HTTP1Sender` also
+  extracts `_ensure_framing_headers` / `_ensure_date_header` helpers
+  shared by `_flush` and `_pathsend`.  `HTTP2Sender`'s bytes
+  `__call__` path now carries the same `_end_stream_sent` defensive
+  guard the dict path got in Sprint 38.
+
+### Status
+
+- `BB_H2_ENABLE_WEBSOCKET` remains opt-in (default `False`).
+  Sprint 39 lands the interop coverage + safety guards so the
+  eventual default flip does not regress the project's security
+  posture.
 
 ---
 

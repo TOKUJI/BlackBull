@@ -12,6 +12,7 @@ from .scenario import (
     Step,
 )
 from .websocket import WebSocketClient, WebSocketSession
+from .websocket_h2 import WebSocketH2Client, WebSocketH2Session
 from .exceptions import (
     ClientError,
     ConnectionError,
@@ -36,6 +37,8 @@ __all__ = [
     'Sleep',
     'Step',
     'WebSocketClient',
+    'WebSocketH2Client',
+    'WebSocketH2Session',
     'WebSocketSession',
     'ClientError',
     'ConnectionError',
