@@ -19,9 +19,6 @@ Coverage:
 
 from __future__ import annotations
 
-import asyncio
-import re
-
 import pytest
 from http import HTTPMethod, HTTPStatus
 
@@ -56,7 +53,8 @@ class TestExtensionsAttribute:
         app = BlackBull()
         app.extensions['test'] = object()
         assert 'test' in app.extensions
-        assert app.extensions.pop('test') is not None
+        popped = app.extensions.pop('test')
+        assert popped is not None
 
 
 # ---------------------------------------------------------------------------
