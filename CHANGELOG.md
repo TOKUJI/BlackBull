@@ -25,7 +25,38 @@ so the editable install's metadata catches up.
 ## [Unreleased]
 
 Sprint 39 in progress — RFC 8441 (WebSocket-over-HTTP/2) interop +
-safety guards in preparation for the default-on flip.
+safety guards in preparation for the default-on flip, plus three
+security-hardening fixes for pre-existing exploitable gaps in
+the HTTP/2 and WebSocket paths.
+
+### Security
+
+- **HTTP/2 CONTINUATION header-block size cap** (high severity).
+  `HTTP2Actor._on_continuation_frame` previously appended every
+  CONTINUATION payload to `header_frame.raw_block` with no size
+  limit; an attacker could flood the server with CONTINUATION
+  frames until OOM.  Mirror the HTTP/1.1 `BB_HEADER_MAX_TOTAL`
+  budget (64 KiB default) and emit `RST_STREAM(ENHANCE_YOUR_CALM)`
+  (RFC 6585 §5 / RFC 9113 §7) on over-cap streams — the same
+  error code nginx and Envoy use.
+- **WebSocket frame payload size cap** (medium severity, requires
+  established WebSocket connection).  `WebSocketRecipient._read_loop`
+  did not bound the declared payload length; a post-handshake
+  adversary could advertise a 2**63 - 1 payload (RFC 6455 §5.2
+  maximum) and the server would attempt to buffer it.  New
+  `_MAX_FRAME_PAYLOAD` class attribute (default 1 MiB) +
+  `max_frame_payload` constructor parameter — the check fires
+  *before* any body bytes are read off the wire, raises
+  `FramePayloadTooLarge` from `read_payload`, and the recipient
+  translates it into `CLOSE(1009)` (MESSAGE_TOO_BIG).
+- **HTTP/2 inbound RST_STREAM rate limit** (high severity —
+  CVE-2023-44487 "Rapid Reset").  Per-second rolling counter on
+  inbound `RST_STREAM` frames.  Over `_RST_RATE_LIMIT=20/s`, the
+  connection is closed with `GOAWAY(ENHANCE_YOUR_CALM)`; a fresh
+  handshake is required to retry.  The check is placed before
+  stream-state validation so both the canonical attack shape
+  (`HEADERS`+`RST_STREAM` cycles) and abusive RSTs on idle
+  streams count toward the budget.
 
 ### Added
 
