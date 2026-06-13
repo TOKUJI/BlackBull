@@ -228,6 +228,11 @@ class BlackBull:
         self._static_roots: list[tuple[str, Path]] = []
         self._chain = None  # cached global middleware chain; rebuilt on first request
 
+        # Extension namespace — name→object registry used by third-party
+        # integrations following the ``init_app(app)`` convention.  See
+        # docs/guide/extensions.md.
+        self.extensions: dict[str, object] = {}
+
         if trusted_proxies is not None:
             from .middleware.proxy import TrustedProxy  # noqa: PLC0415
             self.use(TrustedProxy(trusted_proxies))
@@ -567,9 +572,16 @@ class BlackBull:
     def on_error(self, key):
         """Register a custom error handler for an HTTPStatus or exception class.
 
+        ``key`` may be an :class:`HTTPStatus`, a plain ``int`` status code
+        (coerced to ``HTTPStatus``), or an exception class.
+
         Usage::
 
             @app.on_error(HTTPStatus.FORBIDDEN)
+            async def handle_403(scope, receive, send):
+                ...
+
+            @app.on_error(403)            # int shorthand
             async def handle_403(scope, receive, send):
                 ...
 
@@ -583,6 +595,8 @@ class BlackBull:
           - 'error_exception' : exception instance (when triggered by an exception)
           - 'allowed_methods' : allowed method names (for 405)
         """
+        if isinstance(key, int) and not isinstance(key, HTTPStatus):
+            key = HTTPStatus(key)
         return self._error_router(key)
 
     def url_path_for(self, name: str, /, **params) -> str:

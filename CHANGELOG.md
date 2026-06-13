@@ -24,6 +24,24 @@ so the editable install's metadata catches up.
 
 ## [Unreleased]
 
+### Added
+- `BlackBull.extensions: dict[str, object]` — namespace for
+  third-party integrations following the `init_app(app)`
+  convention.  Empty at construction; extensions write themselves
+  into it under a documented key.
+- `app.on_error(int)` — accepts a plain `int` HTTP status code
+  in addition to `HTTPStatus` and exception classes.  Coerced to
+  `HTTPStatus` internally; ergonomic shortcut for extension code
+  that already uses raw status codes.
+
+### Docs
+- New guide page `docs/guide/extensions.md` covering the
+  `app.extensions` namespace, the `init_app(app)` convention,
+  the `blackbull-<name>` → `app.extensions['<name>']` key
+  convention with `RuntimeError` collision detection, and the
+  author-managed dependency-ordering pattern with the
+  prerequisite-check idiom.
+
 ## [0.35.0] — 2026-06-14
 
 **Sprint 39 close: RFC 8441 interop, default-on safety guards,
