@@ -244,6 +244,13 @@ class HTTP2Actor(Actor):
         self.max_concurrent_streams: int = _cfg.h2_max_concurrent_streams
         self._request_timeout: float = _cfg.request_timeout
         self._frame_yield_every: int = _cfg.frame_yield_every
+        # RFC 9113 header-block hard ceiling — matches the HTTP/1.1
+        # ``BB_HEADER_MAX_TOTAL`` budget so a CONTINUATION-flood peer
+        # can't grow ``header_frame.raw_block`` without bound.  When
+        # exceeded, the offending stream gets RST_STREAM
+        # ENHANCE_YOUR_CALM (RFC 6585 §5 / RFC 9113 §7) — the same
+        # code nginx and Envoy use for this condition.
+        self._header_max_total: int = _cfg.header_max_total
         # Per-connection semaphore: caps concurrently-running stream handlers to
         # prevent a high-mux connection from starving other connections on the
         # same worker.  None means no cap.
@@ -840,6 +847,23 @@ class HTTP2Actor(Actor):
             return True
 
         header_frame.raw_block += frame.payload
+
+        # CVE-class CONTINUATION flood — an attacker that opens a
+        # stream with END_HEADERS=0 and follows with unbounded
+        # CONTINUATION frames at DEFAULT_MAX_FRAME_SIZE each would
+        # otherwise grow ``raw_block`` until OOM.  Mirror the H/1.1
+        # 64 KiB cap (BB_HEADER_MAX_TOTAL).  ENHANCE_YOUR_CALM is the
+        # standard error code for "header block too large" (RFC 6585
+        # §5 / RFC 9113 §7); nginx and Envoy use the same.
+        if len(header_frame.raw_block) > self._header_max_total:
+            logger.warning(
+                'Stream %d header block exceeded BB_HEADER_MAX_TOTAL=%d '
+                'across CONTINUATION frames — RST_STREAM ENHANCE_YOUR_CALM',
+                stream.stream_id, self._header_max_total,
+            )
+            await self.send_frame(self.factory.rst_stream(
+                stream.stream_id, ErrorCodes.ENHANCE_YOUR_CALM))
+            return True
 
         if not frame.end_headers:
             return False
