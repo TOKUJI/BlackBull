@@ -290,9 +290,8 @@ class HTTP2Actor(Actor):
         # streams on this connection, capped at
         # ``cfg.h2_ws_max_streams_per_connection``.  Incremented in
         # :meth:`_handle_h2_websocket` before spawning the actor task;
-        # decremented via :meth:`_make_done_cb` with ``is_ws=True`` when
-        # the WS handler exits (normal close, app raise, or TaskGroup
-        # cancellation).
+        # decremented in the task's ``finally`` block when the WS handler
+        # exits (normal close, app raise, or TaskGroup cancellation).
         self._ws_stream_count: int = 0
 
         # RFC 9113 §5.1 — closed-stream state, separate from the priority tree.
@@ -907,7 +906,8 @@ class HTTP2Actor(Actor):
 
         stream.on_data_received(end_stream=bool(frame.end_stream))
         if stream.stream_id in self._recipients:
-            delivered = self._recipients[stream.stream_id].put_DATAFrame(frame)
+            recipient = self._recipients[stream.stream_id]
+            delivered = recipient.put_DATAFrame(frame)
             if delivered:
                 # RFC 9113 §6.9.1 — DATA frames are subject to BOTH
                 # stream and connection-level flow control.  Crediting
@@ -919,6 +919,14 @@ class HTTP2Actor(Actor):
                     self.factory.window_update(stream.stream_id, frame.length))
                 await self.send_frame(
                     self.factory.window_update(0, frame.length))
+            elif getattr(recipient, 'backpressures_via_credit', False):
+                # Recipient buffered the bytes but signalled backpressure
+                # by withholding credit (HTTP2WSReader past its buffer
+                # cap).  The peer's stream window debits by frame.length
+                # and the recipient replays the credit through its own
+                # callback once readexactly drains below the cap.  No
+                # RST_STREAM — the bytes are safe in the buffer.
+                pass
             else:
                 await self.send_frame(
                     self.factory.rst_stream(stream.stream_id, ErrorCodes.ENHANCE_YOUR_CALM))
@@ -973,7 +981,18 @@ class HTTP2Actor(Actor):
 
         scope['_ws_send_101'] = _ws_send_200  # WebSocketActor calls this on websocket.accept
 
-        ws_reader = HTTP2WSReader()
+        sid = stream.stream_id
+
+        async def _replay_credit(n: int) -> None:
+            # HTTP2WSReader hit its buffer cap and withheld credit while
+            # delivering DATA frames; once readexactly drained below the
+            # cap, replay both the stream-level and connection-level
+            # WINDOW_UPDATE so the peer's window reopens symmetrically
+            # with the regular per-frame path.
+            await self.send_frame(self.factory.window_update(sid, n))
+            await self.send_frame(self.factory.window_update(0, n))
+
+        ws_reader = HTTP2WSReader(credit_callback=_replay_credit)
         ws_writer = HTTP2WSWriter(stream_send)
         self._recipients[stream.stream_id] = ws_reader  # DATA frames routed here
 
