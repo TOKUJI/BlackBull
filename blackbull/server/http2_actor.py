@@ -5,6 +5,7 @@ StreamActor owns the lifetime of a single HTTP/2 stream.
 """
 import asyncio
 import logging
+import time
 from collections.abc import Awaitable, Callable
 from http import HTTPStatus
 from typing import Any, Protocol, runtime_checkable
@@ -208,6 +209,15 @@ class HTTP2Actor(Actor):
     path (same behaviour as the pre-Actor HTTP2Handler).
     """
 
+    # CVE-2023-44487 (Rapid Reset) rolling-window thresholds.  20
+    # RST_STREAMs per second is generous for legitimate clients
+    # (browser navigation + prefetch cancellation rarely exceeds
+    # ~10/s) and limiting for the attack shape (CVE-2023-44487
+    # exploits routinely hit thousands/s).  Promote to env vars if a
+    # real workload surfaces that legitimately exceeds the threshold.
+    _RST_RATE_LIMIT: int = 20
+    _RST_RATE_WINDOW: float = 1.0  # seconds
+
     def __init__(
         self,
         reader: 'AbstractReader | None',
@@ -292,6 +302,20 @@ class HTTP2Actor(Actor):
         # RFC 8441 — set by run() from BB_H2_ENABLE_WEBSOCKET.  When False,
         # any incoming :method=CONNECT with :protocol=websocket is refused.
         self._ws_over_h2_enabled: bool = False
+
+        # CVE-2023-44487 (Rapid Reset) guard — rolling RST_STREAM rate.
+        # Attackers open a stream with HEADERS and immediately RST it,
+        # churning the per-stream allocations (Stream node, sender,
+        # recipient, HPACK context) without hitting
+        # ``max_concurrent_streams`` because the lifecycle is too fast
+        # for the counter to accumulate.  When the inbound RST_STREAM
+        # rate exceeds the threshold, the connection is closed with
+        # GOAWAY ENHANCE_YOUR_CALM.  Cheap counter, no allocation per
+        # RST; threshold/window are class constants today and can be
+        # promoted to env vars if a real workload surfaces that
+        # legitimately exceeds them.
+        self._rst_count: int = 0
+        self._rst_window_start: float = 0.0
 
         # RFC 8441 stream-exhaustion guard — count of in-flight WebSocket
         # streams on this connection, capped at
@@ -529,6 +553,30 @@ class HTTP2Actor(Actor):
             # are silently ignored.
             if frame_type is None:
                 continue
+
+            # CVE-2023-44487 (Rapid Reset) — bound the per-second
+            # inbound RST_STREAM rate before any per-stream work.
+            # The attack opens a stream with HEADERS and immediately
+            # RSTs it; ``max_concurrent_streams`` never catches it
+            # because the lifecycle is too short to accumulate.
+            # GOAWAY ENHANCE_YOUR_CALM closes the connection; a fresh
+            # handshake is required to retry.  Placed BEFORE stream-
+            # state validation so legitimate RSTs on a real open
+            # stream and abusive RSTs on idle/unknown streams both
+            # count toward the rolling budget.
+            if frame_type == FrameTypes.RST_STREAM:
+                now = time.monotonic()
+                if now - self._rst_window_start > self._RST_RATE_WINDOW:
+                    self._rst_count = 0
+                    self._rst_window_start = now
+                self._rst_count += 1
+                if self._rst_count > self._RST_RATE_LIMIT:
+                    await self._connection_error(
+                        ErrorCodes.ENHANCE_YOUR_CALM,
+                        f'RST_STREAM rate limit exceeded '
+                        f'({self._rst_count} in '
+                        f'{self._RST_RATE_WINDOW}s)')
+                    continue
 
             # RFC 9113 §4.2 — a frame whose payload exceeds the receiver's
             # advertised SETTINGS_MAX_FRAME_SIZE is a FRAME_SIZE_ERROR.  When

@@ -1088,3 +1088,81 @@ class TestHTTP2BrowserShapedFrames:
         assert app.call_count == 1, (
             f'Browser-shaped SETTINGS+HEADERS(PRIORITY) must dispatch; '
             f'got call_count={app.call_count}')
+
+
+# ---------------------------------------------------------------------------
+# CVE-2023-44487 (Rapid Reset) — RST_STREAM rate limit
+# ---------------------------------------------------------------------------
+#
+# Attackers open a stream with HEADERS and immediately RST it, churning
+# per-stream allocations (Stream node, sender, recipient, HPACK context)
+# without hitting ``max_concurrent_streams`` because each stream is
+# opened and reset too quickly for the counter to accumulate.  Bound
+# the per-second inbound RST_STREAM rate; over the threshold, close
+# the connection with GOAWAY ENHANCE_YOUR_CALM.
+
+@pytest.mark.asyncio
+class TestRapidReset:
+    """``HTTP2Actor._RST_RATE_LIMIT`` caps inbound RST_STREAM frames
+    per ``_RST_RATE_WINDOW`` seconds.  Over the cap, the connection
+    receives ``GOAWAY ENHANCE_YOUR_CALM``."""
+
+    @staticmethod
+    def _rst_frame(stream_id: int, error_code: int = 0) -> bytes:
+        from blackbull.protocol.frame_types import FrameTypes as _FT
+        payload = error_code.to_bytes(4, 'big')
+        return _make_h2_frame(_FT.RST_STREAM, 0, stream_id, payload)
+
+    @staticmethod
+    def _pretend_streams_closed(handler, stream_ids):
+        """Pre-populate ``_closed_streams`` so the RST_STREAM frames
+        arrive on the 'late frame on closed stream' branch instead of
+        IDLE-state PROTOCOL_ERROR — lets the test exercise the
+        rate-limit guard without orchestrating real HEADERS+RST
+        cycles (the real attack shape; the rate-limit guard is
+        placed before state validation so both shapes count)."""
+        for sid in stream_ids:
+            handler._closed_streams[sid] = False  # closed-via-END_STREAM
+
+    async def test_burst_of_rst_stream_emits_goaway(self):
+        """Sending RST_STREAM frames at a rate above ``_RST_RATE_LIMIT``
+        in a single second must trigger GOAWAY(ENHANCE_YOUR_CALM)."""
+        from blackbull.protocol.frame_types import ErrorCodes as _EC
+        from blackbull.server.http2_actor import HTTP2Actor
+
+        burst = HTTP2Actor._RST_RATE_LIMIT + 5
+        sids = [1 + 2 * i for i in range(burst)]
+        frames = [self._rst_frame(stream_id=s) for s in sids]
+
+        handler, _ = _make_h2_actor()
+        self._pretend_streams_closed(handler, sids)
+        handler.receive = AsyncMock(side_effect=[*frames, None])
+        await handler.run()
+
+        goaways = [c.args[0] for c in handler.send_frame.call_args_list
+                   if hasattr(c.args[0], 'FrameType')
+                   and c.args[0].FrameType() == FrameTypes.GOAWAY]
+        assert goaways, 'rapid-reset burst must trigger GOAWAY'
+        codes = [getattr(g, 'error_code', None) for g in goaways]
+        assert _EC.ENHANCE_YOUR_CALM in codes, (
+            f'GOAWAY must use ENHANCE_YOUR_CALM; got codes={codes}')
+
+    async def test_rate_below_cap_does_not_trip(self):
+        """Sending RST_STREAM frames *under* the cap must NOT trigger
+        GOAWAY — regression lock against an overly-aggressive limit."""
+        from blackbull.server.http2_actor import HTTP2Actor
+
+        below = max(1, HTTP2Actor._RST_RATE_LIMIT // 2)
+        sids = [1 + 2 * i for i in range(below)]
+        frames = [self._rst_frame(stream_id=s) for s in sids]
+
+        handler, _ = _make_h2_actor()
+        self._pretend_streams_closed(handler, sids)
+        handler.receive = AsyncMock(side_effect=[*frames, None])
+        await handler.run()
+
+        goaways = [c.args[0] for c in handler.send_frame.call_args_list
+                   if hasattr(c.args[0], 'FrameType')
+                   and c.args[0].FrameType() == FrameTypes.GOAWAY]
+        assert goaways == [], (
+            f'no GOAWAY expected below the rate cap; got {goaways}')
