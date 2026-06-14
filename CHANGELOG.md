@@ -24,6 +24,69 @@ so the editable install's metadata catches up.
 
 ## [Unreleased]
 
+## [0.37.0] — 2026-06-14
+
+**Sprint 41 close: OpenAPI as the reference implementation of the
+`init_app(app)` extension convention.**
+
+Most of the OpenAPI surface (`generate_spec`, `swagger_ui_html`, v1
+router introspection, v2 type → JSON-schema synthesis with dataclass
+support, the user guide, and 30 unit tests) was already in tree from
+earlier work.  Sprint 41 closes the remainder: the public
+`OpenAPIExtension` class, an `openapi-spec-validator` conformance
+check, and the doc + example updates that make this the canonical
+example of Sprint 40's extension convention.
+
+### Added
+- `blackbull.openapi.OpenAPIExtension` — the in-tree reference
+  implementation of the `init_app(app)` extension convention.
+  Supports both the eager `OpenAPIExtension(app, ...)` and deferred
+  `ext = OpenAPIExtension(...); ext.init_app(app)` construction styles
+  documented in the extensions guide.  Raises `RuntimeError` with
+  module attribution when another extension is already registered
+  under `app.extensions['openapi']`.  Retains handler references on
+  `self` so the registered routes survive past `init_app` return.
+- `tests/unit/test_openapi.py`: +6 `TestOpenAPIExtension` cases
+  (deferred / eager / `docs_path=None` / collision / same-instance
+  idempotency / `enable_openapi` parity) plus 2 conformance cases
+  that validate the generated spec against `openapi-spec-validator`
+  for both the fixture app and a dataclass-driven app.
+- `openapi-spec-validator` added to the `[testing]` extra so the
+  conformance check runs with `pip install -e '.[testing]'`.
+
+### Changed
+- `BlackBull.enable_openapi(...)` refactored to a thin delegating
+  wrapper around `OpenAPIExtension`.  Behaviour and signature are
+  unchanged; the core convenience method is now written in terms of
+  the public extension surface — the same shape third-party authors
+  use.
+- `examples/SimpleTaskManager/app.py` switched from
+  `app.enable_openapi(...)` to `OpenAPIExtension(app, ...)` to
+  demonstrate the reference form in a real end-to-end app.
+
+### Docs
+- `docs/guide/openapi.md`: new "The `OpenAPIExtension` class" section
+  showing the two construction styles and when to prefer them over
+  the convenience method.  Query-parameter gap noted under "What's
+  not yet automated" — the simplified-handler model has no annotation
+  source for query params today, so they're not emitted.
+- `docs/guide/extensions.md`: new "In-tree reference:
+  `OpenAPIExtension`" callout pointing readers to the OpenAPI
+  module as the concrete example of the convention.
+- `docs/about/internals.md`: post-Sprint-40 audit corrections.
+  `ServerActor` (which doesn't exist as a class) is renamed to
+  `ASGIServer` in 4 sites (hierarchy diagram, dedicated section
+  heading, supervisor strategies table row, exception propagation
+  table row).  `app_startup` / `app_shutdown` attribution corrected
+  to `BlackBull._handle_lifespan` rather than the server.
+  `RequestActor` added under `StreamActor` (HTTP/2) in the hierarchy
+  diagram since the H/2 path also delegates through it for the
+  ASGI call.
+
+### Migration risk
+Zero.  `BlackBull.enable_openapi(...)` signature and behaviour are
+unchanged; `OpenAPIExtension` is purely additive.
+
 ## [0.36.0] — 2026-06-14
 
 **Sprint 40 close: slim extension surface.**
