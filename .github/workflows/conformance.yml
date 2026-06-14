@@ -50,12 +50,17 @@ jobs:
         run: pip install -e '.[compression]'
 
       - name: Install h2spec
+        # `$HOME/.local/bin` isn't pre-created on a fresh ubuntu-latest
+        # runner — `tar -C` into a missing directory exits non-zero.
+        # mkdir first, then add to GITHUB_PATH so subsequent steps see it.
         run: |
           set -euo pipefail
+          mkdir -p "$HOME/.local/bin"
           curl -L -sS \
             https://github.com/summerwind/h2spec/releases/download/v2.6.0/h2spec_linux_amd64.tar.gz \
             | tar -xz -C "$HOME/.local/bin" h2spec
           chmod +x "$HOME/.local/bin/h2spec"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           "$HOME/.local/bin/h2spec" --version
 
       - name: Generate self-signed TLS material
@@ -84,8 +89,8 @@ jobs:
           done
 
       - name: Run h2spec
-        env:
-          PATH: ${{ runner.tool_cache }}/Python/3.12/x64/bin:/home/runner/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+        # h2spec_run.sh resolves `h2spec` via PATH; the Install step
+        # added `$HOME/.local/bin` to GITHUB_PATH so it's reachable here.
         run: bash bench/conformance/h2spec_run.sh
 
       - name: Stop BlackBull
