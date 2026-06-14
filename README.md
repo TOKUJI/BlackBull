@@ -16,6 +16,7 @@ third-party C extensions in the protocol stack.
 [![PyPI](https://img.shields.io/pypi/v/blackbull.svg)](https://pypi.org/project/blackbull/)
 [![Python](https://img.shields.io/pypi/pyversions/blackbull.svg)](https://pypi.org/project/blackbull/)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
+[![RFC conformance](https://github.com/TOKUJI/BlackBull/actions/workflows/conformance.yml/badge.svg)](https://github.com/TOKUJI/BlackBull/actions/workflows/conformance.yml)
 [![Benchmarked by HttpArena](https://cdn.jsdelivr.net/gh/MDA2AV/httparena-badge/wordmark.svg)](https://www.http-arena.com/leaderboard/)
 
 ## Why BlackBull
