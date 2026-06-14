@@ -188,7 +188,8 @@ revoke a session early without rotating the secret.
     package, following the [`init_app(app)`](extensions.md)
     extension convention.  The in-tree
     `blackbull.middleware.Session` emits a `DeprecationWarning` and
-    will be removed in BlackBull 0.40.
+    will be removed no earlier than BlackBull v0.41 (and not before
+    2026-07-14).
 
 ```python
 # pip install blackbull-session

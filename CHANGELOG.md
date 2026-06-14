@@ -57,9 +57,12 @@ no convention adjustments were needed.
 ### Deprecated
 
 - `blackbull.middleware.Session` now emits `DeprecationWarning` on
-  construction and will be removed in BlackBull 0.40.  Migrate to
-  `pip install blackbull-session` and
-  `from blackbull_session import SessionExtension`.
+  construction.  Migrate to `pip install blackbull-session` and
+  `from blackbull_session import SessionExtension`.  The in-tree
+  form will be removed no earlier than BlackBull v0.41 (and not
+  before 2026-07-14) — see the
+  [Patterns and pitfalls](https://github.com/TOKUJI/BlackBull/blob/master/docs/guide/extensions.md#deprecating-an-in-tree-class-youre-extracting)
+  section for the deprecation-window policy.
 
 ### Changed
 

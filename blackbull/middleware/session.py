@@ -61,10 +61,11 @@ logger = logging.getLogger(__name__)
 
 
 _DEPRECATION_MESSAGE = (
-    "blackbull.middleware.Session is deprecated and will be removed in "
-    "BlackBull 0.40.  Install the standalone 'blackbull-session' package "
-    "and use 'from blackbull_session import SessionExtension' instead.  "
-    "See https://github.com/TOKUJI/blackbull-session for details."
+    "blackbull.middleware.Session is deprecated.  Install the standalone "
+    "'blackbull-session' package and use 'from blackbull_session import "
+    "SessionExtension' instead.  This in-tree form will be removed no "
+    "earlier than BlackBull v0.41 (and not before 2026-07-14).  See "
+    "https://github.com/TOKUJI/blackbull-session for details."
 )
 
 

@@ -312,7 +312,7 @@ surface BlackBull itself uses.  You don't have to re-declare those.
 
 If your extension replaces something that previously lived in
 BlackBull, the in-tree form should emit a `DeprecationWarning` on
-construction for at least one MINOR cycle:
+construction:
 
 ```python
 import warnings
@@ -321,17 +321,27 @@ class Session:           # in-tree, deprecated form
     def __init__(self, ...):
         warnings.warn(
             "blackbull.middleware.Session is deprecated; install "
-            "'blackbull-session' and use SessionExtension instead.",
+            "'blackbull-session' and use SessionExtension instead. "
+            "Will be removed no earlier than BlackBull v0.41 "
+            "(and not before 2026-07-14).",
             DeprecationWarning,
             stacklevel=2,
         )
         ...
 ```
 
-Schedule the removal explicitly — naming a target version
-(`"will be removed in BlackBull 0.40"`) anchors both authors and
-users.  Don't ship a deprecation without a removal plan; "deprecated
-forever" code accretes maintenance debt without any of the migration
+Schedule the removal with **two gates: at least three MINOR releases
+ahead AND at least one calendar month after the deprecation lands** —
+whichever boundary is later.  For a deprecation announced in v0.38.0
+on 2026-06-14, both gates put the earliest removal at v0.41.0 or
+later, and not before 2026-07-14.  Naming both gates in the warning
+text (rather than a single bare version target) anchors authors and
+users alike and forecloses cargo-cult removal at the release-count
+gate alone.  Early-alpha status does not shorten this window: users
+plan migrations against the announced removal target, and a
+too-short window forces emergency migrations.  At the same time,
+don't ship a deprecation without *some* removal plan — "deprecated
+forever" code accretes maintenance debt without the migration
 benefit.
 
 ## Common extension categories
