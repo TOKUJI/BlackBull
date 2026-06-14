@@ -208,3 +208,159 @@ class RequestIdExtension:
 See [Middleware](middleware.md) for the full middleware
 contract, including how to short-circuit the chain and how to
 inspect responses via `intercepting_send`.
+
+## Patterns and pitfalls from real extractions
+
+The following notes come from packaging an in-tree middleware
+(`blackbull.middleware.Session`) as the standalone
+[`blackbull-session`](https://github.com/TOKUJI/blackbull-session)
+extension during the 0.38 cycle.  They are concrete decisions, not
+hypothetical advice.
+
+### Pick a `dependencies` floor that matches what you import
+
+`app.extensions` landed in BlackBull 0.36.0 (the Sprint 40 work).
+An extension that touches it must pin at least that floor:
+
+```toml
+dependencies = [
+    "blackbull >= 0.36.0",
+]
+```
+
+If your extension uses something newer — `intercepting_send`, a
+specific event name, a `scope` field — bump the floor to match.
+Don't pin an exact version; that fights with downstream apps that
+want a different patch level.
+
+### Reuse the framework's public middleware helpers
+
+Two BlackBull APIs are useful to extension authors and are
+guaranteed-stable public surface:
+
+- `from blackbull.middleware import as_middleware` — class
+  decorator that normalises `call_next` so any `send` wrapper your
+  middleware installs receives plain ASGI event dicts, not
+  `Response` objects.  Saves you from `isinstance` guards.
+- `from blackbull.asgi import ASGIEvent` — symbolic constants for
+  ASGI event type strings (`HTTP_RESPONSE_START`, etc.).  Prefer
+  these over hard-coded literals.
+
+If you find yourself reaching for `from blackbull._something_private`,
+stop and ask whether the symbol should be promoted to a public
+re-export.  Opening an issue is the right move; private imports
+will break across MINOR versions.
+
+### Eager + deferred construction
+
+Follow the same dual-construction shape as `OpenAPIExtension`:
+
+```python
+class MyExtension:
+    extension_key: str = 'myext'
+
+    def __init__(self, app=None, *, opt=...):
+        # validate/store config first
+        self._opt = opt
+        # then wire on-construction if eager
+        if app is not None:
+            self.init_app(app)
+
+    def init_app(self, app):
+        existing = app.extensions.get(self.extension_key)
+        if existing is not None and existing is not self:
+            raise RuntimeError(...)
+        app.use(self)                                # or app.route(...), etc.
+        app.extensions[self.extension_key] = self
+```
+
+The `existing is not self` guard makes `init_app` idempotent for the
+same instance — a defensive nicety for users who wire eagerly and
+then call `init_app` explicitly anyway.
+
+### Make `extension_key` a class attribute, not configurable
+
+A `__init__` kwarg like `extension_key='session-v2'` looks
+flexible but lets users sneak past the collision check (`if 'session'
+in app.extensions: raise` is bypassed when a second extension
+registers itself under a different key).  Pin the key as a class
+attribute and document it in your `README`.
+
+### Place `app` as the first positional argument
+
+`SessionExtension(app, secret=...)` reads cleanly only when `app`
+is positional-first.  If you place it after a `*` keyword separator
+you force `SessionExtension(secret=..., app=app)` — readable but
+inverts the convention every other extension already follows.
+
+### Tests: depend on `blackbull[testing]` for the parent framework
+
+```toml
+[project.optional-dependencies]
+testing = [
+    "pytest",
+    "pytest-asyncio",
+    "blackbull[testing] >= 0.36.0",
+]
+```
+
+This pulls in `pytest-asyncio`, `httpx[http2]`, `websockets`,
+`hypothesis`, and `openapi-spec-validator` — the same testing
+surface BlackBull itself uses.  You don't have to re-declare those.
+
+### Deprecating an in-tree class you're extracting
+
+If your extension replaces something that previously lived in
+BlackBull, the in-tree form should emit a `DeprecationWarning` on
+construction for at least one MINOR cycle:
+
+```python
+import warnings
+
+class Session:           # in-tree, deprecated form
+    def __init__(self, ...):
+        warnings.warn(
+            "blackbull.middleware.Session is deprecated; install "
+            "'blackbull-session' and use SessionExtension instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        ...
+```
+
+Schedule the removal explicitly — naming a target version
+(`"will be removed in BlackBull 0.40"`) anchors both authors and
+users.  Don't ship a deprecation without a removal plan; "deprecated
+forever" code accretes maintenance debt without any of the migration
+benefit.
+
+## Common extension categories
+
+BlackBull's core ships protocols, routing, middleware, events,
+error handling, and a minimal OpenAPI generator.  Almost everything
+else is deliberately *not* in the framework — partly to keep the
+core small and audited, partly because most of these categories
+have several reasonable shapes and BlackBull does not endorse one.
+The table below is informational, not a roadmap; ship one of these
+as `blackbull-<name>` on PyPI and it becomes a citizen of the
+extension ecosystem.
+
+| Category | Reasonable shapes (pick one per extension) | Notes |
+|---|---|---|
+| **Sessions** | signed cookie ([`blackbull-session`](https://github.com/TOKUJI/blackbull-session)), Redis-backed, SQL-backed | Signed cookies have no server state; backed stores allow revocation. |
+| **Authentication** | JWT bearer, OAuth2 PKCE, API keys, session-cookie auth, mutual TLS, HMAC-signed requests | BlackBull does not ship a blessed auth method.  Pick the one that matches your threat model and credential lifecycle. |
+| **Authorization / RBAC** | per-route decorators, policy objects (Casbin-style), scope-based | Often composes with an auth extension via `app.extensions['auth']`. |
+| **Observability** | Prometheus metrics, OpenTelemetry tracing, structured access logs, Sentry error reporting | The `blackbull.*` and `blackbull.access` loggers are the natural hook points; see [Logging](logging.md). |
+| **Rate limiting** | token bucket, leaky bucket, sliding window; in-process / Redis-backed | Best wired through `app.intercept('before_handler')`. |
+| **Caching** | response cache (already in tree as `Cache` middleware), fragment cache, full-page edge cache | Re-extraction of `Cache` is an option once user signal warrants. |
+| **Database integration** | SQLAlchemy async, Tortoise, raw `asyncpg`, SQLite via `aiosqlite` | Connection-pool lifecycle ties to `@app.on('lifespan_startup')` / `lifespan_shutdown`. |
+| **Background tasks** | in-process `asyncio.create_task` helpers, ARQ bridge, Celery bridge | Mind shutdown ordering: drain in `lifespan_shutdown` before pools close. |
+| **Admin / dashboards** | route-mount admin UIs, OpenAPI-driven CRUD | Most depend on an auth extension being already wired. |
+| **CORS / CSRF / security headers** | `CORS` (already in tree), CSP / HSTS injectors, double-submit CSRF | Single-touchpoint middlewares — straightforward to ship as extensions if your variant differs from the in-tree default. |
+| **WebSocket helpers** | room/channel managers, pub-sub bridges (Redis, NATS), broadcast routers | Build on the [`scheme=Scheme.websocket`](websockets.md) route form. |
+| **Static / templates** | static-file extras (already in tree), Jinja2 / Mako / minify-html bridges | Templates are usually a library, not an extension — call them from your handler. |
+
+The framework does not curate this list — there's no
+"blessed extension" registry.  If you want others to find your
+extension, the discovery path is PyPI search for `blackbull-` and
+linking to your project from your own documentation.

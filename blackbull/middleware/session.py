@@ -51,12 +51,21 @@ import json
 import logging
 import os
 import time
+import warnings
 from typing import Any
 
 from ..asgi import ASGIEvent
 from .utils import as_middleware
 
 logger = logging.getLogger(__name__)
+
+
+_DEPRECATION_MESSAGE = (
+    "blackbull.middleware.Session is deprecated and will be removed in "
+    "BlackBull 0.40.  Install the standalone 'blackbull-session' package "
+    "and use 'from blackbull_session import SessionExtension' instead.  "
+    "See https://github.com/TOKUJI/blackbull-session for details."
+)
 
 
 class _SessionDict(dict):
@@ -158,6 +167,7 @@ class Session:
         samesite: str | None = 'Lax',
         path: str = '/',
     ):
+        warnings.warn(_DEPRECATION_MESSAGE, DeprecationWarning, stacklevel=2)
         if secret is None:
             secret = os.environ.get('BB_SESSION_SECRET')
         if not secret:

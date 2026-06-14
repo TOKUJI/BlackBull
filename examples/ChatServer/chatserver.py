@@ -53,7 +53,8 @@ from blackbull import (
     cookie_header,
     read_body,
 )
-from blackbull.middleware import Compression, Session
+from blackbull.middleware import Compression
+from blackbull_session import SessionExtension
 from blackbull.utils import Scheme
 
 _TEMPLATES = pathlib.Path(__file__).parent / 'templates'
@@ -217,13 +218,14 @@ async def json_body_mw(scope, receive, send, call_next):
 
 app = BlackBull()
 app.use(Compression())          # gzips JSON / HTML responses when the client accepts it
-app.use(Session(
+SessionExtension(
+    app,
     # Demo secret — set BB_SESSION_SECRET in production.  DO NOT use this
     # inline default for anything real: anyone who can read the source can
     # forge a session.
     secret=os.environ.get('BB_SESSION_SECRET', 'chat-demo-secret-not-for-production'),
     secure=False,   # demo runs over plain HTTP unless --cert/--key are passed
-))
+)
 protected = app.group(middlewares=[auth_mw])
 
 

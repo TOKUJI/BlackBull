@@ -24,6 +24,59 @@ so the editable install's metadata catches up.
 
 ## [Unreleased]
 
+## [0.38.0] — 2026-06-14
+
+**Sprint 42 close: prove the extension surface.**
+
+The Sprint 40 `init_app(app)` convention now has a real second
+implementation living outside the BlackBull repo: the
+[`blackbull-session`](https://github.com/TOKUJI/blackbull-session)
+package on PyPI.  Packaging the existing in-tree `Session` middleware
+as a separate distribution was the proving exercise — the convention
+survived contact with a real cross-repo release cycle, OIDC trusted
+publishing, dependency floor selection, and a deprecation cycle, and
+no convention adjustments were needed.
+
+### Added
+
+- `docs/guide/extensions.md` gains a *Patterns and pitfalls from real
+  extractions* appendix, capturing concrete decisions from the
+  `blackbull-session` packaging (dependency floor, public middleware
+  helpers, eager+deferred construction, the `extension_key` class
+  attribute, `app` as first positional argument, the
+  `blackbull[testing]` dependency for downstream test suites, and the
+  recommended deprecation cycle).
+- `docs/guide/extensions.md` gains a *Common extension categories*
+  fair-treatment section, listing reasonable shapes for sessions,
+  authentication, authorisation, observability, rate limiting,
+  caching, database integration, background tasks, admin panels, CORS
+  / CSRF, WebSocket helpers, and static / template engines.  No
+  endorsements — the framework does not curate a "blessed extension"
+  registry.
+
+### Deprecated
+
+- `blackbull.middleware.Session` now emits `DeprecationWarning` on
+  construction and will be removed in BlackBull 0.40.  Migrate to
+  `pip install blackbull-session` and
+  `from blackbull_session import SessionExtension`.
+
+### Changed
+
+- `examples/ChatServer/chatserver.py` migrated from the in-tree
+  `Session` middleware to `SessionExtension`, demonstrating the
+  `pip install blackbull-session` adoption path.
+- `docs/guide/middleware.md` Session section rewritten to lead with
+  the `blackbull-session` extension; an admonition documents the
+  deprecation and removal target.
+
+### Internal
+
+- The audit of `OpenAPIExtension` against the documented convention
+  found a 1:1 match (`extension_key` class attribute, eager + deferred
+  construction, collision check with `is not self` idempotence, `app`
+  as first positional argument).  No back-port required.
+
 ## [0.37.0] — 2026-06-14
 
 **Sprint 41 close: OpenAPI as the reference implementation of the
