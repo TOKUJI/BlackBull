@@ -4060,23 +4060,33 @@ surface BlackBull itself uses.  You don't have to re-declare those.</p>
 <h3 id="deprecating-an-in-tree-class-youre-extracting">Deprecating an in-tree class you're extracting<a class="headerlink" href="#deprecating-an-in-tree-class-youre-extracting" title="Permanent link">&para;</a></h3>
 <p>If your extension replaces something that previously lived in
 BlackBull, the in-tree form should emit a <code>DeprecationWarning</code> on
-construction for at least one MINOR cycle:</p>
+construction:</p>
 <div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">warnings</span>
 
 <span class="k">class</span><span class="w"> </span><span class="nc">Session</span><span class="p">:</span>           <span class="c1"># in-tree, deprecated form</span>
     <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">...</span><span class="p">):</span>
         <span class="n">warnings</span><span class="o">.</span><span class="n">warn</span><span class="p">(</span>
             <span class="s2">&quot;blackbull.middleware.Session is deprecated; install &quot;</span>
-            <span class="s2">&quot;&#39;blackbull-session&#39; and use SessionExtension instead.&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;&#39;blackbull-session&#39; and use SessionExtension instead. &quot;</span>
+            <span class="s2">&quot;Will be removed no earlier than BlackBull v0.41 &quot;</span>
+            <span class="s2">&quot;(and not before 2026-07-14).&quot;</span><span class="p">,</span>
             <span class="ne">DeprecationWarning</span><span class="p">,</span>
             <span class="n">stacklevel</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span>
         <span class="p">)</span>
         <span class="o">...</span>
 </code></pre></div>
-<p>Schedule the removal explicitly — naming a target version
-(<code>"will be removed in BlackBull 0.40"</code>) anchors both authors and
-users.  Don't ship a deprecation without a removal plan; "deprecated
-forever" code accretes maintenance debt without any of the migration
+<p>Schedule the removal with <strong>two gates: at least three MINOR releases
+ahead AND at least one calendar month after the deprecation lands</strong> —
+whichever boundary is later.  For a deprecation announced in v0.38.0
+on 2026-06-14, both gates put the earliest removal at v0.41.0 or
+later, and not before 2026-07-14.  Naming both gates in the warning
+text (rather than a single bare version target) anchors authors and
+users alike and forecloses cargo-cult removal at the release-count
+gate alone.  Early-alpha status does not shorten this window: users
+plan migrations against the announced removal target, and a
+too-short window forces emergency migrations.  At the same time,
+don't ship a deprecation without <em>some</em> removal plan — "deprecated
+forever" code accretes maintenance debt without the migration
 benefit.</p>
 <h2 id="common-extension-categories">Common extension categories<a class="headerlink" href="#common-extension-categories" title="Permanent link">&para;</a></h2>
 <p>BlackBull's core ships protocols, routing, middleware, events,
