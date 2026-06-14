@@ -3924,6 +3924,15 @@ HTTP / WebSocket scopes through the global-middleware chain ending in
   skip the UI route and serve only the JSON spec.</li>
 </ul>
 <p>Call once, after the rest of the app's routes have been registered.</p>
+<p>This is a thin convenience wrapper around <code>OpenAPIExtension</code>,
+which is the reference implementation of the <code>init_app(app)</code>
+extension convention (see the Extensions guide).  External
+callers may also instantiate the extension class directly when they
+want to keep a handle on it after registration::</p>
+<pre><code>from blackbull.openapi import OpenAPIExtension
+ext = OpenAPIExtension(app, title='My API')
+assert app.extensions['openapi'] is ext
+</code></pre>
 
 
     </div>

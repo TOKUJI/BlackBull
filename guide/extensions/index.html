@@ -865,6 +865,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#in-tree-reference-openapiextension" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        In-tree reference: OpenAPIExtension
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#asgi-middleware-via-appuse" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3537,6 +3548,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#in-tree-reference-openapiextension" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        In-tree reference: OpenAPIExtension
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#asgi-middleware-via-appuse" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3717,6 +3739,20 @@ free of resolution logic.</p>
 library — import it directly.  An auth layer that adds login
 routes and a <code>scope['user']</code> middleware is an extension —
 wire it through <code>init_app</code>.</p>
+<h2 id="in-tree-reference-openapiextension">In-tree reference: <code>OpenAPIExtension</code><a class="headerlink" href="#in-tree-reference-openapiextension" title="Permanent link">&para;</a></h2>
+<p>BlackBull's own OpenAPI publication is implemented as
+<a href="../openapi/#the-openapiextension-class"><code>blackbull.openapi.OpenAPIExtension</code></a>.
+It is the reference for this convention — small enough to read
+end-to-end, and shipped as part of the framework so it never
+drifts from the public extension surface:</p>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">blackbull.openapi</span><span class="w"> </span><span class="kn">import</span> <span class="n">OpenAPIExtension</span>
+
+<span class="n">OpenAPIExtension</span><span class="p">(</span><span class="n">app</span><span class="p">,</span> <span class="n">title</span><span class="o">=</span><span class="s1">&#39;My API&#39;</span><span class="p">,</span> <span class="n">version</span><span class="o">=</span><span class="s1">&#39;1.0.0&#39;</span><span class="p">)</span>
+<span class="c1"># app.extensions[&#39;openapi&#39;] is the live instance.</span>
+</code></pre></div>
+<p><code>BlackBull.enable_openapi(...)</code> is a thin convenience wrapper
+around the same class — so even the core's own ergonomics call
+into the public extension API.</p>
 <h2 id="asgi-middleware-via-appuse">ASGI middleware via <code>app.use()</code><a class="headerlink" href="#asgi-middleware-via-appuse" title="Permanent link">&para;</a></h2>
 <p><code>app.use()</code> accepts any ASGI 3.0 middleware following the
 <code>(scope, receive, send, call_next)</code> shape, so an extension can

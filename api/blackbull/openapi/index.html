@@ -2258,6 +2258,56 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#blackbull.openapi.OpenAPIExtension" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        OpenAPIExtension
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="OpenAPIExtension">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.openapi.OpenAPIExtension--eager-wire-on-construction" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Eager — wire on construction.
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.openapi.OpenAPIExtension--deferred-useful-when-the-app-is-configured-elsewhere" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Deferred — useful when the app is configured elsewhere.
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.openapi.OpenAPIExtension.init_app" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        init_app
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.openapi.generate_spec" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3471,6 +3521,56 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#blackbull.openapi.OpenAPIExtension" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        OpenAPIExtension
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="OpenAPIExtension">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.openapi.OpenAPIExtension--eager-wire-on-construction" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Eager — wire on construction.
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.openapi.OpenAPIExtension--deferred-useful-when-the-app-is-configured-elsewhere" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Deferred — useful when the app is configured elsewhere.
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.openapi.OpenAPIExtension.init_app" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        init_app
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.openapi.generate_spec" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3581,6 +3681,94 @@ Swagger UI at <code>/docs</code>.</p>
 
 
 
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="blackbull.openapi.OpenAPIExtension" class="doc doc-heading">
+            <code>OpenAPIExtension</code>
+
+
+<a href="#blackbull.openapi.OpenAPIExtension" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+
+
+        <p>Mount an OpenAPI 3.1 spec endpoint and Swagger UI on a BlackBull app.</p>
+<p>Accepts the same arguments as <code>BlackBull.enable_openapi</code>.  Two
+construction styles are supported, following the framework's
+<code>init_app(app)</code> extension convention:</p>
+<blockquote>
+<blockquote>
+<blockquote>
+<h4 id="blackbull.openapi.OpenAPIExtension--eager-wire-on-construction">Eager — wire on construction.<a class="headerlink" href="#blackbull.openapi.OpenAPIExtension--eager-wire-on-construction" title="Permanent link">&para;</a></h4>
+<p>OpenAPIExtension(app, title='My API', version='1.0.0')</p>
+<h4 id="blackbull.openapi.OpenAPIExtension--deferred-useful-when-the-app-is-configured-elsewhere">Deferred — useful when the app is configured elsewhere.<a class="headerlink" href="#blackbull.openapi.OpenAPIExtension--deferred-useful-when-the-app-is-configured-elsewhere" title="Permanent link">&para;</a></h4>
+<p>ext = OpenAPIExtension(title='My API', version='1.0.0')
+ext.init_app(app)</p>
+</blockquote>
+</blockquote>
+</blockquote>
+<p>After <code>init_app</code>:</p>
+<ul>
+<li><code>app.extensions['openapi']</code> is <em>self</em> — collaborators can read the
+  configured <code>title</code>/<code>version</code>/<code>spec_path</code> from it.</li>
+<li>Two GET routes are registered: <code>spec_path</code> (JSON) and <code>docs_path</code>
+  (HTML host for Swagger UI), the latter skipped when <code>docs_path</code> is
+  <code>None</code>.</li>
+<li>Both routes are flagged <code>__blackbull_openapi_internal__</code> so the spec
+  doesn't include itself.</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.openapi.OpenAPIExtension.init_app" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">init_app</span><span class="p">(</span><span class="n">app</span><span class="p">)</span></code>
+
+<a href="#blackbull.openapi.OpenAPIExtension.init_app" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Wire the spec + docs routes onto <em>app</em> through the public API.</p>
+
+
+    </div>
+
+</div>
+
+
+
+  </div>
+
+    </div>
+
+</div>
 
 
 <div class="doc doc-object doc-function">

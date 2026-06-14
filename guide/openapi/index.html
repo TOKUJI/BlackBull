@@ -860,6 +860,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#the-openapiextension-class" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The OpenAPIExtension class
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#real-schemas-via-dataclasses" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3504,6 +3515,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#the-openapiextension-class" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The OpenAPIExtension class
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#real-schemas-via-dataclasses" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3670,6 +3692,42 @@ and the docs page.</p>
 </table>
 <p>Call <code>enable_openapi()</code> once, <strong>after</strong> the rest of your routes
 are registered.</p>
+<h2 id="the-openapiextension-class">The <code>OpenAPIExtension</code> class<a class="headerlink" href="#the-openapiextension-class" title="Permanent link">&para;</a></h2>
+<p><code>enable_openapi()</code> is a thin wrapper around the extension class
+<code>blackbull.openapi.OpenAPIExtension</code>, which is BlackBull's
+in-tree reference implementation of the <code>init_app(app)</code> convention
+from <a href="../extensions/">Extensions</a>.  Use the class directly when
+you want to keep a handle on the running extension or when you
+prefer the explicit two-step style:</p>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">blackbull</span><span class="w"> </span><span class="kn">import</span> <span class="n">BlackBull</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">blackbull.openapi</span><span class="w"> </span><span class="kn">import</span> <span class="n">OpenAPIExtension</span>
+
+<span class="n">app</span> <span class="o">=</span> <span class="n">BlackBull</span><span class="p">()</span>
+
+<span class="c1"># Deferred — useful when the app is configured elsewhere.</span>
+<span class="n">docs</span> <span class="o">=</span> <span class="n">OpenAPIExtension</span><span class="p">(</span><span class="n">title</span><span class="o">=</span><span class="s1">&#39;Items API&#39;</span><span class="p">,</span> <span class="n">version</span><span class="o">=</span><span class="s1">&#39;1.0.0&#39;</span><span class="p">)</span>
+<span class="n">docs</span><span class="o">.</span><span class="n">init_app</span><span class="p">(</span><span class="n">app</span><span class="p">)</span>
+
+<span class="c1"># Or eager — wire on construction.</span>
+<span class="n">OpenAPIExtension</span><span class="p">(</span><span class="n">app</span><span class="p">,</span> <span class="n">title</span><span class="o">=</span><span class="s1">&#39;Items API&#39;</span><span class="p">,</span> <span class="n">version</span><span class="o">=</span><span class="s1">&#39;1.0.0&#39;</span><span class="p">)</span>
+
+<span class="c1"># Either way, the extension is reachable as a registry entry:</span>
+<span class="k">assert</span> <span class="n">app</span><span class="o">.</span><span class="n">extensions</span><span class="p">[</span><span class="s1">&#39;openapi&#39;</span><span class="p">]</span> <span class="ow">is</span> <span class="n">docs</span>
+</code></pre></div>
+<p>Why use the class form?</p>
+<ul>
+<li>Mounting more than once on the same app raises <code>RuntimeError</code>
+  instead of silently shadowing — the same collision-check
+  pattern the extensions guide recommends for third-party
+  extensions.</li>
+<li>The instance survives in <code>app.extensions['openapi']</code>, so an
+  admin route or a status middleware can introspect the
+  configured <code>title</code> / <code>version</code> / <code>spec_path</code> rather than
+  hard-coding them.</li>
+<li>It documents — by being public, audited, and tested — the
+  exact convention third-party <code>blackbull-&lt;name&gt;</code> packages
+  should follow.</li>
+</ul>
 <h2 id="real-schemas-via-dataclasses">Real schemas via dataclasses<a class="headerlink" href="#real-schemas-via-dataclasses" title="Permanent link">&para;</a></h2>
 <p>Annotate a handler parameter with a Python <code>dataclass</code> and the
 spec gains a real request-body schema; annotate the return type
@@ -3851,6 +3909,11 @@ if you want one of those, parse the body yourself from a
 </div>
 <h2 id="whats-not-yet-automated">What's not yet automated<a class="headerlink" href="#whats-not-yet-automated" title="Permanent link">&para;</a></h2>
 <ul>
+<li><strong>Query parameters.</strong>  The simplified handler signature
+  resolves parameters from the URL path, the request body, or
+  the raw scope — there is no annotation source for query
+  parameters yet, so none are emitted in the spec.  Read them
+  manually from <code>scope['query_string']</code> inside the handler.</li>
 <li><strong>Security schemes.</strong>  Auth is application-defined, so no
   global <code>securitySchemes</code> are emitted.  Add them post-hoc by
   editing the spec returned by <code>generate_spec()</code> and serving

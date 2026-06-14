@@ -3380,10 +3380,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#serveractor" class="md-nav__link">
+  <a href="#asgiserver" class="md-nav__link">
     <span class="md-ellipsis">
       
-        ServerActor
+        ASGIServer
       
     </span>
   </a>
@@ -3632,10 +3632,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#serveractor" class="md-nav__link">
+  <a href="#asgiserver" class="md-nav__link">
     <span class="md-ellipsis">
       
-        ServerActor
+        ASGIServer
       
     </span>
   </a>
@@ -3829,7 +3829,7 @@ actor that can only communicate by sending messages is much
 easier to reason about under burst load than one with arbitrary
 back-channels into other components.</p>
 <h2 id="hierarchy">Hierarchy<a class="headerlink" href="#hierarchy" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code>ServerActor                       (one per process)
+<div class="highlight"><pre><span></span><code>ASGIServer                        (one per process; owns the listening socket)
 │
 └── ConnectionActor               (one per accepted TCP connection)
       │
@@ -3837,24 +3837,31 @@ back-channels into other components.</p>
       │     └── RequestActor      (one per HTTP/1.1 request, short-lived)
       │
       ├── HTTP2Actor              (HTTP/2 connection driver)
-      │     └── StreamActor       (one per HTTP/2 stream, short-lived)
+      │     └── StreamActor       (one per HTTP/2 stream)
+      │           └── RequestActor   (per-stream ASGI call, short-lived)
       │
       └── WebSocketActor          (after upgrade, replaces HTTP1/2Actor)
 </code></pre></div>
+<p><code>ASGIServer</code> is the only non-actor in this hierarchy — it's a
+plain <code>asyncio</code> server that owns the listening socket and
+spawns a <code>ConnectionActor</code> task per accepted connection.
+Everything below it is an <code>Actor</code> subclass.</p>
 <p>A separate <code>EventAggregator</code> translates the low-level
 inter-actor messages into the user-facing events documented in
 <a href="../../guide/events/">Events</a> — <code>request_received</code>,
 <code>before_handler</code>, <code>request_completed</code>, <code>websocket_message</code>,
 etc.</p>
 <h2 id="responsibilities">Responsibilities<a class="headerlink" href="#responsibilities" title="Permanent link">&para;</a></h2>
-<h3 id="serveractor"><code>ServerActor</code><a class="headerlink" href="#serveractor" title="Permanent link">&para;</a></h3>
+<h3 id="asgiserver"><code>ASGIServer</code><a class="headerlink" href="#asgiserver" title="Permanent link">&para;</a></h3>
 <ul>
 <li>Owns the listening socket.</li>
 <li>Accepts TCP connections; spawns a <code>ConnectionActor</code> task per
   connection.</li>
 <li>Supervisor strategy: <strong>restart with backoff</strong> — accept loop
   must stay alive even if individual binds fail.</li>
-<li>Surfaces <code>app_startup</code> and <code>app_shutdown</code> (see
+<li>The <code>app_startup</code> and <code>app_shutdown</code> events are surfaced
+  separately, by <code>BlackBull</code> itself as part of the ASGI
+  lifespan handshake — not by the server (see
   <a href="../../guide/events/">Events</a>).</li>
 </ul>
 <h3 id="connectionactor"><code>ConnectionActor</code><a class="headerlink" href="#connectionactor" title="Permanent link">&para;</a></h3>
@@ -3926,7 +3933,7 @@ etc.</p>
 </thead>
 <tbody>
 <tr>
-<td><code>ServerActor</code></td>
+<td><code>ASGIServer</code></td>
 <td>Restart with backoff</td>
 <td>Accept loop must stay alive</td>
 </tr>
@@ -4015,7 +4022,7 @@ respective actors.</p>
 <td>One connection's failure is bounded</td>
 </tr>
 <tr>
-<td><code>ServerActor</code> accept error</td>
+<td><code>ASGIServer</code> accept error</td>
 <td>Backoff + retry</td>
 <td>Server stays alive across transient errors</td>
 </tr>
