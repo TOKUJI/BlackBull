@@ -182,14 +182,23 @@ HMAC-signed by the server.  No server-side store, no database.
 Trade-off: cookies are capped at ~4 KiB by browsers and you can't
 revoke a session early without rotating the secret.
 
+!!! warning "Moved to a separate package"
+    Starting with BlackBull 0.38 the session layer lives in the
+    standalone [`blackbull-session`](https://github.com/TOKUJI/blackbull-session)
+    package, following the [`init_app(app)`](extensions.md)
+    extension convention.  The in-tree
+    `blackbull.middleware.Session` emits a `DeprecationWarning` and
+    will be removed in BlackBull 0.40.
+
 ```python
-from blackbull.middleware.session import Session
+# pip install blackbull-session
+from blackbull_session import SessionExtension
 
 # Operator sets BB_SESSION_SECRET=<32-byte random> in the deployment env
-app.use(Session())
+SessionExtension(app)
 
 # Or pass the secret explicitly (handy for tests):
-app.use(Session(secret=b'<long-random-bytes>'))
+SessionExtension(app, secret=b'<long-random-bytes>')
 
 @app.route(path='/')
 async def index(scope, receive, send):
@@ -200,6 +209,9 @@ async def index(scope, receive, send):
 async def whoami(scope, receive, send):
     await send(Response(scope['session'].get('user', 'anonymous')))
 ```
+
+After construction the live extension is reachable at
+`app.extensions['session']`.
 
 `scope['session']` is a `dict` subclass that tracks whether you
 mutated it.  The middleware only emits `Set-Cookie` when a request
