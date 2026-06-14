@@ -886,6 +886,111 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#patterns-and-pitfalls-from-real-extractions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Patterns and pitfalls from real extractions
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Patterns and pitfalls from real extractions">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#pick-a-dependencies-floor-that-matches-what-you-import" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pick a dependencies floor that matches what you import
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#reuse-the-frameworks-public-middleware-helpers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reuse the framework's public middleware helpers
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#eager-deferred-construction" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Eager + deferred construction
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#make-extension_key-a-class-attribute-not-configurable" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Make extension_key a class attribute, not configurable
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#place-app-as-the-first-positional-argument" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Place app as the first positional argument
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tests-depend-on-blackbulltesting-for-the-parent-framework" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tests: depend on blackbull[testing] for the parent framework
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#deprecating-an-in-tree-class-youre-extracting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Deprecating an in-tree class you're extracting
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#common-extension-categories" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Common extension categories
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -3569,6 +3674,111 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#patterns-and-pitfalls-from-real-extractions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Patterns and pitfalls from real extractions
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Patterns and pitfalls from real extractions">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#pick-a-dependencies-floor-that-matches-what-you-import" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pick a dependencies floor that matches what you import
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#reuse-the-frameworks-public-middleware-helpers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reuse the framework's public middleware helpers
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#eager-deferred-construction" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Eager + deferred construction
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#make-extension_key-a-class-attribute-not-configurable" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Make extension_key a class attribute, not configurable
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#place-app-as-the-first-positional-argument" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Place app as the first positional argument
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tests-depend-on-blackbulltesting-for-the-parent-framework" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tests: depend on blackbull[testing] for the parent framework
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#deprecating-an-in-tree-class-youre-extracting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Deprecating an in-tree class you're extracting
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#common-extension-categories" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Common extension categories
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -3770,6 +3980,188 @@ simply pass a middleware callable through it:</p>
 <p>See <a href="../middleware/">Middleware</a> for the full middleware
 contract, including how to short-circuit the chain and how to
 inspect responses via <code>intercepting_send</code>.</p>
+<h2 id="patterns-and-pitfalls-from-real-extractions">Patterns and pitfalls from real extractions<a class="headerlink" href="#patterns-and-pitfalls-from-real-extractions" title="Permanent link">&para;</a></h2>
+<p>The following notes come from packaging an in-tree middleware
+(<code>blackbull.middleware.Session</code>) as the standalone
+<a href="https://github.com/TOKUJI/blackbull-session"><code>blackbull-session</code></a>
+extension during the 0.38 cycle.  They are concrete decisions, not
+hypothetical advice.</p>
+<h3 id="pick-a-dependencies-floor-that-matches-what-you-import">Pick a <code>dependencies</code> floor that matches what you import<a class="headerlink" href="#pick-a-dependencies-floor-that-matches-what-you-import" title="Permanent link">&para;</a></h3>
+<p><code>app.extensions</code> landed in BlackBull 0.36.0 (the Sprint 40 work).
+An extension that touches it must pin at least that floor:</p>
+<div class="highlight"><pre><span></span><code><span class="n">dependencies</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span>
+<span class="w">    </span><span class="s2">&quot;blackbull &gt;= 0.36.0&quot;</span><span class="p">,</span>
+<span class="p">]</span>
+</code></pre></div>
+<p>If your extension uses something newer — <code>intercepting_send</code>, a
+specific event name, a <code>scope</code> field — bump the floor to match.
+Don't pin an exact version; that fights with downstream apps that
+want a different patch level.</p>
+<h3 id="reuse-the-frameworks-public-middleware-helpers">Reuse the framework's public middleware helpers<a class="headerlink" href="#reuse-the-frameworks-public-middleware-helpers" title="Permanent link">&para;</a></h3>
+<p>Two BlackBull APIs are useful to extension authors and are
+guaranteed-stable public surface:</p>
+<ul>
+<li><code>from blackbull.middleware import as_middleware</code> — class
+  decorator that normalises <code>call_next</code> so any <code>send</code> wrapper your
+  middleware installs receives plain ASGI event dicts, not
+  <code>Response</code> objects.  Saves you from <code>isinstance</code> guards.</li>
+<li><code>from blackbull.asgi import ASGIEvent</code> — symbolic constants for
+  ASGI event type strings (<code>HTTP_RESPONSE_START</code>, etc.).  Prefer
+  these over hard-coded literals.</li>
+</ul>
+<p>If you find yourself reaching for <code>from blackbull._something_private</code>,
+stop and ask whether the symbol should be promoted to a public
+re-export.  Opening an issue is the right move; private imports
+will break across MINOR versions.</p>
+<h3 id="eager-deferred-construction">Eager + deferred construction<a class="headerlink" href="#eager-deferred-construction" title="Permanent link">&para;</a></h3>
+<p>Follow the same dual-construction shape as <code>OpenAPIExtension</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">MyExtension</span><span class="p">:</span>
+    <span class="n">extension_key</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s1">&#39;myext&#39;</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">app</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">opt</span><span class="o">=...</span><span class="p">):</span>
+        <span class="c1"># validate/store config first</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_opt</span> <span class="o">=</span> <span class="n">opt</span>
+        <span class="c1"># then wire on-construction if eager</span>
+        <span class="k">if</span> <span class="n">app</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">init_app</span><span class="p">(</span><span class="n">app</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">init_app</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">app</span><span class="p">):</span>
+        <span class="n">existing</span> <span class="o">=</span> <span class="n">app</span><span class="o">.</span><span class="n">extensions</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">extension_key</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">existing</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="n">existing</span> <span class="ow">is</span> <span class="ow">not</span> <span class="bp">self</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="o">...</span><span class="p">)</span>
+        <span class="n">app</span><span class="o">.</span><span class="n">use</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span>                                <span class="c1"># or app.route(...), etc.</span>
+        <span class="n">app</span><span class="o">.</span><span class="n">extensions</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">extension_key</span><span class="p">]</span> <span class="o">=</span> <span class="bp">self</span>
+</code></pre></div>
+<p>The <code>existing is not self</code> guard makes <code>init_app</code> idempotent for the
+same instance — a defensive nicety for users who wire eagerly and
+then call <code>init_app</code> explicitly anyway.</p>
+<h3 id="make-extension_key-a-class-attribute-not-configurable">Make <code>extension_key</code> a class attribute, not configurable<a class="headerlink" href="#make-extension_key-a-class-attribute-not-configurable" title="Permanent link">&para;</a></h3>
+<p>A <code>__init__</code> kwarg like <code>extension_key='session-v2'</code> looks
+flexible but lets users sneak past the collision check (<code>if 'session'
+in app.extensions: raise</code> is bypassed when a second extension
+registers itself under a different key).  Pin the key as a class
+attribute and document it in your <code>README</code>.</p>
+<h3 id="place-app-as-the-first-positional-argument">Place <code>app</code> as the first positional argument<a class="headerlink" href="#place-app-as-the-first-positional-argument" title="Permanent link">&para;</a></h3>
+<p><code>SessionExtension(app, secret=...)</code> reads cleanly only when <code>app</code>
+is positional-first.  If you place it after a <code>*</code> keyword separator
+you force <code>SessionExtension(secret=..., app=app)</code> — readable but
+inverts the convention every other extension already follows.</p>
+<h3 id="tests-depend-on-blackbulltesting-for-the-parent-framework">Tests: depend on <code>blackbull[testing]</code> for the parent framework<a class="headerlink" href="#tests-depend-on-blackbulltesting-for-the-parent-framework" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="k">[project.optional-dependencies]</span>
+<span class="n">testing</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span>
+<span class="w">    </span><span class="s2">&quot;pytest&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="s2">&quot;pytest-asyncio&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="s2">&quot;blackbull[testing] &gt;= 0.36.0&quot;</span><span class="p">,</span>
+<span class="p">]</span>
+</code></pre></div>
+<p>This pulls in <code>pytest-asyncio</code>, <code>httpx[http2]</code>, <code>websockets</code>,
+<code>hypothesis</code>, and <code>openapi-spec-validator</code> — the same testing
+surface BlackBull itself uses.  You don't have to re-declare those.</p>
+<h3 id="deprecating-an-in-tree-class-youre-extracting">Deprecating an in-tree class you're extracting<a class="headerlink" href="#deprecating-an-in-tree-class-youre-extracting" title="Permanent link">&para;</a></h3>
+<p>If your extension replaces something that previously lived in
+BlackBull, the in-tree form should emit a <code>DeprecationWarning</code> on
+construction for at least one MINOR cycle:</p>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">warnings</span>
+
+<span class="k">class</span><span class="w"> </span><span class="nc">Session</span><span class="p">:</span>           <span class="c1"># in-tree, deprecated form</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">...</span><span class="p">):</span>
+        <span class="n">warnings</span><span class="o">.</span><span class="n">warn</span><span class="p">(</span>
+            <span class="s2">&quot;blackbull.middleware.Session is deprecated; install &quot;</span>
+            <span class="s2">&quot;&#39;blackbull-session&#39; and use SessionExtension instead.&quot;</span><span class="p">,</span>
+            <span class="ne">DeprecationWarning</span><span class="p">,</span>
+            <span class="n">stacklevel</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="o">...</span>
+</code></pre></div>
+<p>Schedule the removal explicitly — naming a target version
+(<code>"will be removed in BlackBull 0.40"</code>) anchors both authors and
+users.  Don't ship a deprecation without a removal plan; "deprecated
+forever" code accretes maintenance debt without any of the migration
+benefit.</p>
+<h2 id="common-extension-categories">Common extension categories<a class="headerlink" href="#common-extension-categories" title="Permanent link">&para;</a></h2>
+<p>BlackBull's core ships protocols, routing, middleware, events,
+error handling, and a minimal OpenAPI generator.  Almost everything
+else is deliberately <em>not</em> in the framework — partly to keep the
+core small and audited, partly because most of these categories
+have several reasonable shapes and BlackBull does not endorse one.
+The table below is informational, not a roadmap; ship one of these
+as <code>blackbull-&lt;name&gt;</code> on PyPI and it becomes a citizen of the
+extension ecosystem.</p>
+<table>
+<thead>
+<tr>
+<th>Category</th>
+<th>Reasonable shapes (pick one per extension)</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Sessions</strong></td>
+<td>signed cookie (<a href="https://github.com/TOKUJI/blackbull-session"><code>blackbull-session</code></a>), Redis-backed, SQL-backed</td>
+<td>Signed cookies have no server state; backed stores allow revocation.</td>
+</tr>
+<tr>
+<td><strong>Authentication</strong></td>
+<td>JWT bearer, OAuth2 PKCE, API keys, session-cookie auth, mutual TLS, HMAC-signed requests</td>
+<td>BlackBull does not ship a blessed auth method.  Pick the one that matches your threat model and credential lifecycle.</td>
+</tr>
+<tr>
+<td><strong>Authorization / RBAC</strong></td>
+<td>per-route decorators, policy objects (Casbin-style), scope-based</td>
+<td>Often composes with an auth extension via <code>app.extensions['auth']</code>.</td>
+</tr>
+<tr>
+<td><strong>Observability</strong></td>
+<td>Prometheus metrics, OpenTelemetry tracing, structured access logs, Sentry error reporting</td>
+<td>The <code>blackbull.*</code> and <code>blackbull.access</code> loggers are the natural hook points; see <a href="../logging/">Logging</a>.</td>
+</tr>
+<tr>
+<td><strong>Rate limiting</strong></td>
+<td>token bucket, leaky bucket, sliding window; in-process / Redis-backed</td>
+<td>Best wired through <code>app.intercept('before_handler')</code>.</td>
+</tr>
+<tr>
+<td><strong>Caching</strong></td>
+<td>response cache (already in tree as <code>Cache</code> middleware), fragment cache, full-page edge cache</td>
+<td>Re-extraction of <code>Cache</code> is an option once user signal warrants.</td>
+</tr>
+<tr>
+<td><strong>Database integration</strong></td>
+<td>SQLAlchemy async, Tortoise, raw <code>asyncpg</code>, SQLite via <code>aiosqlite</code></td>
+<td>Connection-pool lifecycle ties to <code>@app.on('lifespan_startup')</code> / <code>lifespan_shutdown</code>.</td>
+</tr>
+<tr>
+<td><strong>Background tasks</strong></td>
+<td>in-process <code>asyncio.create_task</code> helpers, ARQ bridge, Celery bridge</td>
+<td>Mind shutdown ordering: drain in <code>lifespan_shutdown</code> before pools close.</td>
+</tr>
+<tr>
+<td><strong>Admin / dashboards</strong></td>
+<td>route-mount admin UIs, OpenAPI-driven CRUD</td>
+<td>Most depend on an auth extension being already wired.</td>
+</tr>
+<tr>
+<td><strong>CORS / CSRF / security headers</strong></td>
+<td><code>CORS</code> (already in tree), CSP / HSTS injectors, double-submit CSRF</td>
+<td>Single-touchpoint middlewares — straightforward to ship as extensions if your variant differs from the in-tree default.</td>
+</tr>
+<tr>
+<td><strong>WebSocket helpers</strong></td>
+<td>room/channel managers, pub-sub bridges (Redis, NATS), broadcast routers</td>
+<td>Build on the <a href="../websockets/"><code>scheme=Scheme.websocket</code></a> route form.</td>
+</tr>
+<tr>
+<td><strong>Static / templates</strong></td>
+<td>static-file extras (already in tree), Jinja2 / Mako / minify-html bridges</td>
+<td>Templates are usually a library, not an extension — call them from your handler.</td>
+</tr>
+</tbody>
+</table>
+<p>The framework does not curate this list — there's no
+"blessed extension" registry.  If you want others to find your
+extension, the discovery path is PyPI search for <code>blackbull-</code> and
+linking to your project from your own documentation.</p>
 
 
 

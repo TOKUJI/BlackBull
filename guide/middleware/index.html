@@ -3973,13 +3973,23 @@ pass through uncompressed.</p>
 HMAC-signed by the server.  No server-side store, no database.
 Trade-off: cookies are capped at ~4 KiB by browsers and you can't
 revoke a session early without rotating the secret.</p>
-<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">blackbull.middleware.session</span><span class="w"> </span><span class="kn">import</span> <span class="n">Session</span>
+<div class="admonition warning">
+<p class="admonition-title">Moved to a separate package</p>
+<p>Starting with BlackBull 0.38 the session layer lives in the
+standalone <a href="https://github.com/TOKUJI/blackbull-session"><code>blackbull-session</code></a>
+package, following the <a href="../extensions/"><code>init_app(app)</code></a>
+extension convention.  The in-tree
+<code>blackbull.middleware.Session</code> emits a <code>DeprecationWarning</code> and
+will be removed in BlackBull 0.40.</p>
+</div>
+<div class="highlight"><pre><span></span><code><span class="c1"># pip install blackbull-session</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">blackbull_session</span><span class="w"> </span><span class="kn">import</span> <span class="n">SessionExtension</span>
 
 <span class="c1"># Operator sets BB_SESSION_SECRET=&lt;32-byte random&gt; in the deployment env</span>
-<span class="n">app</span><span class="o">.</span><span class="n">use</span><span class="p">(</span><span class="n">Session</span><span class="p">())</span>
+<span class="n">SessionExtension</span><span class="p">(</span><span class="n">app</span><span class="p">)</span>
 
 <span class="c1"># Or pass the secret explicitly (handy for tests):</span>
-<span class="n">app</span><span class="o">.</span><span class="n">use</span><span class="p">(</span><span class="n">Session</span><span class="p">(</span><span class="n">secret</span><span class="o">=</span><span class="sa">b</span><span class="s1">&#39;&lt;long-random-bytes&gt;&#39;</span><span class="p">))</span>
+<span class="n">SessionExtension</span><span class="p">(</span><span class="n">app</span><span class="p">,</span> <span class="n">secret</span><span class="o">=</span><span class="sa">b</span><span class="s1">&#39;&lt;long-random-bytes&gt;&#39;</span><span class="p">)</span>
 
 <span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">&#39;/&#39;</span><span class="p">)</span>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">index</span><span class="p">(</span><span class="n">scope</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
@@ -3990,6 +4000,8 @@ revoke a session early without rotating the secret.</p>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">whoami</span><span class="p">(</span><span class="n">scope</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
     <span class="k">await</span> <span class="n">send</span><span class="p">(</span><span class="n">Response</span><span class="p">(</span><span class="n">scope</span><span class="p">[</span><span class="s1">&#39;session&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;user&#39;</span><span class="p">,</span> <span class="s1">&#39;anonymous&#39;</span><span class="p">)))</span>
 </code></pre></div>
+<p>After construction the live extension is reachable at
+<code>app.extensions['session']</code>.</p>
 <p><code>scope['session']</code> is a <code>dict</code> subclass that tracks whether you
 mutated it.  The middleware only emits <code>Set-Cookie</code> when a request
 handler changed the session — read-only handlers leave the response
