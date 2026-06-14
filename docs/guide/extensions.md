@@ -168,6 +168,25 @@ library — import it directly.  An auth layer that adds login
 routes and a `scope['user']` middleware is an extension —
 wire it through `init_app`.
 
+## In-tree reference: `OpenAPIExtension`
+
+BlackBull's own OpenAPI publication is implemented as
+[`blackbull.openapi.OpenAPIExtension`](openapi.md#the-openapiextension-class).
+It is the reference for this convention — small enough to read
+end-to-end, and shipped as part of the framework so it never
+drifts from the public extension surface:
+
+```python
+from blackbull.openapi import OpenAPIExtension
+
+OpenAPIExtension(app, title='My API', version='1.0.0')
+# app.extensions['openapi'] is the live instance.
+```
+
+`BlackBull.enable_openapi(...)` is a thin convenience wrapper
+around the same class — so even the core's own ergonomics call
+into the public extension API.
+
 ## ASGI middleware via `app.use()`
 
 `app.use()` accepts any ASGI 3.0 middleware following the

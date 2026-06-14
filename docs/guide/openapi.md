@@ -53,6 +53,46 @@ and the docs page.
 Call `enable_openapi()` once, **after** the rest of your routes
 are registered.
 
+## The `OpenAPIExtension` class
+
+`enable_openapi()` is a thin wrapper around the extension class
+`blackbull.openapi.OpenAPIExtension`, which is BlackBull's
+in-tree reference implementation of the `init_app(app)` convention
+from [Extensions](extensions.md).  Use the class directly when
+you want to keep a handle on the running extension or when you
+prefer the explicit two-step style:
+
+```python
+from blackbull import BlackBull
+from blackbull.openapi import OpenAPIExtension
+
+app = BlackBull()
+
+# Deferred — useful when the app is configured elsewhere.
+docs = OpenAPIExtension(title='Items API', version='1.0.0')
+docs.init_app(app)
+
+# Or eager — wire on construction.
+OpenAPIExtension(app, title='Items API', version='1.0.0')
+
+# Either way, the extension is reachable as a registry entry:
+assert app.extensions['openapi'] is docs
+```
+
+Why use the class form?
+
+- Mounting more than once on the same app raises `RuntimeError`
+  instead of silently shadowing — the same collision-check
+  pattern the extensions guide recommends for third-party
+  extensions.
+- The instance survives in `app.extensions['openapi']`, so an
+  admin route or a status middleware can introspect the
+  configured `title` / `version` / `spec_path` rather than
+  hard-coding them.
+- It documents — by being public, audited, and tested — the
+  exact convention third-party `blackbull-<name>` packages
+  should follow.
+
 ## Real schemas via dataclasses
 
 Annotate a handler parameter with a Python `dataclass` and the
@@ -198,6 +238,11 @@ responses if the default 500 isn't what you want.
 
 ## What's not yet automated
 
+- **Query parameters.**  The simplified handler signature
+  resolves parameters from the URL path, the request body, or
+  the raw scope — there is no annotation source for query
+  parameters yet, so none are emitted in the spec.  Read them
+  manually from `scope['query_string']` inside the handler.
 - **Security schemes.**  Auth is application-defined, so no
   global `securitySchemes` are emitted.  Add them post-hoc by
   editing the spec returned by `generate_spec()` and serving

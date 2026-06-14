@@ -621,29 +621,27 @@ class BlackBull:
           skip the UI route and serve only the JSON spec.
 
         Call once, after the rest of the app's routes have been registered.
+
+        This is a thin convenience wrapper around ``OpenAPIExtension``,
+        which is the reference implementation of the ``init_app(app)``
+        extension convention (see the Extensions guide).  External
+        callers may also instantiate the extension class directly when they
+        want to keep a handle on it after registration::
+
+            from blackbull.openapi import OpenAPIExtension
+            ext = OpenAPIExtension(app, title='My API')
+            assert app.extensions['openapi'] is ext
         """
-        from .openapi import generate_spec, swagger_ui_html  # noqa: PLC0415
-        from .response import Response, JSONResponse  # noqa: PLC0415
+        from .openapi import OpenAPIExtension  # noqa: PLC0415
 
-        async def _openapi_spec(scope, receive, send):  # noqa: ARG001
-            spec = generate_spec(self, title=title, version=version,
-                                 description=description)
-            await send(JSONResponse(spec))
-        # Mark before registration so the original handler stored in
-        # ``Router._route_info`` carries the flag (functools.wraps does not
-        # copy arbitrary attributes onto the wrapper, so setting it post-hoc
-        # on the decorated form would not propagate back to the original).
-        _openapi_spec.__blackbull_openapi_internal__ = True
-        self.route(methods=HTTPMethod.GET, path=spec_path)(_openapi_spec)
-
-        if docs_path is not None:
-            ui_title = f'{title} — Swagger UI'
-
-            async def _swagger_ui(scope, receive, send):  # noqa: ARG001
-                html = swagger_ui_html(spec_path, title=ui_title)
-                await send(Response(html))
-            _swagger_ui.__blackbull_openapi_internal__ = True
-            self.route(methods=HTTPMethod.GET, path=docs_path)(_swagger_ui)
+        OpenAPIExtension(
+            self,
+            title=title,
+            version=version,
+            description=description,
+            spec_path=spec_path,
+            docs_path=docs_path,
+        )
 
     def run(self, certfile=None, keyfile=None, port=0,
             unix_path: str | None = None,

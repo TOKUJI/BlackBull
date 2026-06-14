@@ -89,6 +89,10 @@ testing = [
     "httpx[http2]",
     "websockets",
     "hypothesis",
+    # Validates the generated OpenAPI 3.1 documents against the upstream
+    # schema in tests/unit/test_openapi.py — proves the spec we emit is
+    # consumable by the wider OpenAPI ecosystem.
+    "openapi-spec-validator",
 ]
 
 docs = [
