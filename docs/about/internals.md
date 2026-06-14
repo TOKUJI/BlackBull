@@ -38,7 +38,7 @@ back-channels into other components.
 ## Hierarchy
 
 ```
-ServerActor                       (one per process)
+ASGIServer                        (one per process; owns the listening socket)
 │
 └── ConnectionActor               (one per accepted TCP connection)
       │
@@ -46,10 +46,16 @@ ServerActor                       (one per process)
       │     └── RequestActor      (one per HTTP/1.1 request, short-lived)
       │
       ├── HTTP2Actor              (HTTP/2 connection driver)
-      │     └── StreamActor       (one per HTTP/2 stream, short-lived)
+      │     └── StreamActor       (one per HTTP/2 stream)
+      │           └── RequestActor   (per-stream ASGI call, short-lived)
       │
       └── WebSocketActor          (after upgrade, replaces HTTP1/2Actor)
 ```
+
+`ASGIServer` is the only non-actor in this hierarchy — it's a
+plain `asyncio` server that owns the listening socket and
+spawns a `ConnectionActor` task per accepted connection.
+Everything below it is an `Actor` subclass.
 
 A separate `EventAggregator` translates the low-level
 inter-actor messages into the user-facing events documented in
@@ -59,14 +65,16 @@ etc.
 
 ## Responsibilities
 
-### `ServerActor`
+### `ASGIServer`
 
 - Owns the listening socket.
 - Accepts TCP connections; spawns a `ConnectionActor` task per
   connection.
 - Supervisor strategy: **restart with backoff** — accept loop
   must stay alive even if individual binds fail.
-- Surfaces `app_startup` and `app_shutdown` (see
+- The `app_startup` and `app_shutdown` events are surfaced
+  separately, by `BlackBull` itself as part of the ASGI
+  lifespan handshake — not by the server (see
   [Events](../guide/events.md)).
 
 ### `ConnectionActor`
@@ -131,7 +139,7 @@ etc.
 
 | Actor | Strategy | Rationale |
 |---|---|---|
-| `ServerActor` | Restart with backoff | Accept loop must stay alive |
+| `ASGIServer` | Restart with backoff | Accept loop must stay alive |
 | `ConnectionActor` | Isolate | One bad connection must not affect others |
 | `HTTP1Actor` | Isolate | Error closes the connection cleanly |
 | `RequestActor` | Isolate | Error fires `error` event; connection survives |
@@ -174,7 +182,7 @@ respective actors.
 | `HTTP2Actor` framing error | Propagate to `ConnectionActor` | GOAWAY required; connection is unusable |
 | `StreamActor` flow-control violation | Isolate (`RST_STREAM`) | Stream-fatal only; other streams keep going |
 | `ConnectionActor` unhandled | Log + close connection | One connection's failure is bounded |
-| `ServerActor` accept error | Backoff + retry | Server stays alive across transient errors |
+| `ASGIServer` accept error | Backoff + retry | Server stays alive across transient errors |
 
 ## The pieces around the actor core
 
