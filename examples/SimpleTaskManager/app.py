@@ -318,9 +318,19 @@ async def handle_logout(scope, receive, send):
 # OpenAPI / Swagger UI — must be wired after every other route is registered.
 # Open http://localhost:8000/docs to browse the spec interactively, or
 # http://localhost:8000/openapi.json for the raw JSON.
+#
+# We use the ``OpenAPIExtension`` class form rather than the
+# ``app.enable_openapi(...)`` shortcut to demonstrate BlackBull's
+# ``init_app(app)`` extension convention (see docs/guide/extensions.md).
+# After this returns, ``app.extensions['openapi']`` is the live instance —
+# admin routes or status middleware can introspect ``title`` / ``version``
+# from there instead of hard-coding them.
 # ---------------------------------------------------------------------------
 
-app.enable_openapi(
+from blackbull.openapi import OpenAPIExtension  # noqa: E402
+
+OpenAPIExtension(
+    app,
     title='Simple Task Manager',
     version='1.0.0',
     description='Reference REST + HTML demo for BlackBull.  '

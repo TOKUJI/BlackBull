@@ -6,6 +6,7 @@ from typing import Optional
 
 from blackbull import BlackBull
 from blackbull.openapi import (
+    OpenAPIExtension,
     _dataclass_to_schema,
     _type_to_schema,
     generate_spec,
@@ -372,3 +373,123 @@ class TestHandlerIntrospection:
         assert op['requestBody']['content']['application/json']['schema'] == {
             'type': 'object',
         }
+
+
+# ---------------------------------------------------------------------------
+# OpenAPIExtension — the reference implementation of the Sprint 40
+# init_app(app) extension convention.
+# ---------------------------------------------------------------------------
+
+
+class TestOpenAPIExtension:
+    def test_deferred_form_registers_routes_and_extensions_entry(self):
+        app = BlackBull()
+
+        @app.route(methods=HTTPMethod.GET, path='/ping')
+        async def ping():  # noqa: ARG001
+            return 'pong'
+
+        ext = OpenAPIExtension(title='X', version='9.9.9')
+        assert 'openapi' not in app.extensions
+        ext.init_app(app)
+
+        assert app.extensions['openapi'] is ext
+        templates = {ri.template for ri in app._router._route_info}
+        assert {'/openapi.json', '/docs', '/ping'} <= templates
+
+    def test_eager_form_wires_on_construction(self):
+        app = BlackBull()
+        ext = OpenAPIExtension(app, title='X', version='1.0.0')
+
+        assert app.extensions['openapi'] is ext
+        templates = {ri.template for ri in app._router._route_info}
+        assert '/openapi.json' in templates
+        assert '/docs' in templates
+
+    def test_docs_path_none_skips_swagger_route(self):
+        app = BlackBull()
+        OpenAPIExtension(app, docs_path=None)
+
+        templates = {ri.template for ri in app._router._route_info}
+        assert '/openapi.json' in templates
+        assert '/docs' not in templates
+
+    def test_collision_raises(self):
+        """A second extension registering under the same key fails fast
+        rather than silently shadowing the first instance."""
+        app = BlackBull()
+        OpenAPIExtension(app, title='first')
+
+        with pytest.raises(RuntimeError, match="already registered"):
+            OpenAPIExtension(app, title='second')
+
+    def test_re_init_with_same_instance_is_idempotent_per_call(self):
+        """Calling init_app twice with the same instance should not trigger
+        the collision check (the existing-is-self branch)."""
+        app = BlackBull()
+        ext = OpenAPIExtension(title='X')
+        ext.init_app(app)
+        # The second init_app re-registers the routes (now duplicated), but
+        # doesn't raise — the collision is only against a *different* owner.
+        ext.init_app(app)
+        assert app.extensions['openapi'] is ext
+
+    def test_enable_openapi_uses_extension_under_the_hood(self):
+        """BlackBull.enable_openapi() should produce the same state as a
+        direct OpenAPIExtension construction — proving the convenience method
+        is implemented in terms of the public extension surface."""
+        app = BlackBull()
+        app.enable_openapi(title='Via convenience', version='2.0.0')
+
+        assert 'openapi' in app.extensions
+        ext = app.extensions['openapi']
+        assert isinstance(ext, OpenAPIExtension)
+        assert ext.title == 'Via convenience'
+        assert ext.version == '2.0.0'
+
+
+# ---------------------------------------------------------------------------
+# Conformance — generated spec must pass openapi-spec-validator's checks
+# against the OpenAPI 3.1 schema.  Promotes "we emit JSON shaped like 3.1"
+# from a structural assertion to a third-party-verified one.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def _spec_validator():
+    """Import the validator lazily and skip if it's not installed."""
+    osv = pytest.importorskip('openapi_spec_validator')
+    return osv.validate
+
+
+def test_generated_spec_validates_against_openapi_3_1(_spec_validator, app_with_routes):
+    spec = generate_spec(app_with_routes, title='Conformance', version='1.0.0',
+                         description='Spec must round-trip the OpenAPI 3.1 schema.')
+    # validate() raises on a non-conforming document.
+    _spec_validator(spec)
+
+
+def test_extension_emits_spec_that_validates(_spec_validator):
+    @dataclass
+    class CreateTask:
+        title: str
+        done: bool = False
+
+    @dataclass
+    class Task:
+        id: int
+        title: str
+
+    app = BlackBull()
+
+    @app.route(methods=HTTPMethod.GET, path='/tasks/{tid:int}')
+    async def get_task(tid: int) -> Task:  # noqa: ARG001
+        return Task(id=tid, title='x')
+
+    @app.route(methods=HTTPMethod.POST, path='/tasks')
+    async def create_task(body: CreateTask) -> Task:  # noqa: ARG001
+        return Task(id=1, title=body.title)
+
+    OpenAPIExtension(app, title='Validator', version='1.0.0')
+    spec = generate_spec(app, title='Validator', version='1.0.0')
+    _spec_validator(spec)

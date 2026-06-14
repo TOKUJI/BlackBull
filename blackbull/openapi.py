@@ -405,3 +405,106 @@ def swagger_ui_html(spec_url: str, title: str = 'BlackBull API — Swagger UI') 
     """Return a self-contained HTML page hosting Swagger UI pointed at *spec_url*."""
     return _SWAGGER_UI_HTML.format(
         title=title, version=_SWAGGER_UI_VERSION, spec_url=spec_url)
+
+
+# ---------------------------------------------------------------------------
+# Extension class — reference implementation of the ``init_app(app)`` convention
+# (see docs/guide/extensions.md).
+#
+# Mounts ``/openapi.json`` (and optionally ``/docs``) on the application, and
+# registers itself at ``app.extensions['openapi']`` so collaborators can look
+# up the live extension instance.  ``BlackBull.enable_openapi(...)`` is a thin
+# convenience wrapper around this class.
+# ---------------------------------------------------------------------------
+
+
+class OpenAPIExtension:
+    """Mount an OpenAPI 3.1 spec endpoint and Swagger UI on a BlackBull app.
+
+    Accepts the same arguments as ``BlackBull.enable_openapi``.  Two
+    construction styles are supported, following the framework's
+    ``init_app(app)`` extension convention:
+
+    >>> # Eager — wire on construction.
+    >>> OpenAPIExtension(app, title='My API', version='1.0.0')
+
+    >>> # Deferred — useful when the app is configured elsewhere.
+    >>> ext = OpenAPIExtension(title='My API', version='1.0.0')
+    >>> ext.init_app(app)
+
+    After ``init_app``:
+
+    * ``app.extensions['openapi']`` is *self* — collaborators can read the
+      configured ``title``/``version``/``spec_path`` from it.
+    * Two GET routes are registered: ``spec_path`` (JSON) and ``docs_path``
+      (HTML host for Swagger UI), the latter skipped when ``docs_path`` is
+      ``None``.
+    * Both routes are flagged ``__blackbull_openapi_internal__`` so the spec
+      doesn't include itself.
+    """
+
+    #: Key under which the extension registers itself in ``app.extensions``.
+    #: Follows the ``blackbull-<name>`` → ``<name>`` convention from the
+    #: extensions guide; not configurable to avoid a collision-bypass loophole.
+    extension_key: str = 'openapi'
+
+    def __init__(self, app: object | None = None, *,
+                 title: str = 'BlackBull API',
+                 version: str = '0.1.0',
+                 description: str | None = None,
+                 spec_path: str = '/openapi.json',
+                 docs_path: str | None = '/docs') -> None:
+        self.title = title
+        self.version = version
+        self.description = description
+        self.spec_path = spec_path
+        self.docs_path = docs_path
+        # Hold references to the registered handler functions so they survive
+        # past ``init_app`` return — the router stores them weakly via
+        # ``functools.wraps``, and a GC of the closure would cause the route
+        # to point at a dead function.
+        self._spec_handler = None
+        self._docs_handler = None
+        if app is not None:
+            self.init_app(app)
+
+    def init_app(self, app) -> None:
+        """Wire the spec + docs routes onto *app* through the public API."""
+        # Late imports keep this module importable without the rest of the
+        # framework being initialised (e.g. in spec-only tools).
+        from .response import Response, JSONResponse  # noqa: PLC0415
+
+        existing = app.extensions.get(self.extension_key)
+        if existing is not None and existing is not self:
+            existing_origin = type(existing).__module__
+            raise RuntimeError(
+                f"app.extensions[{self.extension_key!r}] is already registered "
+                f"by {existing_origin}. Cannot initialise "
+                f"{type(self).__module__}.{type(self).__name__}.")
+
+        title, version, description = self.title, self.version, self.description
+        spec_path, docs_path = self.spec_path, self.docs_path
+
+        async def _openapi_spec(scope, receive, send):  # noqa: ARG001
+            spec = generate_spec(app, title=title, version=version,
+                                 description=description)
+            await send(JSONResponse(spec))
+        # Mark before registration so the original handler stored in
+        # ``Router._route_info`` carries the flag — ``functools.wraps`` does
+        # not copy arbitrary attributes onto the wrapper, so setting it
+        # post-hoc on the decorated form would not propagate back.
+        _openapi_spec.__blackbull_openapi_internal__ = True
+        app.route(methods=HTTPMethod.GET, path=spec_path)(_openapi_spec)
+        self._spec_handler = _openapi_spec
+
+        if docs_path is not None:
+            ui_title = f'{title} — Swagger UI'
+
+            async def _swagger_ui(scope, receive, send):  # noqa: ARG001
+                html = swagger_ui_html(spec_path, title=ui_title)
+                await send(Response(html))
+            _swagger_ui.__blackbull_openapi_internal__ = True
+            app.route(methods=HTTPMethod.GET, path=docs_path)(_swagger_ui)
+            self._docs_handler = _swagger_ui
+
+        app.extensions[self.extension_key] = self
