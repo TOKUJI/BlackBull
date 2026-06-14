@@ -8,13 +8,21 @@ suites in addition to the in-tree pytest tests under
 
 | Layer | Suite | Standard | Where it runs |
 |---|---|---|---|
-| HTTP/1.1 | in-tree `tests/conformance/http1/` | RFC 9110, RFC 9112 | `pytest` |
-| HTTP/2 + HPACK | [h2spec](https://github.com/summerwind/h2spec) (external) | RFC 9113, RFC 7541 | local harness under `bench/conformance/` |
-| WebSocket | [Autobahn|Testsuite](https://github.com/crossbario/autobahn-testsuite) (external) | RFC 6455, RFC 7692 | local harness (Docker) |
-| WebSocket over HTTP/2 | in-tree `tests/conformance/http2/test_rfc8441.py` | RFC 8441 | `pytest` |
+| HTTP/1.1 | in-tree `tests/conformance/http1/` | RFC 9110, RFC 9112 | `pytest` + CI |
+| HTTP/1.1 corpus replay | `tests/conformance/http1/test_h1_user_corpus_replay.py` | curated divergence set | `pytest` + CI (docker-free) |
+| HTTP/2 + HPACK | [h2spec](https://github.com/summerwind/h2spec) (external) | RFC 9113, RFC 7541 | CI + local harness under `bench/conformance/` |
+| WebSocket | [Autobahn|Testsuite](https://github.com/crossbario/autobahn-testsuite) (external) | RFC 6455, RFC 7692 | CI + local harness (Docker) |
+| WebSocket over HTTP/2 | in-tree `tests/conformance/http2/test_rfc8441.py` | RFC 8441 | `pytest` + CI |
 
-The external suites are not yet wired into CI — they're kept as
-local harnesses to re-run after any protocol-level change.
+A push to `master` (or any PR against it) triggers
+[`.github/workflows/conformance.yml`](https://github.com/TOKUJI/BlackBull/blob/master/.github/workflows/conformance.yml),
+which runs the three external/external-shape suites on a fresh
+`ubuntu-latest` runner: h2spec, Autobahn|Testsuite, and the
+docker-free corpus replay.  The README's *RFC conformance* badge
+tracks that workflow's status; per-run artefacts (h2spec JUnit
+XML, Autobahn `index.json`, pytest output) are attached for 30
+days.  A weekly cron also runs the suite so upstream container /
+binary-release changes don't silently regress us between pushes.
 
 ## HTTP/1.1 (in-tree pytest)
 
@@ -151,6 +159,86 @@ same input, each categorised:
 The two `STATUS_DIFFER` entries are documented as known
 divergences from nginx behaviour in
 [`KNOWN_LIMITATIONS.md`](https://github.com/TOKUJI/BlackBull/blob/master/KNOWN_LIMITATIONS.md).
+
+#### Docker-free regression replay
+
+The full differential test
+([`test_http1_differential.py`](https://github.com/TOKUJI/BlackBull/blob/master/tests/conformance/http1/test_http1_differential.py))
+spins up nginx via `testcontainers` and skips at collection when
+Docker isn't reachable — which excludes most CI runners.  A
+companion test runs against just BlackBull:
+
+```bash
+pytest tests/conformance/http1/test_h1_user_corpus_replay.py -q
+```
+
+For each `diff_*.meta.json` sidecar, it sends the recorded
+`wire_request_latin1` to a live in-process BlackBull and asserts
+the response status code still matches the recorded
+`blackbull_status`.  Runs in well under a second; no Docker, no
+network egress.  A failure pinpoints which curated edge case
+moved without re-running the Hypothesis sweep against nginx.
+
+If you change the HTTP/1.1 parser or dispatch path and a corpus
+entry's status shifts, decide whether the shift is:
+
+- a **real regression** — fix the change that moved the status; or
+- an **intentional behaviour change** — delete the obsolete
+  `.meta.json` / `.jsonl` pair, regenerate by running the full
+  differential test under Docker, and commit the refreshed
+  recording.
+
+## Verifying your fork stays RFC-correct
+
+If you're carrying a patch on top of BlackBull and want assurance
+that your changes haven't broken protocol conformance, this is
+the recommended order:
+
+1. **Run the in-tree pytest suite**:
+   ```bash
+   pytest tests/conformance/ -q
+   ```
+   This covers HTTP/1.1 (RFC 9110, RFC 9112), HTTP/2 BlackBull-
+   specific cases, and RFC 8441 — fastest signal, no external
+   dependencies.
+
+2. **Run the docker-free corpus replay**:
+   ```bash
+   pytest tests/conformance/http1/test_h1_user_corpus_replay.py -q
+   ```
+   Confirms the curated divergence set still holds.  Single
+   second.
+
+3. **Run h2spec locally** (RFC 9113 + RFC 7541):
+   ```bash
+   openssl req -x509 -newkey rsa:2048 -keyout key.pem -out cert.pem \
+       -days 365 -nodes -subj '/CN=localhost'
+   python bench/conformance/h2spec_app.py --port 8443 \
+       --cert cert.pem --key key.pem &
+   bash bench/conformance/h2spec_run.sh
+   ```
+   ~2-5 minutes.  Output: `bench/conformance/results/h2spec_*.{txt,xml}`.
+
+4. **Run Autobahn|Testsuite locally** (RFC 6455 + RFC 7692):
+   ```bash
+   python bench/conformance/autobahn_app.py --port 9001 &
+   bash bench/conformance/autobahn_run.sh
+   ```
+   Requires Docker.  ~3-10 minutes.  Browse
+   `bench/conformance/results/autobahn_*/index.html` for the
+   case-by-case breakdown.
+
+5. **Push to a branch and let CI run** the same three external
+   suites in parallel on `ubuntu-latest`.  The
+   [`conformance.yml`](https://github.com/TOKUJI/BlackBull/blob/master/.github/workflows/conformance.yml)
+   workflow runs on every push and PR to master; its badge in
+   the README turns red if any suite regresses.
+
+A clean run of all five steps means your fork passes the same
+RFC-conformance bar that BlackBull itself ships with.  None of
+this proves the absence of bugs — these are published suites
+with finite coverage — but a regression in any of them is a
+hard signal you've changed protocol-level behaviour.
 
 ### Hypothesis property tests
 

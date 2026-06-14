@@ -24,6 +24,53 @@ so the editable install's metadata catches up.
 
 ## [Unreleased]
 
+## [0.39.0] — 2026-06-15
+
+**Sprint 43 close: conformance lane.**
+
+The h2spec + Autobahn external conformance suites are now wired
+into CI alongside a new docker-free regression replay of the
+HTTP/1.1 differential user-corpus.  A push or PR to `master`
+triggers
+[`conformance.yml`](https://github.com/TOKUJI/BlackBull/blob/master/.github/workflows/conformance.yml)
+on a fresh `ubuntu-latest` runner; the README's *RFC conformance*
+badge tracks workflow status, and per-run artefacts (h2spec
+JUnit XML, Autobahn `index.json`, pytest output) are attached
+for 30 days.  A weekly cron run catches upstream container /
+binary-release regressions between pushes.
+
+### Added
+
+- `.github/workflows/conformance.yml` — three-job workflow
+  running h2spec (RFC 9113 + RFC 7541), Autobahn|Testsuite (RFC
+  6455 + RFC 7692), and the docker-free corpus replay on push,
+  PR, and weekly cron.
+- `tests/conformance/http1/test_h1_user_corpus_replay.py` —
+  reads each `diff_*.meta.json` sidecar in
+  `tests/conformance/http1/fuzz/user-corpus/`, sends the
+  recorded `wire_request_latin1` to a live in-process
+  BlackBull, and asserts the response status still matches the
+  recorded `blackbull_status`.  Runs in well under a second
+  with no Docker dependency.  Complements the full nginx-
+  oracle differential test (which still requires Docker and so
+  skips on most CI runners).
+- `bench/conformance/h2spec_app.py` — minimal HTTPS+HTTP/2
+  fixture for h2spec, matching the shape of `autobahn_app.py`
+  so the CI workflow can start a self-contained conformance
+  server.
+
+### Changed
+
+- `docs/about/conformance.md` gains a *Verifying your fork
+  stays RFC-correct* section with a five-step recipe (pytest →
+  corpus replay → h2spec → Autobahn → CI push) and a *Docker-
+  free regression replay* subsection under the differential
+  corpus discussion.  The coverage-summary table now reflects
+  CI coverage for h2spec / Autobahn / RFC 8441.
+- `README.md` gains the *RFC conformance* badge linking to the
+  workflow runs.  No peer-framework claims (per
+  `feedback_public_docs_humble`).
+
 ## [0.38.0] — 2026-06-14
 
 **Sprint 42 close: prove the extension surface.**

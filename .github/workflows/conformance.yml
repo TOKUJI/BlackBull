@@ -1,0 +1,204 @@
+name: RFC conformance
+
+# Runs the protocol conformance suites against a live BlackBull on a
+# fresh ubuntu-latest runner.  Three independent jobs so a single
+# tool's flake doesn't take the whole workflow down:
+#
+#   h2spec         — RFC 7540 + RFC 7541 (HTTP/2 + HPACK)
+#   autobahn       — RFC 6455 (WebSocket)
+#   corpus-replay  — docker-free regression replay of the curated
+#                     fuzz/user-corpus/ diff entries
+#
+# The workflow's pass/fail status becomes the badge linked from the
+# README.  An individual job failure surfaces in the badge as a red
+# "failure" — the per-job artefacts (JUnit XML for h2spec,
+# index.json for Autobahn, pytest output for corpus-replay) carry
+# the detail.
+#
+# Third-party actions pinned to commit SHAs per the supply-chain
+# hygiene baseline (Sprint 30 Task 6); Dependabot tracks updates.
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  schedule:
+    # Weekly Sunday 03:17 UTC — picks up upstream h2spec / Autobahn
+    # image changes even when master is quiet.
+    - cron: '17 3 * * 0'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  h2spec:
+    name: h2spec (RFC 7540 + 7541)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10   # v6.0.3
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405   # v6.2.0
+        with:
+          python-version: '3.12'
+
+      - name: Install BlackBull (with compression for full surface)
+        run: pip install -e '.[compression]'
+
+      - name: Install h2spec
+        run: |
+          set -euo pipefail
+          curl -L -sS \
+            https://github.com/summerwind/h2spec/releases/download/v2.6.0/h2spec_linux_amd64.tar.gz \
+            | tar -xz -C "$HOME/.local/bin" h2spec
+          chmod +x "$HOME/.local/bin/h2spec"
+          "$HOME/.local/bin/h2spec" --version
+
+      - name: Generate self-signed TLS material
+        run: |
+          openssl req -x509 -newkey rsa:2048 \
+            -keyout tests/key.pem -out tests/cert.pem \
+            -days 365 -nodes -subj '/CN=localhost'
+
+      - name: Start BlackBull HTTPS+H2 server
+        run: |
+          set -euo pipefail
+          # Background, stdout → file (PIPE deadlocks under load — see
+          # Sprint 10's recorded caution).
+          python bench/conformance/h2spec_app.py \
+              --port 8443 \
+              --cert tests/cert.pem --key tests/key.pem \
+              > /tmp/h2spec_server.log 2>&1 &
+          echo "BB_PID=$!" >> "$GITHUB_ENV"
+          # Wait for the listener to accept connections (up to 15 s).
+          for i in $(seq 1 30); do
+            if (echo > /dev/tcp/127.0.0.1/8443) 2>/dev/null; then
+              echo "server listening after ${i} probe(s)"
+              break
+            fi
+            sleep 0.5
+          done
+
+      - name: Run h2spec
+        env:
+          PATH: ${{ runner.tool_cache }}/Python/3.12/x64/bin:/home/runner/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+        run: bash bench/conformance/h2spec_run.sh
+
+      - name: Stop BlackBull
+        if: always()
+        run: |
+          if [ -n "${BB_PID:-}" ]; then kill "$BB_PID" 2>/dev/null || true; fi
+
+      - name: Upload h2spec results
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a   # v7.0.1
+        with:
+          name: h2spec-results
+          path: |
+            bench/conformance/results/h2spec_*.xml
+            bench/conformance/results/h2spec_*.txt
+            /tmp/h2spec_server.log
+          retention-days: 30
+          if-no-files-found: warn
+
+  autobahn:
+    name: Autobahn (RFC 6455 WebSocket)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10   # v6.0.3
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405   # v6.2.0
+        with:
+          python-version: '3.12'
+
+      - name: Install BlackBull
+        run: pip install -e '.[compression]'
+
+      - name: Start BlackBull WebSocket echo server
+        run: |
+          set -euo pipefail
+          python bench/conformance/autobahn_app.py --port 9001 \
+              > /tmp/autobahn_server.log 2>&1 &
+          echo "BB_PID=$!" >> "$GITHUB_ENV"
+          for i in $(seq 1 30); do
+            if (echo > /dev/tcp/127.0.0.1/9001) 2>/dev/null; then
+              echo "WS server listening after ${i} probe(s)"
+              break
+            fi
+            sleep 0.5
+          done
+
+      - name: Run Autobahn|Testsuite
+        run: bash bench/conformance/autobahn_run.sh
+
+      - name: Assert no failing Autobahn cases
+        run: |
+          set -euo pipefail
+          # Locate the freshest index.json under bench/conformance/results/autobahn_*/
+          INDEX=$(ls -1t bench/conformance/results/autobahn_*/index.json 2>/dev/null | head -1)
+          if [ -z "$INDEX" ]; then
+            echo "ERROR: no Autobahn index.json produced" >&2
+            exit 1
+          fi
+          echo "Parsing $INDEX"
+          # behavior + behaviorClose must both be OK or NON-STRICT;
+          # anything else (FAILED, UNCLEAN, INFORMATIONAL) is a regression.
+          BAD=$(jq -r '
+            ."BlackBull" | to_entries
+            | map(select(
+                  (.value.behavior != "OK" and .value.behavior != "NON-STRICT" and .value.behavior != "INFORMATIONAL")
+                  or
+                  (.value.behaviorClose != "OK" and .value.behaviorClose != "INFORMATIONAL")
+              ))
+            | map(.key)
+            | .[]
+          ' "$INDEX" | tr '\n' ' ')
+          if [ -n "$BAD" ]; then
+            echo "FAIL: Autobahn cases with non-OK behavior: $BAD" >&2
+            exit 1
+          fi
+          echo "All Autobahn cases pass with OK / NON-STRICT / INFORMATIONAL."
+
+      - name: Stop BlackBull
+        if: always()
+        run: |
+          if [ -n "${BB_PID:-}" ]; then kill "$BB_PID" 2>/dev/null || true; fi
+
+      - name: Upload Autobahn results
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a   # v7.0.1
+        with:
+          name: autobahn-results
+          path: |
+            bench/conformance/results/autobahn_*
+            /tmp/autobahn_server.log
+          retention-days: 30
+          if-no-files-found: warn
+
+  corpus-replay:
+    name: HTTP/1.1 user-corpus replay
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10   # v6.0.3
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405   # v6.2.0
+        with:
+          python-version: '3.12'
+
+      - name: Install BlackBull (with testing extras)
+        run: pip install -e '.[testing]'
+
+      - name: Run docker-free corpus replay
+        run: |
+          timeout 60 python -m pytest --timeout=30 -v \
+              tests/conformance/http1/test_h1_user_corpus_replay.py
