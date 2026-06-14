@@ -459,10 +459,18 @@ class WebSocketRecipient(BaseRecipient):
     # WebSocket frame.  RFC 6455 §5.2 allows up to 2**63 - 1, which an
     # adversary post-handshake can use to OOM the server before any
     # body bytes arrive (``read_payload`` would attempt to buffer the
-    # full declared length).  1 MiB matches HTTP2WSReader's default
-    # buffer cap and the typical production WebSocket-server limit.
-    # ``MESSAGE_TOO_BIG`` (1009) is the RFC 6455 §7.4.1 close code.
-    _MAX_FRAME_PAYLOAD: int = 1024 * 1024
+    # full declared length).  ``MESSAGE_TOO_BIG`` (1009) is the
+    # RFC 6455 §7.4.1 close code.
+    #
+    # Default: 64 MiB — large enough to pass the Autobahn|Testsuite
+    # 9.x large-message cases (up to 9.1.6 = 64 MiB text) while still
+    # bounding per-connection memory.  Sprint 39 (v0.35.0) introduced
+    # this cap at 1 MiB; Sprint 43 raised the default to 64 MiB and
+    # exposed it via ``BB_WS_MAX_FRAME_PAYLOAD`` after the conformance
+    # CI lane discovered the 1 MiB cap was regressing Autobahn 9.x.
+    # Override per-deployment via ``BB_WS_MAX_FRAME_PAYLOAD`` for
+    # stricter (or looser) exposure than the default.
+    _MAX_FRAME_PAYLOAD: int = 64 * 1024 * 1024
 
     def __init__(self, reader: AbstractReader, writer: AbstractWriter, *,
                  require_masked: bool = True,
@@ -475,13 +483,21 @@ class WebSocketRecipient(BaseRecipient):
         self._writer = writer
         self._connect_sent = False
         self._assembler = FragmentAssembler()
-        # Constructor override for the class default — lets workloads
-        # with known-large frames (binary file upload, etc.) raise the
-        # cap without subclassing.
+        # Resolution order for the cap:
+        #  1. explicit ``max_frame_payload=`` constructor arg (tests + power users)
+        #  2. ``BB_WS_MAX_FRAME_PAYLOAD`` env var via Settings
+        #  3. class default (``_MAX_FRAME_PAYLOAD``)
+        # Late import keeps ``recipient`` importable without bringing in the
+        # full settings stack — useful for tests that drive the recipient
+        # directly without a Settings populated.
         if max_frame_payload is not None:
             self._max_frame_payload: int = max_frame_payload
         else:
-            self._max_frame_payload = self._MAX_FRAME_PAYLOAD
+            try:
+                from ..env import get_settings  # noqa: PLC0415
+                self._max_frame_payload = get_settings().ws_max_frame_payload
+            except Exception:
+                self._max_frame_payload = self._MAX_FRAME_PAYLOAD
         # Server-side: client frames MUST be masked (RFC 6455 §5.1).  Client-side:
         # server frames MUST NOT be masked, so the recipient must not raise when
         # they aren't.  When ``require_masked`` is False, outgoing PONG frames

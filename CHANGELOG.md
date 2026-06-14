@@ -61,6 +61,20 @@ binary-release regressions between pushes.
 
 ### Changed
 
+- WebSocket inbound-frame payload cap default raised from **1 MiB
+  to 64 MiB** and made configurable via the new
+  `BB_WS_MAX_FRAME_PAYLOAD` env var.  The cap itself (Sprint 39
+  v0.35.0) is the right defense against an adversary advertising
+  a 2^63 - 1 payload to OOM the server; the original 1 MiB
+  *value* was conservative enough to silently regress
+  Autobahn|Testsuite 9.1.4-9.1.6 / 9.2.4-9.2.6 / 9.3.9 / 9.4.9
+  (4–64 MiB single- and fragmented-message cases) that BlackBull
+  passed pre-v0.35.0.  The Sprint 43 conformance CI lane
+  surfaced the regression on its first run — exactly the
+  function the lane was wired in for.  64 MiB matches the
+  largest Autobahn 9.x case while still bounding per-connection
+  memory; lower for stricter exposure (e.g. 1 MiB matching the
+  `python-websockets` default).
 - `docs/about/conformance.md` gains a *Verifying your fork
   stays RFC-correct* section with a five-step recipe (pytest →
   corpus replay → h2spec → Autobahn → CI push) and a *Docker-

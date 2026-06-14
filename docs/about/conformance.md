@@ -102,6 +102,12 @@ bash bench/conformance/autobahn_run.sh               # full fuzzingclient run
 CASES='1.*' bash bench/conformance/autobahn_run.sh   # subset (e.g. all of §1.x)
 ```
 
+The §9 *Limits and performance* cases send single frames of
+4-64 MiB and need the per-frame payload cap to be at least the
+case size.  The shipped default (`BB_WS_MAX_FRAME_PAYLOAD`,
+64 MiB) accepts all of Autobahn's §9 cases; lower it for stricter
+exposure on untrusted-peer deployments.
+
 Reports land in `bench/conformance/results/autobahn_<timestamp>/`
 with an HTML index — open `index.html` in a browser for the
 case-by-case breakdown.

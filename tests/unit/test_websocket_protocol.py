@@ -108,11 +108,15 @@ class _RecipientWrapper:
     and a .writer attribute so tests written against WebSocketHandler.receive()
     continue to work unchanged."""
 
-    def __init__(self, raw_bytes: bytes):
+    def __init__(self, raw_bytes: bytes, *, max_frame_payload: int | None = None):
         self.writer = _FakeWriter()
         # Wrap the sync _FakeWriter in AsyncioWriter so WebSocketRecipient
         # receives a proper AbstractWriter (shim removed from __init__).
-        self._recipient = WebSocketRecipient(AsyncioReader(_FakeReader(raw_bytes)), AsyncioWriter(self.writer))
+        self._recipient = WebSocketRecipient(
+            AsyncioReader(_FakeReader(raw_bytes)),
+            AsyncioWriter(self.writer),
+            max_frame_payload=max_frame_payload,
+        )
 
     async def receive(self):
         return await self._recipient()
@@ -849,13 +853,17 @@ class TestFramePayloadSizeGuard:
     @pytest.mark.asyncio
     async def test_oversize_declared_length_triggers_close_1009(self):
         from blackbull.server.constants import WSCloseCode
-        # Declare 2 MiB payload but supply only 16 actual bytes — the
-        # cap is checked on the declared length before read_payload runs.
+        # Pin an explicit 64 KiB cap for the test — the global default
+        # is 64 MiB (Sprint 43, BB_WS_MAX_FRAME_PAYLOAD).  Asserting the
+        # rejection mechanism doesn't need the default to be small; pinning
+        # in-test keeps this assertion stable across default changes.
+        # Declare 1 MiB payload but supply only 16 actual bytes — the cap
+        # is checked on the declared length before read_payload runs.
         raw = self._frame_with_declared_length(
-            declared_length=2 * 1024 * 1024,
+            declared_length=1 * 1024 * 1024,
             actual_payload=b'\x00' * 16,
         )
-        handler = _RecipientWrapper(raw)
+        handler = _RecipientWrapper(raw, max_frame_payload=64 * 1024)
         await handler.receive()  # synthetic websocket.connect
 
         # The next call surfaces the ProtocolError raised inside _read_loop;

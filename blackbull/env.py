@@ -165,6 +165,18 @@ BB_WS_PERMESSAGE_DEFLATE
     Negotiate ``permessage-deflate`` (RFC 7692) on incoming WebSocket
     handshakes when the peer offers it.  Matches modern browsers and
     major WebSocket libraries.  Default: ``true``.
+BB_WS_MAX_FRAME_PAYLOAD
+    Hard cap on the declared payload length (bytes) of a single
+    inbound WebSocket frame.  RFC 6455 §5.2 allows up to 2**63 - 1; an
+    adversary post-handshake could advertise that to OOM the server
+    before any body bytes arrive.  This cap is enforced on the
+    declared length in the frame header (before reading bytes off the
+    wire) and triggers ``CLOSE`` with status code 1009 (MESSAGE_TOO_BIG)
+    when exceeded.  Default: ``67108864`` (64 MiB) — large enough to
+    pass the Autobahn|Testsuite 9.x large-message cases while still
+    bounding per-connection memory use.  Lower for stricter exposure
+    (e.g. ``1048576`` for 1 MiB matching the
+    ``python-websockets`` default).
 BB_COMPRESSION_MIN_SIZE
     Minimum response body size in bytes below which
     :class:`~blackbull.middleware.compression.Compression` skips
@@ -457,6 +469,11 @@ class Settings:
     #: `websockets`, aiohttp).  Set ``BB_WS_PERMESSAGE_DEFLATE=0`` to disable.
     ws_permessage_deflate: bool = True
 
+    #: Maximum declared payload length (bytes) for a single inbound
+    #: WebSocket frame.  See BB_WS_MAX_FRAME_PAYLOAD docstring above for
+    #: the security rationale.  Default 64 MiB.
+    ws_max_frame_payload: int = 64 * 1024 * 1024
+
     #: Per-connection asyncio.Semaphore cap on running stream handlers when
     #: running with a single worker (0 = disabled).  Defaults to 20 so that
     #: high-mux connections (e.g. -m 50) do not saturate the single event loop
@@ -562,6 +579,8 @@ def get_settings() -> Settings:
         h2_ws_max_streams_per_connection=_int_env_nonneg(
             'BB_H2_WS_MAX_STREAMS_PER_CONNECTION', 5),
         ws_permessage_deflate=_bool_env('BB_WS_PERMESSAGE_DEFLATE', True),
+        ws_max_frame_payload=_int_env_nonneg(
+            'BB_WS_MAX_FRAME_PAYLOAD', 64 * 1024 * 1024),
         use_uvloop=_bool_env('BB_UVLOOP', False),
         h2_active_streams_1w=_int_env_nonneg('BB_H2_ACTIVE_STREAMS_1W', 20),
         h2_active_streams=_int_env_nonneg('BB_H2_ACTIVE_STREAMS', 20),
