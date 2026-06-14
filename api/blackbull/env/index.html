@@ -3762,6 +3762,18 @@ BB_WS_PERMESSAGE_DEFLATE
     Negotiate <code>permessage-deflate</code> (RFC 7692) on incoming WebSocket
     handshakes when the peer offers it.  Matches modern browsers and
     major WebSocket libraries.  Default: <code>true</code>.
+BB_WS_MAX_FRAME_PAYLOAD
+    Hard cap on the declared payload length (bytes) of a single
+    inbound WebSocket frame.  RFC 6455 §5.2 allows up to 2<strong>63 - 1; an
+    adversary post-handshake could advertise that to OOM the server
+    before any body bytes arrive.  This cap is enforced on the
+    declared length in the frame header (before reading bytes off the
+    wire) and triggers <code>CLOSE</code> with status code 1009 (MESSAGE_TOO_BIG)
+    when exceeded.  Default: <code>67108864</code> (64 MiB) — large enough to
+    pass the Autobahn|Testsuite 9.x large-message cases while still
+    bounding per-connection memory use.  Lower for stricter exposure
+    (e.g. <code>1048576</code> for 1 MiB matching the
+    <code>python-websockets</code> default).
 BB_COMPRESSION_MIN_SIZE
     Minimum response body size in bytes below which
     :class:<code>~blackbull.middleware.compression.Compression</code> skips
@@ -3776,7 +3788,7 @@ BB_COMPRESSION_EXECUTOR_THRESHOLD
 BB_COMPRESSION_MAX_INFLIGHT
     Maximum number of compression offloads allowed to be running
     concurrently in the asyncio default thread pool.  When at or above
-    this cap, additional eligible responses are served <strong>uncompressed</strong>
+    this cap, additional eligible responses are served </strong>uncompressed<em><em>
     rather than queued — bounded fall-back rather than unbounded queue
     growth.  Tied to executor size: setting this above Python's default
     <code>ThreadPoolExecutor</code> <code>max_workers</code> provides no benefit.  That
@@ -3816,7 +3828,7 @@ BB_SESSION_SECRET
     HMAC secret used by the :class:<code>~blackbull.middleware.session.Session</code>
     middleware to sign cookies.  Pass <code>secret=</code> to the constructor or
     set this env var; if neither is set, <code>Session()</code> construction
-    raises (no insecure default).  Default: <em>(unset)</em>.</p>
+    raises (no insecure default).  Default: </em>(unset)</em>.</p>
 
 
 

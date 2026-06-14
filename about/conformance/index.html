@@ -3415,7 +3415,41 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Differential corpus vs nginx">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#docker-free-regression-replay" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Docker-free regression replay
+      
+    </span>
+  </a>
+  
 </li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#verifying-your-fork-stays-rfc-correct" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Verifying your fork stays RFC-correct
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Verifying your fork stays RFC-correct">
+      <ul class="md-nav__list">
         
           <li class="md-nav__item">
   <a href="#hypothesis-property-tests" class="md-nav__link">
@@ -3640,7 +3674,41 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Differential corpus vs nginx">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#docker-free-regression-replay" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Docker-free regression replay
+      
+    </span>
+  </a>
+  
 </li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#verifying-your-fork-stays-rfc-correct" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Verifying your fork stays RFC-correct
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Verifying your fork stays RFC-correct">
+      <ul class="md-nav__list">
         
           <li class="md-nav__item">
   <a href="#hypothesis-property-tests" class="md-nav__link">
@@ -3708,13 +3776,19 @@ suites in addition to the in-tree pytest tests under
 <td>HTTP/1.1</td>
 <td>in-tree <code>tests/conformance/http1/</code></td>
 <td>RFC 9110, RFC 9112</td>
-<td><code>pytest</code></td>
+<td><code>pytest</code> + CI</td>
+</tr>
+<tr>
+<td>HTTP/1.1 corpus replay</td>
+<td><code>tests/conformance/http1/test_h1_user_corpus_replay.py</code></td>
+<td>curated divergence set</td>
+<td><code>pytest</code> + CI (docker-free)</td>
 </tr>
 <tr>
 <td>HTTP/2 + HPACK</td>
 <td><a href="https://github.com/summerwind/h2spec">h2spec</a> (external)</td>
 <td>RFC 9113, RFC 7541</td>
-<td>local harness under <code>bench/conformance/</code></td>
+<td>CI + local harness under <code>bench/conformance/</code></td>
 </tr>
 <tr>
 <td>WebSocket</td>
@@ -3726,12 +3800,19 @@ suites in addition to the in-tree pytest tests under
 <td>WebSocket over HTTP/2</td>
 <td>in-tree <code>tests/conformance/http2/test_rfc8441.py</code></td>
 <td>RFC 8441</td>
-<td><code>pytest</code></td>
+<td><code>pytest</code> + CI</td>
 </tr>
 </tbody>
 </table>
-<p>The external suites are not yet wired into CI — they're kept as
-local harnesses to re-run after any protocol-level change.</p>
+<p>A push to <code>master</code> (or any PR against it) triggers
+<a href="https://github.com/TOKUJI/BlackBull/blob/master/.github/workflows/conformance.yml"><code>.github/workflows/conformance.yml</code></a>,
+which runs the three external/external-shape suites on a fresh
+<code>ubuntu-latest</code> runner: h2spec, Autobahn|Testsuite, and the
+docker-free corpus replay.  The README's <em>RFC conformance</em> badge
+tracks that workflow's status; per-run artefacts (h2spec JUnit
+XML, Autobahn <code>index.json</code>, pytest output) are attached for 30
+days.  A weekly cron also runs the suite so upstream container /
+binary-release changes don't silently regress us between pushes.</p>
 <h2 id="http11-in-tree-pytest">HTTP/1.1 (in-tree pytest)<a class="headerlink" href="#http11-in-tree-pytest" title="Permanent link">&para;</a></h2>
 <p>Covers RFC 9110 (HTTP Semantics) and RFC 9112 (HTTP/1.1 message
 framing).  ~250 conformance test functions across the
@@ -3818,6 +3899,11 @@ python<span class="w"> </span>bench/conformance/autobahn_app.py<span class="w"> 
 bash<span class="w"> </span>bench/conformance/autobahn_run.sh<span class="w">               </span><span class="c1"># full fuzzingclient run</span>
 <span class="nv">CASES</span><span class="o">=</span><span class="s1">&#39;1.*&#39;</span><span class="w"> </span>bash<span class="w"> </span>bench/conformance/autobahn_run.sh<span class="w">   </span><span class="c1"># subset (e.g. all of §1.x)</span>
 </code></pre></div>
+<p>The §9 <em>Limits and performance</em> cases send single frames of
+4-64 MiB and need the per-frame payload cap to be at least the
+case size.  The shipped default (<code>BB_WS_MAX_FRAME_PAYLOAD</code>,
+64 MiB) accepts all of Autobahn's §9 cases; lower it for stricter
+exposure on untrusted-peer deployments.</p>
 <p>Reports land in <code>bench/conformance/results/autobahn_&lt;timestamp&gt;/</code>
 with an HTML index — open <code>index.html</code> in a browser for the
 case-by-case breakdown.</p>
@@ -3886,6 +3972,81 @@ same input, each categorised:</p>
 <p>The two <code>STATUS_DIFFER</code> entries are documented as known
 divergences from nginx behaviour in
 <a href="https://github.com/TOKUJI/BlackBull/blob/master/KNOWN_LIMITATIONS.md"><code>KNOWN_LIMITATIONS.md</code></a>.</p>
+<h4 id="docker-free-regression-replay">Docker-free regression replay<a class="headerlink" href="#docker-free-regression-replay" title="Permanent link">&para;</a></h4>
+<p>The full differential test
+(<a href="https://github.com/TOKUJI/BlackBull/blob/master/tests/conformance/http1/test_http1_differential.py"><code>test_http1_differential.py</code></a>)
+spins up nginx via <code>testcontainers</code> and skips at collection when
+Docker isn't reachable — which excludes most CI runners.  A
+companion test runs against just BlackBull:</p>
+<div class="highlight"><pre><span></span><code>pytest<span class="w"> </span>tests/conformance/http1/test_h1_user_corpus_replay.py<span class="w"> </span>-q
+</code></pre></div>
+<p>For each <code>diff_*.meta.json</code> sidecar, it sends the recorded
+<code>wire_request_latin1</code> to a live in-process BlackBull and asserts
+the response status code still matches the recorded
+<code>blackbull_status</code>.  Runs in well under a second; no Docker, no
+network egress.  A failure pinpoints which curated edge case
+moved without re-running the Hypothesis sweep against nginx.</p>
+<p>If you change the HTTP/1.1 parser or dispatch path and a corpus
+entry's status shifts, decide whether the shift is:</p>
+<ul>
+<li>a <strong>real regression</strong> — fix the change that moved the status; or</li>
+<li>an <strong>intentional behaviour change</strong> — delete the obsolete
+  <code>.meta.json</code> / <code>.jsonl</code> pair, regenerate by running the full
+  differential test under Docker, and commit the refreshed
+  recording.</li>
+</ul>
+<h2 id="verifying-your-fork-stays-rfc-correct">Verifying your fork stays RFC-correct<a class="headerlink" href="#verifying-your-fork-stays-rfc-correct" title="Permanent link">&para;</a></h2>
+<p>If you're carrying a patch on top of BlackBull and want assurance
+that your changes haven't broken protocol conformance, this is
+the recommended order:</p>
+<ol>
+<li>
+<p><strong>Run the in-tree pytest suite</strong>:
+   <div class="highlight"><pre><span></span><code>pytest<span class="w"> </span>tests/conformance/<span class="w"> </span>-q
+</code></pre></div>
+   This covers HTTP/1.1 (RFC 9110, RFC 9112), HTTP/2 BlackBull-
+   specific cases, and RFC 8441 — fastest signal, no external
+   dependencies.</p>
+</li>
+<li>
+<p><strong>Run the docker-free corpus replay</strong>:
+   <div class="highlight"><pre><span></span><code>pytest<span class="w"> </span>tests/conformance/http1/test_h1_user_corpus_replay.py<span class="w"> </span>-q
+</code></pre></div>
+   Confirms the curated divergence set still holds.  Single
+   second.</p>
+</li>
+<li>
+<p><strong>Run h2spec locally</strong> (RFC 9113 + RFC 7541):
+   <div class="highlight"><pre><span></span><code>openssl<span class="w"> </span>req<span class="w"> </span>-x509<span class="w"> </span>-newkey<span class="w"> </span>rsa:2048<span class="w"> </span>-keyout<span class="w"> </span>key.pem<span class="w"> </span>-out<span class="w"> </span>cert.pem<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>-days<span class="w"> </span><span class="m">365</span><span class="w"> </span>-nodes<span class="w"> </span>-subj<span class="w"> </span><span class="s1">&#39;/CN=localhost&#39;</span>
+python<span class="w"> </span>bench/conformance/h2spec_app.py<span class="w"> </span>--port<span class="w"> </span><span class="m">8443</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--cert<span class="w"> </span>cert.pem<span class="w"> </span>--key<span class="w"> </span>key.pem<span class="w"> </span><span class="p">&amp;</span>
+bash<span class="w"> </span>bench/conformance/h2spec_run.sh
+</code></pre></div>
+   ~2-5 minutes.  Output: <code>bench/conformance/results/h2spec_*.{txt,xml}</code>.</p>
+</li>
+<li>
+<p><strong>Run Autobahn|Testsuite locally</strong> (RFC 6455 + RFC 7692):
+   <div class="highlight"><pre><span></span><code>python<span class="w"> </span>bench/conformance/autobahn_app.py<span class="w"> </span>--port<span class="w"> </span><span class="m">9001</span><span class="w"> </span><span class="p">&amp;</span>
+bash<span class="w"> </span>bench/conformance/autobahn_run.sh
+</code></pre></div>
+   Requires Docker.  ~3-10 minutes.  Browse
+   <code>bench/conformance/results/autobahn_*/index.html</code> for the
+   case-by-case breakdown.</p>
+</li>
+<li>
+<p><strong>Push to a branch and let CI run</strong> the same three external
+   suites in parallel on <code>ubuntu-latest</code>.  The
+   <a href="https://github.com/TOKUJI/BlackBull/blob/master/.github/workflows/conformance.yml"><code>conformance.yml</code></a>
+   workflow runs on every push and PR to master; its badge in
+   the README turns red if any suite regresses.</p>
+</li>
+</ol>
+<p>A clean run of all five steps means your fork passes the same
+RFC-conformance bar that BlackBull itself ships with.  None of
+this proves the absence of bugs — these are published suites
+with finite coverage — but a regression in any of them is a
+hard signal you've changed protocol-level behaviour.</p>
 <h3 id="hypothesis-property-tests">Hypothesis property tests<a class="headerlink" href="#hypothesis-property-tests" title="Permanent link">&para;</a></h3>
 <p><a href="https://github.com/TOKUJI/BlackBull/tree/master/tests/properties"><code>tests/properties/</code></a>
 uses <a href="https://hypothesis.readthedocs.io/">hypothesis</a> to
