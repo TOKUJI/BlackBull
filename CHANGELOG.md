@@ -24,6 +24,46 @@ so the editable install's metadata catches up.
 
 ## [Unreleased]
 
+## [0.39.1] — 2026-06-15
+
+**Patch release: two cross-platform bug fixes surfaced via the
+proposals folder.**
+
+Inter-sprint patch — no sprint scope change.  Two reproducible
+defects reported by external triage notes were both verified
+against current `master` and fixed in the smallest possible
+diff.  Sprint 44 (cap-hit observability) remains the active
+sprint and is unaffected.
+
+### Fixed
+
+- `blackbull/server/server.py` — `SocketManager` no longer
+  crashes on platforms where `socket.AF_UNIX` is undefined
+  (notably some Windows builds where the `socket` module ships
+  without Unix-domain socket support).  The attribute is now
+  resolved via `getattr` once at context entry; sockets are
+  compared against the sentinel only when it is non-`None`.
+  Before the fix, every accepted connection raised
+  `AttributeError: module '_socket' has no attribute 'AF_UNIX'`
+  on those platforms, making BlackBull unusable.
+- `blackbull/response.py` — `Response(..., headers=[('Foo', 'bar')])`
+  with `str`-typed tuple elements is now accepted.  The
+  constructor coerces both key and value to `bytes` (latin-1
+  encoded) on the way in so the sender's later
+  `b''.join(parts)` no longer raises
+  `TypeError: sequence item N: expected a bytes-like object,
+  str found`.  Bytes-typed tuples continue to pass through
+  unchanged.
+
+### Internal
+
+- `tests/unit/test_socket_manager_af_unix.py` — regression test
+  that monkeypatches `socket.AF_UNIX` away and exercises
+  `SocketManager` against a real AF_INET socket; would have
+  caught the Windows crash had it existed earlier.
+- `tests/unit/test_response.py` — added
+  `test_response_str_headers_coerced_to_bytes`.
+
 ## [0.39.0] — 2026-06-15
 
 **Sprint 43 close: conformance lane.**
