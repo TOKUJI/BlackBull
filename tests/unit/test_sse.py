@@ -239,21 +239,27 @@ async def test_http2_sender_blocks_when_window_closed():
         write_done.set()
 
     task = asyncio.create_task(do_write())
-    # Give the loop a couple of ticks so the writer enters its credit-wait
-    # loop without producing any DATA bytes.
-    for _ in range(5):
-        await asyncio.sleep(0)
-    assert not write_done.is_set(), 'expected _write_data to block on credit'
-    assert writer.chunks == b'', 'expected no DATA bytes before credit grant'
+    try:
+        # Give the loop a couple of ticks so the writer enters its
+        # credit-wait loop without producing any DATA bytes.
+        for _ in range(5):
+            await asyncio.sleep(0)
+        assert not write_done.is_set(), 'expected _write_data to block on credit'
+        assert writer.chunks == b'', 'expected no DATA bytes before credit grant'
 
-    # Reopen the window and signal the waiter — the write should now run
-    # to completion and put the full payload on the wire.
-    sender.connection_window_size = 100
-    sender.stream_window_size[1] = 100
-    assert sender._window_open is not None
-    sender._window_open.set()
-    await asyncio.wait_for(write_done.wait(), timeout=1.0)
-    assert b'xxxx' in bytes(writer.chunks)
+        # Reopen the window and signal the waiter — the write should now
+        # run to completion and put the full payload on the wire.
+        sender.connection_window_size = 100
+        sender.stream_window_size[1] = 100
+        assert sender._window_open is not None
+        sender._window_open.set()
+        await asyncio.wait_for(write_done.wait(), timeout=1.0)
+        assert b'xxxx' in bytes(writer.chunks)
+    finally:
+        # Awaiting the task drains its result and surfaces any exception
+        # the writer raised — without this, an exception inside do_write
+        # would be lost and CodeQL flags ``task`` as unused.
+        await task
 
 
 @pytest.mark.asyncio
