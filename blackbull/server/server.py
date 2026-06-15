@@ -134,13 +134,17 @@ async def SocketManager(cb, raw_sockets, ssl_context):
     import socket as _socket  # noqa: PLC0415
     from ..env import get_settings as _get_settings  # noqa: PLC0415
     _backlog = _get_settings().socket_backlog
+    # AF_UNIX is absent on platforms without Unix-domain socket support
+    # (notably some Windows builds where socket.AF_UNIX is not defined).
+    # Use a sentinel so the family comparison never raises AttributeError.
+    _af_unix = getattr(_socket, 'AF_UNIX', None)
     servers = []
     for sock in raw_sockets:
         # ssl_handshake_timeout is meaningful only when SSL is enabled.
         kwargs = {'sock': sock, 'ssl': ssl_context, 'backlog': _backlog}
         if ssl_context is not None:
             kwargs['ssl_handshake_timeout'] = 60.0
-        if sock.family == _socket.AF_UNIX:
+        if _af_unix is not None and sock.family == _af_unix:
             # AF_UNIX needs the dedicated unix-server entry point — the
             # TCP create_server() rejects non-INET families at family-
             # validation time.

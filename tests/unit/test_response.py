@@ -45,6 +45,25 @@ def test_response_extra_headers():
     assert (b'x-foo', b'bar') in r.headers
 
 
+def test_response_str_headers_coerced_to_bytes():
+    # Regression: str-tuple custom headers used to pass through unchanged
+    # and crash the sender's b''.join with TypeError.  Response now coerces.
+    r = Response(b'<h1>hi</h1>',
+                 headers=[('Content-Type', 'text/html; charset=utf-8'),
+                          ('X-Foo', 'bar')])
+    for k, v in r.headers:
+        assert isinstance(k, bytes)
+        assert isinstance(v, bytes)
+    assert (b'X-Foo', b'bar') in r.headers
+
+
+def test_response_str_headers_reject_non_ascii():
+    # RFC 9110 §5.5: header field values are ASCII.  Surface non-ASCII at
+    # construction time rather than emitting obs-text bytes onto the wire.
+    with pytest.raises(UnicodeEncodeError):
+        Response(b'', headers=[('X-Foo', 'café')])
+
+
 # ---------------------------------------------------------------------------
 # JSONResponse
 # ---------------------------------------------------------------------------
