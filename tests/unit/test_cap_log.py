@@ -35,7 +35,8 @@ def cap_log_caplog(caplog):
 
 def test_log_cap_hit_emits_one_warning_record(cap_log_caplog):
     log_cap_hit('ws_max_frame_payload', requested=4_194_304, limit=1_048_576,
-                peer=('127.0.0.1', 54321), scope_path='/ws', protocol='ws')
+                peer=('127.0.0.1', 54321), scope_path='/ws', protocol='ws',
+                connection_id='abc12345')
 
     records = [r for r in cap_log_caplog.records if r.name == 'blackbull.caps']
     assert len(records) == 1
@@ -47,6 +48,21 @@ def test_log_cap_hit_emits_one_warning_record(cap_log_caplog):
     assert r.peer == ('127.0.0.1', 54321)
     assert r.scope_path == '/ws'
     assert r.protocol == 'ws'
+    assert r.connection_id == 'abc12345'
+
+
+def test_log_cap_hit_connection_id_inherits_from_counter(cap_log_caplog):
+    counter = CapHitCounter()
+    log_cap_hit('ws_max_frame_payload', 1, 2, counter=counter)
+    records = [r for r in cap_log_caplog.records if r.name == 'blackbull.caps']
+    # Counter auto-generates an id; emission inherits it.
+    assert records[0].connection_id == counter.connection_id
+
+
+def test_log_cap_hit_no_counter_no_explicit_id_is_none(cap_log_caplog):
+    log_cap_hit('header_max_line', 10_000, 8_192)
+    records = [r for r in cap_log_caplog.records if r.name == 'blackbull.caps']
+    assert records[0].connection_id is None
 
 
 def test_log_cap_hit_message_names_the_cap(cap_log_caplog):
@@ -97,7 +113,8 @@ def test_counter_different_caps_each_log_once(cap_log_caplog):
 
 
 def test_counter_flush_emits_summary_per_suppressed_cap(cap_log_caplog):
-    counter = CapHitCounter()
+    # Disable threshold so all 99 post-first hits stay queued for flush.
+    counter = CapHitCounter(flush_threshold=0)
     for _ in range(100):
         log_cap_hit('ws_max_frame_payload', 4_000_000, 1_048_576, counter=counter)
     cap_log_caplog.clear()  # discard the first-hit emission
@@ -111,6 +128,23 @@ def test_counter_flush_emits_summary_per_suppressed_cap(cap_log_caplog):
     assert r.suppressed == 99   # 100 calls = 1 first-hit + 99 suppressed
     assert r.peer == ('127.0.0.1', 54321)
     assert r.protocol == 'ws'
+    # connection_id must match the counter's stored id so first-hit /
+    # intermediate / graceful records all correlate downstream.
+    assert r.connection_id == counter.connection_id
+
+
+def test_counter_auto_generates_unique_connection_ids():
+    a = CapHitCounter()
+    b = CapHitCounter()
+    assert a.connection_id != b.connection_id
+    assert isinstance(a.connection_id, str)
+    assert len(a.connection_id) == 8     # _gen_connection_id is 4-byte hex
+    assert all(c in '0123456789abcdef' for c in a.connection_id)
+
+
+def test_counter_accepts_explicit_connection_id():
+    counter = CapHitCounter(connection_id='peer-7-conn-3')
+    assert counter.connection_id == 'peer-7-conn-3'
 
 
 def test_counter_flush_omits_caps_with_no_suppression(cap_log_caplog):
@@ -215,9 +249,113 @@ def test_bind_inherited_by_child_task(cap_log_caplog):
         with counter.bind():
             async with asyncio.TaskGroup() as tg:
                 tg.create_task(child())
+            # Cancel any pending dirty-flush timer before the loop closes
+            # so its eventual cancellation doesn't race with loop teardown.
+            counter.flush()
 
     asyncio.run(parent())
     records = [r for r in cap_log_caplog.records if r.name == 'blackbull.caps']
     # Child task inherits parent's context — both calls go through the
-    # same counter, so only the first emits.
+    # same counter, so only the first emits.  Flush after the child
+    # runs records the 1 suppressed hit as a summary.
+    assert len([r for r in records if not getattr(r, 'suppressed', None)]) == 1
+
+
+# ----------------------------------------------------------------------
+# Dirty-flush triggers (Fix 2 — RST resilience)
+# ----------------------------------------------------------------------
+
+def test_dirty_flush_threshold_emits_intermediate_summary(cap_log_caplog):
+    counter = CapHitCounter(flush_threshold=10, flush_interval=0)
+    for _ in range(11):
+        log_cap_hit('ws_max_frame_payload', 4_000_000, 1_048_576, counter=counter)
+
+    records = [r for r in cap_log_caplog.records if r.name == 'blackbull.caps']
+    # 1 first-hit + 1 intermediate summary at the threshold boundary.
+    assert len(records) == 2
+    first, summary = records
+    assert getattr(first, 'suppressed', None) is None      # first-hit record
+    assert summary.suppressed == 10                        # 10 suppressed hits
+    assert summary.cap == 'ws_max_frame_payload'
+    assert 'connection still open' in summary.getMessage()
+    assert summary.connection_id == counter.connection_id
+
+
+def test_dirty_flush_threshold_resets_and_resumes(cap_log_caplog):
+    counter = CapHitCounter(flush_threshold=5, flush_interval=0)
+    for _ in range(11):    # 1 first-hit + 10 suppressed -> 2 thresholds fire (at 5 and 10)
+        log_cap_hit('ws_max_frame_payload', 1, 2, counter=counter)
+    records = [r for r in cap_log_caplog.records if r.name == 'blackbull.caps']
+    # 1 first-hit + 2 intermediate summaries (at the 5th and 10th
+    # suppressed hits).  Each summary's suppressed == 5.
+    summaries = [r for r in records if 'still open' in r.getMessage()]
+    assert len(summaries) == 2
+    assert all(s.suppressed == 5 for s in summaries)
+
+
+@pytest.mark.asyncio
+async def test_dirty_flush_interval_emits_after_interval(cap_log_caplog):
+    import asyncio as _asyncio
+    counter = CapHitCounter(flush_threshold=0, flush_interval=0.05)
+    for _ in range(3):
+        log_cap_hit('ws_max_frame_payload', 1, 2, counter=counter)
+    # Now wait past the interval so the background timer fires.
+    await _asyncio.sleep(0.15)
+
+    records = [r for r in cap_log_caplog.records if r.name == 'blackbull.caps']
+    summaries = [r for r in records if 'still open' in r.getMessage()]
+    assert len(summaries) == 1
+    assert summaries[0].suppressed == 2
+    assert summaries[0].connection_id == counter.connection_id
+
+
+def test_dirty_flush_disabled_triggers(cap_log_caplog):
+    counter = CapHitCounter(flush_threshold=0, flush_interval=0)
+    for _ in range(200):
+        log_cap_hit('ws_max_frame_payload', 1, 2, counter=counter)
+    records = [r for r in cap_log_caplog.records if r.name == 'blackbull.caps']
+    # Exactly one first-hit record; no intermediate summaries.
     assert len(records) == 1
+    assert getattr(records[0], 'suppressed', None) is None
+
+    counter.flush()
+    records = [r for r in cap_log_caplog.records if r.name == 'blackbull.caps']
+    # Now the graceful flush summary fires with the full count.
+    summaries = [r for r in records if getattr(r, 'suppressed', None) is not None]
+    assert len(summaries) == 1
+    assert summaries[0].suppressed == 199
+
+
+@pytest.mark.asyncio
+async def test_dirty_flush_threshold_cancels_interval_timer(cap_log_caplog):
+    import asyncio as _asyncio
+    # Threshold low, interval long enough we'd see it if it weren't cancelled.
+    counter = CapHitCounter(flush_threshold=5, flush_interval=0.1)
+    for _ in range(6):    # 1 first-hit + 5 suppressed -> threshold fires
+        log_cap_hit('ws_max_frame_payload', 1, 2, counter=counter)
+
+    # Threshold fired and reset counts.  Sleep past the interval — no
+    # second summary should fire because nothing is pending and the
+    # timer was cancelled.
+    await _asyncio.sleep(0.2)
+
+    summaries = [
+        r for r in cap_log_caplog.records
+        if r.name == 'blackbull.caps' and 'still open' in r.getMessage()
+    ]
+    assert len(summaries) == 1
+
+
+@pytest.mark.asyncio
+async def test_flush_cancels_pending_interval_timer(cap_log_caplog):
+    import asyncio as _asyncio
+    counter = CapHitCounter(flush_threshold=0, flush_interval=0.1)
+    log_cap_hit('ws_max_frame_payload', 1, 2, counter=counter)
+    log_cap_hit('ws_max_frame_payload', 1, 2, counter=counter)   # timer arms
+    counter.flush()
+    cap_log_caplog.clear()
+
+    # Sleep past the original interval — the cancelled timer must not fire.
+    await _asyncio.sleep(0.2)
+    records = [r for r in cap_log_caplog.records if r.name == 'blackbull.caps']
+    assert records == []

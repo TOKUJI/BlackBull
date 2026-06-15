@@ -24,6 +24,83 @@ so the editable install's metadata catches up.
 
 ## [Unreleased]
 
+## [0.40.1] — 2026-06-15
+
+**Patch release: cap-hit observability follow-ups.**
+
+Two correlation / resilience gaps in the Sprint 44 cap-hit
+logger, addressed in a single inter-sprint patch.  Sprint 45
+(HTTP/2 SSE with proper backpressure) remains the next sprint
+and is unaffected.
+
+### Added
+
+- Every `blackbull.caps` record (first-hit, intermediate
+  summary, and graceful-close summary) now carries a
+  `connection_id` field in `record.extra`.  The id is an
+  8-character hex string auto-generated per
+  `CapHitCounter` and accessible via the new
+  `CapHitCounter.connection_id` property.  Pass an explicit
+  string to `CapHitCounter(connection_id=...)` when integrating
+  with an upstream correlation system.  Lets log aggregation
+  pipelines (SIEM / Loki / Datadog) join records from a single
+  connection even when `peer` is shared across many clients
+  behind a NAT / CGNAT.  Resolution order on the emission path:
+  explicit `connection_id=` kwarg → active counter's id → None.
+- `CapHitCounter` gains two dirty-flush triggers so a
+  connection torn down by RST (or any abnormal close that skips
+  the graceful `flush()` path) still emits a summary for
+  suppressed hits:
+    - **Threshold trigger** (`flush_threshold=`, default 100)
+      — after this many suppressed hits on any single cap, emit
+      one intermediate summary per non-zero cap and reset
+      counts.  Defends against an attacker that RSTs after
+      every cap-hit to suppress summaries entirely.  Set to 0
+      to disable.
+    - **Interval trigger** (`flush_interval=`, default 60.0 s)
+      — an asyncio timer task lazily armed on the first
+      suppressed hit emits + resets after this many seconds if
+      any cap has suppressed hits.  Cancelled on every reset
+      (threshold trigger, timer fire, or graceful `flush()`).
+      Set to 0 to disable.
+- Intermediate summaries carry the marker text "(connection
+  still open)" in the message so subscribers can distinguish
+  them from the graceful-close summary without inspecting
+  state.
+
+### Internal
+
+- `tests/unit/test_cap_log.py` extended with 10 new tests:
+  `connection_id` propagation through emission and summary;
+  auto-generation produces unique 8-hex IDs; explicit
+  `connection_id=` kwargs honoured; threshold trigger emits
+  intermediate summary at boundary; threshold resets and
+  resumes (two summaries from a single cap); interval timer
+  fires after the configured delay; disabled triggers (both 0)
+  yield no intermediate emission; threshold cancels pending
+  interval timer (no double summary); graceful `flush()`
+  cancels pending interval timer.
+- `tests/unit/test_cap_log_sites.py` upgraded:
+  the previously signature-shaped `h2_max_concurrent_streams`
+  and `h2_ws_max_streams_per_connection` tests now drive the
+  real rejection sites in `HTTP2Actor._on_headers_frame` and
+  `_handle_h2_websocket` with `MagicMock(spec=Stream)` /
+  `MagicMock(spec=asyncio.TaskGroup)` so they exercise the cap
+  guard end-to-end while still satisfying beartype.
+- `tests/unit/test_max_connections_503.py` extended to assert
+  the `max_connections` cap-hit record fires alongside the 503
+  + Retry-After response — a functional pass through
+  `ASGIServer.client_connected_cb` rather than a direct
+  `log_cap_hit()` call.
+
+### Compatibility
+
+`CapHitCounter()` is backwards-compatible — all new parameters
+are keyword-only with sensible defaults.  Existing call sites
+in `blackbull/server/connection_actor.py` need no change; the
+counter auto-generates a `connection_id` and arms the
+dirty-flush triggers transparently.
+
 ## [0.40.0] — 2026-06-15
 
 **Sprint 44 close: cap-hit observability.**
