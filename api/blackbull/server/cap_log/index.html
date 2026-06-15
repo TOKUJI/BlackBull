@@ -2710,6 +2710,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#blackbull.server.cap_log.CapHitCounter.connection_id" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        connection_id
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.server.cap_log.CapHitCounter.bind" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3541,6 +3552,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#blackbull.server.cap_log.CapHitCounter.connection_id" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        connection_id
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.server.cap_log.CapHitCounter.bind" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3644,6 +3666,23 @@ framework code.</p>
   inherit context) automatically pick up the counter.  Zero
   plumbing through actor constructors.</li>
 </ul>
+<p>Every emitted record carries a <code>connection_id</code> so SIEM /
+log-aggregation pipelines can correlate first-hit, intermediate
+summary, and graceful-close summary records that all belong to the
+same connection — useful when <code>peer</code> is shared across many
+clients behind a NAT.</p>
+<p>The counter also runs two dirty-flush triggers so a connection
+torn down by RST (or any abnormal path that skips graceful
+:meth:<code>flush</code>) still emits a summary for any suppressed hits:</p>
+<ul>
+<li><strong>Threshold trigger</strong>: after <code>flush_threshold</code> suppressed hits
+  on any single cap, emit an intermediate summary and reset counts.
+  Default 100; set to 0 to disable.</li>
+<li><strong>Interval trigger</strong>: an asyncio timer task started on the first
+  suppressed hit emits an intermediate summary after
+  <code>flush_interval</code> seconds if any cap still has suppressed
+  hits.  Default 60.0 s; set to 0 to disable.</li>
+</ul>
 <p>Design recap in <code>.claude/planning/candidates/cap-hit-logging.md</code>.</p>
 
 
@@ -3687,6 +3726,16 @@ install it as the ambient counter for the duration of the
 connection via the :meth:<code>bind</code> context manager, and call
 :meth:<code>flush</code> once when the connection closes so a single
 summary record reports any suppressed hits.</p>
+<p>Two dirty-flush triggers fire intermediate summaries even when
+:meth:<code>flush</code> is never called (e.g. RST close that skips the
+graceful path):</p>
+<ul>
+<li><code>flush_threshold</code> (default 100) — after this many suppressed
+  hits on any single cap, emit and reset.  Set to 0 to disable.</li>
+<li><code>flush_interval</code> (default 60.0 s) — an asyncio timer that
+  emits and resets after this many seconds if any cap has
+  suppressed hits.  Set to 0 to disable.</li>
+</ul>
 
 
 
@@ -3705,6 +3754,28 @@ summary record reports any suppressed hits.</p>
 
 
 
+
+<div class="doc doc-object doc-attribute">
+
+
+
+<h4 id="blackbull.server.cap_log.CapHitCounter.connection_id" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">connection_id</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-property"><code>property</code></small>
+  </span>
+
+<a href="#blackbull.server.cap_log.CapHitCounter.connection_id" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Read-only access to the counter's connection id.</p>
+
+    </div>
+
+</div>
 
 
 
@@ -3737,7 +3808,7 @@ with counter.bind():
 
 
 <h4 id="blackbull.server.cap_log.CapHitCounter.flush" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">flush</span><span class="p">(</span><span class="o">*</span><span class="p">,</span> <span class="n">peer</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">protocol</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
+            <code class="highlight language-python"><span class="n">flush</span><span class="p">(</span><span class="o">*</span><span class="p">,</span> <span class="n">peer</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">protocol</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">connection_id</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
 
 <a href="#blackbull.server.cap_log.CapHitCounter.flush" class="headerlink" title="Permanent link">&para;</a></h4>
 
@@ -3745,9 +3816,10 @@ with counter.bind():
     <div class="doc doc-contents ">
 
         <p>Emit one summary record per cap that had suppressed hits.</p>
-<p>Caps with zero suppressed hits (fired exactly once) are
-omitted — the first-hit record already named them.  Clears
-state after emission so the same counter can be re-used.</p>
+<p>Caps with zero suppressed hits (fired exactly once, or already
+emitted via an intermediate summary) are omitted.  Cancels the
+interval timer and clears all state — the counter is safe to
+reuse afterwards if the holder is pooled.</p>
 
 
     </div>
@@ -3767,7 +3839,7 @@ state after emission so the same counter can be re-used.</p>
 
 
 <h3 id="blackbull.server.cap_log.log_cap_hit" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">log_cap_hit</span><span class="p">(</span><span class="n">cap</span><span class="p">,</span> <span class="n">requested</span><span class="p">,</span> <span class="n">limit</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">counter</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">peer</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">scope_path</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">protocol</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
+            <code class="highlight language-python"><span class="n">log_cap_hit</span><span class="p">(</span><span class="n">cap</span><span class="p">,</span> <span class="n">requested</span><span class="p">,</span> <span class="n">limit</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">counter</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">peer</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">scope_path</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">protocol</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">connection_id</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
 
 <a href="#blackbull.server.cap_log.log_cap_hit" class="headerlink" title="Permanent link">&para;</a></h3>
 
@@ -3776,9 +3848,9 @@ state after emission so the same counter can be re-used.</p>
 
         <p>Emit one cap-hit record on <code>blackbull.caps</code> at WARN level.</p>
 <p>The structured fields land in <code>record.extra</code> (<code>cap</code>,
-<code>requested</code>, <code>limit</code>, <code>peer</code>, <code>scope_path</code>, <code>protocol</code>)
-so log handlers can route or aggregate without parsing the
-message string.</p>
+<code>requested</code>, <code>limit</code>, <code>peer</code>, <code>scope_path</code>, <code>protocol</code>,
+<code>connection_id</code>) so log handlers can route or aggregate
+without parsing the message string.</p>
 <p>Resolution order for the rate-limit counter:</p>
 <ol>
 <li>The explicit <em>counter</em> keyword argument, if given.</li>
@@ -3786,6 +3858,12 @@ message string.</p>
    :class:<code>~contextvars.ContextVar</code> (set via
    :meth:<code>CapHitCounter.bind</code>).</li>
 <li><code>None</code> — every call emits, no rate limiting.</li>
+</ol>
+<p><code>connection_id</code> resolution mirrors the counter chain:</p>
+<ol>
+<li>The explicit <code>connection_id</code> keyword argument, if given.</li>
+<li>The active counter's :attr:<code>CapHitCounter.connection_id</code>.</li>
+<li><code>None</code> — record carries <code>connection_id=None</code>.</li>
 </ol>
 <p>The first call per <code>(counter, cap)</code> emits a full record;
 subsequent calls return silently and increment the counter's
