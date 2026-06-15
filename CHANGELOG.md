@@ -24,6 +24,8 @@ so the editable install's metadata catches up.
 
 ## [Unreleased]
 
+## [0.41.0] — 2026-06-16
+
 **Sprint 45 close: HTTP/2 SSE with proper backpressure.**
 
 Real-demand streaming pattern (LLM token streams, log tails)
