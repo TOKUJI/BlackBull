@@ -20,6 +20,7 @@ from .deadline import ConnectionDeadline
 from .recipient import AbstractReader, IncompleteReadError, RecipientFactory, _WS_EVENT_QUEUE_DEPTH
 from .sender import AbstractWriter, SenderFactory
 from .access_log import AccessLogRecord as _AccessLogRecord, _make_capturing_send, _make_disconnect_detecting_receive, emit_access_log as _emit_access_log
+from .cap_log import log_cap_hit
 from .constants import WSCloseCode
 
 logger = logging.getLogger(__name__)
@@ -354,6 +355,10 @@ class HTTP1Actor(Actor):
                     # The buffer is over the configured budget; close so an
                     # attacker can't keep feeding us bytes after the reply.
                     logger.warning('431 Request Header Fields Too Large: %s', exc)
+                    log_cap_hit('header_max_total',
+                                requested=len(self._request),
+                                limit=cfg.header_max_total,
+                                peer=self._peername, protocol='http1')
                     await send(
                         b'431 Request Header Fields Too Large',
                         HTTPStatus.REQUEST_HEADER_FIELDS_TOO_LARGE,
@@ -366,6 +371,10 @@ class HTTP1Actor(Actor):
                         '408 Request Timeout (slowloris defence) — peer=%r '
                         'sent %d bytes in %.1fs without completing headers',
                         self._peername, len(self._request), cfg.header_timeout)
+                    log_cap_hit('header_timeout',
+                                requested=cfg.header_timeout,
+                                limit=cfg.header_timeout,
+                                peer=self._peername, protocol='http1')
                     await send(
                         b'408 Request Timeout',
                         HTTPStatus.REQUEST_TIMEOUT,
@@ -380,6 +389,10 @@ class HTTP1Actor(Actor):
                     # Per-line limit hit during parse.  Same response as the
                     # total-block check in _read_headers.
                     logger.warning('431 Request Header Fields Too Large: %s', exc)
+                    log_cap_hit('header_max_line',
+                                requested=len(self._request),
+                                limit=cfg.header_max_line,
+                                peer=self._peername, protocol='http1')
                     await send(
                         b'431 Request Header Fields Too Large',
                         HTTPStatus.REQUEST_HEADER_FIELDS_TOO_LARGE,
@@ -488,6 +501,12 @@ class HTTP1Actor(Actor):
                         scope.get('method', '?'), scope.get('path', '?'),
                         cfg.request_timeout,
                     )
+                    log_cap_hit('request_timeout',
+                                requested=cfg.request_timeout,
+                                limit=cfg.request_timeout,
+                                peer=self._peername,
+                                scope_path=scope.get('path'),
+                                protocol='http1')
                     if not send._started:
                         await send(
                             b'408 Request Timeout',

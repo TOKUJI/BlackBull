@@ -1,15 +1,16 @@
 # Logging
 
-BlackBull uses two separate logger hierarchies, each with a
+BlackBull uses three separate logger hierarchies, each with a
 distinct purpose:
 
 | Logger | Level | What it carries |
 |---|---|---|
 | `blackbull.access` | `INFO` | One record per completed HTTP/1.1 request (access log) |
+| `blackbull.caps` | `WARNING` | One record per cap rejection (header sizes, timeouts, connection cap, WS frame cap, H/2 stream caps, compression in-flight, …) |
 | `blackbull` (+ children) | `DEBUG` | Internal framework events (frame parsing, HPACK, routing decisions, TLS handshake) |
 
-Both follow standard `logging` semantics — no handlers attached
-by default, so nothing is printed until you opt in.
+All three follow standard `logging` semantics — no handlers
+attached by default, so nothing is printed until you opt in.
 
 ## Access log — `blackbull.access`
 
@@ -248,6 +249,87 @@ touches the event-loop thread.
 to the server, so the background thread starts only when the
 server is ready and is flushed and joined cleanly before the
 process exits.
+
+## Cap-hit log — `blackbull.caps`
+
+Every user-tunable resource cap in BlackBull emits one `WARNING`
+record on `blackbull.caps` when it fires.  Coverage:
+
+| Cap (env var) | Where it fires |
+|---|---|
+| `BB_MAX_CONNECTIONS` | accept loop — connection cap hit |
+| `BB_HEADER_TIMEOUT` | slowloris defence — headers didn't arrive in time |
+| `BB_HEADER_MAX_LINE` | per-line header limit exceeded |
+| `BB_HEADER_MAX_TOTAL` | aggregate header block exceeded (H/1.1 + H/2 CONTINUATION) |
+| `BB_BODY_TIMEOUT` | body bytes didn't arrive in time |
+| `BB_REQUEST_TIMEOUT` | handler exceeded per-request budget (H/1.1 + H/2) |
+| `BB_WRITE_TIMEOUT` | drain stalled (slow-read peer) |
+| `BB_WS_MAX_FRAME_PAYLOAD` | WebSocket frame declared length exceeded |
+| `BB_H2_MAX_CONCURRENT_STREAMS` | HTTP/2 stream-open guard tripped |
+| `BB_H2_WS_MAX_STREAMS_PER_CONNECTION` | RFC 8441 WebSocket stream cap tripped |
+| `BB_COMPRESSION_MAX_INFLIGHT` | Compression middleware bypassed (executor saturated) |
+
+`BB_WS_QUEUE_DEPTH` is intentionally **not** logged — the WebSocket
+event queue applies backpressure (blocking `await put()`) rather
+than dropping events, so a hit is normal flow control rather than
+a rejection.  The HTTP/2 per-stream queue (depth controlled by
+`BB_STREAM_QUEUE_DEPTH`-style internals) does drop and is logged
+under the cap name `stream_queue_depth`.
+
+### Record shape
+
+Each record carries the cap name in the message and the structured
+fields in `record.extra`:
+
+| `extra` field | Meaning |
+|---|---|
+| `cap` | Cap name (e.g. `"ws_max_frame_payload"`) |
+| `requested` | Value the peer asked for (frame size, header bytes, …) |
+| `limit` | Configured cap |
+| `peer` | Peer `(host, port)` tuple when available |
+| `scope_path` | ASGI `scope['path']` when available |
+| `protocol` | `"http1"`, `"http2"`, `"ws"`, `"h2-ws"`, `"compression"`, … |
+
+### Rate limiting
+
+A single misbehaving peer cannot flood the log: each
+`ConnectionActor` carries a `CapHitCounter` (installed via a
+`contextvars`-bound context manager so every actor on the same
+task tree picks it up without plumbing).  The first hit per
+`(connection, cap)` logs in full; subsequent hits on the same
+connection are silently counted.  When the connection closes, the
+counter emits one summary record per suppressed cap:
+
+```
+cap hit summary: ws_max_frame_payload suppressed=99 more
+```
+
+Inventory and audit details live in
+[`.claude/planning/candidates/cap-hit-logging.md`][cap-design].
+
+[cap-design]: https://github.com/TOKUJI/BlackBull/blob/master/.claude/planning/candidates/cap-hit-logging.md
+
+### Subscribing
+
+```python
+import logging
+
+class CapsHandler(logging.Handler):
+    def emit(self, record):
+        # Forward to your metrics pipeline, page on certain caps, etc.
+        print(f"[CAP] {record.cap} requested={record.requested} "
+              f"limit={record.limit} peer={record.peer}")
+
+caps = logging.getLogger('blackbull.caps')
+caps.addHandler(CapsHandler())
+caps.setLevel(logging.WARNING)
+```
+
+In production set the level once at startup and route the records
+to whatever observability surface you prefer (structured JSON to a
+log aggregator, Prometheus counters via a custom handler, Sentry
+breadcrumbs, …).  The `extra` payload is designed to round-trip
+through `json.dumps(record.__dict__)` cleanly.
 
 ## Not yet implemented
 

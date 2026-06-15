@@ -26,6 +26,7 @@ from ..protocol.frame_types import (
 from ..protocol.stream import Stream, StreamState
 from ..headers import Headers
 from .parser import ParserFactory, parse_headers
+from .cap_log import log_cap_hit
 from .recipient import (AbstractReader, IncompleteReadError,
                         RecipientFactory, _HTTP2_STREAM_QUEUE_DEPTH)
 from .response import ResponderFactory
@@ -789,12 +790,15 @@ class HTTP2Actor(Actor):
 
         timeout = self._request_timeout
         if timeout > 0:
-            async def _timed(c=coro, sid=stream_id, t=timeout):
+            async def _timed(c=coro, sid=stream_id, t=timeout, sp=scope.get('path')):
                 try:
                     await asyncio.wait_for(c, timeout=t)
                 except asyncio.TimeoutError:
                     logger.warning(
                         'Stream %d timed out after %.1fs — RST_STREAM CANCEL', sid, t)
+                    log_cap_hit('request_timeout',
+                                requested=t, limit=t,
+                                scope_path=sp, protocol='http2')
                     await self.send_frame(self.factory.rst_stream(sid, ErrorCodes.CANCEL))
             final_coro = _timed()
         else:
@@ -816,6 +820,10 @@ class HTTP2Actor(Actor):
     ) -> bool:
         """Handle a HEADERS frame; return True if stream task spawned, False if awaiting CONTINUATION."""
         if self._active_stream_count >= self.max_concurrent_streams:
+            log_cap_hit('h2_max_concurrent_streams',
+                        requested=self._active_stream_count + 1,
+                        limit=self.max_concurrent_streams,
+                        protocol='http2')
             await self.send_frame(
                 self.factory.rst_stream(stream.stream_id, ErrorCodes.REFUSED_STREAM))
             return True  # refused — do not queue as waiting for CONTINUATION
@@ -909,6 +917,10 @@ class HTTP2Actor(Actor):
                 'across CONTINUATION frames — RST_STREAM ENHANCE_YOUR_CALM',
                 stream.stream_id, self._header_max_total,
             )
+            log_cap_hit('header_max_total',
+                        requested=len(header_frame.raw_block),
+                        limit=self._header_max_total,
+                        protocol='http2')
             await self.send_frame(self.factory.rst_stream(
                 stream.stream_id, ErrorCodes.ENHANCE_YOUR_CALM))
             return True
@@ -932,6 +944,11 @@ class HTTP2Actor(Actor):
         self._fill_scope_connection(scope)
 
         if self._active_stream_count >= self.max_concurrent_streams:
+            log_cap_hit('h2_max_concurrent_streams',
+                        requested=self._active_stream_count + 1,
+                        limit=self.max_concurrent_streams,
+                        scope_path=scope.get('path') if isinstance(scope, dict) else None,
+                        protocol='http2')
             await self.send_frame(
                 self.factory.rst_stream(stream.stream_id, ErrorCodes.REFUSED_STREAM))
             return True
@@ -1035,6 +1052,12 @@ class HTTP2Actor(Actor):
         cfg = _get_settings()
         ws_cap = cfg.h2_ws_max_streams_per_connection
         if ws_cap > 0 and self._ws_stream_count >= ws_cap:
+            _ws_scope = stream.scope
+            log_cap_hit('h2_ws_max_streams_per_connection',
+                        requested=self._ws_stream_count + 1,
+                        limit=ws_cap,
+                        scope_path=_ws_scope.get('path') if isinstance(_ws_scope, dict) else None,
+                        protocol='h2-ws')
             await self.send_frame(self.factory.rst_stream(
                 stream.stream_id, ErrorCodes.REFUSED_STREAM))
             return

@@ -25,6 +25,7 @@ from .sender import SenderFactory, AbstractWriter
 from .recipient import (RecipientFactory, HTTP2Recipient, AbstractReader, AsyncioReader,
                         IncompleteReadError, _HTTP2_STREAM_QUEUE_DEPTH, _WS_EVENT_QUEUE_DEPTH)
 from .access_log import AccessLogRecord, _make_capturing_send, emit_access_log as _emit_access_log
+from .cap_log import log_cap_hit
 from ..asgi import ASGIEvent
 from ..headers import Headers
 from .http2_actor import HTTP2Actor
@@ -303,6 +304,15 @@ class ASGIServer:
                 'Connection limit reached (%d/%d) — 503 to %s',
                 self._active_connections, self._max_connections, peername,
             )
+            # ASGIServer-level cap fires before ConnectionActor binds a
+            # CapHitCounter, so the contextvar is unset; this call emits
+            # unconditionally.  An adversary cannot flood the log
+            # because they cannot accept a connection past the cap to
+            # begin with.
+            log_cap_hit('max_connections',
+                        requested=self._active_connections + 1,
+                        limit=self._max_connections,
+                        peer=peername, protocol='tcp')
             if alpn != 'h2':
                 # HTTP/1.1 (or undetected cleartext — h1 is the safe
                 # default since the client hasn't spoken yet).  Minimal

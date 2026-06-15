@@ -5,6 +5,7 @@ from collections.abc import Callable
 from ..asgi import ASGIEvent
 from ..headers import Headers
 from ..asgi import ResponseStart, ResponseBody, parse_response_event
+from ..server.cap_log import log_cap_hit
 from .utils import as_middleware
 
 _MIN_SIZE = 100  # default minimum body size to bother compressing
@@ -280,6 +281,10 @@ class Compression:
             # is safe without a lock — asyncio is single-threaded.
             if (self._executor_max_inflight > 0
                     and self._executor_inflight >= self._executor_max_inflight):
+                log_cap_hit('compression_max_inflight',
+                            requested=self._executor_inflight + 1,
+                            limit=self._executor_max_inflight,
+                            protocol='compression')
                 await send(start_event)
                 await send({'type': ASGIEvent.HTTP_RESPONSE_BODY,
                             'body': body, 'more_body': False})
