@@ -815,6 +815,56 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#cap-hit-log-blackbullcaps" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cap-hit log — blackbull.caps
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Cap-hit log — blackbull.caps">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#record-shape" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Record shape
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#rate-limiting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Rate limiting
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#subscribing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Subscribing
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#not-yet-implemented" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2778,6 +2828,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../api/blackbull/server/cap_log/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    cap_log
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../api/blackbull/server/connection_actor/" class="md-nav__link">
         
   
@@ -3616,6 +3694,56 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#cap-hit-log-blackbullcaps" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cap-hit log — blackbull.caps
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Cap-hit log — blackbull.caps">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#record-shape" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Record shape
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#rate-limiting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Rate limiting
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#subscribing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Subscribing
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#not-yet-implemented" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3658,7 +3786,7 @@
 
 
 <h1 id="logging">Logging<a class="headerlink" href="#logging" title="Permanent link">&para;</a></h1>
-<p>BlackBull uses two separate logger hierarchies, each with a
+<p>BlackBull uses three separate logger hierarchies, each with a
 distinct purpose:</p>
 <table>
 <thead>
@@ -3675,14 +3803,19 @@ distinct purpose:</p>
 <td>One record per completed HTTP/1.1 request (access log)</td>
 </tr>
 <tr>
+<td><code>blackbull.caps</code></td>
+<td><code>WARNING</code></td>
+<td>One record per cap rejection (header sizes, timeouts, connection cap, WS frame cap, H/2 stream caps, compression in-flight, …)</td>
+</tr>
+<tr>
 <td><code>blackbull</code> (+ children)</td>
 <td><code>DEBUG</code></td>
 <td>Internal framework events (frame parsing, HPACK, routing decisions, TLS handshake)</td>
 </tr>
 </tbody>
 </table>
-<p>Both follow standard <code>logging</code> semantics — no handlers attached
-by default, so nothing is printed until you opt in.</p>
+<p>All three follow standard <code>logging</code> semantics — no handlers
+attached by default, so nothing is printed until you opt in.</p>
 <h2 id="access-log-blackbullaccess">Access log — <code>blackbull.access</code><a class="headerlink" href="#access-log-blackbullaccess" title="Permanent link">&para;</a></h2>
 <p>For every completed HTTP/1.1 request the server emits one <code>INFO</code>
 record on the <code>blackbull.access</code> logger.  Default format:</p>
@@ -3919,6 +4052,136 @@ touches the event-loop thread.</p>
 to the server, so the background thread starts only when the
 server is ready and is flushed and joined cleanly before the
 process exits.</p>
+<h2 id="cap-hit-log-blackbullcaps">Cap-hit log — <code>blackbull.caps</code><a class="headerlink" href="#cap-hit-log-blackbullcaps" title="Permanent link">&para;</a></h2>
+<p>Every user-tunable resource cap in BlackBull emits one <code>WARNING</code>
+record on <code>blackbull.caps</code> when it fires.  Coverage:</p>
+<table>
+<thead>
+<tr>
+<th>Cap (env var)</th>
+<th>Where it fires</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>BB_MAX_CONNECTIONS</code></td>
+<td>accept loop — connection cap hit</td>
+</tr>
+<tr>
+<td><code>BB_HEADER_TIMEOUT</code></td>
+<td>slowloris defence — headers didn't arrive in time</td>
+</tr>
+<tr>
+<td><code>BB_HEADER_MAX_LINE</code></td>
+<td>per-line header limit exceeded</td>
+</tr>
+<tr>
+<td><code>BB_HEADER_MAX_TOTAL</code></td>
+<td>aggregate header block exceeded (H/1.1 + H/2 CONTINUATION)</td>
+</tr>
+<tr>
+<td><code>BB_BODY_TIMEOUT</code></td>
+<td>body bytes didn't arrive in time</td>
+</tr>
+<tr>
+<td><code>BB_REQUEST_TIMEOUT</code></td>
+<td>handler exceeded per-request budget (H/1.1 + H/2)</td>
+</tr>
+<tr>
+<td><code>BB_WRITE_TIMEOUT</code></td>
+<td>drain stalled (slow-read peer)</td>
+</tr>
+<tr>
+<td><code>BB_WS_MAX_FRAME_PAYLOAD</code></td>
+<td>WebSocket frame declared length exceeded</td>
+</tr>
+<tr>
+<td><code>BB_H2_MAX_CONCURRENT_STREAMS</code></td>
+<td>HTTP/2 stream-open guard tripped</td>
+</tr>
+<tr>
+<td><code>BB_H2_WS_MAX_STREAMS_PER_CONNECTION</code></td>
+<td>RFC 8441 WebSocket stream cap tripped</td>
+</tr>
+<tr>
+<td><code>BB_COMPRESSION_MAX_INFLIGHT</code></td>
+<td>Compression middleware bypassed (executor saturated)</td>
+</tr>
+</tbody>
+</table>
+<p><code>BB_WS_QUEUE_DEPTH</code> is intentionally <strong>not</strong> logged — the WebSocket
+event queue applies backpressure (blocking <code>await put()</code>) rather
+than dropping events, so a hit is normal flow control rather than
+a rejection.  The HTTP/2 per-stream queue (depth controlled by
+<code>BB_STREAM_QUEUE_DEPTH</code>-style internals) does drop and is logged
+under the cap name <code>stream_queue_depth</code>.</p>
+<h3 id="record-shape">Record shape<a class="headerlink" href="#record-shape" title="Permanent link">&para;</a></h3>
+<p>Each record carries the cap name in the message and the structured
+fields in <code>record.extra</code>:</p>
+<table>
+<thead>
+<tr>
+<th><code>extra</code> field</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>cap</code></td>
+<td>Cap name (e.g. <code>"ws_max_frame_payload"</code>)</td>
+</tr>
+<tr>
+<td><code>requested</code></td>
+<td>Value the peer asked for (frame size, header bytes, …)</td>
+</tr>
+<tr>
+<td><code>limit</code></td>
+<td>Configured cap</td>
+</tr>
+<tr>
+<td><code>peer</code></td>
+<td>Peer <code>(host, port)</code> tuple when available</td>
+</tr>
+<tr>
+<td><code>scope_path</code></td>
+<td>ASGI <code>scope['path']</code> when available</td>
+</tr>
+<tr>
+<td><code>protocol</code></td>
+<td><code>"http1"</code>, <code>"http2"</code>, <code>"ws"</code>, <code>"h2-ws"</code>, <code>"compression"</code>, …</td>
+</tr>
+</tbody>
+</table>
+<h3 id="rate-limiting">Rate limiting<a class="headerlink" href="#rate-limiting" title="Permanent link">&para;</a></h3>
+<p>A single misbehaving peer cannot flood the log: each
+<code>ConnectionActor</code> carries a <code>CapHitCounter</code> (installed via a
+<code>contextvars</code>-bound context manager so every actor on the same
+task tree picks it up without plumbing).  The first hit per
+<code>(connection, cap)</code> logs in full; subsequent hits on the same
+connection are silently counted.  When the connection closes, the
+counter emits one summary record per suppressed cap:</p>
+<div class="highlight"><pre><span></span><code>cap hit summary: ws_max_frame_payload suppressed=99 more
+</code></pre></div>
+<p>Inventory and audit details live in
+<a href="https://github.com/TOKUJI/BlackBull/blob/master/.claude/planning/candidates/cap-hit-logging.md"><code>.claude/planning/candidates/cap-hit-logging.md</code></a>.</p>
+<h3 id="subscribing">Subscribing<a class="headerlink" href="#subscribing" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">logging</span>
+
+<span class="k">class</span><span class="w"> </span><span class="nc">CapsHandler</span><span class="p">(</span><span class="n">logging</span><span class="o">.</span><span class="n">Handler</span><span class="p">):</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">emit</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">record</span><span class="p">):</span>
+        <span class="c1"># Forward to your metrics pipeline, page on certain caps, etc.</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;[CAP] </span><span class="si">{</span><span class="n">record</span><span class="o">.</span><span class="n">cap</span><span class="si">}</span><span class="s2"> requested=</span><span class="si">{</span><span class="n">record</span><span class="o">.</span><span class="n">requested</span><span class="si">}</span><span class="s2"> &quot;</span>
+              <span class="sa">f</span><span class="s2">&quot;limit=</span><span class="si">{</span><span class="n">record</span><span class="o">.</span><span class="n">limit</span><span class="si">}</span><span class="s2"> peer=</span><span class="si">{</span><span class="n">record</span><span class="o">.</span><span class="n">peer</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+<span class="n">caps</span> <span class="o">=</span> <span class="n">logging</span><span class="o">.</span><span class="n">getLogger</span><span class="p">(</span><span class="s1">&#39;blackbull.caps&#39;</span><span class="p">)</span>
+<span class="n">caps</span><span class="o">.</span><span class="n">addHandler</span><span class="p">(</span><span class="n">CapsHandler</span><span class="p">())</span>
+<span class="n">caps</span><span class="o">.</span><span class="n">setLevel</span><span class="p">(</span><span class="n">logging</span><span class="o">.</span><span class="n">WARNING</span><span class="p">)</span>
+</code></pre></div>
+<p>In production set the level once at startup and route the records
+to whatever observability surface you prefer (structured JSON to a
+log aggregator, Prometheus counters via a custom handler, Sentry
+breadcrumbs, …).  The <code>extra</code> payload is designed to round-trip
+through <code>json.dumps(record.__dict__)</code> cleanly.</p>
 <h2 id="not-yet-implemented">Not yet implemented<a class="headerlink" href="#not-yet-implemented" title="Permanent link">&para;</a></h2>
 <ul>
 <li><strong>HTTP/2 access logging</strong> — per-stream entries.  Today the

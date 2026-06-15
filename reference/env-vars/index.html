@@ -2788,6 +2788,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../api/blackbull/server/cap_log/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    cap_log
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../api/blackbull/server/connection_actor/" class="md-nav__link">
         
   
@@ -3714,6 +3742,13 @@ on busy production deployments, see
 </tbody>
 </table>
 <h2 id="connection-limits-and-timeouts">Connection limits and timeouts<a class="headerlink" href="#connection-limits-and-timeouts" title="Permanent link">&para;</a></h2>
+<p>Every cap in this section (plus the HTTP/2, WebSocket, and
+Compression caps below) emits one <code>WARNING</code> record on the
+<code>blackbull.caps</code> logger when it fires.  Subscribe to that logger to get a real-time signal
+when a deployment hits its configured limits — see
+<a href="../../guide/logging/#cap-hit-log-blackbullcaps">Logging</a> for the
+record shape, the inventory, and the per-connection
+first-hit-then-summary rate-limit model.</p>
 <table>
 <thead>
 <tr>
@@ -3827,13 +3862,13 @@ on busy production deployments, see
 <td><code>1</code></td>
 <td>Emit one record on the <code>blackbull.access</code> logger per completed request.  Set to <code>0</code> to skip access-log formatting (useful during benchmarks).</td>
 </tr>
-<tr>
-<td><code>BB_ASYNC_LOGGING</code></td>
-<td><code>1</code></td>
-<td>Install a <code>QueueHandler</code> on the <code>blackbull</code> logger so <code>logger.debug/info</code> calls from the event loop are non-blocking.</td>
-</tr>
 </tbody>
 </table>
+<p>The <code>blackbull.caps</code> logger has no env-var toggle — set its level
+via <code>logging.getLogger('blackbull.caps').setLevel(...)</code> at
+startup.  Default level is <code>WARNING</code>; raise to <code>ERROR</code> to silence
+or drop to <code>INFO</code> to surface the rate-limit summary records.
+| <code>BB_ASYNC_LOGGING</code> | <code>1</code> | Install a <code>QueueHandler</code> on the <code>blackbull</code> logger so <code>logger.debug/info</code> calls from the event loop are non-blocking. |</p>
 <h2 id="http2-internals">HTTP/2 internals<a class="headerlink" href="#http2-internals" title="Permanent link">&para;</a></h2>
 <table>
 <thead>

@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://TOKUJI.github.io/BlackBull/api/blackbull/server/recipient/">
+        <link rel="canonical" href="https://TOKUJI.github.io/BlackBull/api/blackbull/server/cap_log/">
       
       
-        <link rel="prev" href="../permessage_deflate/">
+        <link rel="prev" href="../access_log/">
       
       
-        <link rel="next" href="../reload/">
+        <link rel="next" href="../connection_actor/">
       
       
         
@@ -27,7 +27,7 @@
     
     
       
-        <title>recipient - BlackBull</title>
+        <title>cap_log - BlackBull</title>
       
     
     
@@ -72,7 +72,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#blackbullserverrecipient" class="md-skip">
+        <a href="#blackbullservercap_log" class="md-skip">
           Skip to content
         </a>
       
@@ -108,7 +108,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              recipient
+              cap_log
             
           </span>
         </div>
@@ -2623,10 +2623,37 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../cap_log/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    cap_log
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -2642,6 +2669,93 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#blackbull.server.cap_log" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        cap_log
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="cap_log">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.cap_log.CapHitCounter" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CapHitCounter
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="CapHitCounter">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.cap_log.CapHitCounter.bind" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bind
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.cap_log.CapHitCounter.flush" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        flush
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.cap_log.log_cap_hit" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        log_cap_hit
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -2931,37 +3045,10 @@
                 
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    recipient
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../recipient/" class="md-nav__link">
         
   
   
@@ -2977,220 +3064,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#blackbull.server.recipient" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        recipient
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="recipient">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.recipient.AbstractReader" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        AbstractReader
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.recipient.AsyncioReader" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        AsyncioReader
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.recipient.BaseRecipient" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        BaseRecipient
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.recipient.FragmentAssembler" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        FragmentAssembler
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="FragmentAssembler">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.recipient.FragmentAssembler.feed" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        feed
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.recipient.HTTP1Recipient" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        HTTP1Recipient
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.recipient.HTTP2Recipient" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        HTTP2Recipient
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="HTTP2Recipient">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.recipient.HTTP2Recipient.mark_end_of_stream_on_headers" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        mark_end_of_stream_on_headers
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.recipient.HTTP2Recipient.put_DATAFrame" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        put_DATAFrame
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.recipient.HTTP2Recipient.put_disconnect" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        put_disconnect
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.recipient.HTTP2Recipient.put_event" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        put_event
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.recipient.IncompleteReadError" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        IncompleteReadError
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.recipient.ProtocolError" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        ProtocolError
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.recipient.RecipientFactory" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        RecipientFactory
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.recipient.WebSocketRecipient" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        WebSocketRecipient
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -3644,67 +3517,45 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#blackbull.server.recipient" class="md-nav__link">
+  <a href="#blackbull.server.cap_log" class="md-nav__link">
     <span class="md-ellipsis">
       
-        recipient
+        cap_log
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="recipient">
+    <nav class="md-nav" aria-label="cap_log">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#blackbull.server.recipient.AbstractReader" class="md-nav__link">
+  <a href="#blackbull.server.cap_log.CapHitCounter" class="md-nav__link">
     <span class="md-ellipsis">
       
-        AbstractReader
+        CapHitCounter
       
     </span>
   </a>
   
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.recipient.AsyncioReader" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        AsyncioReader
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.recipient.BaseRecipient" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        BaseRecipient
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.recipient.FragmentAssembler" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        FragmentAssembler
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="FragmentAssembler">
+    <nav class="md-nav" aria-label="CapHitCounter">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#blackbull.server.recipient.FragmentAssembler.feed" class="md-nav__link">
+  <a href="#blackbull.server.cap_log.CapHitCounter.bind" class="md-nav__link">
     <span class="md-ellipsis">
       
-        feed
+        bind
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.cap_log.CapHitCounter.flush" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        flush
       
     </span>
   </a>
@@ -3717,115 +3568,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#blackbull.server.recipient.HTTP1Recipient" class="md-nav__link">
+  <a href="#blackbull.server.cap_log.log_cap_hit" class="md-nav__link">
     <span class="md-ellipsis">
       
-        HTTP1Recipient
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.recipient.HTTP2Recipient" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        HTTP2Recipient
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="HTTP2Recipient">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.recipient.HTTP2Recipient.mark_end_of_stream_on_headers" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        mark_end_of_stream_on_headers
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.recipient.HTTP2Recipient.put_DATAFrame" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        put_DATAFrame
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.recipient.HTTP2Recipient.put_disconnect" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        put_disconnect
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.recipient.HTTP2Recipient.put_event" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        put_event
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.recipient.IncompleteReadError" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        IncompleteReadError
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.recipient.ProtocolError" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        ProtocolError
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.recipient.RecipientFactory" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        RecipientFactory
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.recipient.WebSocketRecipient" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        WebSocketRecipient
+        log_cap_hit
       
     </span>
   </a>
@@ -3857,21 +3603,49 @@
   
 
 
-<h1 id="blackbullserverrecipient"><code>blackbull.server.recipient</code><a class="headerlink" href="#blackbullserverrecipient" title="Permanent link">&para;</a></h1>
+<h1 id="blackbullservercap_log"><code>blackbull.server.cap_log</code><a class="headerlink" href="#blackbullservercap_log" title="Permanent link">&para;</a></h1>
 
 
 <div class="doc doc-object doc-module">
 
 
 
-<h2 id="blackbull.server.recipient" class="doc doc-heading">
-            <code>blackbull.server.recipient</code>
+<h2 id="blackbull.server.cap_log" class="doc doc-heading">
+            <code>blackbull.server.cap_log</code>
 
 
-<a href="#blackbull.server.recipient" class="headerlink" title="Permanent link">&para;</a></h2>
+<a href="#blackbull.server.cap_log" class="headerlink" title="Permanent link">&para;</a></h2>
 
     <div class="doc doc-contents first">
 
+        <p>Cap-hit observability.</p>
+<p>Every user-tunable resource cap in BlackBull (header sizes, the four
+timeouts, connection cap, WS frame cap, WS queue depth, H/2 stream
+caps, compression in-flight) is silent by default when it rejects
+traffic.  Operators see the consequence — a 503, a CLOSE 1009, a
+dropped event — but no record naming the cap.  Regressions like the
+1 MiB WS frame default that shipped in v0.35.0 (caught by the Sprint
+43 conformance lane in v0.39.0) can hide across releases.</p>
+<p>This module emits one <code>WARNING</code>-level record per cap rejection on
+the <code>blackbull.caps</code> logger so a deployment that subscribes to
+that logger gets actionable visibility without grep-walking the
+framework code.</p>
+<p>Surface:</p>
+<ul>
+<li>:func:<code>log_cap_hit</code> — the single emission point.  Call from any
+  cap-rejection site with the cap name, requested value, and limit.</li>
+<li>:class:<code>CapHitCounter</code> — per-connection state for the "first hit
+  per cap logs in full; later hits silently counted; summary on
+  :meth:<code>~CapHitCounter.flush</code>" rate-limit pattern.</li>
+<li>:meth:<code>CapHitCounter.bind</code> — context manager that installs the
+  counter on a :class:<code>~contextvars.ContextVar</code>.  All
+  :func:<code>log_cap_hit</code> calls inside the <code>with</code> block (including
+  those in child tasks created via :class:<code>asyncio.TaskGroup</code>, which
+  inherit context) automatically pick up the counter.  Zero
+  plumbing through actor constructors.</li>
+</ul>
+<p>Design recap in <code>.claude/planning/candidates/cap-hit-logging.md</code>.</p>
+
 
 
 
@@ -3895,180 +3669,24 @@
 
 
 
-<h3 id="blackbull.server.recipient.AbstractReader" class="doc doc-heading">
-            <code>AbstractReader</code>
+<h3 id="blackbull.server.cap_log.CapHitCounter" class="doc doc-heading">
+            <code>CapHitCounter</code>
 
 
-<a href="#blackbull.server.recipient.AbstractReader" class="headerlink" title="Permanent link">&para;</a></h3>
-
-
-    <div class="doc doc-contents ">
-            <p class="doc doc-class-bases">
-              Bases: <code><span title="abc.ABC">ABC</span></code></p>
-
-
-
-        <p>Protocol-agnostic async byte-source.</p>
-<p>Mirrors <code>AbstractWriter</code> on the receive side.  Implementations wrap a
-concrete transport so that <code>BaseRecipient</code> subclasses stay runtime-agnostic.</p>
-
-
-
-
-
-
-
-
-
-
-
-<div class="doc doc-children">
-
-
-
-
-
-
-
-
-
-
-
-
-  </div>
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-class">
-
-
-
-<h3 id="blackbull.server.recipient.AsyncioReader" class="doc doc-heading">
-            <code>AsyncioReader</code>
-
-
-<a href="#blackbull.server.recipient.AsyncioReader" class="headerlink" title="Permanent link">&para;</a></h3>
+<a href="#blackbull.server.cap_log.CapHitCounter" class="headerlink" title="Permanent link">&para;</a></h3>
 
 
     <div class="doc doc-contents ">
-            <p class="doc doc-class-bases">
-              Bases: <code><a class="autorefs autorefs-internal" title="AbstractReader (blackbull.server.recipient.AbstractReader)" href="#blackbull.server.recipient.AbstractReader">AbstractReader</a></code></p>
 
 
 
-        <p>Adapts an asyncio-compatible stream to <code>AbstractReader</code>.</p>
-<p>Accepts any object exposing <code>read()</code>, <code>readuntil()</code>, and
-<code>readexactly()</code> — the asyncio StreamReader API — so that test doubles
-such as <code>MagicMock</code> can be injected without ceremony.</p>
-
-
-
-
-
-
-
-
-
-
-
-<div class="doc doc-children">
-
-
-
-
-
-
-
-
-
-
-
-
-  </div>
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-class">
-
-
-
-<h3 id="blackbull.server.recipient.BaseRecipient" class="doc doc-heading">
-            <code>BaseRecipient</code>
-
-
-<a href="#blackbull.server.recipient.BaseRecipient" class="headerlink" title="Permanent link">&para;</a></h3>
-
-
-    <div class="doc doc-contents ">
-            <p class="doc doc-class-bases">
-              Bases: <code><span title="abc.ABC">ABC</span></code></p>
-
-
-
-        <p>Abstract base for ASGI-event receive callables.</p>
-<p><code>__call__</code> returns an ASGI event dict appropriate to the protocol:
-  - HTTP: <code>{'type': 'http.request', 'body': ..., 'more_body': False}</code>
-  - WebSocket: <code>{'type': 'websocket.connect'}</code>,
-               <code>{'type': 'websocket.receive', ...}</code>, or
-               <code>{'type': 'websocket.disconnect', ...}</code></p>
-<p>The actual byte transport is hidden behind <code>AbstractReader</code> so the
-recipient logic is decoupled from asyncio internals.</p>
-
-
-
-
-
-
-
-
-
-
-
-<div class="doc doc-children">
-
-
-
-
-
-
-
-
-
-
-
-
-  </div>
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-class">
-
-
-
-<h3 id="blackbull.server.recipient.FragmentAssembler" class="doc doc-heading">
-            <code>FragmentAssembler</code>
-
-
-<a href="#blackbull.server.recipient.FragmentAssembler" class="headerlink" title="Permanent link">&para;</a></h3>
-
-
-    <div class="doc doc-contents ">
-
-
-
-        <p>Accumulates RFC 6455 fragmented frames and signals message completion.</p>
-<p>Feed each data/continuation frame via <code>feed()</code>.  Returns
-<code>(message_opcode, full_payload)</code> when the final FIN=1 continuation
-arrives; returns <code>None</code> while still accumulating.</p>
-<p>Raises <code>ProtocolError</code> on violations:
-- CONTINUATION frame with no fragmentation in progress (§5.4)
-- New TEXT/BINARY opener while a fragmented message is open (§5.4)</p>
+        <p>Per-connection state for cap-hit rate limiting.</p>
+<p>Construct one instance per connection (typically in
+:class:<code>~blackbull.server.connection_actor.ConnectionActor</code>),
+install it as the ambient counter for the duration of the
+connection via the :meth:<code>bind</code> context manager, and call
+:meth:<code>flush</code> once when the connection closes so a single
+summary record reports any suppressed hits.</p>
 
 
 
@@ -4094,141 +3712,21 @@ arrives; returns <code>None</code> while still accumulating.</p>
 <div class="doc doc-object doc-function">
 
 
-<h4 id="blackbull.server.recipient.FragmentAssembler.feed" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">feed</span><span class="p">(</span><span class="n">opcode</span><span class="p">,</span> <span class="n">payload</span><span class="p">,</span> <span class="n">fin</span><span class="p">,</span> <span class="n">rsv1</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span></code>
+<h4 id="blackbull.server.cap_log.CapHitCounter.bind" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">bind</span><span class="p">()</span></code>
 
-<a href="#blackbull.server.recipient.FragmentAssembler.feed" class="headerlink" title="Permanent link">&para;</a></h4>
-
-
-    <div class="doc doc-contents ">
-
-        <p>Feed one frame; return <code>(message_opcode, full_payload, compressed)</code> on completion, else <code>None</code>.</p>
-
-
-    </div>
-
-</div>
-
-
-
-  </div>
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-class">
-
-
-
-<h3 id="blackbull.server.recipient.HTTP1Recipient" class="doc doc-heading">
-            <code>HTTP1Recipient</code>
-
-
-<a href="#blackbull.server.recipient.HTTP1Recipient" class="headerlink" title="Permanent link">&para;</a></h3>
+<a href="#blackbull.server.cap_log.CapHitCounter.bind" class="headerlink" title="Permanent link">&para;</a></h4>
 
 
     <div class="doc doc-contents ">
-            <p class="doc doc-class-bases">
-              Bases: <code><a class="autorefs autorefs-internal" title="BaseRecipient (blackbull.server.recipient.BaseRecipient)" href="#blackbull.server.recipient.BaseRecipient">BaseRecipient</a></code></p>
 
-
-
-        <p>Reads an HTTP/1.1 request body and emits a single <code>http.request</code> event.</p>
-<p>Body bytes are read lazily on the first <code>__call__</code> using the Content-Length
-or Transfer-Encoding header from <code>scope</code>.  Subsequent calls return
-<code>{'type': 'http.disconnect'}</code>.</p>
-
-
-
-
-
-
-
-
-
-
-
-<div class="doc doc-children">
-
-
-
-
-
-
-
-
-
-
-
-
-  </div>
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-class">
-
-
-
-<h3 id="blackbull.server.recipient.HTTP2Recipient" class="doc doc-heading">
-            <code>HTTP2Recipient</code>
-
-
-<a href="#blackbull.server.recipient.HTTP2Recipient" class="headerlink" title="Permanent link">&para;</a></h3>
-
-
-    <div class="doc doc-contents ">
-            <p class="doc doc-class-bases">
-              Bases: <code><a class="autorefs autorefs-internal" title="BaseRecipient (blackbull.server.recipient.BaseRecipient)" href="#blackbull.server.recipient.BaseRecipient">BaseRecipient</a></code></p>
-
-
-
-        <p>Delivers HTTP/2 DATA frames as ASGI <code>http.request</code> events.</p>
-<p>The server loop feeds frames via <code>put_DATAFrame()</code> (non-blocking).
-The ASGI app calls <code>__call__()</code> which suspends until an event is available,
-hiding the concurrency from both sides.</p>
-<p>For GET-style requests (END_STREAM on HEADERS, no DATA frames), the caller
-invokes :meth:<code>mark_end_of_stream_on_headers</code> instead of pre-queuing an empty
-<code>http.request</code> event.  The Queue is then never allocated — the empty event
-is synthesized lazily in :meth:<code>__call__</code> only if the handler reads it.</p>
-
-
-
-
-
-
-
-
-
-
-
-<div class="doc doc-children">
-
-
-
-
-
-
-
-
-
-
-<div class="doc doc-object doc-function">
-
-
-<h4 id="blackbull.server.recipient.HTTP2Recipient.mark_end_of_stream_on_headers" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">mark_end_of_stream_on_headers</span><span class="p">()</span></code>
-
-<a href="#blackbull.server.recipient.HTTP2Recipient.mark_end_of_stream_on_headers" class="headerlink" title="Permanent link">&para;</a></h4>
-
-
-    <div class="doc doc-contents ">
-
-        <p>Mark this stream as ended on HEADERS (no body to deliver).</p>
-<p>Replaces <code>put_event({type: http.request, body: b'', more_body: False})</code>
-with a flag — saves one <code>asyncio.Queue</code> allocation per body-less request.</p>
+        <p>Context manager that installs <em>self</em> as the ambient counter.</p>
+<p>Usage::</p>
+<pre><code>counter = CapHitCounter()
+with counter.bind():
+    ...                       # all log_cap_hit() in here uses *counter*
+    # tasks created via asyncio.TaskGroup inherit it too
+</code></pre>
 
 
     </div>
@@ -4238,256 +3736,66 @@ with a flag — saves one <code>asyncio.Queue</code> allocation per body-less re
 <div class="doc doc-object doc-function">
 
 
-<h4 id="blackbull.server.recipient.HTTP2Recipient.put_DATAFrame" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">put_DATAFrame</span><span class="p">(</span><span class="n">frame</span><span class="p">)</span></code>
+<h4 id="blackbull.server.cap_log.CapHitCounter.flush" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">flush</span><span class="p">(</span><span class="o">*</span><span class="p">,</span> <span class="n">peer</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">protocol</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
 
-<a href="#blackbull.server.recipient.HTTP2Recipient.put_DATAFrame" class="headerlink" title="Permanent link">&para;</a></h4>
+<a href="#blackbull.server.cap_log.CapHitCounter.flush" class="headerlink" title="Permanent link">&para;</a></h4>
 
 
     <div class="doc doc-contents ">
 
-        <p>Enqueue a DATA frame event. Returns False if the queue is full.</p>
+        <p>Emit one summary record per cap that had suppressed hits.</p>
+<p>Caps with zero suppressed hits (fired exactly once) are
+omitted — the first-hit record already named them.  Clears
+state after emission so the same counter can be re-used.</p>
 
 
     </div>
 
 </div>
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
 
 <div class="doc doc-object doc-function">
 
 
-<h4 id="blackbull.server.recipient.HTTP2Recipient.put_disconnect" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">put_disconnect</span><span class="p">()</span></code>
+<h3 id="blackbull.server.cap_log.log_cap_hit" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">log_cap_hit</span><span class="p">(</span><span class="n">cap</span><span class="p">,</span> <span class="n">requested</span><span class="p">,</span> <span class="n">limit</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">counter</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">peer</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">scope_path</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">protocol</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
 
-<a href="#blackbull.server.recipient.HTTP2Recipient.put_disconnect" class="headerlink" title="Permanent link">&para;</a></h4>
-
-
-    <div class="doc doc-contents ">
-
-        <p>Unblock a waiting <strong>call</strong>() with an http.disconnect event.</p>
-<p>Skipped when end-of-stream-on-headers has been delivered and no queue
-was ever created — no consumer can be waiting.</p>
-
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-function">
-
-
-<h4 id="blackbull.server.recipient.HTTP2Recipient.put_event" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">put_event</span><span class="p">(</span><span class="n">event</span><span class="p">)</span></code>
-
-<a href="#blackbull.server.recipient.HTTP2Recipient.put_event" class="headerlink" title="Permanent link">&para;</a></h4>
+<a href="#blackbull.server.cap_log.log_cap_hit" class="headerlink" title="Permanent link">&para;</a></h3>
 
 
     <div class="doc doc-contents ">
 
-        <p>Enqueue a pre-built event dict. Returns False if the queue is full.</p>
+        <p>Emit one cap-hit record on <code>blackbull.caps</code> at WARN level.</p>
+<p>The structured fields land in <code>record.extra</code> (<code>cap</code>,
+<code>requested</code>, <code>limit</code>, <code>peer</code>, <code>scope_path</code>, <code>protocol</code>)
+so log handlers can route or aggregate without parsing the
+message string.</p>
+<p>Resolution order for the rate-limit counter:</p>
+<ol>
+<li>The explicit <em>counter</em> keyword argument, if given.</li>
+<li>The active :class:<code>CapHitCounter</code> from the ambient
+   :class:<code>~contextvars.ContextVar</code> (set via
+   :meth:<code>CapHitCounter.bind</code>).</li>
+<li><code>None</code> — every call emits, no rate limiting.</li>
+</ol>
+<p>The first call per <code>(counter, cap)</code> emits a full record;
+subsequent calls return silently and increment the counter's
+suppression tally.  <code>counter.flush()</code> at connection close
+emits one summary per suppressed cap.</p>
 
 
     </div>
 
 </div>
-
-
-
-  </div>
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-class">
-
-
-
-<h3 id="blackbull.server.recipient.IncompleteReadError" class="doc doc-heading">
-            <code>IncompleteReadError</code>
-
-
-<a href="#blackbull.server.recipient.IncompleteReadError" class="headerlink" title="Permanent link">&para;</a></h3>
-
-
-    <div class="doc doc-contents ">
-            <p class="doc doc-class-bases">
-              Bases: <code><span title="EOFError">EOFError</span></code></p>
-
-
-
-        <p>Raised by AbstractReader when the peer closes the connection mid-read.</p>
-<p>Mirrors asyncio.IncompleteReadError but is not tied to asyncio, so
-handlers that depend on AbstractReader remain runtime-agnostic.</p>
-
-
-
-
-
-
-
-
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-class">
-
-
-
-<h3 id="blackbull.server.recipient.ProtocolError" class="doc doc-heading">
-            <code>ProtocolError</code>
-
-
-<a href="#blackbull.server.recipient.ProtocolError" class="headerlink" title="Permanent link">&para;</a></h3>
-
-
-    <div class="doc doc-contents ">
-            <p class="doc doc-class-bases">
-              Bases: <code><span title="Exception">Exception</span></code></p>
-
-
-
-        <p>Raised when a WebSocket protocol violation is detected (RFC 6455).</p>
-<p><code>close_code</code> is the RFC 6455 §7.4 status code that should appear in
-the CLOSE frame sent to the peer.  Defaults to 1002 (PROTOCOL_ERROR);
-UTF-8 violations use 1007.</p>
-
-
-
-
-
-
-
-
-
-
-
-<div class="doc doc-children">
-
-
-
-
-
-
-
-
-
-
-
-
-  </div>
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-class">
-
-
-
-<h3 id="blackbull.server.recipient.RecipientFactory" class="doc doc-heading">
-            <code>RecipientFactory</code>
-
-
-<a href="#blackbull.server.recipient.RecipientFactory" class="headerlink" title="Permanent link">&para;</a></h3>
-
-
-    <div class="doc doc-contents ">
-
-
-
-        <p>Creates the appropriate <code>BaseRecipient</code> for the given protocol.</p>
-<p>All methods that need a reader accept a raw asyncio-compatible stream reader
-and wrap it in <code>AsyncioReader</code> internally.</p>
-
-
-
-
-
-
-
-
-
-
-
-<div class="doc doc-children">
-
-
-
-
-
-
-
-
-
-
-
-
-  </div>
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-class">
-
-
-
-<h3 id="blackbull.server.recipient.WebSocketRecipient" class="doc doc-heading">
-            <code>WebSocketRecipient</code>
-
-
-<a href="#blackbull.server.recipient.WebSocketRecipient" class="headerlink" title="Permanent link">&para;</a></h3>
-
-
-    <div class="doc doc-contents ">
-            <p class="doc doc-class-bases">
-              Bases: <code><a class="autorefs autorefs-internal" title="BaseRecipient (blackbull.server.recipient.BaseRecipient)" href="#blackbull.server.recipient.BaseRecipient">BaseRecipient</a></code></p>
-
-
-
-        <p>Reads WebSocket frames and emits ASGI <code>websocket.*</code> events.</p>
-<p>First call returns <code>{'type': 'websocket.connect'}</code>.  Subsequent calls
-read the next frame from the transport:
-  - Text frame   → <code>{'type': 'websocket.receive', 'text': ..., 'bytes': None}</code>
-  - Binary frame → <code>{'type': 'websocket.receive', 'text': None, 'bytes': ...}</code>
-  - Close frame  → <code>{'type': 'websocket.disconnect', 'code': 1000}</code>
-  - Ping frame   → sends Pong immediately, then reads the next frame
-  - Pong frame   → silently dropped, reads the next frame</p>
-<p>Ping/pong handling requires write access to the transport, so the raw
-writer is stored alongside the reader.</p>
-
-
-
-
-
-
-
-
-
-
-
-<div class="doc doc-children">
-
-
-
-
-
-
-
-
-
-
-
-
-  </div>
-
-    </div>
-
-</div>
-
 
 
 
