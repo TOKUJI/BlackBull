@@ -48,6 +48,7 @@ nav:
     - Requests and responses: guide/requests-and-responses.md
     - WebSockets: guide/websockets.md
     - HTTP/2: guide/http2.md
+    - Streaming: guide/streaming.md
     - Events: guide/events.md
     - Logging: guide/logging.md
     - Static files: guide/static-files.md

@@ -7,7 +7,7 @@ Public API exports:
 
 - `BlackBull`: the main application object; wraps routing, middleware, and lifespan hooks.
 - `serve`: synchronous entry point that runs any ASGI 3.0 callable (also used by the ``blackbull`` console script).
-- `Response`, `JSONResponse`, `StreamingResponse`, `WebSocketResponse`: response helpers.
+- `Response`, `JSONResponse`, `StreamingResponse`, `EventSourceResponse`, `WebSocketResponse`: response helpers.
 - `Headers`: case-insensitive, ordered, multi-valued HTTP header store.
 - `cookie_header`: builds a ``Set-Cookie`` header tuple.
 - `read_body`: reads and buffers the full request body from the ASGI receive channel.
@@ -40,7 +40,10 @@ except PackageNotFoundError:
 from .app import BlackBull, serve
 from .headers import Headers
 from .request import read_body, parse_cookies
-from .response import Response, JSONResponse, StreamingResponse, WebSocketResponse, cookie_header
+from .response import (
+    Response, JSONResponse, StreamingResponse, EventSourceResponse,
+    WebSocketResponse, cookie_header,
+)
 from .event import Event, EventHandler
 from .asgi import ResponseStart, ResponseBody, parse_response_event
 from .middleware.cors import CORS
