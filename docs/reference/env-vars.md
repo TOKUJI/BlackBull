@@ -20,6 +20,14 @@ For the precedence order (CLI flags > env > TOML), see
 
 ## Connection limits and timeouts
 
+Every cap in this section (plus the HTTP/2, WebSocket, and
+Compression caps below) emits one `WARNING` record on the
+`blackbull.caps` logger when it fires.  Subscribe to that logger to get a real-time signal
+when a deployment hits its configured limits — see
+[Logging](../guide/logging.md#cap-hit-log-blackbullcaps) for the
+record shape, the inventory, and the per-connection
+first-hit-then-summary rate-limit model.
+
 | Variable | Default | Controls |
 |---|---|---|
 | `BB_MAX_CONNECTIONS` | `0` (uncapped) | Maximum simultaneous TCP connections **per worker**.  When the cap is reached, new connections receive HTTP/1.1 `503 Service Unavailable` with `Retry-After: 1` before close — a well-formed response so load-balancers / health-checks can interpret it correctly.  `0` disables the cap (rely on OS file-descriptor limit instead).  Multi-worker servers multiply the ceiling (`workers × max_connections`).  Production deployments on untrusted hosts should set this to a finite ceiling — 1024 is a typical single-loop value. |
@@ -48,6 +56,11 @@ For the precedence order (CLI flags > env > TOML), see
 | Variable | Default | Controls |
 |---|---|---|
 | `BB_ACCESS_LOG` | `1` | Emit one record on the `blackbull.access` logger per completed request.  Set to `0` to skip access-log formatting (useful during benchmarks). |
+
+The `blackbull.caps` logger has no env-var toggle — set its level
+via `logging.getLogger('blackbull.caps').setLevel(...)` at
+startup.  Default level is `WARNING`; raise to `ERROR` to silence
+or drop to `INFO` to surface the rate-limit summary records.
 | `BB_ASYNC_LOGGING` | `1` | Install a `QueueHandler` on the `blackbull` logger so `logger.debug/info` calls from the event loop are non-blocking. |
 
 ## HTTP/2 internals

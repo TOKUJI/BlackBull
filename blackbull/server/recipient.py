@@ -2,6 +2,7 @@ import asyncio
 import zlib
 from abc import ABC, abstractmethod
 
+from .cap_log import log_cap_hit
 from .deadline import ConnectionDeadline
 from .sender import AbstractWriter, AsyncioWriter
 from .ws_codec import (
@@ -338,12 +339,21 @@ class HTTP1Recipient(BaseRecipient):
                 logger.debug('HTTP1Recipient body: %r', body)
                 return {'type': ASGIEvent.HTTP_REQUEST, 'body': body, 'more_body': False}
 
-        except (IncompleteReadError, asyncio.TimeoutError, TimeoutError):
-            # EOF mid-body OR body_timeout exceeded.  In either case the
-            # request is unfinishable — surface disconnect to the ASGI
-            # app so it can clean up.  The server actor closes the
-            # connection on app return (does not send 408 in Sprint 17 —
-            # see plan note).
+        except (asyncio.TimeoutError, TimeoutError):
+            # body_timeout exceeded — distinguish from EOF mid-body so
+            # operators see the cap hit recorded (the request still
+            # surfaces as HTTP_DISCONNECT to the ASGI app).
+            log_cap_hit('body_timeout',
+                        requested=self._body_timeout,
+                        limit=self._body_timeout,
+                        scope_path=self._scope.get('path') if self._scope else None,
+                        protocol='http1')
+            self._done = True
+            return {'type': ASGIEvent.HTTP_DISCONNECT}
+        except IncompleteReadError:
+            # EOF mid-body — not a cap hit (peer disappeared).  Surface
+            # disconnect so the handler can clean up; server closes on
+            # return (no synthetic 408, see Sprint 17 plan note).
             self._done = True
             return {'type': ASGIEvent.HTTP_DISCONNECT}
 
@@ -401,6 +411,10 @@ class HTTP2Recipient(BaseRecipient):
             return True
         except asyncio.QueueFull:
             logger.warning('HTTP2Recipient queue full on stream — dropping DATA frame')
+            log_cap_hit('stream_queue_depth',
+                        requested=self._queue_depth + 1,
+                        limit=self._queue_depth,
+                        protocol='http2')
             return False
 
     def put_event(self, event: dict) -> bool:
@@ -410,6 +424,10 @@ class HTTP2Recipient(BaseRecipient):
             return True
         except asyncio.QueueFull:
             logger.warning('HTTP2Recipient queue full on stream — dropping event %r', event.get('type'))
+            log_cap_hit('stream_queue_depth',
+                        requested=self._queue_depth + 1,
+                        limit=self._queue_depth,
+                        protocol='http2')
             return False
 
     def put_disconnect(self) -> None:
@@ -558,6 +576,11 @@ class WebSocketRecipient(BaseRecipient):
                         self._reader, h.masked, h.length,
                         max_length=self._max_frame_payload)
                 except FramePayloadTooLarge as exc:
+                    log_cap_hit('ws_max_frame_payload',
+                                requested=exc.declared,
+                                limit=self._max_frame_payload,
+                                scope_path=self._scope.get('path') if self._scope else None,
+                                protocol='ws')
                     raise ProtocolError(
                         str(exc),
                         close_code=WSCloseCode.MESSAGE_TOO_BIG,

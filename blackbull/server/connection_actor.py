@@ -6,6 +6,7 @@ from typing import Any
 
 from ..actor import Actor, Message
 from ..event_aggregator import EventAggregator
+from .cap_log import CapHitCounter
 from .deadline import ConnectionDeadline
 from .recipient import (AbstractReader, IncompleteReadError,
                         _HTTP2_STREAM_QUEUE_DEPTH, _WS_EVENT_QUEUE_DEPTH)
@@ -55,15 +56,25 @@ class ConnectionActor(Actor):
         self._ws_queue_depth = ws_queue_depth
 
     async def run(self) -> None:
-        if self._aggregator is not None:
-            await self._aggregator.on_connection_accepted(self._peername)
-        try:
-            await self._dispatch()
-        except Exception as exc:
+        # Per-connection cap-hit rate-limit state — bound on the
+        # ambient contextvar so every log_cap_hit() call inside this
+        # task tree (protocol actor, stream actors, recipients,
+        # senders) picks it up without constructor plumbing.  TaskGroup
+        # children inherit the context automatically.
+        counter = CapHitCounter()
+        with counter.bind():
             if self._aggregator is not None:
-                await self._aggregator.on_error({}, exc)
-        finally:
-            await self._writer.close()
+                await self._aggregator.on_connection_accepted(self._peername)
+            try:
+                await self._dispatch()
+            except Exception as exc:
+                if self._aggregator is not None:
+                    await self._aggregator.on_error({}, exc)
+            finally:
+                # One summary record per suppressed cap before the
+                # transport goes away.
+                counter.flush(peer=self._peername)
+                await self._writer.close()
 
     async def _dispatch(self) -> None:
         import asyncio  # noqa: PLC0415
@@ -104,6 +115,10 @@ class ConnectionActor(Actor):
                 # Peer connected via ALPN h2 but never sent the preface.
                 # Close — no GOAWAY since we don't have a SETTINGS exchange.
                 logger.warning('slowloris: ALPN-h2 peer sent no preface within %.1fs', deadline)
+                from .cap_log import log_cap_hit  # noqa: PLC0415
+                log_cap_hit('header_timeout',
+                            requested=deadline, limit=deadline,
+                            peer=self._peername, protocol='h2')
                 return
             expected = _HTTP2_PREFACE_FIRST_LINE + _HTTP2_PREFACE_REMAINDER
             if preface != expected:
@@ -144,6 +159,10 @@ class ConnectionActor(Actor):
             # h2 client (which would have been on the ALPN path anyway).
             logger.warning(
                 'slowloris: peer sent no first line within %.1fs', deadline)
+            from .cap_log import log_cap_hit  # noqa: PLC0415
+            log_cap_hit('header_timeout',
+                        requested=deadline, limit=deadline,
+                        peer=self._peername, protocol='http1')
             try:
                 await self._writer.write(
                     b'HTTP/1.1 408 Request Timeout\r\n'

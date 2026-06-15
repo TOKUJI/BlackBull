@@ -24,6 +24,95 @@ so the editable install's metadata catches up.
 
 ## [Unreleased]
 
+## [0.40.0] — 2026-06-15
+
+**Sprint 44 close: cap-hit observability.**
+
+Every user-tunable resource cap in BlackBull (header sizes, the
+four timeouts, connection cap, WebSocket frame cap, HTTP/2
+stream caps, compression in-flight, and the HTTP/2 per-stream
+queue) now emits one `WARNING`-level record on the new
+`blackbull.caps` logger when it rejects traffic.  Before this
+sprint a cap firing was silent — the peer saw a 503 / CLOSE 1009
+/ RST_STREAM / dropped event but operators got nothing.  The
+1 MiB WebSocket frame default that shipped in v0.35.0 and was
+caught by the v0.39.0 conformance lane is the kind of regression
+this surfaces immediately.
+
+A single misbehaving peer cannot flood the log: each
+`ConnectionActor` carries a `CapHitCounter` bound on a
+`contextvars.ContextVar`, so the first hit per
+`(connection, cap)` logs in full and subsequent hits are
+silently counted; one summary record per suppressed cap fires
+on connection close.
+
+### Added
+
+- `blackbull/server/cap_log.py` — the single emission point
+  `log_cap_hit()` plus `CapHitCounter` with the
+  first-hit-then-summary rate-limit pattern.  `CapHitCounter.bind()`
+  is a context manager that installs the counter on a
+  `contextvars.ContextVar`; `ConnectionActor.run()` does this
+  once per connection so every actor / stream / recipient task
+  spawned under it picks up the counter without constructor
+  plumbing (TaskGroup children inherit the context automatically).
+- `tests/unit/test_cap_log.py` — 15 unit tests covering the
+  helper in isolation: emission, rate limiting, summary on
+  flush, ambient binding, child-task inheritance via TaskGroup.
+- `tests/unit/test_cap_log_sites.py` — coverage gate: one test
+  per inventory cap plus a parametrised static audit that fails
+  CI if a future PR adds a `BB_*` cap to the inventory list
+  without wiring a `log_cap_hit('<cap>', ...)` call.
+
+### Internal
+
+Cap rejection sites wired to `log_cap_hit()` — twelve in all:
+
+- `BB_MAX_CONNECTIONS` — accept loop in
+  `blackbull/server/server.py` (process-scoped, no counter
+  needed; an adversary cannot loop past the cap).
+- `BB_HEADER_TIMEOUT` — slowloris defences in
+  `blackbull/server/connection_actor.py` (ALPN-h2 preface +
+  cleartext first-line) and `blackbull/server/http1_actor.py`
+  (header-completion phase).
+- `BB_HEADER_MAX_LINE` and `BB_HEADER_MAX_TOTAL` — H/1.1 parser
+  in `blackbull/server/http1_actor.py`; HTTP/2 CONTINUATION
+  guard in `blackbull/server/http2_actor.py`.
+- `BB_BODY_TIMEOUT` — H/1.1 recipient in
+  `blackbull/server/recipient.py` (was indistinguishable from
+  EOF mid-body before; now split so the timeout path logs).
+- `BB_REQUEST_TIMEOUT` — H/1.1 and H/2 paths.
+- `BB_WRITE_TIMEOUT` — both write paths in
+  `blackbull/server/sender.py` (`AsyncioWriter.write` and
+  `AsyncioWriter.writelines`).
+- `BB_WS_MAX_FRAME_PAYLOAD` — WebSocket frame guard in
+  `blackbull/server/recipient.py:WebSocketRecipient._read_loop`.
+- `BB_H2_MAX_CONCURRENT_STREAMS` — both stream-open guards in
+  `blackbull/server/http2_actor.py`.
+- `BB_H2_WS_MAX_STREAMS_PER_CONNECTION` — RFC 8441 WS guard.
+- `BB_COMPRESSION_MAX_INFLIGHT` — executor-saturation bypass in
+  `blackbull/middleware/compression.py`.
+- HTTP/2 per-stream queue drops in
+  `blackbull/server/recipient.py:HTTP2Recipient` (logged under
+  the cap name `stream_queue_depth`).
+
+`BB_WS_QUEUE_DEPTH` was deliberately **not** wired — the
+WebSocket event queue applies backpressure via blocking
+`await put()` rather than dropping, so a hit is normal flow
+control rather than a rejection.
+
+### Docs
+
+- `docs/guide/logging.md` gains a *Cap-hit log — `blackbull.caps`*
+  section covering the inventory, record shape (the `cap`,
+  `requested`, `limit`, `peer`, `scope_path`, `protocol`
+  structured fields), the rate-limit model, and a
+  ready-to-paste subscription recipe.
+- `docs/reference/env-vars.md` gains a section-header note in
+  *Connection limits and timeouts* pointing at the new logging
+  section, plus a one-liner under *Logging* on how to set the
+  `blackbull.caps` level programmatically.
+
 ## [0.39.1] — 2026-06-15
 
 **Patch release: two cross-platform bug fixes surfaced via the

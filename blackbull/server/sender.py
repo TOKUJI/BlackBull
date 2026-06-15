@@ -8,6 +8,7 @@ from email.utils import formatdate
 from ..protocol.frame_types import (FrameTypes, HeaderFrameFlags, DataFrameFlags,
                                     SettingFrameFlags, FrameBase, PseudoHeaders,
                                     DEFAULT_INITIAL_WINDOW_SIZE, DEFAULT_MAX_FRAME_SIZE)
+from .cap_log import log_cap_hit
 from .constants import WSCloseCode
 from .ws_codec import WSOpcode, WSFrameBits, WSFrameHeader, encode_frame
 import logging
@@ -145,6 +146,9 @@ class AsyncioWriter(AbstractWriter):
                 logger.warning(
                     'write timeout (%.1fs) exceeded — closing connection',
                     self._write_timeout)
+                log_cap_hit('write_timeout',
+                            requested=self._write_timeout,
+                            limit=self._write_timeout)
                 try:
                     self._sw.close()
                 except Exception as close_exc:
@@ -183,6 +187,9 @@ class AsyncioWriter(AbstractWriter):
                 logger.warning(
                     'write timeout (%.1fs) exceeded — closing connection',
                     self._write_timeout)
+                log_cap_hit('write_timeout',
+                            requested=self._write_timeout,
+                            limit=self._write_timeout)
                 try:
                     self._sw.close()
                 except Exception as close_exc:
