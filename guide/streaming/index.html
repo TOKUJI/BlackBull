@@ -10,28 +10,28 @@
       
       
       
-        <link rel="canonical" href="https://TOKUJI.github.io/BlackBull/api/blackbull/protocol/hpack_fastpath/">
+        <link rel="canonical" href="https://TOKUJI.github.io/BlackBull/guide/streaming/">
       
       
-        <link rel="prev" href="../frame_types/">
+        <link rel="prev" href="../http2/">
       
       
-        <link rel="next" href="../rsock/">
+        <link rel="next" href="../events/">
       
       
         
       
       
-      <link rel="icon" href="../../../../assets/images/favicon.png">
+      <link rel="icon" href="../../assets/images/favicon.png">
       <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
     
     
       
-        <title>hpack_fastpath - BlackBull</title>
+        <title>Streaming - BlackBull</title>
       
     
     
-      <link rel="stylesheet" href="../../../../assets/stylesheets/main.484c7ddc.min.css">
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
       
       
 
@@ -50,11 +50,11 @@
       
     
     
-      <link rel="stylesheet" href="../../../../assets/_mkdocstrings.css">
+      <link rel="stylesheet" href="../../assets/_mkdocstrings.css">
     
-      <link rel="stylesheet" href="../../../../stylesheets/extra.css">
+      <link rel="stylesheet" href="../../stylesheets/extra.css">
     
-    <script>__md_scope=new URL("../../../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
     
       
 
@@ -72,7 +72,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#blackbullprotocolhpack_fastpath" class="md-skip">
+        <a href="#streaming-responses" class="md-skip">
           Skip to content
         </a>
       
@@ -88,7 +88,7 @@
 
 <header class="md-header md-header--shadow" data-md-component="header">
   <nav class="md-header__inner md-grid" aria-label="Header">
-    <a href="../../../.." title="BlackBull" class="md-header__button md-logo" aria-label="BlackBull" data-md-component="logo">
+    <a href="../.." title="BlackBull" class="md-header__button md-logo" aria-label="BlackBull" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
@@ -108,7 +108,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              hpack_fastpath
+              Streaming
             
           </span>
         </div>
@@ -198,7 +198,7 @@
 
 <nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
   <label class="md-nav__title" for="__drawer">
-    <a href="../../../.." title="BlackBull" class="md-nav__button md-logo" aria-label="BlackBull" data-md-component="logo">
+    <a href="../.." title="BlackBull" class="md-nav__button md-logo" aria-label="BlackBull" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
@@ -228,7 +228,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../.." class="md-nav__link">
+      <a href="../.." class="md-nav__link">
         
   
   
@@ -302,7 +302,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../getting-started/installation/" class="md-nav__link">
+      <a href="../../getting-started/installation/" class="md-nav__link">
         
   
   
@@ -330,7 +330,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../getting-started/hello-world/" class="md-nav__link">
+      <a href="../../getting-started/hello-world/" class="md-nav__link">
         
   
   
@@ -358,7 +358,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../getting-started/first-app/" class="md-nav__link">
+      <a href="../../getting-started/first-app/" class="md-nav__link">
         
   
   
@@ -390,18 +390,20 @@
       
   
   
+    
   
   
+  
     
     
     
     
     
-    <li class="md-nav__item md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
         
           
           <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
@@ -422,7 +424,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_3">
             <span class="md-nav__icon md-icon"></span>
             
@@ -440,7 +442,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../guide/" class="md-nav__link">
+      <a href="../" class="md-nav__link">
         
   
   
@@ -468,7 +470,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../guide/routing/" class="md-nav__link">
+      <a href="../routing/" class="md-nav__link">
         
   
   
@@ -496,7 +498,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../guide/middleware/" class="md-nav__link">
+      <a href="../middleware/" class="md-nav__link">
         
   
   
@@ -524,7 +526,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../guide/error-handling/" class="md-nav__link">
+      <a href="../error-handling/" class="md-nav__link">
         
   
   
@@ -552,7 +554,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../guide/requests-and-responses/" class="md-nav__link">
+      <a href="../requests-and-responses/" class="md-nav__link">
         
   
   
@@ -580,7 +582,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../guide/websockets/" class="md-nav__link">
+      <a href="../websockets/" class="md-nav__link">
         
   
   
@@ -608,7 +610,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../guide/http2/" class="md-nav__link">
+      <a href="../http2/" class="md-nav__link">
         
   
   
@@ -633,10 +635,37 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../../../../guide/streaming/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Streaming
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -652,6 +681,120 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#the-simplified-shape-async-generator" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The simplified shape: async generator
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#streamingresponse" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        StreamingResponse
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#server-sent-events-eventsourceresponse" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Server-Sent Events: EventSourceResponse
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-backpressure-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The backpressure model
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="The backpressure model">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#http11" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        HTTP/1.1
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#http2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        HTTP/2
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#when-sse-when-websocket-when-chunked-http" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        When SSE, when WebSocket, when chunked HTTP
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#caveats" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Caveats
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -664,7 +807,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../guide/events/" class="md-nav__link">
+      <a href="../events/" class="md-nav__link">
         
   
   
@@ -692,7 +835,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../guide/logging/" class="md-nav__link">
+      <a href="../logging/" class="md-nav__link">
         
   
   
@@ -720,7 +863,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../guide/static-files/" class="md-nav__link">
+      <a href="../static-files/" class="md-nav__link">
         
   
   
@@ -748,7 +891,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../guide/configuration/" class="md-nav__link">
+      <a href="../configuration/" class="md-nav__link">
         
   
   
@@ -776,7 +919,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../guide/extensions/" class="md-nav__link">
+      <a href="../extensions/" class="md-nav__link">
         
   
   
@@ -804,7 +947,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../guide/openapi/" class="md-nav__link">
+      <a href="../openapi/" class="md-nav__link">
         
   
   
@@ -832,7 +975,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../guide/testing/" class="md-nav__link">
+      <a href="../testing/" class="md-nav__link">
         
   
   
@@ -914,7 +1057,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../deployment/running/" class="md-nav__link">
+      <a href="../../deployment/running/" class="md-nav__link">
         
   
   
@@ -942,7 +1085,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../deployment/workers/" class="md-nav__link">
+      <a href="../../deployment/workers/" class="md-nav__link">
         
   
   
@@ -970,7 +1113,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../deployment/tls/" class="md-nav__link">
+      <a href="../../deployment/tls/" class="md-nav__link">
         
   
   
@@ -998,7 +1141,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../deployment/behind-nginx/" class="md-nav__link">
+      <a href="../../deployment/behind-nginx/" class="md-nav__link">
         
   
   
@@ -1026,7 +1169,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../deployment/unix-and-fd/" class="md-nav__link">
+      <a href="../../deployment/unix-and-fd/" class="md-nav__link">
         
   
   
@@ -1054,7 +1197,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../deployment/hot-reload/" class="md-nav__link">
+      <a href="../../deployment/hot-reload/" class="md-nav__link">
         
   
   
@@ -1086,20 +1229,18 @@
       
   
   
-    
   
   
-  
     
     
     
     
     
-    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" checked>
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
         
           
           <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
@@ -1120,7 +1261,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="true">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_5">
             <span class="md-nav__icon md-icon"></span>
             
@@ -1138,7 +1279,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../reference/env-vars/" class="md-nav__link">
+      <a href="../../reference/env-vars/" class="md-nav__link">
         
   
   
@@ -1163,20 +1304,18 @@
                 
   
   
-    
   
   
-  
     
     
     
     
     
-    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2" checked>
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2" >
         
           
           <label class="md-nav__link" for="__nav_5_2" id="__nav_5_2_label" tabindex="0">
@@ -1197,7 +1336,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_5_2_label" aria-expanded="true">
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_5_2_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_5_2">
             <span class="md-nav__icon md-icon"></span>
             
@@ -1212,20 +1351,18 @@
                 
   
   
-    
   
   
-  
     
     
     
     
     
-    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2_1" checked>
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2_1" >
         
           
           <label class="md-nav__link" for="__nav_5_2_1" id="__nav_5_2_1_label" tabindex="0">
@@ -1246,7 +1383,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_5_2_1_label" aria-expanded="true">
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_5_2_1_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_5_2_1">
             <span class="md-nav__icon md-icon"></span>
             
@@ -1264,7 +1401,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../" class="md-nav__link">
+      <a href="../../api/blackbull/" class="md-nav__link">
         
   
   
@@ -1292,7 +1429,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../actor/" class="md-nav__link">
+      <a href="../../api/blackbull/actor/" class="md-nav__link">
         
   
   
@@ -1320,7 +1457,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../app/" class="md-nav__link">
+      <a href="../../api/blackbull/app/" class="md-nav__link">
         
   
   
@@ -1348,7 +1485,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../asgi/" class="md-nav__link">
+      <a href="../../api/blackbull/asgi/" class="md-nav__link">
         
   
   
@@ -1376,7 +1513,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../cli/" class="md-nav__link">
+      <a href="../../api/blackbull/cli/" class="md-nav__link">
         
   
   
@@ -1451,7 +1588,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../client/" class="md-nav__link">
+      <a href="../../api/blackbull/client/" class="md-nav__link">
         
   
   
@@ -1479,7 +1616,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../client/client/" class="md-nav__link">
+      <a href="../../api/blackbull/client/client/" class="md-nav__link">
         
   
   
@@ -1507,7 +1644,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../client/exceptions/" class="md-nav__link">
+      <a href="../../api/blackbull/client/exceptions/" class="md-nav__link">
         
   
   
@@ -1535,7 +1672,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../client/http1/" class="md-nav__link">
+      <a href="../../api/blackbull/client/http1/" class="md-nav__link">
         
   
   
@@ -1563,7 +1700,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../client/http2/" class="md-nav__link">
+      <a href="../../api/blackbull/client/http2/" class="md-nav__link">
         
   
   
@@ -1591,7 +1728,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../client/response/" class="md-nav__link">
+      <a href="../../api/blackbull/client/response/" class="md-nav__link">
         
   
   
@@ -1619,7 +1756,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../client/scenario/" class="md-nav__link">
+      <a href="../../api/blackbull/client/scenario/" class="md-nav__link">
         
   
   
@@ -1647,7 +1784,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../client/scenario_oracle/" class="md-nav__link">
+      <a href="../../api/blackbull/client/scenario_oracle/" class="md-nav__link">
         
   
   
@@ -1675,7 +1812,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../client/websocket/" class="md-nav__link">
+      <a href="../../api/blackbull/client/websocket/" class="md-nav__link">
         
   
   
@@ -1703,7 +1840,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../client/websocket_h2/" class="md-nav__link">
+      <a href="../../api/blackbull/client/websocket_h2/" class="md-nav__link">
         
   
   
@@ -1739,7 +1876,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../env/" class="md-nav__link">
+      <a href="../../api/blackbull/env/" class="md-nav__link">
         
   
   
@@ -1767,7 +1904,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../event/" class="md-nav__link">
+      <a href="../../api/blackbull/event/" class="md-nav__link">
         
   
   
@@ -1795,7 +1932,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../event_aggregator/" class="md-nav__link">
+      <a href="../../api/blackbull/event_aggregator/" class="md-nav__link">
         
   
   
@@ -1823,7 +1960,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../headers/" class="md-nav__link">
+      <a href="../../api/blackbull/headers/" class="md-nav__link">
         
   
   
@@ -1851,7 +1988,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../logger/" class="md-nav__link">
+      <a href="../../api/blackbull/logger/" class="md-nav__link">
         
   
   
@@ -1926,7 +2063,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/" class="md-nav__link">
+      <a href="../../api/blackbull/middleware/" class="md-nav__link">
         
   
   
@@ -1954,7 +2091,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/base/" class="md-nav__link">
+      <a href="../../api/blackbull/middleware/base/" class="md-nav__link">
         
   
   
@@ -1982,7 +2119,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/cache/" class="md-nav__link">
+      <a href="../../api/blackbull/middleware/cache/" class="md-nav__link">
         
   
   
@@ -2010,7 +2147,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/compression/" class="md-nav__link">
+      <a href="../../api/blackbull/middleware/compression/" class="md-nav__link">
         
   
   
@@ -2038,7 +2175,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/cors/" class="md-nav__link">
+      <a href="../../api/blackbull/middleware/cors/" class="md-nav__link">
         
   
   
@@ -2066,7 +2203,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/proxy/" class="md-nav__link">
+      <a href="../../api/blackbull/middleware/proxy/" class="md-nav__link">
         
   
   
@@ -2094,7 +2231,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/session/" class="md-nav__link">
+      <a href="../../api/blackbull/middleware/session/" class="md-nav__link">
         
   
   
@@ -2122,7 +2259,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/static/" class="md-nav__link">
+      <a href="../../api/blackbull/middleware/static/" class="md-nav__link">
         
   
   
@@ -2150,7 +2287,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/utils/" class="md-nav__link">
+      <a href="../../api/blackbull/middleware/utils/" class="md-nav__link">
         
   
   
@@ -2178,7 +2315,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/websocket/" class="md-nav__link">
+      <a href="../../api/blackbull/middleware/websocket/" class="md-nav__link">
         
   
   
@@ -2214,7 +2351,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../openapi/" class="md-nav__link">
+      <a href="../../api/blackbull/openapi/" class="md-nav__link">
         
   
   
@@ -2239,20 +2376,18 @@
                 
   
   
-    
   
   
-  
     
     
     
     
     
-    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2_1_14" checked>
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2_1_14" >
         
           
           <label class="md-nav__link" for="__nav_5_2_1_14" id="__nav_5_2_1_14_label" tabindex="0">
@@ -2273,7 +2408,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="4" aria-labelledby="__nav_5_2_1_14_label" aria-expanded="true">
+        <nav class="md-nav" data-md-level="4" aria-labelledby="__nav_5_2_1_14_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_5_2_1_14">
             <span class="md-nav__icon md-icon"></span>
             
@@ -2291,7 +2426,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../" class="md-nav__link">
+      <a href="../../api/blackbull/protocol/" class="md-nav__link">
         
   
   
@@ -2319,7 +2454,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../frame/" class="md-nav__link">
+      <a href="../../api/blackbull/protocol/frame/" class="md-nav__link">
         
   
   
@@ -2347,7 +2482,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../frame_types/" class="md-nav__link">
+      <a href="../../api/blackbull/protocol/frame_types/" class="md-nav__link">
         
   
   
@@ -2372,37 +2507,10 @@
                 
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    hpack_fastpath
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/protocol/hpack_fastpath/" class="md-nav__link">
         
   
   
@@ -2418,65 +2526,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#blackbull.protocol.hpack_fastpath" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        hpack_fastpath
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="hpack_fastpath">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.protocol.hpack_fastpath.pseudo_fast_bytes" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        pseudo_fast_bytes
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.protocol.hpack_fastpath.status_fast_bytes" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        status_fast_bytes
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -2489,7 +2538,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../rsock/" class="md-nav__link">
+      <a href="../../api/blackbull/protocol/rsock/" class="md-nav__link">
         
   
   
@@ -2517,7 +2566,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../stream/" class="md-nav__link">
+      <a href="../../api/blackbull/protocol/stream/" class="md-nav__link">
         
   
   
@@ -2553,7 +2602,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../request/" class="md-nav__link">
+      <a href="../../api/blackbull/request/" class="md-nav__link">
         
   
   
@@ -2581,7 +2630,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../response/" class="md-nav__link">
+      <a href="../../api/blackbull/response/" class="md-nav__link">
         
   
   
@@ -2609,7 +2658,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../router/" class="md-nav__link">
+      <a href="../../api/blackbull/router/" class="md-nav__link">
         
   
   
@@ -2684,7 +2733,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/" class="md-nav__link">
+      <a href="../../api/blackbull/server/" class="md-nav__link">
         
   
   
@@ -2712,7 +2761,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/access_log/" class="md-nav__link">
+      <a href="../../api/blackbull/server/access_log/" class="md-nav__link">
         
   
   
@@ -2740,7 +2789,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/cap_log/" class="md-nav__link">
+      <a href="../../api/blackbull/server/cap_log/" class="md-nav__link">
         
   
   
@@ -2768,7 +2817,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/connection_actor/" class="md-nav__link">
+      <a href="../../api/blackbull/server/connection_actor/" class="md-nav__link">
         
   
   
@@ -2796,7 +2845,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/constants/" class="md-nav__link">
+      <a href="../../api/blackbull/server/constants/" class="md-nav__link">
         
   
   
@@ -2824,7 +2873,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/deadline/" class="md-nav__link">
+      <a href="../../api/blackbull/server/deadline/" class="md-nav__link">
         
   
   
@@ -2852,7 +2901,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/http1_actor/" class="md-nav__link">
+      <a href="../../api/blackbull/server/http1_actor/" class="md-nav__link">
         
   
   
@@ -2880,7 +2929,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/http2_actor/" class="md-nav__link">
+      <a href="../../api/blackbull/server/http2_actor/" class="md-nav__link">
         
   
   
@@ -2908,7 +2957,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/http2_messages/" class="md-nav__link">
+      <a href="../../api/blackbull/server/http2_messages/" class="md-nav__link">
         
   
   
@@ -2936,7 +2985,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/http2_ws/" class="md-nav__link">
+      <a href="../../api/blackbull/server/http2_ws/" class="md-nav__link">
         
   
   
@@ -2964,7 +3013,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/multiworker/" class="md-nav__link">
+      <a href="../../api/blackbull/server/multiworker/" class="md-nav__link">
         
   
   
@@ -2992,7 +3041,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/parser/" class="md-nav__link">
+      <a href="../../api/blackbull/server/parser/" class="md-nav__link">
         
   
   
@@ -3020,7 +3069,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/permessage_deflate/" class="md-nav__link">
+      <a href="../../api/blackbull/server/permessage_deflate/" class="md-nav__link">
         
   
   
@@ -3048,7 +3097,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/recipient/" class="md-nav__link">
+      <a href="../../api/blackbull/server/recipient/" class="md-nav__link">
         
   
   
@@ -3076,7 +3125,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/reload/" class="md-nav__link">
+      <a href="../../api/blackbull/server/reload/" class="md-nav__link">
         
   
   
@@ -3104,7 +3153,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/response/" class="md-nav__link">
+      <a href="../../api/blackbull/server/response/" class="md-nav__link">
         
   
   
@@ -3132,7 +3181,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/sender/" class="md-nav__link">
+      <a href="../../api/blackbull/server/sender/" class="md-nav__link">
         
   
   
@@ -3160,7 +3209,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/server/" class="md-nav__link">
+      <a href="../../api/blackbull/server/server/" class="md-nav__link">
         
   
   
@@ -3188,7 +3237,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/websocket_actor/" class="md-nav__link">
+      <a href="../../api/blackbull/server/websocket_actor/" class="md-nav__link">
         
   
   
@@ -3216,7 +3265,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/worker/" class="md-nav__link">
+      <a href="../../api/blackbull/server/worker/" class="md-nav__link">
         
   
   
@@ -3244,7 +3293,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/ws_codec/" class="md-nav__link">
+      <a href="../../api/blackbull/server/ws_codec/" class="md-nav__link">
         
   
   
@@ -3280,7 +3329,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../testing/" class="md-nav__link">
+      <a href="../../api/blackbull/testing/" class="md-nav__link">
         
   
   
@@ -3308,7 +3357,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../utils/" class="md-nav__link">
+      <a href="../../api/blackbull/utils/" class="md-nav__link">
         
   
   
@@ -3406,7 +3455,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../about/conformance/" class="md-nav__link">
+      <a href="../../about/conformance/" class="md-nav__link">
         
   
   
@@ -3434,7 +3483,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../about/internals/" class="md-nav__link">
+      <a href="../../about/internals/" class="md-nav__link">
         
   
   
@@ -3462,7 +3511,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../about/grpc-assessment/" class="md-nav__link">
+      <a href="../../about/grpc-assessment/" class="md-nav__link">
         
   
   
@@ -3517,22 +3566,55 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#blackbull.protocol.hpack_fastpath" class="md-nav__link">
+  <a href="#the-simplified-shape-async-generator" class="md-nav__link">
     <span class="md-ellipsis">
       
-        hpack_fastpath
+        The simplified shape: async generator
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="hpack_fastpath">
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#streamingresponse" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        StreamingResponse
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#server-sent-events-eventsourceresponse" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Server-Sent Events: EventSourceResponse
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-backpressure-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The backpressure model
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="The backpressure model">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#blackbull.protocol.hpack_fastpath.pseudo_fast_bytes" class="md-nav__link">
+  <a href="#http11" class="md-nav__link">
     <span class="md-ellipsis">
       
-        pseudo_fast_bytes
+        HTTP/1.1
       
     </span>
   </a>
@@ -3540,10 +3622,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#blackbull.protocol.hpack_fastpath.status_fast_bytes" class="md-nav__link">
+  <a href="#http2" class="md-nav__link">
     <span class="md-ellipsis">
       
-        status_fast_bytes
+        HTTP/2
       
     </span>
   </a>
@@ -3552,6 +3634,28 @@
         
       </ul>
     </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#when-sse-when-websocket-when-chunked-http" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        When SSE, when WebSocket, when chunked HTTP
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#caveats" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Caveats
+      
+    </span>
+  </a>
   
 </li>
       
@@ -3575,122 +3679,207 @@
   
 
 
-<h1 id="blackbullprotocolhpack_fastpath"><code>blackbull.protocol.hpack_fastpath</code><a class="headerlink" href="#blackbullprotocolhpack_fastpath" title="Permanent link">&para;</a></h1>
+<h1 id="streaming-responses">Streaming responses<a class="headerlink" href="#streaming-responses" title="Permanent link">&para;</a></h1>
+<p>BlackBull streams responses by yielding chunks from an async iterator.
+The framework handles transport framing (HTTP/1.1 chunked encoding or
+HTTP/2 DATA frames) and the backpressure model.  This page covers
+both halves: the surface for writing a streaming handler, and the
+model behind the curtain so you know what your code is actually
+doing.</p>
+<h2 id="the-simplified-shape-async-generator">The simplified shape: async generator<a class="headerlink" href="#the-simplified-shape-async-generator" title="Permanent link">&para;</a></h2>
+<p>Return an async generator from a simplified handler and BlackBull
+wraps it in a <a href="#streamingresponse"><code>StreamingResponse</code></a> for you:</p>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">asyncio</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">blackbull</span><span class="w"> </span><span class="kn">import</span> <span class="n">BlackBull</span>
 
+<span class="n">app</span> <span class="o">=</span> <span class="n">BlackBull</span><span class="p">()</span>
 
-<div class="doc doc-object doc-module">
+<span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">&#39;/feed&#39;</span><span class="p">)</span>
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">feed</span><span class="p">():</span>
+    <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">10</span><span class="p">):</span>
+        <span class="k">yield</span> <span class="sa">f</span><span class="s1">&#39;line </span><span class="si">{</span><span class="n">i</span><span class="si">}</span><span class="se">\n</span><span class="s1">&#39;</span><span class="o">.</span><span class="n">encode</span><span class="p">()</span>
+        <span class="k">await</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="mf">0.1</span><span class="p">)</span>
+</code></pre></div>
+<p>Each <code>yield</code> becomes one body chunk.  <code>bytes</code> is preferred; <code>str</code>
+is auto-encoded as UTF-8 for convenience.  No <code>await send(...)</code>
+required, no <code>Response</code> object required.</p>
+<p>The handler is still bounded by the normal request-timeout knobs —
+<code>BB_REQUEST_TIMEOUT</code> and <code>BB_WRITE_TIMEOUT</code> apply to streaming
+handlers the same way they apply to any other.</p>
+<h2 id="streamingresponse"><code>StreamingResponse</code><a class="headerlink" href="#streamingresponse" title="Permanent link">&para;</a></h2>
+<p>For finer control, construct a <code>StreamingResponse</code> explicitly:</p>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">blackbull</span><span class="w"> </span><span class="kn">import</span> <span class="n">StreamingResponse</span>
 
+<span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">&#39;/feed&#39;</span><span class="p">)</span>
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">feed</span><span class="p">():</span>
+    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">lines</span><span class="p">():</span>
+        <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">10</span><span class="p">):</span>
+            <span class="k">yield</span> <span class="sa">f</span><span class="s1">&#39;line </span><span class="si">{</span><span class="n">i</span><span class="si">}</span><span class="se">\n</span><span class="s1">&#39;</span>
+    <span class="k">return</span> <span class="n">StreamingResponse</span><span class="p">(</span><span class="n">lines</span><span class="p">(),</span> <span class="n">media_type</span><span class="o">=</span><span class="s1">&#39;text/plain&#39;</span><span class="p">)</span>
+</code></pre></div>
+<p>Constructor arguments:</p>
+<table>
+<thead>
+<tr>
+<th>Argument</th>
+<th>Default</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>content</code></td>
+<td>—</td>
+<td>Async iterator producing <code>bytes</code> or <code>str</code> chunks.</td>
+</tr>
+<tr>
+<td><code>status</code></td>
+<td><code>200</code></td>
+<td>HTTP status code on the response start.</td>
+</tr>
+<tr>
+<td><code>headers</code></td>
+<td><code>[]</code></td>
+<td>Extra response headers as <code>[(bytes, bytes), ...]</code>.</td>
+</tr>
+<tr>
+<td><code>media_type</code></td>
+<td><code>'text/plain'</code></td>
+<td>Content-Type header (overridable via <em>headers</em>).</td>
+</tr>
+</tbody>
+</table>
+<p>Pass it to <code>await send(...)</code> from a full-ASGI handler, or just
+<code>return</code> it from a simplified handler.</p>
+<h2 id="server-sent-events-eventsourceresponse">Server-Sent Events: <code>EventSourceResponse</code><a class="headerlink" href="#server-sent-events-eventsourceresponse" title="Permanent link">&para;</a></h2>
+<p>For browser-side <code>EventSource</code> clients, use the SSE convenience
+class.  It formats each yielded item per the WHATWG SSE grammar,
+forces <code>Content-Type: text/event-stream</code>, and sets
+<code>Cache-Control: no-cache</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">blackbull</span><span class="w"> </span><span class="kn">import</span> <span class="n">EventSourceResponse</span>
 
-
-<h2 id="blackbull.protocol.hpack_fastpath" class="doc doc-heading">
-            <code>blackbull.protocol.hpack_fastpath</code>
-
-
-<a href="#blackbull.protocol.hpack_fastpath" class="headerlink" title="Permanent link">&para;</a></h2>
-
-    <div class="doc doc-contents first">
-
-        <p>HPACK static-table fast path for outbound HEADERS / PUSH_PROMISE frames.</p>
-<p>RFC 7541 Appendix A defines the HPACK static table.  When a header pair's
-name AND value exactly match a static-table entry, the wire encoding is
-a single byte: <code>0x80 | index</code>.  This module precomputes those bytes
-for every entry where both name and value are defined — primarily
-<code>:status</code> (every response) and the request-side pseudo-headers used
-by PUSH_PROMISE (<code>:method</code>, <code>:scheme</code>, <code>:path</code>).</p>
-<p>Wire equivalence: given the same input, the encoder produces identical
-bytes.  Static-indexed fields do not mutate the encoder's dynamic table
-(RFC 7541 §6.1), so emitting precomputed bytes outside the encoder
-leaves dynamic-table state unchanged across requests.  Round-trip tests
-in <code>tests/conformance/http2/test_hpack_fastpath.py</code> assert byte
-equivalence.</p>
-<p>Coverage of RFC 7541 Appendix A indices 1–61 with both name and value
-defined (the only entries eligible for single-byte encoding):</p>
+<span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">&#39;/sse&#39;</span><span class="p">)</span>
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">sse</span><span class="p">():</span>
+    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">events</span><span class="p">():</span>
+        <span class="k">yield</span> <span class="p">{</span><span class="s1">&#39;event&#39;</span><span class="p">:</span> <span class="s1">&#39;token&#39;</span><span class="p">,</span> <span class="s1">&#39;data&#39;</span><span class="p">:</span> <span class="s1">&#39;hello&#39;</span><span class="p">}</span>
+        <span class="k">yield</span> <span class="p">{</span><span class="s1">&#39;event&#39;</span><span class="p">:</span> <span class="s1">&#39;token&#39;</span><span class="p">,</span> <span class="s1">&#39;data&#39;</span><span class="p">:</span> <span class="s1">&#39;world&#39;</span><span class="p">}</span>
+        <span class="k">yield</span> <span class="p">{</span><span class="s1">&#39;event&#39;</span><span class="p">:</span> <span class="s1">&#39;done&#39;</span><span class="p">,</span>  <span class="s1">&#39;data&#39;</span><span class="p">:</span> <span class="s1">&#39;&#39;</span><span class="p">}</span>
+    <span class="k">return</span> <span class="n">EventSourceResponse</span><span class="p">(</span><span class="n">events</span><span class="p">())</span>
+</code></pre></div>
+<p>Yielded items accept three shapes:</p>
+<table>
+<thead>
+<tr>
+<th>Yield</th>
+<th>Wire emission</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>str</code></td>
+<td><code>data: &lt;text&gt;\n\n</code></td>
+</tr>
+<tr>
+<td><code>bytes</code></td>
+<td><code>data: &lt;text-utf8&gt;\n\n</code></td>
+</tr>
+<tr>
+<td><code>Mapping</code></td>
+<td>One field line per recognised key, blank-line terminator</td>
+</tr>
+</tbody>
+</table>
+<p>Recognised mapping keys are <code>data</code>, <code>event</code>, <code>id</code>, and <code>retry</code>.
+<code>data</code> may be a string with embedded newlines (each line emits its
+own <code>data:</code> field per the spec; the browser rejoins them with
+<code>\n</code>).  A non-string <code>data</code> is JSON-serialised before the wire.
+Unknown keys are ignored.</p>
+<p>Override the default headers by passing your own <code>headers=[...]</code>
+— a caller-supplied <code>cache-control</code> or <code>content-type</code> takes
+precedence.</p>
+<h2 id="the-backpressure-model">The backpressure model<a class="headerlink" href="#the-backpressure-model" title="Permanent link">&para;</a></h2>
+<p>Streaming handlers fire one <code>await send({'type': 'http.response.body', ...})</code>
+per chunk.  Both HTTP/1.1 and HTTP/2 paths apply transport-level
+backpressure inside that <code>await</code>, so a slow client never causes
+unbounded buffer growth in BlackBull.</p>
+<h3 id="http11">HTTP/1.1<a class="headerlink" href="#http11" title="Permanent link">&para;</a></h3>
+<p><code>AsyncioWriter.write()</code> calls <code>asyncio.StreamWriter.drain()</code> on
+every chunk
+(<a href="https://github.com/TOKUJI/BlackBull/blob/master/blackbull/server/sender.py"><code>blackbull/server/sender.py</code></a>).
+<code>drain()</code> blocks while the kernel send buffer is full of bytes the
+peer hasn't acknowledged, so the handler naturally stalls until
+the peer pulls bytes off the socket.  <code>BB_WRITE_TIMEOUT</code> (default
+30 s) bounds how long a single drain can wait — if a peer reads
+1 byte/sec, the connection is closed before the handler hangs
+indefinitely.</p>
+<h3 id="http2">HTTP/2<a class="headerlink" href="#http2" title="Permanent link">&para;</a></h3>
+<p><code>HTTP2Sender._write_data()</code> enforces per-stream and per-connection
+flow control per RFC 9113 §6.9.  Before writing each DATA frame
+the sender waits on an <code>asyncio.Event</code> until either window has
+credit:</p>
+<div class="highlight"><pre><span></span><code><span class="k">while</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">connection_window_size</span> <span class="o">&lt;=</span> <span class="mi">0</span> <span class="ow">or</span>
+       <span class="bp">self</span><span class="o">.</span><span class="n">stream_window_size</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">_stream_id</span><span class="p">]</span> <span class="o">&lt;=</span> <span class="mi">0</span><span class="p">):</span>
+    <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_window_open</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_window_open</span> <span class="o">=</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">Event</span><span class="p">()</span>
+    <span class="bp">self</span><span class="o">.</span><span class="n">_window_open</span><span class="o">.</span><span class="n">clear</span><span class="p">()</span>
+    <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">_window_open</span><span class="o">.</span><span class="n">wait</span><span class="p">()</span>
+</code></pre></div>
+<p>The handler's next <code>yield</code> only fires after the previous chunk's
+<code>await send()</code> returns — and that return only happens after the
+peer has granted enough WINDOW_UPDATE credit to put the chunk on
+the wire.  No background queue, no buffering, no per-stream
+unbounded growth.  <code>BB_REQUEST_TIMEOUT</code> bounds total per-stream
+runtime if you want a hard ceiling on streams that produce
+forever.</p>
+<p>The unit test <a href="https://github.com/TOKUJI/BlackBull/blob/master/tests/unit/test_sse.py"><code>test_http2_sender_blocks_when_window_closed</code></a>
+proves this experimentally: forcing both windows to zero before
+the write starts produces zero wire bytes; signalling the
+<code>_window_open</code> event releases the write.</p>
+<h2 id="when-sse-when-websocket-when-chunked-http">When SSE, when WebSocket, when chunked HTTP<a class="headerlink" href="#when-sse-when-websocket-when-chunked-http" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Pattern</th>
+<th>Strengths</th>
+<th>Weaknesses</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>SSE</strong> (<code>EventSourceResponse</code>)</td>
+<td>Server → client only; auto-reconnect in browsers via <code>EventSource</code>; works through HTTP proxies; cleanly multiplexed over HTTP/2 streams.</td>
+<td>One-way only.  Text-only payloads on the wire (binary needs base64).</td>
+</tr>
+<tr>
+<td><strong>WebSocket</strong></td>
+<td>Bidirectional; binary-native; lowest per-message framing overhead after the upgrade.</td>
+<td>Most HTTP middleboxes treat WS as opaque; harder to debug; framework state on both sides.</td>
+</tr>
+<tr>
+<td><strong>Chunked HTTP</strong> (<code>StreamingResponse</code>)</td>
+<td>One-way, request-scoped; uses normal HTTP semantics; trivially cacheable / proxied.</td>
+<td>No event names, no client reconnect.  Use when you just want a long-running download, not a live event stream.</td>
+</tr>
+</tbody>
+</table>
+<p>Default pick: <strong>SSE</strong> when the client is a browser tab consuming
+incremental updates, <strong>WebSocket</strong> when the client also pushes,
+and <strong>plain <code>StreamingResponse</code></strong> for non-browser HTTP clients
+(LLM token streams over <code>httpx.stream</code>, log tail downloads, etc.).</p>
+<h2 id="caveats">Caveats<a class="headerlink" href="#caveats" title="Permanent link">&para;</a></h2>
 <ul>
-<li>8–14   :status 200/204/206/304/400/404/500   (always-on response path)</li>
-<li>16     accept-encoding: gzip, deflate         (defensive — rare on responses)</li>
-<li>2–3    :method GET / POST                     (PUSH_PROMISE only)</li>
-<li>4–5    :path / and /index.html                (PUSH_PROMISE only)</li>
-<li>6–7    :scheme http / https                   (PUSH_PROMISE only)</li>
+<li><strong>Compression interaction</strong>: the <code>Compression</code> middleware buffers
+  the full body before deciding whether to compress; pair it with
+  a route-specific exclusion if you want SSE delivered unbuffered.</li>
+<li><strong><code>Content-Length</code></strong>: streaming responses do not set
+  <code>content-length</code>; the transport advertises chunked encoding
+  (HTTP/1.1) or stream framing (HTTP/2).  Clients that require a
+  known length should buffer client-side.</li>
+<li><strong>Cancellation</strong>: when the client disconnects, the handler's
+  next <code>await send(...)</code> raises and the generator's <code>finally</code>
+  blocks run.  Use a <code>try / finally</code> around any resource that
+  outlives a single yield (DB cursors, subscriptions, …).</li>
 </ul>
-<p>All other static-table entries are name-only (e.g. <code>content-type</code> at
-index 31 has no static value), so they cannot use the single-byte
-indexed encoding.  Sprint 24 confirmed the table is exhausted at this
-encoding tier — any further fastpath work would need to handle the
-literal-with-indexed-name encoding (RFC 7541 §6.2), which involves
-encoder choices (Huffman vs raw, incremental indexing vs not) that we
-cannot pre-decide without coupling to encoder configuration.</p>
-
-
-
-
-
-
-
-
-
-
-<div class="doc doc-children">
-
-
-
-
-
-
-
-
-
-
-<div class="doc doc-object doc-function">
-
-
-<h3 id="blackbull.protocol.hpack_fastpath.pseudo_fast_bytes" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">pseudo_fast_bytes</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="n">value</span><span class="p">)</span></code>
-
-<a href="#blackbull.protocol.hpack_fastpath.pseudo_fast_bytes" class="headerlink" title="Permanent link">&para;</a></h3>
-
-
-    <div class="doc doc-contents ">
-
-        <p>Return the precomputed wire bytes for any static-indexed
-<code>(name, value)</code> pair, else <code>None</code>.</p>
-<p>Used by :meth:<code>PushPromise.save</code> to fast-path the request-side
-pseudo-headers (<code>:method</code>, <code>:scheme</code>, <code>:path</code>).  <code>name</code> and
-<code>value</code> may be <code>str</code> (the ASGI shape) or <code>bytes</code>.</p>
-
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-function">
-
-
-<h3 id="blackbull.protocol.hpack_fastpath.status_fast_bytes" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">status_fast_bytes</span><span class="p">(</span><span class="n">status_value</span><span class="p">)</span></code>
-
-<a href="#blackbull.protocol.hpack_fastpath.status_fast_bytes" class="headerlink" title="Permanent link">&para;</a></h3>
-
-
-    <div class="doc doc-contents ">
-
-        <p>Return the precomputed wire bytes for <code>:status &lt;value&gt;</code> when the
-value matches a static-table entry, else <code>None</code>.</p>
-<p>Accepts <code>str</code> (the ASGI shape, e.g. <code>'200'</code>) or <code>bytes</code>.
-Kept as a separate function for backwards compatibility with the
-Sprint 21 Phase C <code>Headers.save()</code> call site.</p>
-
-
-    </div>
-
-</div>
-
-
-
-  </div>
-
-    </div>
-
-</div>
 
 
 
@@ -3740,10 +3929,10 @@ Sprint 21 Phase C <code>Headers.save()</code> call site.</p>
     
       
       
-      <script id="__config" type="application/json">{"annotate": null, "base": "../../../..", "features": [], "search": "../../../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": [], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
     
     
-      <script src="../../../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
       
     
   </body>

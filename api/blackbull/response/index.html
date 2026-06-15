@@ -636,6 +636,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../../guide/streaming/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Streaming
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../../guide/events/" class="md-nav__link">
         
   
@@ -2537,6 +2565,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#blackbull.response.EventSourceResponse" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        EventSourceResponse
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.response.JSONResponse" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3532,6 +3571,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#blackbull.response.EventSourceResponse" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        EventSourceResponse
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.response.JSONResponse" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3631,7 +3681,8 @@
 <ul>
 <li><code>Response</code>: plain HTTP response (HTML / plain text / binary).</li>
 <li><code>JSONResponse</code>: convenience subclass that serialises a Python object to JSON.</li>
-<li><code>StreamingResponse</code>: pushes an async generator to the client without buffering.</li>
+<li><code>StreamingResponse</code>: pushes an async iterator to the client without buffering.</li>
+<li><code>EventSourceResponse</code>: WHATWG Server-Sent Events on top of StreamingResponse.</li>
 <li><code>WebSocketResponse</code>: wraps text, bytes, or dict data as a WebSocket send event.</li>
 <li><code>cookie_header</code>: builds a <code>(b'set-cookie', ...)</code> header tuple with secure defaults.</li>
 </ul>
@@ -3654,6 +3705,71 @@
 
 
 
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="blackbull.response.EventSourceResponse" class="doc doc-heading">
+            <code>EventSourceResponse</code>
+
+
+<a href="#blackbull.response.EventSourceResponse" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><a class="autorefs autorefs-internal" title="StreamingResponse (blackbull.response.StreamingResponse)" href="#blackbull.response.StreamingResponse">StreamingResponse</a></code></p>
+
+
+
+        <p>Stream a Server-Sent Events response from an async iterator.</p>
+<p>Yields are formatted per WHATWG §9.2.6 (the EventSource spec).  Each
+item produced by <em>content</em> may be a <code>str</code> (bare data), <code>bytes</code>
+(bare data, UTF-8), or a <code>Mapping</code> with optional <code>data</code> /
+<code>event</code> / <code>id</code> / <code>retry</code> keys.</p>
+<p>The content-type is forced to <code>text/event-stream</code> and
+<code>Cache-Control: no-cache</code> is auto-emitted; both are overridable
+via the <em>headers</em> argument if a deployment knows what it's doing.</p>
+<p>Usage::</p>
+<pre><code>async def tokens():
+    yield {'event': 'token', 'data': 'hello'}
+    yield {'event': 'token', 'data': 'world'}
+    yield {'event': 'done',  'data': ''}
+
+@app.route(path='/sse')
+async def stream():
+    return EventSourceResponse(tokens())
+</code></pre>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
 
 <div class="doc doc-object doc-class">
 
