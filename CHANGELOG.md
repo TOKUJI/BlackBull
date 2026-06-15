@@ -24,6 +24,75 @@ so the editable install's metadata catches up.
 
 ## [Unreleased]
 
+**Sprint 45 close: HTTP/2 SSE with proper backpressure.**
+
+Real-demand streaming pattern (LLM token streams, log tails)
+shipped on the existing HTTP/2 sender + flow-control path
+touched by Sprint 38 trailers.  Simplified-handler shape:
+`async def stream(): yield ...` returning an async generator is
+auto-wrapped in a `StreamingResponse`; a new
+`EventSourceResponse` subclass adds WHATWG Server-Sent Events
+formatting on top of the same iterator-driven pipeline.  No
+protocol-level work was needed — `HTTP2Sender._write_data`
+already blocks on the per-stream / per-connection
+flow-control credit (RFC 9113 §6.9) so each `yield`
+naturally throttles to the credit the peer has granted.
+
+### Added
+
+- **`EventSourceResponse`** (`blackbull/response.py`) — formats
+  each yielded item per the WHATWG SSE grammar.  Accepts
+  `str`, `bytes`, or `Mapping` (with optional `data` /
+  `event` / `id` / `retry` keys).  Auto-emits
+  `Content-Type: text/event-stream` and
+  `Cache-Control: no-cache`; both overridable via the
+  `headers=` argument.  Multi-line `data` strings split into
+  one `data:` field per line per the spec; non-string `data`
+  values are JSON-serialised.
+- **Async generator return type** for simplified handlers
+  (`blackbull/router.py`) — a route that returns an
+  `async def stream(): yield ...` generator is now wrapped
+  automatically.  A returned `StreamingResponse` (or any
+  subclass, including `EventSourceResponse`) is passed
+  through verbatim so it can drive `scope/receive/send`
+  directly.
+- **`docs/guide/streaming.md`** — covers the simplified async-
+  generator shape, the `StreamingResponse` / `EventSourceResponse`
+  classes, the HTTP/1.1 (drain-based) and HTTP/2
+  (flow-control-credit-based) backpressure models with a
+  pointer to the unit test that proves the stall+resume
+  behaviour experimentally, and a comparison table for
+  picking between SSE, WebSocket, and plain chunked HTTP.
+- **`examples/sse_token_stream.py`** — end-to-end demo: a
+  browser EventSource page subscribing to a `/sse` endpoint
+  that fakes LLM tokens, plus a `/raw` endpoint showing the
+  bare async-generator handler shape.
+
+### Internal
+
+- `tests/unit/test_sse.py` — 16 tests covering the SSE
+  encoder (data lines, event/id/retry fields, multi-line
+  split, dict-data JSON encoding, unsupported-type
+  TypeError), `EventSourceResponse` ASGI event shape
+  (content-type + cache-control headers, one body event per
+  yield, final empty body close, caller-supplied
+  cache-control wins), the simplified-handler dispatcher
+  (async-generator wraps to `StreamingResponse`,
+  `StreamingResponse` instance passes through,
+  `EventSourceResponse` instance passes through to take the
+  subclass branch not the Response branch), and an HTTP/2
+  backpressure test that forces both windows to zero before
+  the write starts and confirms no DATA bytes hit the wire
+  until the `_window_open` event fires.
+
+### Compatibility
+
+Additive surface — no existing handler shape changes
+behaviour.  The new async-generator branch sits ahead of the
+existing `bytes` / `str` / `dict` / `Response` dispatch in
+`_adapt_handler`; handlers that used to raise `TypeError` on a
+generator return now succeed.
+
 ## [0.40.1] — 2026-06-15
 
 **Patch release: cap-hit observability follow-ups.**

@@ -387,7 +387,10 @@ def _adapt_handler(fn, path: str):
     None → no send; other → TypeError at call time.
     """
     from .request import read_body as _read_body
-    from .response import Response as _Response, JSONResponse as _JSONResponse
+    from .response import (
+        Response as _Response, JSONResponse as _JSONResponse,
+        StreamingResponse as _StreamingResponse,
+    )
 
     path_param_names: set[str] = {m.group(1) for m in Router._param_pattern.finditer(path)}
     params = inspect.signature(fn).parameters
@@ -467,6 +470,17 @@ def _adapt_handler(fn, path: str):
 
         if result is None:
             return
+        elif isinstance(result, _StreamingResponse):
+            # Sprint 45: existing StreamingResponse / EventSourceResponse
+            # instance — let it drive scope/receive/send directly so
+            # subclasses keep control over the start event.
+            await result(scope, receive, send)
+        elif inspect.isasyncgen(result):
+            # Sprint 45: ``async def stream(): yield ...`` shape — wrap
+            # in a default-typed StreamingResponse.  Backpressure flows
+            # naturally because each ``await send()`` on a body event
+            # blocks on flow-control credit (HTTP/2) or drain (HTTP/1).
+            await _StreamingResponse(result)(scope, receive, send)
         elif isinstance(result, _Response):
             await send(result)
         elif isinstance(result, bytes):
