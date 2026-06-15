@@ -39,7 +39,15 @@ class Response:
         self.status = status
         self.headers = [(b'content-type', content_type.encode())]
         if headers:
-            self.headers.extend(headers)
+            # ASGI requires headers as bytes/bytes tuples; coerce str on the
+            # way in so callers may pass either shape without crashing the
+            # sender's b''.join later.
+            for k, v in headers:
+                if isinstance(k, str):
+                    k = k.encode('latin-1')
+                if isinstance(v, str):
+                    v = v.encode('latin-1')
+                self.headers.append((k, v))
 
 
 class JSONResponse(Response):
