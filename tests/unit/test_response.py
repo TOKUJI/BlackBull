@@ -57,6 +57,13 @@ def test_response_str_headers_coerced_to_bytes():
     assert (b'X-Foo', b'bar') in r.headers
 
 
+def test_response_str_headers_reject_non_ascii():
+    # RFC 9110 §5.5: header field values are ASCII.  Surface non-ASCII at
+    # construction time rather than emitting obs-text bytes onto the wire.
+    with pytest.raises(UnicodeEncodeError):
+        Response(b'', headers=[('X-Foo', 'café')])
+
+
 # ---------------------------------------------------------------------------
 # JSONResponse
 # ---------------------------------------------------------------------------

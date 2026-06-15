@@ -41,12 +41,14 @@ class Response:
         if headers:
             # ASGI requires headers as bytes/bytes tuples; coerce str on the
             # way in so callers may pass either shape without crashing the
-            # sender's b''.join later.
+            # sender's b''.join later.  ASCII per RFC 9110 §5.5 — non-ASCII
+            # input raises UnicodeEncodeError at construction rather than
+            # letting obs-text bytes onto the wire.
             for k, v in headers:
                 if isinstance(k, str):
-                    k = k.encode('latin-1')
+                    k = k.encode('ascii')
                 if isinstance(v, str):
-                    v = v.encode('latin-1')
+                    v = v.encode('ascii')
                 self.headers.append((k, v))
 
 

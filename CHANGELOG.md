@@ -48,12 +48,14 @@ sprint and is unaffected.
   on those platforms, making BlackBull unusable.
 - `blackbull/response.py` — `Response(..., headers=[('Foo', 'bar')])`
   with `str`-typed tuple elements is now accepted.  The
-  constructor coerces both key and value to `bytes` (latin-1
-  encoded) on the way in so the sender's later
+  constructor coerces both key and value to ASCII `bytes`
+  (per RFC 9110 §5.5) on the way in so the sender's later
   `b''.join(parts)` no longer raises
   `TypeError: sequence item N: expected a bytes-like object,
   str found`.  Bytes-typed tuples continue to pass through
-  unchanged.
+  unchanged.  Non-ASCII input raises `UnicodeEncodeError` at
+  construction time rather than letting obs-text bytes onto
+  the wire.
 
 ### Internal
 
