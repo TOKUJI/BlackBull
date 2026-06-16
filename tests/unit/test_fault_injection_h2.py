@@ -23,6 +23,7 @@ from blackbull.fault_injection import (
     SendRawBytes,
     WaitForClientFrame,
     frame_matches,
+    make_self_signed_h2_context,
     scenario_h2_from_json,
     scenario_h2_to_json,
     serialize_frame,
@@ -164,6 +165,57 @@ def test_h2_fault_server_accepts_allow_remote_override():
     srv = H2FaultServer(
         scenario=ScenarioH2(steps=()), host='0.0.0.0', allow_remote=True)
     assert srv is not None
+
+
+# ----------------------------------------------------------------------
+# TLS — H2FaultServer over HTTPS with ALPN h2
+# ----------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_h2_fault_server_url_is_https_when_ssl_context_provided():
+    """Constructing with an ssl_context flips the URL scheme to ``https``."""
+    ctx = make_self_signed_h2_context()
+    scenario = ScenarioH2(steps=(CloseGracefully(),))
+    async with H2FaultServer(scenario=scenario, ssl_context=ctx) as srv:
+        assert srv.url is not None
+        assert srv.url.startswith('https://'), srv.url
+
+
+@pytest.mark.asyncio
+async def test_h2_fault_server_negotiates_h2_via_alpn():
+    """A TLS client offering ``h2`` in ALPN gets ``h2`` selected; the
+    server then completes a CloseGracefully scenario over the encrypted
+    connection."""
+    import ssl as _ssl
+    ctx = make_self_signed_h2_context()
+    scenario = ScenarioH2(steps=(CloseGracefully(error_code=0),))
+    async with H2FaultServer(scenario=scenario, ssl_context=ctx) as srv:
+        host, port = srv.url.split('//')[1].rstrip('/').split(':')
+        client_ctx = _ssl.create_default_context()
+        client_ctx.check_hostname = False
+        client_ctx.verify_mode = _ssl.CERT_NONE
+        client_ctx.set_alpn_protocols(['h2'])
+        reader, writer = await asyncio.open_connection(
+            host, int(port), ssl=client_ctx)
+        try:
+            assert writer.get_extra_info('ssl_object').selected_alpn_protocol() == 'h2'
+            writer.write(CLIENT_PREFACE)
+            writer.write(_CLIENT_SETTINGS)
+            await writer.drain()
+            data = await asyncio.wait_for(reader.read(4096), timeout=2.0)
+        finally:
+            writer.close()
+            try:
+                await writer.wait_closed()
+            except Exception:
+                pass
+        await srv.wait_for_connection_done(timeout=2.0)
+
+    assert srv.last_result is not None
+    assert srv.last_result.terminated
+    # GOAWAY frame type byte must appear in the wire data.
+    assert b'\x07' in data, f'expected GOAWAY in {data.hex()}'
 
 
 # ----------------------------------------------------------------------

@@ -41,6 +41,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import ssl
 import time
 
 from blackbull.protocol.frame import FrameFactory
@@ -194,11 +195,19 @@ class H2FaultServer:
         Bind port.  Defaults to ``0`` (kernel-assigned random port).
     allow_remote:
         Bypass the localhost-only safety check.  Off by default.
+    ssl_context:
+        Optional :class:`ssl.SSLContext`.  When provided, the server
+        terminates TLS and ``self.url`` is ``https://...``; ALPN must
+        offer ``h2`` so clients negotiating H/2 over TLS (httpx, curl
+        ``--http2``, …) connect cleanly.  When ``None`` (default), the
+        server speaks plaintext h2c — usable with prior-knowledge
+        clients only.
 
     Attributes
     ----------
     url:
-        ``http://<host>:<port>/`` after start.
+        ``http://<host>:<port>/`` after start, or ``https://...`` when
+        a TLS context is provided.
     last_result:
         :class:`ScenarioH2Result` from the most recently completed
         connection.  ``None`` before any client has connected.
@@ -211,6 +220,7 @@ class H2FaultServer:
         host: str = '127.0.0.1',
         port: int = 0,
         allow_remote: bool = False,
+        ssl_context: ssl.SSLContext | None = None,
     ):
         _refuse_in_production()
         if not allow_remote and host not in ('127.0.0.1', '::1', 'localhost'):
@@ -222,6 +232,7 @@ class H2FaultServer:
         self.scenario = scenario
         self._host = host
         self._port = port
+        self._ssl_context = ssl_context
         self._server: asyncio.base_events.Server | None = None
         self._factory = FrameFactory()
         self.url: str | None = None
@@ -239,10 +250,13 @@ class H2FaultServer:
 
     async def start(self) -> None:
         self._server = await asyncio.start_server(
-            self._handle_connection, self._host, self._port)
+            self._handle_connection, self._host, self._port,
+            ssl=self._ssl_context,
+        )
         sock = self._server.sockets[0]
         port = sock.getsockname()[1]
-        self.url = f'http://{self._host}:{port}/'
+        scheme = 'https' if self._ssl_context is not None else 'http'
+        self.url = f'{scheme}://{self._host}:{port}/'
         logger.debug('H2FaultServer bound at %s', self.url)
 
     async def stop(self) -> None:

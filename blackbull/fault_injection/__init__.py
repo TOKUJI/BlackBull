@@ -44,6 +44,7 @@ from .scenario_h1 import (
     Step,
     StepOp,
 )
+from ._tls import make_self_signed_h2_context
 from .h2_server import (
     CLIENT_PREFACE,
     H2FaultServer,
@@ -94,6 +95,7 @@ __all__ = [
     "WaitForClientFrame",
     "categorize",
     "frame_matches",
+    "make_self_signed_h2_context",
     "normalize_response",
     "run_scenario",
     "scenario_h2_from_json",

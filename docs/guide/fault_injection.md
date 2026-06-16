@@ -24,9 +24,14 @@ production deployment.
 
 ## Quick start — HTTP/2 server-side
 
+`H2FaultServer` accepts an `ssl.SSLContext` so it can negotiate
+HTTP/2 over TLS with real clients (httpx, curl, ...) via ALPN.  Use
+`make_self_signed_h2_context()` to spin up a localhost-only TLS
+context with ALPN ``h2`` advertised:
+
 ```python
 import pytest
-from blackbull.fault_injection import H2FaultServer
+from blackbull.fault_injection import H2FaultServer, make_self_signed_h2_context
 from blackbull.fault_injection.catalogue import (
     half_closed_stream_no_data,
     exhausted_window_zero_initial,
@@ -37,7 +42,8 @@ from blackbull.fault_injection.catalogue import (
 @pytest.fixture
 async def fault_server(request):
     scenario = request.param()
-    async with H2FaultServer(scenario=scenario) as srv:
+    ssl_ctx = make_self_signed_h2_context()
+    async with H2FaultServer(scenario=scenario, ssl_context=ssl_ctx) as srv:
         yield srv
 
 @pytest.mark.parametrize('fault_server', [
@@ -47,13 +53,17 @@ async def fault_server(request):
     headers_continuation_dropped,
 ], indirect=True)
 async def test_my_client_survives_each_catalogue_scenario(fault_server):
-    client = MyH2Client(fault_server.url)
+    client = MyH2Client(fault_server.url, verify=False)
     # The exact assertion depends on the scenario — see the catalogue
     # docstrings for the expected client-side behaviour.  Most reduce
     # to: client must error within a bounded time, not hang forever.
     with pytest.raises((TimeoutError, MyClient.ProtocolError)):
         await asyncio.wait_for(client.get('/'), timeout=2.0)
 ```
+
+Omitting `ssl_context=` runs the server as plaintext h2c — fine for
+prior-knowledge clients, but httpx / curl / hyper-h2 only negotiate
+HTTP/2 via ALPN over TLS, so most real clients need the TLS path.
 
 After each connection, `fault_server.last_result` is a
 `ScenarioH2Result` carrying step-completion count, byte counters,
@@ -158,9 +168,19 @@ from a production process:
 The HTTP/1.1 client-side scenario is benign by construction (it is a
 client, not a server-side code path) and carries no equivalent lock.
 
-## Example
+## Examples
 
-See [`examples/scenario_h2_fault_injection.py`](https://github.com/TOKUJI/BlackBull/blob/master/examples/scenario_h2_fault_injection.py)
-for an end-to-end walkthrough that runs every catalogue scenario
-against a synthetic client and prints the server-side result for
-each.
+Two end-to-end walkthroughs ship with the framework, one per
+direction:
+
+* [`examples/scenario_h2_fault_injection.py`](https://github.com/TOKUJI/BlackBull/blob/master/examples/scenario_h2_fault_injection.py)
+  — runs every catalogue scenario against ``httpx`` (over the
+  self-signed TLS context) and prints both what the server emitted
+  and how httpx reacted (``LocalProtocolError`` /
+  ``RemoteProtocolError`` / ...).  Requires ``pip install 'httpx[http2]'``.
+* [`examples/scenario_h1_fault_injection.py`](https://github.com/TOKUJI/BlackBull/blob/master/examples/scenario_h1_fault_injection.py)
+  — runs a handful of misbehaving client scenarios (slowloris
+  trickle, partial-headers idle, abrupt RST) against a stdlib
+  ``http.server.BaseHTTPRequestHandler`` running in a background
+  thread, and prints the resulting ``ScenarioResult`` for each.
+  No third-party deps.
