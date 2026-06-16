@@ -22,7 +22,7 @@ from pathlib import Path
 
 
 # ---------------------------------------------------------------------------
-# Opcode encoder — must match blackbull.client.scenario.Scenario.from_bytes
+# Opcode encoder — must match blackbull.fault_injection.scenario_h1.Scenario.from_bytes
 # ---------------------------------------------------------------------------
 
 def encode_send(data: bytes, *, byte_interval_idx: int = 0) -> bytes:

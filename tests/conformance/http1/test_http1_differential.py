@@ -58,7 +58,7 @@ from blackbull.client import (  # noqa: E402
     Scenario,
     SendBytes,
 )
-from blackbull.client.scenario_oracle import (  # noqa: E402
+from blackbull.fault_injection import (  # noqa: E402
     ACCEPTED_CATEGORIES,
     Category,
     SideOutcome,
@@ -238,10 +238,11 @@ import time as _time  # noqa: E402
 from dataclasses import dataclass, field  # noqa: E402
 
 # Sprint 18 Phase 3 — Category, ACCEPTED_CATEGORIES, SideOutcome,
-# normalize_response, categorize, and run_scenario moved to
-# blackbull.client.scenario_oracle so the atheris fuzz harness can
-# reuse them without importing this pytest module.  Imports at the
-# top of the file pull them back in.
+# normalize_response, categorize, and run_scenario moved out of this
+# pytest module so the atheris fuzz harness could reuse them without
+# importing pytest.  Sprint 46 re-homed them at
+# blackbull.fault_injection alongside the new HTTP/2 server surface;
+# imports at the top of the file pull them back in.
 
 
 @dataclass
