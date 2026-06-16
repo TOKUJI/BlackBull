@@ -116,6 +116,8 @@ CLAUDE_DEV.md
 .claude/design/
 .claude/planning/
 .claude/patterns/
+.claude/skills/
+
 # benchmark result files (keep directory + READMEs, ignore data)
 bench/results/*
 !bench/results/aws/
