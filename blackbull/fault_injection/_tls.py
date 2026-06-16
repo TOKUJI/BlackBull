@@ -28,6 +28,11 @@ def make_self_signed_h2_context() -> ssl.SSLContext:
     in the ALPN protocol list.  Use it with :class:`H2FaultServer`'s
     ``ssl_context=`` parameter.
 
+    The certificate path is attached to the returned object as
+    ``bb_ca_cert_path: str`` so callers can hand it to a client
+    library (e.g. ``httpx.AsyncClient(verify=ctx.bb_ca_cert_path)``)
+    instead of disabling certificate validation.
+
     Requires ``cryptography`` — installed via the ``[fault-injection]``
     extra (``pip install 'blackbull[fault-injection]'``).
     """
@@ -47,6 +52,7 @@ def make_self_signed_h2_context() -> ssl.SSLContext:
     # offering http/1.1 too keeps the example friendly to clients that
     # don't enable HTTP/2.
     ctx.set_alpn_protocols(['h2', 'http/1.1'])
+    ctx.bb_ca_cert_path = str(cert_path)
     return ctx
 
 

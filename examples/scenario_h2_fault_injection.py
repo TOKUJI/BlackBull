@@ -40,7 +40,8 @@ async def drive_one(name: str) -> None:
         print(f'  bound at:        {server.url}')
 
         async with httpx.AsyncClient(
-            http2=True, verify=False, timeout=PER_REQUEST_TIMEOUT_S,
+            http2=True, verify=ssl_ctx.bb_ca_cert_path,
+            timeout=PER_REQUEST_TIMEOUT_S,
         ) as client:
             try:
                 resp = await client.get(server.url)

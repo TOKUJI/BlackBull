@@ -192,9 +192,7 @@ async def test_h2_fault_server_negotiates_h2_via_alpn():
     scenario = ScenarioH2(steps=(CloseGracefully(error_code=0),))
     async with H2FaultServer(scenario=scenario, ssl_context=ctx) as srv:
         host, port = srv.url.split('//')[1].rstrip('/').split(':')
-        client_ctx = _ssl.create_default_context()
-        client_ctx.check_hostname = False
-        client_ctx.verify_mode = _ssl.CERT_NONE
+        client_ctx = _ssl.create_default_context(cafile=ctx.bb_ca_cert_path)
         client_ctx.set_alpn_protocols(['h2'])
         reader, writer = await asyncio.open_connection(
             host, int(port), ssl=client_ctx)
