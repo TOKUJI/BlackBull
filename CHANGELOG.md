@@ -24,6 +24,127 @@ so the editable install's metadata catches up.
 
 ## [Unreleased]
 
+## [0.42.0] — 2026-06-16
+
+**Sprint 46 close: deliberate-misbehaviour toolkit.**
+
+A new top-level module — `blackbull.fault_injection` — that lets
+test suites drive deliberately bad HTTP/1.1 against a real server
+or serve deliberately bad HTTP/2 to a real client.  The scenario /
+oracle surface that lived under `blackbull.client` in Sprint 45 is
+promoted into a first-class public API, joined by a new HTTP/2
+programmable fault server (`H2FaultServer`) with a named catalogue
+of canned misbehaviours, an optional TLS path so the server can be
+driven by httpx or curl, and a `[fault-injection]` install extra
+that pulls in the optional dependencies.
+
+This release also restructures `README.md` around the toolkit and
+refreshes `SECURITY.md` (supported versions + in-scope modules).
+
+### Added
+
+- **`blackbull.fault_injection` public module** — a single
+  namespace for the two directions of protocol fault injection.
+  Re-exports the HTTP/1.1 client-side scenario / oracle / category
+  surface previously at `blackbull.client.scenario` /
+  `blackbull.client.scenario_oracle`, plus the new HTTP/2
+  server-side surface below.  Refuses to start when `BB_PRODUCTION`
+  is set so a deliberate-misbehaviour code path cannot fire in a
+  production deployment.
+- **`H2FaultServer`** (`blackbull/fault_injection/h2_server.py`) —
+  a programmable HTTP/2 server built directly on `hpack` + the raw
+  RFC 9113 frame layer (no use of BlackBull's own HTTP/2 actor —
+  the point is to misbehave in ways the conformant stack would
+  refuse to emit).  Accepts a `ScenarioH2` step list of
+  `SendFrame` / `SendRawBytes` / `WaitForClientFrame` / `Sleep` /
+  `Abort` / `CloseGracefully` and replays it against the connected
+  client.
+- **HTTP/2 fault catalogue** (`blackbull/fault_injection/catalogue.py`) —
+  four spec-grade scenario constructors covering distinct failure
+  modes: `half_closed_stream_no_data`, `exhausted_window_zero_initial`,
+  `settings_max_frame_size_below_minimum`, `headers_continuation_dropped`.
+  Each carries a docstring naming the expected client-side
+  observable.
+- **TLS support for `H2FaultServer`** — new `ssl_context=` kwarg
+  on the server plus a `make_self_signed_h2_context()` helper
+  (`blackbull/fault_injection/_tls.py`) that mints an ephemeral
+  RSA-2048 self-signed cert (SAN `DNS:localhost,IP:127.0.0.1`,
+  ALPN `[h2, http/1.1]`).  Required for any client that only
+  speaks HTTP/2 via ALPN over TLS (httpx, curl, browsers).
+  `server.url` advertises `https://` when an SSL context is
+  provided.
+- **`[fault-injection]` install extra** — `pip install
+  'blackbull[fault-injection]'` adds `cryptography` (the TLS
+  helper) and `httpx[http2]` (the canonical client example).
+  `H2FaultServer` itself only depends on the stdlib; users driving
+  it over plaintext h2c can skip the extra.
+- **`examples/scenario_h1_fault_injection.py`** — HTTP/1.1
+  scenarios driven against stdlib `http.server` in a background
+  thread.  Four scenarios: `well_formed_request`,
+  `slowloris_trickle`, `partial_headers_idle`,
+  `abort_after_request_line`.
+- **`docs/guide/fault_injection.md`** — full tutorial covering
+  the install extra, the two directions, the TLS quick-start, and
+  a `pytest.parametrize`-shaped fixture pattern that fans the
+  catalogue across a client under test.
+
+### Changed
+
+- **`examples/scenario_h2_fault_injection.py`** — rewritten to use
+  httpx (`http2=True` over TLS) instead of a synthetic-byte test
+  client.  Each catalogue scenario now demonstrates a distinct,
+  named real-client error, making the example genuinely
+  instructive.
+- **`README.md`** restructured per the narrative proposal: leads
+  with a one-sentence value prop, drops the reader into Hello
+  World with curl output, rewrites the "Why BlackBull" bullets as
+  benefits, gives fault injection its own section, moves the
+  Early Alpha warning to after the feature tour, ends with a CTA.
+  Adds an Event API section and a `websocket` row to the
+  middleware table.  Fixes stale links (`docs/guide.md` →
+  `docs/guide/index.md`, `docs/ActorDesign.md` →
+  `docs/about/internals.md`).
+- **`SECURITY.md`** — supported versions moved to 0.41.x + 0.40.x
+  (was stuck at 0.28.x for thirteen MINOR releases).  In-scope
+  list now covers the `blackbull.fault_injection` safety locks
+  (`BB_PRODUCTION`, `allow_remote=`).  Out-of-scope deps cleaned
+  up: removed `h2` (never a runtime dep), added the optional
+  extras (`brotli`, `zstandard`, `uvloop`, `watchfiles`).
+
+### Internal
+
+- `blackbull.client.scenario` / `scenario_oracle` modules moved
+  to `blackbull.fault_injection.scenario_h1` /
+  `oracle_h1`.  Import paths under `blackbull.client.*` keep
+  working as re-exports.
+- `tests/unit/test_fault_injection_h2.py` — 21 tests covering
+  server lifecycle, the frame-level step VM, every catalogue
+  entry, and the TLS / ALPN handshake against a real httpx
+  client.
+- `_tls.py` lazily imports `cryptography` inside
+  `_generate_self_signed_pem()` so importing
+  `blackbull.fault_injection` works without the
+  `[fault-injection]` extra installed (only calling the TLS
+  helper requires it).
+
+### Docs
+
+- **`.claude/skills/pre-release-docs/`** (local-only) — new skill
+  that audits `README.md` / `SECURITY.md` / `CHANGELOG.md` /
+  `KNOWN_LIMITATIONS.md` / `docs/guide/*` / `mkdocs.yml` for
+  staleness before tagging a release.  Cross-linked from
+  `.claude/patterns/release.md`.
+
+### Compatibility
+
+Additive on the public Python surface — no existing import path
+breaks, no behaviour of previously shipped APIs changes.
+`blackbull.client.scenario` / `blackbull.client.scenario_oracle`
+still resolve as deprecation shims emitting `DeprecationWarning`;
+removal floor is v0.45.0 / 2026-09-16 per the project's
+deprecation policy.  New surface (`blackbull.fault_injection.*`)
+is public and stable from this release forward.
+
 ## [0.41.0] — 2026-06-16
 
 **Sprint 45 close: HTTP/2 SSE with proper backpressure.**
