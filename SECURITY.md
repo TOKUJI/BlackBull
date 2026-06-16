@@ -12,8 +12,9 @@ critical vulnerabilities.
 
 | Version | Supported          |
 |---------|--------------------|
-| 0.28.x  | :white_check_mark: |
-| < 0.28  | :x:                |
+| 0.41.x  | :white_check_mark: |
+| 0.40.x  | :white_check_mark: |
+| < 0.40  | :x:                |
 
 This table updates with each minor release.
 
@@ -67,13 +68,20 @@ The following are in scope for security reports:
 - The `blackbull` CLI and module-level boot path (`blackbull.app.serve`).
 - The async HTTP client under `blackbull/client/` (experimental,
   but in-scope).
+- The safety locks on `blackbull/fault_injection/` — the
+  `BB_PRODUCTION` refuse-check and the localhost-only bind guard on
+  `H2FaultServer`.  The deliberate-misbehaviour code paths *behind*
+  those locks are by design; a bypass that lets the module run in a
+  production process or bind to a non-loopback interface without
+  `allow_remote=True` is a security report.
 
 The following are typically **out of scope**:
 
-- Vulnerabilities in third-party dependencies (`h2`, `hpack`,
-  `beartype`, `brotli`, `zstandard`).  Report those to the upstream
-  project.  We monitor `pip-audit` and Dependabot for CVE-class
-  issues in our dependency tree.
+- Vulnerabilities in third-party dependencies (`hpack`, `beartype`,
+  and optional extras such as `brotli`, `zstandard`, `uvloop`,
+  `watchfiles`).  Report those to the upstream project.  We monitor
+  `pip-audit` and Dependabot for CVE-class issues in our dependency
+  tree.
 - Denial-of-service via unauthenticated traffic at scales typical
   of a CDN's job.  BlackBull is designed to sit behind a CDN or
   reverse proxy for internet-facing deployments — see

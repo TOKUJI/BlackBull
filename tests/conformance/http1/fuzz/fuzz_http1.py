@@ -43,7 +43,7 @@ with atheris.instrument_imports():
     from blackbull import BlackBull, read_body
     from blackbull.server import ASGIServer
     from blackbull.client import HTTP1Client, Scenario
-    from blackbull.client.scenario_oracle import (
+    from blackbull.fault_injection import (
         ACCEPTED_CATEGORIES,
         Category,
         categorize,

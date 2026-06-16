@@ -4,7 +4,7 @@ name = "blackbull"
 # minor per closed sprint); PATCH covers bug fixes / harness work
 # between sprints.  No 1.0 commitment until the framework's identity
 # and surface have stabilised across several sprints.  See CHANGELOG.md.
-version = "0.41.0"
+version = "0.42.0"
 description = "Async ASGI 3.0 framework with a from-scratch HTTP/1.1 parser, HTTP/2 frame layer, and WebSocket codec. HPACK delegates to the hpack library."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -109,6 +109,16 @@ speed = [
 
 reload = [
     "watchfiles",
+]
+
+# Deliberate-misbehaviour toolkit (blackbull.fault_injection).  The
+# H2FaultServer itself only needs the stdlib; this extra pulls in
+# cryptography for the self-signed TLS helper, and httpx[http2] so
+# users running examples/scenario_h2_fault_injection.py from a fresh
+# install have a real HTTP/2 client on hand.
+fault-injection = [
+    "cryptography",
+    "httpx[http2]",
 ]
 
 benchmark = []  # k6 and h2load are installed via bench/install.sh (not pip packages)

@@ -22,7 +22,7 @@ from ..server.recipient import (AbstractReader, AsyncioReader,
 from ..server.sender import AbstractWriter, AsyncioWriter
 from .exceptions import ConnectionError, ProtocolError
 from .http2 import ClientResponse  # shared dataclass
-from .scenario import (
+from blackbull.fault_injection.scenario_h1 import (
     Abort,
     ReadResponse,
     Scenario,

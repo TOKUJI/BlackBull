@@ -2,7 +2,11 @@ from .client import Client
 from .http1 import HTTP1Client, HTTP1RequestSender, HTTP1ResponseRecipient
 from .http2 import ClientResponse, HTTP2Client
 from .response import ResponderFactory
-from .scenario import (
+# Sprint 46 moved the scenario primitives to blackbull.fault_injection.
+# The names stay reachable from blackbull.client without a deprecation
+# warning so existing top-level callers keep working; the deep-import
+# path (blackbull.client.scenario) is the one that emits the warning.
+from blackbull.fault_injection.scenario_h1 import (
     Abort,
     ReadResponse,
     Scenario,
