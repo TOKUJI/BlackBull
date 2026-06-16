@@ -19,11 +19,6 @@ import ssl
 import tempfile
 from pathlib import Path
 
-from cryptography import x509
-from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import rsa
-from cryptography.x509.oid import NameOID
-
 
 def make_self_signed_h2_context() -> ssl.SSLContext:
     """Return a server-side SSLContext that negotiates ``h2`` via ALPN.
@@ -32,6 +27,9 @@ def make_self_signed_h2_context() -> ssl.SSLContext:
     a tempdir and advertises ``h2`` (and ``http/1.1`` as a fallback)
     in the ALPN protocol list.  Use it with :class:`H2FaultServer`'s
     ``ssl_context=`` parameter.
+
+    Requires ``cryptography`` — installed via the ``[fault-injection]``
+    extra (``pip install 'blackbull[fault-injection]'``).
     """
     cert_pem, key_pem = _generate_self_signed_pem()
     # SSLContext.load_cert_chain demands file paths, not bytes.  We
@@ -54,6 +52,21 @@ def make_self_signed_h2_context() -> ssl.SSLContext:
 
 def _generate_self_signed_pem() -> tuple[bytes, bytes]:
     """Generate (cert_pem, key_pem) for a localhost-only TLS handshake."""
+    # Lazy import: keep `import blackbull.fault_injection` working without
+    # cryptography installed.  Users who never call this helper (e.g. they
+    # drive H2FaultServer over plaintext h2c) don't need the extra.
+    try:
+        from cryptography import x509
+        from cryptography.hazmat.primitives import hashes, serialization
+        from cryptography.hazmat.primitives.asymmetric import rsa
+        from cryptography.x509.oid import NameOID
+    except ImportError as exc:
+        raise ImportError(
+            "make_self_signed_h2_context() requires the 'cryptography' "
+            "package.  Install it via the [fault-injection] extra: "
+            "pip install 'blackbull[fault-injection]'."
+        ) from exc
+
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     subject = issuer = x509.Name([
         x509.NameAttribute(NameOID.COMMON_NAME, 'localhost'),

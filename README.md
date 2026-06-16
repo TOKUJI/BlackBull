@@ -55,9 +55,10 @@ Hello, world!
 
 ```bash
 pip install blackbull
-pip install 'blackbull[compression]'   # add brotli + zstandard codecs
-pip install 'blackbull[speed]'         # add uvloop event loop
-pip install 'blackbull[reload]'        # add watchfiles for --reload
+pip install 'blackbull[compression]'      # add brotli + zstandard codecs
+pip install 'blackbull[speed]'            # add uvloop event loop
+pip install 'blackbull[reload]'           # add watchfiles for --reload
+pip install 'blackbull[fault-injection]'  # add cryptography + httpx for the toolkit
 ```
 
 ## Simplified handlers

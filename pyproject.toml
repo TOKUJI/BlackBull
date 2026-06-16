@@ -111,6 +111,16 @@ reload = [
     "watchfiles",
 ]
 
+# Deliberate-misbehaviour toolkit (blackbull.fault_injection).  The
+# H2FaultServer itself only needs the stdlib; this extra pulls in
+# cryptography for the self-signed TLS helper, and httpx[http2] so
+# users running examples/scenario_h2_fault_injection.py from a fresh
+# install have a real HTTP/2 client on hand.
+fault-injection = [
+    "cryptography",
+    "httpx[http2]",
+]
+
 benchmark = []  # k6 and h2load are installed via bench/install.sh (not pip packages)
 
 profiling = [

@@ -22,6 +22,17 @@ when `BB_PRODUCTION` is set in the environment so the
 deliberate-misbehaviour code path cannot accidentally fire on a
 production deployment.
 
+## Install
+
+```bash
+pip install 'blackbull[fault-injection]'
+```
+
+The extra adds `cryptography` (for the self-signed TLS helper) and
+`httpx[http2]` (so the canonical example runs out of the box).
+`H2FaultServer` itself only needs the stdlib — if you drive it over
+plaintext h2c you can skip the extra.
+
 ## Quick start — HTTP/2 server-side
 
 `H2FaultServer` accepts an `ssl.SSLContext` so it can negotiate
