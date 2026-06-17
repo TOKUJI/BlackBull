@@ -10,28 +10,24 @@
       
       
       
-        <link rel="canonical" href="https://TOKUJI.github.io/BlackBull/api/blackbull/router/">
+        <link rel="canonical" href="https://TOKUJI.github.io/BlackBull/draft-devto-htcpcp/">
       
       
-        <link rel="prev" href="../response/">
-      
-      
-        <link rel="next" href="../server/">
       
       
         
       
       
-      <link rel="icon" href="../../../assets/images/favicon.png">
+      <link rel="icon" href="../assets/images/favicon.png">
       <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
     
     
       
-        <title>router - BlackBull</title>
+        <title>Brewing Coffee Over HTTP: A Python Implementation of RFC 2324 (HTCPCP) - BlackBull</title>
       
     
     
-      <link rel="stylesheet" href="../../../assets/stylesheets/main.484c7ddc.min.css">
+      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
       
       
 
@@ -50,11 +46,11 @@
       
     
     
-      <link rel="stylesheet" href="../../../assets/_mkdocstrings.css">
+      <link rel="stylesheet" href="../assets/_mkdocstrings.css">
     
-      <link rel="stylesheet" href="../../../stylesheets/extra.css">
+      <link rel="stylesheet" href="../stylesheets/extra.css">
     
-    <script>__md_scope=new URL("../../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
     
       
 
@@ -72,7 +68,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#blackbullrouter" class="md-skip">
+        <a href="#brewing-coffee-over-http-a-python-implementation-of-rfc-2324-htcpcp" class="md-skip">
           Skip to content
         </a>
       
@@ -88,7 +84,7 @@
 
 <header class="md-header md-header--shadow" data-md-component="header">
   <nav class="md-header__inner md-grid" aria-label="Header">
-    <a href="../../.." title="BlackBull" class="md-header__button md-logo" aria-label="BlackBull" data-md-component="logo">
+    <a href=".." title="BlackBull" class="md-header__button md-logo" aria-label="BlackBull" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
@@ -108,7 +104,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              router
+              Brewing Coffee Over HTTP: A Python Implementation of RFC 2324 (HTCPCP)
             
           </span>
         </div>
@@ -198,7 +194,7 @@
 
 <nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
   <label class="md-nav__title" for="__drawer">
-    <a href="../../.." title="BlackBull" class="md-nav__button md-logo" aria-label="BlackBull" data-md-component="logo">
+    <a href=".." title="BlackBull" class="md-nav__button md-logo" aria-label="BlackBull" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
@@ -228,7 +224,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../.." class="md-nav__link">
+      <a href=".." class="md-nav__link">
         
   
   
@@ -302,7 +298,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../getting-started/installation/" class="md-nav__link">
+      <a href="../getting-started/installation/" class="md-nav__link">
         
   
   
@@ -330,7 +326,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../getting-started/hello-world/" class="md-nav__link">
+      <a href="../getting-started/hello-world/" class="md-nav__link">
         
   
   
@@ -358,7 +354,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../getting-started/first-app/" class="md-nav__link">
+      <a href="../getting-started/first-app/" class="md-nav__link">
         
   
   
@@ -440,7 +436,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../guide/" class="md-nav__link">
+      <a href="../guide/" class="md-nav__link">
         
   
   
@@ -468,7 +464,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../guide/routing/" class="md-nav__link">
+      <a href="../guide/routing/" class="md-nav__link">
         
   
   
@@ -496,7 +492,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../guide/middleware/" class="md-nav__link">
+      <a href="../guide/middleware/" class="md-nav__link">
         
   
   
@@ -524,7 +520,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../guide/error-handling/" class="md-nav__link">
+      <a href="../guide/error-handling/" class="md-nav__link">
         
   
   
@@ -552,7 +548,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../guide/requests-and-responses/" class="md-nav__link">
+      <a href="../guide/requests-and-responses/" class="md-nav__link">
         
   
   
@@ -580,7 +576,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../guide/websockets/" class="md-nav__link">
+      <a href="../guide/websockets/" class="md-nav__link">
         
   
   
@@ -608,7 +604,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../guide/http2/" class="md-nav__link">
+      <a href="../guide/http2/" class="md-nav__link">
         
   
   
@@ -636,7 +632,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../guide/streaming/" class="md-nav__link">
+      <a href="../guide/streaming/" class="md-nav__link">
         
   
   
@@ -664,7 +660,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../guide/events/" class="md-nav__link">
+      <a href="../guide/events/" class="md-nav__link">
         
   
   
@@ -692,7 +688,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../guide/logging/" class="md-nav__link">
+      <a href="../guide/logging/" class="md-nav__link">
         
   
   
@@ -720,7 +716,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../guide/static-files/" class="md-nav__link">
+      <a href="../guide/static-files/" class="md-nav__link">
         
   
   
@@ -748,7 +744,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../guide/configuration/" class="md-nav__link">
+      <a href="../guide/configuration/" class="md-nav__link">
         
   
   
@@ -776,7 +772,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../guide/extensions/" class="md-nav__link">
+      <a href="../guide/extensions/" class="md-nav__link">
         
   
   
@@ -804,7 +800,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../guide/openapi/" class="md-nav__link">
+      <a href="../guide/openapi/" class="md-nav__link">
         
   
   
@@ -832,7 +828,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../guide/testing/" class="md-nav__link">
+      <a href="../guide/testing/" class="md-nav__link">
         
   
   
@@ -860,7 +856,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../guide/fault_injection/" class="md-nav__link">
+      <a href="../guide/fault_injection/" class="md-nav__link">
         
   
   
@@ -942,7 +938,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../deployment/running/" class="md-nav__link">
+      <a href="../deployment/running/" class="md-nav__link">
         
   
   
@@ -970,7 +966,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../deployment/workers/" class="md-nav__link">
+      <a href="../deployment/workers/" class="md-nav__link">
         
   
   
@@ -998,7 +994,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../deployment/tls/" class="md-nav__link">
+      <a href="../deployment/tls/" class="md-nav__link">
         
   
   
@@ -1026,7 +1022,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../deployment/behind-nginx/" class="md-nav__link">
+      <a href="../deployment/behind-nginx/" class="md-nav__link">
         
   
   
@@ -1054,7 +1050,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../deployment/unix-and-fd/" class="md-nav__link">
+      <a href="../deployment/unix-and-fd/" class="md-nav__link">
         
   
   
@@ -1082,7 +1078,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../deployment/hot-reload/" class="md-nav__link">
+      <a href="../deployment/hot-reload/" class="md-nav__link">
         
   
   
@@ -1114,20 +1110,18 @@
       
   
   
-    
   
   
-  
     
     
     
     
     
-    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" checked>
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
         
           
           <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
@@ -1148,7 +1142,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="true">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_5">
             <span class="md-nav__icon md-icon"></span>
             
@@ -1166,7 +1160,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../reference/env-vars/" class="md-nav__link">
+      <a href="../reference/env-vars/" class="md-nav__link">
         
   
   
@@ -1191,20 +1185,18 @@
                 
   
   
-    
   
   
-  
     
     
     
     
     
-    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2" checked>
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2" >
         
           
           <label class="md-nav__link" for="__nav_5_2" id="__nav_5_2_label" tabindex="0">
@@ -1225,7 +1217,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_5_2_label" aria-expanded="true">
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_5_2_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_5_2">
             <span class="md-nav__icon md-icon"></span>
             
@@ -1240,20 +1232,18 @@
                 
   
   
-    
   
   
-  
     
     
     
     
     
-    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2_1" checked>
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2_1" >
         
           
           <label class="md-nav__link" for="__nav_5_2_1" id="__nav_5_2_1_label" tabindex="0">
@@ -1274,7 +1264,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_5_2_1_label" aria-expanded="true">
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_5_2_1_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_5_2_1">
             <span class="md-nav__icon md-icon"></span>
             
@@ -1292,7 +1282,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../" class="md-nav__link">
+      <a href="../api/blackbull/" class="md-nav__link">
         
   
   
@@ -1320,7 +1310,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../actor/" class="md-nav__link">
+      <a href="../api/blackbull/actor/" class="md-nav__link">
         
   
   
@@ -1348,7 +1338,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../app/" class="md-nav__link">
+      <a href="../api/blackbull/app/" class="md-nav__link">
         
   
   
@@ -1376,7 +1366,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../asgi/" class="md-nav__link">
+      <a href="../api/blackbull/asgi/" class="md-nav__link">
         
   
   
@@ -1404,7 +1394,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../cli/" class="md-nav__link">
+      <a href="../api/blackbull/cli/" class="md-nav__link">
         
   
   
@@ -1479,7 +1469,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../client/" class="md-nav__link">
+      <a href="../api/blackbull/client/" class="md-nav__link">
         
   
   
@@ -1507,7 +1497,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../client/client/" class="md-nav__link">
+      <a href="../api/blackbull/client/client/" class="md-nav__link">
         
   
   
@@ -1535,7 +1525,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../client/exceptions/" class="md-nav__link">
+      <a href="../api/blackbull/client/exceptions/" class="md-nav__link">
         
   
   
@@ -1563,7 +1553,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../client/http1/" class="md-nav__link">
+      <a href="../api/blackbull/client/http1/" class="md-nav__link">
         
   
   
@@ -1591,7 +1581,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../client/http2/" class="md-nav__link">
+      <a href="../api/blackbull/client/http2/" class="md-nav__link">
         
   
   
@@ -1619,7 +1609,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../client/response/" class="md-nav__link">
+      <a href="../api/blackbull/client/response/" class="md-nav__link">
         
   
   
@@ -1647,7 +1637,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../client/scenario/" class="md-nav__link">
+      <a href="../api/blackbull/client/scenario/" class="md-nav__link">
         
   
   
@@ -1675,7 +1665,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../client/scenario_oracle/" class="md-nav__link">
+      <a href="../api/blackbull/client/scenario_oracle/" class="md-nav__link">
         
   
   
@@ -1703,7 +1693,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../client/websocket/" class="md-nav__link">
+      <a href="../api/blackbull/client/websocket/" class="md-nav__link">
         
   
   
@@ -1731,7 +1721,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../client/websocket_h2/" class="md-nav__link">
+      <a href="../api/blackbull/client/websocket_h2/" class="md-nav__link">
         
   
   
@@ -1767,7 +1757,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../env/" class="md-nav__link">
+      <a href="../api/blackbull/env/" class="md-nav__link">
         
   
   
@@ -1795,7 +1785,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../event/" class="md-nav__link">
+      <a href="../api/blackbull/event/" class="md-nav__link">
         
   
   
@@ -1823,7 +1813,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../event_aggregator/" class="md-nav__link">
+      <a href="../api/blackbull/event_aggregator/" class="md-nav__link">
         
   
   
@@ -1898,7 +1888,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../fault_injection/" class="md-nav__link">
+      <a href="../api/blackbull/fault_injection/" class="md-nav__link">
         
   
   
@@ -1973,7 +1963,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../fault_injection/catalogue/" class="md-nav__link">
+      <a href="../api/blackbull/fault_injection/catalogue/" class="md-nav__link">
         
   
   
@@ -2001,7 +1991,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../fault_injection/catalogue/h2/" class="md-nav__link">
+      <a href="../api/blackbull/fault_injection/catalogue/h2/" class="md-nav__link">
         
   
   
@@ -2037,7 +2027,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../fault_injection/h2_server/" class="md-nav__link">
+      <a href="../api/blackbull/fault_injection/h2_server/" class="md-nav__link">
         
   
   
@@ -2065,7 +2055,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../fault_injection/oracle_h1/" class="md-nav__link">
+      <a href="../api/blackbull/fault_injection/oracle_h1/" class="md-nav__link">
         
   
   
@@ -2093,7 +2083,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../fault_injection/scenario_h1/" class="md-nav__link">
+      <a href="../api/blackbull/fault_injection/scenario_h1/" class="md-nav__link">
         
   
   
@@ -2121,7 +2111,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../fault_injection/scenario_h2/" class="md-nav__link">
+      <a href="../api/blackbull/fault_injection/scenario_h2/" class="md-nav__link">
         
   
   
@@ -2157,7 +2147,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../headers/" class="md-nav__link">
+      <a href="../api/blackbull/headers/" class="md-nav__link">
         
   
   
@@ -2185,7 +2175,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../logger/" class="md-nav__link">
+      <a href="../api/blackbull/logger/" class="md-nav__link">
         
   
   
@@ -2260,7 +2250,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../middleware/" class="md-nav__link">
+      <a href="../api/blackbull/middleware/" class="md-nav__link">
         
   
   
@@ -2288,7 +2278,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../middleware/base/" class="md-nav__link">
+      <a href="../api/blackbull/middleware/base/" class="md-nav__link">
         
   
   
@@ -2316,7 +2306,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../middleware/cache/" class="md-nav__link">
+      <a href="../api/blackbull/middleware/cache/" class="md-nav__link">
         
   
   
@@ -2344,7 +2334,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../middleware/compression/" class="md-nav__link">
+      <a href="../api/blackbull/middleware/compression/" class="md-nav__link">
         
   
   
@@ -2372,7 +2362,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../middleware/cors/" class="md-nav__link">
+      <a href="../api/blackbull/middleware/cors/" class="md-nav__link">
         
   
   
@@ -2400,7 +2390,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../middleware/proxy/" class="md-nav__link">
+      <a href="../api/blackbull/middleware/proxy/" class="md-nav__link">
         
   
   
@@ -2428,7 +2418,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../middleware/session/" class="md-nav__link">
+      <a href="../api/blackbull/middleware/session/" class="md-nav__link">
         
   
   
@@ -2456,7 +2446,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../middleware/static/" class="md-nav__link">
+      <a href="../api/blackbull/middleware/static/" class="md-nav__link">
         
   
   
@@ -2484,7 +2474,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../middleware/utils/" class="md-nav__link">
+      <a href="../api/blackbull/middleware/utils/" class="md-nav__link">
         
   
   
@@ -2512,7 +2502,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../middleware/websocket/" class="md-nav__link">
+      <a href="../api/blackbull/middleware/websocket/" class="md-nav__link">
         
   
   
@@ -2548,7 +2538,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../openapi/" class="md-nav__link">
+      <a href="../api/blackbull/openapi/" class="md-nav__link">
         
   
   
@@ -2623,7 +2613,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../protocol/" class="md-nav__link">
+      <a href="../api/blackbull/protocol/" class="md-nav__link">
         
   
   
@@ -2651,7 +2641,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../protocol/frame/" class="md-nav__link">
+      <a href="../api/blackbull/protocol/frame/" class="md-nav__link">
         
   
   
@@ -2679,7 +2669,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../protocol/frame_types/" class="md-nav__link">
+      <a href="../api/blackbull/protocol/frame_types/" class="md-nav__link">
         
   
   
@@ -2707,7 +2697,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../protocol/hpack_fastpath/" class="md-nav__link">
+      <a href="../api/blackbull/protocol/hpack_fastpath/" class="md-nav__link">
         
   
   
@@ -2735,7 +2725,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../protocol/rsock/" class="md-nav__link">
+      <a href="../api/blackbull/protocol/rsock/" class="md-nav__link">
         
   
   
@@ -2763,7 +2753,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../protocol/stream/" class="md-nav__link">
+      <a href="../api/blackbull/protocol/stream/" class="md-nav__link">
         
   
   
@@ -2799,7 +2789,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../request/" class="md-nav__link">
+      <a href="../api/blackbull/request/" class="md-nav__link">
         
   
   
@@ -2827,7 +2817,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../response/" class="md-nav__link">
+      <a href="../api/blackbull/response/" class="md-nav__link">
         
   
   
@@ -2852,37 +2842,10 @@
                 
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    router
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../api/blackbull/router/" class="md-nav__link">
         
   
   
@@ -2898,198 +2861,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#blackbull.router" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        router
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="router">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.router.ConfigurationError" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        ConfigurationError
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.router.ErrorRouter" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        ErrorRouter
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="ErrorRouter">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.router.ErrorRouter.__call__" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        __call__
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.router.ErrorRouter.__getitem__" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        __getitem__
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.router.MethodNotApplicable" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        MethodNotApplicable
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.router.PathNotRegistered" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        PathNotRegistered
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.router.Router" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Router
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Router">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.router.Router.__contains__" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        __contains__
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.router.Router.__getitem__" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        __getitem__
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.router.Router.__setitem__" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        __setitem__
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.router.Router.route" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        route
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.router.Router.url_path_for" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        url_path_for
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.router.Router.validate" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        validate
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -3149,7 +2920,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../server/" class="md-nav__link">
+      <a href="../api/blackbull/server/" class="md-nav__link">
         
   
   
@@ -3177,7 +2948,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../server/access_log/" class="md-nav__link">
+      <a href="../api/blackbull/server/access_log/" class="md-nav__link">
         
   
   
@@ -3205,7 +2976,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../server/cap_log/" class="md-nav__link">
+      <a href="../api/blackbull/server/cap_log/" class="md-nav__link">
         
   
   
@@ -3233,7 +3004,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../server/connection_actor/" class="md-nav__link">
+      <a href="../api/blackbull/server/connection_actor/" class="md-nav__link">
         
   
   
@@ -3261,7 +3032,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../server/constants/" class="md-nav__link">
+      <a href="../api/blackbull/server/constants/" class="md-nav__link">
         
   
   
@@ -3289,7 +3060,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../server/deadline/" class="md-nav__link">
+      <a href="../api/blackbull/server/deadline/" class="md-nav__link">
         
   
   
@@ -3317,7 +3088,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../server/http1_actor/" class="md-nav__link">
+      <a href="../api/blackbull/server/http1_actor/" class="md-nav__link">
         
   
   
@@ -3345,7 +3116,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../server/http2_actor/" class="md-nav__link">
+      <a href="../api/blackbull/server/http2_actor/" class="md-nav__link">
         
   
   
@@ -3373,7 +3144,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../server/http2_messages/" class="md-nav__link">
+      <a href="../api/blackbull/server/http2_messages/" class="md-nav__link">
         
   
   
@@ -3401,7 +3172,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../server/http2_ws/" class="md-nav__link">
+      <a href="../api/blackbull/server/http2_ws/" class="md-nav__link">
         
   
   
@@ -3429,7 +3200,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../server/multiworker/" class="md-nav__link">
+      <a href="../api/blackbull/server/multiworker/" class="md-nav__link">
         
   
   
@@ -3457,7 +3228,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../server/parser/" class="md-nav__link">
+      <a href="../api/blackbull/server/parser/" class="md-nav__link">
         
   
   
@@ -3485,7 +3256,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../server/permessage_deflate/" class="md-nav__link">
+      <a href="../api/blackbull/server/permessage_deflate/" class="md-nav__link">
         
   
   
@@ -3513,7 +3284,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../server/recipient/" class="md-nav__link">
+      <a href="../api/blackbull/server/recipient/" class="md-nav__link">
         
   
   
@@ -3541,7 +3312,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../server/reload/" class="md-nav__link">
+      <a href="../api/blackbull/server/reload/" class="md-nav__link">
         
   
   
@@ -3569,7 +3340,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../server/response/" class="md-nav__link">
+      <a href="../api/blackbull/server/response/" class="md-nav__link">
         
   
   
@@ -3597,7 +3368,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../server/sender/" class="md-nav__link">
+      <a href="../api/blackbull/server/sender/" class="md-nav__link">
         
   
   
@@ -3625,7 +3396,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../server/server/" class="md-nav__link">
+      <a href="../api/blackbull/server/server/" class="md-nav__link">
         
   
   
@@ -3653,7 +3424,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../server/websocket_actor/" class="md-nav__link">
+      <a href="../api/blackbull/server/websocket_actor/" class="md-nav__link">
         
   
   
@@ -3681,7 +3452,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../server/worker/" class="md-nav__link">
+      <a href="../api/blackbull/server/worker/" class="md-nav__link">
         
   
   
@@ -3709,7 +3480,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../server/ws_codec/" class="md-nav__link">
+      <a href="../api/blackbull/server/ws_codec/" class="md-nav__link">
         
   
   
@@ -3745,7 +3516,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../testing/" class="md-nav__link">
+      <a href="../api/blackbull/testing/" class="md-nav__link">
         
   
   
@@ -3773,7 +3544,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../utils/" class="md-nav__link">
+      <a href="../api/blackbull/utils/" class="md-nav__link">
         
   
   
@@ -3871,7 +3642,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../about/conformance/" class="md-nav__link">
+      <a href="../about/conformance/" class="md-nav__link">
         
   
   
@@ -3899,7 +3670,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../about/internals/" class="md-nav__link">
+      <a href="../about/internals/" class="md-nav__link">
         
   
   
@@ -3927,7 +3698,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../about/grpc-assessment/" class="md-nav__link">
+      <a href="../about/grpc-assessment/" class="md-nav__link">
         
   
   
@@ -3982,56 +3753,44 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#blackbull.router" class="md-nav__link">
+  <a href="#why-a-joke-rfc-is-worth-implementing" class="md-nav__link">
     <span class="md-ellipsis">
       
-        router
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="router">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.router.ConfigurationError" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        ConfigurationError
+        Why a joke RFC is worth implementing
       
     </span>
   </a>
   
 </li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.router.ErrorRouter" class="md-nav__link">
+      
+        <li class="md-nav__item">
+  <a href="#what-blackbull-htcpcp-implements" class="md-nav__link">
     <span class="md-ellipsis">
       
-        ErrorRouter
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="ErrorRouter">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.router.ErrorRouter.__call__" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        __call__
+        What blackbull-htcpcp Implements
       
     </span>
   </a>
   
 </li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.router.ErrorRouter.__getitem__" class="md-nav__link">
+      
+        <li class="md-nav__item">
+  <a href="#five-lines-of-code" class="md-nav__link">
     <span class="md-ellipsis">
       
-        __getitem__
+        Five Lines of Code
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Five Lines of Code">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#deferred-wiring" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Deferred Wiring
       
     </span>
   </a>
@@ -4042,114 +3801,59 @@
     </nav>
   
 </li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.router.MethodNotApplicable" class="md-nav__link">
+      
+        <li class="md-nav__item">
+  <a href="#why-this-is-interesting-beyond-the-joke" class="md-nav__link">
     <span class="md-ellipsis">
       
-        MethodNotApplicable
+        Why This Is Interesting Beyond the Joke
       
     </span>
   </a>
   
 </li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.router.PathNotRegistered" class="md-nav__link">
+      
+        <li class="md-nav__item">
+  <a href="#security-the-threat-model-behind-a-joke-protocol" class="md-nav__link">
     <span class="md-ellipsis">
       
-        PathNotRegistered
+        Security: The Threat Model Behind a Joke Protocol
       
     </span>
   </a>
   
 </li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.router.Router" class="md-nav__link">
+      
+        <li class="md-nav__item">
+  <a href="#the-cultural-precedent-ipoac" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Router
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Router">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.router.Router.__contains__" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        __contains__
+        The Cultural Precedent: IPoAC
       
     </span>
   </a>
   
 </li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.router.Router.__getitem__" class="md-nav__link">
+      
+        <li class="md-nav__item">
+  <a href="#comparison-with-existing-implementations" class="md-nav__link">
     <span class="md-ellipsis">
       
-        __getitem__
+        Comparison With Existing Implementations
       
     </span>
   </a>
   
 </li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.router.Router.__setitem__" class="md-nav__link">
+      
+        <li class="md-nav__item">
+  <a href="#getting-started" class="md-nav__link">
     <span class="md-ellipsis">
       
-        __setitem__
+        Getting Started
       
     </span>
   </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.router.Router.route" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        route
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.router.Router.url_path_for" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        url_path_for
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.router.Router.validate" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        validate
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-        
-      </ul>
-    </nav>
   
 </li>
       
@@ -4173,479 +3877,264 @@
   
 
 
-<h1 id="blackbullrouter"><code>blackbull.router</code><a class="headerlink" href="#blackbullrouter" title="Permanent link">&para;</a></h1>
-
-
-<div class="doc doc-object doc-module">
-
-
-
-<h2 id="blackbull.router" class="doc doc-heading">
-            <code>blackbull.router</code>
-
-
-<a href="#blackbull.router" class="headerlink" title="Permanent link">&para;</a></h2>
-
-    <div class="doc doc-contents first">
-
-        <p>URL routing for BlackBull.</p>
-<p><code>Router</code> maps <code>(path, method, scheme)</code> triples to handler chains.  Paths
-support exact strings, regex patterns, and <code>{name}</code> / <code>{name:converter}</code>
-parameter syntax; <code>ErrorRouter</code> does the same for HTTPStatus codes and
-exception classes.  <code>_register_chain</code> composes per-route middlewares with
-<code>functools.partial</code> so each middleware receives <code>call_next</code> bound to the
-next link.</p>
-<p><code>RouteGroup</code> is defined in :mod:<code>blackbull.app</code> to avoid a circular
-import; this module re-exports it lazily through <code>__getattr__</code>.</p>
-
-
-
-
-
-
-
-
-
-
-<div class="doc doc-children">
-
-
-
-
-
-
-
-
-
-<div class="doc doc-object doc-class">
-
-
-
-<h3 id="blackbull.router.ConfigurationError" class="doc doc-heading">
-            <code>ConfigurationError</code>
-
-
-<a href="#blackbull.router.ConfigurationError" class="headerlink" title="Permanent link">&para;</a></h3>
-
-
-    <div class="doc doc-contents ">
-            <p class="doc doc-class-bases">
-              Bases: <code><span title="Exception">Exception</span></code></p>
-
-
-
-        <p>Raised by Router.validate() when route definitions are inconsistent.</p>
-
-
-
-
-
-
-
-
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-class">
-
-
-
-<h3 id="blackbull.router.ErrorRouter" class="doc doc-heading">
-            <code>ErrorRouter</code>
-
-
-<a href="#blackbull.router.ErrorRouter" class="headerlink" title="Permanent link">&para;</a></h3>
-
-
-    <div class="doc doc-contents ">
-
-
-
-        <p>Maps HTTP error statuses and exception classes to ASGI error-handler functions.</p>
-<p>Keys accepted by <strong>setitem</strong> / <strong>getitem</strong>:
-  - HTTPStatus value  (e.g. HTTPStatus.NOT_FOUND)
-  - Exception class   (e.g. ValueError)</p>
-
-
-<details class="lookup-rules" open>
-  <summary>Lookup rules</summary>
-  <ul>
-<li>HTTPStatus key: exact match only.</li>
-<li>Exception class: walks the MRO so a handler registered for a base class
-  (e.g. Exception) catches all unhandled subclasses.</li>
-<li>Returns None when no handler is found (caller decides the fallback).</li>
-</ul>
-</details>        <p>Usage::</p>
-<pre><code>errors = ErrorRouter()
-
-@errors[HTTPStatus.NOT_FOUND]
-async def handle_404(scope, receive, send):
-    ...
-
-@errors[ValueError]
-async def handle_value_error(scope, receive, send):
-    ...
-
-handler = errors[HTTPStatus.NOT_FOUND]   # → handle_404
-handler = errors[KeyError()]              # → handle_value_error via MRO (if registered)
-handler = errors[KeyError]               # same, accepting the class directly
-</code></pre>
-
-
-
-
-
-
-
-
-
-
-
-<div class="doc doc-children">
-
-
-
-
-
-
-
-
-
-
-<div class="doc doc-object doc-function">
-
-
-<h4 id="blackbull.router.ErrorRouter.__call__" class="doc doc-heading">
-            <code class="highlight language-python"><span class="fm">__call__</span><span class="p">(</span><span class="n">key</span><span class="p">)</span></code>
-
-<a href="#blackbull.router.ErrorRouter.__call__" class="headerlink" title="Permanent link">&para;</a></h4>
-
-
-    <div class="doc doc-contents ">
-
-        <p>Decorator form: @errors[HTTPStatus.NOT_FOUND]</p>
-
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-function">
-
-
-<h4 id="blackbull.router.ErrorRouter.__getitem__" class="doc doc-heading">
-            <code class="highlight language-python"><span class="fm">__getitem__</span><span class="p">(</span><span class="n">key</span><span class="p">)</span></code>
-
-<a href="#blackbull.router.ErrorRouter.__getitem__" class="headerlink" title="Permanent link">&para;</a></h4>
-
-
-    <div class="doc doc-contents ">
-
-        <p>Return the registered handler for <em>key</em>, or None if not found.</p>
-
-
-<details class="accepts" open>
-  <summary>Accepts</summary>
-  <ul>
-<li>HTTPStatus           → exact match</li>
-<li>exception class      → MRO walk</li>
-<li>exception instance   → MRO walk on type(key)</li>
-</ul>
-</details>
-
-    </div>
-
-</div>
-
-
-
-  </div>
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-class">
-
-
-
-<h3 id="blackbull.router.MethodNotApplicable" class="doc doc-heading">
-            <code>MethodNotApplicable</code>
-
-
-<a href="#blackbull.router.MethodNotApplicable" class="headerlink" title="Permanent link">&para;</a></h3>
-
-
-    <div class="doc doc-contents ">
-            <p class="doc doc-class-bases">
-              Bases: <code><span title="Exception">Exception</span></code></p>
-
-
-
-        <p>Raised when the path exists but the HTTP method is not allowed.</p>
-
-
-
-
-
-
-
-
-
-
-
-<div class="doc doc-children">
-
-
-
-
-
-
-
-
-
-
-
-
-  </div>
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-class">
-
-
-
-<h3 id="blackbull.router.PathNotRegistered" class="doc doc-heading">
-            <code>PathNotRegistered</code>
-
-
-<a href="#blackbull.router.PathNotRegistered" class="headerlink" title="Permanent link">&para;</a></h3>
-
-
-    <div class="doc doc-contents ">
-            <p class="doc doc-class-bases">
-              Bases: <code><span title="KeyError">KeyError</span></code></p>
-
-
-
-        <p>Raised when no registered path matches the requested path.</p>
-
-
-
-
-
-
-
-
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-class">
-
-
-
-<h3 id="blackbull.router.Router" class="doc doc-heading">
-            <code>Router</code>
-
-
-<a href="#blackbull.router.Router" class="headerlink" title="Permanent link">&para;</a></h3>
-
-
-    <div class="doc doc-contents ">
-            <p class="doc doc-class-bases">
-              Bases: <code><span title="collections.UserDict">UserDict</span></code>, <code><span title="blackbull.router.BaseRouter">BaseRouter</span></code></p>
-
-
-
-        <p>This class has 2 dictionaries: self.data and self.regex_.
-key: str or re.Pattern
-value: (function, methods, scheme)</p>
-
-
-
-
-
-
-
-
-
-
-
-<div class="doc doc-children">
-
-
-
-
-
-
-
-
-
-
-<div class="doc doc-object doc-function">
-
-
-<h4 id="blackbull.router.Router.__contains__" class="doc doc-heading">
-            <code class="highlight language-python"><span class="fm">__contains__</span><span class="p">(</span><span class="n">item</span><span class="p">)</span></code>
-
-<a href="#blackbull.router.Router.__contains__" class="headerlink" title="Permanent link">&para;</a></h4>
-
-
-    <div class="doc doc-contents ">
-
-        <p>Accept either a plain str (path only) or a (path, method, scheme) tuple.
-Search both self.data and self.regex_.</p>
-
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-function">
-
-
-<h4 id="blackbull.router.Router.__getitem__" class="doc doc-heading">
-            <code class="highlight language-python"><span class="fm">__getitem__</span><span class="p">(</span><span class="n">key</span><span class="p">)</span></code>
-
-<a href="#blackbull.router.Router.__getitem__" class="headerlink" title="Permanent link">&para;</a></h4>
-
-
-    <div class="doc doc-contents ">
-
-        <p>key: (path: str, method: str | HTTPMethod, scheme: Scheme)</p>
-<p>Uses the routing trie for O(path-depth) lookup of string-path routes,
-then falls back to a linear scan of raw re.Pattern routes.</p>
-<p>Results are cached in <code>_lookup_cache</code> (up to <code>_LOOKUP_CACHE_MAX</code>
-entries) so repeated requests to the same (path, method, scheme) skip
-the trie traversal entirely after the first hit.</p>
-
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-function">
-
-
-<h4 id="blackbull.router.Router.__setitem__" class="doc doc-heading">
-            <code class="highlight language-python"><span class="fm">__setitem__</span><span class="p">(</span><span class="n">key</span><span class="p">,</span> <span class="n">value</span><span class="p">)</span></code>
-
-<a href="#blackbull.router.Router.__setitem__" class="headerlink" title="Permanent link">&para;</a></h4>
-
-
-    <div class="doc doc-contents ">
-
-        <p>If key[0] is a str:
-    - Store it in self.data under the normalised (path, methods, scheme) key.
-    - Also compile a regex from {param} / {param:converter} placeholders and
-      store it in self.regex_ together with per-param converter functions.</p>
-<p>If key[0] is a re.Pattern:
-    - Store it in self.regex_ only.</p>
-<p>When scheme is omitted it is stored as _ANY_SCHEME,
-which matches any scheme at lookup time.</p>
-
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-function">
-
-
-<h4 id="blackbull.router.Router.route" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">route</span><span class="p">(</span><span class="n">methods</span><span class="o">=</span><span class="p">[</span><span class="n">HTTPMethod</span><span class="o">.</span><span class="n">GET</span><span class="p">],</span> <span class="n">path</span><span class="o">=</span><span class="s1">&#39;/&#39;</span><span class="p">,</span> <span class="n">scheme</span><span class="o">=</span><span class="n">Scheme</span><span class="o">.</span><span class="n">http</span><span class="p">,</span> <span class="n">functions</span><span class="o">=</span><span class="p">[],</span> <span class="n">middlewares</span><span class="o">=</span><span class="p">[],</span> <span class="n">name</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
-
-<a href="#blackbull.router.Router.route" class="headerlink" title="Permanent link">&para;</a></h4>
-
-
-    <div class="doc doc-contents ">
-
-        <p>Register a function or middleware chain in the routing table.</p>
-<p>Three calling conventions:
-1. Decorator with no extra middlewares (<code>functions</code> and <code>middlewares</code>
-   both empty) — returns a decorator via <code>route_fn</code>.
-2. <code>functions=[...]</code> — registers a pre-built chain immediately;
-   returns None (same as before).
-3. <code>middlewares=[...]</code> — returns a decorator; the decorated handler is
-   appended to the middleware list before the chain is registered.</p>
-<p><code>name</code> registers the route for use with <code>url_path_for()</code>.</p>
-
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-function">
-
-
-<h4 id="blackbull.router.Router.url_path_for" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">url_path_for</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="o">/</span><span class="p">,</span> <span class="o">**</span><span class="n">params</span><span class="p">)</span></code>
-
-<a href="#blackbull.router.Router.url_path_for" class="headerlink" title="Permanent link">&para;</a></h4>
-
-
-    <div class="doc doc-contents ">
-
-        <p>Return the path for the named route with <em>params</em> substituted.</p>
-<p>Raises KeyError if the name is unknown, ValueError if required params
-are missing.</p>
-
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-function">
-
-
-<h4 id="blackbull.router.Router.validate" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">validate</span><span class="p">()</span></code>
-
-<a href="#blackbull.router.Router.validate" class="headerlink" title="Permanent link">&para;</a></h4>
-
-
-    <div class="doc doc-contents ">
-
-        <p>Check all route definitions for consistency, then freeze the router.</p>
-<p>Checks performed:</p>
+<h1 id="brewing-coffee-over-http-a-python-implementation-of-rfc-2324-htcpcp">Brewing Coffee Over HTTP: A Python Implementation of RFC 2324 (HTCPCP)<a class="headerlink" href="#brewing-coffee-over-http-a-python-implementation-of-rfc-2324-htcpcp" title="Permanent link">&para;</a></h1>
+<p><strong>Five lines of Python. That's all it takes to turn your ASGI server into a fully RFC-compliant, HTTP-controlled coffee pot — custom methods, status 418, and all.</strong></p>
+<hr />
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">blackbull</span><span class="w"> </span><span class="kn">import</span> <span class="n">BlackBull</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">blackbull_htcpcp</span><span class="w"> </span><span class="kn">import</span> <span class="n">HtcpcpExtension</span>
+
+<span class="n">app</span> <span class="o">=</span> <span class="n">BlackBull</span><span class="p">()</span>
+<span class="n">HtcpcpExtension</span><span class="p">(</span><span class="n">app</span><span class="o">=</span><span class="n">app</span><span class="p">,</span> <span class="n">pot_type</span><span class="o">=</span><span class="s1">&#39;coffee&#39;</span><span class="p">)</span>
+</code></pre></div>
+<p>This isn't a mock — and no, there's no USB coffee pot. It's a pure software implementation of the protocol: <code>BREW /pot</code> starts brewing (a virtual brew cycle, not a physical one). <code>PROPFIND /pot</code> inspects the pot. <code>WHEN /pot</code> asks when it'll be ready. Ask a teapot to brew coffee? You get <code>418 I'm a teapot</code> — with <code>Content-Type: message/coffeepot</code>. Every method, status code, and header behaves exactly as the RFC specifies. The only thing missing is the actual caffeine. All from a single constructor call, all through the framework's public extension API. No core modifications.</p>
+<p><a href="https://pypi.org/project/blackbull-htcpcp/"><code>blackbull-htcpcp</code></a> is the first Python package on PyPI to implement the full Hyper Text Coffee Pot Control Protocol — both <a href="https://datatracker.ietf.org/doc/html/rfc2324">RFC 2324</a> (coffee pots, 1998) and <a href="https://datatracker.ietf.org/doc/html/rfc7168">RFC 7168</a> (teapots, 2014). Both were published on April 1st. Both were jokes. But implementing a joke protocol turns out to be a remarkably effective way to answer a real question: <strong>can you ship a non-trivial application protocol — custom HTTP methods, custom status codes, custom content types, custom error semantics — purely on top of an ASGI framework's public extension surface, without modifying the framework?</strong></p>
+<p>Spoiler: yes. Here's how, and why it matters.</p>
+<hr />
+<h3 id="why-a-joke-rfc-is-worth-implementing">Why a joke RFC is worth implementing<a class="headerlink" href="#why-a-joke-rfc-is-worth-implementing" title="Permanent link">&para;</a></h3>
+<p>In 2017, the IETF HTTP Working Group proposed removing status code 418 from Node.js, Go, and Python. A 15-year-old developer started the <a href="https://save418.com/">#save418</a> movement — and won. Python 3.9 shipped with <code>HTTPStatus.IM_A_TEAPOT</code>. Google serves <a href="https://www.google.com/teapot">google.com/teapot</a>. The Russian military briefly used 418 as DDoS protection. The teapot endures.</p>
+<p><strong>But nobody had published a Python package that actually implements the full protocol.</strong> Until now.</p>
+<hr />
+<h2 id="what-blackbull-htcpcp-implements">What <code>blackbull-htcpcp</code> Implements<a class="headerlink" href="#what-blackbull-htcpcp-implements" title="Permanent link">&para;</a></h2>
+<p><a href="https://pypi.org/project/blackbull-htcpcp/"><code>blackbull-htcpcp</code></a> is a Python package that implements the complete HTCPCP specification — both RFC 2324 (coffee pots) and RFC 7168 (teapots) — as an extension for the <a href="https://github.com/TOKUJI/BlackBull">BlackBull</a> ASGI framework.</p>
+<table>
+<thead>
+<tr>
+<th>Feature</th>
+<th>RFC</th>
+<th>Implementation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>BREW</code> method</td>
+<td>2324 §2.2</td>
+<td>Start brewing. POST fallback for environments where the stdlib rejects non-IANA HTTP methods.</td>
+</tr>
+<tr>
+<td><code>PROPFIND</code> method</td>
+<td>2324 §2.2</td>
+<td>Inspect the pot (type, state, capacity, supported additions).</td>
+</tr>
+<tr>
+<td><code>WHEN</code> method</td>
+<td>2324 §2.2</td>
+<td>Ask when the coffee will be ready.</td>
+</tr>
+<tr>
+<td><code>GET /pot</code></td>
+<td>—</td>
+<td>Browser-friendly pot state.</td>
+</tr>
+<tr>
+<td>Status <code>418 I'm a teapot</code></td>
+<td>2324 §2.2.2</td>
+<td>Returned when a teapot is asked to brew coffee, or vice versa.</td>
+</tr>
+<tr>
+<td><code>Accept-Additions</code> header</td>
+<td>2324 §2.2.3</td>
+<td>Coffee: cream, sugar, vanilla, whisky, aquavit… Tea: milk, lemon, honey, ginger, bergamot…</td>
+</tr>
+<tr>
+<td><code>message/coffeepot</code> content type</td>
+<td>2324 §2.2.1</td>
+<td>All <code>/pot</code> responses carry the official HTCPCP media type.</td>
+</tr>
+<tr>
+<td>Teapot discrimination</td>
+<td>7168 §2.1</td>
+<td>Teapots brew tea (200); coffee additions on a teapot → 418.</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="five-lines-of-code">Five Lines of Code<a class="headerlink" href="#five-lines-of-code" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">blackbull</span><span class="w"> </span><span class="kn">import</span> <span class="n">BlackBull</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">blackbull_htcpcp</span><span class="w"> </span><span class="kn">import</span> <span class="n">HtcpcpExtension</span>
+
+<span class="n">app</span> <span class="o">=</span> <span class="n">BlackBull</span><span class="p">()</span>
+<span class="n">HtcpcpExtension</span><span class="p">(</span><span class="n">app</span><span class="o">=</span><span class="n">app</span><span class="p">,</span> <span class="n">pot_type</span><span class="o">=</span><span class="s1">&#39;coffee&#39;</span><span class="p">)</span>
+</code></pre></div>
+<p>That's it. Four routes on <code>/pot</code>, an <code>app.on_error(418)</code> handler, and the extension registers itself in <code>app.extensions['htcpcp']</code> — all from a single constructor call.</p>
+<div class="highlight"><pre><span></span><code>$<span class="w"> </span>pip<span class="w"> </span>install<span class="w"> </span>blackbull-htcpcp
+$<span class="w"> </span>python<span class="w"> </span>-c<span class="w"> </span><span class="s2">&quot;</span>
+<span class="s2">from blackbull import BlackBull</span>
+<span class="s2">from blackbull_htcpcp import HtcpcpExtension</span>
+<span class="s2">BlackBull().run(HtcpcpExtension(app=BlackBull(), pot_type=&#39;coffee&#39;))</span>
+<span class="s2">&quot;</span>
+<span class="c1"># Then:</span>
+$<span class="w"> </span>curl<span class="w"> </span>-X<span class="w"> </span>BREW<span class="w"> </span>-H<span class="w"> </span><span class="s1">&#39;Accept-Additions: cream; sugar&#39;</span><span class="w"> </span>http://localhost:8000/pot
+<span class="o">{</span><span class="s2">&quot;pot-type&quot;</span>:<span class="w"> </span><span class="s2">&quot;coffee&quot;</span>,<span class="w"> </span><span class="s2">&quot;state&quot;</span>:<span class="w"> </span><span class="s2">&quot;ready&quot;</span>,<span class="w"> </span><span class="s2">&quot;message&quot;</span>:<span class="w"> </span><span class="s2">&quot;Brewing complete&quot;</span>,<span class="w"> </span><span class="s2">&quot;additions&quot;</span>:<span class="w"> </span><span class="o">[</span><span class="s2">&quot;cream&quot;</span>,<span class="w"> </span><span class="s2">&quot;sugar&quot;</span><span class="o">]}</span>
+
+$<span class="w"> </span>curl<span class="w"> </span>-X<span class="w"> </span>BREW<span class="w"> </span>http://localhost:8000/pot<span class="w">   </span><span class="c1"># teapot mode</span>
+<span class="o">{</span><span class="s2">&quot;error&quot;</span>:<span class="w"> </span><span class="s2">&quot;I&#39;m a teapot&quot;</span>,<span class="w"> </span><span class="s2">&quot;pot-type&quot;</span>:<span class="w"> </span><span class="s2">&quot;teapot&quot;</span><span class="o">}</span>
+</code></pre></div>
+<h3 id="deferred-wiring">Deferred Wiring<a class="headerlink" href="#deferred-wiring" title="Permanent link">&para;</a></h3>
+<p>Prefer explicit initialization? The extension supports deferred wiring:</p>
+<div class="highlight"><pre><span></span><code><span class="n">ext</span> <span class="o">=</span> <span class="n">HtcpcpExtension</span><span class="p">(</span><span class="n">pot_type</span><span class="o">=</span><span class="s1">&#39;teapot&#39;</span><span class="p">)</span>
+<span class="c1"># ... configure app ...</span>
+<span class="n">ext</span><span class="o">.</span><span class="n">init_app</span><span class="p">(</span><span class="n">app</span><span class="p">)</span>
+</code></pre></div>
+<p>Both eager and deferred styles follow BlackBull's documented <a href="https://github.com/TOKUJI/BlackBull/blob/master/docs/guide/extensions.md"><code>init_app(app)</code> convention</a> — the same pattern used by <code>blackbull-session</code>, the framework's session-management extension.</p>
+<hr />
+<h2 id="why-this-is-interesting-beyond-the-joke">Why This Is Interesting Beyond the Joke<a class="headerlink" href="#why-this-is-interesting-beyond-the-joke" title="Permanent link">&para;</a></h2>
+<p>HTCPCP is funny. But <code>blackbull-htcpcp</code> exists for a serious reason: <strong>it validates that a non-trivial application protocol — custom HTTP methods, custom status codes, custom content types, custom error semantics — can be layered onto an ASGI framework purely through its public extension surface, without modifying the framework itself.</strong></p>
+<p>The extension registers:</p>
 <ul>
-<li>Every converter spec names a known converter.</li>
-<li>Every path param appears in the handler signature (simplified handlers).</li>
-<li>Converter output type matches the handler's annotation.</li>
+<li><strong>Routes with non-standard HTTP methods</strong> (<code>BREW</code>, <code>PROPFIND</code>, <code>WHEN</code>). Because Python's <code>http.HTTPMethod</code> enum rejects non-IANA verbs, the extension keeps a <code>POST</code> fallback for clients that can't send custom methods — and registers the real verbs directly now that BlackBull 0.42.1 accepts any RFC 9110 §5.6.2 token as an HTTP method.</li>
+<li><strong>A custom error handler</strong> via <code>app.on_error(418)</code> that returns <code>message/coffeepot</code> JSON — any code path in the application that emits 418 gets the same teapot response body.</li>
+<li><strong>Custom header parsing</strong> for <code>Accept-Additions</code> with full security hardening.</li>
+<li><strong>Self-registration</strong> into <code>app.extensions['htcpcp']</code> so other extensions can discover it.</li>
 </ul>
-<p>Raises :class:<code>ConfigurationError</code> listing all violations found.
-Sets <code>self._frozen = True</code> on success so no further routes can
-be added.  Called once at app boot from :meth:<code>BlackBull.run</code> /
-:meth:<code>BlackBull.serve</code> — handler bugs that violate the contract
-surface before the first request is served, not after.</p>
+<p>No changes to BlackBull's core. No plugin registry. No dependency injection framework. Just <code>app.route</code>, <code>app.on_error</code>, and <code>app.extensions</code> — all public, stable APIs.</p>
+<p>This is the second external <code>blackbull-*</code> package (after <code>blackbull-session</code>), and it compounds the story: <strong>BlackBull's extension surface can carry real protocols.</strong></p>
+<hr />
+<h2 id="security-the-threat-model-behind-a-joke-protocol">Security: The Threat Model Behind a Joke Protocol<a class="headerlink" href="#security-the-threat-model-behind-a-joke-protocol" title="Permanent link">&para;</a></h2>
+<p>Because HTCPCP extends HTTP with custom headers, it inherits all of HTTP's attack surface. The <code>Accept-Additions</code> parser was designed with a threat model — documented in the test suite as test cases S001 through S015:</p>
+<table>
+<thead>
+<tr>
+<th>Category</th>
+<th>Threat</th>
+<th>Mitigation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Header injection</strong></td>
+<td>CRLF / bare LF in addition tokens</td>
+<td>Rejected at parse time (S001–S002)</td>
+</tr>
+<tr>
+<td><strong>Header injection</strong></td>
+<td>NULL bytes in addition tokens</td>
+<td>Rejected at parse time (S003)</td>
+</tr>
+<tr>
+<td><strong>DoS — oversized tokens</strong></td>
+<td>Addition tokens &gt; 256 characters</td>
+<td>Rejected (S004)</td>
+</tr>
+<tr>
+<td><strong>DoS — too many additions</strong></td>
+<td>More than 64 addition tokens</td>
+<td>Rejected (S005)</td>
+</tr>
+<tr>
+<td><strong>DoS — concurrent BREW</strong></td>
+<td>Brewing while already brewing</td>
+<td>409 Conflict (S006)</td>
+</tr>
+<tr>
+<td><strong>DoS — oversized body</strong></td>
+<td>BREW body &gt; 1 MiB</td>
+<td>413 Request Entity Too Large (S007)</td>
+</tr>
+<tr>
+<td><strong>Control characters</strong></td>
+<td>Non-printable chars (except HTAB)</td>
+<td>Rejected (S008)</td>
+</tr>
+<tr>
+<td><strong>418 abuse — cache poisoning</strong></td>
+<td>418 responses carrying cache headers</td>
+<td>No permissive cache headers on 418 (S010)</td>
+</tr>
+</tbody>
+</table>
+<p>Every rejection returns <code>message/coffeepot</code> content type — consistent error formatting even on security responses.</p>
+<p>This is the point where the joke RFC meets real engineering. The protocol is absurd; the implementation is not.</p>
+<hr />
+<h2 id="the-cultural-precedent-ipoac">The Cultural Precedent: IPoAC<a class="headerlink" href="#the-cultural-precedent-ipoac" title="Permanent link">&para;</a></h2>
+<p>In 1990, <a href="https://datatracker.ietf.org/doc/html/rfc1149">RFC 1149</a> specified IP datagram transmission via avian carrier (homing pigeons). In 2001, the Bergen Linux User Group <a href="https://en.wikipedia.org/wiki/IP_over_Avian_Carriers#Real-world_implementation">actually implemented it</a>, sending 9 packets over 5 km with a 55% packet loss rate — mostly due to avian interference.</p>
+<p>HTCPCP follows the same arc: a joke RFC, a real implementation, a crowd that <em>gets it</em>. The cultural through-line from IPoAC (2001) through #save418 (2017) to <code>blackbull-htcpcp</code> (2026) is that <strong>implementing joke protocols is a form of protocol literacy</strong>. If you can implement HTCPCP correctly, you understand HTTP's extension points well enough to implement a real one.</p>
+<hr />
+<h2 id="comparison-with-existing-implementations">Comparison With Existing Implementations<a class="headerlink" href="#comparison-with-existing-implementations" title="Permanent link">&para;</a></h2>
+<p>There are about 105 HTCPCP repositories on GitHub across all languages. The landscape is sparse:</p>
+<table>
+<thead>
+<tr>
+<th>Implementation</th>
+<th>Language</th>
+<th>Stars</th>
+<th>Last Updated</th>
+<th>RFC 7168</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a href="https://github.com/HyperTextCoffeePot/HyperTextCoffeePot">HyperTextCoffeePot</a></td>
+<td>Python (Flask)</td>
+<td>78</td>
+<td>2015 (archived)</td>
+<td>❌</td>
+</tr>
+<tr>
+<td><a href="https://github.com/madmaze/HTCPCP">madmaze/HTCPCP</a></td>
+<td>C</td>
+<td>49</td>
+<td>2011</td>
+<td>❌</td>
+</tr>
+<tr>
+<td><a href="https://github.com/stephen/node-htcpcp">node-htcpcp</a></td>
+<td>Node.js</td>
+<td>36</td>
+<td>2013</td>
+<td>❌</td>
+</tr>
+<tr>
+<td><a href="https://github.com/dkundel/htcpcp-delonghi">htcpcp-delonghi</a></td>
+<td>JS (Tessel 2)</td>
+<td>29</td>
+<td>2023 (archived)</td>
+<td>❌</td>
+</tr>
+<tr>
+<td><a href="https://godoc.org/github.com/davsk/teapot">Go teapot</a></td>
+<td>Go</td>
+<td>—</td>
+<td>—</td>
+<td>✅</td>
+</tr>
+</tbody>
+</table>
+<p><code>blackbull-htcpcp</code> is:</p>
+<ul>
+<li><strong>The first Python package on PyPI</strong> implementing HTCPCP (zero prior PyPI packages).</li>
+<li><strong>One of two known implementations</strong> covering both RFC 2324 + RFC 7168 (alongside Go's <code>teapot</code>).</li>
+<li><strong>The only ASGI-native implementation</strong> — all prior implementations are standalone servers or framework-specific hacks.</li>
+<li><strong>Actively maintained</strong> — the top 5 GitHub implementations by stars are all dead or archived.</li>
+</ul>
+<hr />
+<h2 id="getting-started">Getting Started<a class="headerlink" href="#getting-started" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code>pip<span class="w"> </span>install<span class="w"> </span>blackbull-htcpcp
+</code></pre></div>
+<p>Minimal application:</p>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">blackbull</span><span class="w"> </span><span class="kn">import</span> <span class="n">BlackBull</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">blackbull_htcpcp</span><span class="w"> </span><span class="kn">import</span> <span class="n">HtcpcpExtension</span>
 
+<span class="n">app</span> <span class="o">=</span> <span class="n">BlackBull</span><span class="p">()</span>
+<span class="n">HtcpcpExtension</span><span class="p">(</span><span class="n">app</span><span class="o">=</span><span class="n">app</span><span class="p">,</span> <span class="n">pot_type</span><span class="o">=</span><span class="s1">&#39;coffee&#39;</span><span class="p">,</span> <span class="n">capacity_ml</span><span class="o">=</span><span class="mi">1500</span><span class="p">)</span>
+<span class="n">app</span><span class="o">.</span><span class="n">run</span><span class="p">()</span>
+</code></pre></div>
+<p>Then:</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># Brew coffee with additions</span>
+curl<span class="w"> </span>-X<span class="w"> </span>BREW<span class="w"> </span>-H<span class="w"> </span><span class="s1">&#39;Accept-Additions: cream; sugar; vanilla&#39;</span><span class="w"> </span>http://localhost:8000/pot
 
-    </div>
+<span class="c1"># Inspect the pot</span>
+curl<span class="w"> </span>http://localhost:8000/pot
 
-</div>
+<span class="c1"># Ask when it&#39;s ready</span>
+curl<span class="w"> </span>http://localhost:8000/pot/when
 
-
-
-  </div>
-
-    </div>
-
-</div>
-
-
-
-
-  </div>
-
-    </div>
-
-</div>
+<span class="c1"># Teapot mode — ask a teapot to brew coffee</span>
+curl<span class="w"> </span>-X<span class="w"> </span>BREW<span class="w"> </span>-H<span class="w"> </span><span class="s1">&#39;Accept-Additions: cream&#39;</span><span class="w"> </span>http://localhost:8000/pot
+<span class="c1"># → 418 I&#39;m a teapot</span>
+</code></pre></div>
+<hr />
+<hr />
+<p><em><code>blackbull-htcpcp</code> is on <a href="https://pypi.org/project/blackbull-htcpcp/">PyPI</a> and <a href="https://github.com/TOKUJI/blackbull-htcpcp">GitHub</a>, licensed under Apache 2.0. The <a href="https://github.com/TOKUJI/BlackBull">BlackBull framework</a> is a pure-Python ASGI server with HTTP/1.1, HTTP/2, and WebSocket at the protocol level — a personal learning project where correctness over the wire matters more than API stability.</em></p>
 
 
 
@@ -4695,10 +4184,10 @@ surface before the first request is served, not after.</p>
     
       
       
-      <script id="__config" type="application/json">{"annotate": null, "base": "../../..", "features": [], "search": "../../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": [], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
     
     
-      <script src="../../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
       
     
   </body>
