@@ -1089,18 +1089,16 @@ class TestRouterEdgeCases:
         assert isinstance(r, str)
         assert 'Router' in r
 
-    def test_route_fn_invalid_method_type_raises(self):
-        """``methods=['GET']`` is wrong — items must be HTTPMethod values.
+    def test_route_fn_invalid_method_token_raises(self):
+        """Method strings must be valid RFC 9110 §5.6.2 tokens.
 
-        Under the test-time beartype hook the wrong element type is
-        caught at function entry (raises a TypeError subclass) before
-        ``route_fn``'s own ValueError check fires.  Both outcomes mean
-        the misuse was rejected, which is what the test exists to
-        guarantee.
+        Valid str methods like 'BREW' are accepted (Sprint 47).
+        Strings containing spaces, control characters, or separator
+        characters are not valid tokens and must raise ValueError.
         """
         router = Router()
-        with pytest.raises(_TYPE_ERRORS + (ValueError,)):
-            router.route_fn(methods=['GET'], path='/x')
+        with pytest.raises(ValueError):
+            router.route_fn(methods=['BREW METHOD'], path='/x')  # space is not tchar
 
     def test_register_chain_non_middleware_in_middle_raises(self):
         router = Router()
@@ -1356,3 +1354,59 @@ class TestFrozenRouter:
         with pytest.raises(RuntimeError, match="frozen"):
             @router.route(path='/y', methods=HTTPMethod.GET)
             async def fn(scope, receive, send): pass
+
+
+class TestCustomMethods:
+    """RFC 9110 §9.1 — any token is a valid HTTP method; non-IANA methods
+    (BREW, PROPFIND, WHEN, …) must be registerable and dispatchable."""
+
+    def test_register_single_str_method(self, router):
+        @router.route(path='/pot', methods='BREW')
+        def fn(scope, receive, send): pass
+
+        result = router[('/pot', 'BREW', Scheme.http)]
+        assert result is fn
+
+    def test_register_list_of_str_methods(self, router):
+        @router.route(path='/pot', methods=['BREW', 'PROPFIND'])
+        def fn(scope, receive, send): pass
+
+        assert router[('/pot', 'BREW', Scheme.http)] is fn
+        assert router[('/pot', 'PROPFIND', Scheme.http)] is fn
+
+    def test_custom_method_dispatches_correctly(self, router):
+        @router.route(path='/pot', methods='BREW')
+        def brew_fn(scope, receive, send): pass
+
+        result = router[('/pot', 'BREW', Scheme.http)]
+        assert result is brew_fn
+
+    def test_wrong_custom_method_raises_method_not_applicable(self, router):
+        @router.route(path='/pot', methods='BREW')
+        def fn(scope, receive, send): pass
+
+        with pytest.raises(MethodNotApplicable) as exc_info:
+            router[('/pot', 'FROBNICATE', Scheme.http)]
+        assert 'BREW' in exc_info.value.allowed_methods
+
+    def test_case_sensitivity_custom_method(self, router):
+        @router.route(path='/pot', methods='BREW')
+        def fn(scope, receive, send): pass
+
+        with pytest.raises((MethodNotApplicable, PathNotRegistered)):
+            router[('/pot', 'brew', Scheme.http)]
+
+    def test_iana_and_custom_method_coexist(self, router):
+        @router.route(path='/pot', methods=[HTTPMethod.GET, 'BREW'])
+        def fn(scope, receive, send): pass
+
+        assert router[('/pot', HTTPMethod.GET, Scheme.http)] is fn
+        assert router[('/pot', 'BREW', Scheme.http)] is fn
+
+    def test_custom_method_allow_header_populated(self, router):
+        @router.route(path='/pot', methods='BREW')
+        def fn(scope, receive, send): pass
+
+        with pytest.raises(MethodNotApplicable) as exc_info:
+            router[('/pot', 'WHEN', Scheme.http)]
+        assert 'BREW' in exc_info.value.allowed_methods

@@ -24,6 +24,31 @@ so the editable install's metadata catches up.
 
 ## [Unreleased]
 
+## [0.42.1] — 2026-06-18
+
+**Sprint 47: Custom HTTP Method Support (Proposal 009 Phase 1).**
+
+Routes can now be registered and dispatched using non-IANA HTTP method
+strings such as `BREW`, `PROPFIND`, and `WHEN` from RFC 2324 / RFC 4918.
+Previously, any method not in `http.HTTPMethod` was rejected at dispatch
+time with an immediate 405; the router never had a chance to match.
+
+Key changes:
+
+- `app.py` dispatch: `HTTPMethod(scope['method'])` `ValueError` now keeps
+  the raw string and continues to the router instead of short-circuiting
+  to 405.  IANA methods still resolve to the `HTTPMethod` enum value.
+- `router.py`: `isinstance(x, HTTPMethod)` guard removed from `route_fn`;
+  `methods` annotation broadened to `str | HTTPMethod | Iterable[str | HTTPMethod]`
+  on all public registration surfaces (`RouteGroup.route`, `BlackBull.route`,
+  `Router.route_fn`, `Router.route`, `BaseRouter.route`).
+- RFC 9110 §5.6.2 token validation added at registration time: strings
+  that are not valid HTTP tokens (e.g. `'BREW METHOD'` with a space) raise
+  `ValueError` early.
+- `blackbull-htcpcp` extension unblocked: `BREW`, `PROPFIND`, and `WHEN`
+  routes now register and dispatch without the previous `try/except HTTPMethod`
+  workaround; the three `xfail(strict=True)` tests are promoted to passing.
+
 ## [0.42.0] — 2026-06-16
 
 **Sprint 46 close: deliberate-misbehaviour toolkit.**

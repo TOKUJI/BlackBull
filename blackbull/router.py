@@ -501,6 +501,18 @@ def _adapt_handler(fn, path: str):
     return _wrapper
 
 
+# RFC 9110 §5.6.2: token = 1*tchar (visible US-ASCII, no separators)
+_HTTP_TOKEN_RE = re.compile(r"^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$")
+
+
+def _validate_method_token(method: str) -> None:
+    if not _HTTP_TOKEN_RE.match(method):
+        raise ValueError(
+            f"Invalid HTTP method token {method!r}: RFC 9110 §5.6.2 requires "
+            "a non-empty sequence of visible ASCII tchar characters."
+        )
+
+
 def _to_tuple(value: Any) -> tuple:
     """
     Normalise a value into a tuple.
@@ -522,7 +534,7 @@ class BaseRouter:
     def __contains__(self, item):
         raise NotImplementedError()
 
-    def route(self, methods: HTTPMethod | Iterable[HTTPMethod] = [HTTPMethod.GET],
+    def route(self, methods: str | HTTPMethod | Iterable[str | HTTPMethod] = [HTTPMethod.GET],
               path: str = '/', scheme: Scheme | Iterable[Scheme] = Scheme.http,
               functions: list = []):
         raise NotImplementedError()
@@ -556,8 +568,8 @@ class Router(UserDict, BaseRouter):
 
     def __setitem__(
         self,
-        key: (Tuple[str | re.Pattern, HTTPMethod | Iterable[HTTPMethod]]
-              | Tuple[str | re.Pattern, HTTPMethod | Iterable[HTTPMethod],
+        key: (Tuple[str | re.Pattern, str | HTTPMethod | Iterable[str | HTTPMethod]]
+              | Tuple[str | re.Pattern, str | HTTPMethod | Iterable[str | HTTPMethod],
                       Scheme | Iterable[Scheme] | None]),
         value: Any,
     ):
@@ -593,6 +605,9 @@ class Router(UserDict, BaseRouter):
 
         # Normalise methods / scheme to tuples
         methods = _to_tuple(methods)
+        for m in methods:
+            if isinstance(m, str):
+                _validate_method_token(m)
         scheme  = _ANY_SCHEME if scheme is None or isinstance(scheme, _AnyScheme) \
                   else _to_tuple(scheme)
 
@@ -638,10 +653,10 @@ class Router(UserDict, BaseRouter):
 
     def __getitem__(
         self,
-        key: Tuple[str, HTTPMethod, Scheme],
+        key: Tuple[str, str | HTTPMethod, Scheme],
     ):
         """
-        key: (path: str, method: HTTPMethod, scheme: Scheme)
+        key: (path: str, method: str | HTTPMethod, scheme: Scheme)
 
         Uses the routing trie for O(path-depth) lookup of string-path routes,
         then falls back to a linear scan of raw re.Pattern routes.
@@ -664,7 +679,7 @@ class Router(UserDict, BaseRouter):
 
     def _resolve(
         self,
-        key: Tuple[str, HTTPMethod, Scheme],
+        key: Tuple[str, str | HTTPMethod, Scheme],
     ):
         """Core route lookup — trie first, regex fallback.  Raises on miss."""
         key_path, key_method, key_scheme = key
@@ -764,16 +779,16 @@ class Router(UserDict, BaseRouter):
         return key_scheme in registered_scheme
 
     def route_fn(self,
-                 methods: HTTPMethod | Iterable[HTTPMethod] = [HTTPMethod.GET],
+                 methods: str | HTTPMethod | Iterable[str | HTTPMethod] = [HTTPMethod.GET],
                  path: str = '/',
                  scheme: Scheme | Iterable[Scheme] = Scheme.http,
                  name: str | None = None):
 
         logger.debug('Router.route_fn() is called.')
         methods = _to_tuple(methods)
-
-        if [x for x in methods if not isinstance(x, HTTPMethod)]:
-            raise ValueError('methods must be HTTPMethod.')
+        for m in methods:
+            if isinstance(m, str):
+                _validate_method_token(m)
 
         def register(fn):
             logger.debug(f'Router.route_fn.register() is called. {fn}')
@@ -911,7 +926,7 @@ class Router(UserDict, BaseRouter):
 
         self._frozen = True
 
-    def route(self, methods: HTTPMethod | Iterable[HTTPMethod] = [HTTPMethod.GET],
+    def route(self, methods: str | HTTPMethod | Iterable[str | HTTPMethod] = [HTTPMethod.GET],
               path: str = '/', scheme: Scheme | Iterable[Scheme] = Scheme.http,
               functions: list = [], middlewares: list = [],
               name: str | None = None):
