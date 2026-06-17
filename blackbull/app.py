@@ -190,7 +190,7 @@ class RouteGroup:
         self._app = app
         self._group_mw = list(middlewares)
 
-    def route(self, methods: HTTPMethod | Iterable[HTTPMethod] = [HTTPMethod.GET],
+    def route(self, methods: str | HTTPMethod | Iterable[str | HTTPMethod] = [HTTPMethod.GET],
               path: str = '/', scheme: Scheme | Iterable[Scheme] = Scheme.http,
               middlewares: list = [], name: str | None = None):
         return self._app.route(
@@ -427,18 +427,13 @@ class BlackBull:
             return
 
         try:
-            # RFC 9110 §9.1 — methods are case-sensitive.  Looking up
-            # ``scope['method'].upper()`` would silently fold a lowercase
-            # ``get`` to ``GET`` and dispatch to the wrong handler.  Use
-            # the value verbatim; HTTPMethod() rejects non-uppercase forms.
+            # RFC 9110 §9.1 — methods are case-sensitive tokens.  Prefer the
+            # HTTPMethod enum for IANA-registered methods; for non-IANA methods
+            # (BREW, PROPFIND, WHEN, …) keep the raw str so the router can
+            # still match a registered route and return the correct Allow header.
             method = HTTPMethod(scope['method'])
         except ValueError:
-            self._logger.debug("Unknown HTTP method: %r", scope['method'])
-            scope.setdefault('state', {})['error_status'] = HTTPStatus.METHOD_NOT_ALLOWED
-            handler = self._error_router[HTTPStatus.METHOD_NOT_ALLOWED]
-            if handler is not None:
-                await handler(scope, receive, send)
-            return
+            method = scope['method']
 
         path = scope['path']
         self._logger.debug((path, scheme))
@@ -526,7 +521,7 @@ class BlackBull:
 
         await self._chain(scope, receive, _wrap_send(send))
 
-    def route(self, methods: HTTPMethod | Iterable[HTTPMethod] = [HTTPMethod.GET],
+    def route(self, methods: str | HTTPMethod | Iterable[str | HTTPMethod] = [HTTPMethod.GET],
               path: str = '/', scheme: Scheme | Iterable[Scheme] = Scheme.http,
               functions: list = [], middlewares: list = [],
               name: str | None = None):
