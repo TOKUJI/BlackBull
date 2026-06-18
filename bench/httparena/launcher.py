@@ -40,7 +40,6 @@ before the container is removed.  ``httparena_compare.sh`` then greps
 When ``BB_ACCESS_LOG`` is unset or falsy the FileHandler is not
 added and per-request logging remains silenced (default: off).
 """
-import logging
 import multiprocessing
 import os
 import signal
