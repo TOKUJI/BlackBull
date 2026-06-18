@@ -24,6 +24,33 @@ so the editable install's metadata catches up.
 
 ## [Unreleased]
 
+## [0.42.2] — 2026-06-19
+
+**RFC 9113 compliance fix: stream_id==0 validation for RST_STREAM and PUSH_PROMISE.**
+
+Two frame types were missing the stream_id==0 connection-error check required
+by RFC 9113: RST_STREAM (§6.4) and PUSH_PROMISE (§6.6).  A misbehaving client
+sending either frame type targeting the connection stream (stream_id==0) would
+not have been caught and rejected.  Both checks are now enforced alongside the
+existing HEADERS, CONTINUATION, DATA, and PRIORITY checks.
+
+The implementation consolidates all six stream-only checks from four
+individual `if` tests into a single `frozenset` lookup (`_STREAM_ONLY_FRAME_TYPES`),
+and similarly replaces a per-frame tuple allocation in `_frame_loop` with a
+class-level `frozenset` (`_FRAME_SIZE_CONNECTION_ERROR_TYPES`).
+
+### Fixed
+
+- `HTTP2Actor`: RST_STREAM and PUSH_PROMISE frames with `stream_id == 0` now
+  raise a connection error per RFC 9113 §6.4 and §6.6 respectively.
+
+### Internal
+
+- `HTTP2Actor._STREAM_ONLY_FRAME_TYPES`: class-level `frozenset` replaces
+  four individual checks; coverage expanded to six frame types.
+- `HTTP2Actor._FRAME_SIZE_CONNECTION_ERROR_TYPES`: class-level `frozenset`
+  eliminates per-frame tuple allocation in `_frame_loop`.
+
 ## [0.42.1] — 2026-06-18
 
 **Sprint 47: Custom HTTP Method Support (Proposal 009 Phase 1).**
