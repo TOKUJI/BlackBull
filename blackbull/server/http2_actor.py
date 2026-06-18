@@ -219,6 +219,40 @@ class HTTP2Actor(Actor):
     _RST_RATE_LIMIT: int = 20
     _RST_RATE_WINDOW: float = 1.0  # seconds
 
+    # Frame types whose payload size violation is a connection error
+    # rather than a stream error (RFC 9113 §4.2).  Pre-computed as a
+    # class-level frozenset so _frame_loop avoids allocating a tuple on
+    # every iteration.
+    #
+    # Extension compatibility: if a future RFC or extension introduces a
+    # new frame type that can alter connection state (carries a header
+    # block or targets stream 0), add it here.  The frozenset pattern is
+    # the same shape as the previous inline tuple; the dispatch logic is
+    # unchanged.
+    _FRAME_SIZE_CONNECTION_ERROR_TYPES: frozenset[FrameTypes] = frozenset({
+        FrameTypes.HEADERS,
+        FrameTypes.CONTINUATION,
+        FrameTypes.PUSH_PROMISE,
+        FrameTypes.SETTINGS,
+    })
+
+    # Frame types that MUST NOT appear on stream 0.  Each receives a
+    # connection error of type PROTOCOL_ERROR per the RFC sections below.
+    # SETTINGS/PING/GOAWAY MUST be on stream 0 (inverse requirement);
+    # WINDOW_UPDATE may be on stream 0 or non-zero (no restriction).
+    #
+    # Consolidates six independent checks in _frame_loop into one lookup.
+    # Previously RST_STREAM (§6.4) and PUSH_PROMISE (§6.6) were missing
+    # from the individual checks — now included for full RFC 9113 coverage.
+    _STREAM_ONLY_FRAME_TYPES: frozenset[FrameTypes] = frozenset({
+        FrameTypes.DATA,          # RFC 9113 §6.1
+        FrameTypes.HEADERS,       # RFC 9113 §6.2
+        FrameTypes.PRIORITY,      # RFC 9113 §6.3
+        FrameTypes.RST_STREAM,    # RFC 9113 §6.4
+        FrameTypes.PUSH_PROMISE,  # RFC 9113 §6.6
+        FrameTypes.CONTINUATION,  # RFC 9113 §6.10
+    })
+
     def __init__(
         self,
         reader: 'AbstractReader | None',
@@ -585,11 +619,8 @@ class HTTP2Actor(Actor):
             # is SETTINGS, or targets stream 0), it is a connection error;
             # otherwise it is a stream error.
             if frame.length > DEFAULT_MAX_FRAME_SIZE:
-                _state_altering = frame_type in (
-                    FrameTypes.HEADERS, FrameTypes.CONTINUATION,
-                    FrameTypes.PUSH_PROMISE, FrameTypes.SETTINGS,
-                )
-                if _state_altering or frame.stream_id == 0:
+                if (frame_type in self._FRAME_SIZE_CONNECTION_ERROR_TYPES
+                        or frame.stream_id == 0):
                     await self._connection_error(
                         ErrorCodes.FRAME_SIZE_ERROR,
                         f'{frame_type.name} length {frame.length} > '
@@ -599,20 +630,20 @@ class HTTP2Actor(Actor):
                         frame.stream_id, ErrorCodes.FRAME_SIZE_ERROR))
                 continue
 
-            # RFC 9113 §6.2 — HEADERS MUST be associated with a non-zero
-            # stream identifier (PROTOCOL_ERROR at the connection level).
-            if frame_type == FrameTypes.HEADERS and frame.stream_id == 0:
+            # RFC 9113 §6.1-6.4, §6.6, §6.10 — DATA, HEADERS, PRIORITY,
+            # RST_STREAM, PUSH_PROMISE, and CONTINUATION frames MUST be
+            # associated with a non-zero stream identifier.  Violation is a
+            # connection error of type PROTOCOL_ERROR in every case.
+            # SETTINGS/PING/GOAWAY MUST be on stream 0 (inverse requirement);
+            # WINDOW_UPDATE may be on stream 0 or non-zero.
+            #
+            # Consolidated from six independent checks into one frozenset
+            # lookup.  RST_STREAM (§6.4) and PUSH_PROMISE (§6.6) were
+            # previously missing from the individual checks; now covered.
+            if frame.stream_id == 0 and frame_type in self._STREAM_ONLY_FRAME_TYPES:
                 await self._connection_error(
                     ErrorCodes.PROTOCOL_ERROR,
-                    'HEADERS with stream_id 0')
-                continue
-
-            # RFC 9113 §6.10 — CONTINUATION MUST be associated with a non-zero
-            # stream identifier (PROTOCOL_ERROR at the connection level).
-            if frame_type == FrameTypes.CONTINUATION and frame.stream_id == 0:
-                await self._connection_error(
-                    ErrorCodes.PROTOCOL_ERROR,
-                    'CONTINUATION with stream_id 0')
+                    f'{frame_type.name} with stream_id 0')
                 continue
 
             # RFC 9113 §6.10 — CONTINUATION outside an open header block is a
@@ -624,22 +655,6 @@ class HTTP2Actor(Actor):
                 await self._connection_error(
                     ErrorCodes.PROTOCOL_ERROR,
                     'unexpected CONTINUATION without preceding HEADERS')
-                continue
-
-            # RFC 9113 §6.1 — DATA MUST be associated with a non-zero stream
-            # identifier (PROTOCOL_ERROR at the connection level).
-            if frame_type == FrameTypes.DATA and frame.stream_id == 0:
-                await self._connection_error(
-                    ErrorCodes.PROTOCOL_ERROR,
-                    'DATA with stream_id 0')
-                continue
-
-            # RFC 9113 §6.3 — PRIORITY MUST be associated with a non-zero
-            # stream identifier (PROTOCOL_ERROR at the connection level).
-            if frame_type == FrameTypes.PRIORITY and frame.stream_id == 0:
-                await self._connection_error(
-                    ErrorCodes.PROTOCOL_ERROR,
-                    'PRIORITY with stream_id 0')
                 continue
 
             # RFC 9113 §6.3 — PRIORITY frame payload MUST be 5 octets;
