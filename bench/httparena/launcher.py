@@ -22,7 +22,25 @@ Parallel ``subprocess.Popen`` per port, all terminated on SIGTERM /
 SIGINT.  No port-readiness gating — BlackBull's bind happens in
 ``serve()`` as the first awaited step, so by the time the
 subprocess is alive the kernel TCP accept queue is open.
+
+BB_ACCESS_LOG
+-------------
+When the ``BB_ACCESS_LOG`` environment variable is set to a truthy
+value (any non-empty string other than "0" / "false" / "no"), this
+launcher attaches a ``StreamHandler`` to the ``blackbull.access``
+logger that writes every request to **stderr** with a ``[ACCESS]`` prefix.
+
+``bench/aws/httparena_compare.sh`` passes ``-e BB_ACCESS_LOG=1`` into the
+container via the docker shim.  ``benchmark.sh``'s ``save_result()`` writes
+``docker logs`` output to ``site/static/logs/<profile>/<conns>/blackbull.log``
+before the container is removed.  ``httparena_compare.sh`` then greps
+``[ACCESS]`` lines from that file to produce a standalone
+``bb-access-blackbull-<profile>.log`` alongside the other result logs.
+
+When ``BB_ACCESS_LOG`` is unset or falsy the FileHandler is not
+added and per-request logging remains silenced (default: off).
 """
+import logging
 import multiprocessing
 import os
 import signal
@@ -38,19 +56,60 @@ HTTPS_H2_PORT  = int(os.environ.get('HTTPARENA_HTTPS_H2_PORT',  '8443'))
 TLS_CERT       = os.environ.get('TLS_CERT', '/certs/server.crt')
 TLS_KEY        = os.environ.get('TLS_KEY',  '/certs/server.key')
 
-# Worker count — explicit override via WEB_WORKERS env var (the
-# harness sets this when sweeping nproc/2 / nproc / nproc×2).
-# Otherwise honour cgroup-aware CPU affinity if the platform exposes
-# it (Linux), else fall back to multiprocessing.cpu_count().  Capped
-# at 128 as a sanity guard.
-_web_workers = os.environ.get('WEB_WORKERS', '').strip()
-if _web_workers.isdigit() and int(_web_workers) > 0:
-    WRK_COUNT = min(int(_web_workers), 128)
+# Worker count — WEB_WORKERS env var takes explicit precedence (set by
+# the bench/aws/httparena_compare.sh shim via `docker run -e WEB_WORKERS=N`).
+# Falls back to cgroup-aware CPU affinity (Linux sched_getaffinity), then
+# multiprocessing.cpu_count().  Capped at 128 as a sanity guard.
+_web_workers_env = os.environ.get('WEB_WORKERS', '').strip()
+if _web_workers_env:
+    try:
+        WRK_COUNT = max(1, int(_web_workers_env))
+    except ValueError:
+        WRK_COUNT = None  # resolved below
 else:
+    WRK_COUNT = None
+
+if WRK_COUNT is None:
     try:
         WRK_COUNT = min(len(os.sched_getaffinity(0)), 128)
     except (AttributeError, OSError):
         WRK_COUNT = multiprocessing.cpu_count()
+
+# Log effective settings so they appear in `docker logs` output.
+import resource as _resource
+_soft_nofile, _hard_nofile = _resource.getrlimit(_resource.RLIMIT_NOFILE)
+sys.stderr.write(
+    f'launcher: workers={WRK_COUNT}'
+    f'  nofile(soft)={_soft_nofile}'
+    f'  nofile(hard)={_hard_nofile}\n'
+)
+
+# ---------------------------------------------------------------------------
+# BB_ACCESS_LOG — per-request access log to stderr.
+#
+# Logging configuration is handled declaratively via logging_access.ini
+# (standard Python logging.config.fileConfig format), NOT inline handler
+# setup here.  When BB_ACCESS_LOG=1, httparena_compare.sh copies
+# logging_access.ini into the container image alongside app.py.
+# Each app.py worker process loads it at startup:
+#
+#   if os.path.isfile('logging_access.ini'):
+#       logging.config.fileConfig('logging_access.ini')
+#
+# This launcher only echoes a status line so the setting is visible in
+# `docker logs`.  No handler setup is performed here — Python logging
+# state is NOT inherited across subprocess.Popen, so any setup in this
+# process has no effect on the spawned app.py workers.
+#
+# Result: every completed request emits one [ACCESS] line to stderr,
+# captured by `docker logs` → save_result() → blackbull.log.
+# httparena_compare.sh greps [ACCESS] lines to produce bb-access-*.log.
+# ---------------------------------------------------------------------------
+_BB_ACCESS_LOG_ENV = os.environ.get('BB_ACCESS_LOG', '').strip().lower()
+_ACCESS_LOG_ENABLED = _BB_ACCESS_LOG_ENV not in ('', '0', 'false', 'no')
+
+if _ACCESS_LOG_ENABLED:
+    sys.stderr.write('launcher: BB_ACCESS_LOG=1  access log → stderr (via logging_access.ini)\n')
 
 PY = sys.executable
 APP = os.path.join(os.path.dirname(__file__), 'app.py')

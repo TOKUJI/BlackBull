@@ -239,23 +239,14 @@ if __name__ == '__main__':
     args = _parse_args()
     # Match peer benchmark posture: access log off (apples-to-apples).
     os.environ.setdefault('BB_ACCESS_LOG', '0')
-    # When BB_ACCESS_LOG=1 is opted in (e.g. for diagnostic phase
-    # tracing under BB_PHASE_TRACE=1), the access logger needs an
-    # explicit INFO handler — BlackBull's default level inheritance
-    # leaves ``blackbull.access`` at WARNING (effective), so
-    # emit_access_log() is gated off even when cfg.access_log is True.
-    # Wire a dedicated stderr handler with propagate=False so the
-    # access stream is self-contained and doesn't double-emit through
-    # the QueueHandler on the parent 'blackbull' logger.
-    if os.environ.get('BB_ACCESS_LOG') == '1':
-        import logging as _bb_logging
-        _bb_access = _bb_logging.getLogger('blackbull.access')
-        _bb_access.setLevel(_bb_logging.INFO)
-        _h = _bb_logging.StreamHandler(sys.stderr)
-        _h.setLevel(_bb_logging.INFO)
-        _h.setFormatter(_bb_logging.Formatter('[ACCESS] %(message)s'))
-        _bb_access.addHandler(_h)
-        _bb_access.propagate = False
+    # If logging_access.ini is present (placed by httparena_compare.sh when
+    # BB_ACCESS_LOG=1), apply it now via the standard logging.config mechanism.
+    # This is the single, declarative place that enables the blackbull.access
+    # logger — no handler setup is scattered across launcher.py or library code.
+    _logging_ini = os.path.join(os.path.dirname(__file__), 'logging_access.ini')
+    if os.path.isfile(_logging_ini):
+        import logging.config as _logging_config
+        _logging_config.fileConfig(_logging_ini)
     if args.cert and args.key:
         app.run(port=args.port, certfile=args.cert, keyfile=args.key,
                 workers=args.workers)
