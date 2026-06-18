@@ -24,6 +24,35 @@ so the editable install's metadata catches up.
 
 ## [Unreleased]
 
+## [0.42.3] — 2026-06-19
+
+**HTTP/2 perf: deferred HEADERS write coalesces HEADERS + DATA into one TCP segment.**
+
+`HTTP2Sender` now buffers the `http.response.start` HEADERS frame internally
+and flushes it together with the first `http.response.body` DATA frame in a
+single `write()` call.  For single-body responses that fit within the current
+flow-control windows and `max_frame_size`, this halves the number of `drain()`
+calls per response and eliminates the inter-frame TCP segment gap produced by
+the previous eager-write path.
+
+Wire order is unchanged: HEADERS precedes DATA per RFC 9113 §8.1.  Date header
+auto-injection (RFC 9110 §6.6.1) is preserved on all paths — bytes, ASGI event,
+and trailers.
+
+### Performance
+
+- Single-body HTTP/2 responses: HEADERS + DATA coalesced into one `write()` +
+  `drain()` (was two separate calls, ~2× the drain yield count per response).
+
+### Internal
+
+- `HTTP2Sender`: three new `__slots__` (`_buffered_status`, `_buffered_headers`,
+  `_expect_trailers`) mirror the `HTTP1Sender` buffering model.
+- `HTTP2Sender._flush_buffered_start()`: new method handles the coalesced write
+  with flow-control and max-frame-size fallback.
+- `HTTP2Sender.reset_per_request_state()`: clears buffered fields alongside
+  `_end_stream_sent` for correctness across stream reuse.
+
 ## [0.42.2] — 2026-06-19
 
 **RFC 9113 compliance fix: stream_id==0 validation for RST_STREAM and PUSH_PROMISE.**

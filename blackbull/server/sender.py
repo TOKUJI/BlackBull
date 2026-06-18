@@ -619,6 +619,7 @@ class HTTP2Sender(BaseSender):
         '_factory', '_stream_id', '_push_callback',
         'connection_window_size', 'stream_window_size',
         'max_frame_size', '_window_open', '_end_stream_sent',
+        '_buffered_status', '_buffered_headers', '_expect_trailers',
     )
 
     def __init__(self, writer: AbstractWriter, factory, stream_id: int,
@@ -630,21 +631,58 @@ class HTTP2Sender(BaseSender):
         self.connection_window_size = DEFAULT_INITIAL_WINDOW_SIZE
         self.stream_window_size = {stream_id: DEFAULT_INITIAL_WINDOW_SIZE}
         self.max_frame_size = DEFAULT_MAX_FRAME_SIZE
-        self._window_open: asyncio.Event | None = None  # created lazily on first stall
-        # RFC 9113 §8.1 — once END_STREAM is set on a frame this stream is
-        # closed; any further frames would be a connection error.  Track
-        # this so a misbehaving ASGI application sending events after
-        # ``http.response.trailers`` (or after a body event with
-        # ``more_body=False``) gets a logged warning instead of a wire
-        # protocol violation.
+        self._window_open: asyncio.Event | None = None
         self._end_stream_sent: bool = False
+        # Defer HEADERS write until first body event (mirrors HTTP1Sender).
+        self._buffered_status: HTTPStatus | None = None
+        self._buffered_headers: list[tuple[bytes, bytes]] | None = None
+        self._expect_trailers: bool = False
 
     def reset_per_request_state(self) -> None:
-        # Symmetric with HTTP1Sender.reset_per_request_state() — the
-        # HTTP/2 sender is per-stream (constructed fresh by the actor for
-        # each stream id), so today this is only meaningful if a future
-        # refactor reuses a sender across streams.  Keep the contract.
         self._end_stream_sent = False
+        self._buffered_status = None
+        self._buffered_headers = None
+        self._expect_trailers = False
+
+    async def _flush_buffered_start(
+        self, body: bytes, end_stream: bool,
+        status: HTTPStatus, headers: list[tuple[bytes, bytes]],
+        expect_trailers: bool,
+    ) -> None:
+        """Write buffered HEADERS + first DATA body chunk together."""
+        h_frame = self._factory.create(
+            FrameTypes.HEADERS,
+            HeaderFrameFlags.END_HEADERS,
+            self._stream_id,
+        )
+        h_frame.pseudo_headers[PseudoHeaders.STATUS] = str(status)
+        for k, v in headers:
+            h_frame.headers.append((k, v))
+        if not _has_header(h_frame.headers, b'date'):
+            h_frame.headers.append((b'date', _http_date()))
+        h_bytes = h_frame.save()
+
+        total = len(body)
+        sid_bytes = self._stream_id.to_bytes(4, 'big')
+        set_end_stream = end_stream and not expect_trailers
+
+        if (total <= self.connection_window_size and
+                total <= self.stream_window_size[self._stream_id] and
+                total <= self.max_frame_size):
+            end_flag = DataFrameFlags.END_STREAM if set_end_stream else 0
+            if total == 0:
+                d_bytes = b'\x00\x00\x00\x00' + end_flag.to_bytes(1, 'big') + sid_bytes
+            else:
+                d_bytes = (total.to_bytes(3, 'big') + b'\x00'
+                           + end_flag.to_bytes(1, 'big') + sid_bytes + body)
+            await super()._write(h_bytes + d_bytes)
+            self.connection_window_size -= total
+            self.stream_window_size[self._stream_id] -= total
+        else:
+            await super()._write(h_bytes)
+            await self._write_data(body, end_stream=set_end_stream)
+        if set_end_stream:
+            self._end_stream_sent = True
 
     async def _write(self, data: bytes):
         """Write a frame to the transport.
@@ -792,33 +830,42 @@ class HTTP2Sender(BaseSender):
                 return
 
             if event_type == ASGIEvent.HTTP_RESPONSE_START:
-                frame = self._factory.create(
-                    FrameTypes.HEADERS,
-                    HeaderFrameFlags.END_HEADERS,
-                    self._stream_id,
-                )
-                frame.pseudo_headers[PseudoHeaders.STATUS] = str(body.get('status', 200))
-                for k, v in body.get('headers', []):
-                    frame.headers.append((k, v))
-                if not _has_header(frame.headers, b'date'):
-                    frame.headers.append((b'date', _http_date()))
-                await self._write(frame.save())
+                # Buffer — defer HEADERS write until body event.
+                self._buffered_status = HTTPStatus(body.get('status', 200))
+                self._buffered_headers = list(body.get('headers', []))
+                self._expect_trailers = bool(body.get('trailers', False))
 
             elif event_type == ASGIEvent.HTTP_RESPONSE_BODY:
                 payload = body.get('body', b'')
                 end_stream = not body.get('more_body', False)
-                await self._write_data(payload, end_stream=end_stream)
-                if end_stream:
+                if self._buffered_status is not None:
+                    await self._flush_buffered_start(
+                        payload, end_stream, self._buffered_status,
+                        self._buffered_headers, self._expect_trailers)
+                    self._buffered_status = None
+                    self._buffered_headers = None
+                else:
+                    await self._write_data(payload, end_stream=end_stream)
+                if end_stream and not self._expect_trailers:
                     self._end_stream_sent = True
 
             elif event_type == ASGIEvent.HTTP_RESPONSE_TRAILERS:
-                # RFC 9113 §8.1 — trailers are a HEADERS frame with
-                # END_STREAM set, carrying only regular fields (no
-                # pseudo-headers).  Mirrors the HTTP/1.1 sender's
-                # chunked-trailer case ~line 434.  The caller is
-                # responsible for setting ``more_body: True`` on the
-                # preceding body event so the DATA frame doesn't
-                # close the stream prematurely.
+                # Flush buffered start if no body preceded trailers.
+                if self._buffered_status is not None:
+                    h_frame = self._factory.create(
+                        FrameTypes.HEADERS,
+                        HeaderFrameFlags.END_HEADERS,
+                        self._stream_id,
+                    )
+                    h_frame.pseudo_headers[PseudoHeaders.STATUS] = str(self._buffered_status)
+                    for k, v in self._buffered_headers or ():
+                        h_frame.headers.append((k, v))
+                    if not _has_header(h_frame.headers, b'date'):
+                        h_frame.headers.append((b'date', _http_date()))
+                    await self._write(h_frame.save())
+                    self._buffered_status = None
+                    self._buffered_headers = None
+
                 frame = self._factory.create(
                     FrameTypes.HEADERS,
                     HeaderFrameFlags.END_HEADERS | HeaderFrameFlags.END_STREAM,

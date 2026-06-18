@@ -196,7 +196,13 @@ async def test_http2_sender_auto_emits_date_on_bytes_path():
 
 @pytest.mark.asyncio
 async def test_http2_sender_auto_emits_date_on_asgi_event_path():
-    """ASGI streaming path (``http.response.start``) also gets the auto-date."""
+    """ASGI streaming path (``http.response.start`` + ``http.response.body``) also gets the auto-date.
+
+    HEADERS are buffered on ``http.response.start`` and flushed to the wire on
+    the first ``http.response.body`` event (coalesced into one write).
+    ``_decode_h2_headers`` reads only the leading HEADERS frame from the buffer,
+    so the trailing DATA frame bytes do not affect the result.
+    """
     from blackbull.server.sender import HTTP2Sender, AsyncioWriter
     from blackbull.asgi import ASGIEvent
 
@@ -209,6 +215,9 @@ async def test_http2_sender_auto_emits_date_on_asgi_event_path():
     sender = HTTP2Sender(AsyncioWriter(mock_writer), factory, stream_id=1)
 
     await sender({'type': ASGIEvent.HTTP_RESPONSE_START, 'status': 200, 'headers': []})
+    # HEADERS are buffered until the first body event; nothing is on the wire yet.
+    assert not written, 'HEADERS should be buffered, not yet written after response.start'
+    await sender({'type': ASGIEvent.HTTP_RESPONSE_BODY, 'body': b'hi', 'more_body': False})
 
     decoded = _decode_h2_headers(bytes(written), factory)
     names = [k.lower() if isinstance(k, (bytes, bytearray)) else k.lower().encode()
