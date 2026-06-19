@@ -8,6 +8,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1 PIP_DISABLE_
 COPY blackbull-*.whl /tmp/
 RUN pip install --no-cache-dir /tmp/blackbull-*.whl '/tmp/blackbull-0.28.0-py3-none-any.whl[compression]' || \
     (cd /tmp && WHEEL=$(ls blackbull-*.whl) && pip install --no-cache-dir "/tmp/${WHEEL}[compression]")
+VOLUME /results
 COPY app.py launcher.py ./
 EXPOSE 8080 8081 8443
 CMD ["python", "launcher.py"]
