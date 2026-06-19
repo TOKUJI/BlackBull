@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://TOKUJI.github.io/BlackBull/guide/configuration/">
+        <link rel="canonical" href="https://TOKUJI.github.io/BlackBull/about/rfc9113-implementation/">
       
       
-        <link rel="prev" href="../static-files/">
+        <link rel="prev" href="../internals/">
       
       
-        <link rel="next" href="../extensions/">
+        <link rel="next" href="../grpc-assessment/">
       
       
         
@@ -27,7 +27,7 @@
     
     
       
-        <title>Configuration - BlackBull</title>
+        <title>RFC 9113, implemented - BlackBull</title>
       
     
     
@@ -72,7 +72,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#configuration" class="md-skip">
+        <a href="#rfc-9113-implemented" class="md-skip">
           Skip to content
         </a>
       
@@ -108,7 +108,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Configuration
+              RFC 9113, implemented
             
           </span>
         </div>
@@ -390,20 +390,18 @@
       
   
   
-    
   
   
-  
     
     
     
     
     
-    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
         
           
           <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
@@ -424,7 +422,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_3">
             <span class="md-nav__icon md-icon"></span>
             
@@ -442,7 +440,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../" class="md-nav__link">
+      <a href="../../guide/" class="md-nav__link">
         
   
   
@@ -470,7 +468,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../routing/" class="md-nav__link">
+      <a href="../../guide/routing/" class="md-nav__link">
         
   
   
@@ -498,7 +496,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../middleware/" class="md-nav__link">
+      <a href="../../guide/middleware/" class="md-nav__link">
         
   
   
@@ -526,7 +524,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../error-handling/" class="md-nav__link">
+      <a href="../../guide/error-handling/" class="md-nav__link">
         
   
   
@@ -554,7 +552,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../requests-and-responses/" class="md-nav__link">
+      <a href="../../guide/requests-and-responses/" class="md-nav__link">
         
   
   
@@ -582,7 +580,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../websockets/" class="md-nav__link">
+      <a href="../../guide/websockets/" class="md-nav__link">
         
   
   
@@ -610,7 +608,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../http2/" class="md-nav__link">
+      <a href="../../guide/http2/" class="md-nav__link">
         
   
   
@@ -638,7 +636,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../streaming/" class="md-nav__link">
+      <a href="../../guide/streaming/" class="md-nav__link">
         
   
   
@@ -666,7 +664,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../events/" class="md-nav__link">
+      <a href="../../guide/events/" class="md-nav__link">
         
   
   
@@ -694,7 +692,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../logging/" class="md-nav__link">
+      <a href="../../guide/logging/" class="md-nav__link">
         
   
   
@@ -722,7 +720,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../static-files/" class="md-nav__link">
+      <a href="../../guide/static-files/" class="md-nav__link">
         
   
   
@@ -747,37 +745,10 @@
                 
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Configuration
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../../guide/configuration/" class="md-nav__link">
         
   
   
@@ -793,103 +764,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#environment-variables" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Environment variables
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#toml-config-file" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        TOML config file
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#cli-flags" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        CLI flags
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#precedence-in-detail" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Precedence in detail
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#in-code-configuration" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        In-code configuration
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#operational-defaults-to-think-about" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Operational defaults to think about
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#next" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Next
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -902,7 +776,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../extensions/" class="md-nav__link">
+      <a href="../../guide/extensions/" class="md-nav__link">
         
   
   
@@ -930,7 +804,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../openapi/" class="md-nav__link">
+      <a href="../../guide/openapi/" class="md-nav__link">
         
   
   
@@ -958,7 +832,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../testing/" class="md-nav__link">
+      <a href="../../guide/testing/" class="md-nav__link">
         
   
   
@@ -986,7 +860,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../fault_injection/" class="md-nav__link">
+      <a href="../../guide/fault_injection/" class="md-nav__link">
         
   
   
@@ -3722,18 +3596,20 @@
       
   
   
+    
   
   
+  
     
     
     
     
     
-    <li class="md-nav__item md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" checked>
         
           
           <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="0">
@@ -3754,7 +3630,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_6">
             <span class="md-nav__icon md-icon"></span>
             
@@ -3772,7 +3648,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../about/conformance/" class="md-nav__link">
+      <a href="../conformance/" class="md-nav__link">
         
   
   
@@ -3800,7 +3676,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../about/internals/" class="md-nav__link">
+      <a href="../internals/" class="md-nav__link">
         
   
   
@@ -3825,10 +3701,37 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../../about/rfc9113-implementation/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    RFC 9113, implemented
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -3844,6 +3747,158 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#legend" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Legend
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-starting-http2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        §3 — Starting HTTP/2
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-http-frames" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        §4 — HTTP Frames
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-streams-and-multiplexing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        §5 — Streams and Multiplexing
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-frame-definitions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        §6 — Frame Definitions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-error-codes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        §7 — Error Codes
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8-expressing-http-semantics" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        §8 — Expressing HTTP Semantics
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#9-http2-connections" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        §9 — HTTP/2 Connections
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#10-security-considerations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        §10 — Security Considerations
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#11-appendices" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        §11 / Appendices
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#coverage-summary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Coverage summary
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#see-also" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        See also
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -3856,7 +3911,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../about/grpc-assessment/" class="md-nav__link">
+      <a href="../grpc-assessment/" class="md-nav__link">
         
   
   
@@ -3911,10 +3966,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#environment-variables" class="md-nav__link">
+  <a href="#legend" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Environment variables
+        Legend
       
     </span>
   </a>
@@ -3922,10 +3977,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#toml-config-file" class="md-nav__link">
+  <a href="#3-starting-http2" class="md-nav__link">
     <span class="md-ellipsis">
       
-        TOML config file
+        §3 — Starting HTTP/2
       
     </span>
   </a>
@@ -3933,10 +3988,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#cli-flags" class="md-nav__link">
+  <a href="#4-http-frames" class="md-nav__link">
     <span class="md-ellipsis">
       
-        CLI flags
+        §4 — HTTP Frames
       
     </span>
   </a>
@@ -3944,10 +3999,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#precedence-in-detail" class="md-nav__link">
+  <a href="#5-streams-and-multiplexing" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Precedence in detail
+        §5 — Streams and Multiplexing
       
     </span>
   </a>
@@ -3955,10 +4010,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#in-code-configuration" class="md-nav__link">
+  <a href="#6-frame-definitions" class="md-nav__link">
     <span class="md-ellipsis">
       
-        In-code configuration
+        §6 — Frame Definitions
       
     </span>
   </a>
@@ -3966,10 +4021,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#operational-defaults-to-think-about" class="md-nav__link">
+  <a href="#7-error-codes" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Operational defaults to think about
+        §7 — Error Codes
       
     </span>
   </a>
@@ -3977,10 +4032,65 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#next" class="md-nav__link">
+  <a href="#8-expressing-http-semantics" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Next
+        §8 — Expressing HTTP Semantics
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#9-http2-connections" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        §9 — HTTP/2 Connections
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#10-security-considerations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        §10 — Security Considerations
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#11-appendices" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        §11 / Appendices
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#coverage-summary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Coverage summary
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#see-also" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        See also
       
     </span>
   </a>
@@ -4007,163 +4117,544 @@
   
 
 
-<h1 id="configuration">Configuration<a class="headerlink" href="#configuration" title="Permanent link">&para;</a></h1>
-<p>BlackBull reads its runtime configuration from three sources,
-which compose with a deterministic precedence:</p>
-<blockquote>
-<p><strong>CLI flags &gt; environment variables &gt; TOML config file &gt; defaults</strong></p>
-</blockquote>
-<p>A more specific source overrides a less specific one.  This means
-you can ship a config file with sensible defaults, override
-individual values via env in your container, and override
-those again via CLI flags for one-off debugging.</p>
-<h2 id="environment-variables">Environment variables<a class="headerlink" href="#environment-variables" title="Permanent link">&para;</a></h2>
-<p>Every runtime knob has a <code>BB_*</code> (or <code>BLACKBULL_*</code>) environment
-variable.  Setting it on the process environment is the most
-common form of configuration:</p>
-<div class="highlight"><pre><span></span><code><span class="nv">BB_WORKERS</span><span class="o">=</span><span class="m">4</span><span class="w"> </span><span class="nv">BB_UVLOOP</span><span class="o">=</span><span class="m">1</span><span class="w"> </span><span class="nv">BB_ACCESS_LOG</span><span class="o">=</span><span class="m">1</span><span class="w"> </span><span class="se">\</span>
-<span class="w">    </span>blackbull<span class="w"> </span>myapp:app<span class="w"> </span>--bind<span class="w"> </span><span class="m">0</span>.0.0.0:8080
-</code></pre></div>
-<p>The full table is in <a href="../../reference/env-vars/">Reference — Environment
-variables</a>.  Highlights:</p>
-<ul>
-<li><code>BLACKBULL_ENV</code> — <code>development</code> (default) / <code>production</code> /
-  <code>test</code>.  Controls the <a href="../error-handling/">error handler</a>
-  posture and whether <a href="../static-files/">static files</a> are
-  served.</li>
-<li><code>BB_WORKERS</code> — pre-fork worker count (<code>0</code> resolves to
-  <code>os.cpu_count()</code>).</li>
-<li><code>BB_ACCESS_LOG</code> — toggle the access log (<code>1</code> on, <code>0</code> off).</li>
-<li><code>BB_UVLOOP</code> — install <code>uvloop</code>'s asyncio policy.</li>
-<li><code>BB_SESSION_SECRET</code> — HMAC secret for the <code>Session</code>
-  middleware (no insecure default — must be set explicitly).</li>
-</ul>
-<h2 id="toml-config-file">TOML config file<a class="headerlink" href="#toml-config-file" title="Permanent link">&para;</a></h2>
-<p>For larger deployments, write a TOML file and point the CLI at it:</p>
-<div class="highlight"><pre><span></span><code>blackbull<span class="w"> </span>myapp:app<span class="w"> </span>--config<span class="w"> </span>/etc/blackbull/config.toml
-</code></pre></div>
-<div class="highlight"><span class="filename">/etc/blackbull/config.toml</span><pre><span></span><code><span class="k">[server]</span>
-<span class="n">workers</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">4</span>
-<span class="n">uvloop</span><span class="w">  </span><span class="o">=</span><span class="w"> </span><span class="kc">true</span>
-<span class="n">keep_alive_timeout</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">5</span>
-
-<span class="n">h2_max_concurrent_streams</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">200</span>
-<span class="n">h2_enable_websocket</span><span class="w">       </span><span class="o">=</span><span class="w"> </span><span class="kc">false</span>
-
-<span class="k">[limits]</span>
-<span class="n">max_connections</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">1000</span>
-<span class="n">request_timeout</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">30</span>
-<span class="n">header_timeout</span><span class="w">  </span><span class="o">=</span><span class="w"> </span><span class="mi">10</span>
-<span class="n">compression_min_size</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">100</span>
-
-<span class="k">[logging]</span>
-<span class="n">access_log</span><span class="w">    </span><span class="o">=</span><span class="w"> </span><span class="kc">true</span>
-<span class="n">async_logging</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="kc">true</span>
-
-<span class="k">[tls]</span>
-<span class="n">cert</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;/etc/blackbull/cert.pem&quot;</span>
-<span class="n">key</span><span class="w">  </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;/etc/blackbull/key.pem&quot;</span>
-</code></pre></div>
-<p>Section + key names mirror the <code>BB_*</code> environment-variable
-naming (lower-cased, the <code>BB_</code> prefix dropped).  Unknown
-sections and keys are silently ignored, so future TOML keys
-don't break older binaries.</p>
-<p>The TLS keys (<code>[tls] cert</code>, <code>[tls] key</code>) are CLI-arg fallbacks
-applied to <code>--certfile</code> / <code>--keyfile</code> when those aren't
-specified on the command line.</p>
-<h2 id="cli-flags">CLI flags<a class="headerlink" href="#cli-flags" title="Permanent link">&para;</a></h2>
-<p>The <code>blackbull</code> console script (and <code>app.run(...)</code> in code)
-both expose the most-touched knobs as direct flags:</p>
-<div class="highlight"><pre><span></span><code>blackbull<span class="w"> </span>myapp:app<span class="w"> </span><span class="se">\</span>
-<span class="w">    </span>--bind<span class="w"> </span><span class="m">0</span>.0.0.0:8443<span class="w"> </span><span class="se">\</span>
-<span class="w">    </span>--certfile<span class="w"> </span>cert.pem<span class="w"> </span>--keyfile<span class="w"> </span>key.pem<span class="w"> </span><span class="se">\</span>
-<span class="w">    </span>--workers<span class="w"> </span><span class="m">4</span><span class="w"> </span><span class="se">\</span>
-<span class="w">    </span>--max-connections<span class="w"> </span><span class="m">1000</span><span class="w"> </span><span class="se">\</span>
-<span class="w">    </span>--stream-queue-depth<span class="w"> </span><span class="m">128</span>
-</code></pre></div>
-<p>See <code>blackbull --help</code> for the complete list.  Anything not
-exposed as a flag can still be set via the corresponding
-<code>BB_*</code> environment variable.</p>
-<h2 id="precedence-in-detail">Precedence in detail<a class="headerlink" href="#precedence-in-detail" title="Permanent link">&para;</a></h2>
-<p>For each knob, the resolved value is the <strong>first</strong> source that
-specifies it:</p>
-<ol>
-<li><strong>CLI flag</strong> — <code>--workers 4</code> wins over both env and TOML.</li>
-<li><strong>Environment variable</strong> — <code>BB_WORKERS=4</code> wins over TOML.</li>
-<li><strong>TOML config file</strong> — <code>[server] workers = 4</code> wins over the
-   default.</li>
-<li><strong>Built-in default</strong> — listed in
-   <a href="../../reference/env-vars/">Reference — Environment variables</a>.</li>
-</ol>
-<p>The implementation hook is <code>os.environ.setdefault(...)</code> — TOML
-values are only written into the environment when the variable
-isn't already present, so existing env vars always win.  CLI
-flags then trump both.</p>
-<h2 id="in-code-configuration">In-code configuration<a class="headerlink" href="#in-code-configuration" title="Permanent link">&para;</a></h2>
-<p>When embedding BlackBull (not running via the CLI), <code>app.run()</code>
-accepts the same parameters as keyword arguments:</p>
-<div class="highlight"><pre><span></span><code><span class="n">app</span><span class="o">.</span><span class="n">run</span><span class="p">(</span>
-    <span class="n">port</span><span class="o">=</span><span class="mi">8443</span><span class="p">,</span>
-    <span class="n">certfile</span><span class="o">=</span><span class="s1">&#39;cert.pem&#39;</span><span class="p">,</span> <span class="n">keyfile</span><span class="o">=</span><span class="s1">&#39;key.pem&#39;</span><span class="p">,</span>
-    <span class="n">workers</span><span class="o">=</span><span class="mi">4</span><span class="p">,</span>
-    <span class="n">max_connections</span><span class="o">=</span><span class="mi">1000</span><span class="p">,</span>
-    <span class="n">stream_queue_depth</span><span class="o">=</span><span class="mi">128</span><span class="p">,</span>
-<span class="p">)</span>
-</code></pre></div>
-<p>Keyword arguments take precedence over environment variables in
-the same way the CLI flags do.</p>
-<h2 id="operational-defaults-to-think-about">Operational defaults to think about<a class="headerlink" href="#operational-defaults-to-think-about" title="Permanent link">&para;</a></h2>
-<p>The default values are tuned for development.  For production,
-the knobs most worth a second look:</p>
+<h1 id="rfc-9113-implemented">RFC 9113, implemented<a class="headerlink" href="#rfc-9113-implemented" title="Permanent link">&para;</a></h1>
+<p>A section-by-section reading of <a href="https://www.rfc-editor.org/rfc/rfc9113">RFC 9113</a>
+(HTTP/2) against the Python that implements it in BlackBull.</p>
+<p><strong>Who this is for</strong>: you already know RFC 9113 and want to see how a
+from-scratch, pure-Python server implements each requirement — and <em>why</em> it
+made the choices it did.  Each entry below reads <em>the RFC says X → BlackBull
+does Y → because Z</em>, keyed by the section number you already hold in your head.</p>
+<p><strong>The one thing to know up front</strong>: most Python HTTP/2 servers are built on
+the <a href="https://python-hyper.org/projects/h2/en/stable/"><code>h2</code> library</a>, a
+<em>sans-I/O state machine</em> — you feed it bytes, it returns events, the frame
+layer is invisible.  BlackBull is not built that way.  It is an <strong>actor</strong> that
+owns the socket and drives the frame loop itself, so every requirement below
+maps to a method you can open and step through with <code>pdb</code>.  The actor
+architecture itself is described in <a href="../internals/">Internals</a>; you do not need
+it to read this page — it surfaces here only where the RFC's behaviour depends
+on it (notably §5.4 error handling).</p>
+<h3 id="legend">Legend<a class="headerlink" href="#legend" title="Permanent link">&para;</a></h3>
 <table>
 <thead>
 <tr>
-<th>Variable</th>
-<th>Dev default</th>
-<th>Production guidance</th>
+<th>Mark</th>
+<th>Meaning</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td><code>BLACKBULL_ENV</code></td>
-<td><code>development</code></td>
-<td>Set to <code>production</code>.  Tightens error responses and stops <code>StaticFiles</code> from competing with your reverse proxy.</td>
+<td>✅</td>
+<td>Implemented by BlackBull.  Most of it lives in <a href="https://github.com/TOKUJI/BlackBull/blob/master/blackbull/server/http2_actor.py"><code>http2_actor.py</code></a>; where a requirement is met by another component (<code>ConnectionActor</code>, the TLS layer) or a dependency (<code>hpack</code>), the text says so.</td>
 </tr>
 <tr>
-<td><code>BB_WORKERS</code></td>
-<td><code>1</code></td>
-<td>Set to <code>0</code> (= <code>cpu_count()</code>) or a fixed integer matching your CPU budget.</td>
-</tr>
-<tr>
-<td><code>BB_REQUEST_TIMEOUT</code></td>
-<td><code>0</code> (off)</td>
-<td>Set to a positive value (e.g. <code>30</code>) so stalled handlers get evicted.</td>
-</tr>
-<tr>
-<td><code>BB_MAX_CONNECTIONS</code></td>
-<td><code>500</code></td>
-<td>Tune for the worker's memory budget; set <code>0</code> only if some upstream caps connection counts.</td>
-</tr>
-<tr>
-<td><code>BB_SESSION_SECRET</code></td>
-<td>unset</td>
-<td>Must be set (or pass <code>secret=</code> to <code>Session</code>).  Generate with <code>python -c "import secrets; print(secrets.token_urlsafe(32))"</code>.</td>
-</tr>
-<tr>
-<td><code>BB_UVLOOP</code></td>
-<td><code>0</code></td>
-<td>Set to <code>1</code> for a typical 1.5-2× throughput improvement on HTTP/2 hot paths.</td>
+<td>✗</td>
+<td>Not implemented — the reason is given inline, and every such item is optional (see the <a href="#coverage-summary">coverage summary</a>).</td>
 </tr>
 </tbody>
 </table>
-<h2 id="next">Next<a class="headerlink" href="#next" title="Permanent link">&para;</a></h2>
+<p><strong>Code-reference convention</strong> (used throughout): a <strong>method</strong> is written
+<code>Class.method()</code> — e.g. <code>HTTP2Actor.receive()</code>; a <strong>module-level function</strong> is
+written <code>function() in file.py</code> — e.g. <code>parse_headers() in parser.py</code>; a
+<strong>class member</strong> (constant or instance attribute) is written <code>Class.NAME</code> — e.g.
+<code>HTTP2Actor._STREAM_ONLY_FRAME_TYPES</code>, <code>HTTP2Actor._connection_window_size</code> — so
+the reader always knows which actor owns the state.  A <strong>method-local variable</strong>
+is named with its method, e.g. "the <code>_frame_loop()</code>-local <code>waiting_continuation</code>".
+Behaviour is described in terms of the
+<strong>method</strong> that does the work, with any constant it consults named alongside —
+so every reference is something you can locate, not a bare name floating free.</p>
+<p>A <a href="#coverage-summary">coverage tally</a> at the foot lets you confirm you have
+seen every section of RFC 9113, not a curated subset.</p>
+<hr />
+<h2 id="3-starting-http2">§3 — Starting HTTP/2<a class="headerlink" href="#3-starting-http2" title="Permanent link">&para;</a></h2>
+<p><strong>§3.1 Version Identification / §3.2 "https" URIs</strong> ✅
+Over TLS, HTTP/2 is selected by ALPN <code>h2</code>, negotiated by <code>ConnectionActor</code>
+before <code>HTTP2Actor</code> exists; the actor only ever runs once the connection is
+known to be HTTP/2.  <em>Because</em> protocol detection is a connection-layer concern —
+the HTTP/2 driver should not have to re-derive which protocol it is.</p>
+<p><strong>§3.3 Prior Knowledge (h2c)</strong> ✅
+Cleartext HTTP/2 <em>is</em> supported via prior knowledge.  On a connection that did
+<strong>not</strong> negotiate ALPN <code>h2</code>, <code>ConnectionActor._dispatch()</code> sniffs the first
+line; if it is <code>PRI * HTTP/2.0\r\n</code> it validates the full 24-byte preface and
+spawns <code>HTTP2Actor</code> over the plaintext socket.  This shares the HTTP/1.1 port —
+there is no separate h2c-only port — which RFC 9113 §3.3 permits.  <em>Because</em>
+prior knowledge needs no Upgrade dance: a client committed to h2c simply opens
+with the preface, and the same listener can serve both protocols.  (The
+deliberate port-sharing is noted in
+<a href="https://github.com/TOKUJI/BlackBull/blob/master/KNOWN_LIMITATIONS.md"><code>KNOWN_LIMITATIONS.md</code></a>
+as an operational caveat, not a missing feature.)</p>
+<blockquote>
+<p>The <em>Upgrade</em>-based h2c bootstrap (the <code>Upgrade: h2c</code> / HTTP/1.1-101
+dance, originally RFC 7540 §3.2, deprecated by RFC 9113 §3.1) is <strong>not</strong>
+implemented — only prior-knowledge h2c is.  RFC 9113 removed the Upgrade
+mechanism that RFC 7540 defined, so this is the forward-looking shape.</p>
+</blockquote>
+<p><strong>§3.4 Connection Preface</strong> ✅
+After the 24-byte client preface, the server <strong>MUST</strong> send a SETTINGS frame as
+the very first frame.  <code>HTTP2Actor.run()</code> does exactly this on entry, and — when
+configured to grow the connection window — follows it with a connection-level
+WINDOW_UPDATE.  <em>Because</em> the preface is non-negotiable: a client will not
+proceed until it has seen the server's opening SETTINGS.</p>
+<hr />
+<h2 id="4-http-frames">§4 — HTTP Frames<a class="headerlink" href="#4-http-frames" title="Permanent link">&para;</a></h2>
+<p><strong>§4.1 Frame Format</strong> ✅
+Every frame is a 9-byte header — length(24) + type(8) + flags(8) +
+R(1)+stream_id(31) — followed by the payload.  <code>HTTP2Actor.receive()</code> reads
+exactly 9 bytes, extracts the length, then reads exactly that many more.
+<em>Because</em> <code>readexactly</code> over a known length is the whole of framing — no
+buffering heuristics, no partial-frame state to carry.</p>
+<p><strong>§4.2 Frame Size</strong> ✅
+Frames larger than <code>SETTINGS_MAX_FRAME_SIZE</code> are an error.
+<code>HTTP2Actor._frame_loop()</code> decides whether it is a <strong>connection</strong> error or a
+<strong>stream</strong> error by testing the frame type against the class-level frozenset
+<code>HTTP2Actor._FRAME_SIZE_CONNECTION_ERROR_TYPES</code> — header-block and
+connection-state frames (HEADERS, CONTINUATION, PUSH_PROMISE, SETTINGS) are
+connection-fatal, everything else is stream-fatal.  <em>Because</em> an oversized
+HEADERS frame corrupts the shared HPACK decoder state, so the whole connection
+must die — but an oversized DATA frame only dooms its own stream.</p>
+<p><strong>§4.3 Field Section Compression (HPACK)</strong> ✅
+Header bytes are accumulated into <code>frame.raw_block</code> and decoded by the
+<a href="https://pypi.org/project/hpack/"><code>hpack</code></a> library (the only third-party
+package in the protocol stack), wrapped by <code>hpack_fastpath.py</code> for the common
+short-header case.  <em>Because</em> HPACK is stateful at the connection level (a
+shared dynamic table); re-implementing a conformant codec is a sub-project of
+its own, and <code>hpack</code> is the de-facto Python reference — itself pure Python, so
+it stays <code>pdb</code>-debuggable.</p>
+<hr />
+<h2 id="5-streams-and-multiplexing">§5 — Streams and Multiplexing<a class="headerlink" href="#5-streams-and-multiplexing" title="Permanent link">&para;</a></h2>
+<p><strong>§5.1 Stream States</strong> ✅
+Four states matter for a server in practice:
+IDLE → OPEN → HALF_CLOSED_REMOTE → CLOSED.
+(The two "reserved" states exist only during server push and are not shown —
+the server sends PUSH_PROMISE but never receives one, so it only ever sees
+IDLE, OPEN, HALF_CLOSED_REMOTE, and CLOSED.)
+<code>HTTP2Actor._validate_stream_state(stream, frame_type)</code> is the gate: it returns
+<code>(error_code, level)</code> for an illegal frame in the current state, or <code>None</code> to
+allow it.</p>
+<table>
+<thead>
+<tr>
+<th>State</th>
+<th>Legal frames</th>
+<th>Violation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>IDLE</td>
+<td>HEADERS, PRIORITY, CONTINUATION, PUSH_PROMISE</td>
+<td>connection PROTOCOL_ERROR</td>
+</tr>
+<tr>
+<td>HALF_CLOSED_REMOTE</td>
+<td>PRIORITY, WINDOW_UPDATE, RST_STREAM</td>
+<td>stream STREAM_CLOSED</td>
+</tr>
+<tr>
+<td>CLOSED</td>
+<td>PRIORITY always; HEADERS/CONTINUATION → connection error; else → stream RST</td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<p>CONTINUATION on IDLE is listed because <code>_validate_stream_state</code> permits it,
+but <code>_frame_loop()</code> catches a stray CONTINUATION — one not preceded by
+HEADERS without END_HEADERS — as a connection PROTOCOL_ERROR earlier in the
+loop.  The state check is the second line of defence.</p>
+<p><em>Because</em> the state table is the heart of multiplexing — getting it wrong means
+either rejecting valid concurrent streams or leaking resources on dead ones.
+A subtlety: closed streams are not kept as full <code>Stream</code> objects.  When a task
+finishes, <code>HTTP2Actor._make_done_cb()</code> prunes the node and records just
+<code>HTTP2Actor._closed_streams[stream_id] = closed_via_rst</code>.  <em>Because</em> a late frame on a
+closed stream still needs the CLOSED branch of validation, but an integer
+lookup is enough — you should not pay a <code>Stream</code> object per completed request.</p>
+<p><strong>§5.1.1 Stream Identifiers</strong> ✅
+Peer-initiated streams <strong>MUST</strong> use odd identifiers, strictly increasing.
+Checked in <code>HTTP2Actor._frame_loop()</code>: an even id from the peer, or one <code>≤
+HTTP2Actor._last_peer_stream_id</code>, is a connection PROTOCOL_ERROR.  Server push uses even
+ids from <code>HTTP2Actor._allocate_push_stream_id()</code>.  <em>Because</em> the monotonic-odd
+rule is what lets both ends allocate ids without a round-trip; a violation means
+the peer's state machine has diverged from ours and the connection is no longer
+trustworthy.</p>
+<p><strong>§5.1.2 Stream Concurrency</strong> ✅
+RFC 9113 lets a server <em>choose</em> how many streams may run at once, and the server
+publishes its choice as <code>SETTINGS_MAX_CONCURRENT_STREAMS</code>.  When a new HEADERS
+frame would push past that limit, <code>HTTP2Actor._on_headers_frame()</code> answers it
+with <strong>RST_STREAM REFUSED_STREAM</strong> — a stream-level error, not a connection
+error.  <em>Because</em> the client did nothing wrong: it just bumped into a ceiling
+the server set for itself.  REFUSED_STREAM says exactly that — "I never started
+this one, so just retry it" — and the client keeps all its other in-flight
+streams, re-sending only the stream that didn't fit.  A connection error would
+be the wrong tool: it tears down the whole connection and forces the client to
+replay <em>every</em> request, punishing it for the server's own limit.</p>
+<p><strong>§5.2 Flow Control</strong> ✅
+A DATA frame may be sent only when <strong>two</strong> windows both have credit — the
+stream window and the connection window.  <code>HTTP2Actor</code> tracks both:
+<code>HTTP2Actor._peer_initial_window_size</code> (per-stream) and
+<code>HTTP2Actor._connection_window_size</code> (connection-level), updated by
+<code>SettingsResponder</code> and
+<code>WindowUpdateResponder</code>; the credit mechanics — and the bug that follows from
+getting them wrong — are in §6.9.1.  <em>Because</em> the two windows do two jobs that
+a single window can't do at once.  The <strong>stream</strong> window stops any one stream
+from hogging the connection — fairness between streams.  The <strong>connection</strong>
+window caps the <em>total</em> data in flight across <em>all</em> streams at once — a bound on
+how much the receiver has to buffer.  You need both: per-stream fairness alone
+can't bound total memory, and a total bound alone can't stop one stream from
+starving the rest.</p>
+<p><strong>§5.3 Prioritization</strong> ✅ (as deprecation)
+RFC 9113 <strong>§5.3.2</strong> deprecated the priority <em>tree</em> (dependencies and weights)
+that <strong>RFC 7540</strong> had originally defined.
+BlackBull does not build the tree; it accepts PRIORITY frames and translates
+them, plus RFC 9218 <code>PRIORITY_UPDATE</code>, into a simple
+<code>{'urgency', 'incremental'}</code> hint (built by <code>_resolve_priority() in
+http2_actor.py</code> / <code>_build_h2_extensions() in http2_actor.py</code>) exposed at
+<code>scope['extensions']['http.response.priority']</code>.  <em>Because</em> the tree was
+unimplementable interoperably — RFC 9113 itself removed it, and modern clients
+send RFC 9218 urgency signals instead.  (Background: §5.3.1.)</p>
+<p><strong>§5.4 Error Handling</strong> ✅ — <em>this is where the actor model earns its place.</em>
+A <strong>connection error</strong> (§5.4.1) goes through <code>HTTP2Actor._connection_error()</code>:
+build GOAWAY with the accumulated <code>HTTP2Actor._last_peer_stream_id</code>, flush it,
+then <code>writer.close()</code> so the peer sees FIN after the GOAWAY; idempotent via
+<code>HTTP2Actor._goaway_sent</code>.  A <strong>stream error</strong> (§5.4.2) sends RST_STREAM and lets the
+stream's task die <em>without taking the connection down</em> — because
+<code>HTTP2Actor.run()</code> supervises every stream task in an <code>asyncio.TaskGroup</code>.
+<em>Because</em> the RFC's two-tier error model maps exactly onto the actor supervision
+model: stream-fatal = isolate the child task, connection-fatal = propagate and
+GOAWAY.</p>
+<p><strong>§5.5 Extending HTTP/2</strong> ✅
+Unknown frame types <strong>MUST</strong> be ignored (outside a header block).  The parser
+returns <code>None</code> for an unrecognised type and <code>HTTP2Actor._frame_loop()</code> does
+<code>continue</code>.  <em>Because</em> forward-compatibility is a hard requirement — an endpoint
+that errored on unknown frames could not coexist with a peer using a newer
+extension.</p>
+<hr />
+<h2 id="6-frame-definitions">§6 — Frame Definitions<a class="headerlink" href="#6-frame-definitions" title="Permanent link">&para;</a></h2>
+<p><strong>How frames are represented and dispatched.</strong>  Every frame type is its own
+Python class — a <code>FrameBase</code> subclass in <code>frame_types.py</code> (<code>Data</code>, <code>Headers</code>,
+<code>Ping</code>, <code>SettingFrame</code>, …) that knows how to parse its own payload.
+<code>HTTP2Actor._frame_loop()</code> then routes each parsed frame one of two ways:</p>
 <ul>
-<li><a href="../../reference/env-vars/">Reference — Environment variables</a>
-  — exhaustive table of every <code>BB_*</code> knob.</li>
-<li><a href="../logging/">Logging</a> — <code>BB_ACCESS_LOG</code> and <code>BB_ASYNC_LOGGING</code>
-  in action.</li>
-<li><a href="../error-handling/">Error handling</a> — <code>BLACKBULL_ENV</code>'s effect
-  on the default error response.</li>
+<li>the four frames that drive stream state and the request lifecycle — <strong>HEADERS,
+  CONTINUATION, DATA, GOAWAY</strong> — go to a dedicated <code>HTTP2Actor._on_*_frame()</code>
+  method (the <code>case</code> arms of a <code>match</code> on the frame type);</li>
+<li>the connection-control frames — <strong>PING, SETTINGS, WINDOW_UPDATE, PRIORITY,
+  RST_STREAM</strong> — fall through to a <code>Responder</code> class built by <code>ResponderFactory</code>
+  (e.g. <code>PingResponder</code>, <code>SettingsResponder</code>), keeping the loop itself small.</li>
+</ul>
+<p>The subsections below take the frame types in RFC order.  Each heading names
+the frame's <strong>class</strong> (the RFC definition → Python); the body says where it is
+dispatched and which method or responder handles it — DATA, in particular, is
+not one method but a chain of steps.</p>
+<p><strong>§6.1 DATA — <code>Data(FrameBase)</code></strong> ✅
+<code>HTTP2Actor._frame_loop()</code> dispatches a parsed <code>Data</code> frame to
+<code>HTTP2Actor._on_data_frame()</code>, but the handling fans out across several steps —
+the <code>Data</code> object is read in more than one place: a state check (DATA on
+HALF_CLOSED_REMOTE or CLOSED → RST STREAM_CLOSED, since the peer already sent
+END_STREAM), content-length accounting as bytes accumulate (§8.1.1), delivery to
+the stream's recipient, dual flow-control crediting (§6.9.1), and back-pressure
+(a full recipient queue → RST ENHANCE_YOUR_CALM).  <em>Because</em> DATA is the only
+frame that both moves application bytes and consumes flow-control credit — so it
+carries the most invariants and touches the most code.</p>
+<p><strong>§6.2 HEADERS — <code>Headers(FrameBase)</code></strong> ✅
+A <code>Headers</code> frame is handled by <code>HTTP2Actor._on_headers_frame()</code>, which runs the
+admission gauntlet: concurrency check first → REFUSED_STREAM if over the limit
+(§5.1.2).  If <code>END_HEADERS</code> is unset, stash the frame and set the
+<code>_frame_loop()</code>-local flag <code>waiting_continuation</code> (§6.10).
+Malformed headers → RST PROTOCOL_ERROR before dispatch (§8.1.1).  Extended
+CONNECT (<code>:protocol</code>) routes to WebSocket (RFC 8441).  <em>Because</em> HEADERS is the
+stream's birth certificate — every admission, framing, and routing decision has
+to happen here, before any application code runs.</p>
+<p><strong>§6.3 PRIORITY — <code>Priority(FrameBase)</code></strong> ✅
+A <code>Priority</code> frame is dispatched to <code>PriorityResponder</code>, but its payload-length
+guard (it <strong>MUST</strong> be exactly 5 bytes → stream FRAME_SIZE_ERROR) is enforced in
+<code>HTTP2Actor._frame_loop()</code>, and the urgency signal is mapped by
+<code>_resolve_priority() in http2_actor.py</code>.  PRIORITY on a not-yet-seen stream
+creates an idle <code>Stream</code> node.  The signal is mapped to RFC 9218 urgency (see
+§5.3).  <em>Because</em> the frame is still valid wire
+syntax even though the tree semantics are deprecated — reject the malformed,
+accept-and-translate the well-formed.</p>
+<p><strong>§6.4 RST_STREAM — <code>RstStream(FrameBase)</code></strong> ✅
+The basic "any → CLOSED" transition is applied by <code>RstStreamResponder</code>; ahead of
+it, <code>HTTP2Actor._frame_loop()</code> carries the <strong>CVE-2023-44487 (Rapid Reset)</strong>
+mitigation: a rolling 1-second counter, &gt;20 RST/s → GOAWAY ENHANCE_YOUR_CALM,
+raised <em>before</em> stream-state validation so abusive RSTs on idle/unknown streams
+still count.
+<em>Because</em> <code>SETTINGS_MAX_CONCURRENT_STREAMS</code> cannot catch the attack — a stream
+reset in the same round-trip never counts as "concurrent."</p>
+<p><strong>§6.5 SETTINGS — <code>SettingFrame(FrameBase)</code></strong> ✅
+The server sends its own SETTINGS first from <code>HTTP2Actor.run()</code> (§3.4); a peer's
+<code>SettingFrame</code> is handled by <code>SettingsResponder</code>, which updates the window sizes
+and answers with ACK (§6.5.3).
+<code>SETTINGS_ENABLE_CONNECT_PROTOCOL</code> (§6.5.2 / RFC 8441 §3) is advertised <strong>only</strong>
+when <code>BB_H2_ENABLE_WEBSOCKET=1</code>.  <em>Because</em> you must not invite Extended CONNECT
+unless you can service it.</p>
+<p><strong>§6.6 PUSH_PROMISE — <code>PushPromise(FrameBase)</code></strong> ✅
+A server-sent <code>PushPromise</code> is built by <code>HTTP2Actor._handle_push()</code>: allocate the
+next even id, build pseudo-headers from the parent scope, send PUSH_PROMISE
+<strong>on the parent stream</strong> (so the client can associate it), then
+spawn the synthetic pushed request as its own stream task.  See §8.4 for the
+server-push semantics.  <code>HTTP2Actor._frame_loop()</code> rejects a <code>stream_id==0</code>
+PUSH_PROMISE by testing the type against the class-level frozenset
+<code>HTTP2Actor._STREAM_ONLY_FRAME_TYPES</code>.  <em>Because</em> the promise has to reference
+the request that triggered
+it, which is the parent stream — sending it on the new stream would leave the
+client unable to correlate.</p>
+<p><strong>§6.7 PING — <code>Ping(FrameBase)</code></strong> ✅
+A <code>Ping</code> frame is handled by <code>PingResponder</code>: PING with ACK → no-op (it answers
+our own PING); PING without ACK → echo with ACK, unchanged opaque data.
+<em>Because</em> PING is the connection liveness primitive;
+the only correct response is the identical payload with the flag flipped.</p>
+<p><strong>§6.8 GOAWAY — <code>GoAway(FrameBase)</code></strong> ✅
+A <code>GoAway</code> frame is handled in two directions.  <strong>Incoming</strong>
+(<code>HTTP2Actor._on_goaway_frame()</code>): echo a GOAWAY mirroring the peer's
+<code>last_stream_id</code>, then inject <code>http.disconnect</code> into every recipient and return
+from the loop.  <strong>Outgoing</strong> (<code>HTTP2Actor._connection_error()</code>): the §5.4.1
+connection-error path.  <em>Because</em> §6.8
+asks an endpoint to tell its peer which streams it processed before closing —
+echoing the last id is how the peer learns what it may safely retry.</p>
+<p><strong>§6.9 WINDOW_UPDATE — <code>WindowUpdate(FrameBase)</code></strong> ✅
+A <code>WindowUpdate</code> frame is handled by <code>WindowUpdateResponder</code>: <code>stream_id==0</code>
+credits the connection window; non-zero credits a stream's send window.  A zero
+increment is PROTOCOL_ERROR; overflow past 2³¹−1 is
+FLOW_CONTROL_ERROR.  <em>Because</em> the two scopes share one frame type but mean
+different things — the responder must dispatch on the stream id.</p>
+<p><strong>§6.9.1 The Flow-Control Window</strong> ✅
+The dual-credit mechanic in full:</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># in HTTP2Actor._on_data_frame() — after a DATA frame is delivered to the app</span>
+<span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">send_frame</span><span class="p">(</span><span class="n">factory</span><span class="o">.</span><span class="n">window_update</span><span class="p">(</span><span class="n">stream</span><span class="o">.</span><span class="n">stream_id</span><span class="p">,</span> <span class="n">frame</span><span class="o">.</span><span class="n">length</span><span class="p">))</span>  <span class="c1"># stream</span>
+<span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">send_frame</span><span class="p">(</span><span class="n">factory</span><span class="o">.</span><span class="n">window_update</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">frame</span><span class="o">.</span><span class="n">length</span><span class="p">))</span>                  <span class="c1"># connection</span>
+</code></pre></div>
+<p>A single DATA frame debits <em>both</em> windows (§5.2), so both must be credited
+back — that is why there are two <code>window_update</code> calls, one on the stream and
+one on stream 0 (the connection).  Credit is sent <strong>after</strong> the recipient
+accepts the bytes, so a full application queue withholds credit and
+back-pressures the peer — the RFC's intended mechanism.</p>
+<p><em>Because</em> the connection window is the easy half to forget, and forgetting it
+fails <em>late</em>.  Credit only the stream window — the obvious half — and everything
+works until ~65535 cumulative bytes have flowed; only then does the shared
+connection window reach zero, after which <em>every</em> stream stalls, even ones with
+plenty of their own credit.  A bug that surfaces only on a long-lived connection
+is exactly the kind that is easy to introduce and hard to notice, so crediting
+both windows on every DATA frame is the invariant to hold onto.</p>
+<p><strong>§6.10 CONTINUATION — <code>Continuation(FrameBase)</code></strong> ✅
+A <code>Continuation</code> frame is handled by <code>HTTP2Actor._on_continuation_frame()</code>,
+legal only while the <code>_frame_loop()</code>-local <code>waiting_continuation</code> is set; any
+other frame in that state → connection PROTOCOL_ERROR, checked <em>first</em> in the
+loop.  Bytes accumulate into
+<code>raw_block</code>; if it exceeds <code>BB_HEADER_MAX_TOTAL</code> (64 KiB) the stream is reset
+with ENHANCE_YOUR_CALM <em>before</em> <code>Headers.parse_payload()</code> — the
+<strong>CONTINUATION-flood / CVE-2024-27983</strong> defence.  <em>Because</em> an unbounded
+CONTINUATION stream is an OOM vector: you must cap the buffer before handing it
+to the HPACK decoder.</p>
+<hr />
+<h2 id="7-error-codes">§7 — Error Codes<a class="headerlink" href="#7-error-codes" title="Permanent link">&para;</a></h2>
+<p><strong>§7 Error Codes</strong> ✅
+The full <code>ErrorCodes</code> enum is used across the loop and responders:
+PROTOCOL_ERROR, STREAM_CLOSED, FRAME_SIZE_ERROR, FLOW_CONTROL_ERROR,
+REFUSED_STREAM, CANCEL, ENHANCE_YOUR_CALM.  Each appears above next to the
+condition that raises it; the §9 threat table cross-references the
+security-relevant ones.  <em>Because</em> the error code <em>is</em> the protocol's contract
+with the peer — REFUSED_STREAM vs CANCEL vs ENHANCE_YOUR_CALM each tell the
+client a different thing to do next.</p>
+<hr />
+<h2 id="8-expressing-http-semantics">§8 — Expressing HTTP Semantics<a class="headerlink" href="#8-expressing-http-semantics" title="Permanent link">&para;</a></h2>
+<p><strong>§8.1 Request/Response Exchange</strong> ✅
+<code>HTTP2Actor._spawn_stream_task()</code> bridges connection and application: count the
+stream, create the <code>StreamActor</code> (or direct-dispatch coroutine), optionally wrap
+in a request-timeout (<code>BB_REQUEST_TIMEOUT</code> → RST CANCEL on expiry) and a
+per-worker concurrency semaphore (<code>BB_H2_ACTIVE_STREAMS_1W</code>), and register the
+done-callback.  An HTTP message is HEADERS → zero or more DATA → optional
+trailing HEADERS.  <em>Because</em> this is the seam between protocol and ASGI app;
+everything protocol-level must be settled before the app sees a scope.</p>
+<p><strong>§8.1.1 Malformed Messages</strong> ✅
+Malformed requests are RST PROTOCOL_ERROR <em>before the application sees them</em>,
+checked at two points: the direct-HEADERS path in
+<code>HTTP2Actor._on_headers_frame()</code> and the post-CONTINUATION path in
+<code>HTTP2Actor._on_continuation_frame()</code>.  Content-length is validated by
+accumulating <code>stream.received_data_bytes</code>: excess on any frame → immediate RST;
+deficit at END_STREAM → RST (padding excluded).  <em>Because</em> §8.1.1 makes the
+server, not the app, responsible for rejecting framing-level malformation — a
+malformed request must never reach handler code.  (RFC 7540 located the
+content-length rule at §8.1.2.6; RFC 9113 folds it into §8.1.1.)</p>
+<p><strong>§8.2 HTTP Fields / §8.2.1 Field Validity</strong> ✅
+Field-level violations are flagged by <code>Headers.parse_payload()</code> /
+<code>parse_headers() in parser.py</code> (the <code>malformed</code> flag) and rejected as above.
+<strong>§8.2.2 Connection-Specific Header Fields</strong> (e.g. <code>Connection</code>,
+<code>Transfer-Encoding</code>) are rejected at parse time (in <code>frame_types.py</code>).
+<strong>§8.2.3 Cookie crumb compression</strong> ✗ — not specially handled; cookies pass
+through as ordinary fields.  <em>Because</em> §8.2.3 is a compression optimisation, not
+a correctness requirement.</p>
+<p><strong>§8.3 HTTP Control Data</strong> ✅
+Pseudo-headers are parsed and validated before dispatch.  <strong>§8.3.1 Request
+Pseudo-Headers</strong> — <code>:method</code>, <code>:scheme</code>, <code>:path</code>, <code>:authority</code>; the <code>:path</code>
+split for pushed requests lives in <code>HTTP2Actor._handle_push()</code>.
+<strong>§8.3.2 Response Pseudo-Headers</strong> — <code>:status</code> is synthesised on the response
+path.  For the seven most common status codes (200, 204, 206, 304, 400, 404,
+500) the wire bytes are precomputed in <code>hpack_fastpath.py</code> via HPACK
+static-table indexing — a single-byte lookup that avoids the full encoder
+path.  <em>Because</em> pseudo-headers are the request line of HTTP/2; missing or
+duplicated ones are a malformed-message condition (§8.1.1).</p>
+<p><strong>§8.4 Server Push → <code>HTTP2Actor._handle_push()</code></strong> ✅
+Triggered by the ASGI <code>http.response.push</code> event from inside a handler.  Pushed
+requests are GET, safe, cacheable, body-less (<strong>§8.4.1</strong>); the pushed response
+streams on its own even-numbered stream (<strong>§8.4.2</strong>).  <em>Because</em> push lets the
+server pre-empt a request it knows the client will make — but only for the
+method/cacheability class the RFC permits.</p>
+<p><strong>§8.5 The CONNECT Method</strong> ✅ (Extended CONNECT only)
+Plain CONNECT tunnelling is not offered, but <strong>Extended CONNECT</strong> (RFC 8441,
+<code>:protocol=websocket</code>) is — that is the WebSocket-over-HTTP/2 path, opt-in via
+<code>BB_H2_ENABLE_WEBSOCKET=1</code>.  <em>Because</em> the project's CONNECT use case is
+WebSocket bootstrapping, not proxy tunnelling.</p>
+<p><strong>§8.6 Upgrade / §8.7 Request Reliability / §8.8 Examples</strong> ✗ / n/a
+<code>Upgrade</code> does not exist in HTTP/2 (§8.6 explicitly forbids it).  §8.7
+(idempotency/retry hints) is the client's concern; §8.8 is illustrative.</p>
+<hr />
+<h2 id="9-http2-connections">§9 — HTTP/2 Connections<a class="headerlink" href="#9-http2-connections" title="Permanent link">&para;</a></h2>
+<p><strong>§9.1 Connection Management / Reuse</strong> ✅
+Connection lifetime, idle timeouts, and reuse are owned by <code>ConnectionActor</code> and
+the deadline subsystem, not by <code>HTTP2Actor</code>.  <em>Because</em> these are transport
+concerns shared with HTTP/1.1 and WebSocket.</p>
+<p><strong>§9.2 Use of TLS Features (§9.2.1–§9.2.3, Appendix A cipher list)</strong> ✅
+TLS version and cipher policy are configured where the <code>SSLContext</code> is built
+(in <code>ASGIServer</code>, via <code>server.py</code>) — not in the frame driver.  <em>Because</em> the HTTP/2
+layer runs only after the TLS handshake it does not perform.</p>
+<hr />
+<h2 id="10-security-considerations">§10 — Security Considerations<a class="headerlink" href="#10-security-considerations" title="Permanent link">&para;</a></h2>
+<p><strong>§10.1 Server Authority / §10.2 Cross-Protocol / §10.3 Intermediary
+Encapsulation / §10.4 Cacheability of Pushed Responses</strong> ✅
+Server authority and TLS cross-protocol defence rest on the TLS layer (§9.2);
+intermediary-encapsulation defence is the §8.2.1/§8.2.2 field-validity checks
+already enforced at parse time; pushed-response cacheability follows from the
+§8.4.1 safe/cacheable constraint.</p>
+<p><strong>§10.5 Denial-of-Service Considerations</strong> ✅ — the cross-cutting threat table:</p>
+<table>
+<thead>
+<tr>
+<th>Threat</th>
+<th>RFC</th>
+<th>Mitigation</th>
+<th>Code</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Rapid Reset (CVE-2023-44487)</td>
+<td>§6.4</td>
+<td>Rolling 20/s RST limit → GOAWAY ENHANCE_YOUR_CALM</td>
+<td><code>HTTP2Actor._frame_loop()</code></td>
+</tr>
+<tr>
+<td>CONTINUATION flood / CVE-2024-27983 (§10.5.1)</td>
+<td>§6.10</td>
+<td><code>len(raw_block) &gt; BB_HEADER_MAX_TOTAL</code> → RST before parse</td>
+<td><code>HTTP2Actor._on_continuation_frame()</code></td>
+</tr>
+<tr>
+<td><code>stream_id==0</code> for stream-only frames</td>
+<td>§6.1–6.4, 6.6, 6.10</td>
+<td><code>HTTP2Actor._STREAM_ONLY_FRAME_TYPES</code> → connection PROTOCOL_ERROR</td>
+<td><code>HTTP2Actor._frame_loop()</code></td>
+</tr>
+<tr>
+<td>Oversized single header block (§10.5.1)</td>
+<td>§4.3, §8.1.1</td>
+<td><code>malformed</code> flag set during parse → RST</td>
+<td><code>parse_payload() in frame_types.py</code> / <code>parse_headers() in parser.py</code></td>
+</tr>
+<tr>
+<td>Stream exhaustion</td>
+<td>§5.1.2</td>
+<td>RST REFUSED_STREAM before scope is built</td>
+<td><code>HTTP2Actor._on_headers_frame()</code></td>
+</tr>
+<tr>
+<td>WebSocket stream exhaustion</td>
+<td>RFC 8441</td>
+<td><code>HTTP2Actor._ws_stream_count</code> cap (<code>BB_H2_WS_MAX_STREAMS</code>)</td>
+<td><code>HTTP2Actor._handle_h2_websocket()</code></td>
+</tr>
+<tr>
+<td>Concurrent-handler flood (1 worker)</td>
+<td>operational</td>
+<td><code>BB_H2_ACTIVE_STREAMS_1W</code> semaphore via <code>_run_guarded() in http2_actor.py</code></td>
+<td><code>HTTP2Actor._spawn_stream_task()</code></td>
+</tr>
+</tbody>
+</table>
+<p><em>Because</em> DoS hardening is the part of the spec a from-scratch server most easily
+skips, and the part attackers most reliably probe.  Making it a single auditable
+table is the point.  Each of these defences is exercised by the
+<a href="../conformance/">conformance and fuzz suites</a> — h2spec's error-handling and
+flow-control cases, the in-tree Rapid-Reset and CONTINUATION-flood tests, and
+the parser fuzzers — so the security posture is <em>tested</em>, not just asserted.</p>
+<p><strong>§10.6 Compression / §10.7 Padding / §10.8 Privacy / §10.9 Remote Timing</strong> ✗
+Not specifically mitigated. HPACK compression-ratio attacks (§10.6) are bounded
+indirectly by the header-size caps; padding (§10.7) is accepted and excluded
+from content-length accounting but not otherwise normalised. <em>Because</em> these are
+defence-in-depth refinements beyond the project's current threat model; they are
+named here so the gap is explicit, not hidden.</p>
+<hr />
+<h2 id="11-appendices">§11 / Appendices<a class="headerlink" href="#11-appendices" title="Permanent link">&para;</a></h2>
+<p><strong>§11 IANA Considerations, Appendix A (cipher list), Appendix B (changes from
+RFC 7540)</strong> — registry and historical material; no implementation surface.</p>
+<hr />
+<h2 id="coverage-summary">Coverage summary<a class="headerlink" href="#coverage-summary" title="Permanent link">&para;</a></h2>
+<p>The denominator below is the <strong>subsections of RFC 9113 that state a server
+requirement or option</strong>, not all ~87.  Excluded (non-normative, no
+implementation surface): §1 (introduction), §2 (document organisation &amp;
+conventions), §5.3.1 (background on deprecated RFC 7540 priority), §8.8
+(illustrative examples), §11 (IANA registries), Appendix A (prohibited
+cipher list), and Appendix B (changes from RFC 7540).  Against that
+denominator:  Against that
+denominator:</p>
+<table>
+<thead>
+<tr>
+<th>Of RFC 9113's server requirements &amp; options</th>
+<th>Share (approx.)</th>
+<th>Examples</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>✅ Implemented by BlackBull's own code</td>
+<td>~80%</td>
+<td>Framing (§4.1–4.2), frame definitions (§6), stream state machine (§5.1), flow control (§5.2/§6.9.1), error handling (§5.4, §7), HTTP semantics &amp; server push (§8), Extended CONNECT (§8.5), DoS defences (§10.5), connection setup &amp; ALPN (§3, §9.1)</td>
+</tr>
+<tr>
+<td>✅ Implemented via dependencies</td>
+<td>~8%</td>
+<td>HPACK (§4.3) → the <code>hpack</code> package; TLS 1.2/1.3 features and ciphers (§9.2, Appendix A) → Python's <code>ssl</code> / OpenSSL</td>
+</tr>
+<tr>
+<td>○ Not implemented — all optional</td>
+<td>~12%</td>
+<td>Upgrade-based h2c (§3.1), cookie-crumb compression (§8.2.3), reducing a stream window mid-flight (§6.9.3), the §10.6–10.9 hardening refinements</td>
+</tr>
+</tbody>
+</table>
+<p><strong>No mandatory (MUST) requirement is missing</strong> — every unimplemented item is a
+MAY/SHOULD-level option.  The behaviour that makes a correct, safe server —
+framing, multiplexing, flow control, stream-state and error handling, and the
+§10.5 denial-of-service defences — is fully implemented, and is exercised
+end-to-end by the <a href="../conformance/">conformance suite</a> (h2spec for RFC 9113 and
+HPACK, plus the in-tree security and fuzz tests), not merely asserted on this
+page.  (Prior-knowledge h2c, §3.3, <em>is</em> supported; only the deprecated Upgrade
+bootstrap is not.)</p>
+<p>Every ✅ in the sections above is implemented; the prose notes when a
+requirement is met by a dependency (<code>hpack</code>, the <code>ssl</code> / OpenSSL stack) rather
+than BlackBull's own code — that is the split between the two implemented rows.</p>
+<hr />
+<h2 id="see-also">See also<a class="headerlink" href="#see-also" title="Permanent link">&para;</a></h2>
+<ul>
+<li><a href="../internals/">Internals</a> — the actor model, hierarchy, and supervisor
+  strategies referenced from §5.4.</li>
+<li><a href="../conformance/">Conformance</a> — the RFC test suites (h2spec, Autobahn) that
+  exercise this surface end-to-end.</li>
+<li><a href="../../guide/http2/">HTTP/2 guide</a> — the user-facing feature surface.</li>
+<li><a href="https://www.rfc-editor.org/rfc/rfc9113">RFC 9113</a> ·
+  <a href="https://www.rfc-editor.org/rfc/rfc8441">RFC 8441</a> (WebSocket over H/2) ·
+  <a href="https://www.rfc-editor.org/rfc/rfc9218">RFC 9218</a> (priorities) ·
+  <a href="https://www.rfc-editor.org/rfc/rfc7541">RFC 7541</a> (HPACK).</li>
 </ul>
 
 
