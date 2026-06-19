@@ -1,4 +1,4 @@
-"""HTTP/2 frame type definitions (RFC 7540 §6, RFC 9113).
+"""HTTP/2 frame type definitions (RFC 9113 §6; supersedes RFC 7540 §6).
 
 Frame-type classes, enums, and the FrameBase registry.  HPACK
 compression/decompression is delegated to the ``hpack`` library.

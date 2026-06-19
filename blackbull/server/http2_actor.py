@@ -121,6 +121,11 @@ _HTTP2_EXTENSIONS: dict = {ASGIEvent.HTTP_RESPONSE_PUSH: {}}
 
 
 async def _run_guarded(coro, sem):
+    # BB_H2_ACTIVE_STREAMS_1W semaphore: caps concurrently-running handlers on a
+    # single-worker deployment.  Without it, one high-mux connection can saturate
+    # the event loop with handler coroutines and starve connections handled by the
+    # same worker.  Each acquire yields to the event loop, so stream tasks that
+    # cannot enter still receive frames; they just don't start the ASGI app call.
     async with sem:
         await coro
 
@@ -847,7 +852,7 @@ class HTTP2Actor(Actor):
             return False
 
         scope = parse_headers(frame)
-        # RFC 9113 §8.1.2 / §8.2 — malformed HEADERS must be rejected with
+        # RFC 9113 §8.1.1 / §8.2.1 — malformed HEADERS must be rejected with
         # a stream error of type PROTOCOL_ERROR rather than dispatched.
         # parse_payload sets the flag for field-level violations; parse_headers
         # sets it for missing/empty required pseudo-headers.
@@ -946,7 +951,7 @@ class HTTP2Actor(Actor):
         header_frame.parse_payload()
 
         scope = parse_headers(header_frame)
-        # RFC 9113 §8.1.2 / §8.2 — same malformed-HEADERS check as the direct
+        # RFC 9113 §8.1.1 / §8.2.1 — same malformed-HEADERS check as the direct
         # HEADERS path; reject with RST_STREAM PROTOCOL_ERROR.
         if getattr(header_frame, 'malformed', False):
             logger.debug('Stream %d malformed HEADERS (via CONTINUATION) — %s',
@@ -1038,7 +1043,14 @@ class HTTP2Actor(Actor):
             logger.warning('DATA for stream %d but no recipient found', stream.stream_id)
 
     async def _on_goaway_frame(self, last_stream_id: int) -> None:
-        """Handle an incoming GOAWAY: echo one back and signal all recipients."""
+        """Handle an incoming GOAWAY: echo one back and signal all recipients.
+
+        RFC 9113 §6.8 — when a GOAWAY is received the endpoint SHOULD send
+        its own GOAWAY before closing the connection so the peer knows
+        which streams were processed.  We mirror the peer's last_stream_id
+        back in our GOAWAY and then inject ``http.disconnect`` into every
+        active stream recipient before returning from ``_frame_loop``.
+        """
         await self.send_frame(self.factory.goaway(last_stream_id))
         _signal_recipients(self._recipients)
 
@@ -1136,7 +1148,15 @@ class HTTP2Actor(Actor):
             self._make_done_cb(stream.stream_id, is_ws=True))
 
     async def _handle_push(self, event: dict, parent_stream_id: int) -> None:
-        """Handle an 'http.response.push' ASGI event (RFC 7540 §8.2)."""
+        """Handle an 'http.response.push' ASGI event.
+
+        RFC 9113 §8.4 (server push) — the pushed request MUST be safe,
+        cacheable, and have no request body (§8.4.1); ``:method`` is always
+        ``GET``.  The PUSH_PROMISE frame itself is §6.6.  RFC 9113 §8.3.1:
+        the ``:path`` pseudo-header carries both path and query string; we
+        split them at urlparse so the synthetic ASGI scope gets separate
+        ``path`` and ``query_string`` keys.
+        """
         from urllib.parse import urlparse as _urlparse  # noqa: PLC0415
 
         push_stream_id = self._allocate_push_stream_id()
