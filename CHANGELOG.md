@@ -24,6 +24,15 @@ so the editable install's metadata catches up.
 
 ## [Unreleased]
 
+### Docs
+- Added [`docs/about/rfc9113-implementation.md`](docs/about/rfc9113-implementation.md)
+  — a section-by-section map of how BlackBull implements RFC 9113, ordered by the
+  RFC's own §-numbers, with a coverage summary measured against the spec's
+  normative requirements/options (no mandatory MUST is unimplemented).
+- Corrected RFC 7540→9113 section citations in `http2_actor.py` and
+  `frame_types.py` comments/docstrings (server push §8.4, malformed messages
+  §8.1.1/§8.2.1; no behaviour change).
+
 ## [0.42.3] — 2026-06-19
 
 **HTTP/2 perf: deferred HEADERS write coalesces HEADERS + DATA into one TCP segment.**
