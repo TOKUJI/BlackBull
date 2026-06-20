@@ -30,6 +30,7 @@ from .event import Event, EventDispatcher, EventHandler
 from .headers import Headers
 from .utils import Scheme
 from .router import Router, ErrorRouter, MethodNotApplicable, PathNotRegistered, ConfigurationError, has_middleware_param
+from .config import AppConfig
 logger = logging.getLogger(__name__)
 
 
@@ -207,7 +208,9 @@ class BlackBull:
                  loop=None,
                  observer_shutdown_timeout: float = 5.0,
                  trusted_proxies: list[str] | str | None = None,
+                 config: AppConfig | None = None,
                  ):
+        self._config = config
         self._router = Router()
         self._logger = logger
         self._error_router = ErrorRouter()
@@ -545,7 +548,7 @@ class BlackBull:
         self._chain = None  # invalidate cached chain
 
     def static(self, url_prefix: str, root_dir: str | Path, *,
-               cache: bool = False) -> None:
+               cache: bool = False, index: str | None = None) -> None:
         """Serve static files from *root_dir* under *url_prefix* via global middleware.
 
         ``cache`` (default ``False``): when ``True``, file bodies are
@@ -556,12 +559,15 @@ class BlackBull:
         need the in-process cache; the default off is calibrated to
         that majority.  See ``docs/guide/static-files.md`` for the
         full discussion.
+
+        ``index`` (default ``None`` — off): a filename (e.g.
+        ``'index.html'``) served when a request resolves to a directory.
         """
         from blackbull.middleware.static import StaticFiles
         root = Path(root_dir).resolve()
         self._static_roots.append((url_prefix, root))
         self._global_middlewares.append(
-            StaticFiles(url_prefix=url_prefix, root_dir=root, cache=cache))
+            StaticFiles(url_prefix=url_prefix, root_dir=root, cache=cache, index=index))
         self._chain = None  # invalidate cached chain
 
     def on_error(self, key):
@@ -638,14 +644,14 @@ class BlackBull:
             docs_path=docs_path,
         )
 
-    def run(self, certfile=None, keyfile=None, port=0,
+    def run(self, certfile=None, keyfile=None, port: int | None = None,
             unix_path: str | None = None,
             inherited_fd: int | None = None,
             workers: int | None = None,
             max_connections: int | None = None,
             stream_queue_depth: int | None = None,
             ws_queue_depth: int | None = None,
-            reload: bool = False,
+            reload: bool | None = None,
             reload_paths: list | None = None) -> None:
         """Run the app under BlackBull's own server (single- or multi-worker).
 
@@ -653,6 +659,16 @@ class BlackBull:
         write ``app.run(port=8000)``, not ``asyncio.run(app.run(...))``.
         For ``workers > 1`` *or* ``reload=True`` the master pre-binds
         sockets, forks workers, and blocks until SIGTERM / SIGINT.
+
+        Each argument left unset (``None``) falls back to the value declared
+        on the bound :class:`~blackbull.AppConfig` (if the app was built with
+        ``BlackBull(config=...)``), then to :func:`blackbull.serve`'s own
+        default.  An explicit argument always wins::
+
+            app = BlackBull(config=AppConfig(port=8443, certfile='c.pem',
+                                             keyfile='k.pem'))
+            app.run()              # binds 8443 with TLS from the config
+            app.run(port=9000)     # explicit arg overrides the config's 8443
 
         For embedded use under an existing event loop, or for pre-binding
         a socket before forking a test subprocess, instantiate
@@ -667,17 +683,28 @@ class BlackBull:
             app.run(port=8443, certfile='cert.pem', keyfile='key.pem', reload=True)
             app.run(unix_path='/run/blackbull.sock')
         """
+        cfg = self._config
+
+        def _pick(explicit, attr, fallback):
+            if explicit is not None:
+                return explicit
+            if cfg is not None:
+                return getattr(cfg, attr)
+            return fallback
+
         serve(
             self,
-            certfile=certfile, keyfile=keyfile, port=port,
-            unix_path=unix_path,
-            inherited_fd=inherited_fd,
-            workers=workers,
-            max_connections=max_connections,
-            stream_queue_depth=stream_queue_depth,
-            ws_queue_depth=ws_queue_depth,
-            reload=reload,
-            reload_paths=reload_paths,
+            certfile=_pick(certfile, 'certfile', None),
+            keyfile=_pick(keyfile, 'keyfile', None),
+            port=_pick(port, 'port', 0),
+            unix_path=_pick(unix_path, 'unix_path', None),
+            inherited_fd=_pick(inherited_fd, 'inherited_fd', None),
+            workers=_pick(workers, 'workers', None),
+            max_connections=_pick(max_connections, 'max_connections', None),
+            stream_queue_depth=_pick(stream_queue_depth, 'stream_queue_depth', None),
+            ws_queue_depth=_pick(ws_queue_depth, 'ws_queue_depth', None),
+            reload=_pick(reload, 'reload', False),
+            reload_paths=_pick(reload_paths, 'reload_paths', None),
         )
 
 

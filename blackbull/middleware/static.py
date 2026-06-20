@@ -64,8 +64,15 @@ class StaticFiles:
 
     def __init__(self, directory: str | None = None, *,
                  url_prefix: str = '', root_dir: str | Path | None = None,
-                 cache: bool = False):
+                 cache: bool = False, index: str | None = None):
         """Serve files from ``directory`` (or ``root_dir``).
+
+        ``index`` (default ``None`` — off): when set to a filename (e.g.
+        ``'index.html'``), a request that resolves to a *directory* is
+        served that file from inside the directory if it exists.  Off by
+        default so existing exact-path serving is unchanged; the
+        ``blackbull serve`` CLI turns it on to match ``python -m
+        http.server``'s directory-index behaviour.
 
         ``cache`` (default ``False``): when ``True``, file bodies up to
         ``_CACHE_MAX_BYTES_PER_FILE`` are held in an in-memory
@@ -94,6 +101,7 @@ class StaticFiles:
         self._root_sep: str = self._root_str + os.sep
         self._url_prefix = url_prefix.rstrip('/')
         self._cache_enabled: bool = cache
+        self._index: str | None = index
         # cache key = the actual filesystem path served (original or
         # sibling), held as a ``str`` so the hash is cheap and the
         # key matches the value returned by ``os.path.realpath``.
@@ -162,6 +170,17 @@ class StaticFiles:
             return
 
         if not os.path.isfile(target):
+            # Directory request → serve the configured index file when one
+            # is set (off by default, so ``app.static()`` callers keep the
+            # exact-file-only behaviour).  The index candidate is run
+            # through the same realpath + traversal guard as any other
+            # target so a crafted ``index`` can't escape the root.
+            if self._index and os.path.isdir(target):
+                candidate = os.path.realpath(os.path.join(target, self._index))
+                if ((candidate == self._root_str or candidate.startswith(self._root_sep))
+                        and os.path.isfile(candidate)):
+                    await self._serve(scope, send, candidate)
+                    return
             if call_next:
                 await call_next(scope, receive, send)
             else:

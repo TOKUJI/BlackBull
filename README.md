@@ -38,8 +38,10 @@ Hello, world!
 
 ## Why BlackBull
 
-- **Zero ceremony.** `app.run()` is the entire deploy story.  No
-  separate ASGI runner, no YAML config, no `gunicorn` class path.
+- **Zero ceremony.** `app.run()` is the entire deploy story — or
+  `blackbull serve ./public` for a static site with ETag + HTTP/2 and
+  no code at all.  No separate ASGI runner, no YAML config, no
+  `gunicorn` class path.
 - **Readable stack.** Every byte on the wire passes through Python
   you can step through with `pdb`.  No C extensions to debug.
 - **Break things on purpose.** The same protocol code that serves

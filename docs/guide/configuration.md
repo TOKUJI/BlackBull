@@ -129,6 +129,81 @@ app.run(
 Keyword arguments take precedence over environment variables in
 the same way the CLI flags do.
 
+### Declarative startup with `AppConfig`
+
+To declare the startup settings once — rather than threading them
+through every `run()` call site — build the app with an
+`AppConfig`:
+
+```python
+from blackbull import BlackBull, AppConfig
+
+app = BlackBull(config=AppConfig(
+    port=8443,
+    certfile='cert.pem', keyfile='key.pem',
+    workers=4,
+))
+
+if __name__ == '__main__':
+    app.run()                 # picks up the bound config
+```
+
+`AppConfig` is a frozen dataclass holding exactly the parameters
+`run()` accepts (`port`, `certfile`, `keyfile`, `unix_path`,
+`inherited_fd`, `workers`, `max_connections`, `stream_queue_depth`,
+`ws_queue_depth`, `reload`, `reload_paths`).  It is not a
+general-purpose settings store — server-tuning knobs stay in the
+`BB_*` environment variables.
+
+Resolution order in `run()` is, highest to lowest:
+
+1. an explicit `run(...)` keyword argument — `app.run(port=9000)`
+   always wins;
+2. the value declared on the bound `AppConfig`;
+3. `serve()`'s built-in default.
+
+```python
+app = BlackBull(config=AppConfig(port=8443, certfile='c.pem', keyfile='k.pem'))
+app.run()              # binds 8443 with TLS from the config
+app.run(port=9000)     # explicit arg overrides the config's 8443
+```
+
+There is no `host` field: BlackBull's socket layer binds dual-stack
+on all interfaces, so a per-interface `host` would silently do
+nothing.  Use `unix_path` or `inherited_fd` for non-TCP binds.
+
+## Serving static files with `blackbull serve`
+
+For a quick static file server — a drop-in upgrade over
+`python -m http.server` — point the `serve` subcommand at a
+directory:
+
+```bash
+blackbull serve                       # serve ./ on http://127.0.0.1:8000
+blackbull serve ./public --bind :8080
+blackbull serve ./public --certfile cert.pem --keyfile key.pem  # HTTPS + HTTP/2
+```
+
+Unlike `python -m http.server`, it ships:
+
+- **ETag / conditional requests** — repeat fetches get a `304 Not
+  Modified` (disable with `--no-etag`);
+- **HTTP/2** automatically once `--certfile` / `--keyfile` make it
+  HTTPS;
+- a **directory index** (`index.html` by default; change with
+  `--index NAME`, disable with `--index ''`);
+- precompressed-sibling negotiation (`.br` / `.zst` / `.gz`).
+
+No application code is required.  `--cache` holds file bodies in an
+in-memory LRU for higher throughput at the cost of picking up
+on-disk edits only after the per-entry `stat` TTL.
+
+!!! note
+    `blackbull serve` is a development / standalone convenience.
+    `StaticFiles` does not serve files when `BLACKBULL_ENV=production`
+    (the expectation is a reverse proxy or CDN fronts static traffic
+    there) — see [Static files](static-files.md).
+
 ## Operational defaults to think about
 
 The default values are tuned for development.  For production,
