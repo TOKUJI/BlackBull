@@ -9,7 +9,6 @@ from __future__ import annotations
 import pytest
 
 import blackbull.cli as cli
-from blackbull.cli import _build_static_app
 from blackbull.testing import TestClient
 
 
@@ -26,15 +25,15 @@ def site(tmp_path):
 
 def test_build_static_app_missing_dir_raises(tmp_path):
     with pytest.raises(FileNotFoundError):
-        _build_static_app(str(tmp_path / 'nope'), etag=True, cache=False,
-                          index='index.html')
+        cli._build_static_app(str(tmp_path / 'nope'), etag=True, cache=False,
+                              index='index.html')
 
 
 def test_build_static_app_file_not_dir_raises(tmp_path):
     f = tmp_path / 'a_file'
     f.write_text('x')
     with pytest.raises(NotADirectoryError):
-        _build_static_app(str(f), etag=True, cache=False, index='index.html')
+        cli._build_static_app(str(f), etag=True, cache=False, index='index.html')
 
 
 # ---------------------------------------------------------------------------
@@ -42,7 +41,7 @@ def test_build_static_app_file_not_dir_raises(tmp_path):
 # ---------------------------------------------------------------------------
 
 def test_serves_a_file(site):
-    app = _build_static_app(str(site), etag=True, cache=False, index='index.html')
+    app = cli._build_static_app(str(site), etag=True, cache=False, index='index.html')
     with TestClient(app) as c:
         r = c.get('/a.txt')
     assert r.status_code == 200
@@ -50,7 +49,7 @@ def test_serves_a_file(site):
 
 
 def test_directory_index_served_on_root(site):
-    app = _build_static_app(str(site), etag=True, cache=False, index='index.html')
+    app = cli._build_static_app(str(site), etag=True, cache=False, index='index.html')
     with TestClient(app) as c:
         r = c.get('/')
     assert r.status_code == 200
@@ -58,21 +57,21 @@ def test_directory_index_served_on_root(site):
 
 
 def test_index_disabled_means_root_404(site):
-    app = _build_static_app(str(site), etag=True, cache=False, index=None)
+    app = cli._build_static_app(str(site), etag=True, cache=False, index=None)
     with TestClient(app) as c:
         r = c.get('/')
     assert r.status_code == 404
 
 
 def test_missing_file_is_404(site):
-    app = _build_static_app(str(site), etag=True, cache=False, index='index.html')
+    app = cli._build_static_app(str(site), etag=True, cache=False, index='index.html')
     with TestClient(app) as c:
         r = c.get('/does-not-exist.txt')
     assert r.status_code == 404
 
 
 def test_etag_and_conditional_304(site):
-    app = _build_static_app(str(site), etag=True, cache=False, index='index.html')
+    app = cli._build_static_app(str(site), etag=True, cache=False, index='index.html')
     with TestClient(app) as c:
         r = c.get('/a.txt')
         etag = r.headers.get('etag')
@@ -82,7 +81,7 @@ def test_etag_and_conditional_304(site):
 
 
 def test_no_etag_omits_etag_header(site):
-    app = _build_static_app(str(site), etag=False, cache=False, index='index.html')
+    app = cli._build_static_app(str(site), etag=False, cache=False, index='index.html')
     with TestClient(app) as c:
         r = c.get('/a.txt')
     assert r.status_code == 200
