@@ -135,8 +135,10 @@ next request with no staleness window.  Default is `cache=False`;
 standalone deployments serving static traffic directly should opt
 in to keep prior performance.
 
-What's still missing across all paths: ETag-driven revalidation,
-byte-range-multipart, and CDN edge-cache invalidation glue.  For
+`StaticFiles` itself emits no `ETag`; pair it with the `Cache`
+middleware for ETag / `If-None-Match` revalidation (`blackbull serve`
+does this for you).  What's still missing across all paths:
+byte-range-multipart and CDN edge-cache invalidation glue.  For
 anything user-visible, front a real static-file server (nginx,
 S3 + CloudFront).
 
@@ -161,12 +163,17 @@ Out of scope.  Revisit if a real user need appears.
 
 Out of scope.
 
-### CLI ergonomics are minimal
+### CLI `--bind` host is advisory
 
-The `blackbull` console script covers the basic ASGI-runner
-shape (`blackbull app:app --bind ...`).  A few quality-of-life
-knobs (`--version`, helpful error on missing `app:module`,
-`--reload-dir`) are pending.
+The `blackbull` console script covers the ASGI-runner shape
+(`blackbull app:app --bind ...`), the zero-code static server
+(`blackbull serve ./dir`), `--version`, `--config`, `--reload`, and
+focused errors on a bad `module:attr`.  The one notable gap: the
+host portion of `--bind host:port` (and the absence of a `host`
+field on `AppConfig`) is advisory — the socket layer binds dual-stack
+on **all** interfaces, so `--bind 127.0.0.1:8000` still listens on
+every interface.  Use a `unix:` bind, `fd://` socket activation, or a
+fronting proxy when interface filtering matters.
 
 ---
 

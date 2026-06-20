@@ -36,6 +36,35 @@ app = StaticFiles(directory='public')
 # app(scope, receive, send)  — 3-argument ASGI
 ```
 
+## Directory index
+
+By default `StaticFiles` serves files by their exact path only.
+Pass `index` to serve a named file when a request resolves to a
+directory:
+
+```python
+app.static('/', 'public', index='index.html')   # GET / → public/index.html
+```
+
+The index candidate is run through the same realpath + traversal
+guard as any other target, so it can't escape the root.  The
+`blackbull serve` CLI (below) turns this on by default.
+
+## Zero-code static server: `blackbull serve`
+
+For an ad-hoc static server with no application code — a drop-in
+upgrade over `python -m http.server` — use the `serve` subcommand:
+
+```bash
+blackbull serve ./public --bind :8080
+blackbull serve ./public --certfile cert.pem --keyfile key.pem  # HTTPS + HTTP/2
+```
+
+It wires `StaticFiles` with `index='index.html'` plus the
+[`Cache`](middleware.md) middleware for ETag / `304` conditional
+responses.  See [Configuration → blackbull serve](configuration.md#serving-static-files-with-blackbull-serve)
+for the full flag list.
+
 ## Environment gate
 
 The `BLACKBULL_ENV` environment variable controls serving

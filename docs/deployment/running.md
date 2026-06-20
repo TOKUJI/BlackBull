@@ -31,11 +31,26 @@ around the worker pool).
 Full signature:
 
 ```python
-def run(port=0, certfile=None, keyfile=None,
+def run(port=None, certfile=None, keyfile=None,
         workers=None, unix_path=None, inherited_fd=None,
         max_connections=None, stream_queue_depth=None,
-        ws_queue_depth=None, reload=False, reload_paths=None):
+        ws_queue_depth=None, reload=None, reload_paths=None):
     ...
+```
+
+Each argument left unset (`None`) falls back to the value declared
+on the bound [`AppConfig`](../guide/configuration.md#declarative-startup-with-appconfig)
+(if any), then to `serve()`'s built-in default.  Declaring the
+settings once keeps `__main__` to a single line:
+
+```python
+from blackbull import BlackBull, AppConfig
+
+app = BlackBull(config=AppConfig(port=8443, certfile='cert.pem',
+                                 keyfile='key.pem', workers=4))
+
+if __name__ == '__main__':
+    app.run()
 ```
 
 ## 2. `blackbull` CLI — useful for systemd, Docker, PaaS
@@ -56,6 +71,20 @@ attribute may be a `BlackBull` instance *or* a plain ASGI
 callable.  See `blackbull --help` for the full flag list and
 [Configuration](../guide/configuration.md) for how flags compose
 with environment variables and TOML config files.
+
+### `blackbull serve` — zero-code static files
+
+To serve a directory of static files without writing any
+application code — a drop-in upgrade over `python -m
+http.server`, with ETag, HTTP/2 (under TLS), and a directory
+index built in:
+
+```bash
+blackbull serve ./public --bind :8080
+blackbull serve ./public --certfile cert.pem --keyfile key.pem  # HTTPS + HTTP/2
+```
+
+See [Static files → blackbull serve](../guide/static-files.md#zero-code-static-server-blackbull-serve).
 
 ## 3. Any external ASGI 3.0 server
 

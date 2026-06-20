@@ -296,13 +296,154 @@ def _build_parser() -> argparse.ArgumentParser:
     return p
 
 
+# ---------------------------------------------------------------------------
+# ``blackbull serve`` — zero-code static file server (Sprint 49, B4)
+# ---------------------------------------------------------------------------
+
+def _build_serve_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(
+        prog='blackbull serve',
+        description='Serve a directory of static files over HTTP/1.1 — and '
+                    'HTTP/2 when TLS is supplied — with ETag / conditional '
+                    'requests out of the box.  No application code required; '
+                    'a drop-in upgrade over "python -m http.server".',
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    p.add_argument(
+        'directory', nargs='?', default='.', metavar='DIR',
+        help='Directory to serve.  Defaults to the current directory.',
+    )
+    p.add_argument(
+        '--bind', default=_DEFAULT_BIND, metavar='SPEC',
+        help='Address to bind: host:port (TCP) or unix:/abs/path (AF_UNIX).',
+    )
+    p.add_argument(
+        '--certfile', default=None, metavar='PATH',
+        help='TLS certificate file.  Supplying --certfile and --keyfile '
+             'enables HTTPS and HTTP/2 (via ALPN).',
+    )
+    p.add_argument(
+        '--keyfile', default=None, metavar='PATH',
+        help='TLS private key file.  Required alongside --certfile.',
+    )
+    p.add_argument(
+        '--index', default='index.html', metavar='NAME',
+        help="Filename served for directory requests.  Pass '' to disable.",
+    )
+    p.add_argument(
+        '--no-etag', dest='etag', action='store_false',
+        help='Disable ETag / If-None-Match (304) conditional responses.',
+    )
+    p.add_argument(
+        '--cache', action='store_true',
+        help='Hold file bodies in an in-memory LRU (faster, but does not '
+             'pick up on-disk edits until the per-entry stat TTL expires).',
+    )
+    p.add_argument(
+        '--workers', type=int, default=None, metavar='N',
+        help='Number of worker processes.  0 = os.cpu_count().',
+    )
+    return p
+
+
+def _build_static_app(directory: str, *, etag: bool, cache: bool,
+                      index: str | None):
+    """Build a :class:`blackbull.BlackBull` app that serves *directory*.
+
+    Raises :class:`FileNotFoundError` / :class:`NotADirectoryError` when
+    *directory* is not a usable directory so the caller can report a
+    focused error rather than starting a server that 404s everything.
+    """
+    if not os.path.isdir(directory):
+        if os.path.exists(directory):
+            raise NotADirectoryError(f'not a directory: {directory!r}')
+        raise FileNotFoundError(f'directory not found: {directory!r}')
+
+    from . import BlackBull  # noqa: PLC0415
+
+    app = BlackBull()
+    if etag:
+        # Cache is the outermost middleware (registered first) so a matching
+        # If-None-Match short-circuits to 304 before StaticFiles touches the
+        # disk; it also injects the generated ETag on the storing pass.
+        from .middleware.cache import Cache  # noqa: PLC0415
+        app.use(Cache())
+    app.static('/', directory, cache=cache, index=index or None)
+    return app
+
+
+def _serve_static(argv: list[str]) -> int:
+    parser = _build_serve_parser()
+    args = parser.parse_args(argv)
+
+    try:
+        addr = _split_bind(args.bind)
+    except ValueError as exc:
+        print(f'blackbull: {exc}', file=sys.stderr)
+        return 1
+
+    port = 0
+    unix_path: str | None = None
+    if addr[0] == 'tcp':
+        _, host, port = addr
+        if host not in ('', '0.0.0.0', '::', '127.0.0.1', 'localhost'):
+            print(
+                f'blackbull: --bind host {host!r} is advisory in v1; '
+                f'binding dual-stack on port {port} for now.',
+                file=sys.stderr,
+            )
+    elif addr[0] == 'unix':
+        _, unix_path = addr
+    else:  # fd:// makes no sense for the zero-code static server
+        print('blackbull: serve does not support fd:// binds; use host:port '
+              'or unix:/path.', file=sys.stderr)
+        return 1
+
+    try:
+        app = _build_static_app(
+            args.directory, etag=args.etag, cache=args.cache, index=args.index)
+    except (FileNotFoundError, NotADirectoryError) as exc:
+        print(f'blackbull: {exc}', file=sys.stderr)
+        return 1
+
+    scheme = 'https' if args.certfile else 'http'
+    where = unix_path if unix_path else f'{scheme}://127.0.0.1:{port}'
+    print(f'blackbull: serving {os.path.abspath(args.directory)} on {where}',
+          file=sys.stderr)
+
+    try:
+        _serve(
+            app,
+            certfile=args.certfile,
+            keyfile=args.keyfile,
+            port=port,
+            unix_path=unix_path,
+            workers=args.workers,
+        )
+    except RuntimeError as exc:
+        print(f'blackbull: {exc}', file=sys.stderr)
+        return 1
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     """Entry point invoked by the ``blackbull`` console script.
+
+    Two forms are dispatched here:
+
+    * ``blackbull serve [DIR] …`` — the zero-code static file server
+      (see :func:`_serve_static`);
+    * ``blackbull module:attr …`` — run an ASGI 3.0 application.
 
     Returns a process exit code.  argparse handles ``--help`` and
     invalid-flag exits itself (status 2); application-level errors
     (bad import path, bind syntax) print to stderr and exit 1.
     """
+    if argv is None:
+        argv = sys.argv[1:]
+    if argv and argv[0] == 'serve':
+        return _serve_static(argv[1:])
+
     parser = _build_parser()
     args = parser.parse_args(argv)
 

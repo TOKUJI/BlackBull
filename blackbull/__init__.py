@@ -6,6 +6,7 @@
 Public API exports:
 
 - `BlackBull`: the main application object; wraps routing, middleware, and lifespan hooks.
+- `AppConfig`: declarative, immutable holder for the startup settings ``run()`` accepts (port, TLS, workers, …).
 - `serve`: synchronous entry point that runs any ASGI 3.0 callable (also used by the ``blackbull`` console script).
 - `Response`, `JSONResponse`, `StreamingResponse`, `EventSourceResponse`, `WebSocketResponse`: response helpers.
 - `Headers`: case-insensitive, ordered, multi-valued HTTP header store.
@@ -38,6 +39,7 @@ except PackageNotFoundError:
     __version__ = '0.0.0+unknown'
 
 from .app import BlackBull, serve
+from .config import AppConfig
 from .headers import Headers
 from .request import read_body, parse_cookies
 from .response import (

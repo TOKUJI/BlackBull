@@ -30,9 +30,11 @@ from pathlib import Path
 import pytest
 
 
-# Smaller payload than the unit-test debounce wait — picked so the test
-# is responsive without becoming flaky on a loaded laptop.
-_RELOAD_DEADLINE_SEC = 20.0
+# Generous deadline: polling-mode watchfiles (see env setup below) detects
+# the change reliably, but the re-exec + re-import + re-fork cycle can still
+# run slow under the CPU/IO contention of the full pre-commit suite.  30 s
+# gives headroom there while staying well under the 90 s hard timeout.
+_RELOAD_DEADLINE_SEC = 30.0
 _REQ_TIMEOUT_SEC = 2.0
 
 
@@ -89,7 +91,7 @@ def _write_app(script: Path, port: int, version: str) -> None:
     ''').lstrip())
 
 
-@pytest.mark.timeout(60)
+@pytest.mark.timeout(90)
 def test_auto_reload_picks_up_new_code(tmp_path: Path):
     port = _free_port()
     script = tmp_path / 'reload_app.py'
@@ -101,6 +103,16 @@ def test_auto_reload_picks_up_new_code(tmp_path: Path):
     env = os.environ.copy()
     env['PYTHONUNBUFFERED'] = '1'
     env['BB_ACCESS_LOG'] = '0'   # quieter test output
+    # Force watchfiles into polling mode for the subprocess's watcher.
+    # watchfiles' default inotify backend silently drops the rewrite event
+    # on WSL2's drvfs/9p filesystem and under the CPU/IO contention of the
+    # full pre-commit suite (which forks through the multiworker tests just
+    # before this one) — the observed flake was ``last_seen='v1'`` with zero
+    # connect failures, i.e. the change was never detected.  Polling is
+    # backend-agnostic and reliable across filesystems; the reload re-exec
+    # logic under test is identical either way.
+    env['WATCHFILES_FORCE_POLLING'] = '1'
+    env['WATCHFILES_POLL_DELAY_MS'] = '100'
 
     # Capture to a file rather than a pipe: an unread PIPE eventually
     # blocks the subprocess on writes once the kernel buffer (~64 KiB)

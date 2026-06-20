@@ -24,6 +24,26 @@ so the editable install's metadata catches up.
 
 ## [Unreleased]
 
+## [0.43.0] — 2026-06-20
+
+### Added
+- **`AppConfig` — declarative startup config.** A frozen dataclass holding
+  exactly the parameters `run()`/`serve()` accept (port, TLS, workers,
+  queue depths, reload, …).  `BlackBull(config=AppConfig(...))` declares the
+  server settings once; `app.run()` resolves each setting **explicit arg →
+  bound config → built-in default**.  Additive — existing programmatic
+  startup is unchanged.  Exported as `blackbull.AppConfig`.
+- **`blackbull serve` — zero-code static file server.** `blackbull serve
+  [DIR]` serves a directory over HTTP/1.1 (and HTTP/2 when `--certfile` /
+  `--keyfile` enable TLS) with ETag / `304` conditional requests, a
+  directory index, and precompressed-sibling negotiation — a drop-in
+  upgrade over `python -m http.server`.  The existing `blackbull
+  module:attr` runner is unchanged.
+- **`StaticFiles` directory index.** New opt-in `index=` parameter on
+  `StaticFiles` and `app.static()` (default off): a request resolving to a
+  directory serves the named file (e.g. `index.html`) when present, guarded
+  by the same realpath + traversal check.
+
 ### Docs
 - Added [`docs/about/rfc9113-implementation.md`](docs/about/rfc9113-implementation.md)
   — a section-by-section map of how BlackBull implements RFC 9113, ordered by the
@@ -32,6 +52,8 @@ so the editable install's metadata catches up.
 - Corrected RFC 7540→9113 section citations in `http2_actor.py` and
   `frame_types.py` comments/docstrings (server push §8.4, malformed messages
   §8.1.1/§8.2.1; no behaviour change).
+- Documented `AppConfig` and `blackbull serve` in the configuration,
+  static-files, and running guides.
 
 ## [0.42.3] — 2026-06-19
 
