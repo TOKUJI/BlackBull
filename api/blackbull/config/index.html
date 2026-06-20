@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://TOKUJI.github.io/BlackBull/api/blackbull/logger/">
+        <link rel="canonical" href="https://TOKUJI.github.io/BlackBull/api/blackbull/config/">
       
       
-        <link rel="prev" href="../headers/">
+        <link rel="prev" href="../client/websocket_h2/">
       
       
-        <link rel="next" href="../middleware/">
+        <link rel="next" href="../env/">
       
       
         
@@ -27,7 +27,7 @@
     
     
       
-        <title>logger - BlackBull</title>
+        <title>config - BlackBull</title>
       
     
     
@@ -72,7 +72,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#blackbulllogger" class="md-skip">
+        <a href="#blackbullconfig" class="md-skip">
           Skip to content
         </a>
       
@@ -108,7 +108,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              logger
+              config
             
           </span>
         </div>
@@ -1764,10 +1764,37 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../config/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    config
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -1783,6 +1810,54 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#blackbull.config" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        config
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="config">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.config.AppConfig" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        AppConfig
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -2210,37 +2285,10 @@
                 
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    logger
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../logger/" class="md-nav__link">
         
   
   
@@ -2256,93 +2304,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#blackbull.logger" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        logger
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="logger">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.logger.log" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        log
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.logger.setup_async_logging" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        setup_async_logging
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="setup_async_logging">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.logger.setup_async_logging--parameters" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Parameters
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.logger.teardown_async_logging" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        teardown_async_logging
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -3933,61 +3894,22 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#blackbull.logger" class="md-nav__link">
+  <a href="#blackbull.config" class="md-nav__link">
     <span class="md-ellipsis">
       
-        logger
+        config
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="logger">
+    <nav class="md-nav" aria-label="config">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#blackbull.logger.log" class="md-nav__link">
+  <a href="#blackbull.config.AppConfig" class="md-nav__link">
     <span class="md-ellipsis">
       
-        log
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.logger.setup_async_logging" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        setup_async_logging
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="setup_async_logging">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.logger.setup_async_logging--parameters" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Parameters
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.logger.teardown_async_logging" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        teardown_async_logging
+        AppConfig
       
     </span>
   </a>
@@ -4019,20 +3941,100 @@
   
 
 
-<h1 id="blackbulllogger"><code>blackbull.logger</code><a class="headerlink" href="#blackbulllogger" title="Permanent link">&para;</a></h1>
+<h1 id="blackbullconfig"><code>blackbull.config</code><a class="headerlink" href="#blackbullconfig" title="Permanent link">&para;</a></h1>
 
 
 <div class="doc doc-object doc-module">
 
 
 
-<h2 id="blackbull.logger" class="doc doc-heading">
-            <code>blackbull.logger</code>
+<h2 id="blackbull.config" class="doc doc-heading">
+            <code>blackbull.config</code>
 
 
-<a href="#blackbull.logger" class="headerlink" title="Permanent link">&para;</a></h2>
+<a href="#blackbull.config" class="headerlink" title="Permanent link">&para;</a></h2>
 
     <div class="doc doc-contents first">
+
+        <p>Declarative application configuration — :class:<code>AppConfig</code>.</p>
+<p><code>AppConfig</code> is a small, typed, immutable holder for the server-facing
+settings that :meth:<code>blackbull.BlackBull.run</code> (and :func:<code>blackbull.serve</code>)
+already accept as keyword arguments.  It lets an application declare those
+settings once::</p>
+<pre><code>from blackbull import BlackBull, AppConfig
+
+app = BlackBull(config=AppConfig(
+    port=8443,
+    certfile='cert.pem',
+    keyfile='key.pem',
+    workers=4,
+))
+
+if __name__ == '__main__':
+    app.run()          # picks up the config; no flags to thread through
+</code></pre>
+<p>Resolution precedence in :meth:<code>BlackBull.run</code> is, highest to lowest:</p>
+<ol>
+<li>an explicit keyword argument to <code>run(...)</code> — <code>app.run(port=9000)</code>
+    always wins;</li>
+<li>the value declared on the bound :class:<code>AppConfig</code> (if any);</li>
+<li>the built-in default baked into :func:<code>blackbull.serve</code>.</li>
+</ol>
+<p><code>AppConfig</code> deliberately mirrors <em>only</em> the parameters <code>serve</code> already
+exposes — it is not a general-purpose settings store.  Per-request and
+server-tuning knobs (window sizes, timeouts, queue depths beyond the two
+listed here, …) continue to live in :mod:<code>blackbull.env</code> and are sourced
+from <code>BB_*</code> environment variables.</p>
+<p><code>host</code> is intentionally absent: BlackBull's socket layer binds dual-stack
+on all interfaces (see :meth:<code>blackbull.server.ASGIServer.open_socket</code>), so
+a per-interface <code>host</code> field would silently do nothing.  Use <code>unix_path</code>
+or <code>inherited_fd</code> for non-TCP binds.</p>
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="blackbull.config.AppConfig" class="doc doc-heading">
+            <code>AppConfig</code>
+
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-dataclass"><code>dataclass</code></small>
+  </span>
+
+<a href="#blackbull.config.AppConfig" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+
+
+        <p>Immutable, declarative startup configuration for a BlackBull app.</p>
+<p>Every field corresponds one-to-one with a keyword argument of
+:func:<code>blackbull.serve</code> / :meth:<code>blackbull.BlackBull.run</code>.  Fields left
+at their sentinel default (<code>None</code>, or <code>0</code> for <code>port</code>, or <code>False</code>
+for <code>reload</code>) defer to <code>serve</code>'s own built-in default unless an
+explicit <code>run(...)</code> argument overrides them.</p>
+
 
 
 
@@ -4054,76 +4056,14 @@
 
 
 
-<div class="doc doc-object doc-function">
 
 
-<h3 id="blackbull.logger.log" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">log</span><span class="p">(</span><span class="n">fn</span><span class="p">)</span></code>
-
-<a href="#blackbull.logger.log" class="headerlink" title="Permanent link">&para;</a></h3>
-
-
-    <div class="doc doc-contents ">
-
-        <p>Decorator: log call arguments at DEBUG level.</p>
-<p>Automatically uses the logger of the module where <code>@log</code> is applied,
-determined by inspecting the caller's frame at decoration time.</p>
-<p>When the module logger is not enabled for DEBUG at decoration time (i.e.
-at import), the decorator is a zero-cost no-op: the original function is
-returned unwrapped, so there is no extra function-call overhead in
-production.  The trade-off is that raising the log level to DEBUG after
-modules have been imported will not activate logging for already-decorated
-functions.</p>
-
+  </div>
 
     </div>
 
 </div>
 
-<div class="doc doc-object doc-function">
-
-
-<h3 id="blackbull.logger.setup_async_logging" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">setup_async_logging</span><span class="p">(</span><span class="n">handlers</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
-
-<a href="#blackbull.logger.setup_async_logging" class="headerlink" title="Permanent link">&para;</a></h3>
-
-
-    <div class="doc doc-contents ">
-
-        <p>Install a QueueHandler on the <code>blackbull</code> logger hierarchy.</p>
-<p>After this call every <code>logger.debug/info/warning</code> in the event loop
-enqueues a <code>LogRecord</code> and returns immediately.  A daemon thread
-(<code>QueueListener</code>) drains the queue and forwards records to <em>handlers</em>.</p>
-<p>Idempotent — a second call before :func:<code>teardown_async_logging</code> is a no-op.</p>
-<h5 id="blackbull.logger.setup_async_logging--parameters">Parameters<a class="headerlink" href="#blackbull.logger.setup_async_logging--parameters" title="Permanent link">&para;</a></h5>
-<p>handlers:
-    Handlers the background listener should write to.  Defaults to the
-    non-NullHandler handlers already on the <code>blackbull</code> logger, or a
-    single <code>StreamHandler(stderr)</code> when none exist.</p>
-
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-function">
-
-
-<h3 id="blackbull.logger.teardown_async_logging" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">teardown_async_logging</span><span class="p">()</span></code>
-
-<a href="#blackbull.logger.teardown_async_logging" class="headerlink" title="Permanent link">&para;</a></h3>
-
-
-    <div class="doc doc-contents ">
-
-        <p>Stop the <code>QueueListener</code> and restore a <code>NullHandler</code> on <code>blackbull</code>.</p>
-
-
-    </div>
-
-</div>
 
 
 
