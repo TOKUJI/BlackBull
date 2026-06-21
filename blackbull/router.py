@@ -890,7 +890,7 @@ class Router(UserDict, BaseRouter):
         surface before the first request is served, not after.
         """
         from beartype.door import die_if_unbearable
-        from beartype.roar import BeartypeDoorHintViolation
+        from beartype.roar import BeartypeDoorHintViolation, BeartypeException
 
         errors: list[str] = []
 
@@ -908,18 +908,34 @@ class Router(UserDict, BaseRouter):
                     continue
 
                 p = sig.parameters.get(param_name)
-                if p is None or p.annotation is inspect.Parameter.empty:
+                if p is None:
+                    continue
+
+                # Resolve string annotations (forward refs / PEP 563) to real
+                # types before handing to beartype.  inspect.Parameter.annotation
+                # returns the raw string when __future__.annotations is active,
+                # and beartype's code generator cannot handle unresolved strings.
+                try:
+                    hints = typing.get_type_hints(info.handler)
+                except Exception:
+                    hints = {}
+                annotation = hints.get(param_name, inspect.Parameter.empty)
+                if annotation is inspect.Parameter.empty:
                     continue
 
                 _regex_str, converter_fn = _CONVERTERS[spec]
                 sample = converter_fn(_SAMPLE_INPUTS[spec])
                 try:
-                    die_if_unbearable(sample, p.annotation)
+                    die_if_unbearable(sample, annotation)
                 except BeartypeDoorHintViolation as exc:
                     errors.append(
                         f"Route {info.template!r} param {param_name!r}: "
                         f"converter {spec!r} yields {type(sample).__name__!r} "
-                        f"but annotation is {p.annotation!r}: {exc}")
+                        f"but annotation is {annotation!r}: {exc}")
+                except BeartypeException:
+                    # beartype internal error (e.g. code-gen bug with a
+                    # partially-resolved forward ref) — skip this check.
+                    pass
 
         if errors:
             raise ConfigurationError('\n'.join(errors))

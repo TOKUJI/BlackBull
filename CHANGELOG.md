@@ -9,7 +9,13 @@ BlackBull uses [ZeroVer](https://0ver.org/) prior to a 1.0 commitment:
 
 - `0.MINOR.PATCH`
 - `MINOR` advances at each sprint close (one minor per closed sprint).
-  The number matches the sprint: `0.26.0` = Sprint 26 close.
+  The minor number does **not** equal the sprint number — patch releases
+  and combined-sprint releases have introduced an offset (Sprint 49
+  closed as `v0.43.0`).
+- **Exception (2026-06-21)**: Sprint 50 is not independently released —
+  it ships together with Sprint 51 and Sprint 52 as `v0.44.0` (the next
+  minor after `v0.43.0`).  Normal per-sprint versioning resumes at the
+  next sprint close as `v0.45.0`.
 - `PATCH` covers bug fixes / harness work between sprints.
 - No `1.0.0` until the framework's identity (pure-Python H1 parser,
   BlackBull-internal `ASGIServer`, per-process tick scanner deadline
@@ -23,6 +29,21 @@ so the editable install's metadata catches up.
 ---
 
 ## [Unreleased]
+
+## [0.43.1] — 2026-06-21
+
+### Fixed
+
+- **`Router.validate()` — forward-ref annotation crash on lifespan startup.**
+  Route handlers annotated with string types (`'str'`, `'int'`, etc.) or compiled
+  under `from __future__ import annotations` (PEP 563) caused a `SyntaxError`
+  inside beartype's code generator (`${FORWARDREF:str]?}` — mismatched bracket),
+  which surfaced as `RuntimeError: Lifespan startup failed` for all integration
+  tests and the production `app.run()` path.
+  Fix: resolve annotations via `typing.get_type_hints()` before passing to
+  `die_if_unbearable`, and catch `BeartypeException` (beartype's base error class)
+  as a defensive fallback for any other internal beartype code-gen failure.
+  Affected `beartype` ≥ 0.22.8; no beartype version change required.
 
 ## [0.43.0] — 2026-06-20
 
