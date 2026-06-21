@@ -9,7 +9,6 @@ Public API:
 from functools import wraps
 
 from ..response import Response
-from ..asgi import ASGIEvent
 
 
 def _normalize_send(inner_send):
@@ -26,19 +25,17 @@ def _normalize_send(inner_send):
     ``*args/**kwargs`` form needs to be preserved here, and dropping it
     shaves a per-event call-frame setup that showed in the Sprint 33
     py-spy profile on the static path.
+
+    The Response→ASGI expansion is delegated to :meth:`Response.__call__` so
+    there is a single source of truth for the start/body event shape (shared
+    with ``app._wrap_send`` and the simplified-handler dispatch).
     """
     async def normalized(event):
         if isinstance(event, Response):
-            await inner_send({
-                'type': ASGIEvent.HTTP_RESPONSE_START,
-                'status': event.status,
-                'headers': list(event.headers),
-            })
-            await inner_send({
-                'type': ASGIEvent.HTTP_RESPONSE_BODY,
-                'body': event.body,
-                'more_body': False,
-            })
+            # Response is ASGI-callable and ignores scope/receive (it is a pure
+            # serialiser wearing the ASGI-app signature), so drive it with the
+            # inner send to reuse the one Response→ASGI path.
+            await event(None, None, inner_send)
         else:
             await inner_send(event)
 

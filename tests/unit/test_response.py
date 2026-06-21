@@ -148,7 +148,7 @@ async def test_wrap_send_unpacks_response():
     assert start['type'] == 'http.response.start'
     assert start['status'] == int(HTTPStatus.CREATED)
     assert (b'content-type', b'text/html; charset=utf-8') in start['headers']
-    assert body == {'type': 'http.response.body', 'body': b'hi'}
+    assert body == {'type': 'http.response.body', 'body': b'hi', 'more_body': False}
 
 
 @pytest.mark.asyncio
@@ -191,7 +191,7 @@ async def test_wrap_send_passes_bytes_through():
     await _wrap_send(raw)(b'raw bytes')
     assert len(calls) == 2
     assert calls[0]['type'] == 'http.response.start'
-    assert calls[1] == {'type': 'http.response.body', 'body': b'raw bytes'}
+    assert calls[1] == {'type': 'http.response.body', 'body': b'raw bytes', 'more_body': False}
 
 
 # ---------------------------------------------------------------------------

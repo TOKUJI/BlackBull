@@ -35,37 +35,37 @@ logger = logging.getLogger(__name__)
 
 
 def _wrap_send(raw_send):
-    """Wrap an ASGI send callable to also accept Response objects.
+    """Adapt the handler-facing ``send`` to accept BlackBull convenience shapes.
 
-    Normalises every form a BlackBull handler may produce — Response
-    object, ASGI event dict, or raw ``bytes`` body — into the standard
-    ASGI 3.0 ``http.response.start`` + ``http.response.body`` event
-    pair forwarded to ``raw_send`` one event at a time.  This keeps
-    ``BlackBull.__call__`` truly ASGI 3.0 compliant so the app runs
-    unchanged under external ASGI servers (uvicorn, hypercorn,
-    httpx.ASGITransport, …) while BlackBull's own ``HTTP1Sender`` /
-    ``HTTP2Sender`` (which also accept dict events natively) handle
-    the same canonical sequence.
+    BlackBull lets a handler emit more than bare ASGI dicts: a ``Response``
+    object, or the ``send(body_bytes, status, headers)`` 3-arg form.  This
+    wrapper normalises those into standard ASGI ``http.response.start`` +
+    ``http.response.body`` events before they reach ``raw_send`` (the access
+    log + wire sender, which also accept dict events natively), so the app
+    stays ASGI 3.0 compliant under external servers (uvicorn, hypercorn,
+    httpx.ASGITransport, …).
+
+    **Altitude matters.**  This adapter is installed at the *handler boundary*
+    inside :meth:`_dispatch` — never at :meth:`__call__` around the whole
+    middleware chain.  Wrapping outward leaks ``Response`` objects into
+    middleware ``send`` wrappers, which reasonably assume ASGI dicts and
+    crash on ``msg['type']`` (the 0.43.2 regression; locked by
+    ``tests/unit/test_middleware_decorator.py``).  Keep it innermost so
+    everything above the route handler observes plain ASGI dicts.
+
+    The Response case delegates to :meth:`Response.__call__` — the single
+    source of truth for Response→ASGI serialisation, shared with
+    ``middleware.utils._normalize_send``.  Response is a pure serialiser and
+    ignores scope/receive, so ``None`` is passed for both.
     """
     from .response import Response as _Response
 
     async def _send(event, status=HTTPStatus.OK, headers=[]):
         if isinstance(event, _Response):
-            await raw_send({
-                'type': 'http.response.start',
-                'status': int(event.status),
-                'headers': list(event.headers),
-            })
-            await raw_send({
-                'type': 'http.response.body',
-                'body': event.body,
-            })
-        elif isinstance(event, dict):
-            # Standard ASGI event from full-form handlers or middleware.
-            await raw_send(event)
+            await event(None, None, raw_send)
         elif isinstance(event, (bytes, bytearray, memoryview)):
-            # Legacy "bytes body + status + headers" form used by simplified
-            # handlers when they pass through the wrap from inside BlackBull.
+            # ``send(body, status, headers)`` convenience form — used by
+            # full-form handlers and custom error handlers.
             await raw_send({
                 'type': 'http.response.start',
                 'status': int(status),
@@ -74,10 +74,11 @@ def _wrap_send(raw_send):
             await raw_send({
                 'type': 'http.response.body',
                 'body': bytes(event) if not isinstance(event, bytes) else event,
+                'more_body': False,
             })
         else:
-            # Unknown shapes are passed through; the underlying sender's
-            # type checking decides what to do with them.
+            # ASGI dict (the common path) or any other shape — passed through
+            # so the underlying sender's type checking decides what to do.
             await raw_send(event)
 
     return _send
@@ -429,6 +430,13 @@ class BlackBull:
             await function(scope, receive, send)
             return
 
+        # Normalise send for the HTTP path: handlers may emit Response objects
+        # or the (bytes, status, headers) 3-arg form.  Apply _wrap_send here —
+        # at the handler boundary, after the WebSocket branch — so middleware
+        # (which sees send before _dispatch is entered) always receives plain
+        # ASGI dicts.  See _wrap_send for why outward placement is a bug.
+        send = _wrap_send(send)
+
         try:
             # RFC 9110 §9.1 — methods are case-sensitive tokens.  Prefer the
             # HTTPMethod enum for IANA-registered methods; for non-IANA methods
@@ -522,7 +530,7 @@ class BlackBull:
         if raw_headers is not None and not isinstance(raw_headers, Headers):
             scope['headers'] = Headers(raw_headers)
 
-        await self._chain(scope, receive, _wrap_send(send))
+        await self._chain(scope, receive, send)
 
     def route(self, methods: str | HTTPMethod | Iterable[str | HTTPMethod] = [HTTPMethod.GET],
               path: str = '/', scheme: Scheme | Iterable[Scheme] = Scheme.http,

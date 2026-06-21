@@ -52,6 +52,22 @@ class Response:
                     v = v.encode('ascii')
                 self.headers.append((k, v))
 
+    async def __call__(self, scope, receive, send) -> None:
+        """Drive this response as an ASGI app: emit ``start`` then ``body``.
+
+        Mirrors :class:`StreamingResponse` so every BlackBull response type
+        shares one protocol — ``await response(scope, receive, send)`` —
+        whether returned from a simplified handler, invoked explicitly by a
+        full-form handler, or normalised by ``app._wrap_send``.  Keeping the
+        start/body serialisation here means there is a single source of truth
+        for turning a Response into ASGI events.
+        """
+        await send({'type': 'http.response.start',
+                    'status': int(self.status),
+                    'headers': list(self.headers)})
+        await send({'type': 'http.response.body',
+                    'body': self.body, 'more_body': False})
+
 
 class JSONResponse(Response):
     """HTTP response with JSON-serialised body and ``application/json`` content-type.
