@@ -30,6 +30,36 @@ so the editable install's metadata catches up.
 
 ## [Unreleased]
 
+## [0.43.2] — 2026-06-22
+
+### Fixed
+
+- **Middleware `send` wrappers received `Response` objects instead of ASGI
+  dicts.**  The `_wrap_send` adapter was installed at the outermost layer
+  (`BlackBull.__call__`), but `send` flows handler→outward, so it normalised
+  *last* — after every middleware had already seen the raw object.  A
+  middleware that wrapped `send` and inspected `msg['type']` therefore crashed
+  with `TypeError: 'Response' object is not subscriptable` whenever a handler
+  returned a `dict`/`str` (auto-`Response`) or called `send(Response(...))`.
+  Fix: install `_wrap_send` at the *handler boundary* in `_dispatch`, so
+  everything above the route handler observes plain ASGI dicts.  (The defect
+  shipped in 0.43.0; it surfaced only in 0.43.1 once the lifespan-startup crash
+  it hid behind — the beartype forward-ref bug — was fixed.)
+
+### Internal
+
+- **Unified the Response→ASGI serialisation onto a single source of truth.**
+  `Response` is now ASGI-callable (`Response.__call__(scope, receive, send)`),
+  mirroring `StreamingResponse`, so every response type shares one protocol.
+  `app._wrap_send` and `middleware.utils._normalize_send` both delegate to it
+  instead of carrying their own (and previously divergent) copies of the
+  `http.response.start` + `http.response.body` event construction.  No wire
+  behaviour change; terminal body events now consistently carry
+  `more_body: False`.
+- Added a regression test (`test_middleware_decorator.py`) asserting that a
+  plain, undecorated middleware's `send` wrapper receives ASGI dicts through
+  the full app stack.
+
 ## [0.43.1] — 2026-06-21
 
 ### Fixed

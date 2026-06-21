@@ -207,3 +207,55 @@ async def test_startup_accepts_undecorated_valid_middleware():
     await app._handle_lifespan({'type': 'lifespan'}, mock_receive, mock_send)
 
     assert not failed
+
+
+# ---------------------------------------------------------------------------
+# Regression (0.43.2): plain (undecorated) middleware send wrappers must see
+# ASGI dicts, never Response objects, when driven through the full app stack.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_plain_middleware_send_wrapper_sees_asgi_dicts():
+    """An undecorated middleware that wraps ``send`` and subscripts
+    ``msg['type']`` must receive ASGI dicts.
+
+    Before 0.43.2 ``_wrap_send`` was applied at ``BlackBull.__call__``
+    (outermost), so a simplified handler returning a dict (auto-JSONResponse)
+    reached the middleware's send wrapper as a ``Response`` object →
+    ``TypeError: 'Response' object is not subscriptable``.  The adapter now
+    sits at the handler boundary in ``_dispatch`` so middleware always sees
+    plain dicts.
+    """
+    from blackbull import BlackBull
+
+    app = BlackBull()
+    seen_status = []
+
+    async def stats_mw(scope, receive, send, call_next):
+        async def capture(msg):
+            if msg['type'] == 'http.response.start':   # subscripts the dict
+                seen_status.append(msg['status'])
+            await send(msg)
+        await call_next(scope, receive, capture)
+
+    app.use(stats_mw)
+
+    @app.route(path='/health')
+    async def health():
+        return {'status': 'ok'}          # auto JSONResponse
+
+    sent = []
+    scope = {'type': 'http', 'method': 'GET', 'path': '/health',
+             'headers': [], 'client': ('127.0.0.1', 1)}
+
+    async def receive():
+        return {'type': 'http.request', 'body': b'', 'more_body': False}
+
+    async def send(event):
+        sent.append(event)
+
+    await app(scope, receive, send)
+
+    assert seen_status == [200]
+    assert all(isinstance(e, dict) for e in sent)
+    assert sent[0]['type'] == 'http.response.start'
