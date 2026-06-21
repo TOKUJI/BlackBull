@@ -84,7 +84,8 @@ def test_all_level_b_events_covered() -> None:
         "on_request_completed", "on_request_disconnected", "on_error",
         "on_websocket_connected", "on_websocket_message",
         "on_websocket_disconnected",
-        "on_connection_accepted",
+        "on_connection_accepted", "on_connection_closed",
+        "on_message_received", "on_message_sent",
     }
     from blackbull.event_aggregator import EventAggregator
     actual = {name for name in dir(EventAggregator) if name.startswith("on_")}

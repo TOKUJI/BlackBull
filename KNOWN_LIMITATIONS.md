@@ -98,6 +98,24 @@ appears.
 
 ## Deployment notes
 
+### Raw protocol handlers are single-worker and cleartext-only
+
+When a non-ASGI protocol handler is registered via `app.raw_handler()` or
+`app.register_protocol_handler()`, BlackBull enforces two constraints:
+
+**Single-worker only** — if `workers > 1` is requested at startup, the
+server silently forces `workers=1` for the entire process.  The root cause
+is that inherited-socket adoption (used for `--reload`) does not tag sockets
+by protocol; distributing raw protocol sockets across worker processes would
+require SO_REUSEPORT with protocol-tagged socket sets or a dispatcher-worker
+model.  Planned for resolution after Sprint 52.
+
+**Cleartext only** — raw protocol sockets are bound without TLS regardless
+of whether a TLS certificate is configured.  Adding TLS support for raw
+protocols requires `ssl_context` plumbing through `RawBinding` → `Server`.
+For MQTT-over-TLS or similar, put a TLS-terminating proxy in front of the
+raw socket.
+
 ### Multi-worker scaling tops out at physical core count
 
 Worker throughput scales roughly to the **physical core count**,

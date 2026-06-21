@@ -237,6 +237,12 @@ class BlackBull:
         # docs/guide/extensions.md.
         self.extensions: dict[str, object] = {}
 
+        # Non-ASGI protocol registry (Sprint 50) — lazily built on the first
+        # raw_handler / register_protocol_handler so importing BlackBull does
+        # not drag in the server package.  None means "HTTP-only" (the bridge
+        # is fully dormant).
+        self._protocol_registry = None
+
         if trusted_proxies is not None:
             from .middleware.proxy import TrustedProxy  # noqa: PLC0415
             self.use(TrustedProxy(trusted_proxies))
@@ -652,6 +658,51 @@ class BlackBull:
             docs_path=docs_path,
         )
 
+    def register_protocol_handler(
+        self,
+        name: str,
+        handler: Callable[..., Awaitable[None]],
+        *,
+        detector: object | None = None,
+        port: int | None = None,
+    ) -> None:
+        """Register a handler for a non-ASGI (raw) protocol (Sprint 50).
+
+        The handler is an async callable ``(reader, writer, ctx) -> None`` that
+        owns the connection for its whole lifetime.  When *port* is set, the
+        server binds an additional listening socket on it; connections there
+        skip HTTP detection and go straight to *handler*.
+
+        Args:
+            name: Protocol name (e.g. ``'echo'``, ``'mqtt'``); must be unique.
+            handler: Async ``(reader, writer, ctx)`` coroutine.
+            detector: Reserved for first-byte sniffing on shared ports
+                (Sprint 51); unused today.
+            port: Dedicated listening port for this protocol.
+        """
+        if self._protocol_registry is None:
+            from .server.protocol_registry import ProtocolRegistry  # noqa: PLC0415
+            self._protocol_registry = ProtocolRegistry()
+        self._protocol_registry.register(name, handler,
+                                         detector=detector, port=port)
+
+    def raw_handler(self, name: str, *, port: int | None = None,
+                    detector: object | None = None):
+        """Decorator form of :meth:`register_protocol_handler`.
+
+        ::
+
+            @app.raw_handler('echo', port=9000)
+            async def echo(reader, writer, ctx):
+                while data := await reader.read(1024):
+                    await writer.write(data)
+        """
+        def decorator(handler):
+            self.register_protocol_handler(name, handler,
+                                           detector=detector, port=port)
+            return handler
+        return decorator
+
     def run(self, certfile=None, keyfile=None, port: int | None = None,
             unix_path: str | None = None,
             inherited_fd: int | None = None,
@@ -749,6 +800,17 @@ def serve(app, *,
     _cfg = _get_settings()
     workers = workers if workers is not None else _cfg.workers
     workers = workers or (_os.cpu_count() or 1)
+
+    # Sprint 50: port-bound non-ASGI protocols are bound only in the
+    # single-worker path (inherited-socket adoption does not tag sockets by
+    # protocol, so multi-worker raw ports are a carry-forward).  Force
+    # workers=1 so ``app.run(port=8000)`` with a raw_handler "just works".
+    if (isinstance(app, BlackBull) and app._protocol_registry is not None
+            and app._protocol_registry.has_port_bindings() and workers > 1):
+        logger.warning(
+            'Non-ASGI protocol handlers are single-worker only; '
+            'forcing workers=1 (was %d).', workers)
+        workers = 1
     max_connections = max_connections if max_connections is not None else _cfg.max_connections
     stream_queue_depth = (stream_queue_depth if stream_queue_depth is not None
                           else _cfg.stream_queue_depth)

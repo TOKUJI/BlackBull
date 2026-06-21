@@ -157,5 +157,52 @@ class EventAggregator:
     # Connection lifecycle
     # ------------------------------------------------------------------
 
-    async def on_connection_accepted(self, peername) -> None:
-        """Level A notification — no Level B event fires yet."""
+    async def on_connection_accepted(self, peername, protocol: str = 'http') -> None:
+        """Fire Level B ``connection_accepted``.
+
+        *protocol* is ``'http'`` for the shared HTTP listener (the h1/h2 split is
+        not yet known at accept time) and the registered protocol name (e.g.
+        ``'echo'``) for a port-bound non-ASGI connection.
+        """
+        if not self._dispatcher.has_listeners('connection_accepted'):
+            return
+        await self._dispatcher.emit(Event('connection_accepted', {
+            'peername': peername,
+            'protocol': protocol,
+        }))
+
+    async def on_connection_closed(
+        self, peername, protocol: str, duration_ms: float
+    ) -> None:
+        """Fire Level B ``connection_closed``."""
+        if not self._dispatcher.has_listeners('connection_closed'):
+            return
+        await self._dispatcher.emit(Event('connection_closed', {
+            'peername': peername,
+            'protocol': protocol,
+            'duration_ms': duration_ms,
+        }))
+
+    async def on_message_received(
+        self, protocol: str, message_type: str, payload_size: int
+    ) -> None:
+        """Fire Level B ``message_received`` (application-level message in)."""
+        if not self._dispatcher.has_listeners('message_received'):
+            return
+        await self._dispatcher.emit(Event('message_received', {
+            'protocol': protocol,
+            'message_type': message_type,
+            'payload_size': payload_size,
+        }))
+
+    async def on_message_sent(
+        self, protocol: str, message_type: str, payload_size: int
+    ) -> None:
+        """Fire Level B ``message_sent`` (application-level message out)."""
+        if not self._dispatcher.has_listeners('message_sent'):
+            return
+        await self._dispatcher.emit(Event('message_sent', {
+            'protocol': protocol,
+            'message_type': message_type,
+            'payload_size': payload_size,
+        }))
