@@ -1,0 +1,96 @@
+name: pytest
+
+# Two-tier pytest CI (Sprint 51 R8).
+#
+# Fast tier  — runs on every push/PR; no Docker, beartype enabled.
+#              Catches regressions in unit, architecture, and property tests.
+# Full tier  — runs weekly (Saturday 05:00 UTC, offset from conformance.yml's
+#              Sunday 03:17 UTC) and on demand; adds --run-all (integration +
+#              docker-dependent tests).
+#
+# Both tiers install the full [compression,testing] extras and generate a
+# self-signed TLS cert so TLS-aware tests don't fail due to missing key files.
+#
+# Third-party actions pinned to commit SHAs per the supply-chain hygiene
+# baseline (Sprint 30 Task 6); Dependabot tracks updates.
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  schedule:
+    # Full-tier weekly run — Saturday 05:00 UTC.
+    - cron: '0 5 * * 6'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fast:
+    name: Fast tier (unit + arch + properties)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10   # v6.0.3
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405   # v6.2.0
+        with:
+          python-version: '3.12'
+
+      - name: Install BlackBull (with test-relevant extras)
+        # fault-injection (cryptography) + reload (watchfiles) + speed (uvloop)
+        # are exercised by unit/architecture tests; without them those tests
+        # raise ImportError on the runner.
+        run: pip install -e '.[compression,testing,fault-injection,reload,speed]'
+
+      - name: Generate self-signed TLS material
+        run: |
+          openssl req -x509 -newkey rsa:2048 \
+            -keyout tests/key.pem -out tests/cert.pem \
+            -days 365 -nodes -subj '/CN=localhost'
+
+      - name: Run fast test tier
+        # Scope to the Docker-free suites named in this job.  `pytest tests/`
+        # would collect tests/integration + docker-dependent conformance
+        # modules whose top-level `import docker` fails here (no Docker on the
+        # fast tier); those run on the full tier and via the dedicated h2spec
+        # / Autobahn / user-corpus jobs.
+        run: |
+          python -m pytest tests/unit tests/architecture tests/properties \
+            --timeout=60 -q --beartype-packages=blackbull
+
+  full:
+    name: Full tier (+ integration + docker)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10   # v6.0.3
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405   # v6.2.0
+        with:
+          python-version: '3.12'
+
+      - name: Install BlackBull (with test-relevant extras + Docker deps)
+        # Full tier runs --run-all, so it also needs testcontainers/docker for
+        # the integration + docker-dependent conformance tests.
+        run: |
+          pip install -e '.[compression,testing,fault-injection,reload,speed]'
+          pip install testcontainers docker
+
+      - name: Generate self-signed TLS material
+        run: |
+          openssl req -x509 -newkey rsa:2048 \
+            -keyout tests/key.pem -out tests/cert.pem \
+            -days 365 -nodes -subj '/CN=localhost'
+
+      - name: Run full test tier
+        run: |
+          python -m pytest tests/ --run-all --timeout=120 -q \
+            --beartype-packages=blackbull
