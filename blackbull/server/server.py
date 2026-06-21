@@ -119,10 +119,15 @@ class LifespanManager:
 
 
 @asynccontextmanager
-async def SocketManager(cb, raw_sockets, ssl_context):
+async def SocketManager(socket_cb_pairs, ssl_context):
     """Async context manager that creates asyncio servers from already-bound sockets.
 
-    On enter: wraps each raw socket in asyncio.start_server (TCP) or
+    *socket_cb_pairs* is an iterable of ``(sock, callback)`` — each socket is
+    served by its own accept callback.  The shared HTTP listener uses
+    :meth:`Server.client_connected_cb`; port-bound non-ASGI protocols (Sprint 50)
+    use a per-binding raw callback.
+
+    On enter: wraps each socket in asyncio.start_server (TCP) or
     asyncio.start_unix_server (AF_UNIX) and yields the list.
     On exit: closes all asyncio servers.
 
@@ -140,7 +145,7 @@ async def SocketManager(cb, raw_sockets, ssl_context):
     # Use a sentinel so the family comparison never raises AttributeError.
     _af_unix = getattr(_socket, 'AF_UNIX', None)
     servers = []
-    for sock in raw_sockets:
+    for sock, cb in socket_cb_pairs:
         # ssl_handshake_timeout is meaningful only when SSL is enabled.
         kwargs = {'sock': sock, 'ssl': ssl_context, 'backlog': _backlog}
         if ssl_context is not None:
@@ -160,22 +165,41 @@ async def SocketManager(cb, raw_sockets, ssl_context):
             srv.close()
 
 
-class ASGIServer:
-    """ An asyncio socket server with which reads first several bytes and dispatches
-    transactions to HTTP2/HTTP1.1/WebSocket server.
-    When ssl_context or certfile is set, this server runs as a HTTPS server.
+class Server:
+    """An asyncio socket server that dispatches each connection through the
+    app's :class:`~blackbull.server.protocol_registry.ProtocolRegistry`.
+
+    The shared HTTP listener detects HTTP/1.1 vs HTTP/2 (and upgrades to
+    WebSocket); port-bound non-ASGI protocols registered via
+    :meth:`BlackBull.raw_handler` get their own listening socket (Sprint 50).
+    When ssl_context or certfile is set, the HTTP listener runs as HTTPS.
+
+    Formerly ``ASGIServer`` — that name remains as a backward-compat alias.
     """
     def __init__(self, app, *,
                  ssl_context=None, certfile=None, keyfile=None, password=None,
                  max_connections: int = 0,
                  stream_queue_depth: int = _HTTP2_STREAM_QUEUE_DEPTH,
                  ws_queue_depth: int = _WS_EVENT_QUEUE_DEPTH,
+                 protocol_registry=None,
                  **kwds):
         self.app = app
         self._max_connections = max_connections
         self._stream_queue_depth = stream_queue_depth
         self._ws_queue_depth = ws_queue_depth
         self._active_connections = 0
+
+        # Protocol registry: explicit arg wins, else the app's (a BlackBull
+        # carries one once a raw_handler is registered), else a default holding
+        # only the built-in http1/http2 bindings.
+        from .protocol_registry import ProtocolRegistry as _PR  # noqa: PLC0415
+        self._protocol_registry = (protocol_registry
+                                   or getattr(app, '_protocol_registry', None)
+                                   or _PR())
+        # name -> bound port, populated by open_socket for port-bound protocols.
+        self.protocol_ports: dict[str, int] = {}
+        # list of (raw_sockets, binding) bound for non-ASGI protocols.
+        self._protocol_sockets: list = []
         # Cache the dispatcher + aggregator pair once — both are
         # process-wide singletons.  Looking them up per accept is wasted
         # work on the hot connection-burst path.
@@ -251,7 +275,23 @@ class ASGIServer:
         self.ssl_context.load_verify_locations(cafile=ca_cert)
 
     async def client_connected_cb(self, reader, writer):
-        """Called when the server receives a new TCP connection."""
+        """Accept callback for the shared HTTP listener."""
+        await self._serve_connection(reader, writer)
+
+    def _raw_connected_cb(self, binding):
+        """Build an accept callback for a port-bound non-ASGI protocol."""
+        async def _cb(reader, writer):
+            await self._serve_connection(reader, writer, bound_binding=binding)
+        return _cb
+
+    async def _serve_connection(self, reader, writer, *, bound_binding=None):
+        """Wrap the transport and run one :class:`ConnectionActor`.
+
+        *bound_binding* is set for port-bound non-ASGI protocols (Sprint 50) —
+        the connection skips HTTP detection and is handed straight to the
+        binding's raw handler.
+        """
+        import uuid  # noqa: PLC0415
         from .connection_actor import ConnectionActor  # noqa: PLC0415
         from .sender import AsyncioWriter  # noqa: PLC0415
         from .recipient import AsyncioReader  # noqa: PLC0415
@@ -313,11 +353,12 @@ class ASGIServer:
                         requested=self._active_connections + 1,
                         limit=self._max_connections,
                         peer=peername, protocol='tcp')
-            if alpn != 'h2':
+            if bound_binding is None and alpn != 'h2':
                 # HTTP/1.1 (or undetected cleartext — h1 is the safe
                 # default since the client hasn't spoken yet).  Minimal
                 # response: no body, content-length: 0, connection:
-                # close.  Retry-After in seconds.
+                # close.  Retry-After in seconds.  A port-bound non-ASGI
+                # protocol gets a plain close — we don't know its framing.
                 try:
                     await wrapped_writer.write(
                         b'HTTP/1.1 503 Service Unavailable\r\n'
@@ -342,6 +383,9 @@ class ASGIServer:
                 alpn=alpn,
                 stream_queue_depth=self._stream_queue_depth,
                 ws_queue_depth=self._ws_queue_depth,
+                registry=self._protocol_registry,
+                bound_binding=bound_binding,
+                connection_id=uuid.uuid4().hex,
             )
             await actor.run()
         finally:
@@ -441,9 +485,39 @@ class ASGIServer:
         # Pre-wrapping with ssl_context.wrap_socket() causes a double-TLS
         # layer and breaks the handshake.
 
+        self._bind_protocol_sockets(_cfg)
+
+    def _bind_protocol_sockets(self, _cfg):
+        """Bind a listening socket per port-bound non-ASGI protocol (Sprint 50).
+
+        Each :class:`RawBinding` registered with a ``port`` gets its own
+        dual-stack socket set.  ``port=0`` lets the OS pick a free port (used by
+        tests); the bound port is recorded in :attr:`protocol_ports`.  Cleartext
+        only — TLS for raw protocols is out of scope for the PoC.
+        """
+        for port, binding in self._protocol_registry.port_bindings.items():
+            socks = create_dual_stack_sockets(
+                port,
+                backlog=_cfg.socket_backlog,
+                sndbuf=_cfg.socket_sndbuf,
+                rcvbuf=_cfg.socket_rcvbuf,
+                user_timeout_ms=_cfg.tcp_user_timeout_ms,
+                keepalive=False,
+            )
+            if not socks:
+                logger.error('Failed to bind %s on port %d.', binding.name, port)
+                continue
+            bound_port = socks[0].getsockname()[1]
+            self.protocol_ports[binding.name] = bound_port
+            self._protocol_sockets.append((socks, binding))
+            logger.info('Protocol %r listening on port %d', binding.name, bound_port)
+
     def close_socket(self):
         for s in getattr(self, 'raw_sockets', []):
             s.close()
+        for socks, _ in self._protocol_sockets:
+            for s in socks:
+                s.close()
 
     async def startup(self):
         """Drive the ASGI lifespan startup handshake.
@@ -465,13 +539,20 @@ class ASGIServer:
         if not hasattr(self, 'raw_sockets') or not self.raw_sockets:
             self.open_socket(port)
 
-        # SocketManager wraps each raw socket in asyncio.start_server and
-        # closes all servers on exit.  LifespanManager drives the ASGI
-        # lifespan protocol; nesting it inside SocketManager guarantees:
-        #   startup completes before serve_forever() is called, and
-        #   shutdown completes before sockets are closed.
-        async with SocketManager(self.client_connected_cb,
-                                 self.raw_sockets, self.ssl_context) as servers:
+        # SocketManager wraps each socket in asyncio.start_server and closes all
+        # servers on exit.  The shared HTTP listener uses client_connected_cb;
+        # each port-bound non-ASGI protocol uses its own raw callback.  Raw
+        # sockets are cleartext (no TLS) for the Sprint 50 PoC.
+        # LifespanManager drives the ASGI lifespan protocol; nesting it inside
+        # SocketManager guarantees: startup completes before serve_forever() is
+        # called, and shutdown completes before sockets are closed.
+        pairs = [(s, self.client_connected_cb) for s in self.raw_sockets]
+        async with SocketManager(pairs, self.ssl_context) as servers, \
+                SocketManager(
+                    [(s, self._raw_connected_cb(binding))
+                     for socks, binding in self._protocol_sockets for s in socks],
+                    None) as raw_servers:
+            servers = servers + raw_servers
             async with LifespanManager(self.app):
                 logger.info(f'Server(s) created: {servers}')
                 try:
@@ -520,6 +601,12 @@ class ASGIServer:
                 time.sleep(poll_interval)
 
     def close(self):
-        logger.info('ASGIServer.close() is called.')
+        logger.info('Server.close() is called.')
         logger.info(self.__dict__)
         self.close_socket()
+
+
+# Backward-compat alias — ``ASGIServer`` was renamed to ``Server`` in Sprint 50
+# when the class gained non-ASGI (raw protocol) listeners.  Existing imports
+# (``from blackbull.server import ASGIServer``) keep working.
+ASGIServer = Server

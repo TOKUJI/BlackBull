@@ -28,7 +28,7 @@ async def test_socket_manager_handles_missing_af_unix(monkeypatch):
         writer.close()
 
     try:
-        async with SocketManager(_cb, [tcp_sock], ssl_context=None) as servers:
+        async with SocketManager([(tcp_sock, _cb)], ssl_context=None) as servers:
             assert len(servers) == 1
             await asyncio.sleep(0)
     finally:

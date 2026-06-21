@@ -8,14 +8,13 @@ from ..actor import Actor, Message
 from ..event_aggregator import EventAggregator
 from .cap_log import CapHitCounter
 from .deadline import ConnectionDeadline
-from .recipient import (AbstractReader, IncompleteReadError,
+from .protocol_registry import (ConnectionView, ProtocolBinding,
+                                ProtocolRegistry)
+from .recipient import (AbstractReader,
                         _HTTP2_STREAM_QUEUE_DEPTH, _WS_EVENT_QUEUE_DEPTH)
 from .sender import AbstractWriter
 
 logger = logging.getLogger(__name__)
-
-_HTTP2_PREFACE_FIRST_LINE = b'PRI * HTTP/2.0\r\n'
-_HTTP2_PREFACE_REMAINDER  = b'\r\nSM\r\n\r\n'
 
 
 class ConnectionActor(Actor):
@@ -42,6 +41,9 @@ class ConnectionActor(Actor):
         alpn: str | None = None,
         stream_queue_depth: int = _HTTP2_STREAM_QUEUE_DEPTH,
         ws_queue_depth: int = _WS_EVENT_QUEUE_DEPTH,
+        registry: ProtocolRegistry | None = None,
+        bound_binding: ProtocolBinding | None = None,
+        connection_id: str = '',
     ) -> None:
         super().__init__()
         self._reader = reader
@@ -54,6 +56,13 @@ class ConnectionActor(Actor):
         self._alpn = alpn
         self._stream_queue_depth = stream_queue_depth
         self._ws_queue_depth = ws_queue_depth
+        # A registry is always available: tests construct ConnectionActor with
+        # positional (reader, writer, app, aggregator) and no registry, so fall
+        # back to a default holding only the built-in http1/http2 bindings.
+        self._registry = registry if registry is not None else ProtocolRegistry()
+        # When set (port-bound raw protocol), detection is skipped entirely.
+        self._bound_binding = bound_binding
+        self._connection_id = connection_id
 
     async def run(self) -> None:
         # Per-connection cap-hit rate-limit state — bound on the
@@ -64,7 +73,10 @@ class ConnectionActor(Actor):
         counter = CapHitCounter()
         with counter.bind():
             if self._aggregator is not None:
-                await self._aggregator.on_connection_accepted(self._peername)
+                protocol = (self._bound_binding.name
+                            if self._bound_binding is not None else 'http')
+                await self._aggregator.on_connection_accepted(
+                    self._peername, protocol=protocol)
             try:
                 await self._dispatch()
             except Exception as exc:
@@ -98,13 +110,33 @@ class ConnectionActor(Actor):
         # just re-arms the same handle.
         dl = ConnectionDeadline()
 
-        # ALPN-negotiated HTTP/2: the peer is committed to HTTP/2, so the
-        # first 24 bytes MUST be the connection preface (RFC 9113 §3.4).
-        # Read exactly 24 bytes rather than scanning for CRLF so an invalid
-        # preface is detected and rejected promptly instead of hanging the
-        # reader (h2spec §3.5 #2 exercises this with a non-preface byte
-        # sequence and times out otherwise).
-        if self._alpn == 'h2':
+        conn = ConnectionView(
+            reader=self._reader, writer=self._writer, app=self._app,
+            aggregator=self._aggregator,
+            peername=self._peername, sockname=self._sockname, ssl=self._ssl,
+            alpn=self._alpn, deadline=dl, connection_id=self._connection_id,
+            stream_queue_depth=self._stream_queue_depth,
+            ws_queue_depth=self._ws_queue_depth,
+        )
+
+        # Port-bound non-ASGI protocol (Sprint 50): the listening socket already
+        # identifies the protocol, so skip detection and the deadline machinery
+        # entirely — the handler owns the connection lifetime.
+        if self._bound_binding is not None:
+            await self._bound_binding.serve_raw(conn)
+            return
+
+        # Sprint 50: dispatch is registry-driven.  ``http1``/``http2`` are
+        # built-in bindings; the deadline-guarded reads + slowloris handling
+        # stay here so the hot HTTP path is unchanged — only protocol selection
+        # and Actor construction move into the bindings.
+
+        # ALPN-negotiated protocol: the peer is committed.  For HTTP/2 the first
+        # 24 bytes MUST be the connection preface (RFC 9113 §3.4).  Read exactly
+        # 24 bytes rather than scanning for CRLF so an invalid preface is
+        # rejected promptly instead of hanging the reader (h2spec §3.5 #2).
+        alpn_binding = self._registry.by_alpn(self._alpn)
+        if alpn_binding is not None:
             try:
                 if deadline is not None:
                     with dl.guard(deadline):
@@ -112,40 +144,19 @@ class ConnectionActor(Actor):
                 else:
                     preface = await self._reader.readexactly(24)
             except (asyncio.TimeoutError, TimeoutError):
-                # Peer connected via ALPN h2 but never sent the preface.
+                # Peer connected via ALPN but never sent the preface.
                 # Close — no GOAWAY since we don't have a SETTINGS exchange.
-                logger.warning('slowloris: ALPN-h2 peer sent no preface within %.1fs', deadline)
+                logger.warning('slowloris: ALPN-%s peer sent no preface within %.1fs',
+                               self._alpn, deadline)
                 from .cap_log import log_cap_hit  # noqa: PLC0415
                 log_cap_hit('header_timeout',
                             requested=deadline, limit=deadline,
                             peer=self._peername, protocol='h2')
                 return
-            expected = _HTTP2_PREFACE_FIRST_LINE + _HTTP2_PREFACE_REMAINDER
-            if preface != expected:
-                # Best-effort: send GOAWAY before closing so a peer that did
-                # implement HTTP/2 gets a clean diagnosis.  We do not bother
-                # framing the goaway via the factory — the connection is
-                # already doomed and we want to close before timing out.
-                from ..protocol.frame_types import ErrorCodes  # noqa: PLC0415
-                goaway = (b'\x00\x00\x08\x07\x00\x00\x00\x00\x00'
-                          + b'\x00\x00\x00\x00'
-                          + int(ErrorCodes.PROTOCOL_ERROR).to_bytes(4, 'big'))
-                try:
-                    await self._writer.write(goaway)
-                except Exception:
-                    pass
-                raise ValueError(f'Invalid HTTP/2 preface: {preface!r}')
-            from .http2_actor import HTTP2Actor  # noqa: PLC0415
-            actor = HTTP2Actor(
-                self._reader, self._writer, self._app, self._aggregator,
-                peername=self._peername, sockname=self._sockname,
-                ssl=self._ssl,
-                stream_queue_depth=self._stream_queue_depth,
-            )
-            await actor.run()
+            await alpn_binding.serve_alpn(conn, preface)
             return
 
-        # No ALPN (cleartext) or ALPN didn't pick h2 — sniff the first line.
+        # No ALPN (cleartext) or ALPN didn't match a binding — sniff the first line.
         try:
             if deadline is not None:
                 with dl.guard(deadline):
@@ -172,29 +183,26 @@ class ConnectionActor(Actor):
                 pass
             return
 
-        if first_line == _HTTP2_PREFACE_FIRST_LINE:
-            remainder = await self._reader.readexactly(8)
-            if first_line + remainder != _HTTP2_PREFACE_FIRST_LINE + _HTTP2_PREFACE_REMAINDER:
-                raise ValueError(
-                    f'Invalid HTTP/2 preface continuation: {remainder!r}')
-            from .http2_actor import HTTP2Actor  # noqa: PLC0415
-            actor = HTTP2Actor(
-                self._reader, self._writer, self._app, self._aggregator,
-                peername=self._peername, sockname=self._sockname,
-                ssl=self._ssl,
-                stream_queue_depth=self._stream_queue_depth,
-            )
-        else:
-            from .http1_actor import HTTP1Actor  # noqa: PLC0415
-            actor = HTTP1Actor(
-                self._reader, self._writer, self._app, self._aggregator,
-                request=first_line,
-                peername=self._peername, sockname=self._sockname,
-                ssl=self._ssl,
-                ws_queue_depth=self._ws_queue_depth,
-                deadline=dl,
-            )
-        await actor.run()
+        # Shared-port protocol detection (Sprint 51): raw bindings with a
+        # ProtocolDetector get a chance to claim the connection before the
+        # http1 fallback — enabling e.g. MQTT+HTTP on one port.  Iteration is
+        # registration order (``raw_bindings`` is insertion-ordered), so when
+        # multiple detectors match overlapping byte signatures the
+        # first-registered binding wins.  Not exercised in Sprint 52 (a single
+        # MQTT detector); revisit this ordering guarantee if multi-detector
+        # ports arrive.
+        for raw_binding in self._registry.raw_bindings.values():
+            if (raw_binding.detector is not None
+                    and raw_binding.detector.detect(first_line, self._alpn)):
+                await raw_binding.serve_raw(conn)
+                return
+
+        # First cleartext binding to claim the line wins (http2 preface, then
+        # the http1 fallback which matches any line and is registered last).
+        for binding in self._registry.cleartext_bindings:
+            if binding.matches_cleartext(first_line):
+                await binding.serve_cleartext(conn, first_line)
+                return
 
     async def _handle(self, msg: Message) -> None:
         raise NotImplementedError

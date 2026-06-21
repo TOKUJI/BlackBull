@@ -30,6 +30,29 @@ so the editable install's metadata catches up.
 
 ## [Unreleased]
 
+### Added
+- **Non-ASGI protocol bridge (Sprint 50).** `app.raw_handler(name, *, port=…)`
+  / `app.register_protocol_handler(...)` register a raw-TCP protocol that speaks
+  the wire directly, alongside HTTP on other ports.  A `RawActor` drives the
+  byte stream; see `docs/guide/raw-protocols.md` and `examples/echo_tcp.py`.
+- **Unified `ProtocolRegistry` (Sprint 50).** Connection dispatch is now
+  registry-driven (`Http1Binding`, `Http2Binding`, `RawBinding`) instead of a
+  hardcoded `_dispatch()`; `ASGIServer` is reorganised and re-exported as
+  `Server`.  Non-disruptive — all HTTP/1.1, HTTP/2, and WebSocket paths behave
+  identically.
+- **Protocol-agnostic Level B events (Sprint 50).** `EventAggregator` gains
+  `on_connection_accepted(protocol=…)`, `on_connection_closed`,
+  `on_message_received`, and `on_message_sent`, so observers can hook raw
+  protocols, not just HTTP requests.
+- **`ProtocolDetector` shared-port dispatch (Sprint 51).** Raw bindings may
+  carry a detector consulted after the cleartext-HTTP chain, enabling a raw
+  protocol to share a port with HTTP (the foundation for Sprint 52 MQTT).
+
+### Internal
+- Raw protocol handlers are single-worker and cleartext-only for now; documented
+  in `KNOWN_LIMITATIONS.md` / `docs/guide/raw-protocols.md`.  Combined Sprint
+  50 + 51 + 52 work releases together as a future `v0.44.0`.
+
 ## [0.43.2] — 2026-06-22
 
 ### Fixed
