@@ -2957,6 +2957,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Response">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.response.Response.__call__" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        __call__
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
         
           <li class="md-nav__item">
@@ -3991,6 +4008,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Response">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.response.Response.__call__" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        __call__
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
         
           <li class="md-nav__item">
@@ -4254,6 +4288,34 @@ await send(Response(b'data', status=HTTPStatus.NOT_FOUND))
 
 
 
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.response.Response.__call__" class="doc doc-heading">
+            <code class="highlight language-python"><span class="fm">__call__</span><span class="p">(</span><span class="n">scope</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">)</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-async"><code>async</code></small>
+  </span>
+
+<a href="#blackbull.response.Response.__call__" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Drive this response as an ASGI app: emit <code>start</code> then <code>body</code>.</p>
+<p>Mirrors :class:<code>StreamingResponse</code> so every BlackBull response type
+shares one protocol — <code>await response(scope, receive, send)</code> —
+whether returned from a simplified handler, invoked explicitly by a
+full-form handler, or normalised by <code>app._wrap_send</code>.  Keeping the
+start/body serialisation here means there is a single source of truth
+for turning a Response into ASGI events.</p>
+
+
+    </div>
+
+</div>
 
 
 
