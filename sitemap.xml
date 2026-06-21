@@ -277,6 +277,14 @@
          <lastmod>2026-06-21</lastmod>
     </url>
     <url>
+         <loc>https://TOKUJI.github.io/BlackBull/api/blackbull/server/protocol_registry/</loc>
+         <lastmod>2026-06-21</lastmod>
+    </url>
+    <url>
+         <loc>https://TOKUJI.github.io/BlackBull/api/blackbull/server/raw_actor/</loc>
+         <lastmod>2026-06-21</lastmod>
+    </url>
+    <url>
          <loc>https://TOKUJI.github.io/BlackBull/api/blackbull/server/recipient/</loc>
          <lastmod>2026-06-21</lastmod>
     </url>
@@ -382,6 +390,10 @@
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/guide/openapi/</loc>
+         <lastmod>2026-06-21</lastmod>
+    </url>
+    <url>
+         <loc>https://TOKUJI.github.io/BlackBull/guide/raw-protocols/</loc>
          <lastmod>2026-06-21</lastmod>
     </url>
     <url>

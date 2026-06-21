@@ -10,28 +10,28 @@
       
       
       
-        <link rel="canonical" href="https://TOKUJI.github.io/BlackBull/api/blackbull/client/scenario_oracle/">
+        <link rel="canonical" href="https://TOKUJI.github.io/BlackBull/guide/raw-protocols/">
       
       
-        <link rel="prev" href="../scenario/">
+        <link rel="prev" href="../http2/">
       
       
-        <link rel="next" href="../websocket/">
+        <link rel="next" href="../streaming/">
       
       
         
       
       
-      <link rel="icon" href="../../../../assets/images/favicon.png">
+      <link rel="icon" href="../../assets/images/favicon.png">
       <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
     
     
       
-        <title>scenario_oracle - BlackBull</title>
+        <title>Non-ASGI protocols - BlackBull</title>
       
     
     
-      <link rel="stylesheet" href="../../../../assets/stylesheets/main.484c7ddc.min.css">
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
       
       
 
@@ -50,11 +50,11 @@
       
     
     
-      <link rel="stylesheet" href="../../../../assets/_mkdocstrings.css">
+      <link rel="stylesheet" href="../../assets/_mkdocstrings.css">
     
-      <link rel="stylesheet" href="../../../../stylesheets/extra.css">
+      <link rel="stylesheet" href="../../stylesheets/extra.css">
     
-    <script>__md_scope=new URL("../../../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
     
       
 
@@ -72,7 +72,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#blackbullclientscenario_oracle" class="md-skip">
+        <a href="#non-asgi-protocols-raw-tcp" class="md-skip">
           Skip to content
         </a>
       
@@ -88,7 +88,7 @@
 
 <header class="md-header md-header--shadow" data-md-component="header">
   <nav class="md-header__inner md-grid" aria-label="Header">
-    <a href="../../../.." title="BlackBull" class="md-header__button md-logo" aria-label="BlackBull" data-md-component="logo">
+    <a href="../.." title="BlackBull" class="md-header__button md-logo" aria-label="BlackBull" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
@@ -108,7 +108,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              scenario_oracle
+              Non-ASGI protocols
             
           </span>
         </div>
@@ -198,7 +198,7 @@
 
 <nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
   <label class="md-nav__title" for="__drawer">
-    <a href="../../../.." title="BlackBull" class="md-nav__button md-logo" aria-label="BlackBull" data-md-component="logo">
+    <a href="../.." title="BlackBull" class="md-nav__button md-logo" aria-label="BlackBull" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
@@ -228,7 +228,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../.." class="md-nav__link">
+      <a href="../.." class="md-nav__link">
         
   
   
@@ -302,7 +302,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../getting-started/installation/" class="md-nav__link">
+      <a href="../../getting-started/installation/" class="md-nav__link">
         
   
   
@@ -330,7 +330,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../getting-started/hello-world/" class="md-nav__link">
+      <a href="../../getting-started/hello-world/" class="md-nav__link">
         
   
   
@@ -358,7 +358,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../getting-started/first-app/" class="md-nav__link">
+      <a href="../../getting-started/first-app/" class="md-nav__link">
         
   
   
@@ -390,18 +390,20 @@
       
   
   
+    
   
   
+  
     
     
     
     
     
-    <li class="md-nav__item md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
         
           
           <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
@@ -422,7 +424,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_3">
             <span class="md-nav__icon md-icon"></span>
             
@@ -440,7 +442,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../guide/" class="md-nav__link">
+      <a href="../" class="md-nav__link">
         
   
   
@@ -468,7 +470,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../guide/routing/" class="md-nav__link">
+      <a href="../routing/" class="md-nav__link">
         
   
   
@@ -496,7 +498,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../guide/middleware/" class="md-nav__link">
+      <a href="../middleware/" class="md-nav__link">
         
   
   
@@ -524,7 +526,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../guide/error-handling/" class="md-nav__link">
+      <a href="../error-handling/" class="md-nav__link">
         
   
   
@@ -552,7 +554,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../guide/requests-and-responses/" class="md-nav__link">
+      <a href="../requests-and-responses/" class="md-nav__link">
         
   
   
@@ -580,7 +582,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../guide/websockets/" class="md-nav__link">
+      <a href="../websockets/" class="md-nav__link">
         
   
   
@@ -608,7 +610,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../guide/http2/" class="md-nav__link">
+      <a href="../http2/" class="md-nav__link">
         
   
   
@@ -633,10 +635,37 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../../../../guide/raw-protocols/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Non-ASGI protocols
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -652,6 +681,81 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#the-handler-contract" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The handler contract
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#how-dispatch-works" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How dispatch works
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#events" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Events
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#limitations-sprint-50" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Limitations (Sprint 50)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#a-note-on-the-server-class" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A note on the server class
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -664,7 +768,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../guide/streaming/" class="md-nav__link">
+      <a href="../streaming/" class="md-nav__link">
         
   
   
@@ -692,7 +796,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../guide/events/" class="md-nav__link">
+      <a href="../events/" class="md-nav__link">
         
   
   
@@ -720,7 +824,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../guide/logging/" class="md-nav__link">
+      <a href="../logging/" class="md-nav__link">
         
   
   
@@ -748,7 +852,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../guide/static-files/" class="md-nav__link">
+      <a href="../static-files/" class="md-nav__link">
         
   
   
@@ -776,7 +880,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../guide/configuration/" class="md-nav__link">
+      <a href="../configuration/" class="md-nav__link">
         
   
   
@@ -804,7 +908,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../guide/extensions/" class="md-nav__link">
+      <a href="../extensions/" class="md-nav__link">
         
   
   
@@ -832,7 +936,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../guide/openapi/" class="md-nav__link">
+      <a href="../openapi/" class="md-nav__link">
         
   
   
@@ -860,7 +964,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../guide/testing/" class="md-nav__link">
+      <a href="../testing/" class="md-nav__link">
         
   
   
@@ -888,7 +992,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../guide/fault_injection/" class="md-nav__link">
+      <a href="../fault_injection/" class="md-nav__link">
         
   
   
@@ -970,7 +1074,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../deployment/running/" class="md-nav__link">
+      <a href="../../deployment/running/" class="md-nav__link">
         
   
   
@@ -998,7 +1102,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../deployment/workers/" class="md-nav__link">
+      <a href="../../deployment/workers/" class="md-nav__link">
         
   
   
@@ -1026,7 +1130,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../deployment/tls/" class="md-nav__link">
+      <a href="../../deployment/tls/" class="md-nav__link">
         
   
   
@@ -1054,7 +1158,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../deployment/behind-nginx/" class="md-nav__link">
+      <a href="../../deployment/behind-nginx/" class="md-nav__link">
         
   
   
@@ -1082,7 +1186,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../deployment/unix-and-fd/" class="md-nav__link">
+      <a href="../../deployment/unix-and-fd/" class="md-nav__link">
         
   
   
@@ -1110,7 +1214,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../deployment/hot-reload/" class="md-nav__link">
+      <a href="../../deployment/hot-reload/" class="md-nav__link">
         
   
   
@@ -1142,20 +1246,18 @@
       
   
   
-    
   
   
-  
     
     
     
     
     
-    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" checked>
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
         
           
           <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
@@ -1176,7 +1278,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="true">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_5">
             <span class="md-nav__icon md-icon"></span>
             
@@ -1194,7 +1296,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../reference/env-vars/" class="md-nav__link">
+      <a href="../../reference/env-vars/" class="md-nav__link">
         
   
   
@@ -1219,20 +1321,18 @@
                 
   
   
-    
   
   
-  
     
     
     
     
     
-    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2" checked>
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2" >
         
           
           <label class="md-nav__link" for="__nav_5_2" id="__nav_5_2_label" tabindex="0">
@@ -1253,7 +1353,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_5_2_label" aria-expanded="true">
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_5_2_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_5_2">
             <span class="md-nav__icon md-icon"></span>
             
@@ -1268,20 +1368,18 @@
                 
   
   
-    
   
   
-  
     
     
     
     
     
-    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2_1" checked>
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2_1" >
         
           
           <label class="md-nav__link" for="__nav_5_2_1" id="__nav_5_2_1_label" tabindex="0">
@@ -1302,7 +1400,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_5_2_1_label" aria-expanded="true">
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_5_2_1_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_5_2_1">
             <span class="md-nav__icon md-icon"></span>
             
@@ -1320,7 +1418,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../" class="md-nav__link">
+      <a href="../../api/blackbull/" class="md-nav__link">
         
   
   
@@ -1348,7 +1446,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../actor/" class="md-nav__link">
+      <a href="../../api/blackbull/actor/" class="md-nav__link">
         
   
   
@@ -1376,7 +1474,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../app/" class="md-nav__link">
+      <a href="../../api/blackbull/app/" class="md-nav__link">
         
   
   
@@ -1404,7 +1502,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../asgi/" class="md-nav__link">
+      <a href="../../api/blackbull/asgi/" class="md-nav__link">
         
   
   
@@ -1432,7 +1530,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../cli/" class="md-nav__link">
+      <a href="../../api/blackbull/cli/" class="md-nav__link">
         
   
   
@@ -1457,20 +1555,18 @@
                 
   
   
-    
   
   
-  
     
     
     
     
     
-    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2_1_6" checked>
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2_1_6" >
         
           
           <label class="md-nav__link" for="__nav_5_2_1_6" id="__nav_5_2_1_6_label" tabindex="0">
@@ -1491,7 +1587,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="4" aria-labelledby="__nav_5_2_1_6_label" aria-expanded="true">
+        <nav class="md-nav" data-md-level="4" aria-labelledby="__nav_5_2_1_6_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_5_2_1_6">
             <span class="md-nav__icon md-icon"></span>
             
@@ -1509,7 +1605,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../" class="md-nav__link">
+      <a href="../../api/blackbull/client/" class="md-nav__link">
         
   
   
@@ -1537,7 +1633,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../client/" class="md-nav__link">
+      <a href="../../api/blackbull/client/client/" class="md-nav__link">
         
   
   
@@ -1565,7 +1661,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../exceptions/" class="md-nav__link">
+      <a href="../../api/blackbull/client/exceptions/" class="md-nav__link">
         
   
   
@@ -1593,7 +1689,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../http1/" class="md-nav__link">
+      <a href="../../api/blackbull/client/http1/" class="md-nav__link">
         
   
   
@@ -1621,7 +1717,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../http2/" class="md-nav__link">
+      <a href="../../api/blackbull/client/http2/" class="md-nav__link">
         
   
   
@@ -1649,7 +1745,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../response/" class="md-nav__link">
+      <a href="../../api/blackbull/client/response/" class="md-nav__link">
         
   
   
@@ -1677,7 +1773,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../scenario/" class="md-nav__link">
+      <a href="../../api/blackbull/client/scenario/" class="md-nav__link">
         
   
   
@@ -1702,37 +1798,10 @@
                 
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    scenario_oracle
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/client/scenario_oracle/" class="md-nav__link">
         
   
   
@@ -1748,98 +1817,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#blackbull.client.scenario_oracle" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        scenario_oracle
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="scenario_oracle">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.client.scenario_oracle.Category" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Category
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.client.scenario_oracle.SideOutcome" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        SideOutcome
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.client.scenario_oracle.categorize" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        categorize
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.client.scenario_oracle.normalize_response" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        normalize_response
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.client.scenario_oracle.run_scenario" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        run_scenario
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -1852,7 +1829,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../websocket/" class="md-nav__link">
+      <a href="../../api/blackbull/client/websocket/" class="md-nav__link">
         
   
   
@@ -1880,7 +1857,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../websocket_h2/" class="md-nav__link">
+      <a href="../../api/blackbull/client/websocket_h2/" class="md-nav__link">
         
   
   
@@ -1916,7 +1893,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../config/" class="md-nav__link">
+      <a href="../../api/blackbull/config/" class="md-nav__link">
         
   
   
@@ -1944,7 +1921,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../env/" class="md-nav__link">
+      <a href="../../api/blackbull/env/" class="md-nav__link">
         
   
   
@@ -1972,7 +1949,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../event/" class="md-nav__link">
+      <a href="../../api/blackbull/event/" class="md-nav__link">
         
   
   
@@ -2000,7 +1977,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../event_aggregator/" class="md-nav__link">
+      <a href="../../api/blackbull/event_aggregator/" class="md-nav__link">
         
   
   
@@ -2075,7 +2052,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../fault_injection/" class="md-nav__link">
+      <a href="../../api/blackbull/fault_injection/" class="md-nav__link">
         
   
   
@@ -2150,7 +2127,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../fault_injection/catalogue/" class="md-nav__link">
+      <a href="../../api/blackbull/fault_injection/catalogue/" class="md-nav__link">
         
   
   
@@ -2178,7 +2155,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../fault_injection/catalogue/h2/" class="md-nav__link">
+      <a href="../../api/blackbull/fault_injection/catalogue/h2/" class="md-nav__link">
         
   
   
@@ -2214,7 +2191,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../fault_injection/h2_server/" class="md-nav__link">
+      <a href="../../api/blackbull/fault_injection/h2_server/" class="md-nav__link">
         
   
   
@@ -2242,7 +2219,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../fault_injection/oracle_h1/" class="md-nav__link">
+      <a href="../../api/blackbull/fault_injection/oracle_h1/" class="md-nav__link">
         
   
   
@@ -2270,7 +2247,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../fault_injection/scenario_h1/" class="md-nav__link">
+      <a href="../../api/blackbull/fault_injection/scenario_h1/" class="md-nav__link">
         
   
   
@@ -2298,7 +2275,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../fault_injection/scenario_h2/" class="md-nav__link">
+      <a href="../../api/blackbull/fault_injection/scenario_h2/" class="md-nav__link">
         
   
   
@@ -2334,7 +2311,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../headers/" class="md-nav__link">
+      <a href="../../api/blackbull/headers/" class="md-nav__link">
         
   
   
@@ -2362,7 +2339,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../logger/" class="md-nav__link">
+      <a href="../../api/blackbull/logger/" class="md-nav__link">
         
   
   
@@ -2437,7 +2414,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/" class="md-nav__link">
+      <a href="../../api/blackbull/middleware/" class="md-nav__link">
         
   
   
@@ -2465,7 +2442,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/base/" class="md-nav__link">
+      <a href="../../api/blackbull/middleware/base/" class="md-nav__link">
         
   
   
@@ -2493,7 +2470,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/cache/" class="md-nav__link">
+      <a href="../../api/blackbull/middleware/cache/" class="md-nav__link">
         
   
   
@@ -2521,7 +2498,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/compression/" class="md-nav__link">
+      <a href="../../api/blackbull/middleware/compression/" class="md-nav__link">
         
   
   
@@ -2549,7 +2526,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/cors/" class="md-nav__link">
+      <a href="../../api/blackbull/middleware/cors/" class="md-nav__link">
         
   
   
@@ -2577,7 +2554,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/proxy/" class="md-nav__link">
+      <a href="../../api/blackbull/middleware/proxy/" class="md-nav__link">
         
   
   
@@ -2605,7 +2582,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/session/" class="md-nav__link">
+      <a href="../../api/blackbull/middleware/session/" class="md-nav__link">
         
   
   
@@ -2633,7 +2610,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/static/" class="md-nav__link">
+      <a href="../../api/blackbull/middleware/static/" class="md-nav__link">
         
   
   
@@ -2661,7 +2638,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/utils/" class="md-nav__link">
+      <a href="../../api/blackbull/middleware/utils/" class="md-nav__link">
         
   
   
@@ -2689,7 +2666,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/websocket/" class="md-nav__link">
+      <a href="../../api/blackbull/middleware/websocket/" class="md-nav__link">
         
   
   
@@ -2725,7 +2702,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../openapi/" class="md-nav__link">
+      <a href="../../api/blackbull/openapi/" class="md-nav__link">
         
   
   
@@ -2800,7 +2777,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../protocol/" class="md-nav__link">
+      <a href="../../api/blackbull/protocol/" class="md-nav__link">
         
   
   
@@ -2828,7 +2805,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../protocol/frame/" class="md-nav__link">
+      <a href="../../api/blackbull/protocol/frame/" class="md-nav__link">
         
   
   
@@ -2856,7 +2833,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../protocol/frame_types/" class="md-nav__link">
+      <a href="../../api/blackbull/protocol/frame_types/" class="md-nav__link">
         
   
   
@@ -2884,7 +2861,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../protocol/hpack_fastpath/" class="md-nav__link">
+      <a href="../../api/blackbull/protocol/hpack_fastpath/" class="md-nav__link">
         
   
   
@@ -2912,7 +2889,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../protocol/rsock/" class="md-nav__link">
+      <a href="../../api/blackbull/protocol/rsock/" class="md-nav__link">
         
   
   
@@ -2940,7 +2917,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../protocol/stream/" class="md-nav__link">
+      <a href="../../api/blackbull/protocol/stream/" class="md-nav__link">
         
   
   
@@ -2976,7 +2953,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../request/" class="md-nav__link">
+      <a href="../../api/blackbull/request/" class="md-nav__link">
         
   
   
@@ -3004,7 +2981,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../response/" class="md-nav__link">
+      <a href="../../api/blackbull/response/" class="md-nav__link">
         
   
   
@@ -3032,7 +3009,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../router/" class="md-nav__link">
+      <a href="../../api/blackbull/router/" class="md-nav__link">
         
   
   
@@ -3107,7 +3084,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/" class="md-nav__link">
+      <a href="../../api/blackbull/server/" class="md-nav__link">
         
   
   
@@ -3135,7 +3112,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/access_log/" class="md-nav__link">
+      <a href="../../api/blackbull/server/access_log/" class="md-nav__link">
         
   
   
@@ -3163,7 +3140,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/cap_log/" class="md-nav__link">
+      <a href="../../api/blackbull/server/cap_log/" class="md-nav__link">
         
   
   
@@ -3191,7 +3168,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/connection_actor/" class="md-nav__link">
+      <a href="../../api/blackbull/server/connection_actor/" class="md-nav__link">
         
   
   
@@ -3219,7 +3196,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/constants/" class="md-nav__link">
+      <a href="../../api/blackbull/server/constants/" class="md-nav__link">
         
   
   
@@ -3247,7 +3224,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/deadline/" class="md-nav__link">
+      <a href="../../api/blackbull/server/deadline/" class="md-nav__link">
         
   
   
@@ -3275,7 +3252,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/http1_actor/" class="md-nav__link">
+      <a href="../../api/blackbull/server/http1_actor/" class="md-nav__link">
         
   
   
@@ -3303,7 +3280,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/http2_actor/" class="md-nav__link">
+      <a href="../../api/blackbull/server/http2_actor/" class="md-nav__link">
         
   
   
@@ -3331,7 +3308,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/http2_messages/" class="md-nav__link">
+      <a href="../../api/blackbull/server/http2_messages/" class="md-nav__link">
         
   
   
@@ -3359,7 +3336,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/http2_ws/" class="md-nav__link">
+      <a href="../../api/blackbull/server/http2_ws/" class="md-nav__link">
         
   
   
@@ -3387,7 +3364,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/multiworker/" class="md-nav__link">
+      <a href="../../api/blackbull/server/multiworker/" class="md-nav__link">
         
   
   
@@ -3415,7 +3392,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/parser/" class="md-nav__link">
+      <a href="../../api/blackbull/server/parser/" class="md-nav__link">
         
   
   
@@ -3443,7 +3420,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/permessage_deflate/" class="md-nav__link">
+      <a href="../../api/blackbull/server/permessage_deflate/" class="md-nav__link">
         
   
   
@@ -3471,7 +3448,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/protocol_registry/" class="md-nav__link">
+      <a href="../../api/blackbull/server/protocol_registry/" class="md-nav__link">
         
   
   
@@ -3499,7 +3476,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/raw_actor/" class="md-nav__link">
+      <a href="../../api/blackbull/server/raw_actor/" class="md-nav__link">
         
   
   
@@ -3527,7 +3504,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/recipient/" class="md-nav__link">
+      <a href="../../api/blackbull/server/recipient/" class="md-nav__link">
         
   
   
@@ -3555,7 +3532,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/reload/" class="md-nav__link">
+      <a href="../../api/blackbull/server/reload/" class="md-nav__link">
         
   
   
@@ -3583,7 +3560,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/response/" class="md-nav__link">
+      <a href="../../api/blackbull/server/response/" class="md-nav__link">
         
   
   
@@ -3611,7 +3588,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/sender/" class="md-nav__link">
+      <a href="../../api/blackbull/server/sender/" class="md-nav__link">
         
   
   
@@ -3639,7 +3616,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/server/" class="md-nav__link">
+      <a href="../../api/blackbull/server/server/" class="md-nav__link">
         
   
   
@@ -3667,7 +3644,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/websocket_actor/" class="md-nav__link">
+      <a href="../../api/blackbull/server/websocket_actor/" class="md-nav__link">
         
   
   
@@ -3695,7 +3672,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/worker/" class="md-nav__link">
+      <a href="../../api/blackbull/server/worker/" class="md-nav__link">
         
   
   
@@ -3723,7 +3700,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/ws_codec/" class="md-nav__link">
+      <a href="../../api/blackbull/server/ws_codec/" class="md-nav__link">
         
   
   
@@ -3759,7 +3736,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../testing/" class="md-nav__link">
+      <a href="../../api/blackbull/testing/" class="md-nav__link">
         
   
   
@@ -3787,7 +3764,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../utils/" class="md-nav__link">
+      <a href="../../api/blackbull/utils/" class="md-nav__link">
         
   
   
@@ -3885,7 +3862,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../about/conformance/" class="md-nav__link">
+      <a href="../../about/conformance/" class="md-nav__link">
         
   
   
@@ -3913,7 +3890,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../about/internals/" class="md-nav__link">
+      <a href="../../about/internals/" class="md-nav__link">
         
   
   
@@ -3941,7 +3918,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../about/rfc9113-implementation/" class="md-nav__link">
+      <a href="../../about/rfc9113-implementation/" class="md-nav__link">
         
   
   
@@ -3969,7 +3946,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../about/grpc-assessment/" class="md-nav__link">
+      <a href="../../about/grpc-assessment/" class="md-nav__link">
         
   
   
@@ -4024,74 +4001,57 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#blackbull.client.scenario_oracle" class="md-nav__link">
+  <a href="#the-handler-contract" class="md-nav__link">
     <span class="md-ellipsis">
       
-        scenario_oracle
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="scenario_oracle">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.client.scenario_oracle.Category" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Category
+        The handler contract
       
     </span>
   </a>
   
 </li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.client.scenario_oracle.SideOutcome" class="md-nav__link">
+      
+        <li class="md-nav__item">
+  <a href="#how-dispatch-works" class="md-nav__link">
     <span class="md-ellipsis">
       
-        SideOutcome
+        How dispatch works
       
     </span>
   </a>
   
 </li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.client.scenario_oracle.categorize" class="md-nav__link">
+      
+        <li class="md-nav__item">
+  <a href="#events" class="md-nav__link">
     <span class="md-ellipsis">
       
-        categorize
+        Events
       
     </span>
   </a>
   
 </li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.client.scenario_oracle.normalize_response" class="md-nav__link">
+      
+        <li class="md-nav__item">
+  <a href="#limitations-sprint-50" class="md-nav__link">
     <span class="md-ellipsis">
       
-        normalize_response
+        Limitations (Sprint 50)
       
     </span>
   </a>
   
 </li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.client.scenario_oracle.run_scenario" class="md-nav__link">
+      
+        <li class="md-nav__item">
+  <a href="#a-note-on-the-server-class" class="md-nav__link">
     <span class="md-ellipsis">
       
-        run_scenario
+        A note on the server class
       
     </span>
   </a>
-  
-</li>
-        
-      </ul>
-    </nav>
   
 </li>
       
@@ -4115,230 +4075,121 @@
   
 
 
-<h1 id="blackbullclientscenario_oracle"><code>blackbull.client.scenario_oracle</code><a class="headerlink" href="#blackbullclientscenario_oracle" title="Permanent link">&para;</a></h1>
-
-
-<div class="doc doc-object doc-module">
-
-
-
-<h2 id="blackbull.client.scenario_oracle" class="doc doc-heading">
-            <code>blackbull.client.scenario_oracle</code>
-
-
-<a href="#blackbull.client.scenario_oracle" class="headerlink" title="Permanent link">&para;</a></h2>
-
-    <div class="doc doc-contents first">
-
-        <p>Deprecation shim — moved to :mod:<code>blackbull.fault_injection</code>.</p>
-<p>Sprint 46 grouped the HTTP/1.1 differential oracle alongside the
-scenario model under :mod:<code>blackbull.fault_injection</code>.  Import from
-there going forward::</p>
-<pre><code>from blackbull.fault_injection import Category, run_scenario  # ...
-</code></pre>
-<p>This shim re-exports the names that used to live here and will be
-removed no earlier than BlackBull v0.45.0 (and not before
-2026-09-16) — three releases ahead AND one month, whichever is later,
-per the project's deprecation policy.</p>
-
-
-
-
-
-
-
-
-
-
-<div class="doc doc-children">
-
-
-
-
-
-
-
-
-
-<div class="doc doc-object doc-class">
-
-
-
-<h3 id="blackbull.client.scenario_oracle.Category" class="doc doc-heading">
-            <code>Category</code>
-
-
-<a href="#blackbull.client.scenario_oracle.Category" class="headerlink" title="Permanent link">&para;</a></h3>
-
-
-    <div class="doc doc-contents ">
-            <p class="doc doc-class-bases">
-              Bases: <code><span title="str">str</span></code>, <code><span title="enum.Enum">Enum</span></code></p>
-
-
-
-        <p>Why a differential example was (not) accepted.</p>
-<p>Subclassing <code>str</code> makes the values JSON-serialisable directly
-and keeps <code>assert ctx.category == 'OK'</code>-style sites readable.</p>
-
-
-
-
-
-
-
-
-
-
-
-<div class="doc doc-children">
-
-
-
-
-
-
-
-
-
-
-
-
-  </div>
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-class">
-
-
-
-<h3 id="blackbull.client.scenario_oracle.SideOutcome" class="doc doc-heading">
-            <code>SideOutcome</code>
-
-
-  <span class="doc doc-labels">
-      <small class="doc doc-label doc-label-dataclass"><code>dataclass</code></small>
-  </span>
-
-<a href="#blackbull.client.scenario_oracle.SideOutcome" class="headerlink" title="Permanent link">&para;</a></h3>
-
-
-    <div class="doc doc-contents ">
-
-
-
-        <p>One side's response in a differential pair.</p>
-<p>Exactly one of (response, exception) is populated.  <code>timed_out</code>
-is True if the failure was an :class:<code>asyncio.TimeoutError</code> from
-the per-example wait_for; we record it separately because timeouts
-are semantically distinct from other transport errors.</p>
-
-
-
-
-
-
-
-
-
-
-
-<div class="doc doc-children">
-
-
-
-
-
-
-
-
-
-
-
-
-  </div>
-
-    </div>
-
-</div>
-
-
-<div class="doc doc-object doc-function">
-
-
-<h3 id="blackbull.client.scenario_oracle.categorize" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">categorize</span><span class="p">(</span><span class="n">ng</span><span class="p">,</span> <span class="n">bb</span><span class="p">)</span></code>
-
-<a href="#blackbull.client.scenario_oracle.categorize" class="headerlink" title="Permanent link">&para;</a></h3>
-
-
-    <div class="doc doc-contents ">
-
-        <p>Bucket a differential example into a :class:<code>Category</code>.</p>
-<p>Order of the checks matters: both-rejected wins over individual
-transport failures so we don't flag inputs that nginx also
-refused.</p>
-
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-function">
-
-
-<h3 id="blackbull.client.scenario_oracle.normalize_response" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">normalize_response</span><span class="p">(</span><span class="n">resp</span><span class="p">)</span></code>
-
-<a href="#blackbull.client.scenario_oracle.normalize_response" class="headerlink" title="Permanent link">&para;</a></h3>
-
-
-    <div class="doc doc-contents ">
-
-        <p>Drop volatile / framing-only headers; preserve status + body.</p>
-
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-function">
-
-
-<h3 id="blackbull.client.scenario_oracle.run_scenario" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">run_scenario</span><span class="p">(</span><span class="n">host</span><span class="p">,</span> <span class="n">port</span><span class="p">,</span> <span class="n">scenario</span><span class="p">)</span></code>
-
-  <span class="doc doc-labels">
-      <small class="doc doc-label doc-label-async"><code>async</code></small>
-  </span>
-
-<a href="#blackbull.client.scenario_oracle.run_scenario" class="headerlink" title="Permanent link">&para;</a></h3>
-
-
-    <div class="doc doc-contents ">
-
-        <p>Execute <em>scenario</em> against (host, port) and return (outcome, wire_bytes).</p>
-<p>Drives the scenario through :meth:<code>HTTP1Client.execute_scenario</code>,
-which itself never raises; this wrapper only adds an outer
-<code>asyncio.wait_for</code> so a runaway scenario (e.g. trickled bytes
-plus a long read timeout) can't blow the per-side budget.</p>
-<p>Returns the captured wire bytes (both servers receive identical
-bytes, so a single capture is enough for failure diagnostics).</p>
-
-
-    </div>
-
-</div>
-
-
-
-  </div>
-
-    </div>
-
-</div>
+<h1 id="non-asgi-protocols-raw-tcp">Non-ASGI protocols (raw TCP)<a class="headerlink" href="#non-asgi-protocols-raw-tcp" title="Permanent link">&para;</a></h1>
+<p>Most BlackBull traffic is HTTP/1.1, HTTP/2, or WebSocket — protocols that map
+cleanly onto the ASGI <code>(scope, receive, send)</code> contract. Some protocols do not:
+MQTT, Redis RESP, a raw line protocol, the PostgreSQL wire protocol. They have no
+method, path, status, or headers, so forcing them through ASGI would be a leaky
+abstraction.</p>
+<p>The <strong>Non-ASGI bridge</strong> lets such a protocol run inside the same BlackBull
+process, sharing the connection machinery and the event system, while speaking
+the socket directly. You register an async handler with <code>raw_handler</code> and give it
+a port:</p>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">blackbull</span><span class="w"> </span><span class="kn">import</span> <span class="n">BlackBull</span>
+
+<span class="n">app</span> <span class="o">=</span> <span class="n">BlackBull</span><span class="p">()</span>
+
+<span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">&#39;/&#39;</span><span class="p">)</span>
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">index</span><span class="p">():</span>
+    <span class="k">return</span> <span class="s2">&quot;HTTP here; raw TCP echo on :9000.&quot;</span>
+
+<span class="nd">@app</span><span class="o">.</span><span class="n">raw_handler</span><span class="p">(</span><span class="s1">&#39;echo&#39;</span><span class="p">,</span> <span class="n">port</span><span class="o">=</span><span class="mi">9000</span><span class="p">)</span>
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">echo</span><span class="p">(</span><span class="n">reader</span><span class="p">,</span> <span class="n">writer</span><span class="p">,</span> <span class="n">ctx</span><span class="p">):</span>
+    <span class="k">while</span> <span class="kc">True</span><span class="p">:</span>
+        <span class="n">data</span> <span class="o">=</span> <span class="k">await</span> <span class="n">reader</span><span class="o">.</span><span class="n">read</span><span class="p">(</span><span class="mi">1024</span><span class="p">)</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">data</span><span class="p">:</span>
+            <span class="k">break</span>
+        <span class="k">await</span> <span class="n">writer</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="n">data</span><span class="p">)</span>
+
+<span class="n">app</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="n">port</span><span class="o">=</span><span class="mi">8000</span><span class="p">)</span>   <span class="c1"># HTTP on 8000, echo on 9000</span>
+</code></pre></div>
+<p>A full runnable version is in <code>examples/echo_tcp.py</code>.</p>
+<h2 id="the-handler-contract">The handler contract<a class="headerlink" href="#the-handler-contract" title="Permanent link">&para;</a></h2>
+<p>A raw handler is an async callable <code>(reader, writer, ctx)</code> that <strong>owns the
+connection for its entire lifetime</strong> — it decides when to stop. This is
+deliberately unlike HTTP's request-per-connection model; raw protocols are
+typically long-lived and stateful.</p>
+<ul>
+<li><code>reader</code> is an <code>AbstractReader</code>: <code>await reader.read(n)</code>,
+  <code>await reader.readexactly(n)</code>, <code>await reader.readuntil(sep)</code>.</li>
+<li><code>writer</code> is an <code>AbstractWriter</code>: <code>await writer.write(data)</code>,
+  <code>await writer.close()</code>.</li>
+<li><code>ctx</code> is a <code>ProtocolContext</code> carrying <code>peername</code>, <code>sockname</code>, <code>ssl</code>,
+  <code>connection_id</code> (a uuid4 hex for log correlation), <code>protocol</code> (the registered
+  name), and <code>aggregator</code> (for emitting events — see below).</li>
+</ul>
+<p>When the handler returns, or raises, BlackBull closes the connection. A raised
+exception is reported through the <code>error</code> event and otherwise isolated — one bad
+connection never affects another.</p>
+<p><code>register_protocol_handler(name, handler, *, port=...)</code> is the non-decorator
+form of <code>raw_handler</code> and behaves identically.</p>
+<h2 id="how-dispatch-works">How dispatch works<a class="headerlink" href="#how-dispatch-works" title="Permanent link">&para;</a></h2>
+<p>BlackBull routes every accepted connection through a single <strong>protocol
+registry</strong>. <code>http1</code> and <code>http2</code> are built-in registry bindings on the shared
+HTTP listener; a <code>raw_handler</code> adds a binding on its own dedicated port.
+Connections arriving on a raw protocol's port skip HTTP detection entirely and
+go straight to the handler. WebSocket is unaffected — it is still reached through
+an HTTP <code>Upgrade</code> on the HTTP listener, not as a top-level protocol.</p>
+<p>The bridge is <strong>dormant by default</strong>: an app with no <code>raw_handler</code> binds only the
+HTTP port and runs no raw code paths.</p>
+<h2 id="events">Events<a class="headerlink" href="#events" title="Permanent link">&para;</a></h2>
+<p>Raw protocols emit the protocol-agnostic Level B events (subscribe with
+<code>@app.on</code>):</p>
+<table>
+<thead>
+<tr>
+<th>Event</th>
+<th>Fires when</th>
+<th>Detail</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>connection_accepted</code></td>
+<td>a connection is accepted</td>
+<td><code>peername</code>, <code>protocol</code></td>
+</tr>
+<tr>
+<td><code>connection_closed</code></td>
+<td>the connection closes</td>
+<td><code>peername</code>, <code>protocol</code>, <code>duration_ms</code></td>
+</tr>
+<tr>
+<td><code>message_received</code></td>
+<td>the handler reports an inbound message</td>
+<td><code>protocol</code>, <code>message_type</code>, <code>payload_size</code></td>
+</tr>
+<tr>
+<td><code>message_sent</code></td>
+<td>the handler reports an outbound message</td>
+<td><code>protocol</code>, <code>message_type</code>, <code>payload_size</code></td>
+</tr>
+<tr>
+<td><code>error</code></td>
+<td>the handler raises</td>
+<td><code>scope</code>, <code>exception</code></td>
+</tr>
+</tbody>
+</table>
+<p><code>message_received</code> / <code>message_sent</code> are emitted by the handler itself when it has
+parsed an application-level message, via the aggregator on <code>ctx</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="k">if</span> <span class="n">ctx</span><span class="o">.</span><span class="n">aggregator</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="k">await</span> <span class="n">ctx</span><span class="o">.</span><span class="n">aggregator</span><span class="o">.</span><span class="n">on_message_received</span><span class="p">(</span><span class="s1">&#39;echo&#39;</span><span class="p">,</span> <span class="s1">&#39;data&#39;</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">data</span><span class="p">))</span>
+</code></pre></div>
+<p><code>connection_accepted</code> and <code>connection_closed</code> fire automatically.</p>
+<h2 id="limitations-sprint-50">Limitations (Sprint 50)<a class="headerlink" href="#limitations-sprint-50" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Cleartext only.</strong> TLS termination for raw protocols is not yet wired up.</li>
+<li><strong>Single worker.</strong> Port-bound protocols are served only when <code>workers=1</code>;
+  <code>app.run()</code> with a <code>raw_handler</code> forces single-worker automatically.</li>
+<li><strong>Port-based routing only.</strong> Sharing one port between HTTP and a raw protocol
+  (first-byte sniffing) is planned for a later release.</li>
+</ul>
+<h2 id="a-note-on-the-server-class">A note on the server class<a class="headerlink" href="#a-note-on-the-server-class" title="Permanent link">&para;</a></h2>
+<p>The server class that drives all this is <code>blackbull.server.Server</code> (it serves
+both ASGI and non-ASGI listeners). Its previous name, <code>ASGIServer</code>, remains as a
+backward-compatible alias, so existing
+<code>from blackbull.server import ASGIServer</code> imports keep working.</p>
 
 
 
@@ -4388,10 +4239,10 @@ bytes, so a single capture is enough for failure diagnostics).</p>
     
       
       
-      <script id="__config" type="application/json">{"annotate": null, "base": "../../../..", "features": [], "search": "../../../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": [], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
     
     
-      <script src="../../../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
       
     
   </body>
