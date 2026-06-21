@@ -17,8 +17,6 @@ from ..protocol.rsock import (
     create_dual_stack_sockets, create_unix_socket,
     adopt_inherited_sockets, adopt_listening_fd,
 )
-from ..protocol.frame import FrameFactory
-from ..protocol.frame_types import ErrorCodes, FrameTypes, FrameBase
 from .response import ResponderFactory
 from .parser import ParserFactory
 from .sender import SenderFactory, AbstractWriter
@@ -28,7 +26,6 @@ from .access_log import AccessLogRecord, _make_capturing_send, emit_access_log a
 from .cap_log import log_cap_hit
 from ..asgi import ASGIEvent
 from ..headers import Headers
-from .http2_actor import HTTP2Actor
 logger = logging.getLogger(__name__)
 
 async def _run_with_log(coro, record: AccessLogRecord,
