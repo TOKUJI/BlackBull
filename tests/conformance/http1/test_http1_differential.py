@@ -158,6 +158,17 @@ def docker_network():
 
 @pytest.fixture(scope='session')
 def echo_server(docker_network):
+    # The differential oracle's backend runs the local ``echo-server:latest``
+    # image, built from tests/conformance/echo_server/.  It is not published to
+    # any registry, so build it on demand when absent: CI runners start with an
+    # empty image cache (this was the silent gap that kept the full tier red),
+    # while developers keep it cached after the first run.
+    client = from_env()
+    try:
+        client.images.get('echo-server:latest')
+    except _docker.errors.ImageNotFound:
+        ctx = Path(__file__).resolve().parents[1] / 'echo_server'
+        client.images.build(path=str(ctx), tag='echo-server:latest', rm=True)
     container = (
         DockerContainer('echo-server:latest')
         .with_exposed_ports(8000)

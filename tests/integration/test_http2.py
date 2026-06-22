@@ -55,7 +55,7 @@ async def h2_app():
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_http2_json_response(h2_app):
-    url = f'https://localhost:{h2_app.port}/hello'
+    url = f'https://127.0.0.1:{h2_app.port}/hello'
     async with httpx.AsyncClient(http2=True, verify=False) as client:
         r = await client.get(url)
     assert r.status_code == 200
@@ -66,7 +66,7 @@ async def test_http2_json_response(h2_app):
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_http2_plain_response(h2_app):
-    url = f'https://localhost:{h2_app.port}/text'
+    url = f'https://127.0.0.1:{h2_app.port}/text'
     async with httpx.AsyncClient(http2=True, verify=False) as client:
         r = await client.get(url)
     assert r.status_code == 200
@@ -78,7 +78,7 @@ async def test_http2_plain_response(h2_app):
 @pytest.mark.asyncio
 async def test_http2_multiplexed(h2_app):
     """10 concurrent requests on one HTTP/2 connection must all succeed."""
-    url = f'https://localhost:{h2_app.port}/hello'
+    url = f'https://127.0.0.1:{h2_app.port}/hello'
     async with httpx.AsyncClient(http2=True, verify=False) as client:
         responses = await asyncio.gather(*(client.get(url) for _ in range(10)))
     assert all(r.status_code == 200 for r in responses)
@@ -89,7 +89,7 @@ async def test_http2_multiplexed(h2_app):
 @pytest.mark.asyncio
 async def test_http2_streaming_response(h2_app):
     """StreamingResponse chunks must arrive concatenated and in order."""
-    url = f'https://localhost:{h2_app.port}/stream'
+    url = f'https://127.0.0.1:{h2_app.port}/stream'
     async with httpx.AsyncClient(http2=True, verify=False) as client:
         r = await client.get(url)
     assert r.status_code == 200

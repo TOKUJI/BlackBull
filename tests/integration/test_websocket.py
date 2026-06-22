@@ -51,7 +51,7 @@ async def ws_app():
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_websocket_text_echo(ws_app):
-    uri = f'ws://localhost:{ws_app.port}/echo'
+    uri = f'ws://127.0.0.1:{ws_app.port}/echo'
     async with websockets.connect(uri) as ws:
         await ws.send('hello')
         reply = await ws.recv()
@@ -61,7 +61,7 @@ async def test_websocket_text_echo(ws_app):
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_websocket_binary_echo(ws_app):
-    uri = f'ws://localhost:{ws_app.port}/echo'
+    uri = f'ws://127.0.0.1:{ws_app.port}/echo'
     async with websockets.connect(uri) as ws:
         await ws.send(b'\xde\xad\xbe\xef')
         reply = await ws.recv()
@@ -71,7 +71,7 @@ async def test_websocket_binary_echo(ws_app):
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_websocket_multiple_messages(ws_app):
-    uri = f'ws://localhost:{ws_app.port}/echo'
+    uri = f'ws://127.0.0.1:{ws_app.port}/echo'
     messages = ['one', 'two', 'three']
     async with websockets.connect(uri) as ws:
         for m in messages:
@@ -84,7 +84,7 @@ async def test_websocket_multiple_messages(ws_app):
 @pytest.mark.asyncio
 async def test_websocket_clean_close(ws_app):
     """Client-initiated close must complete without raising an exception."""
-    uri = f'ws://localhost:{ws_app.port}/echo'
+    uri = f'ws://127.0.0.1:{ws_app.port}/echo'
     async with websockets.connect(uri) as ws:
         await ws.send('ping')
         await ws.recv()
@@ -95,7 +95,7 @@ async def test_websocket_clean_close(ws_app):
 async def test_websocket_permessage_deflate_negotiated(ws_app):
     """When the client offers permessage-deflate, the server must accept it
     and echo a compressed message through the same connection."""
-    uri = f'ws://localhost:{ws_app.port}/echo'
+    uri = f'ws://127.0.0.1:{ws_app.port}/echo'
     # websockets.connect enables permessage-deflate by default and refuses
     # to fall back silently — if the handshake didn't negotiate the
     # extension, the message would still pass uncompressed.  We assert the
