@@ -3737,6 +3737,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.server.sender.HTTP2Sender.send_response_headers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        send_response_headers
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.server.sender.HTTP2Sender.wake_window" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4365,6 +4376,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.server.sender.HTTP2Sender.send_response_headers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        send_response_headers
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.server.sender.HTTP2Sender.wake_window" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4962,6 +4984,35 @@ announcement.  The window may legitimately become negative.</p>
     <div class="doc doc-contents ">
 
         <p>Apply SETTINGS parameters that do not require delta tracking.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.server.sender.HTTP2Sender.send_response_headers" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">send_response_headers</span><span class="p">(</span><span class="n">status</span><span class="p">,</span> <span class="n">headers</span><span class="p">)</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-async"><code>async</code></small>
+  </span>
+
+<a href="#blackbull.server.sender.HTTP2Sender.send_response_headers" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Write a standalone HEADERS frame (END_HEADERS, no END_STREAM) now.</p>
+<p>Unlike the <code>http.response.start</code> event — which is buffered until a
+body event so HEADERS + first DATA can coalesce into one write — this
+flushes the response HEADERS immediately and leaves the stream open.
+Required by the RFC 8441 WebSocket-over-HTTP/2 accept: the
+<code>:status 200</code> response carries no body, so nothing would ever trigger
+the deferred flush, and the stream must stay open bidirectionally for
+the subsequent WebSocket DATA frames.</p>
 
 
     </div>
