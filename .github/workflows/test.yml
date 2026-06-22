@@ -49,9 +49,14 @@ jobs:
 
       - name: Generate self-signed TLS material
         run: |
+          # subjectAltName must cover the loopback IP: the cert-verifying
+          # integration tests (test_http2_advanced) connect to 127.0.0.1 and
+          # validate the chain + hostname.  CN=localhost alone fails with
+          # "IP address mismatch".  Mirrors the committed tests/cert.pem SAN.
           openssl req -x509 -newkey rsa:2048 \
             -keyout tests/key.pem -out tests/cert.pem \
-            -days 365 -nodes -subj '/CN=localhost'
+            -days 365 -nodes -subj '/CN=localhost' \
+            -addext 'subjectAltName=DNS:localhost,IP:127.0.0.1'
 
       - name: Run fast test tier
         # Scope to the Docker-free suites named in this job.  `pytest tests/`
@@ -86,9 +91,14 @@ jobs:
 
       - name: Generate self-signed TLS material
         run: |
+          # subjectAltName must cover the loopback IP: the cert-verifying
+          # integration tests (test_http2_advanced) connect to 127.0.0.1 and
+          # validate the chain + hostname.  CN=localhost alone fails with
+          # "IP address mismatch".  Mirrors the committed tests/cert.pem SAN.
           openssl req -x509 -newkey rsa:2048 \
             -keyout tests/key.pem -out tests/cert.pem \
-            -days 365 -nodes -subj '/CN=localhost'
+            -days 365 -nodes -subj '/CN=localhost' \
+            -addext 'subjectAltName=DNS:localhost,IP:127.0.0.1'
 
       - name: Run full test tier
         run: |
