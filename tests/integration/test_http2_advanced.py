@@ -148,7 +148,7 @@ async def test_server_push_scope_extension_present(push_app):
     _KEY  = pathlib.Path(__file__).parent.parent / 'key.pem'
     from .conftest import live_server
     with live_server(app2, certfile=str(_CERT), keyfile=str(_KEY)) as live:
-        async with httpx.AsyncClient(http2=True, verify=False) as c:
+        async with httpx.AsyncClient(http2=True, verify=_test_ssl_context()) as c:
             r = await c.get(f'https://127.0.0.1:{live.port}/ext')
         assert r.status_code == 200
         # Verify that the framework advertises push support in the scope
@@ -159,7 +159,7 @@ async def test_server_push_scope_extension_present(push_app):
 @pytest.mark.asyncio
 async def test_priority_hint_in_scope(priority_app):
     async with httpx.AsyncClient(
-        http2=True, verify=False,
+        http2=True, verify=_test_ssl_context(),
         base_url=f'https://127.0.0.1:{priority_app.port}',
     ) as c:
         # Send a request with RFC 9218 priority header

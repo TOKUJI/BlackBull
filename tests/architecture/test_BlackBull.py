@@ -191,18 +191,31 @@ async def ssl_h2context():
     pass
 
 
+def _validating_ssl_context() -> ssl.SSLContext:
+    """SSLContext that validates the chain + hostname against the self-signed
+    test cert, instead of ``verify=False``.
+
+    The test cert carries an ``IP:127.0.0.1`` SAN, so connecting to the IPv4
+    loopback validates cleanly.  Using a real context (rather than disabling
+    verification) keeps CodeQL from flagging the call as "Request without
+    certificate validation" — the same rationale as
+    ``test_http2_advanced._test_ssl_context``.
+    """
+    localhost_pem = pathlib.Path(__file__).parent.parent / 'cert.pem'
+    return ssl.create_default_context(cafile=str(localhost_pem))
+
+
 # These response-code tests connect to the literal IPv4 loopback rather than
 # the name 'localhost'.  On GitHub-hosted runners 'localhost' resolves to the
 # IPv6 loopback '::1' first, and that path drops the TLS connection mid-handshake
 # ("httpx.RemoteProtocolError: Server disconnected") even though the dual-stack
 # listener binds '::' — a runner-network quirk that does not reproduce locally.
-# The tests assert HTTP status, not name resolution, and run with verify=False
-# (so the hostname is irrelevant to cert validation); using '127.0.0.1' matches
-# every other test in this module and keeps the suite green in CI.  See Sprint 52
-# R8.
+# The test cert's IP:127.0.0.1 SAN lets _validating_ssl_context() verify the
+# chain against the loopback IP, so using '127.0.0.1' matches every other test
+# in this module and keeps the suite green in CI.  See Sprint 52 R8.
 @pytest.mark.asyncio
 async def test_response_200(app):
-    async with httpx.AsyncClient(http2=True, verify=False) as c:
+    async with httpx.AsyncClient(http2=True, verify=_validating_ssl_context()) as c:
         res = await c.get(f'https://127.0.0.1:{app.port}/test', headers={'key': 'value'})
         assert res.status_code == 200
 
@@ -210,7 +223,7 @@ async def test_response_200(app):
 @pytest.mark.asyncio
 async def test_response_404_fn(app):
 
-    async with httpx.AsyncClient(http2=True, verify=False) as c:
+    async with httpx.AsyncClient(http2=True, verify=_validating_ssl_context()) as c:
         res = await c.get(f'https://127.0.0.1:{app.port}/badpath', headers={'key': 'value'})
 
         assert res.status_code == 404
@@ -221,7 +234,7 @@ async def test_response_404_fn(app):
 async def test_routing_middleware(app):
     logger.debug('test_routing_middleware is called.')
 
-    async with httpx.AsyncClient(http2=True, verify=False) as c:
+    async with httpx.AsyncClient(http2=True, verify=_validating_ssl_context()) as c:
         res = await c.get(f'https://127.0.0.1:{app.port}/test2', headers={'key': 'value'})
 
         assert res.status_code == 200
