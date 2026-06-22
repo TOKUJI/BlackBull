@@ -191,10 +191,19 @@ async def ssl_h2context():
     pass
 
 
+# These response-code tests connect to the literal IPv4 loopback rather than
+# the name 'localhost'.  On GitHub-hosted runners 'localhost' resolves to the
+# IPv6 loopback '::1' first, and that path drops the TLS connection mid-handshake
+# ("httpx.RemoteProtocolError: Server disconnected") even though the dual-stack
+# listener binds '::' — a runner-network quirk that does not reproduce locally.
+# The tests assert HTTP status, not name resolution, and run with verify=False
+# (so the hostname is irrelevant to cert validation); using '127.0.0.1' matches
+# every other test in this module and keeps the suite green in CI.  See Sprint 52
+# R8.
 @pytest.mark.asyncio
 async def test_response_200(app):
     async with httpx.AsyncClient(http2=True, verify=False) as c:
-        res = await c.get(f'https://localhost:{app.port}/test', headers={'key': 'value'})
+        res = await c.get(f'https://127.0.0.1:{app.port}/test', headers={'key': 'value'})
         assert res.status_code == 200
 
 
@@ -202,7 +211,7 @@ async def test_response_200(app):
 async def test_response_404_fn(app):
 
     async with httpx.AsyncClient(http2=True, verify=False) as c:
-        res = await c.get(f'https://localhost:{app.port}/badpath', headers={'key': 'value'})
+        res = await c.get(f'https://127.0.0.1:{app.port}/badpath', headers={'key': 'value'})
 
         assert res.status_code == 404
         assert res.content == b'not found test.'
