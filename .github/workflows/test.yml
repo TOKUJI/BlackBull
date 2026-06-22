@@ -100,6 +100,22 @@ jobs:
             -days 365 -nodes -subj '/CN=localhost' \
             -addext 'subjectAltName=DNS:localhost,IP:127.0.0.1'
 
+      - name: Pre-pull + build differential-test images
+        # The HTTP/1.1 differential oracle (test_http1_differential) builds a
+        # local echo-server image (base: python:3.12-slim) and runs nginx as
+        # the reference.  Anonymous Docker Hub pulls from the runner are
+        # rate-limited and time out ("context deadline exceeded") if left to
+        # happen lazily inside the test.  Warm them here with retries and
+        # pre-build echo-server so the fixture finds it cached.
+        run: |
+          for img in python:3.12-slim nginx:1.27-alpine; do
+            for attempt in 1 2 3; do
+              docker pull "$img" && break
+              echo "::warning::docker pull $img attempt $attempt failed; retrying" && sleep 10
+            done
+          done
+          docker build -t echo-server:latest tests/conformance/echo_server
+
       - name: Run full test tier
         run: |
           python -m pytest tests/ --run-all --timeout=120 -q \
