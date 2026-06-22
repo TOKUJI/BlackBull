@@ -1099,7 +1099,13 @@ class HTTP2Actor(Actor):
             if subprotocol:
                 sp = subprotocol if isinstance(subprotocol, str) else subprotocol.decode()
                 headers = [(b'sec-websocket-protocol', sp.encode())]
-            await stream_send({'type': 'http.response.start', 'status': 200, 'headers': headers})
+            # Flush the :status 200 HEADERS immediately.  The plain
+            # http.response.start event would be buffered until a body event
+            # (HTTP2Sender coalesces HEADERS + first DATA), but an RFC 8441
+            # accept has no body — the HEADERS would never reach the client and
+            # the handshake would hang.  send_response_headers writes them now
+            # without END_STREAM so the stream stays open for WS DATA frames.
+            await stream_send.send_response_headers(HTTPStatus(200), headers)
 
         scope['_ws_send_101'] = _ws_send_200  # WebSocketActor calls this on websocket.accept
 

@@ -121,7 +121,7 @@ async def test_server_push_route_reachable(push_app):
     1. The /style.css route exists and returns the expected content.
     2. The server continues serving requests after a push-enabled request.
     """
-    base = f'https://localhost:{push_app.port}'
+    base = f'https://127.0.0.1:{push_app.port}'
     async with httpx.AsyncClient(http2=True, verify=False) as c:
         css = await c.get(f'{base}/style.css')
     assert css.status_code == 200
@@ -148,8 +148,8 @@ async def test_server_push_scope_extension_present(push_app):
     _KEY  = pathlib.Path(__file__).parent.parent / 'key.pem'
     from .conftest import live_server
     with live_server(app2, certfile=str(_CERT), keyfile=str(_KEY)) as live:
-        async with httpx.AsyncClient(http2=True, verify=False) as c:
-            r = await c.get(f'https://localhost:{live.port}/ext')
+        async with httpx.AsyncClient(http2=True, verify=_test_ssl_context()) as c:
+            r = await c.get(f'https://127.0.0.1:{live.port}/ext')
         assert r.status_code == 200
         # Verify that the framework advertises push support in the scope
         # (the assertion lives in the server process; we just check the response)
@@ -159,8 +159,8 @@ async def test_server_push_scope_extension_present(push_app):
 @pytest.mark.asyncio
 async def test_priority_hint_in_scope(priority_app):
     async with httpx.AsyncClient(
-        http2=True, verify=False,
-        base_url=f'https://localhost:{priority_app.port}',
+        http2=True, verify=_test_ssl_context(),
+        base_url=f'https://127.0.0.1:{priority_app.port}',
     ) as c:
         # Send a request with RFC 9218 priority header
         r = await c.get('/priority', headers={'priority': 'u=1'})
@@ -192,7 +192,7 @@ async def test_priority_extension_present_in_scope(stream_info_app):
     values the legacy ``scope['http2_priority']`` does."""
     async with httpx.AsyncClient(
         http2=True, verify=_test_ssl_context(),
-        base_url=f'https://localhost:{stream_info_app.port}',
+        base_url=f'https://127.0.0.1:{stream_info_app.port}',
     ) as c:
         r = await c.get('/stream-info', headers={'priority': 'u=2, i'})
     assert r.status_code == 200
@@ -212,7 +212,7 @@ async def test_http2_stream_extension_present_in_scope(stream_info_app):
     stream_id and the send-window snapshot."""
     async with httpx.AsyncClient(
         http2=True, verify=_test_ssl_context(),
-        base_url=f'https://localhost:{stream_info_app.port}',
+        base_url=f'https://127.0.0.1:{stream_info_app.port}',
     ) as c:
         r = await c.get('/stream-info')
     body = r.json()
@@ -233,7 +233,7 @@ async def test_scope_advertises_three_extension_keys(stream_info_app):
     keys.  Sprint 32 adds the latter two; the existing push key stays."""
     async with httpx.AsyncClient(
         http2=True, verify=_test_ssl_context(),
-        base_url=f'https://localhost:{stream_info_app.port}',
+        base_url=f'https://127.0.0.1:{stream_info_app.port}',
     ) as c:
         r = await c.get('/stream-info')
     keys = set(r.json()['extension_keys'])

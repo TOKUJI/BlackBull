@@ -684,6 +684,31 @@ class HTTP2Sender(BaseSender):
         if set_end_stream:
             self._end_stream_sent = True
 
+    async def send_response_headers(
+        self, status: HTTPStatus, headers: list[tuple[bytes, bytes]],
+    ) -> None:
+        """Write a standalone HEADERS frame (END_HEADERS, no END_STREAM) now.
+
+        Unlike the ``http.response.start`` event — which is buffered until a
+        body event so HEADERS + first DATA can coalesce into one write — this
+        flushes the response HEADERS immediately and leaves the stream open.
+        Required by the RFC 8441 WebSocket-over-HTTP/2 accept: the
+        ``:status 200`` response carries no body, so nothing would ever trigger
+        the deferred flush, and the stream must stay open bidirectionally for
+        the subsequent WebSocket DATA frames.
+        """
+        h_frame = self._factory.create(
+            FrameTypes.HEADERS,
+            HeaderFrameFlags.END_HEADERS,
+            self._stream_id,
+        )
+        h_frame.pseudo_headers[PseudoHeaders.STATUS] = str(status)
+        for k, v in headers:
+            h_frame.headers.append((k, v))
+        if not _has_header(h_frame.headers, b'date'):
+            h_frame.headers.append((b'date', _http_date()))
+        await self._write(h_frame.save())
+
     async def _write(self, data: bytes):
         """Write a frame to the transport.
 

@@ -146,42 +146,42 @@ async def server_tls_port(cert_path, key_path, manage_cert_and_key):
 class TestHTTP2Client:
     @pytest.mark.asyncio
     async def test_get_returns_status_and_body(self, server_port):
-        async with HTTP2Client('localhost', server_port) as c:
+        async with HTTP2Client('127.0.0.1', server_port) as c:
             res = await c.request(HTTPMethod.GET, '/')
         assert res.status == HTTPStatus.OK
         assert res.body == b'hello'
 
     @pytest.mark.asyncio
     async def test_path_reflected(self, server_port):
-        async with HTTP2Client('localhost', server_port) as c:
+        async with HTTP2Client('127.0.0.1', server_port) as c:
             res = await c.request(HTTPMethod.GET, '/path')
         assert res.status == HTTPStatus.OK
         assert res.body == b'/path'
 
     @pytest.mark.asyncio
     async def test_post_with_body(self, server_port):
-        async with HTTP2Client('localhost', server_port) as c:
+        async with HTTP2Client('127.0.0.1', server_port) as c:
             res = await c.request(HTTPMethod.POST, '/echo', body=b'world')
         assert res.status == HTTPStatus.OK
         assert res.body == b'world'
 
     @pytest.mark.asyncio
     async def test_error_status_propagates(self, server_port):
-        async with HTTP2Client('localhost', server_port) as c:
+        async with HTTP2Client('127.0.0.1', server_port) as c:
             res = await c.request(HTTPMethod.GET, '/error')
         assert res.status == HTTPStatus.INTERNAL_SERVER_ERROR
         assert res.body == b'oh no'
 
     @pytest.mark.asyncio
     async def test_response_headers_are_bytes(self, server_port):
-        async with HTTP2Client('localhost', server_port) as c:
+        async with HTTP2Client('127.0.0.1', server_port) as c:
             res = await c.request(HTTPMethod.GET, '/')
         ct = res.headers.get(b'content-type')
         assert ct == b'text/plain'
 
     @pytest.mark.asyncio
     async def test_two_concurrent_requests(self, server_port):
-        async with HTTP2Client('localhost', server_port) as c:
+        async with HTTP2Client('127.0.0.1', server_port) as c:
             r1, r2 = await asyncio.gather(
                 c.request(HTTPMethod.GET, '/path'),
                 c.request(HTTPMethod.POST, '/echo', body=b'second'),
@@ -193,7 +193,7 @@ class TestHTTP2Client:
 
     @pytest.mark.asyncio
     async def test_context_manager_cleans_up(self, server_port):
-        client = HTTP2Client('localhost', server_port)
+        client = HTTP2Client('127.0.0.1', server_port)
         async with client as c:
             await c.request(HTTPMethod.GET, '/')
         # After exiting, the receive task must be cancelled or done.
@@ -207,21 +207,21 @@ class TestHTTP2Client:
 class TestHTTP1Client:
     @pytest.mark.asyncio
     async def test_get_returns_status_and_body(self, server_port):
-        async with HTTP1Client('localhost', server_port) as c:
+        async with HTTP1Client('127.0.0.1', server_port) as c:
             res = await c.request(HTTPMethod.GET, '/')
         assert res.status == HTTPStatus.OK
         assert res.body == b'hello'
 
     @pytest.mark.asyncio
     async def test_path_reflected(self, server_port):
-        async with HTTP1Client('localhost', server_port) as c:
+        async with HTTP1Client('127.0.0.1', server_port) as c:
             res = await c.request(HTTPMethod.GET, '/path')
         assert res.status == HTTPStatus.OK
         assert res.body == b'/path'
 
     @pytest.mark.asyncio
     async def test_post_with_bytes_body(self, server_port):
-        async with HTTP1Client('localhost', server_port) as c:
+        async with HTTP1Client('127.0.0.1', server_port) as c:
             res = await c.request(HTTPMethod.POST, '/echo', body=b'hello-bytes')
         assert res.status == HTTPStatus.OK
         assert res.body == b'hello-bytes'
@@ -232,21 +232,21 @@ class TestHTTP1Client:
             for chunk in (b'one ', b'two ', b'three'):
                 yield chunk
 
-        async with HTTP1Client('localhost', server_port) as c:
+        async with HTTP1Client('127.0.0.1', server_port) as c:
             res = await c.request(HTTPMethod.POST, '/echo', body=stream_body())
         assert res.status == HTTPStatus.OK
         assert res.body == b'one two three'
 
     @pytest.mark.asyncio
     async def test_error_status_propagates(self, server_port):
-        async with HTTP1Client('localhost', server_port) as c:
+        async with HTTP1Client('127.0.0.1', server_port) as c:
             res = await c.request(HTTPMethod.GET, '/error')
         assert res.status == HTTPStatus.INTERNAL_SERVER_ERROR
         assert res.body == b'oh no'
 
     @pytest.mark.asyncio
     async def test_keep_alive_two_requests(self, server_port):
-        async with HTTP1Client('localhost', server_port) as c:
+        async with HTTP1Client('127.0.0.1', server_port) as c:
             r1 = await c.request(HTTPMethod.GET, '/path')
             r2 = await c.request(HTTPMethod.POST, '/echo', body=b'second')
         assert r1.body == b'/path'
@@ -254,7 +254,7 @@ class TestHTTP1Client:
 
     @pytest.mark.asyncio
     async def test_host_header_auto_injected(self, server_port):
-        async with HTTP1Client('localhost', server_port) as c:
+        async with HTTP1Client('127.0.0.1', server_port) as c:
             res = await c.request(HTTPMethod.GET, '/')
         assert res.status == HTTPStatus.OK
 
@@ -325,14 +325,14 @@ class TestHTTP1RequestSenderWire:
 class TestWebSocketClient:
     @pytest.mark.asyncio
     async def test_handshake_completes(self, server_port):
-        async with WebSocketClient('localhost', server_port) as c:
+        async with WebSocketClient('127.0.0.1', server_port) as c:
             ws = await c.connect('/ws')
             await ws.close()
         assert ws.subprotocol is None
 
     @pytest.mark.asyncio
     async def test_text_echo(self, server_port):
-        async with WebSocketClient('localhost', server_port) as c:
+        async with WebSocketClient('127.0.0.1', server_port) as c:
             ws = await c.connect('/ws')
             await ws.send_text('hello')
             event = await ws.receive()
@@ -342,7 +342,7 @@ class TestWebSocketClient:
 
     @pytest.mark.asyncio
     async def test_binary_echo(self, server_port):
-        async with WebSocketClient('localhost', server_port) as c:
+        async with WebSocketClient('127.0.0.1', server_port) as c:
             ws = await c.connect('/ws')
             await ws.send_bytes(b'\x00\x01\x02')
             event = await ws.receive()
@@ -352,7 +352,7 @@ class TestWebSocketClient:
 
     @pytest.mark.asyncio
     async def test_close_handshake(self, server_port):
-        async with WebSocketClient('localhost', server_port) as c:
+        async with WebSocketClient('127.0.0.1', server_port) as c:
             ws = await c.connect('/ws')
             await ws.close()
         # No exception raised — close() drained gracefully.
@@ -364,7 +364,7 @@ class TestWebSocketClient:
         # so attaching to the function works.
         _echo_app.available_ws_protocols = [b'chat']  # type: ignore[attr-defined]
         try:
-            async with WebSocketClient('localhost', server_port) as c:
+            async with WebSocketClient('127.0.0.1', server_port) as c:
                 ws = await c.connect('/ws', subprotocols=[b'chat', b'other'])
                 await ws.close()
             assert ws.subprotocol == b'chat'
@@ -388,7 +388,7 @@ def _make_tls_client_context(cert_path: pathlib.Path,
 class TestClient:
     @pytest.mark.asyncio
     async def test_plaintext_defaults_to_http1(self, server_port):
-        async with Client('localhost', server_port) as c:
+        async with Client('127.0.0.1', server_port) as c:
             assert isinstance(c, HTTP1Client)
             res = await c.request(HTTPMethod.GET, '/')
         assert res.status == HTTPStatus.OK
@@ -398,7 +398,7 @@ class TestClient:
     async def test_alpn_picks_h2_when_advertised(self, server_tls_port):
         port, cert_path = server_tls_port
         ctx = _make_tls_client_context(cert_path, ['h2', 'http/1.1'])
-        async with Client('localhost', port, ssl=ctx) as c:
+        async with Client('127.0.0.1', port, ssl=ctx) as c:
             assert isinstance(c, HTTP2Client)
             res = await c.request(HTTPMethod.GET, '/')
         assert res.status == HTTPStatus.OK
@@ -410,7 +410,7 @@ class TestClient:
         # ALPN selection requires overlap, so the connection must fall back.
         port, cert_path = server_tls_port
         ctx = _make_tls_client_context(cert_path, ['http/1.1'])
-        async with Client('localhost', port, ssl=ctx) as c:
+        async with Client('127.0.0.1', port, ssl=ctx) as c:
             assert isinstance(c, HTTP1Client)
             res = await c.request(HTTPMethod.GET, '/')
         assert res.status == HTTPStatus.OK
