@@ -30,7 +30,7 @@ jobs:
     timeout-minutes: 5
     steps:
       - name: Checkout
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10   # v6.0.3
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0   # v7.0.0
         with:
           fetch-depth: 0   # so `python -m build` sees full git context if needed
 
@@ -107,7 +107,7 @@ jobs:
       - name: Checkout
         # Needs CHANGELOG.md for the release notes; default fetch-depth
         # of 1 is enough since we read the file at HEAD of the tag.
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10   # v6.0.3
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0   # v7.0.0
 
       - name: Extract changelog section for this tag
         # Pull the ``## [x.y.z]`` block out of CHANGELOG.md so the
