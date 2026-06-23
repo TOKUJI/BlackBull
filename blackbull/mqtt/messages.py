@@ -4,7 +4,7 @@ Level-A (pure-data) layer for the ``blackbull-mqtt`` broker sidecar: the 15
 MQTT 5.0 control packets as frozen dataclasses, a wire encoder/decoder, the
 MQTT 5.0 property system, reason codes, and the topic-filter matching
 algorithm.  No I/O and no broker state live here — that is the job of
-:mod:`blackbull.mqtt.actor`.
+:mod:`blackbull.mqtt.broker` and :mod:`blackbull.mqtt.connection`.
 
 Reference: MQTT Version 5.0, OASIS Standard
   https://docs.oasis-open.org/mqtt/mqtt/v5.0/os/mqtt-v5.0-os.html

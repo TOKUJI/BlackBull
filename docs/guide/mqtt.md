@@ -53,12 +53,29 @@ async def firehose(msg: Message): ...
 async def alerts(msg: Message): ...
 ```
 
+A filter level may also be a `{name}` **capture**: it matches one level like `+`
+and is injected into the callback as a keyword argument, mirroring HTTP path
+params.
+
+```python
+@mqtt.on_message(topic='sensors/{room}/temperature')
+async def on_temperature(msg: Message, room: str):
+    print(room, msg.payload.decode())   # room == 'kitchen' for sensors/kitchen/temperature
+```
+
 Handlers are an **application-level tap**: they run *in addition to* normal
 broker routing, never instead of it. The broker still delivers each PUBLISH to
-every subscribed MQTT client whether or not a handler matches. Each tap runs
-inline on the connection that received the message (sequentially), so a slow tap
-back-pressures only that one client, never the broker. A handler that raises is
-isolated and logged — it never disturbs the broker or other handlers.
+every subscribed MQTT client whether or not a handler matches. A handler that
+raises is isolated and logged — it never disturbs the broker or other handlers.
+
+By default taps are dispatched on a **decoupled `TapActor`**: the connection
+hands each message off without waiting, so a slow tap can never back-pressure
+delivery or the broker. The `TapActor`'s inbox is bounded; if taps fall behind,
+the newest messages are dropped (best-effort observability) and a running
+dropped-count is logged. Taps are therefore *not* a reliable delivery path — use
+a real MQTT subscription for that. (`MQTTExtension(tap_mode='inline')` runs taps
+inline on the receiving connection instead — the pre-Sprint-54 behaviour, kept
+mainly so the `bench/mqtt/tap_throughput.py` comparison stays reproducible.)
 
 The broker also runs without any handler at all: `on_message` is just how an
 application observes traffic. `app.add_extension(MQTTExtension())` on its own
@@ -84,13 +101,16 @@ conformance matrix:
 
 The wire codec lives in `blackbull.mqtt.messages` (the 15 control-packet
 dataclasses, `encode_packet` / `decode_packet`, the property system, reason
-codes, and `topic_matches_filter`). The broker is an actor model in
-`blackbull.mqtt.actor`: a single `BrokerActor` owns all routing state
-(subscriptions, sessions, retained messages) and, processing its inbox serially,
-needs no locks; one `MQTTConnectionActor` per connection is the sole writer to
-its socket and forwards decoded control packets to the broker. `serve_connection`
-wires the two, and `MQTTProtocolDetector` recognises the MQTT CONNECT first byte
-(`0x10`) for shared-port sniffing.
+codes, and `topic_matches_filter`). The broker is an actor model split across a
+few small modules: `blackbull.mqtt.broker` holds the `BrokerActor`, which owns
+all routing state (subscriptions, sessions, retained messages) and, processing
+its inbox serially, needs no locks; `blackbull.mqtt.connection` holds the
+`MQTTConnectionActor` (one per connection — the sole writer to its socket,
+forwarding decoded control packets to the broker) and `serve_connection`, which
+wires the two; `blackbull.mqtt.tap` holds the `TapActor` and the `Message`
+read-model; and `blackbull.mqtt.extension` holds `MQTTExtension` and
+`MQTTProtocolDetector`, which recognises the MQTT CONNECT first byte (`0x10`) for
+shared-port sniffing.
 
 ## Trying it with Mosquitto
 

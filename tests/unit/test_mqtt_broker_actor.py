@@ -8,7 +8,7 @@ the reader loop, or the connection actor.  The wire-level conformance suite
 import pytest
 
 from blackbull.actor import Actor
-from blackbull.mqtt.actor import (
+from blackbull.mqtt.broker import (
     BrokerActor,
     Attach, ClientSubscribe, ClientUnsubscribe, ClientPublish,
     ClientPubrel, ClientPubrec, ClientPuback,

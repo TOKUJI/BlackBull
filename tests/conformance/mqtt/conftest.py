@@ -58,7 +58,7 @@ class MQTTHarness:
     """
 
     def __init__(self) -> None:
-        from blackbull.mqtt.actor import BrokerActor
+        from blackbull.mqtt.broker import BrokerActor
         self._broker = BrokerActor()
         self._broker_task = None
 
@@ -72,7 +72,7 @@ class MQTTHarness:
                 await self._broker_task
 
     def serve(self, reader, writer, ctx, **kwargs):
-        from blackbull.mqtt.actor import serve_connection
+        from blackbull.mqtt.connection import serve_connection
         broker = self._broker
         app_handlers = kwargs.get('app_handlers')
 

@@ -45,18 +45,41 @@ so the editable install's metadata catches up.
   protocols.
 - **`on_message` taps now receive a single `blackbull.mqtt.Message`**
   (`topic`/`payload`/`qos`/`retain`/`properties`) instead of `(topic, payload)`,
-  mirroring how `@app.on` hands an observer one `Event`. Taps run inline on the
-  receiving connection (sequential), so a slow tap back-pressures only that
-  client, never the broker.
+  mirroring how `@app.on` hands an observer one `Event`.
+- **MQTT taps now dispatch on a decoupled `TapActor` by default (Sprint 54).**
+  The connection *offers* each message to a single lifespan-owned `TapActor` and
+  returns immediately, so a slow tap can no longer back-pressure delivery or the
+  broker (the Sprint 53 inline dispatch did). The `TapActor`'s inbox is bounded;
+  on overflow the newest message is dropped and a running dropped-count is logged
+  — taps are best-effort observability, not a reliable delivery path.
+  `MQTTExtension(tap_mode='inline')` restores the inline behaviour, and
+  `tap_queue_size=` tunes the bound.
+- **MQTT module split (Sprint 54).** The flat `blackbull/mqtt/actor.py` is broken
+  into `broker.py` (`BrokerActor` + the Level A messages), `connection.py`
+  (`MQTTConnectionActor`, `PacketFramer`, `serve_connection`), `tap.py`
+  (`Message`, `Tap`, `TapActor`), and `extension.py` (`MQTTExtension`,
+  `MQTTProtocolDetector`). Public imports from `blackbull.mqtt` are unchanged.
 - Will (LWT) delivery on abnormal disconnect no longer relies on the old
   keep-globals-forever crutch: the long-lived `BrokerActor` outlives connection
   actors, so a peer's Will routes to live subscribers during teardown by
   construction. The broker now ends a connection on real EOF.
+- `MQTTConnectionActor`'s read loop now frames packets through a small
+  incremental `PacketFramer` (Sprint 54): it decodes straight off its internal
+  buffer (no whole-buffer `bytes(...)` copy per attempt) and treats an incomplete
+  packet as "await more bytes", dropping a byte to resync only on a genuine
+  decode error.
 
 ### Added
+- **`{name}` topic captures for MQTT taps (Sprint 54).**
+  `@mqtt.on_message(topic='sensors/{room}/temperature')` matches `{room}` as one
+  level (like `+`) and injects it into the callback as a keyword argument,
+  mirroring HTTP path params.
 - `AbstractReader.at_eof()` (default `False`; `AsyncioReader` delegates to the
   underlying stream) so a long-lived raw-protocol read loop can detect peer
   close instead of relying solely on task cancellation.
+- `Actor` accepts an optional `inbox_maxsize` (default `0` = unbounded) for a
+  bounded inbox, enabling explicit overflow policies such as the `TapActor`'s
+  drop-newest.
 
 ## [0.44.0] — 2026-06-22
 

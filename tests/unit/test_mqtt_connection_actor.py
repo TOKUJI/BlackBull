@@ -11,7 +11,8 @@ import contextlib
 
 import pytest
 
-from blackbull.mqtt.actor import BrokerActor, serve_connection
+from blackbull.mqtt.broker import BrokerActor
+from blackbull.mqtt.connection import serve_connection
 from blackbull.mqtt.messages import (
     MQTTConnect, MQTTConnack, MQTTPublish, MQTTPuback,
     MQTTSubscribe, MQTTPingreq, MQTTPingresp, MQTTDisconnect,
@@ -195,6 +196,57 @@ async def test_on_message_tap_skips_non_matching_topic():
         await _drain(task)
 
     assert seen == []
+
+
+async def test_on_message_capture_param_injected_inline():
+    """A ``{name}`` segment in the filter is injected as a keyword argument."""
+    seen = {}
+
+    async def tap(msg, room):
+        seen['topic'] = msg.topic
+        seen['room'] = room
+
+    async with _running_broker() as broker:
+        reader = _FakeReader()
+        writer, task = await _serve(broker, reader, _ctx(),
+                                    app_handlers=[('sensors/{room}/temp', tap)])
+        reader.feed_packet(MQTTConnect(client_id='c1', clean_start=True, keep_alive=60))
+        reader.feed_packet(MQTTPublish(topic='sensors/kitchen/temp', payload=b'21', qos=0))
+        await asyncio.sleep(0.1)
+        await _drain(task)
+
+    assert seen == {'topic': 'sensors/kitchen/temp', 'room': 'kitchen'}
+
+
+async def test_on_message_dispatched_through_tap_actor():
+    """In actor mode the connection offers to a decoupled TapActor."""
+    from blackbull.mqtt import Message, TapActor
+    seen = []
+
+    async def tap(msg):
+        seen.append(msg)
+
+    tap_actor = TapActor([('sensors/#', tap)])
+    tap_task = asyncio.create_task(tap_actor.run())
+    try:
+        async with _running_broker() as broker:
+            reader = _FakeReader()
+            writer = _FakeWriter()
+            task = asyncio.create_task(
+                serve_connection(reader, writer, _ctx(), broker, tap=tap_actor))
+            reader.feed_packet(MQTTConnect(client_id='c1', clean_start=True, keep_alive=60))
+            reader.feed_packet(MQTTPublish(topic='sensors/a/temp', payload=b'9', qos=0))
+            await asyncio.sleep(0.1)
+            await _drain(task)
+    finally:
+        tap_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await tap_task
+
+    assert len(seen) == 1
+    assert isinstance(seen[0], Message)
+    assert seen[0].topic == 'sensors/a/temp'
+    assert tap_actor.dropped == 0
 
 
 async def test_on_message_tap_exception_is_isolated():

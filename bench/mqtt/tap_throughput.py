@@ -1,20 +1,28 @@
-r"""MQTT tap-throughput benchmark (Sprint 53 baseline; reused unchanged in 54).
+r"""MQTT tap-throughput benchmark — controlled inline-vs-actor tap comparison.
 
 Measures how a *slow* ``on_message`` tap affects end-to-end delivery, by driving
 the real ``BrokerActor`` + ``serve_connection`` over in-memory pipes:
 
   publisher --PUBLISH--> broker --deliver--> subscriber   (latency measured here)
-       \--inline tap (await sleep(tap_delay))
+       \--tap (await sleep(tap_delay))
 
-The tap runs inline on the publisher's connection (the Sprint 53 contract), so a
-slow tap serialises that connection's reads.  Sweeping ``tap_delay`` shows the
-coupling: throughput falls and p99 latency rises while tap coverage stays 100 %.
+Two dispatch modes, selected with ``--tap-mode`` (the **only** variable between
+runs — same load generator, same machine, same build):
 
-Sprint 54 adds a decoupled ``TapActor`` (drop-newest overflow); re-run this same
-script then with ``MQTTExtension(tap_mode='actor')`` to get the controlled
-side-by-side (see bench/sprint-logs/sprint-54.md).
+* ``inline``  — the tap runs inline on the publisher's connection (Sprint 53
+  contract), so a slow tap serialises that connection's reads.  Throughput
+  falls and p99 rises as ``tap_delay`` grows, while coverage stays 100 %.
+* ``actor``   — the publish is *offered* to a decoupled bounded ``TapActor``
+  (Sprint 54, drop-newest overflow).  A slow tap no longer back-pressures
+  delivery; throughput/p99 stay ~flat, the cost surfacing as coverage < 100 %
+  and a non-zero drop count.
 
-Run:  python bench/mqtt/tap_throughput.py [--messages N]
+Run both back-to-back in one session for the controlled side-by-side:
+
+  python bench/mqtt/tap_throughput.py --tap-mode inline [--messages N]
+  python bench/mqtt/tap_throughput.py --tap-mode actor [--messages N]
+
+(see bench/sprint-logs/sprint-54.md).
 """
 from __future__ import annotations
 
@@ -27,7 +35,7 @@ import struct
 import sys
 import time
 
-from blackbull.mqtt import BrokerActor, serve_connection
+from blackbull.mqtt import BrokerActor, TapActor, serve_connection
 from blackbull.mqtt.messages import (
     MQTTConnect, MQTTPublish, MQTTSubscribe, MQTTMessage,
     IncompletePacket, MQTTDecodeError,
@@ -109,11 +117,21 @@ class _NullWriter(AbstractWriter):
         pass
 
 
-async def _run_once(tap_delay: float, n: int, timeout: float = 120.0) -> dict:
+async def _run_once(tap_delay: float, n: int, *, tap_mode: str,
+                    tap_queue: int, timeout: float = 120.0) -> dict:
     broker = BrokerActor()
     broker_task = asyncio.create_task(broker.run())
     tasks = [broker_task]
     readers = []
+    tap_actor = None
+    taps = {'count': 0}
+
+    async def tap(_msg):
+        taps['count'] += 1
+        if tap_delay:
+            await asyncio.sleep(tap_delay)
+
+    handlers = [('#', tap)]
     try:
         # --- subscriber on sensors/# ---
         sub_reader, sub_writer = _PipeReader(), _TimingWriter()
@@ -126,19 +144,18 @@ async def _run_once(tap_delay: float, n: int, timeout: float = 120.0) -> dict:
             MQTTSubscribe(packet_id=1, subscriptions=[('sensors/#', 0)])))
         await asyncio.sleep(0.05)
 
-        # --- publisher with an inline slow tap ---
-        taps = {'count': 0}
-
-        async def tap(_msg):
-            taps['count'] += 1
-            if tap_delay:
-                await asyncio.sleep(tap_delay)
+        # --- publisher with a slow tap (inline on the connection, or offered to
+        # a decoupled bounded TapActor — the single variable under test) ---
+        if tap_mode == 'actor':
+            tap_actor = TapActor(handlers, queue_size=tap_queue)
+            tasks.append(asyncio.create_task(tap_actor.run()))
 
         pub_reader = _PipeReader()
         readers.append(pub_reader)
         tasks.append(asyncio.create_task(
             serve_connection(pub_reader, _NullWriter(), _ctx('pub'), broker,
-                             app_handlers=[('#', tap)])))
+                             app_handlers=None if tap_mode == 'actor' else handlers,
+                             tap=tap_actor)))
         pub_reader.feed(encode_packet(
             MQTTConnect(client_id='pub', clean_start=True, keep_alive=0)))
         await asyncio.sleep(0.02)
@@ -157,6 +174,15 @@ async def _run_once(tap_delay: float, n: int, timeout: float = 120.0) -> dict:
                 break
             await asyncio.sleep(0.005)
         elapsed = time.perf_counter() - start
+
+        # In actor mode taps trail delivery; let the (bounded) queue drain so
+        # coverage reflects the messages that were *accepted* (the rest were
+        # dropped on overflow, counted separately).
+        if tap_actor is not None:
+            drain_deadline = time.perf_counter() + timeout
+            while (not tap_actor._inbox.empty()
+                   and time.perf_counter() < drain_deadline):
+                await asyncio.sleep(tap_delay or 0.005)
     finally:
         for r in readers:
             r.close()
@@ -174,20 +200,25 @@ async def _run_once(tap_delay: float, n: int, timeout: float = 120.0) -> dict:
         'p99': (lat_ms[min(len(lat_ms) - 1, int(len(lat_ms) * 0.99))]
                 if lat_ms else 0.0),
         'coverage': taps['count'] / n if n else 0.0,
+        'dropped': tap_actor.dropped if tap_actor is not None else 0,
     }
 
 
-async def _main(n: int) -> None:
+async def _main(n: int, tap_mode: str, tap_queue: int) -> None:
     print(f"# MQTT tap-throughput — {platform.python_implementation()} "
           f"{platform.python_version()} on {platform.system()}; "
-          f"uvloop={'uvloop' in sys.modules}; messages={n}\n")
-    header = f"{'tap_delay':>10} | {'throughput':>12} | {'p50 ms':>8} | {'p99 ms':>8} | {'coverage':>8}"
+          f"uvloop={'uvloop' in sys.modules}; messages={n}; "
+          f"tap_mode={tap_mode}"
+          f"{f'; tap_queue={tap_queue}' if tap_mode == 'actor' else ''}\n")
+    header = (f"{'tap_delay':>10} | {'throughput':>12} | {'p50 ms':>8} | "
+              f"{'p99 ms':>8} | {'coverage':>8} | {'dropped':>8}")
     print(header)
     print('-' * len(header))
     for delay in TAP_DELAYS:
-        r = await _run_once(delay, n)
+        r = await _run_once(delay, n, tap_mode=tap_mode, tap_queue=tap_queue)
         print(f"{delay * 1000:>7.0f}ms | {r['throughput']:>10.0f}/s | "
-              f"{r['p50']:>8.2f} | {r['p99']:>8.2f} | {r['coverage'] * 100:>6.0f}%")
+              f"{r['p50']:>8.2f} | {r['p99']:>8.2f} | "
+              f"{r['coverage'] * 100:>6.0f}% | {r['dropped']:>8}")
 
 
 if __name__ == '__main__':
@@ -195,5 +226,11 @@ if __name__ == '__main__':
     ap.add_argument('--messages', type=int, default=500,
                     help='messages per tap_delay (default 500; '
                          'kept modest because inline taps serialise at 1/tap_delay)')
+    ap.add_argument('--tap-mode', choices=('inline', 'actor'), default='actor',
+                    help="tap dispatch: 'inline' (Sprint 53) or 'actor' "
+                         "(Sprint 54, decoupled + drop-newest; default)")
+    ap.add_argument('--tap-queue', type=int, default=256,
+                    help='actor-mode TapActor inbox bound (default 256; '
+                         'overflow drops newest)')
     args = ap.parse_args()
-    asyncio.run(_main(args.messages))
+    asyncio.run(_main(args.messages, args.tap_mode, args.tap_queue))
