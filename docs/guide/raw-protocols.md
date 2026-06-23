@@ -67,6 +67,28 @@ an HTTP `Upgrade` on the HTTP listener, not as a top-level protocol.
 The bridge is **dormant by default**: an app with no `raw_handler` binds only the
 HTTP port and runs no raw code paths.
 
+## Core protocols vs. bridge protocols
+
+BlackBull distinguishes two tiers of protocol, and the distinction is
+deliberate:
+
+- **Core protocols — the HTTP family.** HTTP/1.1, HTTP/2, and (as they land)
+  gRPC and HTTP/3. These *are* the framework: they share the from-scratch HTTP
+  stack BlackBull exists to implement. gRPC is HTTP/2 + protobuf framing and
+  HTTP/3 is HTTP over QUIC, so both reuse the core stream machinery rather than
+  introducing a foreign transport. They live in the core (`blackbull.protocol`,
+  `blackbull.server`).
+- **Bridge protocols — everything else.** MQTT (and, in principle, Redis RESP,
+  AMQP, …) are independent protocol families that ride the Non-ASGI bridge but
+  share none of the HTTP protocol logic. They are wired in as
+  [extensions](extensions.md) and live in their own subpackages
+  (`blackbull.mqtt`), kept opt-in via an extra (`pip install 'blackbull[mqtt]'`).
+  A bridge protocol is structured so it can be extracted to a standalone
+  `blackbull-<name>` distribution later without touching the core — the same
+  path `blackbull-session` took.
+
+The MQTT broker is the reference bridge protocol; see [MQTT broker](mqtt.md).
+
 ## Events
 
 Raw protocols emit the protocol-agnostic Level B events (subscribe with

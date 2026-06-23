@@ -121,11 +121,36 @@ class AbstractReader(ABC):
     @abstractmethod
     async def read(self, n: int) -> bytes: ...
 
-    @abstractmethod
-    async def readuntil(self, sep: bytes) -> bytes: ...
+    def at_eof(self) -> bool:
+        """Return True once the peer has closed and the buffer is drained.
 
-    @abstractmethod
-    async def readexactly(self, n: int) -> bytes: ...
+        Default ``False`` (callers that need EOF detection — e.g. a long-lived
+        raw-protocol read loop — should use a reader that overrides this).
+        """
+        return False
+
+    async def readuntil(self, sep: bytes) -> bytes:
+        """Read until *sep* is seen (inclusive).  Default: byte-wise via
+        :meth:`read`.  Concrete transport readers override this with the
+        stream's native, buffered implementation."""
+        buf = bytearray()
+        while sep not in buf:
+            chunk = await self.read(1)
+            if not chunk:
+                break
+            buf += chunk
+        return bytes(buf)
+
+    async def readexactly(self, n: int) -> bytes:
+        """Read exactly *n* bytes.  Default: accumulate via :meth:`read`.
+        Concrete transport readers override this."""
+        buf = bytearray()
+        while len(buf) < n:
+            chunk = await self.read(n - len(buf))
+            if not chunk:
+                break
+            buf += chunk
+        return bytes(buf)
 
 
 class AsyncioReader(AbstractReader):
@@ -149,6 +174,10 @@ class AsyncioReader(AbstractReader):
             return await self._sr.read(n)
         except asyncio.IncompleteReadError as exc:
             raise IncompleteReadError(exc.partial) from exc
+
+    def at_eof(self) -> bool:
+        at_eof = getattr(self._sr, 'at_eof', None)
+        return bool(at_eof()) if at_eof is not None else False
 
     async def readuntil(self, sep: bytes) -> bytes:
         try:

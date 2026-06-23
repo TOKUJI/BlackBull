@@ -7,15 +7,25 @@ outside the core as **extensions**: small packages that wire
 themselves into an application using the existing public APIs
 (`app.use`, `app.route`, `app.on`, `app.on_error`).
 
-The extension surface is one attribute and one convention:
+The extension surface is one base class, one registration method,
+one attribute, and one convention:
 
-- **`app.extensions`** — a `dict[str, object]` for extension
-  instances to register themselves under a stable key.
-- **`init_app(app)`** — a method extensions implement so the
-  application author can wire them in explicitly.
+- **`Extension`** — `blackbull.extension.Extension`, the base class
+  extensions subclass.  It declares `extension_key`, an abstract
+  `init_app(app)`, and optional async `startup(app)` / `shutdown(app)`
+  lifecycle hooks.
+- **`app.add_extension(ext)`** — the single registration entry point
+  on the core.  It calls `ext.init_app(app)`, wires any
+  `startup`/`shutdown` into the app's lifespan, and returns `ext`.
+- **`app.extensions`** — a `dict[str, object]` where extension
+  instances register themselves under a stable key.
+- **`init_app(app)`** — the method an extension implements to wire
+  itself in.
 
-There is no plugin registry, no auto-discovery, no dependency
-injection.  Composition is the application author's job.
+`add_extension` duck-types on `init_app`, so legacy extensions that
+predate the `Extension` base class keep working unchanged.  There is
+no plugin registry, no auto-discovery, no dependency injection.
+Composition is the application author's job.
 
 ## The `app.extensions` namespace
 
@@ -85,6 +95,71 @@ class HelloExtension:
 
 Both styles are supported by convention; pick one per extension
 and document it.
+
+## The `Extension` base class and `app.add_extension`
+
+Prefer subclassing `blackbull.extension.Extension` and registering
+through `app.add_extension`.  The base class gives you a typed
+contract and a `_register` helper (the duplicate-key guard plus
+self-storage in `app.extensions`); `add_extension` is the single
+registration seam on the core and returns the instance for chaining:
+
+```python
+from blackbull import BlackBull
+from blackbull.extension import Extension
+
+
+class HelloExtension(Extension):
+    extension_key = 'hello'
+
+    def __init__(self, greeting: str = 'Hello'):
+        self._greeting = greeting
+
+    def init_app(self, app: BlackBull) -> None:
+        @app.route(path='/hello')
+        async def hello():
+            return {'message': f'{self._greeting} from extension'}
+        self._handler = hello
+        self._register(app)            # dup-check + app.extensions['hello'] = self
+
+
+app = BlackBull()
+hello = app.add_extension(HelloExtension(greeting='Howdy'))
+```
+
+`add_extension` accepts any object with an `init_app(app)` method, so
+the duck-typed style above still works — adopting the base class is
+recommended, not required.
+
+### Lifecycle: `startup` / `shutdown`
+
+Override the optional async hooks for resources that must open and
+close with the application.  `add_extension` wires them into the
+`app_startup` / `app_shutdown` lifespan events, so they run under the
+ASGI lifespan **and** per worker in multi-worker mode:
+
+```python
+class PoolExtension(Extension):
+    extension_key = 'pool'
+
+    def init_app(self, app):
+        self._register(app)
+
+    async def startup(self, app):
+        self.pool = await open_pool()
+
+    async def shutdown(self, app):
+        await self.pool.close()
+```
+
+### Protocol extensions use the same mechanism
+
+A non-HTTP protocol is just an extension whose `init_app` calls
+`app.register_protocol_handler(...)`.  The in-tree MQTT broker
+(`blackbull.mqtt.MQTTExtension`) is the reference: it
+registers the broker on a port and exposes its own `on_message`
+decorator, with **zero** MQTT-specific code on the `BlackBull` class.
+See [MQTT broker](mqtt.md) and [Non-ASGI protocols](raw-protocols.md).
 
 ## Extension keys in `app.extensions`
 
