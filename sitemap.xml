@@ -65,6 +65,10 @@
          <lastmod>2026-06-23</lastmod>
     </url>
     <url>
+         <loc>https://TOKUJI.github.io/BlackBull/api/blackbull/extension/</loc>
+         <lastmod>2026-06-23</lastmod>
+    </url>
+    <url>
          <loc>https://TOKUJI.github.io/BlackBull/api/blackbull/fault_injection/</loc>
          <lastmod>2026-06-23</lastmod>
     </url>
@@ -78,6 +82,10 @@
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/api/blackbull/middleware/</loc>
+         <lastmod>2026-06-23</lastmod>
+    </url>
+    <url>
+         <loc>https://TOKUJI.github.io/BlackBull/api/blackbull/mqtt/</loc>
          <lastmod>2026-06-23</lastmod>
     </url>
     <url>
@@ -206,6 +214,14 @@
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/api/blackbull/middleware/websocket/</loc>
+         <lastmod>2026-06-23</lastmod>
+    </url>
+    <url>
+         <loc>https://TOKUJI.github.io/BlackBull/api/blackbull/mqtt/actor/</loc>
+         <lastmod>2026-06-23</lastmod>
+    </url>
+    <url>
+         <loc>https://TOKUJI.github.io/BlackBull/api/blackbull/mqtt/messages/</loc>
          <lastmod>2026-06-23</lastmod>
     </url>
     <url>
@@ -386,6 +402,10 @@
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/guide/middleware/</loc>
+         <lastmod>2026-06-23</lastmod>
+    </url>
+    <url>
+         <loc>https://TOKUJI.github.io/BlackBull/guide/mqtt/</loc>
          <lastmod>2026-06-23</lastmod>
     </url>
     <url>
