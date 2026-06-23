@@ -41,6 +41,7 @@ import typing
 from http import HTTPMethod
 from typing import Any
 
+from .extension import Extension
 from .router import _CONVERTERS, _AnyScheme
 from .utils import Scheme
 
@@ -418,7 +419,7 @@ def swagger_ui_html(spec_url: str, title: str = 'BlackBull API — Swagger UI') 
 # ---------------------------------------------------------------------------
 
 
-class OpenAPIExtension:
+class OpenAPIExtension(Extension):
     """Mount an OpenAPI 3.1 spec endpoint and Swagger UI on a BlackBull app.
 
     Accepts the same arguments as ``BlackBull.enable_openapi``.  Two

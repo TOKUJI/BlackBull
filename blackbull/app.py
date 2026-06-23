@@ -703,6 +703,44 @@ class BlackBull:
             return handler
         return decorator
 
+    def add_extension(self, ext):
+        """Register an extension and return it (for decorator chaining).
+
+        *ext* is any object exposing ``init_app(app)`` — a
+        :class:`~blackbull.extension.Extension` subclass, or a legacy
+        duck-typed extension.  ``init_app`` is called immediately to wire the
+        extension's routes / middleware / protocol handlers / events through
+        the public ``app.*`` API.  Optional async ``startup(app)`` /
+        ``shutdown(app)`` methods are wired into the ``app_startup`` /
+        ``app_shutdown`` lifespan events.
+
+        This is the **only** extension- or protocol-registration entry point on
+        the core class; protocol support (e.g. an MQTT broker) is added by
+        passing the relevant extension here, never by editing this class::
+
+            from blackbull.mqtt import MQTTExtension, Message
+
+            mqtt = app.add_extension(MQTTExtension(port=1883))
+
+            @mqtt.on_message(topic='sensors/+/temperature')
+            async def on_temp(msg: Message):
+                ...
+
+        Returns *ext* so it can be captured and configured further.
+        """
+        if not hasattr(ext, 'init_app'):
+            raise TypeError(
+                f"{type(ext).__name__} is not a valid extension: it must "
+                f"expose init_app(app).")
+        ext.init_app(self)
+        startup = getattr(ext, 'startup', None)
+        if startup is not None:
+            self.on_startup(lambda: startup(self))
+        shutdown = getattr(ext, 'shutdown', None)
+        if shutdown is not None:
+            self.on_shutdown(lambda: shutdown(self))
+        return ext
+
     def run(self, certfile=None, keyfile=None, port: int | None = None,
             unix_path: str | None = None,
             inherited_fd: int | None = None,

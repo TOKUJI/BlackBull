@@ -30,7 +30,69 @@ so the editable install's metadata catches up.
 
 ## [Unreleased]
 
+### Changed
+- **MQTT broker rewritten to the actor model (Sprint 53).** The procedural
+  `MQTTActor` + process-global broker state (`_topic_router` / `_session_store`
+  / `_retained_store`) are replaced by two `Actor`s: a single supervisor/
+  lifespan-owned `BrokerActor` that owns *all* routing/session/retained state
+  (serial inbox ⇒ no locks, no shared mutable state) and one
+  `MQTTConnectionActor` per connection (its inbox is the sole socket writer; a
+  reader loop forwards control packets to the broker). `serve_connection` wires
+  the two; `MQTTExtension` owns the broker and starts/stops it on
+  startup/shutdown. No user-facing wire behaviour changes — the conformance
+  suite is unchanged. This makes MQTT — the reference bridge protocol — a
+  first-class citizen of BlackBull's actor model, the template for future
+  protocols.
+- **`on_message` taps now receive a single `blackbull.mqtt.Message`**
+  (`topic`/`payload`/`qos`/`retain`/`properties`) instead of `(topic, payload)`,
+  mirroring how `@app.on` hands an observer one `Event`. Taps run inline on the
+  receiving connection (sequential), so a slow tap back-pressures only that
+  client, never the broker.
+- Will (LWT) delivery on abnormal disconnect no longer relies on the old
+  keep-globals-forever crutch: the long-lived `BrokerActor` outlives connection
+  actors, so a peer's Will routes to live subscribers during teardown by
+  construction. The broker now ends a connection on real EOF.
+
 ### Added
+- `AbstractReader.at_eof()` (default `False`; `AsyncioReader` delegates to the
+  underlying stream) so a long-lived raw-protocol read loop can detect peer
+  close instead of relying solely on task cancellation.
+
+## [0.44.0] — 2026-06-22
+
+Combined release of Sprint 50 + Sprint 51 + Sprint 52 (see the Versioning note
+above).  Sprint 52 adds the first real consumer of the Non-ASGI bridge: a
+pure-Python MQTT 5 broker.
+
+### Added
+- **Generic extension mechanism.** `blackbull.extension.Extension` is the base
+  class for plugins (`extension_key`, `init_app(app)`, optional async
+  `startup`/`shutdown`); `app.add_extension(ext)` is the single registration
+  seam on the core — it calls `init_app`, wires lifecycle into the
+  `app_startup`/`app_shutdown` lifespan events, and returns the instance for
+  chaining.  It duck-types on `init_app`, so legacy extensions keep working.
+  `OpenAPIExtension` is retrofitted onto the base class as a second reference.
+  This keeps `BlackBull` protocol-agnostic: a protocol is added by passing its
+  extension to `add_extension`, never by editing the core class.  See
+  `docs/guide/extensions.md`.
+- **MQTT 5 broker sidecar (Sprint 52).** A pure-Python MQTT 5 broker runs on the
+  Non-ASGI bridge alongside HTTP.  It is a **non-core "bridge" protocol** — it
+  lives in its own `blackbull.mqtt` subpackage (distinct from the core HTTP
+  family in `blackbull.protocol` / `blackbull.server`) and is opt-in via the
+  `blackbull[mqtt]` extra, structured for later extraction to a standalone
+  `blackbull-mqtt` package without core changes.  `blackbull.mqtt.messages` provides
+  the 15 control-packet dataclasses, `encode_packet` / `decode_packet`, the full
+  MQTT 5 property system (§2.2.2.2), reason codes, and `topic_matches_filter`.
+  `MQTTActor` (`blackbull.mqtt.actor`) is the per-connection broker:
+  CONNECT/CONNACK (protocol-level check → `0x84`), SUBSCRIBE/UNSUBSCRIBE,
+  PUBLISH at QoS 0/1/2 with their acknowledgement flows, retained messages,
+  Will (LWT) delivery on abnormal disconnect, keep-alive PING, and Clean
+  Start / Session Present semantics.  The broker is wired in as
+  `MQTTExtension`: `mqtt = app.add_extension(MQTTExtension(port=1883))`, with
+  `@mqtt.on_message(topic=…)` tapping the broker's routing via an async
+  `(topic, payload)` callback; `MQTTProtocolDetector` recognises the CONNECT
+  first byte (`0x10`) for shared-port sniffing.  See `docs/guide/mqtt.md` and
+  `examples/mqtt_broker.py`.
 - **Non-ASGI protocol bridge (Sprint 50).** `app.raw_handler(name, *, port=…)`
   / `app.register_protocol_handler(...)` register a raw-TCP protocol that speaks
   the wire directly, alongside HTTP on other ports.  A `RawActor` drives the
@@ -51,7 +113,11 @@ so the editable install's metadata catches up.
 ### Internal
 - Raw protocol handlers are single-worker and cleartext-only for now; documented
   in `KNOWN_LIMITATIONS.md` / `docs/guide/raw-protocols.md`.  Combined Sprint
-  50 + 51 + 52 work releases together as a future `v0.44.0`.
+  50 + 51 + 52 work releases together as `v0.44.0`.
+- `AbstractReader.readuntil` / `readexactly` now have concrete default
+  implementations built on `read()`, so a minimal reader (e.g. an MQTT test
+  double) only needs to implement `read`.  Concrete transport readers continue
+  to override both with their native buffered versions.
 
 ## [0.43.2] — 2026-06-22
 
