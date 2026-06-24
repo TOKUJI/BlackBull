@@ -72,5 +72,6 @@ nav:
   - About:
     - Conformance: about/conformance.md
     - Internals: about/internals.md
+    - MQTT broker design: about/mqtt-actor-design.md
     - RFC 9113, implemented: about/rfc9113-implementation.md
     - gRPC assessment: about/grpc-assessment.md

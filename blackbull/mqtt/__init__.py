@@ -20,11 +20,12 @@ Wire it in through the generic extension seam::
     async def on_temp(msg: Message):
         print(msg.topic, msg.payload)
 """
-from .actor import (
-    MQTTExtension, MQTTProtocolDetector, Message, BrokerActor, serve_connection,
-)
+from .broker import BrokerActor
+from .connection import serve_connection
+from .extension import MQTTExtension, MQTTProtocolDetector
+from .tap import Message, TapActor
 
 __all__ = [
     'MQTTExtension', 'MQTTProtocolDetector', 'Message',
-    'BrokerActor', 'serve_connection',
+    'BrokerActor', 'TapActor', 'serve_connection',
 ]

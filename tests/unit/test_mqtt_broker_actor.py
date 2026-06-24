@@ -8,10 +8,10 @@ the reader loop, or the connection actor.  The wire-level conformance suite
 import pytest
 
 from blackbull.actor import Actor
-from blackbull.mqtt.actor import (
+from blackbull.mqtt.broker import (
     BrokerActor,
     Attach, ClientSubscribe, ClientUnsubscribe, ClientPublish,
-    ClientPubrel, ClientPubrec, ClientPuback,
+    ClientPubrel,
     Detach, Send, Close,
     _new_broker_session,
 )
@@ -80,6 +80,72 @@ async def test_subscribe_acked_with_granted_qos():
     assert len(subacks) == 1
     assert subacks[0].packet_id == 10
     assert subacks[0].reason_codes == [1]
+
+
+async def test_subscribe_persists_options_in_session():
+    """§3.1.2.11 — subscription options become session state (a list of
+    ``(filter, qos, options)`` 3-tuples), not just the (filter, qos) pair."""
+    broker, conn = BrokerActor(), RecordingConn()
+    await _attach(broker, conn, client_id='opts-c')
+    await broker._handle(ClientSubscribe(
+        subscribe=MQTTSubscribe(
+            packet_id=1, subscriptions=[('chat/room1', 1)],
+            subscription_options=[{'no_local': True,
+                                   'retain_as_published': True,
+                                   'retain_handling': 1}]),
+        sender=conn))
+
+    subs = broker._sessions['opts-c']['subscriptions']
+    assert isinstance(subs, list)
+    filt, qos, opts = [s for s in subs if s[0] == 'chat/room1'][0]
+    assert (filt, qos) == ('chat/room1', 1)
+    assert opts['no_local'] is True
+    assert opts['retain_as_published'] is True
+    assert opts['retain_handling'] == 1
+
+
+async def test_subscription_options_survive_clean_start_0_reconnect():
+    """§3.1.2.11 — with Clean Start = 0 the session (and its subscription
+    options) is restored on reconnect rather than rebuilt empty."""
+    broker = BrokerActor()
+    first = RecordingConn()
+    await _attach(broker, first, client_id='persist-c', clean_start=False,
+                  properties={'session_expiry_interval': 3600})
+    await broker._handle(ClientSubscribe(
+        subscribe=MQTTSubscribe(
+            packet_id=1, subscriptions=[('alerts/#', 2)],
+            subscription_options=[{'no_local': True}]),
+        sender=first))
+    # Peer drops; session is retained because expiry > 0.
+    await broker._handle(Detach(graceful=True, sender=first))
+
+    second = RecordingConn()
+    await _attach(broker, second, client_id='persist-c', clean_start=False)
+    connack = [p for p in second.packets() if isinstance(p, MQTTConnack)][0]
+    assert connack.session_present is True
+
+    filt, qos, opts = [s for s in broker._sessions['persist-c']['subscriptions']
+                       if s[0] == 'alerts/#'][0]
+    assert qos == 2
+    assert opts['no_local'] is True
+
+
+async def test_resubscribe_same_filter_replaces_options():
+    """§3.8.4 — a SUBSCRIBE for an existing filter replaces it (and its
+    options) rather than adding a duplicate entry."""
+    broker, conn = BrokerActor(), RecordingConn()
+    await _attach(broker, conn, client_id='re-c')
+    for rh in (0, 2):
+        await broker._handle(ClientSubscribe(
+            subscribe=MQTTSubscribe(
+                packet_id=rh + 1, subscriptions=[('t/x', 1)],
+                subscription_options=[{'retain_handling': rh}]),
+            sender=conn))
+
+    matching = [s for s in broker._sessions['re-c']['subscriptions']
+                if s[0] == 't/x']
+    assert len(matching) == 1                       # not duplicated
+    assert matching[0][2]['retain_handling'] == 2   # last write wins
 
 
 async def test_publish_routed_to_subscriber_and_publisher_acked():

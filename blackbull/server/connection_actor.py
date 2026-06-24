@@ -10,7 +10,7 @@ from .cap_log import CapHitCounter
 from .deadline import ConnectionDeadline
 from .protocol_registry import (ConnectionView, ProtocolBinding,
                                 ProtocolRegistry)
-from .recipient import (AbstractReader,
+from .recipient import (AbstractReader, PrefixReader,
                         _HTTP2_STREAM_QUEUE_DEPTH, _WS_EVENT_QUEUE_DEPTH)
 from .sender import AbstractWriter
 
@@ -63,6 +63,12 @@ class ConnectionActor(Actor):
         # When set (port-bound raw protocol), detection is skipped entirely.
         self._bound_binding = bound_binding
         self._connection_id = connection_id
+        # Protocol name reported on the lifecycle events.  At accept time the
+        # h1/h2 split isn't known, so the shared listener reports ``'http'``;
+        # a port-bound binding already knows its name.  ``_dispatch`` refines
+        # this to the actually-served binding once detection picks one.
+        self._served_protocol = (bound_binding.name
+                                 if bound_binding is not None else 'http')
 
     async def run(self) -> None:
         # Per-connection cap-hit rate-limit state — bound on the
@@ -70,16 +76,19 @@ class ConnectionActor(Actor):
         # task tree (protocol actor, stream actors, recipients,
         # senders) picks it up without constructor plumbing.  TaskGroup
         # children inherit the context automatically.
+        import time  # noqa: PLC0415
         counter = CapHitCounter()
+        start = time.monotonic()
         with counter.bind():
             if self._aggregator is not None:
-                protocol = (self._bound_binding.name
-                            if self._bound_binding is not None else 'http')
                 await self._aggregator.on_connection_accepted(
-                    self._peername, protocol=protocol)
+                    self._peername, protocol=self._served_protocol)
             try:
                 await self._dispatch()
             except Exception as exc:
+                # One error path for every protocol: a handler / actor that
+                # raises is isolated here (decouple-connection-detection Stage 4
+                # — RawProtocolActor's L2 error wrapper folded in).
                 if self._aggregator is not None:
                     await self._aggregator.on_error({}, exc)
             finally:
@@ -87,31 +96,18 @@ class ConnectionActor(Actor):
                 # transport goes away.
                 counter.flush(peer=self._peername)
                 await self._writer.close()
+                # ``connection_closed`` now fires for *every* protocol, not just
+                # raw/MQTT (the old asymmetry — decouple-connection-detection
+                # symptom #5).  ``_served_protocol`` is the binding that handled
+                # the connection (or the accept-time guess if none was selected).
+                if self._aggregator is not None:
+                    elapsed_ms = (time.monotonic() - start) * 1000
+                    await self._aggregator.on_connection_closed(
+                        self._peername, self._served_protocol, elapsed_ms)
 
-    async def _dispatch(self) -> None:
-        import asyncio  # noqa: PLC0415
-        from ..env import get_settings as _get_settings  # noqa: PLC0415
-        cfg = _get_settings()
-
-        # Slowloris defence at protocol-detection: a connected peer that
-        # never sends a first line / preface would otherwise hold a slot
-        # forever waiting on readuntil / readexactly here.  We use the
-        # same ``header_timeout`` setting HTTP1Actor uses for its own
-        # header-completion deadline — the practical worst case is two
-        # timeouts back-to-back (protocol-detect + first request headers),
-        # still bounded.  ``header_timeout=0`` disables both halves.
-        deadline = cfg.header_timeout if cfg.header_timeout > 0 else None
-
-        # Sprint 23: one rescheduled TimerHandle per connection replaces
-        # the per-phase ``async with asyncio.timeout(d):`` allocations.
-        # The deadline binds to *this* task — the per-connection dispatch
-        # task — and gets passed down into HTTP1Actor / HTTP1Recipient so
-        # each phase boundary (preface, headers, body chunk, keep-alive)
-        # just re-arms the same handle.
-        dl = ConnectionDeadline()
-
-        conn = ConnectionView(
-            reader=self._reader, writer=self._writer, app=self._app,
+    def _make_conn(self, reader: AbstractReader, dl: ConnectionDeadline) -> ConnectionView:
+        return ConnectionView(
+            reader=reader, writer=self._writer, app=self._app,
             aggregator=self._aggregator,
             peername=self._peername, sockname=self._sockname, ssl=self._ssl,
             alpn=self._alpn, deadline=dl, connection_id=self._connection_id,
@@ -119,90 +115,164 @@ class ConnectionActor(Actor):
             ws_queue_depth=self._ws_queue_depth,
         )
 
+    def _detection_order(self) -> 'list[ProtocolBinding]':
+        """Bindings consulted during cleartext detection, in priority order:
+        registered raw detectors first (shared-port protocols such as MQTT),
+        then the ordered cleartext chain (``http2`` preface, ``http1`` fallback).
+        """
+        return (list(self._registry.raw_bindings.values())
+                + self._registry.cleartext_bindings)
+
+    def _select(self, prefix: bytes, at_eof: bool,
+                order: 'list[ProtocolBinding]') -> 'ProtocolBinding | None':
+        """First binding (in priority order) to claim *prefix*, or ``None`` if a
+        higher-priority binding still needs more bytes to decide.
+
+        A binding is only consulted once ``prefix`` holds at least its
+        ``detect_prefix_len`` bytes (or the peer has closed): until then we must
+        not let a lower-priority catch-all (``http1``) claim a connection the
+        higher-priority protocol might still own.
+        """
+        for binding in order:
+            if not at_eof and len(prefix) < binding.detect_prefix_len:
+                return None
+            if binding.claims(prefix, self._alpn):
+                return binding
+        return None
+
+    async def _peek_and_select(
+        self, order: 'list[ProtocolBinding]',
+    ) -> 'tuple[bytes, ProtocolBinding | None]':
+        """Peek the smallest discriminating prefix and return ``(prefix, binding)``.
+
+        Reads incrementally up to ``max(detect_prefix_len)`` and stops the
+        instant a binding claims — so a short non-HTTP frame (e.g. a 15-byte
+        MQTT CONNECT) is recognised on its first byte and never blocks waiting
+        for HTTP-sized input.  This is the fix for the shared-port MQTT
+        ``readuntil`` hang (decouple-connection-detection symptom #4).
+        """
+        max_len = max((b.detect_prefix_len for b in order), default=0)
+        prefix = bytearray()
+        at_eof = False
+        while True:
+            binding = self._select(bytes(prefix), at_eof, order)
+            if binding is not None or at_eof or len(prefix) >= max_len:
+                return bytes(prefix), binding
+            chunk = await self._reader.read(max_len - len(prefix))
+            if not chunk:
+                at_eof = True
+            else:
+                prefix += chunk
+
+    async def _peek(self, n: int) -> bytes:
+        """Read up to *n* bytes (fewer on EOF) for an ALPN-committed binding."""
+        buf = bytearray()
+        while len(buf) < n:
+            chunk = await self._reader.read(n - len(buf))
+            if not chunk:
+                break
+            buf += chunk
+        return bytes(buf)
+
+    async def _dispatch(self) -> None:
+        import asyncio  # noqa: PLC0415
+        from ..env import get_settings as _get_settings  # noqa: PLC0415
+        cfg = _get_settings()
+
+        # Slowloris defence at protocol-detection: a connected peer that
+        # never sends its discriminator prefix would otherwise hold a slot
+        # forever waiting on the peek read.  We use the same ``header_timeout``
+        # setting HTTP1Actor uses for its own header-completion deadline — the
+        # practical worst case is two timeouts back-to-back (protocol-detect +
+        # first request headers), still bounded.  ``header_timeout=0`` disables
+        # both halves.
+        deadline = cfg.header_timeout if cfg.header_timeout > 0 else None
+
+        # Sprint 23: one rescheduled TimerHandle per connection replaces
+        # the per-phase ``async with asyncio.timeout(d):`` allocations.
+        # The deadline binds to *this* task — the per-connection dispatch
+        # task — and gets passed down into HTTP1Actor / HTTP1Recipient so
+        # each phase boundary (peek, headers, body chunk, keep-alive) just
+        # re-arms the same handle.
+        dl = ConnectionDeadline()
+
         # Port-bound non-ASGI protocol (Sprint 50): the listening socket already
         # identifies the protocol, so skip detection and the deadline machinery
-        # entirely — the handler owns the connection lifetime.
+        # entirely — the handler owns the connection lifetime and the raw reader.
         if self._bound_binding is not None:
-            await self._bound_binding.serve_raw(conn)
+            await self._bound_binding.serve(self._make_conn(self._reader, dl))
             return
 
-        # Sprint 50: dispatch is registry-driven.  ``http1``/``http2`` are
-        # built-in bindings; the deadline-guarded reads + slowloris handling
-        # stay here so the hot HTTP path is unchanged — only protocol selection
-        # and Actor construction move into the bindings.
-
-        # ALPN-negotiated protocol: the peer is committed.  For HTTP/2 the first
-        # 24 bytes MUST be the connection preface (RFC 9113 §3.4).  Read exactly
-        # 24 bytes rather than scanning for CRLF so an invalid preface is
-        # rejected promptly instead of hanging the reader (h2spec §3.5 #2).
+        # Peek-and-replay detection (decouple-connection-detection, Stage 2):
+        # ``ConnectionActor`` peeks only a protocol-agnostic discriminator — no
+        # hardcoded byte counts, delimiters, or HTTP knowledge — and replays it
+        # to the winning binding via a ``PrefixReader``.  Each binding then reads
+        # its own framing (the 24-byte preface / the ``\r\n`` request line) from
+        # a reader still positioned at the start of the stream.
         alpn_binding = self._registry.by_alpn(self._alpn)
-        if alpn_binding is not None:
-            try:
-                if deadline is not None:
-                    with dl.guard(deadline):
-                        preface = await self._reader.readexactly(24)
-                else:
-                    preface = await self._reader.readexactly(24)
-            except (asyncio.TimeoutError, TimeoutError):
-                # Peer connected via ALPN but never sent the preface.
-                # Close — no GOAWAY since we don't have a SETTINGS exchange.
-                logger.warning('slowloris: ALPN-%s peer sent no preface within %.1fs',
-                               self._alpn, deadline)
-                from .cap_log import log_cap_hit  # noqa: PLC0415
-                log_cap_hit('header_timeout',
-                            requested=deadline, limit=deadline,
-                            peer=self._peername, protocol='h2')
-                return
-            await alpn_binding.serve_alpn(conn, preface)
-            return
-
-        # No ALPN (cleartext) or ALPN didn't match a binding — sniff the first line.
         try:
-            if deadline is not None:
-                with dl.guard(deadline):
-                    first_line = await self._reader.readuntil(b'\r\n')
+            if alpn_binding is not None:
+                # ALPN pre-commits the protocol; still peek its declared prefix
+                # length under the deadline so a silent peer is timed out.
+                prefix = await self._guarded(
+                    dl, deadline, self._peek(alpn_binding.detect_prefix_len))
+                binding = alpn_binding
             else:
-                first_line = await self._reader.readuntil(b'\r\n')
+                prefix, binding = await self._guarded(
+                    dl, deadline, self._peek_and_select(self._detection_order()))
         except (asyncio.TimeoutError, TimeoutError):
-            # Slowloris during protocol-detect: best-effort 408 then close.
-            # We don't yet know the protocol; the bytes are HTTP/1.1-compatible
-            # so a 408 will be parseable by an h1 client and ignored by an
-            # h2 client (which would have been on the ALPN path anyway).
-            logger.warning(
-                'slowloris: peer sent no first line within %.1fs', deadline)
-            from .cap_log import log_cap_hit  # noqa: PLC0415
-            log_cap_hit('header_timeout',
-                        requested=deadline, limit=deadline,
-                        peer=self._peername, protocol='http1')
-            try:
-                await self._writer.write(
-                    b'HTTP/1.1 408 Request Timeout\r\n'
-                    b'connection: close\r\n'
-                    b'content-length: 0\r\n\r\n')
-            except Exception:
-                pass
+            # Slowloris at detection: hand the "peer was too slow" decision to
+            # the binding that would have served it — ALPN's committed binding,
+            # else the cleartext catch-all (http1, which emits a 408).  The
+            # status string lives in the binding, not here.
+            timeout_binding = (alpn_binding if alpn_binding is not None
+                               else self._fallback_binding())
+            await self._on_detect_timeout(timeout_binding, deadline, dl)
             return
 
-        # Shared-port protocol detection (Sprint 51): raw bindings with a
-        # ProtocolDetector get a chance to claim the connection before the
-        # http1 fallback — enabling e.g. MQTT+HTTP on one port.  Iteration is
-        # registration order (``raw_bindings`` is insertion-ordered), so when
-        # multiple detectors match overlapping byte signatures the
-        # first-registered binding wins.  Not exercised in Sprint 52 (a single
-        # MQTT detector); revisit this ordering guarantee if multi-detector
-        # ports arrive.
-        for raw_binding in self._registry.raw_bindings.values():
-            if (raw_binding.detector is not None
-                    and raw_binding.detector.detect(first_line, self._alpn)):
-                await raw_binding.serve_raw(conn)
-                return
+        if binding is None:
+            # No binding claimed the prefix — only reachable if the registry has
+            # no http1 fallback (it always does for HTTP listeners).  Close.
+            return
+        self._served_protocol = binding.name
+        await binding.serve(self._make_conn(PrefixReader(prefix, self._reader), dl))
 
-        # First cleartext binding to claim the line wins (http2 preface, then
-        # the http1 fallback which matches any line and is registered last).
-        for binding in self._registry.cleartext_bindings:
-            if binding.matches_cleartext(first_line):
-                await binding.serve_cleartext(conn, first_line)
-                return
+    @staticmethod
+    async def _guarded(dl: ConnectionDeadline, deadline: 'float | None', coro):
+        """Run *coro* under the connection deadline, if one is configured."""
+        if deadline is not None:
+            with dl.guard(deadline):
+                return await coro
+        return await coro
+
+    def _fallback_binding(self) -> 'ProtocolBinding | None':
+        """The cleartext catch-all (``http1``, registered last) — the binding a
+        silent cleartext peer is treated as.  ``None`` if no cleartext bindings
+        are registered."""
+        cleartext = self._registry.cleartext_bindings
+        return cleartext[-1] if cleartext else None
+
+    async def _on_detect_timeout(self, binding: 'ProtocolBinding | None',
+                                 deadline: 'float | None',
+                                 dl: ConnectionDeadline) -> None:
+        """Peer connected but never sent its discriminator within the deadline.
+
+        Records the (protocol-agnostic) slowloris cap hit, then delegates the
+        wire response to the binding's :meth:`~ProtocolBinding.on_detect_timeout`
+        — HTTP writes a 408; other protocols close silently.  No status string
+        lives here (decouple-connection-detection, Stage 3).
+        """
+        from .cap_log import log_cap_hit  # noqa: PLC0415
+        # The deadline only fires under ``_guarded``, which arms a timer solely
+        # when a deadline is configured — so it is non-None on this path.
+        assert deadline is not None
+        proto = binding.name if binding is not None else 'unknown'
+        logger.warning('slowloris: %s peer sent no discriminator within %.1fs',
+                       proto, deadline)
+        log_cap_hit('header_timeout', requested=deadline, limit=deadline,
+                    peer=self._peername, protocol=proto)
+        if binding is not None:
+            await binding.on_detect_timeout(self._make_conn(self._reader, dl))
 
     async def _handle(self, msg: Message) -> None:
         raise NotImplementedError

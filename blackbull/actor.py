@@ -23,15 +23,21 @@ class Actor:
     exclusively via :meth:`send`; they never share mutable state.
 
     Subclasses must override :meth:`_handle`.
+
+    Pass ``inbox_maxsize`` to bound the inbox (``0`` — the default — is
+    unbounded, matching :class:`asyncio.Queue`).  A bounded inbox lets an actor
+    apply back-pressure or, with :meth:`asyncio.Queue.put_nowait`, an explicit
+    overflow policy.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, inbox_maxsize: int = 0) -> None:
         self.__inbox: asyncio.Queue[Message] | None = None
+        self.__inbox_maxsize = inbox_maxsize
 
     @property
     def _inbox(self) -> asyncio.Queue[Message]:
         if self.__inbox is None:
-            self.__inbox = asyncio.Queue()
+            self.__inbox = asyncio.Queue(maxsize=self.__inbox_maxsize)
         return self.__inbox
 
     async def run(self) -> None:

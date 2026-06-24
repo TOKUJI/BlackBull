@@ -12,10 +12,11 @@ BlackBull uses [ZeroVer](https://0ver.org/) prior to a 1.0 commitment:
   The minor number does **not** equal the sprint number — patch releases
   and combined-sprint releases have introduced an offset (Sprint 49
   closed as `v0.43.0`).
-- **Exception (2026-06-21)**: Sprint 50 is not independently released —
-  it ships together with Sprint 51 and Sprint 52 as `v0.44.0` (the next
-  minor after `v0.43.0`).  Normal per-sprint versioning resumes at the
-  next sprint close as `v0.45.0`.
+- **Exception (2026-06-25)**: Sprints 50 through 54 are not independently
+  released — they ship together as `v0.44.0` (the next minor after `v0.43.0`),
+  the MQTT-broker debut plus its actor-model rebuild and the protocol-agnostic
+  connection dispatcher.  Normal per-sprint versioning resumes at the next
+  sprint close as `v0.45.0`.
 - `PATCH` covers bug fixes / harness work between sprints.
 - No `1.0.0` until the framework's identity (pure-Python H1 parser,
   BlackBull-internal `ASGIServer`, per-process tick scanner deadline
@@ -28,43 +29,25 @@ so the editable install's metadata catches up.
 
 ---
 
-## [Unreleased]
+## [0.44.0] — 2026-06-25
 
-### Changed
-- **MQTT broker rewritten to the actor model (Sprint 53).** The procedural
-  `MQTTActor` + process-global broker state (`_topic_router` / `_session_store`
-  / `_retained_store`) are replaced by two `Actor`s: a single supervisor/
-  lifespan-owned `BrokerActor` that owns *all* routing/session/retained state
-  (serial inbox ⇒ no locks, no shared mutable state) and one
-  `MQTTConnectionActor` per connection (its inbox is the sole socket writer; a
-  reader loop forwards control packets to the broker). `serve_connection` wires
-  the two; `MQTTExtension` owns the broker and starts/stops it on
-  startup/shutdown. No user-facing wire behaviour changes — the conformance
-  suite is unchanged. This makes MQTT — the reference bridge protocol — a
-  first-class citizen of BlackBull's actor model, the template for future
-  protocols.
-- **`on_message` taps now receive a single `blackbull.mqtt.Message`**
-  (`topic`/`payload`/`qos`/`retain`/`properties`) instead of `(topic, payload)`,
-  mirroring how `@app.on` hands an observer one `Event`. Taps run inline on the
-  receiving connection (sequential), so a slow tap back-pressures only that
-  client, never the broker.
-- Will (LWT) delivery on abnormal disconnect no longer relies on the old
-  keep-globals-forever crutch: the long-lived `BrokerActor` outlives connection
-  actors, so a peer's Will routes to live subscribers during teardown by
-  construction. The broker now ends a connection on real EOF.
+Combined release of Sprint 50 through Sprint 54 (see the Versioning note above).
+Sprints 50–52 debut the Non-ASGI bridge and the first protocol to ride it — a
+pure-Python MQTT 5 broker.  Sprints 53–54 rebuild that broker on the actor model
+and make the connection dispatcher fully protocol-agnostic so the next protocol
+adds zero hardcoded branches.
 
 ### Added
+- **`{name}` topic captures for MQTT taps (Sprint 54).**
+  `@mqtt.on_message(topic='sensors/{room}/temperature')` matches `{room}` as one
+  level (like `+`) and injects it into the callback as a keyword argument,
+  mirroring HTTP path params.
 - `AbstractReader.at_eof()` (default `False`; `AsyncioReader` delegates to the
   underlying stream) so a long-lived raw-protocol read loop can detect peer
   close instead of relying solely on task cancellation.
-
-## [0.44.0] — 2026-06-22
-
-Combined release of Sprint 50 + Sprint 51 + Sprint 52 (see the Versioning note
-above).  Sprint 52 adds the first real consumer of the Non-ASGI bridge: a
-pure-Python MQTT 5 broker.
-
-### Added
+- `Actor` accepts an optional `inbox_maxsize` (default `0` = unbounded) for a
+  bounded inbox, enabling explicit overflow policies such as the `TapActor`'s
+  drop-newest.
 - **Generic extension mechanism.** `blackbull.extension.Extension` is the base
   class for plugins (`extension_key`, `init_app(app)`, optional async
   `startup`/`shutdown`); `app.add_extension(ext)` is the single registration
@@ -110,7 +93,87 @@ pure-Python MQTT 5 broker.
   carry a detector consulted after the cleartext-HTTP chain, enabling a raw
   protocol to share a port with HTTP (the foundation for Sprint 52 MQTT).
 
+### Changed
+- **MQTT broker rewritten to the actor model (Sprint 53).** The procedural
+  `MQTTActor` + process-global broker state (`_topic_router` / `_session_store`
+  / `_retained_store`) are replaced by two `Actor`s: a single supervisor/
+  lifespan-owned `BrokerActor` that owns *all* routing/session/retained state
+  (serial inbox ⇒ no locks, no shared mutable state) and one
+  `MQTTConnectionActor` per connection (its inbox is the sole socket writer; a
+  reader loop forwards control packets to the broker). `serve_connection` wires
+  the two; `MQTTExtension` owns the broker and starts/stops it on
+  startup/shutdown. No user-facing wire behaviour changes — the conformance
+  suite is unchanged. This makes MQTT — the reference bridge protocol — a
+  first-class citizen of BlackBull's actor model, the template for future
+  protocols.
+- **`on_message` taps now receive a single `blackbull.mqtt.Message`**
+  (`topic`/`payload`/`qos`/`retain`/`properties`) instead of `(topic, payload)`,
+  mirroring how `@app.on` hands an observer one `Event`.
+- **MQTT taps now dispatch on a decoupled `TapActor` by default (Sprint 54).**
+  The connection *offers* each message to a single lifespan-owned `TapActor` and
+  returns immediately, so a slow tap can no longer back-pressure delivery or the
+  broker (the Sprint 53 inline dispatch did). The `TapActor`'s inbox is bounded;
+  on overflow the newest message is dropped and a running dropped-count is logged
+  — taps are best-effort observability, not a reliable delivery path.
+  `MQTTExtension(tap_mode='inline')` restores the inline behaviour, and
+  `tap_queue_size=` tunes the bound.
+- **MQTT module split (Sprint 54).** The flat `blackbull/mqtt/actor.py` is broken
+  into `broker.py` (`BrokerActor` + the Level A messages), `connection.py`
+  (`MQTTConnectionActor`, `PacketFramer`, `serve_connection`), `tap.py`
+  (`Message`, `Tap`, `TapActor`), and `extension.py` (`MQTTExtension`,
+  `MQTTProtocolDetector`). Public imports from `blackbull.mqtt` are unchanged.
+- Will (LWT) delivery on abnormal disconnect no longer relies on the old
+  keep-globals-forever crutch: the long-lived `BrokerActor` outlives connection
+  actors, so a peer's Will routes to live subscribers during teardown by
+  construction. The broker now ends a connection on real EOF.
+- `MQTTConnectionActor`'s read loop now frames packets through a small
+  incremental `PacketFramer` (Sprint 54): it decodes straight off its internal
+  buffer (no whole-buffer `bytes(...)` copy per attempt) and treats an incomplete
+  packet as "await more bytes", dropping a byte to resync only on a genuine
+  decode error.
+
+### Fixed
+- **MQTT subscription options now persist across reconnect (§3.1.2.11).** The
+  broker stored each subscription as a `(filter, qos)` pair, silently dropping
+  the No Local / Retain As Published / Retain Handling options — so a client
+  reconnecting with Clean Start = 0 lost them. `BrokerActor` now keeps
+  `session['subscriptions']` as `(filter, qos, options)` tuples (and a
+  re-SUBSCRIBE to an existing filter replaces it per §3.8.4).
+- **Shared-port MQTT detection no longer hangs.** A CONNECT packet with no CRLF
+  in its first bytes used to ride the HTTP `readuntil(b'\r\n')` detection read
+  and block until the slowloris timeout when MQTT shared an HTTP listener. The
+  dispatcher now peeks a tiny protocol-agnostic discriminator, so the broker is
+  recognised on the CONNECT's first byte. (Port-bound MQTT was never affected.)
+- **`connection_closed` now fires for HTTP connections too.** Previously only
+  raw/non-ASGI (MQTT) connections emitted `connection_closed`; HTTP connections
+  emitted `connection_accepted` but never the matching close event. The
+  lifecycle is now symmetric for every protocol, and the event carries the
+  served protocol name (`http1` / `http2` / the binding name) and duration.
+  **Behaviour change:** an `@app.on('connection_closed')` handler will now also
+  receive HTTP connection events.
+
 ### Internal
+- **`ConnectionActor` is now protocol-agnostic** (decouple-connection-detection).
+  Detection peeks a binding-declared discriminator prefix and replays
+  it to the winning binding via a `PrefixReader`; the three `serve_alpn` /
+  `serve_cleartext` / `serve_raw` methods collapse to one `serve(conn)`, and the
+  24-byte HTTP/2 preface read and the HTTP/1.1 request-line read move into the
+  bindings. The detection-timeout 408 also moves into a binding hook
+  (`ProtocolBinding.on_detect_timeout`; HTTP emits the 408, other protocols
+  close silently). `ConnectionActor._dispatch()` no longer contains hardcoded
+  byte counts, delimiters, or HTTP status strings. No hot-path regression
+  (EC2 HttpArena gate).
+- **`RawProtocolActor` (the non-ASGI Layer-2 actor) is removed.** Connection
+  timing, error isolation, and the `connection_closed` event now live in
+  `ConnectionActor.run()` for every protocol; a `RawBinding` calls its handler
+  directly. One lifecycle owner instead of an HTTP path and a separate raw path.
+- MQTT codec reads in spec terms instead of raw hex: named flag/level
+  constants (`ConnectFlags`, `PublishFlagBits`, `SubscriptionOptions`,
+  `ProtocolLevel`, `WILL_QOS_*`, `PUBLISH_QOS_*`, `RETAIN_HANDLING_*`,
+  `RESERVED_FLAGS_0010`) in `blackbull.mqtt.messages`.
+- Single source of truth for the reason codes the broker uses: `ReasonCode`
+  (`IntEnum`) in `messages.py`; the duplicated per-module `_RC_*` constants in
+  `broker.py`/`connection.py` are deleted.
 - Raw protocol handlers are single-worker and cleartext-only for now; documented
   in `KNOWN_LIMITATIONS.md` / `docs/guide/raw-protocols.md`.  Combined Sprint
   50 + 51 + 52 work releases together as `v0.44.0`.

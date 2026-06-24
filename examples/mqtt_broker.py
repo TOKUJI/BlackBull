@@ -66,10 +66,11 @@ async def status():
 # Each tap receives one Message (msg.topic / msg.payload / msg.qos / msg.retain),
 # mirroring how @app.on hands an observer a single Event.
 
-@mqtt.on_message(topic='sensors/+/temperature')
-async def on_temperature(msg: Message):
-    """Called for every temperature reading published to the broker."""
-    log.info('temperature reading on %s: %s', msg.topic,
+@mqtt.on_message(topic='sensors/{room}/temperature')
+async def on_temperature(msg: Message, room: str):
+    """Called for every temperature reading; ``{room}`` is captured like an HTTP
+    path param and injected as a keyword argument."""
+    log.info('temperature in %s: %s', room,
              msg.payload.decode('utf-8', 'replace'))
 
 

@@ -192,6 +192,62 @@ class AsyncioReader(AbstractReader):
             raise IncompleteReadError(exc.partial) from exc
 
 
+class PrefixReader(AbstractReader):
+    """An :class:`AbstractReader` that replays an already-read *prefix*.
+
+    Connection detection peeks the first bytes of a stream to decide which
+    protocol owns it; wrapping the underlying reader in a ``PrefixReader`` hands
+    the *still-complete* stream to the protocol that claims it — the peeked bytes
+    are served back first, then reads fall through to the underlying reader.
+
+    Used by the decouple-connection-detection refactor so the dispatcher no
+    longer consumes protocol-specific bytes on the connection's behalf.  The
+    fast native ``readuntil`` / ``readexactly`` of the underlying reader are
+    used once the prefix is drained, including the seam case where the separator
+    straddles the prefix/underlying boundary.
+    """
+
+    def __init__(self, prefix: bytes, reader: AbstractReader) -> None:
+        self._buf = bytearray(prefix)
+        self._reader = reader
+
+    async def read(self, n: int) -> bytes:
+        if self._buf:
+            chunk = bytes(self._buf[:n])
+            del self._buf[:n]
+            return chunk
+        return await self._reader.read(n)
+
+    async def readexactly(self, n: int) -> bytes:
+        if len(self._buf) >= n:
+            chunk = bytes(self._buf[:n])
+            del self._buf[:n]
+            return chunk
+        head = bytes(self._buf)
+        self._buf.clear()
+        return head + await self._reader.readexactly(n - len(head))
+
+    async def readuntil(self, sep: bytes) -> bytes:
+        idx = self._buf.find(sep)
+        if idx != -1:
+            end = idx + len(sep)
+            chunk = bytes(self._buf[:end])
+            del self._buf[:end]
+            return chunk
+        # Not wholly in the prefix: pull the rest with the underlying reader's
+        # native readuntil, then re-resolve against the seam so a separator that
+        # straddles the boundary is honoured and any over-read is pushed back.
+        head = bytes(self._buf)
+        self._buf.clear()
+        combined = head + await self._reader.readuntil(sep)
+        end = combined.find(sep) + len(sep)
+        self._buf[:0] = combined[end:]          # push back over-read (usually none)
+        return combined[:end]
+
+    def at_eof(self) -> bool:
+        return not self._buf and self._reader.at_eof()
+
+
 # ---------------------------------------------------------------------------
 # Fragment reassembly (RFC 6455 §5.4)
 # ---------------------------------------------------------------------------
