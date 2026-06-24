@@ -22,14 +22,11 @@ from .messages import (
     MQTTPublish, MQTTPuback, MQTTPubrec, MQTTPubrel, MQTTPubcomp,
     MQTTSubscribe, MQTTSuback,
     MQTTUnsubscribe, MQTTUnsuback,
+    ProtocolLevel, ReasonCode,
     topic_matches_filter,
 )
 
 logger = logging.getLogger(__name__)
-
-# MQTT 5.0 reason codes used by the broker.
-_RC_SUCCESS = 0x00
-_RC_UNSUPPORTED_PROTOCOL_VERSION = 0x84
 
 
 # -- Level A messages: connection actor -> broker ---------------------------
@@ -98,7 +95,11 @@ class Close(ActorMessage):
 def _new_broker_session() -> dict[str, Any]:
     """Per-client session state owned by the broker (§3.1.2.11)."""
     return {
-        'subscriptions': set(),     # set[tuple[str, int]] (filter, qos)
+        # list[tuple[str, int, dict]] — (filter, qos, options).  §3.1.2.11
+        # requires subscription *options* (No Local / Retain As Published /
+        # Retain Handling) to be session state, so each entry carries the full
+        # options dict and survives a Clean Start = 0 reconnect.
+        'subscriptions': [],
         'pending_qos1_out': {},     # packet_id -> MQTTPublish awaiting PUBACK
         'pending_qos2_in': {},      # packet_id -> state str (PUBREC sent ...)
         'pending_qos2_out': {},     # packet_id -> state str (PUBLISH/PUBREL ...)
@@ -174,11 +175,11 @@ class BrokerActor(Actor):
     # -- handlers -----------------------------------------------------------
 
     async def _on_attach(self, conn, connect) -> None:
-        if connect.proto_level != 5:
+        if connect.proto_level != ProtocolLevel.V5_0:
             await conn.send(Send(packet=MQTTConnack(
                 session_present=False,
-                reason_code=_RC_UNSUPPORTED_PROTOCOL_VERSION)))
-            await conn.send(Close(reason_code=_RC_UNSUPPORTED_PROTOCOL_VERSION))
+                reason_code=ReasonCode.UNSUPPORTED_PROTOCOL_VERSION)))
+            await conn.send(Close(reason_code=ReasonCode.UNSUPPORTED_PROTOCOL_VERSION))
             return
 
         client_id = connect.client_id
@@ -225,7 +226,7 @@ class BrokerActor(Actor):
                 self._sessions[client_id] = session
 
         await conn.send(Send(packet=MQTTConnack(
-            session_present=session_present, reason_code=_RC_SUCCESS)))
+            session_present=session_present, reason_code=ReasonCode.SUCCESS)))
 
         # Deliver QoS 1 messages queued while the client was offline.
         if session_present:
@@ -239,11 +240,15 @@ class BrokerActor(Actor):
         reason_codes = []
         options = subscribe.subscription_options or []
         for index, (topic_filter, qos) in enumerate(subscribe.subscriptions):
-            session['subscriptions'].add((topic_filter, qos))
+            opts = dict(options[index]) if index < len(options) else {}
+            opts['qos'] = qos
+            # §3.8.4 — a SUBSCRIBE for an existing Topic Filter replaces its
+            # prior subscription (and its options) rather than adding a second.
+            subs = [s for s in session['subscriptions'] if s[0] != topic_filter]
+            subs.append((topic_filter, qos, opts))
+            session['subscriptions'] = subs
             reason_codes.append(qos)  # granted QoS == requested QoS
-            retain_handling = (int(options[index].get('retain_handling', 0))
-                               if index < len(options) else 0)
-            if retain_handling != 2:
+            if int(opts.get('retain_handling', 0)) != 2:
                 await self._deliver_retained(conn, session, topic_filter, qos)
         await conn.send(Send(packet=MQTTSuback(
             packet_id=subscribe.packet_id, reason_codes=reason_codes)))
@@ -258,22 +263,22 @@ class BrokerActor(Actor):
         if session is None:
             return
         topics = set(unsubscribe.topics)
-        session['subscriptions'] = {
-            (f, q) for (f, q) in session['subscriptions'] if f not in topics
-        }
+        session['subscriptions'] = [
+            s for s in session['subscriptions'] if s[0] not in topics
+        ]
         await conn.send(Send(packet=MQTTUnsuback(
             packet_id=unsubscribe.packet_id,
-            reason_codes=[_RC_SUCCESS] * len(unsubscribe.topics))))
+            reason_codes=[ReasonCode.SUCCESS] * len(unsubscribe.topics))))
 
     async def _on_publish(self, conn, publish) -> None:
         if publish.retain:
             self._store_retained(publish)
         if publish.qos == 1:
             await conn.send(Send(packet=MQTTPuback(
-                packet_id=publish.packet_id, reason_code=_RC_SUCCESS)))
+                packet_id=publish.packet_id, reason_code=ReasonCode.SUCCESS)))
         elif publish.qos == 2:
             await conn.send(Send(packet=MQTTPubrec(
-                packet_id=publish.packet_id, reason_code=_RC_SUCCESS)))
+                packet_id=publish.packet_id, reason_code=ReasonCode.SUCCESS)))
             session = self._session_for(conn)
             if session is not None:
                 session['pending_qos2_in'][publish.packet_id] = 'PUBREC_SENT'
@@ -286,7 +291,7 @@ class BrokerActor(Actor):
             if session is None:
                 continue
             granted = None
-            for topic_filter, qos in session['subscriptions']:
+            for topic_filter, qos, _opts in session['subscriptions']:
                 if topic_matches_filter(publish.topic, topic_filter):
                     granted = qos if granted is None else max(granted, qos)
             if granted is None:
@@ -307,14 +312,14 @@ class BrokerActor(Actor):
 
     async def _on_pubrel(self, conn, packet_id) -> None:
         await conn.send(Send(packet=MQTTPubcomp(
-            packet_id=packet_id, reason_code=_RC_SUCCESS)))
+            packet_id=packet_id, reason_code=ReasonCode.SUCCESS)))
         session = self._session_for(conn)
         if session is not None:
             session['pending_qos2_in'].pop(packet_id, None)
 
     async def _on_pubrec(self, conn, packet_id) -> None:
         await conn.send(Send(packet=MQTTPubrel(
-            packet_id=packet_id, reason_code=_RC_SUCCESS)))
+            packet_id=packet_id, reason_code=ReasonCode.SUCCESS)))
         session = self._session_for(conn)
         if session is not None:
             session['pending_qos2_out'][packet_id] = 'PUBREL_SENT'

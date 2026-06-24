@@ -472,14 +472,15 @@ class TestTimeoutHandling:
     """
 
     async def test_slow_header_read_times_out(self):
-        """A reader that never yields headers must trigger a timeout."""
+        """A peer that connects and never sends its discriminator must stall the
+        connection (detection now peeks via ``read`` before any binding runs)."""
         async def slow_read(*args, **kwargs):
             await asyncio.sleep(10)
             return b''
 
         sw = _make_fake_writer()
         reader = MagicMock()
-        reader.readuntil = AsyncMock(side_effect=slow_read)
+        reader.read = AsyncMock(side_effect=slow_read)
 
         async def noop_app(scope, receive, send):
             pass
@@ -501,8 +502,10 @@ class TestTimeoutHandling:
 
         sw = _make_fake_writer()
         reader = MagicMock()
-        reader.readuntil = AsyncMock(side_effect=[b'POST / HTTP/1.1\r\n',
-                                                  b'Content-Length: 5\r\n\r\n'])
+        # Detection peek + the whole header block arrive in one read; the body
+        # read (readexactly) is the one that hangs.
+        reader.read = AsyncMock(
+            side_effect=[b'POST / HTTP/1.1\r\nContent-Length: 5\r\n\r\n'])
         reader.readexactly = AsyncMock(side_effect=slow_body)
 
         async def noop_app(scope, receive, send):

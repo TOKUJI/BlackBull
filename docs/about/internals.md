@@ -49,7 +49,11 @@ ASGIServer                        (one per process; owns the listening socket)
       │     └── StreamActor       (one per HTTP/2 stream)
       │           └── RequestActor   (per-stream ASGI call, short-lived)
       │
-      └── WebSocketActor          (after upgrade, replaces HTTP1/2Actor)
+      ├── WebSocketActor          (after upgrade, replaces HTTP1/2Actor)
+      │
+      └── raw protocol handler    (non-HTTP bridge: the binding calls a
+                                   long-lived (reader, writer, ctx) handler
+                                   directly — no separate actor layer)
 ```
 
 `ASGIServer` is the only non-actor in this hierarchy — it's a
@@ -79,12 +83,21 @@ etc.
 
 ### `ConnectionActor`
 
-- Owns the reader / writer for one TCP connection.
-- Detects the protocol: TLS handshake → check ALPN → HTTP/2
-  preface check → spawn `HTTP2Actor` or `HTTP1Actor`.
+- Owns the reader / writer for one TCP connection, and the
+  connection-lifecycle events: it fires `connection_accepted` on
+  entry and `connection_closed` (with duration) on exit for
+  **every** protocol — HTTP and non-HTTP alike.
+- Detects the protocol *without any HTTP-specific wire knowledge*:
+  it peeks a tiny protocol-agnostic discriminator prefix, asks each
+  registered `ProtocolBinding` whether it `claims` it (ALPN first,
+  then the cleartext chain), and replays the peeked bytes to the
+  winning binding's `serve`.  Each binding does its own framing reads
+  (the HTTP/2 preface, the HTTP/1.1 request line) — `ConnectionActor`
+  holds no hardcoded byte counts, delimiters, or status strings.
 - Supervisor strategy: **isolate** — one connection dying does
-  not affect others.  Unhandled exceptions are logged, and the
-  connection is closed.
+  not affect others.  A handler/actor exception from any protocol is
+  caught here, emitted once as an `error` event, and the connection
+  is closed.
 
 ### `HTTP1Actor`
 
@@ -135,6 +148,33 @@ etc.
 - Supervisor strategy: **isolate** — a protocol error closes
   this connection only.
 
+### Non-HTTP protocol handlers (the Non-ASGI bridge)
+
+- A non-HTTP protocol registers a `ProtocolBinding` whose `serve`
+  calls a long-lived `(reader, writer, ctx)` handler directly —
+  there is **no separate actor layer** between `ConnectionActor`
+  and the handler.  `ConnectionActor` reaches it the same way it
+  reaches HTTP: by a binding (port-bound, or matched by a first-byte
+  sniff) for protocols that don't map to ASGI request/response:
+  MQTT, raw TCP, and the like.
+- Unlike the HTTP actors the handler does not run a request loop —
+  it owns the connection until it decides to close (raw protocols
+  are typically stateful and persistent).
+- Connection timing, error isolation, and the `connection_closed`
+  event are provided uniformly by `ConnectionActor.run()` for every
+  protocol (an earlier `RawProtocolActor` Layer-2 wrapper was folded
+  into `ConnectionActor` so HTTP and non-HTTP share one lifecycle
+  owner).
+- The handler is where a protocol's own actors live.  MQTT, for
+  example, runs a lifespan-owned `BrokerActor` and `TapActor`
+  plus a per-connection `MQTTConnectionActor` beneath it — and
+  these are the framework's **first genuine users of the `Actor`
+  inbox** (the HTTP actors override `run()` and call each other
+  directly).  See
+  [MQTT broker design](mqtt-actor-design.md) for the deep dive
+  and [Non-ASGI protocols](../guide/raw-protocols.md) for the
+  user-facing API.
+
 ## Supervisor strategies — at a glance
 
 | Actor | Strategy | Rationale |
@@ -146,6 +186,7 @@ etc.
 | `HTTP2Actor` | Propagate to `ConnectionActor` | Framing error is connection-fatal (GOAWAY) |
 | `StreamActor` | Isolate (`RST_STREAM`) | Stream error is stream-fatal only |
 | `WebSocketActor` | Isolate | Protocol error closes this WS connection only |
+| raw protocol handler | Isolate (via `ConnectionActor`) | One raw connection's handler failure is bounded |
 
 ## Message types
 
@@ -181,6 +222,7 @@ respective actors.
 | `RequestActor` handler raises | Isolate + re-emit as `error` event | Handler error must not kill the connection |
 | `HTTP2Actor` framing error | Propagate to `ConnectionActor` | GOAWAY required; connection is unusable |
 | `StreamActor` flow-control violation | Isolate (`RST_STREAM`) | Stream-fatal only; other streams keep going |
+| raw protocol handler raises | Caught by `ConnectionActor`, re-emit as `error` event | Bridge handler error must not kill other connections |
 | `ConnectionActor` unhandled | Log + close connection | One connection's failure is bounded |
 | `ASGIServer` accept error | Backoff + retry | Server stays alive across transient errors |
 

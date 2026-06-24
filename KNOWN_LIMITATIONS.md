@@ -108,13 +108,55 @@ server silently forces `workers=1` for the entire process.  The root cause
 is that inherited-socket adoption (used for `--reload`) does not tag sockets
 by protocol; distributing raw protocol sockets across worker processes would
 require SO_REUSEPORT with protocol-tagged socket sets or a dispatcher-worker
-model.  Planned for resolution after Sprint 52.
+model.  Still outstanding as of Sprint 54; no scheduled sprint.
 
 **Cleartext only** — raw protocol sockets are bound without TLS regardless
 of whether a TLS certificate is configured.  Adding TLS support for raw
 protocols requires `ssl_context` plumbing through `RawBinding` → `Server`.
 For MQTT-over-TLS or similar, put a TLS-terminating proxy in front of the
 raw socket.
+
+### MQTT broker: best-effort taps, in-memory single-process state
+
+The MQTT 5 broker (`blackbull.mqtt`, opt-in via `blackbull[mqtt]`) rides
+the raw-protocol bridge above, so it inherits both constraints there —
+**single-worker** and **cleartext only** (front a TLS terminator for
+MQTT-over-TLS).  Beyond those:
+
+**Why single-worker is a protocol requirement, not an implementation
+limitation.**  The MQTT 5.0 specification (OASIS Committee Specification
+02, March 2019) defines semantics that depend on broker-side state visible
+to every connection: publish-subscribe matching (§3.3), retained messages
+(§3.3.2.3), session state across Clean Start = 0 reconnects (§3.1.2.11),
+Will messages (§3.1.2.5), and QoS 1/2 delivery tracking (§4.3).  All five
+break if that state is split across worker processes with no shared store.
+This is consistent with industry practice: the Eclipse Mosquitto
+reference implementation ([mosquitto.org](https://mosquitto.org/)) is
+single-threaded by architecture for the same reason, and EMQX clusters via
+Erlang distributed message passing rather than local worker splitting.
+(Confirmed 2026-06-25 against the OASIS MQTT 5.0 specification and
+Mosquitto's project documentation.)
+
+**`on_message` taps are best-effort observability, not a delivery path.**
+In the default `tap_mode='actor'`, each PUBLISH is *offered* to a
+bounded-inbox `TapActor` that **drops the newest message on overflow**
+(with a running dropped-count logged) so a slow tap can never
+back-pressure routing.  Use a real MQTT subscription when you need
+guaranteed delivery; treat a tap as a probe.
+
+**Broker state is in-memory and per-process.**  Subscriptions, sessions,
+and retained messages live in the serving process — not shared across
+workers (hence single-worker) and not persisted across a restart.  A
+restart clears all session and retained state.  Sessions are also kept
+for the process lifetime rather than expired on a timer.
+
+**Subscription options are persisted but not fully enforced.**  No Local
+and Retain As Published are parsed and stored in the session (and survive
+a Clean Start = 0 reconnect, §3.1.2.11) but are **not yet applied during
+delivery**.  Retain Handling is honoured only coarsely: `2` (don't send)
+suppresses the retained delivery on subscribe, while `0` and `1` both
+send it — the §3.8.3.1 "only on a *new* subscription" nuance of `1` is
+not yet distinguished.
 
 ### Multi-worker scaling tops out at physical core count
 

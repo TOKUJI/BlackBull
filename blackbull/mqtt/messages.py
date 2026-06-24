@@ -24,7 +24,7 @@ count is recorded on the instance during decode.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import IntEnum
+from enum import IntEnum, IntFlag
 from typing import Any, ClassVar, NamedTuple
 
 
@@ -86,12 +86,71 @@ class PublishFlags(NamedTuple):
     retain: bool
 
 
+# ---------------------------------------------------------------------------
+# Protocol level & flag-byte bit definitions — so the bitwise codec below
+# reads in MQTT 5.0 spec terms rather than raw hex (§3.1.2.2, §3.1.2.3,
+# §3.3.1, §3.8.3.1).  A two-bit QoS / Retain-Handling subfield is expressed
+# as a (shift, mask) pair; single bits are :class:`~enum.IntFlag` members.
+# ---------------------------------------------------------------------------
+
+class ProtocolLevel(IntEnum):
+    """CONNECT Protocol Level (§3.1.2.2).  This broker speaks ``V5_0``."""
+    V3_1 = 3
+    V3_1_1 = 4
+    V5_0 = 5
+
+
+class ConnectFlags(IntFlag):
+    """Single-bit flags in the CONNECT flags byte (§3.1.2.3).
+
+    The Will QoS field is the two-bit subfield at :data:`WILL_QOS_SHIFT`
+    (mask :data:`WILL_QOS_MASK`), not a flag here.
+    """
+    CLEAN_START = 0x02
+    WILL_FLAG = 0x04
+    WILL_RETAIN = 0x20
+    PASSWORD = 0x40
+    USERNAME = 0x80
+
+
+WILL_QOS_SHIFT = 3          # §3.1.2.6 — Will QoS occupies bits 4-3
+WILL_QOS_MASK = 0x03
+
+
+class PublishFlagBits(IntFlag):
+    """Single-bit flags in the PUBLISH fixed header (§3.3.1).
+
+    QoS is the two-bit subfield at :data:`PUBLISH_QOS_SHIFT`.
+    """
+    RETAIN = 0x01
+    DUP = 0x08
+
+
+PUBLISH_QOS_SHIFT = 1       # §3.3.1.2 — QoS occupies bits 2-1
+PUBLISH_QOS_MASK = 0x03
+
+
+class SubscriptionOptions(IntFlag):
+    """Single-bit options in the SUBSCRIBE options byte (§3.8.3.1)."""
+    NO_LOCAL = 0x04
+    RETAIN_AS_PUBLISHED = 0x08
+
+
+SUBSCRIPTION_QOS_MASK = 0x03    # §3.8.3.1 — Maximum QoS, bits 1-0
+RETAIN_HANDLING_SHIFT = 4       # §3.8.3.1 — Retain Handling, bits 5-4
+RETAIN_HANDLING_MASK = 0x03
+
+# §2.1.3 — PUBREL/SUBSCRIBE/UNSUBSCRIBE carry mandatory fixed-header flags
+# 0b0010; every other non-PUBLISH packet's flags MUST be 0b0000.
+RESERVED_FLAGS_0010 = 0x02
+
+
 def decode_publish_flags(flags_byte: int) -> PublishFlags:
     """§3.3.1 — DUP (bit 3), QoS (bits 2-1), RETAIN (bit 0)."""
     return PublishFlags(
-        qos=(flags_byte >> 1) & 0x03,
-        dup=bool(flags_byte & 0x08),
-        retain=bool(flags_byte & 0x01),
+        qos=(flags_byte >> PUBLISH_QOS_SHIFT) & PUBLISH_QOS_MASK,
+        dup=bool(flags_byte & PublishFlagBits.DUP),
+        retain=bool(flags_byte & PublishFlagBits.RETAIN),
     )
 
 
@@ -175,6 +234,26 @@ class MQTTReasonCode(int):
 
     def __repr__(self) -> str:
         return f'MQTTReasonCode(0x{int(self):02X}: {self.name})'
+
+
+class ReasonCode(IntEnum):
+    """The subset of §2.4 reason codes the broker references by name.
+
+    This is the single definition of these *values*; their human-readable
+    names live once in :data:`_REASON_CODE_NAMES` (the full §2.4 registry used
+    by :class:`MQTTReasonCode`).  Importers (`blackbull.mqtt.broker`,
+    `blackbull.mqtt.connection`) use these members instead of redeclaring raw
+    hex, so a code can never drift between modules.
+    """
+    SUCCESS = 0x00
+    DISCONNECT_WITH_WILL = 0x04
+    UNSUPPORTED_PROTOCOL_VERSION = 0x84
+
+
+# Guard against the typed subset and the name registry drifting apart: every
+# ReasonCode value must be a known §2.4 code.
+assert all(int(rc) in _REASON_CODE_NAMES for rc in ReasonCode), \
+    'ReasonCode member missing from _REASON_CODE_NAMES (§2.4 registry)'
 
 
 # ===========================================================================
@@ -616,16 +695,16 @@ def _encode_connect(m: MQTTConnect) -> bytes:
 
     flags = 0
     if m.clean_start:
-        flags |= 0x02
+        flags |= ConnectFlags.CLEAN_START
     if m.will_topic is not None:
-        flags |= 0x04
-        flags |= (m.will_qos & 0x03) << 3
+        flags |= ConnectFlags.WILL_FLAG
+        flags |= (m.will_qos & WILL_QOS_MASK) << WILL_QOS_SHIFT
         if m.will_retain:
-            flags |= 0x20
+            flags |= ConnectFlags.WILL_RETAIN
     if m.password is not None:
-        flags |= 0x40
+        flags |= ConnectFlags.PASSWORD
     if m.username is not None:
-        flags |= 0x80
+        flags |= ConnectFlags.USERNAME
     body.append(flags)
 
     body += int(m.keep_alive).to_bytes(2, 'big')
@@ -653,7 +732,11 @@ def _encode_connack(m: MQTTConnack) -> bytes:
 
 
 def _encode_publish(m: MQTTPublish) -> bytes:
-    flags = ((1 if m.dup else 0) << 3) | ((m.qos & 0x03) << 1) | (1 if m.retain else 0)
+    flags = ((m.qos & PUBLISH_QOS_MASK) << PUBLISH_QOS_SHIFT)
+    if m.dup:
+        flags |= PublishFlagBits.DUP
+    if m.retain:
+        flags |= PublishFlagBits.RETAIN
     body = bytearray()
     body += _encode_utf8(m.topic)
     if m.qos > 0:
@@ -667,7 +750,7 @@ def _encode_publish(m: MQTTPublish) -> bytes:
 
 
 def _encode_packet_id_ack(m: _PacketIdAck) -> bytes:
-    flags = 0x02 if m.packet_type == MQTTPacketType.PUBREL else 0x00
+    flags = RESERVED_FLAGS_0010 if m.packet_type == MQTTPacketType.PUBREL else 0x00
     body = bytearray()
     body += int(m.packet_id).to_bytes(2, 'big')
     body.append(int(m.reason_code) & 0xFF)
@@ -681,16 +764,16 @@ def _encode_subscribe(m: MQTTSubscribe) -> bytes:
     body += encode_properties(m.properties)
     for i, (topic_filter, qos) in enumerate(m.subscriptions):
         body += _encode_utf8(topic_filter)
-        options = qos & 0x03
+        options = qos & SUBSCRIPTION_QOS_MASK
         if m.subscription_options and i < len(m.subscription_options):
             o = m.subscription_options[i]
             if o.get('no_local'):
-                options |= 0x04
+                options |= SubscriptionOptions.NO_LOCAL
             if o.get('retain_as_published'):
-                options |= 0x08
-            options |= (int(o.get('retain_handling', 0)) & 0x03) << 4
+                options |= SubscriptionOptions.RETAIN_AS_PUBLISHED
+            options |= (int(o.get('retain_handling', 0)) & RETAIN_HANDLING_MASK) << RETAIN_HANDLING_SHIFT
         body.append(options)
-    return _frame(MQTTPacketType.SUBSCRIBE, 0x02, bytes(body))
+    return _frame(MQTTPacketType.SUBSCRIBE, RESERVED_FLAGS_0010, bytes(body))
 
 
 def _encode_suback(m: MQTTSuback) -> bytes:
@@ -707,7 +790,7 @@ def _encode_unsubscribe(m: MQTTUnsubscribe) -> bytes:
     body += encode_properties(m.properties)
     for topic in m.topics:
         body += _encode_utf8(topic)
-    return _frame(MQTTPacketType.UNSUBSCRIBE, 0x02, bytes(body))
+    return _frame(MQTTPacketType.UNSUBSCRIBE, RESERVED_FLAGS_0010, bytes(body))
 
 
 def _encode_unsuback(m: MQTTUnsuback) -> bytes:
@@ -773,12 +856,12 @@ def _decode_connect(body: bytes, flags: int) -> MQTTConnect:
     pos += 1
     cflags = body[pos]
     pos += 1
-    clean_start = bool(cflags & 0x02)
-    will_flag = bool(cflags & 0x04)
-    will_qos = (cflags >> 3) & 0x03
-    will_retain = bool(cflags & 0x20)
-    password_flag = bool(cflags & 0x40)
-    username_flag = bool(cflags & 0x80)
+    clean_start = bool(cflags & ConnectFlags.CLEAN_START)
+    will_flag = bool(cflags & ConnectFlags.WILL_FLAG)
+    will_qos = (cflags >> WILL_QOS_SHIFT) & WILL_QOS_MASK
+    will_retain = bool(cflags & ConnectFlags.WILL_RETAIN)
+    password_flag = bool(cflags & ConnectFlags.PASSWORD)
+    username_flag = bool(cflags & ConnectFlags.USERNAME)
     keep_alive = int.from_bytes(body[pos:pos + 2], 'big')
     pos += 2
     # MQTT 3.1.1 (proto_level 4) and earlier carry no Properties block; only
@@ -859,13 +942,13 @@ def _decode_subscribe(body: bytes) -> MQTTSubscribe:
         topic_filter, pos = _decode_utf8(body, pos)
         options = body[pos]
         pos += 1
-        qos = options & 0x03
+        qos = options & SUBSCRIPTION_QOS_MASK
         subscriptions.append((topic_filter, qos))
         sub_options.append({
             'qos': qos,
-            'no_local': bool(options & 0x04),
-            'retain_as_published': bool(options & 0x08),
-            'retain_handling': (options >> 4) & 0x03,
+            'no_local': bool(options & SubscriptionOptions.NO_LOCAL),
+            'retain_as_published': bool(options & SubscriptionOptions.RETAIN_AS_PUBLISHED),
+            'retain_handling': (options >> RETAIN_HANDLING_SHIFT) & RETAIN_HANDLING_MASK,
         })
     return MQTTSubscribe(packet_id=packet_id, subscriptions=subscriptions,
                          properties=properties, subscription_options=sub_options)
@@ -933,7 +1016,7 @@ def decode_packet(data: bytes) -> MQTTMessage:
     # A mismatch is a Malformed Packet — also the signal the actor's resync uses
     # to skip junk bytes.
     if packet_type != MQTTPacketType.PUBLISH:
-        expected = 0x02 if packet_type in (
+        expected = RESERVED_FLAGS_0010 if packet_type in (
             MQTTPacketType.PUBREL, MQTTPacketType.SUBSCRIBE,
             MQTTPacketType.UNSUBSCRIBE) else 0x00
         if flags != expected:

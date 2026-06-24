@@ -48,6 +48,9 @@ Hello, world!
   real traffic can drive a programmable misbehaving client or
   server.  Test your own HTTP/2 client against half-closed streams,
   exhausted windows, and illegal SETTINGS — in CI.
+- **Multi-protocol, one process.** A pure-Python MQTT 5 broker rides
+  beside HTTP/2 and WebSocket on the same runtime; extensions add new
+  protocols without touching the core — still no C extension.
 - **RFC-grade correctness.** Passes the same external conformance
   suites used to validate nginx and Envoy (`h2spec`, Autobahn).
 - **Typed throughout.** Your editor and `mypy` / `pyright` see
@@ -61,6 +64,7 @@ pip install 'blackbull[compression]'      # add brotli + zstandard codecs
 pip install 'blackbull[speed]'            # add uvloop event loop
 pip install 'blackbull[reload]'           # add watchfiles for --reload
 pip install 'blackbull[fault-injection]'  # add cryptography + httpx for the toolkit
+pip install 'blackbull[mqtt]'             # MQTT 5 broker extension
 ```
 
 ## Simplified handlers
@@ -104,6 +108,34 @@ async def ws_echo(scope, receive, send):
             await send({'type': 'websocket.send',
                         'text': msg.get('text') or ''})
 ```
+
+## Beyond HTTP — the Non-ASGI bridge
+
+One process, more than one protocol. Extensions attach non-HTTP
+protocols through a single seam — `app.add_extension(...)` — while the
+HTTP core stays protocol-agnostic. The flagship is a **pure-Python
+MQTT 5 broker**: CONNECT / SUBSCRIBE / PUBLISH at QoS 0–2, retained
+messages, and Last-Will on the standard `:1883` port, beside your HTTP
+routes — no Mosquitto sidecar, no C extension.
+
+```python
+from blackbull import BlackBull
+from blackbull.mqtt import MQTTExtension, Message
+
+app = BlackBull()
+mqtt = app.add_extension(MQTTExtension(port=1883))
+
+@mqtt.on_message(topic='sensors/{room}/temperature')
+async def on_temp(msg: Message, room: str):
+    print(room, msg.payload.decode())   # {room} captured like an HTTP path param
+
+app.run(port=8000)   # HTTP on 8000, MQTT on 1883
+```
+
+Need a protocol BlackBull doesn't ship? `@app.raw_handler` hands you the
+raw reader/writer for a port. See
+[`docs/guide/mqtt.md`](https://github.com/TOKUJI/BlackBull/blob/master/docs/guide/mqtt.md)
+and [`docs/guide/raw-protocols.md`](https://github.com/TOKUJI/BlackBull/blob/master/docs/guide/raw-protocols.md).
 
 ## Event API
 
@@ -202,6 +234,7 @@ for the full tutorial.
 |---|---|
 | [`examples/SimpleTaskManager/`](examples/SimpleTaskManager/) | REST API + HTML UI, middleware pipeline, route groups, SQLite, Bearer token auth |
 | [`examples/ChatServer/`](examples/ChatServer/) | WebSocket, SSE, long polling side by side; Session + Compression + custom auth |
+| [`examples/mqtt_broker.py`](examples/mqtt_broker.py) | MQTT 5 broker beside HTTP; `on_message` taps with `{capture}` topic params |
 | [`examples/typed_routes_ok.py`](examples/typed_routes_ok.py) | `{param:converter}` syntax, `url_path_for` |
 | [`examples/scenario_h1_fault_injection.py`](examples/scenario_h1_fault_injection.py) | HTTP/1.1 fault scenarios driven against stdlib `http.server` |
 | [`examples/scenario_h2_fault_injection.py`](examples/scenario_h2_fault_injection.py) | HTTP/2 fault scenarios served against httpx |

@@ -29,14 +29,13 @@ from .messages import (
     MQTTConnect, MQTTPublish, MQTTPuback, MQTTPubrec, MQTTPubrel, MQTTPubcomp,
     MQTTSubscribe, MQTTUnsubscribe, MQTTPingreq, MQTTPingresp,
     MQTTDisconnect, MQTTAuth, MQTTMessage,
-    IncompletePacket, MQTTDecodeError,
+    IncompletePacket, MQTTDecodeError, ReasonCode,
     decode_packet, encode_packet,
 )
 from .tap import Message, TapActor, compile_taps, run_taps
 
 logger = logging.getLogger(__name__)
 
-_RC_SUCCESS = 0x00
 _READ_CHUNK = 4096
 _IDLE_SLEEP = 0.005
 
@@ -159,10 +158,10 @@ class MQTTConnectionActor(Actor):
             # Stateless: reply through our own inbox so run() stays the only writer.
             await self.send(Send(packet=MQTTPingresp()))
         elif isinstance(message, MQTTAuth):
-            await self.send(Send(packet=MQTTAuth(reason_code=_RC_SUCCESS)))
+            await self.send(Send(packet=MQTTAuth(reason_code=ReasonCode.SUCCESS)))
         elif isinstance(message, MQTTDisconnect):
-            # 0x04 = "Disconnect with Will Message"; anything else is graceful.
-            self.graceful = message.reason_code != 0x04
+            # "Disconnect with Will Message" keeps the Will; anything else is graceful.
+            self.graceful = message.reason_code != ReasonCode.DISCONNECT_WITH_WILL
             await broker.send(Detach(graceful=self.graceful, sender=self))
             self._done = True
         else:  # pragma: no cover - decode_packet yields only known types

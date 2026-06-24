@@ -19,24 +19,36 @@ async def _noop_app(scope, receive, send):  # pragma: no cover - never invoked
 
 class _StubReader(AbstractReader):
     """Concrete AbstractReader so ConnectionActor's beartyped __init__ accepts
-    it.  Records whether the byte-sniffing reads were called and returns a
-    configurable first line from readuntil."""
+    it.  Buffer-backed (detection peeks via ``read``); records whether the
+    framing reads were called so a port-bound test can assert detection never
+    touched the stream."""
 
     def __init__(self, first_line: bytes = b''):
-        self._first_line = first_line
+        self._buf = bytearray(first_line)
         self.readuntil_called = False
         self.readexactly_called = False
 
     async def read(self, n: int) -> bytes:
-        return b''
+        chunk = bytes(self._buf[:n])
+        del self._buf[:n]
+        return chunk
 
     async def readuntil(self, sep: bytes) -> bytes:
         self.readuntil_called = True
-        return self._first_line
+        idx = self._buf.find(sep)
+        end = (idx + len(sep)) if idx != -1 else len(self._buf)
+        chunk = bytes(self._buf[:end])
+        del self._buf[:end]
+        return chunk
 
     async def readexactly(self, n: int) -> bytes:
         self.readexactly_called = True
-        return b''
+        chunk = bytes(self._buf[:n])
+        del self._buf[:n]
+        return chunk
+
+    def at_eof(self) -> bool:
+        return not self._buf
 
 
 class _StubWriter(AbstractWriter):
@@ -68,6 +80,29 @@ def test_by_alpn():
     assert r.by_alpn('h2').name == 'http2'
     assert r.by_alpn('http/1.1') is None
     assert r.by_alpn(None) is None
+
+
+def test_claims_unified_predicate():
+    """claims() is the Stage-1 selection seam: built-ins mirror
+    matches_cleartext; a RawBinding claims via its detector."""
+    r = ProtocolRegistry()
+    http2, http1 = r.cleartext_bindings
+    assert http2.claims(_HTTP2_PREFACE_FIRST_LINE, None) is True
+    assert http2.claims(b'GET / HTTP/1.1\r\n', None) is False
+    assert http1.claims(b'anything', None) is True
+
+    class _FirstByte(ProtocolDetector):
+        def detect(self, first_bytes: bytes, alpn) -> bool:
+            return bool(first_bytes) and first_bytes[0] == 0x10
+        @property
+        def protocol_name(self) -> str:
+            return 'fake'
+
+    detected = RawBinding('fake', _noop, detector=_FirstByte())
+    assert detected.claims(b'\x10\x00', None) is True
+    assert detected.claims(b'GET', None) is False
+    # A port-bound raw binding (no detector) never claims via detection.
+    assert RawBinding('bound', _noop, port=9000).claims(b'\x10', None) is False
 
 
 def test_register_raw_binding():
@@ -113,9 +148,9 @@ def test_raw_binding_without_port_is_not_a_port_binding():
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_bound_binding_calls_serve_raw_skips_detection():
-    """ConnectionActor(bound_binding=…) hands the connection to serve_raw
-    without touching the reader — no byte sniffing, no ALPN check."""
+async def test_bound_binding_calls_serve_skips_detection():
+    """ConnectionActor(bound_binding=…) hands the connection to the binding's
+    serve without touching the reader — no byte sniffing, no ALPN check."""
     from blackbull.server.connection_actor import ConnectionActor
 
     reader = _StubReader()
@@ -123,11 +158,11 @@ async def test_bound_binding_calls_serve_raw_skips_detection():
 
     served = []
 
-    async def _serve_raw(conn):
+    async def _serve(conn):
         served.append(conn)
 
     binding = RawBinding('echo', _noop, port=9000)
-    binding.serve_raw = _serve_raw
+    binding.serve = _serve
 
     actor = ConnectionActor(reader, writer, app=_noop_app, aggregator=None,
                             bound_binding=binding)
@@ -157,12 +192,12 @@ async def test_protocol_detector_claims_connection_before_http1():
 
     served = []
 
-    async def _serve_raw(conn):
+    async def _serve(conn):
         served.append(conn)
 
     registry = ProtocolRegistry()
     binding = registry.register('echo', _noop, detector=_EchoDetector())
-    binding.serve_raw = _serve_raw
+    binding.serve = _serve
 
     actor = ConnectionActor(reader, writer, app=_noop_app, aggregator=None,
                             registry=registry)
@@ -186,7 +221,7 @@ async def test_non_matching_detector_falls_through_to_http1():
         def protocol_name(self):
             return 'none'
 
-    reader = _StubReader(first_line=b'GET / HTTP/1.1\r\n')
+    reader = _StubReader(first_line=b'GET / HTTP/1.1\r\nHost: x\r\n\r\n')
     writer = _StubWriter()
 
     http1_served = []
@@ -194,11 +229,13 @@ async def test_non_matching_detector_falls_through_to_http1():
     registry = ProtocolRegistry()
     binding = registry.register('none', _noop, detector=_NeverMatches())
 
-    async def _record(conn, first_line):
-        http1_served.append(first_line)
+    async def _record(conn):
+        # The http1 binding now reads its own request line from the replayed
+        # stream — assert it sees the intact line through the PrefixReader.
+        http1_served.append(await conn.reader.readuntil(b'\r\n'))
 
     with patch(
-        'blackbull.server.protocol_registry.Http1Binding.serve_cleartext',
+        'blackbull.server.protocol_registry.Http1Binding.serve',
         new=AsyncMock(side_effect=_record),
     ):
         actor = ConnectionActor(reader, writer, app=_noop_app, aggregator=None,
