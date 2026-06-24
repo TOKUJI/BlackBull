@@ -45,6 +45,9 @@ jobs:
         with:
           languages: ${{ matrix.language }}
           queries: security-extended,security-and-quality
+          # Scope quality lint to shipped code (blackbull/ + examples/);
+          # ignore tests/bench/templates/docs.  See the config file header.
+          config-file: ./.github/codeql/codeql-config.yml
 
       - name: Autobuild
         uses: github/codeql-action/autobuild@8aad20d150bbac5944a9f9d289da16a4b0d87c1e   # v4.36.2
