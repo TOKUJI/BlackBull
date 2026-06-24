@@ -10,28 +10,28 @@
       
       
       
-        <link rel="canonical" href="https://TOKUJI.github.io/BlackBull/api/blackbull/asgi/">
+        <link rel="canonical" href="https://TOKUJI.github.io/BlackBull/api/blackbull/mqtt/extension/">
       
       
-        <link rel="prev" href="../app/">
+        <link rel="prev" href="../connection/">
       
       
-        <link rel="next" href="../cli/">
+        <link rel="next" href="../messages/">
       
       
         
       
       
-      <link rel="icon" href="../../../assets/images/favicon.png">
+      <link rel="icon" href="../../../../assets/images/favicon.png">
       <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
     
     
       
-        <title>asgi - BlackBull</title>
+        <title>extension - BlackBull</title>
       
     
     
-      <link rel="stylesheet" href="../../../assets/stylesheets/main.484c7ddc.min.css">
+      <link rel="stylesheet" href="../../../../assets/stylesheets/main.484c7ddc.min.css">
       
       
 
@@ -50,11 +50,11 @@
       
     
     
-      <link rel="stylesheet" href="../../../assets/_mkdocstrings.css">
+      <link rel="stylesheet" href="../../../../assets/_mkdocstrings.css">
     
-      <link rel="stylesheet" href="../../../stylesheets/extra.css">
+      <link rel="stylesheet" href="../../../../stylesheets/extra.css">
     
-    <script>__md_scope=new URL("../../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    <script>__md_scope=new URL("../../../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
     
       
 
@@ -72,7 +72,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#blackbullasgi" class="md-skip">
+        <a href="#blackbullmqttextension" class="md-skip">
           Skip to content
         </a>
       
@@ -88,7 +88,7 @@
 
 <header class="md-header md-header--shadow" data-md-component="header">
   <nav class="md-header__inner md-grid" aria-label="Header">
-    <a href="../../.." title="BlackBull" class="md-header__button md-logo" aria-label="BlackBull" data-md-component="logo">
+    <a href="../../../.." title="BlackBull" class="md-header__button md-logo" aria-label="BlackBull" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
@@ -108,7 +108,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              asgi
+              extension
             
           </span>
         </div>
@@ -198,7 +198,7 @@
 
 <nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
   <label class="md-nav__title" for="__drawer">
-    <a href="../../.." title="BlackBull" class="md-nav__button md-logo" aria-label="BlackBull" data-md-component="logo">
+    <a href="../../../.." title="BlackBull" class="md-nav__button md-logo" aria-label="BlackBull" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
@@ -228,7 +228,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../.." class="md-nav__link">
+      <a href="../../../.." class="md-nav__link">
         
   
   
@@ -302,7 +302,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../getting-started/installation/" class="md-nav__link">
+      <a href="../../../../getting-started/installation/" class="md-nav__link">
         
   
   
@@ -330,7 +330,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../getting-started/hello-world/" class="md-nav__link">
+      <a href="../../../../getting-started/hello-world/" class="md-nav__link">
         
   
   
@@ -358,7 +358,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../getting-started/first-app/" class="md-nav__link">
+      <a href="../../../../getting-started/first-app/" class="md-nav__link">
         
   
   
@@ -440,7 +440,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../guide/" class="md-nav__link">
+      <a href="../../../../guide/" class="md-nav__link">
         
   
   
@@ -468,7 +468,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../guide/routing/" class="md-nav__link">
+      <a href="../../../../guide/routing/" class="md-nav__link">
         
   
   
@@ -496,7 +496,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../guide/middleware/" class="md-nav__link">
+      <a href="../../../../guide/middleware/" class="md-nav__link">
         
   
   
@@ -524,7 +524,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../guide/error-handling/" class="md-nav__link">
+      <a href="../../../../guide/error-handling/" class="md-nav__link">
         
   
   
@@ -552,7 +552,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../guide/requests-and-responses/" class="md-nav__link">
+      <a href="../../../../guide/requests-and-responses/" class="md-nav__link">
         
   
   
@@ -580,7 +580,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../guide/websockets/" class="md-nav__link">
+      <a href="../../../../guide/websockets/" class="md-nav__link">
         
   
   
@@ -608,7 +608,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../guide/http2/" class="md-nav__link">
+      <a href="../../../../guide/http2/" class="md-nav__link">
         
   
   
@@ -636,7 +636,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../guide/raw-protocols/" class="md-nav__link">
+      <a href="../../../../guide/raw-protocols/" class="md-nav__link">
         
   
   
@@ -664,7 +664,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../guide/mqtt/" class="md-nav__link">
+      <a href="../../../../guide/mqtt/" class="md-nav__link">
         
   
   
@@ -692,7 +692,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../guide/streaming/" class="md-nav__link">
+      <a href="../../../../guide/streaming/" class="md-nav__link">
         
   
   
@@ -720,7 +720,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../guide/events/" class="md-nav__link">
+      <a href="../../../../guide/events/" class="md-nav__link">
         
   
   
@@ -748,7 +748,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../guide/logging/" class="md-nav__link">
+      <a href="../../../../guide/logging/" class="md-nav__link">
         
   
   
@@ -776,7 +776,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../guide/static-files/" class="md-nav__link">
+      <a href="../../../../guide/static-files/" class="md-nav__link">
         
   
   
@@ -804,7 +804,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../guide/configuration/" class="md-nav__link">
+      <a href="../../../../guide/configuration/" class="md-nav__link">
         
   
   
@@ -832,7 +832,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../guide/extensions/" class="md-nav__link">
+      <a href="../../../../guide/extensions/" class="md-nav__link">
         
   
   
@@ -860,7 +860,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../guide/openapi/" class="md-nav__link">
+      <a href="../../../../guide/openapi/" class="md-nav__link">
         
   
   
@@ -888,7 +888,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../guide/testing/" class="md-nav__link">
+      <a href="../../../../guide/testing/" class="md-nav__link">
         
   
   
@@ -916,7 +916,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../guide/fault_injection/" class="md-nav__link">
+      <a href="../../../../guide/fault_injection/" class="md-nav__link">
         
   
   
@@ -998,7 +998,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../deployment/running/" class="md-nav__link">
+      <a href="../../../../deployment/running/" class="md-nav__link">
         
   
   
@@ -1026,7 +1026,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../deployment/workers/" class="md-nav__link">
+      <a href="../../../../deployment/workers/" class="md-nav__link">
         
   
   
@@ -1054,7 +1054,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../deployment/tls/" class="md-nav__link">
+      <a href="../../../../deployment/tls/" class="md-nav__link">
         
   
   
@@ -1082,7 +1082,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../deployment/behind-nginx/" class="md-nav__link">
+      <a href="../../../../deployment/behind-nginx/" class="md-nav__link">
         
   
   
@@ -1110,7 +1110,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../deployment/unix-and-fd/" class="md-nav__link">
+      <a href="../../../../deployment/unix-and-fd/" class="md-nav__link">
         
   
   
@@ -1138,7 +1138,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../deployment/hot-reload/" class="md-nav__link">
+      <a href="../../../../deployment/hot-reload/" class="md-nav__link">
         
   
   
@@ -1222,7 +1222,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../reference/env-vars/" class="md-nav__link">
+      <a href="../../../../reference/env-vars/" class="md-nav__link">
         
   
   
@@ -1348,7 +1348,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../" class="md-nav__link">
+      <a href="../../" class="md-nav__link">
         
   
   
@@ -1376,7 +1376,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../actor/" class="md-nav__link">
+      <a href="../../actor/" class="md-nav__link">
         
   
   
@@ -1404,7 +1404,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../app/" class="md-nav__link">
+      <a href="../../app/" class="md-nav__link">
         
   
   
@@ -1429,37 +1429,10 @@
                 
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    asgi
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../../asgi/" class="md-nav__link">
         
   
   
@@ -1475,87 +1448,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#blackbull.asgi" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        asgi
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="asgi">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.asgi.ASGIEvent" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        ASGIEvent
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.asgi.ResponseBody" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        ResponseBody
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.asgi.ResponseStart" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        ResponseStart
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.asgi.parse_response_event" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        parse_response_event
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -1568,7 +1460,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../cli/" class="md-nav__link">
+      <a href="../../cli/" class="md-nav__link">
         
   
   
@@ -1643,7 +1535,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../client/" class="md-nav__link">
+      <a href="../../client/" class="md-nav__link">
         
   
   
@@ -1671,7 +1563,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../client/client/" class="md-nav__link">
+      <a href="../../client/client/" class="md-nav__link">
         
   
   
@@ -1699,7 +1591,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../client/exceptions/" class="md-nav__link">
+      <a href="../../client/exceptions/" class="md-nav__link">
         
   
   
@@ -1727,7 +1619,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../client/http1/" class="md-nav__link">
+      <a href="../../client/http1/" class="md-nav__link">
         
   
   
@@ -1755,7 +1647,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../client/http2/" class="md-nav__link">
+      <a href="../../client/http2/" class="md-nav__link">
         
   
   
@@ -1783,7 +1675,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../client/response/" class="md-nav__link">
+      <a href="../../client/response/" class="md-nav__link">
         
   
   
@@ -1811,7 +1703,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../client/scenario/" class="md-nav__link">
+      <a href="../../client/scenario/" class="md-nav__link">
         
   
   
@@ -1839,7 +1731,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../client/scenario_oracle/" class="md-nav__link">
+      <a href="../../client/scenario_oracle/" class="md-nav__link">
         
   
   
@@ -1867,7 +1759,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../client/websocket/" class="md-nav__link">
+      <a href="../../client/websocket/" class="md-nav__link">
         
   
   
@@ -1895,7 +1787,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../client/websocket_h2/" class="md-nav__link">
+      <a href="../../client/websocket_h2/" class="md-nav__link">
         
   
   
@@ -1931,7 +1823,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../config/" class="md-nav__link">
+      <a href="../../config/" class="md-nav__link">
         
   
   
@@ -1959,7 +1851,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../env/" class="md-nav__link">
+      <a href="../../env/" class="md-nav__link">
         
   
   
@@ -1987,7 +1879,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../event/" class="md-nav__link">
+      <a href="../../event/" class="md-nav__link">
         
   
   
@@ -2015,7 +1907,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../event_aggregator/" class="md-nav__link">
+      <a href="../../event_aggregator/" class="md-nav__link">
         
   
   
@@ -2043,7 +1935,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../extension/" class="md-nav__link">
+      <a href="../../extension/" class="md-nav__link">
         
   
   
@@ -2118,7 +2010,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../fault_injection/" class="md-nav__link">
+      <a href="../../fault_injection/" class="md-nav__link">
         
   
   
@@ -2193,7 +2085,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../fault_injection/catalogue/" class="md-nav__link">
+      <a href="../../fault_injection/catalogue/" class="md-nav__link">
         
   
   
@@ -2221,7 +2113,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../fault_injection/catalogue/h2/" class="md-nav__link">
+      <a href="../../fault_injection/catalogue/h2/" class="md-nav__link">
         
   
   
@@ -2257,7 +2149,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../fault_injection/h2_server/" class="md-nav__link">
+      <a href="../../fault_injection/h2_server/" class="md-nav__link">
         
   
   
@@ -2285,7 +2177,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../fault_injection/oracle_h1/" class="md-nav__link">
+      <a href="../../fault_injection/oracle_h1/" class="md-nav__link">
         
   
   
@@ -2313,7 +2205,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../fault_injection/scenario_h1/" class="md-nav__link">
+      <a href="../../fault_injection/scenario_h1/" class="md-nav__link">
         
   
   
@@ -2341,7 +2233,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../fault_injection/scenario_h2/" class="md-nav__link">
+      <a href="../../fault_injection/scenario_h2/" class="md-nav__link">
         
   
   
@@ -2377,7 +2269,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../headers/" class="md-nav__link">
+      <a href="../../headers/" class="md-nav__link">
         
   
   
@@ -2405,7 +2297,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../logger/" class="md-nav__link">
+      <a href="../../logger/" class="md-nav__link">
         
   
   
@@ -2480,7 +2372,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../middleware/" class="md-nav__link">
+      <a href="../../middleware/" class="md-nav__link">
         
   
   
@@ -2508,7 +2400,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../middleware/base/" class="md-nav__link">
+      <a href="../../middleware/base/" class="md-nav__link">
         
   
   
@@ -2536,7 +2428,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../middleware/cache/" class="md-nav__link">
+      <a href="../../middleware/cache/" class="md-nav__link">
         
   
   
@@ -2564,7 +2456,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../middleware/compression/" class="md-nav__link">
+      <a href="../../middleware/compression/" class="md-nav__link">
         
   
   
@@ -2592,7 +2484,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../middleware/cors/" class="md-nav__link">
+      <a href="../../middleware/cors/" class="md-nav__link">
         
   
   
@@ -2620,7 +2512,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../middleware/proxy/" class="md-nav__link">
+      <a href="../../middleware/proxy/" class="md-nav__link">
         
   
   
@@ -2648,7 +2540,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../middleware/session/" class="md-nav__link">
+      <a href="../../middleware/session/" class="md-nav__link">
         
   
   
@@ -2676,7 +2568,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../middleware/static/" class="md-nav__link">
+      <a href="../../middleware/static/" class="md-nav__link">
         
   
   
@@ -2704,7 +2596,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../middleware/utils/" class="md-nav__link">
+      <a href="../../middleware/utils/" class="md-nav__link">
         
   
   
@@ -2732,7 +2624,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../middleware/websocket/" class="md-nav__link">
+      <a href="../../middleware/websocket/" class="md-nav__link">
         
   
   
@@ -2765,18 +2657,20 @@
                 
   
   
+    
   
   
+  
     
     
     
     
     
-    <li class="md-nav__item md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2_1_16" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2_1_16" checked>
         
           
           <label class="md-nav__link" for="__nav_5_2_1_16" id="__nav_5_2_1_16_label" tabindex="0">
@@ -2797,7 +2691,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="4" aria-labelledby="__nav_5_2_1_16_label" aria-expanded="false">
+        <nav class="md-nav" data-md-level="4" aria-labelledby="__nav_5_2_1_16_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_5_2_1_16">
             <span class="md-nav__icon md-icon"></span>
             
@@ -2815,7 +2709,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../mqtt/" class="md-nav__link">
+      <a href="../" class="md-nav__link">
         
   
   
@@ -2843,7 +2737,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../mqtt/broker/" class="md-nav__link">
+      <a href="../broker/" class="md-nav__link">
         
   
   
@@ -2871,7 +2765,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../mqtt/connection/" class="md-nav__link">
+      <a href="../connection/" class="md-nav__link">
         
   
   
@@ -2896,10 +2790,37 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../mqtt/extension/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    extension
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -2915,6 +2836,104 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#blackbull.mqtt.extension" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        extension
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="extension">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.mqtt.extension.MQTTExtension" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        MQTTExtension
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="MQTTExtension">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.mqtt.extension.MQTTExtension.on_message" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        on_message
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.mqtt.extension.MQTTExtension.shutdown" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        shutdown
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.mqtt.extension.MQTTExtension.startup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        startup
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.mqtt.extension.MQTTProtocolDetector" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        MQTTProtocolDetector
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -2927,7 +2946,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../mqtt/messages/" class="md-nav__link">
+      <a href="../messages/" class="md-nav__link">
         
   
   
@@ -2955,7 +2974,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../mqtt/tap/" class="md-nav__link">
+      <a href="../tap/" class="md-nav__link">
         
   
   
@@ -2991,7 +3010,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../openapi/" class="md-nav__link">
+      <a href="../../openapi/" class="md-nav__link">
         
   
   
@@ -3066,7 +3085,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../protocol/" class="md-nav__link">
+      <a href="../../protocol/" class="md-nav__link">
         
   
   
@@ -3094,7 +3113,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../protocol/frame/" class="md-nav__link">
+      <a href="../../protocol/frame/" class="md-nav__link">
         
   
   
@@ -3122,7 +3141,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../protocol/frame_types/" class="md-nav__link">
+      <a href="../../protocol/frame_types/" class="md-nav__link">
         
   
   
@@ -3150,7 +3169,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../protocol/hpack_fastpath/" class="md-nav__link">
+      <a href="../../protocol/hpack_fastpath/" class="md-nav__link">
         
   
   
@@ -3178,7 +3197,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../protocol/rsock/" class="md-nav__link">
+      <a href="../../protocol/rsock/" class="md-nav__link">
         
   
   
@@ -3206,7 +3225,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../protocol/stream/" class="md-nav__link">
+      <a href="../../protocol/stream/" class="md-nav__link">
         
   
   
@@ -3242,7 +3261,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../request/" class="md-nav__link">
+      <a href="../../request/" class="md-nav__link">
         
   
   
@@ -3270,7 +3289,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../response/" class="md-nav__link">
+      <a href="../../response/" class="md-nav__link">
         
   
   
@@ -3298,7 +3317,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../router/" class="md-nav__link">
+      <a href="../../router/" class="md-nav__link">
         
   
   
@@ -3373,7 +3392,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../server/" class="md-nav__link">
+      <a href="../../server/" class="md-nav__link">
         
   
   
@@ -3401,7 +3420,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../server/access_log/" class="md-nav__link">
+      <a href="../../server/access_log/" class="md-nav__link">
         
   
   
@@ -3429,7 +3448,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../server/cap_log/" class="md-nav__link">
+      <a href="../../server/cap_log/" class="md-nav__link">
         
   
   
@@ -3457,7 +3476,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../server/connection_actor/" class="md-nav__link">
+      <a href="../../server/connection_actor/" class="md-nav__link">
         
   
   
@@ -3485,7 +3504,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../server/constants/" class="md-nav__link">
+      <a href="../../server/constants/" class="md-nav__link">
         
   
   
@@ -3513,7 +3532,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../server/deadline/" class="md-nav__link">
+      <a href="../../server/deadline/" class="md-nav__link">
         
   
   
@@ -3541,7 +3560,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../server/http1_actor/" class="md-nav__link">
+      <a href="../../server/http1_actor/" class="md-nav__link">
         
   
   
@@ -3569,7 +3588,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../server/http2_actor/" class="md-nav__link">
+      <a href="../../server/http2_actor/" class="md-nav__link">
         
   
   
@@ -3597,7 +3616,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../server/http2_messages/" class="md-nav__link">
+      <a href="../../server/http2_messages/" class="md-nav__link">
         
   
   
@@ -3625,7 +3644,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../server/http2_ws/" class="md-nav__link">
+      <a href="../../server/http2_ws/" class="md-nav__link">
         
   
   
@@ -3653,7 +3672,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../server/multiworker/" class="md-nav__link">
+      <a href="../../server/multiworker/" class="md-nav__link">
         
   
   
@@ -3681,7 +3700,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../server/parser/" class="md-nav__link">
+      <a href="../../server/parser/" class="md-nav__link">
         
   
   
@@ -3709,7 +3728,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../server/permessage_deflate/" class="md-nav__link">
+      <a href="../../server/permessage_deflate/" class="md-nav__link">
         
   
   
@@ -3737,7 +3756,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../server/protocol_registry/" class="md-nav__link">
+      <a href="../../server/protocol_registry/" class="md-nav__link">
         
   
   
@@ -3765,7 +3784,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../server/recipient/" class="md-nav__link">
+      <a href="../../server/recipient/" class="md-nav__link">
         
   
   
@@ -3793,7 +3812,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../server/reload/" class="md-nav__link">
+      <a href="../../server/reload/" class="md-nav__link">
         
   
   
@@ -3821,7 +3840,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../server/response/" class="md-nav__link">
+      <a href="../../server/response/" class="md-nav__link">
         
   
   
@@ -3849,7 +3868,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../server/sender/" class="md-nav__link">
+      <a href="../../server/sender/" class="md-nav__link">
         
   
   
@@ -3877,7 +3896,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../server/server/" class="md-nav__link">
+      <a href="../../server/server/" class="md-nav__link">
         
   
   
@@ -3905,7 +3924,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../server/websocket_actor/" class="md-nav__link">
+      <a href="../../server/websocket_actor/" class="md-nav__link">
         
   
   
@@ -3933,7 +3952,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../server/worker/" class="md-nav__link">
+      <a href="../../server/worker/" class="md-nav__link">
         
   
   
@@ -3961,7 +3980,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../server/ws_codec/" class="md-nav__link">
+      <a href="../../server/ws_codec/" class="md-nav__link">
         
   
   
@@ -3997,7 +4016,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../testing/" class="md-nav__link">
+      <a href="../../testing/" class="md-nav__link">
         
   
   
@@ -4025,7 +4044,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../utils/" class="md-nav__link">
+      <a href="../../utils/" class="md-nav__link">
         
   
   
@@ -4123,7 +4142,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../about/conformance/" class="md-nav__link">
+      <a href="../../../../about/conformance/" class="md-nav__link">
         
   
   
@@ -4151,7 +4170,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../about/internals/" class="md-nav__link">
+      <a href="../../../../about/internals/" class="md-nav__link">
         
   
   
@@ -4179,7 +4198,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../about/mqtt-actor-design/" class="md-nav__link">
+      <a href="../../../../about/mqtt-actor-design/" class="md-nav__link">
         
   
   
@@ -4207,7 +4226,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../about/rfc9113-implementation/" class="md-nav__link">
+      <a href="../../../../about/rfc9113-implementation/" class="md-nav__link">
         
   
   
@@ -4235,7 +4254,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../about/grpc-assessment/" class="md-nav__link">
+      <a href="../../../../about/grpc-assessment/" class="md-nav__link">
         
   
   
@@ -4290,22 +4309,34 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#blackbull.asgi" class="md-nav__link">
+  <a href="#blackbull.mqtt.extension" class="md-nav__link">
     <span class="md-ellipsis">
       
-        asgi
+        extension
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="asgi">
+    <nav class="md-nav" aria-label="extension">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#blackbull.asgi.ASGIEvent" class="md-nav__link">
+  <a href="#blackbull.mqtt.extension.MQTTExtension" class="md-nav__link">
     <span class="md-ellipsis">
       
-        ASGIEvent
+        MQTTExtension
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="MQTTExtension">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.mqtt.extension.MQTTExtension.on_message" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        on_message
       
     </span>
   </a>
@@ -4313,10 +4344,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#blackbull.asgi.ResponseBody" class="md-nav__link">
+  <a href="#blackbull.mqtt.extension.MQTTExtension.shutdown" class="md-nav__link">
     <span class="md-ellipsis">
       
-        ResponseBody
+        shutdown
       
     </span>
   </a>
@@ -4324,21 +4355,26 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#blackbull.asgi.ResponseStart" class="md-nav__link">
+  <a href="#blackbull.mqtt.extension.MQTTExtension.startup" class="md-nav__link">
     <span class="md-ellipsis">
       
-        ResponseStart
+        startup
       
     </span>
   </a>
   
 </li>
         
+      </ul>
+    </nav>
+  
+</li>
+        
           <li class="md-nav__item">
-  <a href="#blackbull.asgi.parse_response_event" class="md-nav__link">
+  <a href="#blackbull.mqtt.extension.MQTTProtocolDetector" class="md-nav__link">
     <span class="md-ellipsis">
       
-        parse_response_event
+        MQTTProtocolDetector
       
     </span>
   </a>
@@ -4370,33 +4406,22 @@
   
 
 
-<h1 id="blackbullasgi"><code>blackbull.asgi</code><a class="headerlink" href="#blackbullasgi" title="Permanent link">&para;</a></h1>
+<h1 id="blackbullmqttextension"><code>blackbull.mqtt.extension</code><a class="headerlink" href="#blackbullmqttextension" title="Permanent link">&para;</a></h1>
 
 
 <div class="doc doc-object doc-module">
 
 
 
-<h2 id="blackbull.asgi" class="doc doc-heading">
-            <code>blackbull.asgi</code>
+<h2 id="blackbull.mqtt.extension" class="doc doc-heading">
+            <code>blackbull.mqtt.extension</code>
 
 
-<a href="#blackbull.asgi" class="headerlink" title="Permanent link">&para;</a></h2>
+<a href="#blackbull.mqtt.extension" class="headerlink" title="Permanent link">&para;</a></h2>
 
     <div class="doc doc-contents first">
 
-        <p>ASGI protocol types: event-type string constants and typed event wrappers.</p>
-<p>Two responsibilities, both framework-side:</p>
-<ul>
-<li><code>ASGIEvent</code>: namespace of ASGI 3.0 event-type strings, used for
-  <code>match</code>/<code>case</code> dispatch and equality checks across both the
-  framework and (importing from here) the server stack.</li>
-<li><code>ResponseStart</code> / <code>ResponseBody</code>: dict-subclass wrappers for the
-  two outgoing response event shapes so middleware can dispatch on
-  Python type rather than string comparison.  Both subclass <code>dict</code>
-  so <code>isinstance(e, dict)</code> remains True — required for beartype and
-  any ASGI send callable annotated <code>event: dict</code>.</li>
-</ul>
+        <p>User-facing wiring for the MQTT 5 broker — detector + :class:<code>MQTTExtension</code>.</p>
 
 
 
@@ -4421,114 +4446,43 @@
 
 
 
-<h3 id="blackbull.asgi.ASGIEvent" class="doc doc-heading">
-            <code>ASGIEvent</code>
+<h3 id="blackbull.mqtt.extension.MQTTExtension" class="doc doc-heading">
+            <code>MQTTExtension</code>
 
 
-<a href="#blackbull.asgi.ASGIEvent" class="headerlink" title="Permanent link">&para;</a></h3>
-
-
-    <div class="doc doc-contents ">
-
-
-
-        <p>Namespace for ASGI protocol event type strings (ASGI 3.0 spec).</p>
-
-
-
-
-
-
-
-
-
-
-
-<div class="doc doc-children">
-
-
-
-
-
-
-
-
-
-
-
-
-  </div>
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-class">
-
-
-
-<h3 id="blackbull.asgi.ResponseBody" class="doc doc-heading">
-            <code>ResponseBody</code>
-
-
-<a href="#blackbull.asgi.ResponseBody" class="headerlink" title="Permanent link">&para;</a></h3>
+<a href="#blackbull.mqtt.extension.MQTTExtension" class="headerlink" title="Permanent link">&para;</a></h3>
 
 
     <div class="doc doc-contents ">
             <p class="doc doc-class-bases">
-              Bases: <code><span title="dict">dict</span></code></p>
+              Bases: <code><a class="autorefs autorefs-internal" title="Extension (blackbull.extension.Extension)" href="../../extension/#blackbull.extension.Extension">Extension</a></code></p>
 
 
 
-        <p>http.response.body event with typed property access.</p>
+        <p>Wires the MQTT 5 broker into a BlackBull app as a non-ASGI protocol.</p>
+<p>Register it once and tap the broker's routing with :meth:<code>on_message</code>::</p>
+<pre><code>from blackbull.mqtt import MQTTExtension, Message
 
+mqtt = app.add_extension(MQTTExtension(port=1883))
 
-
-
-
-
-
-
-
-
-
-<div class="doc doc-children">
-
-
-
-
-
-
-
-
-
-
-
-
-  </div>
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-class">
-
-
-
-<h3 id="blackbull.asgi.ResponseStart" class="doc doc-heading">
-            <code>ResponseStart</code>
-
-
-<a href="#blackbull.asgi.ResponseStart" class="headerlink" title="Permanent link">&para;</a></h3>
-
-
-    <div class="doc doc-contents ">
-            <p class="doc doc-class-bases">
-              Bases: <code><span title="dict">dict</span></code></p>
-
-
-
-        <p>http.response.start event with typed property access.</p>
+@mqtt.on_message(topic='sensors/{room}/temperature')
+async def on_temp(msg: Message, room: str):
+    print(room, msg.payload)
+</code></pre>
+<p>The broker itself (CONNECT/SUBSCRIBE/PUBLISH/QoS flows, retained messages,
+Will delivery) runs whether or not any handler is registered; handlers are
+an application-level tap on top of normal broker routing.</p>
+<p>This instance owns a single :class:<code>BrokerActor</code> and a single
+:class:<code>TapActor</code> (both started on app startup, stopped on shutdown) — one
+broker and one tap consumer per worker, no module globals.  The class is
+self-contained and importable from a future <code>blackbull-mqtt</code> package
+without touching the core.</p>
+<p><code>tap_mode</code> selects how taps are dispatched: <code>'actor'</code> (default) runs
+them on the decoupled :class:<code>TapActor</code> so a slow tap never back-pressures
+delivery; <code>'inline'</code> reproduces the Sprint 53 connection-actor dispatch
+and exists mainly so <code>bench/mqtt/tap_throughput.py</code> can compare the two on
+one build.  <code>tap_queue_size</code> bounds the actor-mode inbox (drop-newest on
+overflow).</p>
 
 
 
@@ -4549,37 +4503,132 @@
 
 
 
-
-
-
-
-  </div>
-
-    </div>
-
-</div>
 
 
 <div class="doc doc-object doc-function">
 
 
-<h3 id="blackbull.asgi.parse_response_event" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">parse_response_event</span><span class="p">(</span><span class="n">event</span><span class="p">)</span></code>
+<h4 id="blackbull.mqtt.extension.MQTTExtension.on_message" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">on_message</span><span class="p">(</span><span class="n">topic</span><span class="o">=</span><span class="s1">&#39;#&#39;</span><span class="p">)</span></code>
 
-<a href="#blackbull.asgi.parse_response_event" class="headerlink" title="Permanent link">&para;</a></h3>
+<a href="#blackbull.mqtt.extension.MQTTExtension.on_message" class="headerlink" title="Permanent link">&para;</a></h4>
 
 
     <div class="doc doc-contents ">
 
-        <p>Wrap <em>event</em> in the appropriate typed subclass for dispatch.</p>
-<p>The returned object IS the event dict (shallow copy) — pass it directly
-to downstream send callables without re-serialisation.
-Trailers and unknown event types are returned unchanged.</p>
+        <p>Decorator: register an async <code>(message, **captures) -&gt; None</code> tap for
+every PUBLISH whose topic matches <em>topic</em> (an MQTT topic filter, so <code>+</code>
+and <code>#</code> wildcards apply, plus <code>{name}</code> capture segments).  The
+callback receives a :class:<code>~blackbull.mqtt.Message</code>.</p>
 
 
     </div>
 
 </div>
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.mqtt.extension.MQTTExtension.shutdown" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">shutdown</span><span class="p">(</span><span class="n">app</span><span class="p">)</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-async"><code>async</code></small>
+  </span>
+
+<a href="#blackbull.mqtt.extension.MQTTExtension.shutdown" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Stop the broker and tap actors on lifespan shutdown.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.mqtt.extension.MQTTExtension.startup" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">startup</span><span class="p">(</span><span class="n">app</span><span class="p">)</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-async"><code>async</code></small>
+  </span>
+
+<a href="#blackbull.mqtt.extension.MQTTExtension.startup" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Start the broker (and, in actor mode, the tap) inbox loops.</p>
+
+
+    </div>
+
+</div>
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="blackbull.mqtt.extension.MQTTProtocolDetector" class="doc doc-heading">
+            <code>MQTTProtocolDetector</code>
+
+
+<a href="#blackbull.mqtt.extension.MQTTProtocolDetector" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><a class="autorefs autorefs-internal" title="ProtocolDetector (blackbull.server.protocol_registry.ProtocolDetector)" href="../../server/protocol_registry/#blackbull.server.protocol_registry.ProtocolDetector">ProtocolDetector</a></code></p>
+
+
+
+        <p>Recognise an MQTT connection from its first byte.</p>
+<p>Every MQTT session opens with a CONNECT packet whose fixed-header first
+byte is <code>0x10</code> (type 1, flags 0).  That is unambiguous against the HTTP
+request line and the HTTP/2 preface, both of which start with ASCII text.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
 
 
 
@@ -4637,10 +4686,10 @@ Trailers and unknown event types are returned unchanged.</p>
     
       
       
-      <script id="__config" type="application/json">{"annotate": null, "base": "../../..", "features": [], "search": "../../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+      <script id="__config" type="application/json">{"annotate": null, "base": "../../../..", "features": [], "search": "../../../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
     
     
-      <script src="../../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      <script src="../../../../assets/javascripts/bundle.79ae519e.min.js"></script>
       
     
   </body>

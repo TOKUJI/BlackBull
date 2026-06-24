@@ -16,7 +16,7 @@
         <link rel="prev" href="../middleware/websocket/">
       
       
-        <link rel="next" href="actor/">
+        <link rel="next" href="broker/">
       
       
         
@@ -2864,6 +2864,45 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.mqtt.TapActor" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        TapActor
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="TapActor">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.mqtt.TapActor.dropped" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        dropped
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.mqtt.TapActor.offer" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        offer
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.mqtt.serve_connection" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2895,14 +2934,70 @@
   
   
     <li class="md-nav__item">
-      <a href="actor/" class="md-nav__link">
+      <a href="broker/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    actor
+    broker
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="connection/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    connection
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="extension/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    extension
   
 
     
@@ -2931,6 +3026,34 @@
     
   
     messages
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="tap/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    tap
   
 
     
@@ -3733,34 +3856,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../server/raw_actor/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    raw_actor
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../server/recipient/" class="md-nav__link">
         
   
@@ -4175,6 +4270,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../../about/mqtt-actor-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MQTT broker design
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../../about/rfc9113-implementation/" class="md-nav__link">
         
   
@@ -4353,6 +4476,45 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.mqtt.TapActor" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        TapActor
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="TapActor">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.mqtt.TapActor.dropped" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        dropped
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.mqtt.TapActor.offer" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        offer
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.mqtt.serve_connection" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4516,17 +4678,24 @@ state — the design goal of the Sprint 53 refactor.</p>
 
 mqtt = app.add_extension(MQTTExtension(port=1883))
 
-@mqtt.on_message(topic='sensors/+/temperature')
-async def on_temp(msg: Message):
-    print(msg.topic, msg.payload)
+@mqtt.on_message(topic='sensors/{room}/temperature')
+async def on_temp(msg: Message, room: str):
+    print(room, msg.payload)
 </code></pre>
 <p>The broker itself (CONNECT/SUBSCRIBE/PUBLISH/QoS flows, retained messages,
 Will delivery) runs whether or not any handler is registered; handlers are
 an application-level tap on top of normal broker routing.</p>
-<p>This instance owns a single :class:<code>BrokerActor</code> (started on app startup,
-stopped on shutdown) holding all routing/session/retained state — one broker
-per worker, no module globals.  The class is self-contained and importable
-from a future <code>blackbull-mqtt</code> package without touching the core.</p>
+<p>This instance owns a single :class:<code>BrokerActor</code> and a single
+:class:<code>TapActor</code> (both started on app startup, stopped on shutdown) — one
+broker and one tap consumer per worker, no module globals.  The class is
+self-contained and importable from a future <code>blackbull-mqtt</code> package
+without touching the core.</p>
+<p><code>tap_mode</code> selects how taps are dispatched: <code>'actor'</code> (default) runs
+them on the decoupled :class:<code>TapActor</code> so a slow tap never back-pressures
+delivery; <code>'inline'</code> reproduces the Sprint 53 connection-actor dispatch
+and exists mainly so <code>bench/mqtt/tap_throughput.py</code> can compare the two on
+one build.  <code>tap_queue_size</code> bounds the actor-mode inbox (drop-newest on
+overflow).</p>
 
 
 
@@ -4560,9 +4729,10 @@ from a future <code>blackbull-mqtt</code> package without touching the core.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Decorator: register an async <code>(message) -&gt; None</code> tap for every
-PUBLISH whose topic matches <em>topic</em> (an MQTT topic filter, so <code>+</code> and
-<code>#</code> wildcards apply).  The callback receives a :class:<code>Message</code>.</p>
+        <p>Decorator: register an async <code>(message, **captures) -&gt; None</code> tap for
+every PUBLISH whose topic matches <em>topic</em> (an MQTT topic filter, so <code>+</code>
+and <code>#</code> wildcards apply, plus <code>{name}</code> capture segments).  The
+callback receives a :class:<code>~blackbull.mqtt.Message</code>.</p>
 
 
     </div>
@@ -4584,7 +4754,7 @@ PUBLISH whose topic matches <em>topic</em> (an MQTT topic filter, so <code>+</co
 
     <div class="doc doc-contents ">
 
-        <p>Stop the broker actor on lifespan shutdown.</p>
+        <p>Stop the broker and tap actors on lifespan shutdown.</p>
 
 
     </div>
@@ -4606,7 +4776,7 @@ PUBLISH whose topic matches <em>topic</em> (an MQTT topic filter, so <code>+</co
 
     <div class="doc doc-contents ">
 
-        <p>Start the broker actor's inbox loop (once per worker).</p>
+        <p>Start the broker (and, in actor mode, the tap) inbox loops.</p>
 
 
     </div>
@@ -4727,12 +4897,107 @@ paho): users write <code>from blackbull.mqtt import Message</code>.</p>
 
 </div>
 
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="blackbull.mqtt.TapActor" class="doc doc-heading">
+            <code>TapActor</code>
+
+
+<a href="#blackbull.mqtt.TapActor" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><a class="autorefs autorefs-internal" title="Actor (blackbull.actor.Actor)" href="../actor/#blackbull.actor.Actor">Actor</a></code></p>
+
+
+
+        <p>Decoupled, lifespan-owned consumer of <code>on_message</code> taps.</p>
+<p>Producers call :meth:<code>offer</code> (non-blocking); a single consumer task drains
+the bounded inbox and runs the matching taps, so FIFO order of <em>accepted</em>
+messages is preserved and tap latency never reaches the connection or broker.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+<div class="doc doc-object doc-attribute">
+
+
+
+<h4 id="blackbull.mqtt.TapActor.dropped" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">dropped</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-property"><code>property</code></small>
+  </span>
+
+<a href="#blackbull.mqtt.TapActor.dropped" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Number of messages dropped on overflow so far (best-effort metric).</p>
+
+    </div>
+
+</div>
+
+
+
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.mqtt.TapActor.offer" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">offer</span><span class="p">(</span><span class="n">message</span><span class="p">)</span></code>
+
+<a href="#blackbull.mqtt.TapActor.offer" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Enqueue <em>message</em> without blocking; drop-newest on overflow.</p>
+<p>Taps are best-effort observability, so a full queue drops the incoming
+message rather than back-pressuring the publisher — but the running
+dropped count is always logged, since silent loss is the one
+unacceptable outcome.</p>
+
+
+    </div>
+
+</div>
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
 
 <div class="doc doc-object doc-function">
 
 
 <h3 id="blackbull.mqtt.serve_connection" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">serve_connection</span><span class="p">(</span><span class="n">reader</span><span class="p">,</span> <span class="n">writer</span><span class="p">,</span> <span class="n">ctx</span><span class="p">,</span> <span class="n">broker</span><span class="p">,</span> <span class="n">app_handlers</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
+            <code class="highlight language-python"><span class="n">serve_connection</span><span class="p">(</span><span class="n">reader</span><span class="p">,</span> <span class="n">writer</span><span class="p">,</span> <span class="n">ctx</span><span class="p">,</span> <span class="n">broker</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">app_handlers</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">tap</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
 
   <span class="doc doc-labels">
       <small class="doc doc-label doc-label-async"><code>async</code></small>
@@ -4746,7 +5011,8 @@ paho): users write <code>from blackbull.mqtt import Message</code>.</p>
         <p>Raw-protocol handler body for one MQTT connection.</p>
 <p>Spawns the connection actor's inbox-drain (<code>run</code>) alongside the reader loop,
 and guarantees the broker sees a <code>Detach</code> when the connection ends — so a
-Will fires on an abnormal (cancelled) close.</p>
+Will fires on an abnormal (cancelled) close.  Pass <em>tap</em> for decoupled tap
+dispatch or <em>app_handlers</em> for inline dispatch (see :mod:<code>blackbull.mqtt.tap</code>).</p>
 
 
     </div>

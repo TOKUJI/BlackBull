@@ -10,28 +10,28 @@
       
       
       
-        <link rel="canonical" href="https://TOKUJI.github.io/BlackBull/api/blackbull/mqtt/actor/">
+        <link rel="canonical" href="https://TOKUJI.github.io/BlackBull/about/mqtt-actor-design/">
       
       
-        <link rel="prev" href="../">
+        <link rel="prev" href="../internals/">
       
       
-        <link rel="next" href="../messages/">
+        <link rel="next" href="../rfc9113-implementation/">
       
       
         
       
       
-      <link rel="icon" href="../../../../assets/images/favicon.png">
+      <link rel="icon" href="../../assets/images/favicon.png">
       <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
     
     
       
-        <title>actor - BlackBull</title>
+        <title>MQTT broker design - BlackBull</title>
       
     
     
-      <link rel="stylesheet" href="../../../../assets/stylesheets/main.484c7ddc.min.css">
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
       
       
 
@@ -50,11 +50,11 @@
       
     
     
-      <link rel="stylesheet" href="../../../../assets/_mkdocstrings.css">
+      <link rel="stylesheet" href="../../assets/_mkdocstrings.css">
     
-      <link rel="stylesheet" href="../../../../stylesheets/extra.css">
+      <link rel="stylesheet" href="../../stylesheets/extra.css">
     
-    <script>__md_scope=new URL("../../../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
     
       
 
@@ -72,7 +72,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#blackbullmqttactor" class="md-skip">
+        <a href="#mqtt-broker-actor-model-design" class="md-skip">
           Skip to content
         </a>
       
@@ -88,7 +88,7 @@
 
 <header class="md-header md-header--shadow" data-md-component="header">
   <nav class="md-header__inner md-grid" aria-label="Header">
-    <a href="../../../.." title="BlackBull" class="md-header__button md-logo" aria-label="BlackBull" data-md-component="logo">
+    <a href="../.." title="BlackBull" class="md-header__button md-logo" aria-label="BlackBull" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
@@ -108,7 +108,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              actor
+              MQTT broker design
             
           </span>
         </div>
@@ -198,7 +198,7 @@
 
 <nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
   <label class="md-nav__title" for="__drawer">
-    <a href="../../../.." title="BlackBull" class="md-nav__button md-logo" aria-label="BlackBull" data-md-component="logo">
+    <a href="../.." title="BlackBull" class="md-nav__button md-logo" aria-label="BlackBull" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
@@ -228,7 +228,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../.." class="md-nav__link">
+      <a href="../.." class="md-nav__link">
         
   
   
@@ -302,7 +302,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../getting-started/installation/" class="md-nav__link">
+      <a href="../../getting-started/installation/" class="md-nav__link">
         
   
   
@@ -330,7 +330,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../getting-started/hello-world/" class="md-nav__link">
+      <a href="../../getting-started/hello-world/" class="md-nav__link">
         
   
   
@@ -358,7 +358,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../getting-started/first-app/" class="md-nav__link">
+      <a href="../../getting-started/first-app/" class="md-nav__link">
         
   
   
@@ -440,7 +440,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../guide/" class="md-nav__link">
+      <a href="../../guide/" class="md-nav__link">
         
   
   
@@ -468,7 +468,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../guide/routing/" class="md-nav__link">
+      <a href="../../guide/routing/" class="md-nav__link">
         
   
   
@@ -496,7 +496,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../guide/middleware/" class="md-nav__link">
+      <a href="../../guide/middleware/" class="md-nav__link">
         
   
   
@@ -524,7 +524,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../guide/error-handling/" class="md-nav__link">
+      <a href="../../guide/error-handling/" class="md-nav__link">
         
   
   
@@ -552,7 +552,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../guide/requests-and-responses/" class="md-nav__link">
+      <a href="../../guide/requests-and-responses/" class="md-nav__link">
         
   
   
@@ -580,7 +580,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../guide/websockets/" class="md-nav__link">
+      <a href="../../guide/websockets/" class="md-nav__link">
         
   
   
@@ -608,7 +608,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../guide/http2/" class="md-nav__link">
+      <a href="../../guide/http2/" class="md-nav__link">
         
   
   
@@ -636,7 +636,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../guide/raw-protocols/" class="md-nav__link">
+      <a href="../../guide/raw-protocols/" class="md-nav__link">
         
   
   
@@ -664,7 +664,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../guide/mqtt/" class="md-nav__link">
+      <a href="../../guide/mqtt/" class="md-nav__link">
         
   
   
@@ -692,7 +692,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../guide/streaming/" class="md-nav__link">
+      <a href="../../guide/streaming/" class="md-nav__link">
         
   
   
@@ -720,7 +720,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../guide/events/" class="md-nav__link">
+      <a href="../../guide/events/" class="md-nav__link">
         
   
   
@@ -748,7 +748,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../guide/logging/" class="md-nav__link">
+      <a href="../../guide/logging/" class="md-nav__link">
         
   
   
@@ -776,7 +776,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../guide/static-files/" class="md-nav__link">
+      <a href="../../guide/static-files/" class="md-nav__link">
         
   
   
@@ -804,7 +804,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../guide/configuration/" class="md-nav__link">
+      <a href="../../guide/configuration/" class="md-nav__link">
         
   
   
@@ -832,7 +832,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../guide/extensions/" class="md-nav__link">
+      <a href="../../guide/extensions/" class="md-nav__link">
         
   
   
@@ -860,7 +860,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../guide/openapi/" class="md-nav__link">
+      <a href="../../guide/openapi/" class="md-nav__link">
         
   
   
@@ -888,7 +888,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../guide/testing/" class="md-nav__link">
+      <a href="../../guide/testing/" class="md-nav__link">
         
   
   
@@ -916,7 +916,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../guide/fault_injection/" class="md-nav__link">
+      <a href="../../guide/fault_injection/" class="md-nav__link">
         
   
   
@@ -998,7 +998,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../deployment/running/" class="md-nav__link">
+      <a href="../../deployment/running/" class="md-nav__link">
         
   
   
@@ -1026,7 +1026,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../deployment/workers/" class="md-nav__link">
+      <a href="../../deployment/workers/" class="md-nav__link">
         
   
   
@@ -1054,7 +1054,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../deployment/tls/" class="md-nav__link">
+      <a href="../../deployment/tls/" class="md-nav__link">
         
   
   
@@ -1082,7 +1082,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../deployment/behind-nginx/" class="md-nav__link">
+      <a href="../../deployment/behind-nginx/" class="md-nav__link">
         
   
   
@@ -1110,7 +1110,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../deployment/unix-and-fd/" class="md-nav__link">
+      <a href="../../deployment/unix-and-fd/" class="md-nav__link">
         
   
   
@@ -1138,7 +1138,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../deployment/hot-reload/" class="md-nav__link">
+      <a href="../../deployment/hot-reload/" class="md-nav__link">
         
   
   
@@ -1170,20 +1170,18 @@
       
   
   
-    
   
   
-  
     
     
     
     
     
-    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" checked>
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
         
           
           <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
@@ -1204,7 +1202,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="true">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_5">
             <span class="md-nav__icon md-icon"></span>
             
@@ -1222,7 +1220,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../reference/env-vars/" class="md-nav__link">
+      <a href="../../reference/env-vars/" class="md-nav__link">
         
   
   
@@ -1247,20 +1245,18 @@
                 
   
   
-    
   
   
-  
     
     
     
     
     
-    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2" checked>
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2" >
         
           
           <label class="md-nav__link" for="__nav_5_2" id="__nav_5_2_label" tabindex="0">
@@ -1281,7 +1277,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_5_2_label" aria-expanded="true">
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_5_2_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_5_2">
             <span class="md-nav__icon md-icon"></span>
             
@@ -1296,20 +1292,18 @@
                 
   
   
-    
   
   
-  
     
     
     
     
     
-    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2_1" checked>
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2_1" >
         
           
           <label class="md-nav__link" for="__nav_5_2_1" id="__nav_5_2_1_label" tabindex="0">
@@ -1330,7 +1324,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_5_2_1_label" aria-expanded="true">
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_5_2_1_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_5_2_1">
             <span class="md-nav__icon md-icon"></span>
             
@@ -1348,7 +1342,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../" class="md-nav__link">
+      <a href="../../api/blackbull/" class="md-nav__link">
         
   
   
@@ -1376,7 +1370,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../actor/" class="md-nav__link">
+      <a href="../../api/blackbull/actor/" class="md-nav__link">
         
   
   
@@ -1404,7 +1398,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../app/" class="md-nav__link">
+      <a href="../../api/blackbull/app/" class="md-nav__link">
         
   
   
@@ -1432,7 +1426,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../asgi/" class="md-nav__link">
+      <a href="../../api/blackbull/asgi/" class="md-nav__link">
         
   
   
@@ -1460,7 +1454,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../cli/" class="md-nav__link">
+      <a href="../../api/blackbull/cli/" class="md-nav__link">
         
   
   
@@ -1535,7 +1529,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../client/" class="md-nav__link">
+      <a href="../../api/blackbull/client/" class="md-nav__link">
         
   
   
@@ -1563,7 +1557,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../client/client/" class="md-nav__link">
+      <a href="../../api/blackbull/client/client/" class="md-nav__link">
         
   
   
@@ -1591,7 +1585,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../client/exceptions/" class="md-nav__link">
+      <a href="../../api/blackbull/client/exceptions/" class="md-nav__link">
         
   
   
@@ -1619,7 +1613,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../client/http1/" class="md-nav__link">
+      <a href="../../api/blackbull/client/http1/" class="md-nav__link">
         
   
   
@@ -1647,7 +1641,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../client/http2/" class="md-nav__link">
+      <a href="../../api/blackbull/client/http2/" class="md-nav__link">
         
   
   
@@ -1675,7 +1669,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../client/response/" class="md-nav__link">
+      <a href="../../api/blackbull/client/response/" class="md-nav__link">
         
   
   
@@ -1703,7 +1697,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../client/scenario/" class="md-nav__link">
+      <a href="../../api/blackbull/client/scenario/" class="md-nav__link">
         
   
   
@@ -1731,7 +1725,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../client/scenario_oracle/" class="md-nav__link">
+      <a href="../../api/blackbull/client/scenario_oracle/" class="md-nav__link">
         
   
   
@@ -1759,7 +1753,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../client/websocket/" class="md-nav__link">
+      <a href="../../api/blackbull/client/websocket/" class="md-nav__link">
         
   
   
@@ -1787,7 +1781,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../client/websocket_h2/" class="md-nav__link">
+      <a href="../../api/blackbull/client/websocket_h2/" class="md-nav__link">
         
   
   
@@ -1823,7 +1817,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../config/" class="md-nav__link">
+      <a href="../../api/blackbull/config/" class="md-nav__link">
         
   
   
@@ -1851,7 +1845,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../env/" class="md-nav__link">
+      <a href="../../api/blackbull/env/" class="md-nav__link">
         
   
   
@@ -1879,7 +1873,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../event/" class="md-nav__link">
+      <a href="../../api/blackbull/event/" class="md-nav__link">
         
   
   
@@ -1907,7 +1901,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../event_aggregator/" class="md-nav__link">
+      <a href="../../api/blackbull/event_aggregator/" class="md-nav__link">
         
   
   
@@ -1935,7 +1929,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../extension/" class="md-nav__link">
+      <a href="../../api/blackbull/extension/" class="md-nav__link">
         
   
   
@@ -2010,7 +2004,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../fault_injection/" class="md-nav__link">
+      <a href="../../api/blackbull/fault_injection/" class="md-nav__link">
         
   
   
@@ -2085,7 +2079,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../fault_injection/catalogue/" class="md-nav__link">
+      <a href="../../api/blackbull/fault_injection/catalogue/" class="md-nav__link">
         
   
   
@@ -2113,7 +2107,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../fault_injection/catalogue/h2/" class="md-nav__link">
+      <a href="../../api/blackbull/fault_injection/catalogue/h2/" class="md-nav__link">
         
   
   
@@ -2149,7 +2143,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../fault_injection/h2_server/" class="md-nav__link">
+      <a href="../../api/blackbull/fault_injection/h2_server/" class="md-nav__link">
         
   
   
@@ -2177,7 +2171,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../fault_injection/oracle_h1/" class="md-nav__link">
+      <a href="../../api/blackbull/fault_injection/oracle_h1/" class="md-nav__link">
         
   
   
@@ -2205,7 +2199,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../fault_injection/scenario_h1/" class="md-nav__link">
+      <a href="../../api/blackbull/fault_injection/scenario_h1/" class="md-nav__link">
         
   
   
@@ -2233,7 +2227,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../fault_injection/scenario_h2/" class="md-nav__link">
+      <a href="../../api/blackbull/fault_injection/scenario_h2/" class="md-nav__link">
         
   
   
@@ -2269,7 +2263,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../headers/" class="md-nav__link">
+      <a href="../../api/blackbull/headers/" class="md-nav__link">
         
   
   
@@ -2297,7 +2291,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../logger/" class="md-nav__link">
+      <a href="../../api/blackbull/logger/" class="md-nav__link">
         
   
   
@@ -2372,7 +2366,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/" class="md-nav__link">
+      <a href="../../api/blackbull/middleware/" class="md-nav__link">
         
   
   
@@ -2400,7 +2394,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/base/" class="md-nav__link">
+      <a href="../../api/blackbull/middleware/base/" class="md-nav__link">
         
   
   
@@ -2428,7 +2422,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/cache/" class="md-nav__link">
+      <a href="../../api/blackbull/middleware/cache/" class="md-nav__link">
         
   
   
@@ -2456,7 +2450,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/compression/" class="md-nav__link">
+      <a href="../../api/blackbull/middleware/compression/" class="md-nav__link">
         
   
   
@@ -2484,7 +2478,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/cors/" class="md-nav__link">
+      <a href="../../api/blackbull/middleware/cors/" class="md-nav__link">
         
   
   
@@ -2512,7 +2506,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/proxy/" class="md-nav__link">
+      <a href="../../api/blackbull/middleware/proxy/" class="md-nav__link">
         
   
   
@@ -2540,7 +2534,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/session/" class="md-nav__link">
+      <a href="../../api/blackbull/middleware/session/" class="md-nav__link">
         
   
   
@@ -2568,7 +2562,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/static/" class="md-nav__link">
+      <a href="../../api/blackbull/middleware/static/" class="md-nav__link">
         
   
   
@@ -2596,7 +2590,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/utils/" class="md-nav__link">
+      <a href="../../api/blackbull/middleware/utils/" class="md-nav__link">
         
   
   
@@ -2624,7 +2618,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/websocket/" class="md-nav__link">
+      <a href="../../api/blackbull/middleware/websocket/" class="md-nav__link">
         
   
   
@@ -2657,20 +2651,18 @@
                 
   
   
-    
   
   
-  
     
     
     
     
     
-    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2_1_16" checked>
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2_1_16" >
         
           
           <label class="md-nav__link" for="__nav_5_2_1_16" id="__nav_5_2_1_16_label" tabindex="0">
@@ -2691,7 +2683,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="4" aria-labelledby="__nav_5_2_1_16_label" aria-expanded="true">
+        <nav class="md-nav" data-md-level="4" aria-labelledby="__nav_5_2_1_16_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_5_2_1_16">
             <span class="md-nav__icon md-icon"></span>
             
@@ -2709,7 +2701,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../" class="md-nav__link">
+      <a href="../../api/blackbull/mqtt/" class="md-nav__link">
         
   
   
@@ -2734,44 +2726,17 @@
                 
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    actor
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/mqtt/broker/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    actor
+    broker
   
 
     
@@ -2780,209 +2745,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#blackbull.mqtt.actor" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        actor
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="actor">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.mqtt.actor.Attach" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Attach
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.mqtt.actor.BrokerActor" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        BrokerActor
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.mqtt.actor.Close" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Close
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.mqtt.actor.Detach" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Detach
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.mqtt.actor.MQTTConnectionActor" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        MQTTConnectionActor
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="MQTTConnectionActor">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.mqtt.actor.MQTTConnectionActor.read_loop" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        read_loop
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.mqtt.actor.MQTTExtension" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        MQTTExtension
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="MQTTExtension">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.mqtt.actor.MQTTExtension.on_message" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        on_message
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.mqtt.actor.MQTTExtension.shutdown" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        shutdown
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.mqtt.actor.MQTTExtension.startup" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        startup
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.mqtt.actor.MQTTProtocolDetector" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        MQTTProtocolDetector
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.mqtt.actor.Message" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Message
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.mqtt.actor.Send" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Send
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.mqtt.actor.serve_connection" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        serve_connection
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -2995,7 +2757,63 @@
   
   
     <li class="md-nav__item">
-      <a href="../messages/" class="md-nav__link">
+      <a href="../../api/blackbull/mqtt/connection/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    connection
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/mqtt/extension/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    extension
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/mqtt/messages/" class="md-nav__link">
         
   
   
@@ -3003,6 +2821,34 @@
     
   
     messages
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/mqtt/tap/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    tap
   
 
     
@@ -3031,7 +2877,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../openapi/" class="md-nav__link">
+      <a href="../../api/blackbull/openapi/" class="md-nav__link">
         
   
   
@@ -3106,7 +2952,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../protocol/" class="md-nav__link">
+      <a href="../../api/blackbull/protocol/" class="md-nav__link">
         
   
   
@@ -3134,7 +2980,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../protocol/frame/" class="md-nav__link">
+      <a href="../../api/blackbull/protocol/frame/" class="md-nav__link">
         
   
   
@@ -3162,7 +3008,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../protocol/frame_types/" class="md-nav__link">
+      <a href="../../api/blackbull/protocol/frame_types/" class="md-nav__link">
         
   
   
@@ -3190,7 +3036,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../protocol/hpack_fastpath/" class="md-nav__link">
+      <a href="../../api/blackbull/protocol/hpack_fastpath/" class="md-nav__link">
         
   
   
@@ -3218,7 +3064,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../protocol/rsock/" class="md-nav__link">
+      <a href="../../api/blackbull/protocol/rsock/" class="md-nav__link">
         
   
   
@@ -3246,7 +3092,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../protocol/stream/" class="md-nav__link">
+      <a href="../../api/blackbull/protocol/stream/" class="md-nav__link">
         
   
   
@@ -3282,7 +3128,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../request/" class="md-nav__link">
+      <a href="../../api/blackbull/request/" class="md-nav__link">
         
   
   
@@ -3310,7 +3156,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../response/" class="md-nav__link">
+      <a href="../../api/blackbull/response/" class="md-nav__link">
         
   
   
@@ -3338,7 +3184,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../router/" class="md-nav__link">
+      <a href="../../api/blackbull/router/" class="md-nav__link">
         
   
   
@@ -3413,7 +3259,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/" class="md-nav__link">
+      <a href="../../api/blackbull/server/" class="md-nav__link">
         
   
   
@@ -3441,7 +3287,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/access_log/" class="md-nav__link">
+      <a href="../../api/blackbull/server/access_log/" class="md-nav__link">
         
   
   
@@ -3469,7 +3315,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/cap_log/" class="md-nav__link">
+      <a href="../../api/blackbull/server/cap_log/" class="md-nav__link">
         
   
   
@@ -3497,7 +3343,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/connection_actor/" class="md-nav__link">
+      <a href="../../api/blackbull/server/connection_actor/" class="md-nav__link">
         
   
   
@@ -3525,7 +3371,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/constants/" class="md-nav__link">
+      <a href="../../api/blackbull/server/constants/" class="md-nav__link">
         
   
   
@@ -3553,7 +3399,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/deadline/" class="md-nav__link">
+      <a href="../../api/blackbull/server/deadline/" class="md-nav__link">
         
   
   
@@ -3581,7 +3427,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/http1_actor/" class="md-nav__link">
+      <a href="../../api/blackbull/server/http1_actor/" class="md-nav__link">
         
   
   
@@ -3609,7 +3455,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/http2_actor/" class="md-nav__link">
+      <a href="../../api/blackbull/server/http2_actor/" class="md-nav__link">
         
   
   
@@ -3637,7 +3483,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/http2_messages/" class="md-nav__link">
+      <a href="../../api/blackbull/server/http2_messages/" class="md-nav__link">
         
   
   
@@ -3665,7 +3511,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/http2_ws/" class="md-nav__link">
+      <a href="../../api/blackbull/server/http2_ws/" class="md-nav__link">
         
   
   
@@ -3693,7 +3539,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/multiworker/" class="md-nav__link">
+      <a href="../../api/blackbull/server/multiworker/" class="md-nav__link">
         
   
   
@@ -3721,7 +3567,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/parser/" class="md-nav__link">
+      <a href="../../api/blackbull/server/parser/" class="md-nav__link">
         
   
   
@@ -3749,7 +3595,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/permessage_deflate/" class="md-nav__link">
+      <a href="../../api/blackbull/server/permessage_deflate/" class="md-nav__link">
         
   
   
@@ -3777,7 +3623,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/protocol_registry/" class="md-nav__link">
+      <a href="../../api/blackbull/server/protocol_registry/" class="md-nav__link">
         
   
   
@@ -3805,35 +3651,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/raw_actor/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    raw_actor
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../server/recipient/" class="md-nav__link">
+      <a href="../../api/blackbull/server/recipient/" class="md-nav__link">
         
   
   
@@ -3861,7 +3679,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/reload/" class="md-nav__link">
+      <a href="../../api/blackbull/server/reload/" class="md-nav__link">
         
   
   
@@ -3889,7 +3707,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/response/" class="md-nav__link">
+      <a href="../../api/blackbull/server/response/" class="md-nav__link">
         
   
   
@@ -3917,7 +3735,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/sender/" class="md-nav__link">
+      <a href="../../api/blackbull/server/sender/" class="md-nav__link">
         
   
   
@@ -3945,7 +3763,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/server/" class="md-nav__link">
+      <a href="../../api/blackbull/server/server/" class="md-nav__link">
         
   
   
@@ -3973,7 +3791,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/websocket_actor/" class="md-nav__link">
+      <a href="../../api/blackbull/server/websocket_actor/" class="md-nav__link">
         
   
   
@@ -4001,7 +3819,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/worker/" class="md-nav__link">
+      <a href="../../api/blackbull/server/worker/" class="md-nav__link">
         
   
   
@@ -4029,7 +3847,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/ws_codec/" class="md-nav__link">
+      <a href="../../api/blackbull/server/ws_codec/" class="md-nav__link">
         
   
   
@@ -4065,7 +3883,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../testing/" class="md-nav__link">
+      <a href="../../api/blackbull/testing/" class="md-nav__link">
         
   
   
@@ -4093,7 +3911,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../utils/" class="md-nav__link">
+      <a href="../../api/blackbull/utils/" class="md-nav__link">
         
   
   
@@ -4141,18 +3959,20 @@
       
   
   
+    
   
   
+  
     
     
     
     
     
-    <li class="md-nav__item md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" checked>
         
           
           <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="0">
@@ -4173,7 +3993,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_6">
             <span class="md-nav__icon md-icon"></span>
             
@@ -4191,7 +4011,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../about/conformance/" class="md-nav__link">
+      <a href="../conformance/" class="md-nav__link">
         
   
   
@@ -4219,7 +4039,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../about/internals/" class="md-nav__link">
+      <a href="../internals/" class="md-nav__link">
         
   
   
@@ -4244,10 +4064,179 @@
                 
   
   
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MQTT broker design
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MQTT broker design
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#why-an-actor-model-at-all" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why an actor model at all
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-two-actor-data-plane" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The two-actor data plane
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="The two-actor data plane">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#brokeractor-the-state-owner" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        BrokerActor — the state owner
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mqttconnectionactor-the-sole-socket-writer" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        MQTTConnectionActor — the sole socket writer
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-will-on-teardown-payoff" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The Will-on-teardown payoff
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-tap-dispatch-plane" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The tap dispatch plane
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#reading-the-wire-packetframer" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reading the wire: PacketFramer
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#relationship-to-the-framework-actor-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Relationship to the framework actor model
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
   
   
     <li class="md-nav__item">
-      <a href="../../../../about/rfc9113-implementation/" class="md-nav__link">
+      <a href="../rfc9113-implementation/" class="md-nav__link">
         
   
   
@@ -4275,7 +4264,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../about/grpc-assessment/" class="md-nav__link">
+      <a href="../grpc-assessment/" class="md-nav__link">
         
   
   
@@ -4330,22 +4319,33 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#blackbull.mqtt.actor" class="md-nav__link">
+  <a href="#why-an-actor-model-at-all" class="md-nav__link">
     <span class="md-ellipsis">
       
-        actor
+        Why an actor model at all
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="actor">
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-two-actor-data-plane" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The two-actor data plane
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="The two-actor data plane">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#blackbull.mqtt.actor.Attach" class="md-nav__link">
+  <a href="#brokeractor-the-state-owner" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Attach
+        BrokerActor — the state owner
       
     </span>
   </a>
@@ -4353,10 +4353,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#blackbull.mqtt.actor.BrokerActor" class="md-nav__link">
+  <a href="#mqttconnectionactor-the-sole-socket-writer" class="md-nav__link">
     <span class="md-ellipsis">
       
-        BrokerActor
+        MQTTConnectionActor — the sole socket writer
       
     </span>
   </a>
@@ -4364,44 +4364,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#blackbull.mqtt.actor.Close" class="md-nav__link">
+  <a href="#the-will-on-teardown-payoff" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Close
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.mqtt.actor.Detach" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Detach
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.mqtt.actor.MQTTConnectionActor" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        MQTTConnectionActor
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="MQTTConnectionActor">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.mqtt.actor.MQTTConnectionActor.read_loop" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        read_loop
+        The Will-on-teardown payoff
       
     </span>
   </a>
@@ -4412,103 +4378,37 @@
     </nav>
   
 </li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.mqtt.actor.MQTTExtension" class="md-nav__link">
+      
+        <li class="md-nav__item">
+  <a href="#the-tap-dispatch-plane" class="md-nav__link">
     <span class="md-ellipsis">
       
-        MQTTExtension
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="MQTTExtension">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.mqtt.actor.MQTTExtension.on_message" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        on_message
+        The tap dispatch plane
       
     </span>
   </a>
   
 </li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.mqtt.actor.MQTTExtension.shutdown" class="md-nav__link">
+      
+        <li class="md-nav__item">
+  <a href="#reading-the-wire-packetframer" class="md-nav__link">
     <span class="md-ellipsis">
       
-        shutdown
+        Reading the wire: PacketFramer
       
     </span>
   </a>
   
 </li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.mqtt.actor.MQTTExtension.startup" class="md-nav__link">
+      
+        <li class="md-nav__item">
+  <a href="#relationship-to-the-framework-actor-model" class="md-nav__link">
     <span class="md-ellipsis">
       
-        startup
+        Relationship to the framework actor model
       
     </span>
   </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.mqtt.actor.MQTTProtocolDetector" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        MQTTProtocolDetector
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.mqtt.actor.Message" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Message
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.mqtt.actor.Send" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Send
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.mqtt.actor.serve_connection" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        serve_connection
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
   
 </li>
       
@@ -4532,685 +4432,145 @@
   
 
 
-<h1 id="blackbullmqttactor"><code>blackbull.mqtt.actor</code><a class="headerlink" href="#blackbullmqttactor" title="Permanent link">&para;</a></h1>
-
-
-<div class="doc doc-object doc-module">
-
-
-
-<h2 id="blackbull.mqtt.actor" class="doc doc-heading">
-            <code>blackbull.mqtt.actor</code>
-
-
-<a href="#blackbull.mqtt.actor" class="headerlink" title="Permanent link">&para;</a></h2>
-
-    <div class="doc doc-contents first">
-
-        <p>MQTT 5.0 broker on the Non-ASGI bridge — actor model (Sprint 53).</p>
-<p>Two actor roles, no shared mutable state:</p>
+<h1 id="mqtt-broker-actor-model-design">MQTT broker — actor-model design<a class="headerlink" href="#mqtt-broker-actor-model-design" title="Permanent link">&para;</a></h1>
+<p>This page explains <em>how</em> the MQTT broker is built, for readers who want to
+understand the internals or extend them. For the user-facing API (<code>on_message</code>,
+<code>{name}</code> captures, tap modes) see the <a href="../../guide/mqtt/">MQTT broker guide</a>.</p>
+<p>The MQTT broker is the first part of BlackBull that uses the framework's
+<strong>Actor inbox</strong> for real — see <a href="#relationship-to-the-framework-actor-model">Relationship to the framework actor model</a>
+below.</p>
+<h2 id="why-an-actor-model-at-all">Why an actor model at all<a class="headerlink" href="#why-an-actor-model-at-all" title="Permanent link">&para;</a></h2>
+<p>A broker is shared mutable state by nature: one routing table, one set of
+sessions, one retained-message store, all touched by every connection
+concurrently. The obvious implementation reaches for locks. The actor model
+removes the need for them: a single actor <em>owns</em> the state and processes one
+message at a time, so concurrent connections can never interleave inside it.</p>
+<p>BlackBull's broker is three kinds of actor:</p>
+<table>
+<thead>
+<tr>
+<th>Actor</th>
+<th>Count</th>
+<th>Owns</th>
+<th>Inbox carries</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>BrokerActor</code></td>
+<td>one per app/worker</td>
+<td>all routing/session/retained state</td>
+<td>client control events (<code>Attach</code>, <code>ClientPublish</code>, …)</td>
+</tr>
+<tr>
+<td><code>MQTTConnectionActor</code></td>
+<td>one per connection</td>
+<td>one socket's write side</td>
+<td>outbound packets (<code>Send</code>, <code>Close</code>)</td>
+</tr>
+<tr>
+<td><code>TapActor</code></td>
+<td>one per app/worker</td>
+<td>nothing (stateless dispatch)</td>
+<td>published messages for <code>on_message</code> taps</td>
+</tr>
+</tbody>
+</table>
+<p>Each lives in its own module: <code>BrokerActor</code> in <code>blackbull.mqtt.broker</code>,
+<code>MQTTConnectionActor</code> in <code>blackbull.mqtt.connection</code>, <code>TapActor</code> (with the
+<code>Message</code> read-model) in <code>blackbull.mqtt.tap</code>, and the user-facing
+<code>MQTTExtension</code> wiring in <code>blackbull.mqtt.extension</code>. The wire codec is separate
+again, in <code>blackbull.mqtt.messages</code>.</p>
+<h2 id="the-two-actor-data-plane">The two-actor data plane<a class="headerlink" href="#the-two-actor-data-plane" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code>            ┌──────────────────────── one per connection ────────────────────────┐
+  socket →  reader loop ──decode──►  MQTTConnectionActor.run()  ──write──►  socket
+  (bytes)        │  (control packets)        ▲   (sole writer, drains its inbox)
+                 │                           │
+                 ▼  send(ClientPublish, …)   │  send(Send(packet=…)), send(Close)
+            ┌─────────────────────────────────────────────┐
+            │            BrokerActor.run()                 │   one per app/worker
+            │  owns subscriptions / sessions / retained    │   (serial inbox → no locks)
+            └─────────────────────────────────────────────┘
+</code></pre></div>
+<h3 id="brokeractor-the-state-owner"><code>BrokerActor</code> — the state owner<a class="headerlink" href="#brokeractor-the-state-owner" title="Permanent link">&para;</a></h3>
+<p><code>BrokerActor</code> is the single locus of routing state: the live-connection
+registry, per-client sessions (subscriptions and pending QoS state), retained
+messages, and Will templates. It never touches a socket. When it needs to send
+something to a client it <code>send</code>s a <code>Send</code> (or <code>Close</code>) message to that client's
+connection actor and moves on.</p>
+<p>Because it processes its inbox serially, two PUBLISHes from two different
+connections are handled one after another, never concurrently — so the routing
+table and session dicts are plain Python objects with <strong>no locks and no shared
+mutable state</strong>. This is the property the actor model buys.</p>
+<h3 id="mqttconnectionactor-the-sole-socket-writer"><code>MQTTConnectionActor</code> — the sole socket writer<a class="headerlink" href="#mqttconnectionactor-the-sole-socket-writer" title="Permanent link">&para;</a></h3>
+<p>Each connection has one <code>MQTTConnectionActor</code>. Its inbox carries <em>only outbound
+packets</em>, and its <code>run()</code> loop — draining that inbox — is the <strong>only</strong> code that
+writes to the socket. That single-writer invariant means there are no
+cross-task write races, even though the broker, the keep-alive path, and the
+reader can all originate outbound traffic.</p>
+<p>A sibling <strong>reader task</strong> (<code>read_loop</code>) does the opposite direction: it decodes
+the wire and <code>send</code>s control messages (<code>ClientPublish</code>, <code>ClientSubscribe</code>, …) to
+the broker. Stateless replies the connection can answer itself — PINGRESP, AUTH —
+it routes back through its <em>own</em> inbox so that <code>run()</code> stays the only writer.</p>
+<p><code>serve_connection</code> is the raw-protocol handler body that wires the reader task
+and the writer loop together and guarantees the broker sees a <code>Detach</code> when the
+connection ends — including an abnormal (cancelled) close, which is what makes a
+Will fire.</p>
+<h3 id="the-will-on-teardown-payoff">The Will-on-teardown payoff<a class="headerlink" href="#the-will-on-teardown-payoff" title="Permanent link">&para;</a></h3>
+<p>Because <code>BrokerActor</code> outlives every connection actor by construction, a peer's
+Last-Will-and-Testament routes to live subscribers <em>during</em> that peer's
+teardown with no special-casing. An earlier (pre-actor) broker had to keep
+global state alive forever to make this work; the long-lived broker actor makes
+the crutch unnecessary.</p>
+<h2 id="the-tap-dispatch-plane">The tap dispatch plane<a class="headerlink" href="#the-tap-dispatch-plane" title="Permanent link">&para;</a></h2>
+<p><code>on_message</code> handlers are <strong>application-level taps</strong> on top of routing — the
+broker delivers to subscribers whether or not any tap is registered. Taps have
+their own dispatch plane so a slow tap can never stall the data plane.</p>
 <ul>
-<li>:class:<code>BrokerActor</code> — one per app/worker, supervisor/lifespan-owned. Owns
-  <em>all</em> routing state (subscriptions, sessions, retained messages, the live
-  connection registry). Processes its inbox serially, so there are no locks.</li>
-<li>:class:<code>MQTTConnectionActor</code> — one per connection. Its inbox carries only
-  <em>outbound</em> packets, and its <code>run()</code> is the sole writer to the socket; a
-  sibling reader loop (:meth:<code>MQTTConnectionActor.read_loop</code>) decodes the wire
-  and <code>send</code>s control messages to the broker. :func:<code>serve_connection</code> is the
-  :data:<code>~blackbull.server.protocol_registry.RawProtocolHandler</code> body that wires
-  the two together.</li>
+<li><strong>actor mode (default).</strong> The connection <em>offers</em> each published <code>Message</code> to
+  the shared <code>TapActor</code> with a non-blocking call and returns immediately. The
+  <code>TapActor</code> has a <strong>bounded inbox</strong>; on overflow it drops the newest message
+  and logs a running dropped-count. A slow tap therefore back-pressures
+  <em>nothing</em> — the cost surfaces as bounded coverage, not latency.</li>
+<li><strong>inline mode.</strong> The connection awaits the matching callbacks itself, so a
+  slow tap back-pressures only its own connection. Selected with
+  <code>MQTTExtension(tap_mode='inline')</code>; retained mainly so the
+  <code>bench/mqtt/tap_throughput.py</code> comparison is a controlled one-variable test.</li>
 </ul>
-<p>Together they implement the broker subset exercised by the conformance matrix:
-CONNECT/CONNACK, SUBSCRIBE/SUBACK, UNSUBSCRIBE/UNSUBACK, PUBLISH QoS 0/1/2 with
-their acknowledgement flows, PINGREQ/PINGRESP, retained messages, Will (LWT)
-delivery on abnormal disconnect, and Clean Start / Session Present semantics.
-Because the broker outlives every connection actor, a Will routes to live
-subscribers during a peer's teardown with no special-casing.</p>
-<p>Application taps registered via :meth:<code>MQTTExtension.on_message</code> run inline in
-the connection actor (sequentially) and receive a :class:<code>Message</code>.</p>
-
-
-
-
-
-
-
-
-
-
-<div class="doc doc-children">
-
-
-
-
-
-
-
-
-
-<div class="doc doc-object doc-class">
-
-
-
-<h3 id="blackbull.mqtt.actor.Attach" class="doc doc-heading">
-            <code>Attach</code>
-
-
-  <span class="doc doc-labels">
-      <small class="doc doc-label doc-label-dataclass"><code>dataclass</code></small>
-  </span>
-
-<a href="#blackbull.mqtt.actor.Attach" class="headerlink" title="Permanent link">&para;</a></h3>
-
-
-    <div class="doc doc-contents ">
-            <p class="doc doc-class-bases">
-              Bases: <code><a class="autorefs autorefs-internal" title="Message
-
-
-  
-      dataclass
-   (blackbull.actor.Message)" href="../../actor/#blackbull.actor.Message">Message</a></code></p>
-
-
-
-        <p>A client's CONNECT arrived; register it and reply with CONNACK.</p>
-
-
-
-
-
-
-
-
-
-
-
-<div class="doc doc-children">
-
-
-
-
-
-
-
-
-
-
-
-
-  </div>
-
-    </div>
-
+<p>Both modes share one matching/invocation path (<code>run_taps</code>), so a tap behaves
+identically either way apart from the back-pressure characteristic. <code>{name}</code>
+topic captures are compiled once (rewriting <code>{name}</code> to a <code>+</code> level and
+recording the capture position) and bound to keyword arguments at dispatch.</p>
+<h2 id="reading-the-wire-packetframer">Reading the wire: <code>PacketFramer</code><a class="headerlink" href="#reading-the-wire-packetframer" title="Permanent link">&para;</a></h2>
+<p>TCP is a byte stream, so a single read may contain several MQTT packets, a
+partial packet, or junk from a desynchronised peer. <code>PacketFramer</code> isolates that
+framing/resync state machine from the read loop: fed raw bytes, it yields each
+fully decoded packet and keeps any trailing partial packet for the next feed. An
+incomplete packet ends the current iteration (wait for more bytes); a hard
+decode error drops one byte and resyncs.</p>
+<div class="admonition note">
+<p class="admonition-title">Why the framer still copies at the decode boundary</p>
+<p><code>PacketFramer</code> snapshots its buffer with <code>bytes(...)</code> before each decode
+because the codec's <code>decode_packet</code> input contract is deliberately <code>bytes</code>
+(enforced by beartype). A zero-copy framer would mean widening that contract
+to the buffer protocol; that is deferred, and the copy is bounded by one
+packet's length.</p>
 </div>
-
-<div class="doc doc-object doc-class">
-
-
-
-<h3 id="blackbull.mqtt.actor.BrokerActor" class="doc doc-heading">
-            <code>BrokerActor</code>
-
-
-<a href="#blackbull.mqtt.actor.BrokerActor" class="headerlink" title="Permanent link">&para;</a></h3>
-
-
-    <div class="doc doc-contents ">
-            <p class="doc doc-class-bases">
-              Bases: <code><a class="autorefs autorefs-internal" title="Actor (blackbull.actor.Actor)" href="../../actor/#blackbull.actor.Actor">Actor</a></code></p>
-
-
-
-        <p>Single owner of all MQTT routing state (one per app/worker).</p>
-<p>Connection actors <code>send</code> it client events; it <code>send</code>s <code>Send</code>/<code>Close</code>
-back to them.  Serial inbox processing means no locks and no shared mutable
-state — the design goal of the Sprint 53 refactor.</p>
-
-
-
-
-
-
-
-
-
-
-
-<div class="doc doc-children">
-
-
-
-
-
-
-
-
-
-
-
-
-  </div>
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-class">
-
-
-
-<h3 id="blackbull.mqtt.actor.Close" class="doc doc-heading">
-            <code>Close</code>
-
-
-  <span class="doc doc-labels">
-      <small class="doc doc-label doc-label-dataclass"><code>dataclass</code></small>
-  </span>
-
-<a href="#blackbull.mqtt.actor.Close" class="headerlink" title="Permanent link">&para;</a></h3>
-
-
-    <div class="doc doc-contents ">
-            <p class="doc doc-class-bases">
-              Bases: <code><a class="autorefs autorefs-internal" title="Message
-
-
-  
-      dataclass
-   (blackbull.actor.Message)" href="../../actor/#blackbull.actor.Message">Message</a></code></p>
-
-
-
-        <p>Tell the connection actor to close (e.g. CONNECT rejected).</p>
-
-
-
-
-
-
-
-
-
-
-
-<div class="doc doc-children">
-
-
-
-
-
-
-
-
-
-
-
-
-  </div>
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-class">
-
-
-
-<h3 id="blackbull.mqtt.actor.Detach" class="doc doc-heading">
-            <code>Detach</code>
-
-
-  <span class="doc doc-labels">
-      <small class="doc doc-label doc-label-dataclass"><code>dataclass</code></small>
-  </span>
-
-<a href="#blackbull.mqtt.actor.Detach" class="headerlink" title="Permanent link">&para;</a></h3>
-
-
-    <div class="doc doc-contents ">
-            <p class="doc doc-class-bases">
-              Bases: <code><a class="autorefs autorefs-internal" title="Message
-
-
-  
-      dataclass
-   (blackbull.actor.Message)" href="../../actor/#blackbull.actor.Message">Message</a></code></p>
-
-
-
-        <p>A client's connection is ending (<code>graceful=False</code> fires its Will).</p>
-
-
-
-
-
-
-
-
-
-
-
-<div class="doc doc-children">
-
-
-
-
-
-
-
-
-
-
-
-
-  </div>
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-class">
-
-
-
-<h3 id="blackbull.mqtt.actor.MQTTConnectionActor" class="doc doc-heading">
-            <code>MQTTConnectionActor</code>
-
-
-<a href="#blackbull.mqtt.actor.MQTTConnectionActor" class="headerlink" title="Permanent link">&para;</a></h3>
-
-
-    <div class="doc doc-contents ">
-            <p class="doc doc-class-bases">
-              Bases: <code><a class="autorefs autorefs-internal" title="Actor (blackbull.actor.Actor)" href="../../actor/#blackbull.actor.Actor">Actor</a></code></p>
-
-
-
-        <p>One per MQTT connection.</p>
-<p>Its <strong>inbox carries only outbound packets</strong> (<code>Send</code>/<code>Close</code> from the
-broker, plus the two stateless replies this actor generates itself), and
-<code>run()</code> — draining that inbox — is the <em>sole writer</em> to the socket, so
-there are no cross-task write races.  A sibling reader task (:meth:<code>read_loop</code>)
-decodes the wire and <code>send</code>s control messages to the broker.</p>
-
-
-
-
-
-
-
-
-
-
-
-<div class="doc doc-children">
-
-
-
-
-
-
-
-
-
-
-<div class="doc doc-object doc-function">
-
-
-<h4 id="blackbull.mqtt.actor.MQTTConnectionActor.read_loop" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">read_loop</span><span class="p">(</span><span class="n">reader</span><span class="p">)</span></code>
-
-  <span class="doc doc-labels">
-      <small class="doc doc-label doc-label-async"><code>async</code></small>
-  </span>
-
-<a href="#blackbull.mqtt.actor.MQTTConnectionActor.read_loop" class="headerlink" title="Permanent link">&para;</a></h4>
-
-
-    <div class="doc doc-contents ">
-
-        <p>Decode the wire and forward control packets to the broker.</p>
-<p>An empty <code>read()</code> means <em>idle</em> (not EOF) — the connection stays open
-until a DISCONNECT (sets <code>_done</code>) or the handler task is cancelled.</p>
-
-
-    </div>
-
-</div>
-
-
-
-  </div>
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-class">
-
-
-
-<h3 id="blackbull.mqtt.actor.MQTTExtension" class="doc doc-heading">
-            <code>MQTTExtension</code>
-
-
-<a href="#blackbull.mqtt.actor.MQTTExtension" class="headerlink" title="Permanent link">&para;</a></h3>
-
-
-    <div class="doc doc-contents ">
-            <p class="doc doc-class-bases">
-              Bases: <code><a class="autorefs autorefs-internal" title="Extension (blackbull.extension.Extension)" href="../../extension/#blackbull.extension.Extension">Extension</a></code></p>
-
-
-
-        <p>Wires the MQTT 5 broker into a BlackBull app as a non-ASGI protocol.</p>
-<p>Register it once and tap the broker's routing with :meth:<code>on_message</code>::</p>
-<pre><code>from blackbull.mqtt import MQTTExtension, Message
-
-mqtt = app.add_extension(MQTTExtension(port=1883))
-
-@mqtt.on_message(topic='sensors/+/temperature')
-async def on_temp(msg: Message):
-    print(msg.topic, msg.payload)
-</code></pre>
-<p>The broker itself (CONNECT/SUBSCRIBE/PUBLISH/QoS flows, retained messages,
-Will delivery) runs whether or not any handler is registered; handlers are
-an application-level tap on top of normal broker routing.</p>
-<p>This instance owns a single :class:<code>BrokerActor</code> (started on app startup,
-stopped on shutdown) holding all routing/session/retained state — one broker
-per worker, no module globals.  The class is self-contained and importable
-from a future <code>blackbull-mqtt</code> package without touching the core.</p>
-
-
-
-
-
-
-
-
-
-
-
-<div class="doc doc-children">
-
-
-
-
-
-
-
-
-
-
-<div class="doc doc-object doc-function">
-
-
-<h4 id="blackbull.mqtt.actor.MQTTExtension.on_message" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">on_message</span><span class="p">(</span><span class="n">topic</span><span class="o">=</span><span class="s1">&#39;#&#39;</span><span class="p">)</span></code>
-
-<a href="#blackbull.mqtt.actor.MQTTExtension.on_message" class="headerlink" title="Permanent link">&para;</a></h4>
-
-
-    <div class="doc doc-contents ">
-
-        <p>Decorator: register an async <code>(message) -&gt; None</code> tap for every
-PUBLISH whose topic matches <em>topic</em> (an MQTT topic filter, so <code>+</code> and
-<code>#</code> wildcards apply).  The callback receives a :class:<code>Message</code>.</p>
-
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-function">
-
-
-<h4 id="blackbull.mqtt.actor.MQTTExtension.shutdown" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">shutdown</span><span class="p">(</span><span class="n">app</span><span class="p">)</span></code>
-
-  <span class="doc doc-labels">
-      <small class="doc doc-label doc-label-async"><code>async</code></small>
-  </span>
-
-<a href="#blackbull.mqtt.actor.MQTTExtension.shutdown" class="headerlink" title="Permanent link">&para;</a></h4>
-
-
-    <div class="doc doc-contents ">
-
-        <p>Stop the broker actor on lifespan shutdown.</p>
-
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-function">
-
-
-<h4 id="blackbull.mqtt.actor.MQTTExtension.startup" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">startup</span><span class="p">(</span><span class="n">app</span><span class="p">)</span></code>
-
-  <span class="doc doc-labels">
-      <small class="doc doc-label doc-label-async"><code>async</code></small>
-  </span>
-
-<a href="#blackbull.mqtt.actor.MQTTExtension.startup" class="headerlink" title="Permanent link">&para;</a></h4>
-
-
-    <div class="doc doc-contents ">
-
-        <p>Start the broker actor's inbox loop (once per worker).</p>
-
-
-    </div>
-
-</div>
-
-
-
-  </div>
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-class">
-
-
-
-<h3 id="blackbull.mqtt.actor.MQTTProtocolDetector" class="doc doc-heading">
-            <code>MQTTProtocolDetector</code>
-
-
-<a href="#blackbull.mqtt.actor.MQTTProtocolDetector" class="headerlink" title="Permanent link">&para;</a></h3>
-
-
-    <div class="doc doc-contents ">
-            <p class="doc doc-class-bases">
-              Bases: <code><a class="autorefs autorefs-internal" title="ProtocolDetector (blackbull.server.protocol_registry.ProtocolDetector)" href="../../server/protocol_registry/#blackbull.server.protocol_registry.ProtocolDetector">ProtocolDetector</a></code></p>
-
-
-
-        <p>Recognise an MQTT connection from its first byte.</p>
-<p>Every MQTT session opens with a CONNECT packet whose fixed-header first
-byte is <code>0x10</code> (type 1, flags 0).  That is unambiguous against the HTTP
-request line and the HTTP/2 preface, both of which start with ASCII text.</p>
-
-
-
-
-
-
-
-
-
-
-
-<div class="doc doc-children">
-
-
-
-
-
-
-
-
-
-
-
-
-  </div>
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-class">
-
-
-
-<h3 id="blackbull.mqtt.actor.Message" class="doc doc-heading">
-            <code>Message</code>
-
-
-  <span class="doc doc-labels">
-      <small class="doc doc-label doc-label-dataclass"><code>dataclass</code></small>
-  </span>
-
-<a href="#blackbull.mqtt.actor.Message" class="headerlink" title="Permanent link">&para;</a></h3>
-
-
-    <div class="doc doc-contents ">
-
-
-
-        <p>A published message handed to an <code>on_message</code> tap.</p>
-<p>The user-facing read-model — a plain, immutable view of one PUBLISH,
-deliberately distinct from the wire codec <code>MQTTPublish</code> (which carries the
-<code>__iter__</code>/<code>__getitem__</code> tuple-magic) and from the actor inbox
-<code>Message</code> base.  Named <code>Message</code> for ecosystem consistency (aiomqtt,
-paho): users write <code>from blackbull.mqtt import Message</code>.</p>
-
-
-
-
-
-
-
-
-
-
-
-<div class="doc doc-children">
-
-
-
-
-
-
-
-
-
-
-
-
-  </div>
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-class">
-
-
-
-<h3 id="blackbull.mqtt.actor.Send" class="doc doc-heading">
-            <code>Send</code>
-
-
-  <span class="doc doc-labels">
-      <small class="doc doc-label doc-label-dataclass"><code>dataclass</code></small>
-  </span>
-
-<a href="#blackbull.mqtt.actor.Send" class="headerlink" title="Permanent link">&para;</a></h3>
-
-
-    <div class="doc doc-contents ">
-            <p class="doc doc-class-bases">
-              Bases: <code><a class="autorefs autorefs-internal" title="Message
-
-
-  
-      dataclass
-   (blackbull.actor.Message)" href="../../actor/#blackbull.actor.Message">Message</a></code></p>
-
-
-
-        <p>Tell the connection actor to encode + write <em>packet</em> to its socket.</p>
-
-
-
-
-
-
-
-
-
-
-
-<div class="doc doc-children">
-
-
-
-
-
-
-
-
-
-
-
-
-  </div>
-
-    </div>
-
-</div>
-
-
-<div class="doc doc-object doc-function">
-
-
-<h3 id="blackbull.mqtt.actor.serve_connection" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">serve_connection</span><span class="p">(</span><span class="n">reader</span><span class="p">,</span> <span class="n">writer</span><span class="p">,</span> <span class="n">ctx</span><span class="p">,</span> <span class="n">broker</span><span class="p">,</span> <span class="n">app_handlers</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
-
-  <span class="doc doc-labels">
-      <small class="doc doc-label doc-label-async"><code>async</code></small>
-  </span>
-
-<a href="#blackbull.mqtt.actor.serve_connection" class="headerlink" title="Permanent link">&para;</a></h3>
-
-
-    <div class="doc doc-contents ">
-
-        <p>Raw-protocol handler body for one MQTT connection.</p>
-<p>Spawns the connection actor's inbox-drain (<code>run</code>) alongside the reader loop,
-and guarantees the broker sees a <code>Detach</code> when the connection ends — so a
-Will fires on an abnormal (cancelled) close.</p>
-
-
-    </div>
-
-</div>
-
-
-
-  </div>
-
-    </div>
-
-</div>
+<h2 id="relationship-to-the-framework-actor-model">Relationship to the framework actor model<a class="headerlink" href="#relationship-to-the-framework-actor-model" title="Permanent link">&para;</a></h2>
+<p>The framework's <a href="../internals/">actor-model design invariants</a> describe
+an <code>Actor</code> base with an <code>asyncio.Queue</code> inbox and a <code>send</code> / <code>run</code> / <code>_handle</code>
+contract. Historically the <strong>HTTP</strong> actors (<code>ConnectionActor</code>, <code>HTTP1Actor</code>,
+<code>HTTP2Actor</code>, <code>StreamActor</code>, …) override <code>run()</code> and call each other through
+direct method calls — the inbox is defined but latent on that path.</p>
+<p>The MQTT broker is the <strong>first production code that uses the inbox for real</strong>:
+<code>BrokerActor</code>, <code>MQTTConnectionActor</code>, and <code>TapActor</code> all keep the base <code>run()</code>
+loop, override <code>_handle()</code>, and communicate exclusively by <code>await
+other.send(message)</code>. That is why the broker needs no locks — the "one message
+at a time" guarantee is the base-class <code>run()</code> draining the queue, not a
+convention the broker re-implements.</p>
+<p>So the broker is not a parallel mechanism bolted onto the framework; it is the
+actor model the framework already described, finally exercised end-to-end. If
+you are looking for a worked example of BlackBull's actor inbox, this is it.</p>
 
 
 
@@ -5260,10 +4620,10 @@ Will fires on an abnormal (cancelled) close.</p>
     
       
       
-      <script id="__config" type="application/json">{"annotate": null, "base": "../../../..", "features": [], "search": "../../../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": [], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
     
     
-      <script src="../../../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
       
     
   </body>

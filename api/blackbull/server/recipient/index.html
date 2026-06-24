@@ -13,7 +13,7 @@
         <link rel="canonical" href="https://TOKUJI.github.io/BlackBull/api/blackbull/server/recipient/">
       
       
-        <link rel="prev" href="../raw_actor/">
+        <link rel="prev" href="../protocol_registry/">
       
       
         <link rel="next" href="../reload/">
@@ -2735,14 +2735,70 @@
   
   
     <li class="md-nav__item">
-      <a href="../../mqtt/actor/" class="md-nav__link">
+      <a href="../../mqtt/broker/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    actor
+    broker
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../mqtt/connection/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    connection
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../mqtt/extension/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    extension
   
 
     
@@ -2771,6 +2827,34 @@
     
   
     messages
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../mqtt/tap/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    tap
   
 
     
@@ -3572,34 +3656,6 @@
                 
   
   
-  
-  
-    <li class="md-nav__item">
-      <a href="../raw_actor/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    raw_actor
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
     
   
   
@@ -3851,6 +3907,17 @@
     <span class="md-ellipsis">
       
         IncompleteReadError
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.recipient.PrefixReader" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PrefixReader
       
     </span>
   </a>
@@ -4297,6 +4364,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../../../about/mqtt-actor-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MQTT broker design
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../../../about/rfc9113-implementation/" class="md-nav__link">
         
   
@@ -4568,6 +4663,17 @@
     <span class="md-ellipsis">
       
         IncompleteReadError
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.recipient.PrefixReader" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PrefixReader
       
     </span>
   </a>
@@ -5169,6 +5275,63 @@ handlers that depend on AbstractReader remain runtime-agnostic.</p>
 
 
 
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="blackbull.server.recipient.PrefixReader" class="doc doc-heading">
+            <code>PrefixReader</code>
+
+
+<a href="#blackbull.server.recipient.PrefixReader" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><a class="autorefs autorefs-internal" title="AbstractReader (blackbull.server.recipient.AbstractReader)" href="#blackbull.server.recipient.AbstractReader">AbstractReader</a></code></p>
+
+
+
+        <p>An :class:<code>AbstractReader</code> that replays an already-read <em>prefix</em>.</p>
+<p>Connection detection peeks the first bytes of a stream to decide which
+protocol owns it; wrapping the underlying reader in a <code>PrefixReader</code> hands
+the <em>still-complete</em> stream to the protocol that claims it — the peeked bytes
+are served back first, then reads fall through to the underlying reader.</p>
+<p>Used by the decouple-connection-detection refactor so the dispatcher no
+longer consumes protocol-specific bytes on the connection's behalf.  The
+fast native <code>readuntil</code> / <code>readexactly</code> of the underlying reader are
+used once the prefix is drained, including the seam case where the separator
+straddles the prefix/underlying boundary.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
 
     </div>
 

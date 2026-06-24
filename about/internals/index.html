@@ -16,7 +16,7 @@
         <link rel="prev" href="../conformance/">
       
       
-        <link rel="next" href="../rfc9113-implementation/">
+        <link rel="next" href="../mqtt-actor-design/">
       
       
         
@@ -2729,14 +2729,70 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/mqtt/actor/" class="md-nav__link">
+      <a href="../../api/blackbull/mqtt/broker/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    actor
+    broker
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/mqtt/connection/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    connection
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/mqtt/extension/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    extension
   
 
     
@@ -2765,6 +2821,34 @@
     
   
     messages
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/mqtt/tap/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    tap
   
 
     
@@ -3567,34 +3651,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/server/raw_actor/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    raw_actor
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../../api/blackbull/server/recipient/" class="md-nav__link">
         
   
@@ -4153,6 +4209,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#non-http-protocol-handlers-the-non-asgi-bridge" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Non-HTTP protocol handlers (the Non-ASGI bridge)
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -4228,6 +4295,34 @@
   
 </nav>
       
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../mqtt-actor-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MQTT broker design
+  
+
+    
+  </span>
+  
+  
+
+      </a>
     </li>
   
 
@@ -4433,6 +4528,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#non-http-protocol-handlers-the-non-asgi-bridge" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Non-HTTP protocol handlers (the Non-ASGI bridge)
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -4565,7 +4671,11 @@ back-channels into other components.</p>
       │     └── StreamActor       (one per HTTP/2 stream)
       │           └── RequestActor   (per-stream ASGI call, short-lived)
       │
-      └── WebSocketActor          (after upgrade, replaces HTTP1/2Actor)
+      ├── WebSocketActor          (after upgrade, replaces HTTP1/2Actor)
+      │
+      └── raw protocol handler    (non-HTTP bridge: the binding calls a
+                                   long-lived (reader, writer, ctx) handler
+                                   directly — no separate actor layer)
 </code></pre></div>
 <p><code>ASGIServer</code> is the only non-actor in this hierarchy — it's a
 plain <code>asyncio</code> server that owns the listening socket and
@@ -4591,12 +4701,21 @@ etc.</p>
 </ul>
 <h3 id="connectionactor"><code>ConnectionActor</code><a class="headerlink" href="#connectionactor" title="Permanent link">&para;</a></h3>
 <ul>
-<li>Owns the reader / writer for one TCP connection.</li>
-<li>Detects the protocol: TLS handshake → check ALPN → HTTP/2
-  preface check → spawn <code>HTTP2Actor</code> or <code>HTTP1Actor</code>.</li>
+<li>Owns the reader / writer for one TCP connection, and the
+  connection-lifecycle events: it fires <code>connection_accepted</code> on
+  entry and <code>connection_closed</code> (with duration) on exit for
+  <strong>every</strong> protocol — HTTP and non-HTTP alike.</li>
+<li>Detects the protocol <em>without any HTTP-specific wire knowledge</em>:
+  it peeks a tiny protocol-agnostic discriminator prefix, asks each
+  registered <code>ProtocolBinding</code> whether it <code>claims</code> it (ALPN first,
+  then the cleartext chain), and replays the peeked bytes to the
+  winning binding's <code>serve</code>.  Each binding does its own framing reads
+  (the HTTP/2 preface, the HTTP/1.1 request line) — <code>ConnectionActor</code>
+  holds no hardcoded byte counts, delimiters, or status strings.</li>
 <li>Supervisor strategy: <strong>isolate</strong> — one connection dying does
-  not affect others.  Unhandled exceptions are logged, and the
-  connection is closed.</li>
+  not affect others.  A handler/actor exception from any protocol is
+  caught here, emitted once as an <code>error</code> event, and the connection
+  is closed.</li>
 </ul>
 <h3 id="http1actor"><code>HTTP1Actor</code><a class="headerlink" href="#http1actor" title="Permanent link">&para;</a></h3>
 <ul>
@@ -4647,6 +4766,33 @@ etc.</p>
 <li>Supervisor strategy: <strong>isolate</strong> — a protocol error closes
   this connection only.</li>
 </ul>
+<h3 id="non-http-protocol-handlers-the-non-asgi-bridge">Non-HTTP protocol handlers (the Non-ASGI bridge)<a class="headerlink" href="#non-http-protocol-handlers-the-non-asgi-bridge" title="Permanent link">&para;</a></h3>
+<ul>
+<li>A non-HTTP protocol registers a <code>ProtocolBinding</code> whose <code>serve</code>
+  calls a long-lived <code>(reader, writer, ctx)</code> handler directly —
+  there is <strong>no separate actor layer</strong> between <code>ConnectionActor</code>
+  and the handler.  <code>ConnectionActor</code> reaches it the same way it
+  reaches HTTP: by a binding (port-bound, or matched by a first-byte
+  sniff) for protocols that don't map to ASGI request/response:
+  MQTT, raw TCP, and the like.</li>
+<li>Unlike the HTTP actors the handler does not run a request loop —
+  it owns the connection until it decides to close (raw protocols
+  are typically stateful and persistent).</li>
+<li>Connection timing, error isolation, and the <code>connection_closed</code>
+  event are provided uniformly by <code>ConnectionActor.run()</code> for every
+  protocol (an earlier <code>RawProtocolActor</code> Layer-2 wrapper was folded
+  into <code>ConnectionActor</code> so HTTP and non-HTTP share one lifecycle
+  owner).</li>
+<li>The handler is where a protocol's own actors live.  MQTT, for
+  example, runs a lifespan-owned <code>BrokerActor</code> and <code>TapActor</code>
+  plus a per-connection <code>MQTTConnectionActor</code> beneath it — and
+  these are the framework's <strong>first genuine users of the <code>Actor</code>
+  inbox</strong> (the HTTP actors override <code>run()</code> and call each other
+  directly).  See
+  <a href="../mqtt-actor-design/">MQTT broker design</a> for the deep dive
+  and <a href="../../guide/raw-protocols/">Non-ASGI protocols</a> for the
+  user-facing API.</li>
+</ul>
 <h2 id="supervisor-strategies-at-a-glance">Supervisor strategies — at a glance<a class="headerlink" href="#supervisor-strategies-at-a-glance" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
@@ -4691,6 +4837,11 @@ etc.</p>
 <td><code>WebSocketActor</code></td>
 <td>Isolate</td>
 <td>Protocol error closes this WS connection only</td>
+</tr>
+<tr>
+<td>raw protocol handler</td>
+<td>Isolate (via <code>ConnectionActor</code>)</td>
+<td>One raw connection's handler failure is bounded</td>
 </tr>
 </tbody>
 </table>
@@ -4740,6 +4891,11 @@ respective actors.</p>
 <td><code>StreamActor</code> flow-control violation</td>
 <td>Isolate (<code>RST_STREAM</code>)</td>
 <td>Stream-fatal only; other streams keep going</td>
+</tr>
+<tr>
+<td>raw protocol handler raises</td>
+<td>Caught by <code>ConnectionActor</code>, re-emit as <code>error</code> event</td>
+<td>Bridge handler error must not kill other connections</td>
 </tr>
 <tr>
 <td><code>ConnectionActor</code> unhandled</td>

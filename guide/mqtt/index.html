@@ -2822,14 +2822,70 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/mqtt/actor/" class="md-nav__link">
+      <a href="../../api/blackbull/mqtt/broker/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    actor
+    broker
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/mqtt/connection/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    connection
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/mqtt/extension/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    extension
   
 
     
@@ -2858,6 +2914,34 @@
     
   
     messages
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/mqtt/tap/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    tap
   
 
     
@@ -3660,34 +3744,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/server/raw_actor/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    raw_actor
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../../api/blackbull/server/recipient/" class="md-nav__link">
         
   
@@ -4102,6 +4158,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../about/mqtt-actor-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MQTT broker design
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../about/rfc9113-implementation/" class="md-nav__link">
         
   
@@ -4292,12 +4376,25 @@ and <code>#</code> (multi level) wildcards apply.</p>
 <span class="nd">@mqtt</span><span class="o">.</span><span class="n">on_message</span><span class="p">(</span><span class="n">topic</span><span class="o">=</span><span class="s1">&#39;alerts/#&#39;</span><span class="p">)</span>     <span class="c1"># one subtree</span>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">alerts</span><span class="p">(</span><span class="n">msg</span><span class="p">:</span> <span class="n">Message</span><span class="p">):</span> <span class="o">...</span>
 </code></pre></div>
+<p>A filter level may also be a <code>{name}</code> <strong>capture</strong>: it matches one level like <code>+</code>
+and is injected into the callback as a keyword argument, mirroring HTTP path
+params.</p>
+<div class="highlight"><pre><span></span><code><span class="nd">@mqtt</span><span class="o">.</span><span class="n">on_message</span><span class="p">(</span><span class="n">topic</span><span class="o">=</span><span class="s1">&#39;sensors/</span><span class="si">{room}</span><span class="s1">/temperature&#39;</span><span class="p">)</span>
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">on_temperature</span><span class="p">(</span><span class="n">msg</span><span class="p">:</span> <span class="n">Message</span><span class="p">,</span> <span class="n">room</span><span class="p">:</span> <span class="nb">str</span><span class="p">):</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">room</span><span class="p">,</span> <span class="n">msg</span><span class="o">.</span><span class="n">payload</span><span class="o">.</span><span class="n">decode</span><span class="p">())</span>   <span class="c1"># room == &#39;kitchen&#39; for sensors/kitchen/temperature</span>
+</code></pre></div>
 <p>Handlers are an <strong>application-level tap</strong>: they run <em>in addition to</em> normal
 broker routing, never instead of it. The broker still delivers each PUBLISH to
-every subscribed MQTT client whether or not a handler matches. Each tap runs
-inline on the connection that received the message (sequentially), so a slow tap
-back-pressures only that one client, never the broker. A handler that raises is
-isolated and logged — it never disturbs the broker or other handlers.</p>
+every subscribed MQTT client whether or not a handler matches. A handler that
+raises is isolated and logged — it never disturbs the broker or other handlers.</p>
+<p>By default taps are dispatched on a <strong>decoupled <code>TapActor</code></strong>: the connection
+hands each message off without waiting, so a slow tap can never back-pressure
+delivery or the broker. The <code>TapActor</code>'s inbox is bounded; if taps fall behind,
+the newest messages are dropped (best-effort observability) and a running
+dropped-count is logged. Taps are therefore <em>not</em> a reliable delivery path — use
+a real MQTT subscription for that. (<code>MQTTExtension(tap_mode='inline')</code> runs taps
+inline on the receiving connection instead — the pre-Sprint-54 behaviour, kept
+mainly so the <code>bench/mqtt/tap_throughput.py</code> comparison stays reproducible.)</p>
 <p>The broker also runs without any handler at all: <code>on_message</code> is just how an
 application observes traffic. <code>app.add_extension(MQTTExtension())</code> on its own
 gives you a fully functional broker with no tap.</p>
@@ -4356,13 +4453,16 @@ conformance matrix:</p>
 </table>
 <p>The wire codec lives in <code>blackbull.mqtt.messages</code> (the 15 control-packet
 dataclasses, <code>encode_packet</code> / <code>decode_packet</code>, the property system, reason
-codes, and <code>topic_matches_filter</code>). The broker is an actor model in
-<code>blackbull.mqtt.actor</code>: a single <code>BrokerActor</code> owns all routing state
-(subscriptions, sessions, retained messages) and, processing its inbox serially,
-needs no locks; one <code>MQTTConnectionActor</code> per connection is the sole writer to
-its socket and forwards decoded control packets to the broker. <code>serve_connection</code>
-wires the two, and <code>MQTTProtocolDetector</code> recognises the MQTT CONNECT first byte
-(<code>0x10</code>) for shared-port sniffing.</p>
+codes, and <code>topic_matches_filter</code>). The broker is an actor model split across a
+few small modules: <code>blackbull.mqtt.broker</code> holds the <code>BrokerActor</code>, which owns
+all routing state (subscriptions, sessions, retained messages) and, processing
+its inbox serially, needs no locks; <code>blackbull.mqtt.connection</code> holds the
+<code>MQTTConnectionActor</code> (one per connection — the sole writer to its socket,
+forwarding decoded control packets to the broker) and <code>serve_connection</code>, which
+wires the two; <code>blackbull.mqtt.tap</code> holds the <code>TapActor</code> and the <code>Message</code>
+read-model; and <code>blackbull.mqtt.extension</code> holds <code>MQTTExtension</code> and
+<code>MQTTProtocolDetector</code>, which recognises the MQTT CONNECT first byte (<code>0x10</code>) for
+shared-port sniffing.</p>
 <h2 id="trying-it-with-mosquitto">Trying it with Mosquitto<a class="headerlink" href="#trying-it-with-mosquitto" title="Permanent link">&para;</a></h2>
 <p>The broker speaks standard MQTT 5, so the Eclipse Mosquitto CLI works against it
 (<code>apt install mosquitto-clients</code>):</p>
