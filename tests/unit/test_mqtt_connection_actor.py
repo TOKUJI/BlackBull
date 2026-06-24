@@ -241,7 +241,7 @@ async def test_on_message_dispatched_through_tap_actor():
     finally:
         tap_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
-            await tap_task
+            await asyncio.gather(tap_task)
 
     assert len(seen) == 1
     assert isinstance(seen[0], Message)

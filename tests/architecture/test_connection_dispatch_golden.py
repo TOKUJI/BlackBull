@@ -12,8 +12,6 @@ is meant to **change** (the HTTP-shaped 408 on timeout, symptom #3; the missing
 ``connection_closed`` for HTTP, symptom #5); those are marked and will be flipped
 by the stage that fixes them.
 """
-import asyncio
-
 import pytest
 from unittest.mock import AsyncMock
 

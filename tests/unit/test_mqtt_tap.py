@@ -108,7 +108,7 @@ async def _running(actor):
     finally:
         task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
-            await task
+            await asyncio.gather(task)
 
 
 @asyncio_test

@@ -215,7 +215,7 @@ async def serve_connection(reader: AbstractReader, writer: AbstractWriter,
             await _flush_pending(broker, conn)
         writer_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
-            await writer_task
+            await asyncio.gather(writer_task)
 
 
 async def _flush_pending(broker, conn, *, max_turns: int = 1000) -> None:

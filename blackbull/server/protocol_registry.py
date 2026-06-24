@@ -259,6 +259,8 @@ class Http1Binding(ProtocolBinding):
                 b'connection: close\r\n'
                 b'content-length: 0\r\n\r\n')
         except Exception:
+            # Best-effort only — the peer may already be gone or the socket
+            # unwritable; there is nothing useful to do on a failed 408 write.
             pass
 
 

@@ -116,5 +116,5 @@ class MQTTExtension(Extension):
             if task is not None:
                 task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
-                    await task
+                    await asyncio.gather(task)
                 setattr(self, attr, None)
