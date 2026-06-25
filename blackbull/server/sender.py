@@ -6,11 +6,11 @@ from http import HTTPStatus
 from email.utils import formatdate
 
 from ..protocol.frame_types import (FrameTypes, HeaderFrameFlags, DataFrameFlags,
-                                    SettingFrameFlags, FrameBase, PseudoHeaders,
+                                    FrameBase, PseudoHeaders,
                                     DEFAULT_INITIAL_WINDOW_SIZE, DEFAULT_MAX_FRAME_SIZE)
 from .cap_log import log_cap_hit
 from .constants import WSCloseCode
-from .ws_codec import WSOpcode, WSFrameBits, WSFrameHeader, encode_frame
+from .ws_codec import WSOpcode, encode_frame
 import logging
 from ..asgi import ASGIEvent
 from ..headers import Headers, HeaderList
@@ -73,7 +73,6 @@ class AbstractWriter(ABC):
     @abstractmethod
     async def write(self, data: bytes) -> None:
         """Write *data* to the transport and ensure it is flushed."""
-        ...
 
     async def writelines(self, parts) -> None:
         """Write multiple byte segments without joining them in user space.
@@ -267,7 +266,7 @@ class BaseSender(ABC):
         self._closed = False
 
     @abstractmethod
-    async def __call__(self, body, status: HTTPStatus = HTTPStatus.OK, headers: HeaderList = []): ...
+    async def __call__(self, body, status: HTTPStatus = HTTPStatus.OK, headers: HeaderList = []): pass
 
     async def _write(self, data: bytes):
         """Flush *data* through the writer.

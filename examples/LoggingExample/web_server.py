@@ -24,7 +24,6 @@ Why QueueHandler + QueueListener?
 Reference: https://docs.python.org/3/library/logging.handlers.html#logging.handlers.HTTPHandler
 """
 
-import asyncio
 import http.client
 import json
 import logging

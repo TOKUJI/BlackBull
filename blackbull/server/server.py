@@ -3,29 +3,24 @@ import asyncio
 from http import HTTPStatus
 import logging
 import ssl
-import traceback
 from collections import defaultdict, deque
 from contextlib import asynccontextmanager
 from pathlib import Path
 import time
-import socket
 
 # private library
-from ..utils import HTTP2, pop_safe, check_port
+from ..utils import check_port
 from ..event import Event
 from ..protocol.rsock import (
     create_dual_stack_sockets, create_unix_socket,
     adopt_inherited_sockets, adopt_listening_fd,
 )
-from .response import ResponderFactory
-from .parser import ParserFactory
-from .sender import SenderFactory, AbstractWriter
-from .recipient import (RecipientFactory, HTTP2Recipient, AbstractReader, AsyncioReader,
-                        IncompleteReadError, _HTTP2_STREAM_QUEUE_DEPTH, _WS_EVENT_QUEUE_DEPTH)
-from .access_log import AccessLogRecord, _make_capturing_send, emit_access_log as _emit_access_log
+from .sender import AbstractWriter
+from .recipient import (AbstractReader,
+                        _HTTP2_STREAM_QUEUE_DEPTH, _WS_EVENT_QUEUE_DEPTH)
+from .access_log import AccessLogRecord, emit_access_log as _emit_access_log
 from .cap_log import log_cap_hit
 from ..asgi import ASGIEvent
-from ..headers import Headers
 logger = logging.getLogger(__name__)
 
 async def _run_with_log(coro, record: AccessLogRecord,
@@ -111,7 +106,7 @@ class LifespanManager:
             try:
                 await self._task   # drain finally blocks inside the lifespan app
             except asyncio.CancelledError:
-                pass
+                pass  # task was just cancelled; its unwind is expected.
         return False
 
 

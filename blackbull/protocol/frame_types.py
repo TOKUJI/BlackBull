@@ -10,7 +10,7 @@ pulling in the codec.
 from enum import Enum, IntEnum, StrEnum
 from io import BytesIO
 from itertools import chain
-from hpack import Encoder, Decoder
+from hpack import Encoder
 
 from . import hpack_fastpath
 
@@ -669,7 +669,7 @@ def parse_priority_field(s: str) -> dict[str, int | bool]:
             try:
                 urgency = max(0, min(7, int(part[2:])))
             except ValueError:
-                pass
+                pass  # malformed u= urgency → ignore this part.
         elif part == 'i':
             incremental = True
     return {'urgency': urgency, 'incremental': incremental}

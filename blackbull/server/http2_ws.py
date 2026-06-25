@@ -16,7 +16,7 @@ orderly HTTP/2 stream termination per RFC 8441 §5.
 import asyncio
 from typing import Awaitable, Callable, Optional
 
-from .recipient import AbstractReader, IncompleteReadError
+from .recipient import AbstractReader
 from .sender import AbstractWriter
 from ..protocol.frame_types import Data
 

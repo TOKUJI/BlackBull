@@ -68,9 +68,6 @@ logger = logging.getLogger(__name__)
 # RFC 9113 §3.4 — client connection preface bytes.
 CLIENT_PREFACE = b'PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n'
 
-# Setting identifier numbers (RFC 9113 §6.5.2).
-_SETTING_INITIAL_WINDOW_SIZE = 0x4
-
 
 class H2FaultServerError(RuntimeError):
     """Raised when ``H2FaultServer`` cannot start.
@@ -305,7 +302,7 @@ class H2FaultServer:
                     result.terminated = True
                     break
         except (asyncio.CancelledError, ConnectionResetError, BrokenPipeError):
-            pass
+            pass  # peer disconnect or our own cancellation — the scenario simply ends.
         except Exception as exc:  # noqa: BLE001
             result.exception = repr(exc)
             logger.warning('scenario step raised: %r', exc)
@@ -315,7 +312,7 @@ class H2FaultServer:
                 try:
                     await reader_task
                 except (asyncio.CancelledError, Exception):
-                    pass
+                    pass  # teardown: reader task was just cancelled; ignore its unwind.
             result.elapsed_s = time.monotonic() - t0
             self.last_result = result
             self._connection_done.set()

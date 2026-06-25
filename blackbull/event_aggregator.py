@@ -1,4 +1,3 @@
-import asyncio
 from typing import Any
 
 from blackbull.event import Event, EventDispatcher

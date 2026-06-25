@@ -31,7 +31,7 @@ from __future__ import annotations
 import logging
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 from ..event_aggregator import EventAggregator
@@ -112,13 +112,11 @@ class ProtocolDetector(ABC):
     @abstractmethod
     def detect(self, first_bytes: bytes, alpn: str | None) -> bool:
         """Return True if *first_bytes* matches this protocol."""
-        ...
 
     @property
     @abstractmethod
     def protocol_name(self) -> str:
         """Human-readable protocol name for logging."""
-        ...
 
 
 # ---------------------------------------------------------------------------
@@ -212,7 +210,7 @@ class Http2Binding(ProtocolBinding):
             try:
                 await conn.writer.write(goaway)
             except Exception:
-                pass
+                pass  # best-effort GOAWAY before rejecting the bad preface; peer may be gone.
             raise ValueError(f'Invalid HTTP/2 preface: {preface!r}')
         await self._run(conn)
 

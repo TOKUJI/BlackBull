@@ -1,5 +1,4 @@
 import asyncio
-import zlib
 from abc import ABC, abstractmethod
 
 from .cap_log import log_cap_hit
@@ -119,7 +118,7 @@ class AbstractReader(ABC):
     """
 
     @abstractmethod
-    async def read(self, n: int) -> bytes: ...
+    async def read(self, n: int) -> bytes: pass
 
     def at_eof(self) -> bool:
         """Return True once the peer has closed and the buffer is drained.
@@ -335,7 +334,7 @@ class BaseRecipient(ABC):
         self._reader = reader
 
     @abstractmethod
-    async def __call__(self) -> dict: ...
+    async def __call__(self) -> dict: pass
 
 
 class HTTP1Recipient(BaseRecipient):
@@ -700,7 +699,7 @@ class WebSocketRecipient(BaseRecipient):
             try:
                 await self._writer.write(close)
             except Exception:
-                pass
+                pass  # best-effort CLOSE frame; the socket may already be gone.
             await self._emit_disconnected(exc.close_code)
             # Surface the violation on the next app-side receive() (matches
             # the legacy contract that any exception in the read loop is
@@ -715,7 +714,7 @@ class WebSocketRecipient(BaseRecipient):
             try:
                 await self._writer.write(close)
             except Exception:
-                pass
+                pass  # best-effort CLOSE frame; the socket may already be gone.
             await self._event_queue.put(exc)
 
     async def _handle_data_frame(self, opcode, payload: bytes, fin: bool,
@@ -787,7 +786,7 @@ class WebSocketRecipient(BaseRecipient):
             try:
                 await self._writer.write(close)
             except Exception:
-                pass
+                pass  # best-effort CLOSE frame; the socket may already be gone.
             await self._emit_disconnected(event_code)
             await self._event_queue.put(
                 {'type': ASGIEvent.WS_DISCONNECT, 'code': event_code})
@@ -808,7 +807,7 @@ class WebSocketRecipient(BaseRecipient):
         try:
             await self._writer.write(close)
         except Exception:
-            pass
+            pass  # best-effort CLOSE frame; the socket may already be gone.
         await self._emit_disconnected(WSCloseCode.PROTOCOL_ERROR)
         await self._event_queue.put(
             {'type': ASGIEvent.WS_DISCONNECT, 'code': WSCloseCode.PROTOCOL_ERROR})

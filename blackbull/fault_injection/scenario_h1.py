@@ -36,7 +36,7 @@ Two serialisations are supported:
 import base64
 import enum
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Union
 
 

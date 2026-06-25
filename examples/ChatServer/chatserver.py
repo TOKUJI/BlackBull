@@ -407,7 +407,7 @@ async def handle_poll(scope, receive, send):  # noqa: ARG001
             while not session.queue.empty():
                 events.append(session.queue.get_nowait())
         except asyncio.TimeoutError:
-            pass
+            pass  # no events within the poll window → return an empty batch.
 
     session.last_seen = time.monotonic()
     await send(JSONResponse(events))
@@ -435,7 +435,7 @@ async def handle_websocket(scope, receive, send):
                 evt = await asyncio.wait_for(session.queue.get(), timeout=30)
                 await send(WebSocketResponse(evt))
             except asyncio.TimeoutError:
-                pass
+                pass  # idle keepalive tick → loop and wait for the next event.
             except Exception:
                 break
 

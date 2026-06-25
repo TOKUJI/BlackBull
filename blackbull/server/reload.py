@@ -30,7 +30,6 @@ from __future__ import annotations
 
 import logging
 import os
-import signal
 import socket
 import sys
 import threading
@@ -103,7 +102,7 @@ class FileChangeWatcher:
                 # ``stop_event`` is the cooperative shutdown signal.
                 # ``watch_filter`` selects which files we care about
                 # (drops .pyc churn, dotfiles, editor swap files).
-                for _changes in watchfiles.watch(
+                for _ in watchfiles.watch(
                     *self._paths,
                     watch_filter=self._watch_filter,
                     stop_event=self._stop_event,

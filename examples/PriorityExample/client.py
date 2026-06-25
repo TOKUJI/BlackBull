@@ -27,7 +27,8 @@ BASE_URL = 'https://localhost:8443'
 
 
 async def demo(base_url: str) -> None:
-    # verify=False because the server uses a self-signed certificate.
+    # verify=False because this demo talks to a local self-signed server.
+    # NEVER disable certificate verification against a real host in production.
     async with httpx.AsyncClient(http2=True, verify=False,
                                  base_url=base_url) as client:
 

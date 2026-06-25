@@ -17,7 +17,6 @@ Companion definitions live in this module to avoid circular imports:
   ``Response`` objects directly.
 """
 import functools
-import inspect
 from collections.abc import Awaitable, Callable, Iterable
 from http import HTTPStatus, HTTPMethod
 from pathlib import Path

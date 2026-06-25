@@ -52,7 +52,6 @@ import logging
 import os
 import time
 import warnings
-from typing import Any
 
 from ..asgi import ASGIEvent
 from .utils import as_middleware

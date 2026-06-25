@@ -42,7 +42,7 @@ from http import HTTPMethod
 from typing import Any
 
 from .extension import Extension
-from .router import _CONVERTERS, _AnyScheme
+from .router import _AnyScheme
 from .utils import Scheme
 
 
@@ -205,7 +205,7 @@ def _dataclass_to_schema(cls: Any) -> dict:
             try:
                 field_schema['default'] = json.loads(json.dumps(default))
             except (TypeError, ValueError):
-                pass
+                pass  # default isn't JSON-serialisable → omit it from the schema.
         props[f.name] = field_schema
 
     schema: dict[str, Any] = {

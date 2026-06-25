@@ -25,7 +25,7 @@ import logging
 from ..headers import Headers
 from ..server.recipient import (AbstractReader, AsyncioReader,
                                 WebSocketRecipient)
-from ..server.sender import AbstractWriter, AsyncioWriter, WebSocketSender
+from ..server.sender import AbstractWriter, AsyncioWriter
 from ..server.ws_codec import WSOpcode, encode_frame
 from .exceptions import HandshakeError
 from .http1 import HTTP1RequestSender, HTTP1ResponseRecipient
@@ -103,7 +103,7 @@ class WebSocketSession:
         try:
             await self._send_frame(payload, WSOpcode.CLOSE)
         except Exception:
-            pass
+            pass  # best-effort close frame; the socket may already be gone.
 
     # ---- internal --------------------------------------------------------
 
@@ -157,7 +157,7 @@ class WebSocketClient:
                 self._raw_writer.close()
                 await self._raw_writer.wait_closed()
             except Exception:
-                pass
+                pass  # best-effort close on context exit; peer may already be gone.
 
     async def connect(self, path: str, *,
                       subprotocols: Iterable[bytes] = ()) -> WebSocketSession:

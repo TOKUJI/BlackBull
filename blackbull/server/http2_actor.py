@@ -9,14 +9,9 @@ import time
 from collections.abc import Awaitable, Callable
 from http import HTTPStatus
 from typing import Any, Protocol, runtime_checkable
-from urllib.parse import urlparse
 
 from ..actor import Actor, Message
 from ..event_aggregator import EventAggregator
-from .http2_messages import (
-    ConnectionAccepted, StreamHeadersReceived, WindowUpdate, Header, Data,
-    SettingsReceived, Goaway, WindowRequested,
-)
 from ..logger import log
 from ..protocol.frame import FrameFactory
 from ..protocol.frame_types import (
@@ -25,7 +20,7 @@ from ..protocol.frame_types import (
 )
 from ..protocol.stream import Stream, StreamState
 from ..headers import Headers
-from .parser import ParserFactory, parse_headers
+from .parser import parse_headers
 from .cap_log import log_cap_hit
 from .recipient import (AbstractReader, IncompleteReadError,
                         RecipientFactory, _HTTP2_STREAM_QUEUE_DEPTH)
@@ -41,8 +36,8 @@ logger = logging.getLogger(__name__)
 @runtime_checkable
 class _StreamRecipient(Protocol):
     """Duck-type interface shared by HTTP2Recipient and HTTP2WSReader."""
-    def put_disconnect(self) -> None: ...
-    def put_DATAFrame(self, frame) -> bool: ...
+    def put_disconnect(self) -> None: pass
+    def put_DATAFrame(self, frame) -> bool: pass
 
 
 def _extract_content_length(scope: dict) -> int | None:
@@ -114,10 +109,6 @@ def _build_h2_extensions(
     }
 
 
-# Retained for older test fixtures that inspect this constant directly.
-# New code reads ``scope['extensions']`` instead; this is just a list of
-# the keys the actor advertises.
-_HTTP2_EXTENSIONS: dict = {ASGIEvent.HTTP_RESPONSE_PUSH: {}}
 
 
 async def _run_guarded(coro, sem):

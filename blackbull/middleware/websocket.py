@@ -4,7 +4,6 @@ from ..asgi import ASGIEvent
 
 logger = logging.getLogger(__name__)
 
-_connect = {'type': ASGIEvent.WS_CONNECT}
 _accept  = {'type': ASGIEvent.WS_ACCEPT, 'subprotocol': None}
 _close   = {'type': ASGIEvent.WS_CLOSE}
 
