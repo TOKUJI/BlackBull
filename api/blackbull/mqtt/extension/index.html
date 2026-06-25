@@ -2737,6 +2737,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../asyncapi/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    asyncapi
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../broker/" class="md-nav__link">
         
   
@@ -2877,6 +2905,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#blackbull.mqtt.extension.MQTTExtension.iter_subscriptions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        iter_subscriptions
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.mqtt.extension.MQTTExtension.on_message" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2919,6 +2958,17 @@
     <span class="md-ellipsis">
       
         MQTTProtocolDetector
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.mqtt.extension.Subscription" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Subscription
       
     </span>
   </a>
@@ -4333,6 +4383,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#blackbull.mqtt.extension.MQTTExtension.iter_subscriptions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        iter_subscriptions
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.mqtt.extension.MQTTExtension.on_message" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4375,6 +4436,17 @@
     <span class="md-ellipsis">
       
         MQTTProtocolDetector
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.mqtt.extension.Subscription" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Subscription
       
     </span>
   </a>
@@ -4508,6 +4580,29 @@ overflow).</p>
 <div class="doc doc-object doc-function">
 
 
+<h4 id="blackbull.mqtt.extension.MQTTExtension.iter_subscriptions" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">iter_subscriptions</span><span class="p">()</span></code>
+
+<a href="#blackbull.mqtt.extension.MQTTExtension.iter_subscriptions" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Yield a :class:<code>Subscription</code> for each registered <code>on_message</code> tap.</p>
+<p>A stable, public, read-only accessor over the compiled handlers — the
+seam <code>AsyncAPIExtension</code> reads instead of touching <code>_handlers</code>.
+Reflects the handlers registered <em>at call time</em>, so a documentation
+endpoint that calls this per request picks up taps added after the
+documenting extension was wired in.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
 <h4 id="blackbull.mqtt.extension.MQTTExtension.on_message" class="doc doc-heading">
             <code class="highlight language-python"><span class="n">on_message</span><span class="p">(</span><span class="n">topic</span><span class="o">=</span><span class="s1">&#39;#&#39;</span><span class="p">)</span></code>
 
@@ -4599,6 +4694,59 @@ callback receives a :class:<code>~blackbull.mqtt.Message</code>.</p>
 <p>Every MQTT session opens with a CONNECT packet whose fixed-header first
 byte is <code>0x10</code> (type 1, flags 0).  That is unambiguous against the HTTP
 request line and the HTTP/2 preface, both of which start with ASCII text.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="blackbull.mqtt.extension.Subscription" class="doc doc-heading">
+            <code>Subscription</code>
+
+
+<a href="#blackbull.mqtt.extension.Subscription" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="typing.NamedTuple">NamedTuple</span></code></p>
+
+
+
+        <p>A read-only view of one registered <code>on_message</code> tap.</p>
+<p>Yielded by :meth:<code>MQTTExtension.iter_subscriptions</code> so documentation tools
+(<code>AsyncAPIExtension</code>) can describe an app's taps without reaching into the
+private <code>_handlers</code> list.  <code>topic</code> is the filter as the application
+wrote it (<code>{name}</code> captures restored); <code>callback</code> is the registered
+coroutine function (its <code>__name__</code>/docstring name the AsyncAPI operation).</p>
 
 
 

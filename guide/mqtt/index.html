@@ -759,6 +759,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#documenting-the-taps-with-asyncapi" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Documenting the taps with AsyncAPI
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#limitations" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2822,6 +2833,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../api/blackbull/mqtt/asyncapi/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    asyncapi
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../api/blackbull/mqtt/broker/" class="md-nav__link">
         
   
@@ -4302,6 +4341,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#documenting-the-taps-with-asyncapi" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Documenting the taps with AsyncAPI
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#limitations" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4474,6 +4524,45 @@ mosquitto_pub<span class="w"> </span>-t<span class="w"> </span><span class="s1">
 </code></pre></div>
 <p>The message appears in the subscriber's terminal and in any matching
 <code>@mqtt.on_message</code> handler.</p>
+<h2 id="documenting-the-taps-with-asyncapi">Documenting the taps with AsyncAPI<a class="headerlink" href="#documenting-the-taps-with-asyncapi" title="Permanent link">&para;</a></h2>
+<p>OpenAPI documents BlackBull's HTTP surface, but it has no vocabulary for topics
+or the publish/subscribe direction, so the broker is invisible to it. The
+messaging-world counterpart is <a href="https://www.asyncapi.com/">AsyncAPI</a>, and
+<code>AsyncAPIExtension</code> emits an AsyncAPI 3.0 document for the topic taps your app
+registered — served over HTTP, exactly as <code>/openapi.json</code> is. It is a normal
+extension and coexists with <code>OpenAPIExtension</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">blackbull</span><span class="w"> </span><span class="kn">import</span> <span class="n">BlackBull</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">blackbull.mqtt</span><span class="w"> </span><span class="kn">import</span> <span class="n">MQTTExtension</span><span class="p">,</span> <span class="n">AsyncAPIExtension</span><span class="p">,</span> <span class="n">Message</span>
+
+<span class="n">app</span> <span class="o">=</span> <span class="n">BlackBull</span><span class="p">()</span>
+<span class="n">mqtt</span> <span class="o">=</span> <span class="n">app</span><span class="o">.</span><span class="n">add_extension</span><span class="p">(</span><span class="n">MQTTExtension</span><span class="p">(</span><span class="n">port</span><span class="o">=</span><span class="mi">1883</span><span class="p">))</span>
+<span class="n">app</span><span class="o">.</span><span class="n">add_extension</span><span class="p">(</span><span class="n">AsyncAPIExtension</span><span class="p">(</span><span class="n">title</span><span class="o">=</span><span class="s1">&#39;Sensor Gateway&#39;</span><span class="p">,</span> <span class="n">version</span><span class="o">=</span><span class="s1">&#39;1.0.0&#39;</span><span class="p">))</span>
+
+<span class="nd">@mqtt</span><span class="o">.</span><span class="n">on_message</span><span class="p">(</span><span class="n">topic</span><span class="o">=</span><span class="s1">&#39;sensors/</span><span class="si">{room}</span><span class="s1">/temperature&#39;</span><span class="p">)</span>
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">on_temp</span><span class="p">(</span><span class="n">msg</span><span class="p">:</span> <span class="n">Message</span><span class="p">,</span> <span class="n">room</span><span class="p">:</span> <span class="nb">str</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Temperature readings per room.&quot;&quot;&quot;</span>
+</code></pre></div>
+<p>After <code>app.run()</code> the document is at <code>/asyncapi.json</code> and an HTML viewer (a
+CDN-hosted AsyncAPI renderer — no new Python dependency) at <code>/asyncapi</code>. Each
+<code>on_message</code> filter becomes a <em>channel</em> whose <code>address</code> is the filter as you
+wrote it (<code>{name}</code> captures preserved); each callback becomes a <code>receive</code>
+<em>operation</em> (the application <em>receives</em> PUBLISHes), with its docstring summary.
+Pass <code>docs_path=None</code> to skip the HTML page, or <code>server_host=</code> to override the
+advertised broker host (default <code>localhost:&lt;port&gt;</code>).</p>
+<p>The document is generated lazily on each request, so taps registered <em>after</em>
+<code>add_extension(AsyncAPIExtension(...))</code> are still included. The MQTT extension
+must be present when the spec route is hit, or the request raises
+<code>RuntimeError</code>.</p>
+<p>Three honest caveats — also stated in the document's <code>info.description</code>:</p>
+<ul>
+<li>It documents the <strong>application's taps</strong>, not "the broker's API". A broker
+  accepts any topic from any client; <code>on_message</code> filters describe only what
+  <em>this</em> app observes.</li>
+<li><strong>QoS and retain are not captured</strong> — taps fire regardless of QoS, so MQTT
+  channel bindings are omitted until the tap API carries that metadata.</li>
+<li><strong>Payloads are opaque bytes</strong> (<code>application/octet-stream</code>) until a future
+  opt-in <code>schema=</code> on <code>on_message</code> lands.</li>
+</ul>
 <h2 id="limitations">Limitations<a class="headerlink" href="#limitations" title="Permanent link">&para;</a></h2>
 <ul>
 <li><strong>Cleartext only.</strong> TLS / MQTT-over-WebSocket transport is not yet wired up,

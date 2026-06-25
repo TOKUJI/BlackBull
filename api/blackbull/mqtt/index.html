@@ -16,7 +16,7 @@
         <link rel="prev" href="../middleware/websocket/">
       
       
-        <link rel="next" href="broker/">
+        <link rel="next" href="asyncapi/">
       
       
         
@@ -2781,6 +2781,34 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#blackbull.mqtt.AsyncAPIExtension" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        AsyncAPIExtension
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="AsyncAPIExtension">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.mqtt.AsyncAPIExtension.init_app" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        init_app
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.mqtt.BrokerActor" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2802,6 +2830,17 @@
   
     <nav class="md-nav" aria-label="MQTTExtension">
       <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.mqtt.MQTTExtension.iter_subscriptions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        iter_subscriptions
+      
+    </span>
+  </a>
+  
+</li>
         
           <li class="md-nav__item">
   <a href="#blackbull.mqtt.MQTTExtension.on_message" class="md-nav__link">
@@ -2857,6 +2896,17 @@
     <span class="md-ellipsis">
       
         Message
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.mqtt.Subscription" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Subscription
       
     </span>
   </a>
@@ -2922,6 +2972,34 @@
   
 </nav>
       
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="asyncapi/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    asyncapi
+  
+
+    
+  </span>
+  
+  
+
+      </a>
     </li>
   
 
@@ -4393,6 +4471,34 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#blackbull.mqtt.AsyncAPIExtension" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        AsyncAPIExtension
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="AsyncAPIExtension">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.mqtt.AsyncAPIExtension.init_app" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        init_app
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.mqtt.BrokerActor" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4414,6 +4520,17 @@
   
     <nav class="md-nav" aria-label="MQTTExtension">
       <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.mqtt.MQTTExtension.iter_subscriptions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        iter_subscriptions
+      
+    </span>
+  </a>
+  
+</li>
         
           <li class="md-nav__item">
   <a href="#blackbull.mqtt.MQTTExtension.on_message" class="md-nav__link">
@@ -4469,6 +4586,17 @@
     <span class="md-ellipsis">
       
         Message
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.mqtt.Subscription" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Subscription
       
     </span>
   </a>
@@ -4608,6 +4736,83 @@ async def on_temp(msg: Message):
 
 
 
+<h3 id="blackbull.mqtt.AsyncAPIExtension" class="doc doc-heading">
+            <code>AsyncAPIExtension</code>
+
+
+<a href="#blackbull.mqtt.AsyncAPIExtension" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><a class="autorefs autorefs-internal" title="Extension (blackbull.extension.Extension)" href="../extension/#blackbull.extension.Extension">Extension</a></code></p>
+
+
+
+        <p>Mount an AsyncAPI 3.0 spec endpoint (+ HTML viewer) describing the MQTT taps.</p>
+<p>Requires an <code>MQTTExtension</code> on the same app; it is read lazily (per
+request) via <code>app.extensions['mqtt']</code>, so there is <strong>no ordering
+constraint</strong> at registration — and taps added <em>after</em> this extension are
+still documented.  The MQTT extension must, however, be present when the
+spec route is hit, or the request raises <code>RuntimeError</code>.</p>
+<p>Two GET routes are registered (mirroring <code>OpenAPIExtension</code>):</p>
+<ul>
+<li><code>spec_path</code> (default <code>/asyncapi.json</code>) → the document as JSON;</li>
+<li><code>docs_path</code> (default <code>/asyncapi</code>, <code>None</code> to skip) → an HTML page
+  hosting the CDN AsyncAPI renderer.</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.mqtt.AsyncAPIExtension.init_app" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">init_app</span><span class="p">(</span><span class="n">app</span><span class="p">)</span></code>
+
+<a href="#blackbull.mqtt.AsyncAPIExtension.init_app" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Wire the spec + docs routes onto <em>app</em> through the public API.</p>
+
+
+    </div>
+
+</div>
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
 <h3 id="blackbull.mqtt.BrokerActor" class="doc doc-heading">
             <code>BrokerActor</code>
 
@@ -4717,6 +4922,29 @@ overflow).</p>
 
 
 
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.mqtt.MQTTExtension.iter_subscriptions" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">iter_subscriptions</span><span class="p">()</span></code>
+
+<a href="#blackbull.mqtt.MQTTExtension.iter_subscriptions" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Yield a :class:<code>Subscription</code> for each registered <code>on_message</code> tap.</p>
+<p>A stable, public, read-only accessor over the compiled handlers — the
+seam <code>AsyncAPIExtension</code> reads instead of touching <code>_handlers</code>.
+Reflects the handlers registered <em>at call time</em>, so a documentation
+endpoint that calls this per request picks up taps added after the
+documenting extension was wired in.</p>
+
+
+    </div>
+
+</div>
 
 <div class="doc doc-object doc-function">
 
@@ -4867,6 +5095,59 @@ deliberately distinct from the wire codec <code>MQTTPublish</code> (which carrie
 <code>__iter__</code>/<code>__getitem__</code> tuple-magic) and from the actor inbox
 <code>Message</code> base.  Named <code>Message</code> for ecosystem consistency (aiomqtt,
 paho): users write <code>from blackbull.mqtt import Message</code>.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="blackbull.mqtt.Subscription" class="doc doc-heading">
+            <code>Subscription</code>
+
+
+<a href="#blackbull.mqtt.Subscription" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="typing.NamedTuple">NamedTuple</span></code></p>
+
+
+
+        <p>A read-only view of one registered <code>on_message</code> tap.</p>
+<p>Yielded by :meth:<code>MQTTExtension.iter_subscriptions</code> so documentation tools
+(<code>AsyncAPIExtension</code>) can describe an app's taps without reaching into the
+private <code>_handlers</code> list.  <code>topic</code> is the filter as the application
+wrote it (<code>{name}</code> captures restored); <code>callback</code> is the registered
+coroutine function (its <code>__name__</code>/docstring name the AsyncAPI operation).</p>
 
 
 

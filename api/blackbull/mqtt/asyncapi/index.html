@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://TOKUJI.github.io/BlackBull/api/blackbull/server/multiworker/">
+        <link rel="canonical" href="https://TOKUJI.github.io/BlackBull/api/blackbull/mqtt/asyncapi/">
       
       
-        <link rel="prev" href="../http2_ws/">
+        <link rel="prev" href="../">
       
       
-        <link rel="next" href="../parser/">
+        <link rel="next" href="../broker/">
       
       
         
@@ -27,7 +27,7 @@
     
     
       
-        <title>multiworker - BlackBull</title>
+        <title>asyncapi - BlackBull</title>
       
     
     
@@ -72,7 +72,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#blackbullservermultiworker" class="md-skip">
+        <a href="#blackbullmqttasyncapi" class="md-skip">
           Skip to content
         </a>
       
@@ -108,7 +108,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              multiworker
+              asyncapi
             
           </span>
         </div>
@@ -2657,18 +2657,20 @@
                 
   
   
+    
   
   
+  
     
     
     
     
     
-    <li class="md-nav__item md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2_1_16" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2_1_16" checked>
         
           
           <label class="md-nav__link" for="__nav_5_2_1_16" id="__nav_5_2_1_16_label" tabindex="0">
@@ -2689,7 +2691,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="4" aria-labelledby="__nav_5_2_1_16_label" aria-expanded="false">
+        <nav class="md-nav" data-md-level="4" aria-labelledby="__nav_5_2_1_16_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_5_2_1_16">
             <span class="md-nav__icon md-icon"></span>
             
@@ -2707,7 +2709,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../mqtt/" class="md-nav__link">
+      <a href="../" class="md-nav__link">
         
   
   
@@ -2732,10 +2734,37 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../../mqtt/asyncapi/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    asyncapi
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -2751,6 +2780,93 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#blackbull.mqtt.asyncapi" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        asyncapi
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="asyncapi">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.mqtt.asyncapi.AsyncAPIExtension" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        AsyncAPIExtension
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="AsyncAPIExtension">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.mqtt.asyncapi.AsyncAPIExtension.init_app" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        init_app
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.mqtt.asyncapi.asyncapi_html" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        asyncapi_html
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.mqtt.asyncapi.generate_asyncapi" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        generate_asyncapi
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -2763,7 +2879,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../mqtt/broker/" class="md-nav__link">
+      <a href="../broker/" class="md-nav__link">
         
   
   
@@ -2791,7 +2907,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../mqtt/connection/" class="md-nav__link">
+      <a href="../connection/" class="md-nav__link">
         
   
   
@@ -2819,7 +2935,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../mqtt/extension/" class="md-nav__link">
+      <a href="../extension/" class="md-nav__link">
         
   
   
@@ -2847,7 +2963,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../mqtt/messages/" class="md-nav__link">
+      <a href="../messages/" class="md-nav__link">
         
   
   
@@ -2875,7 +2991,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../mqtt/tap/" class="md-nav__link">
+      <a href="../tap/" class="md-nav__link">
         
   
   
@@ -3243,20 +3359,18 @@
                 
   
   
-    
   
   
-  
     
     
     
     
     
-    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2_1_22" checked>
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2_1_22" >
         
           
           <label class="md-nav__link" for="__nav_5_2_1_22" id="__nav_5_2_1_22_label" tabindex="0">
@@ -3277,7 +3391,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="4" aria-labelledby="__nav_5_2_1_22_label" aria-expanded="true">
+        <nav class="md-nav" data-md-level="4" aria-labelledby="__nav_5_2_1_22_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_5_2_1_22">
             <span class="md-nav__icon md-icon"></span>
             
@@ -3295,7 +3409,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../" class="md-nav__link">
+      <a href="../../server/" class="md-nav__link">
         
   
   
@@ -3323,7 +3437,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../access_log/" class="md-nav__link">
+      <a href="../../server/access_log/" class="md-nav__link">
         
   
   
@@ -3351,7 +3465,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../cap_log/" class="md-nav__link">
+      <a href="../../server/cap_log/" class="md-nav__link">
         
   
   
@@ -3379,7 +3493,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../connection_actor/" class="md-nav__link">
+      <a href="../../server/connection_actor/" class="md-nav__link">
         
   
   
@@ -3407,7 +3521,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../constants/" class="md-nav__link">
+      <a href="../../server/constants/" class="md-nav__link">
         
   
   
@@ -3435,7 +3549,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../deadline/" class="md-nav__link">
+      <a href="../../server/deadline/" class="md-nav__link">
         
   
   
@@ -3463,7 +3577,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../http1_actor/" class="md-nav__link">
+      <a href="../../server/http1_actor/" class="md-nav__link">
         
   
   
@@ -3491,7 +3605,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../http2_actor/" class="md-nav__link">
+      <a href="../../server/http2_actor/" class="md-nav__link">
         
   
   
@@ -3519,7 +3633,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../http2_messages/" class="md-nav__link">
+      <a href="../../server/http2_messages/" class="md-nav__link">
         
   
   
@@ -3547,7 +3661,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../http2_ws/" class="md-nav__link">
+      <a href="../../server/http2_ws/" class="md-nav__link">
         
   
   
@@ -3572,37 +3686,10 @@
                 
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    multiworker
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../../server/multiworker/" class="md-nav__link">
         
   
   
@@ -3618,82 +3705,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#blackbull.server.multiworker" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        multiworker
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="multiworker">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.multiworker.MultiWorkerServer" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        MultiWorkerServer
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="MultiWorkerServer">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.multiworker.MultiWorkerServer--parameters" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Parameters
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.multiworker.MultiWorkerServer.run" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        run
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -3706,7 +3717,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../parser/" class="md-nav__link">
+      <a href="../../server/parser/" class="md-nav__link">
         
   
   
@@ -3734,7 +3745,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../permessage_deflate/" class="md-nav__link">
+      <a href="../../server/permessage_deflate/" class="md-nav__link">
         
   
   
@@ -3762,7 +3773,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../protocol_registry/" class="md-nav__link">
+      <a href="../../server/protocol_registry/" class="md-nav__link">
         
   
   
@@ -3790,7 +3801,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../recipient/" class="md-nav__link">
+      <a href="../../server/recipient/" class="md-nav__link">
         
   
   
@@ -3818,7 +3829,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../reload/" class="md-nav__link">
+      <a href="../../server/reload/" class="md-nav__link">
         
   
   
@@ -3846,7 +3857,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../response/" class="md-nav__link">
+      <a href="../../server/response/" class="md-nav__link">
         
   
   
@@ -3874,7 +3885,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../sender/" class="md-nav__link">
+      <a href="../../server/sender/" class="md-nav__link">
         
   
   
@@ -3902,7 +3913,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../server/" class="md-nav__link">
+      <a href="../../server/server/" class="md-nav__link">
         
   
   
@@ -3930,7 +3941,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../websocket_actor/" class="md-nav__link">
+      <a href="../../server/websocket_actor/" class="md-nav__link">
         
   
   
@@ -3958,7 +3969,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../worker/" class="md-nav__link">
+      <a href="../../server/worker/" class="md-nav__link">
         
   
   
@@ -3986,7 +3997,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../ws_codec/" class="md-nav__link">
+      <a href="../../server/ws_codec/" class="md-nav__link">
         
   
   
@@ -4315,45 +4326,34 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#blackbull.server.multiworker" class="md-nav__link">
+  <a href="#blackbull.mqtt.asyncapi" class="md-nav__link">
     <span class="md-ellipsis">
       
-        multiworker
+        asyncapi
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="multiworker">
+    <nav class="md-nav" aria-label="asyncapi">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#blackbull.server.multiworker.MultiWorkerServer" class="md-nav__link">
+  <a href="#blackbull.mqtt.asyncapi.AsyncAPIExtension" class="md-nav__link">
     <span class="md-ellipsis">
       
-        MultiWorkerServer
+        AsyncAPIExtension
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="MultiWorkerServer">
+    <nav class="md-nav" aria-label="AsyncAPIExtension">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#blackbull.server.multiworker.MultiWorkerServer--parameters" class="md-nav__link">
+  <a href="#blackbull.mqtt.asyncapi.AsyncAPIExtension.init_app" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Parameters
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.multiworker.MultiWorkerServer.run" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        run
+        init_app
       
     </span>
   </a>
@@ -4362,6 +4362,28 @@
         
       </ul>
     </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.mqtt.asyncapi.asyncapi_html" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        asyncapi_html
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.mqtt.asyncapi.generate_asyncapi" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        generate_asyncapi
+      
+    </span>
+  </a>
   
 </li>
         
@@ -4390,46 +4412,49 @@
   
 
 
-<h1 id="blackbullservermultiworker"><code>blackbull.server.multiworker</code><a class="headerlink" href="#blackbullservermultiworker" title="Permanent link">&para;</a></h1>
+<h1 id="blackbullmqttasyncapi"><code>blackbull.mqtt.asyncapi</code><a class="headerlink" href="#blackbullmqttasyncapi" title="Permanent link">&para;</a></h1>
 
 
 <div class="doc doc-object doc-module">
 
 
 
-<h2 id="blackbull.server.multiworker" class="doc doc-heading">
-            <code>blackbull.server.multiworker</code>
+<h2 id="blackbull.mqtt.asyncapi" class="doc doc-heading">
+            <code>blackbull.mqtt.asyncapi</code>
 
 
-<a href="#blackbull.server.multiworker" class="headerlink" title="Permanent link">&para;</a></h2>
+<a href="#blackbull.mqtt.asyncapi" class="headerlink" title="Permanent link">&para;</a></h2>
 
     <div class="doc doc-contents first">
 
-        <p>Multi-worker master process for BlackBull.</p>
+        <p>AsyncAPI 3.0 documentation for the MQTT broker — :class:<code>AsyncAPIExtension</code>.</p>
+<p>OpenAPI documents BlackBull's HTTP surface; it has no vocabulary for topics,
+QoS, retain, or the publish/subscribe direction, so the MQTT broker is — by
+design — invisible to it.  <strong>AsyncAPI</strong> (https://www.asyncapi.com/) is the
+messaging-world counterpart, and this extension emits an AsyncAPI 3.0 document
+describing the topic taps the application registered via
+<code>MQTTExtension.on_message</code>, served over HTTP exactly as <code>/openapi.json</code> is.</p>
+<p>It is a normal :class:<code>~blackbull.extension.Extension</code>, parallel to
+<code>OpenAPIExtension</code> and coexisting with it::</p>
+<pre><code>app = BlackBull()
+mqtt = app.add_extension(MQTTExtension(port=1883))
+app.add_extension(AsyncAPIExtension(title='Sensor Gateway', version='1.0.0'))
 
-
-<details class="uses-a-pre-fork-model" open>
-  <summary>Uses a pre-fork model</summary>
-  <ol>
-<li>The master binds sockets once (via ASGIServer.open_socket).</li>
-<li>N worker processes are forked; each inherits the socket file descriptors.</li>
-<li>The master monitors workers in a synchronous loop and respawns any that crash.</li>
-<li>On SIGTERM or SIGINT the master sends SIGTERM to all workers, waits up to
-   <em>shutdown_timeout</em> seconds, then SIGKILLs any that are still alive.</li>
-</ol>
-</details>        <p>When <code>reload=True</code> the master additionally runs a file watcher; on any
-matching change it SIGTERMs the workers, marks the listening sockets
-inheritable, and <code>os.execvp</code>\ s itself with the original argv — the
-fresh process adopts the inherited fds and re-forks workers from the
-new code.  See :mod:<code>blackbull.server.reload</code>.</p>
-<p>The worker entry point is :func:<code>blackbull.server.worker.run_worker</code>.
-Each worker runs its own asyncio event loop and its own ASGI lifespan cycle.</p>
-<p>Usage::</p>
-<pre><code>from blackbull.server.multiworker import MultiWorkerServer
-
-server = MultiWorkerServer(app, raw_sockets, ssl_context, workers=4)
-server.run()          # blocks until SIGTERM / SIGINT
+@mqtt.on_message(topic='sensors/{room}/temperature')
+async def on_temp(msg, room): ...
 </code></pre>
+<p>After <code>app.run()</code> the document is at <code>/asyncapi.json</code> and an HTML viewer at
+<code>/asyncapi</code>.</p>
+<p>Honest caveats (also stated in the document's <code>info.description</code>):</p>
+<ol>
+<li>It documents the <strong>application's taps</strong>, not "the broker's API".  A broker
+   accepts any topic from any client; <code>on_message</code> filters describe only what
+   <em>this</em> app observes.</li>
+<li><strong>QoS / retain are not captured</strong> — <code>on_message</code> taps regardless of QoS,
+   so MQTT channel bindings are omitted until the tap API carries that metadata.</li>
+<li><strong>Payloads are opaque bytes</strong> (<code>application/octet-stream</code>) until an
+   optional <code>schema=</code> on <code>on_message</code> lands (a deliberate fast-follow).</li>
+</ol>
 
 
 
@@ -4454,31 +4479,31 @@ server.run()          # blocks until SIGTERM / SIGINT
 
 
 
-<h3 id="blackbull.server.multiworker.MultiWorkerServer" class="doc doc-heading">
-            <code>MultiWorkerServer</code>
+<h3 id="blackbull.mqtt.asyncapi.AsyncAPIExtension" class="doc doc-heading">
+            <code>AsyncAPIExtension</code>
 
 
-<a href="#blackbull.server.multiworker.MultiWorkerServer" class="headerlink" title="Permanent link">&para;</a></h3>
+<a href="#blackbull.mqtt.asyncapi.AsyncAPIExtension" class="headerlink" title="Permanent link">&para;</a></h3>
 
 
     <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><a class="autorefs autorefs-internal" title="Extension (blackbull.extension.Extension)" href="../../extension/#blackbull.extension.Extension">Extension</a></code></p>
 
 
 
-        <p>Spawns and supervises N worker processes.</p>
-<h5 id="blackbull.server.multiworker.MultiWorkerServer--parameters">Parameters<a class="headerlink" href="#blackbull.server.multiworker.MultiWorkerServer--parameters" title="Permanent link">&para;</a></h5>
-<p>app:
-    ASGI application callable.
-raw_sockets:
-    Pre-bound sockets that every worker will inherit.
-ssl_context:
-    TLS context, or None for plain HTTP.
-workers:
-    Number of worker processes to maintain.
-max_connections:
-    Per-worker connection limit forwarded to :class:<code>ASGIServer</code>.
-shutdown_timeout:
-    Seconds to wait for graceful shutdown before sending SIGKILL.</p>
+        <p>Mount an AsyncAPI 3.0 spec endpoint (+ HTML viewer) describing the MQTT taps.</p>
+<p>Requires an <code>MQTTExtension</code> on the same app; it is read lazily (per
+request) via <code>app.extensions['mqtt']</code>, so there is <strong>no ordering
+constraint</strong> at registration — and taps added <em>after</em> this extension are
+still documented.  The MQTT extension must, however, be present when the
+spec route is hit, or the request raises <code>RuntimeError</code>.</p>
+<p>Two GET routes are registered (mirroring <code>OpenAPIExtension</code>):</p>
+<ul>
+<li><code>spec_path</code> (default <code>/asyncapi.json</code>) → the document as JSON;</li>
+<li><code>docs_path</code> (default <code>/asyncapi</code>, <code>None</code> to skip) → an HTML page
+  hosting the CDN AsyncAPI renderer.</li>
+</ul>
 
 
 
@@ -4504,18 +4529,15 @@ shutdown_timeout:
 <div class="doc doc-object doc-function">
 
 
-<h4 id="blackbull.server.multiworker.MultiWorkerServer.run" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">run</span><span class="p">()</span></code>
+<h4 id="blackbull.mqtt.asyncapi.AsyncAPIExtension.init_app" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">init_app</span><span class="p">(</span><span class="n">app</span><span class="p">)</span></code>
 
-<a href="#blackbull.server.multiworker.MultiWorkerServer.run" class="headerlink" title="Permanent link">&para;</a></h4>
+<a href="#blackbull.mqtt.asyncapi.AsyncAPIExtension.init_app" class="headerlink" title="Permanent link">&para;</a></h4>
 
 
     <div class="doc doc-contents ">
 
-        <p>Spawn workers and block until a shutdown signal is received.</p>
-<p>When <code>reload</code> is enabled the master also runs a file watcher and
-re-execs itself on any matching change — see
-:mod:<code>blackbull.server.reload</code>.</p>
+        <p>Wire the spec + docs routes onto <em>app</em> through the public API.</p>
 
 
     </div>
@@ -4530,6 +4552,44 @@ re-execs itself on any matching change — see
 
 </div>
 
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="blackbull.mqtt.asyncapi.asyncapi_html" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">asyncapi_html</span><span class="p">(</span><span class="n">spec_url</span><span class="p">,</span> <span class="n">title</span><span class="o">=</span><span class="s1">&#39;BlackBull — AsyncAPI&#39;</span><span class="p">)</span></code>
+
+<a href="#blackbull.mqtt.asyncapi.asyncapi_html" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Return a self-contained HTML page hosting the AsyncAPI renderer.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="blackbull.mqtt.asyncapi.generate_asyncapi" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">generate_asyncapi</span><span class="p">(</span><span class="n">mqtt</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">title</span><span class="p">,</span> <span class="n">version</span><span class="p">,</span> <span class="n">description</span><span class="p">,</span> <span class="n">server_host</span><span class="p">)</span></code>
+
+<a href="#blackbull.mqtt.asyncapi.generate_asyncapi" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Build an AsyncAPI 3.0 document for <em>mqtt</em>'s registered <code>on_message</code> taps.</p>
+<p><em>mqtt</em> is an <code>MQTTExtension</code> (anything exposing <code>iter_subscriptions()</code>
+and <code>port</code>).  The returned dict is JSON-serialisable.</p>
+
+
+    </div>
+
+</div>
 
 
 
