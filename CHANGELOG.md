@@ -41,6 +41,17 @@ so the editable install's metadata catches up.
   `stream.py`) is now lazy `%`-args or `isEnabledFor`-guarded, so nothing is
   formatted or concatenated when the log level is off. DEBUG output is unchanged
   when DEBUG is on; two valueless per-frame traces were dropped.
+- **`RequestActor` fast path when no listeners are registered.** When no Level B
+  request-lifecycle event handler is registered (the default), `RequestActor.run()`
+  now calls the ASGI app directly, skipping the `EventAggregator` indirection
+  (~4 async frames/request that Sprint 53 added for the MQTT broker pattern).
+  Benefits HTTP/1.1 and HTTP/2 (both dispatch through `RequestActor`). The
+  aggregator path is still taken the moment any listener — including an
+  `error`-only one — is present.
+- **`PrefixReader.readuntil()` short-circuit.** Once the protocol-detect prefix
+  is drained (the common keep-alive case), `readuntil` delegates straight to the
+  underlying reader, skipping the per-call buffer bookkeeping.
+
 ### Added
 - **`AsyncAPIExtension` — AsyncAPI 3.0 docs for the MQTT broker.** Parallel to
   `OpenAPIExtension` (and coexisting with it), it serves an AsyncAPI 3.0
@@ -76,6 +87,10 @@ so the editable install's metadata catches up.
   (CodeQL `py/catch-base-exception`.)
 
 ### Internal
+- **MQTT per-connection actor renamed `MQTTConnectionActor` → `MQTT5Actor`**,
+  matching the `HTTP1Actor` / `HTTP2Actor` `<Protocol><Version>Actor` convention
+  (the `Connection` suffix made it read like a dispatcher). No public API impact —
+  it was never exported.
 - CodeQL quality analysis is scoped to the shipped package (`blackbull/`) plus
   `examples/`; `tests/`, `bench/`, `templates/`, and `docs/` are excluded via
   `.github/codeql/codeql-config.yml`, removing ~196 style-lint alerts in

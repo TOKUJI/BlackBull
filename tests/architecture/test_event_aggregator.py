@@ -90,3 +90,51 @@ def test_all_level_b_events_covered() -> None:
     from blackbull.event_aggregator import EventAggregator
     actual = {name for name in dir(EventAggregator) if name.startswith("on_")}
     assert expected == actual
+
+
+# ---------------------------------------------------------------------------
+# has_any_request_listeners — the RequestActor fast-path guard
+# ---------------------------------------------------------------------------
+
+# Every event a request may emit between RequestActor.run() entry and exit.
+# The fast path is only safe to take when NONE of these has a listener.
+_REQUEST_PATH_EVENTS = {
+    'request_received', 'before_handler', 'after_handler',
+    'request_completed', 'request_disconnected', 'error',
+}
+
+
+def test_request_events_set_matches_emitted_events() -> None:
+    """The fast-path guard must check exactly the events the request path can
+    emit — no more, no fewer.  Adding a new request event without listing it
+    here (the way ``error`` was originally missed) would silently bypass its
+    listeners on the fast path."""
+    assert set(EventAggregator._REQUEST_EVENTS) == _REQUEST_PATH_EVENTS
+
+
+def test_has_any_request_listeners_false_when_empty() -> None:
+    agg = EventAggregator(EventDispatcher())
+    assert agg.has_any_request_listeners() is False
+
+
+@pytest.mark.parametrize('event', sorted(_REQUEST_PATH_EVENTS))
+def test_has_any_request_listeners_true_for_each_request_event(event) -> None:
+    """Registering a listener for ANY request event (observer or interceptor)
+    must disable the fast path.  Parametrised over ``error`` too — the bug was
+    that an ``error``-only listener was bypassed."""
+    d_obs = EventDispatcher()
+    d_obs.on(event, AsyncMock())
+    assert EventAggregator(d_obs).has_any_request_listeners() is True
+
+    d_int = EventDispatcher()
+    d_int.intercept(event, AsyncMock())
+    assert EventAggregator(d_int).has_any_request_listeners() is True
+
+
+@pytest.mark.parametrize('event', ['app_startup', 'websocket_message',
+                                   'connection_accepted', 'message_received'])
+def test_has_any_request_listeners_ignores_non_request_events(event) -> None:
+    """A listener on a non-request event must NOT disable the fast path."""
+    d = EventDispatcher()
+    d.on(event, AsyncMock())
+    assert EventAggregator(d).has_any_request_listeners() is False

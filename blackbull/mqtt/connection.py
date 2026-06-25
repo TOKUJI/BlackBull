@@ -1,6 +1,6 @@
 """MQTT 5.0 per-connection actor and its raw-protocol entry point.
 
-:class:`MQTTConnectionActor` is one per connection. Its **inbox carries only
+:class:`MQTT5Actor` is one per connection. Its **inbox carries only
 outbound packets** (:class:`~blackbull.mqtt.broker.Send` /
 :class:`~blackbull.mqtt.broker.Close` from the broker, plus the two stateless
 replies it generates itself), and its ``run()`` — draining that inbox — is the
@@ -78,8 +78,8 @@ class PacketFramer:
             yield message
 
 
-class MQTTConnectionActor(Actor):
-    """One per MQTT connection; the sole writer to its socket.
+class MQTT5Actor(Actor):
+    """One per MQTT 5.0 connection; the sole writer to its socket.
 
     Tap dispatch is selected at construction: pass a running :class:`TapActor`
     as *tap* for decoupled (actor-mode) dispatch, or *app_handlers* for inline
@@ -196,7 +196,7 @@ async def serve_connection(reader: AbstractReader, writer: AbstractWriter,
     Will fires on an abnormal (cancelled) close.  Pass *tap* for decoupled tap
     dispatch or *app_handlers* for inline dispatch (see :mod:`blackbull.mqtt.tap`).
     """
-    conn = MQTTConnectionActor(writer, broker, ctx,
+    conn = MQTT5Actor(writer, broker, ctx,
                                app_handlers=app_handlers, tap=tap)
     writer_task = asyncio.create_task(conn.run())
     graceful = False
