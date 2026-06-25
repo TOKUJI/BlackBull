@@ -1,0 +1,20 @@
+# CodeQL configuration.
+#
+# The analysis runs the `security-extended,security-and-quality` suites (see
+# codeql.yml).  The quality suite lints style across *all* Python, which floods
+# the alert list with unused-import / empty-except / ineffectual-statement hits
+# in code we never ship: the test suite, micro-benchmarks, and the generated
+# template dummy modules.  Scope quality analysis to the shipped package
+# (`blackbull/`) and the user-facing `examples/` (teaching code we want kept
+# clean) by ignoring the rest.
+#
+# Note: this also stops scanning the test-only self-signed-TLS setups that
+# tripped `py/request-without-cert-validation` in tests/integration — those are
+# intended for the local h2 fault-injection server, not real findings.  The
+# acceptance is recorded in .claude/planning/drafts/codeql-backlog-triage.md.
+
+paths-ignore:
+  - tests
+  - bench
+  - templates
+  - docs
