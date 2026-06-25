@@ -4444,6 +4444,9 @@ same result.</p>
     <div class="doc doc-contents ">
 
         <p>Read the complete request body from the ASGI receive channel.</p>
+<p>Collects chunks in a list and joins once, rather than the O(n²) <code>+=</code>
+growth.  A single-chunk body (the common case) is returned directly with
+no intermediate copy at all (copy-reduction-http1 P1).</p>
 
 
     </div>
