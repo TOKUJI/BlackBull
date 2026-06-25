@@ -8,14 +8,25 @@ Provides:
 
 
 async def read_body(receive) -> bytes:
-    """Read the complete request body from the ASGI receive channel."""
-    body = b''
+    """Read the complete request body from the ASGI receive channel.
+
+    Collects chunks in a list and joins once, rather than the O(n²) ``+=``
+    growth.  A single-chunk body (the common case) is returned directly with
+    no intermediate copy at all (copy-reduction-http1 P1).
+    """
+    chunks: list[bytes] = []
     while True:
         event = await receive()
-        body += event.get('body', b'')
+        chunk = event.get('body', b'')
+        if chunk:
+            chunks.append(chunk)
         if not event.get('more_body', False):
             break
-    return body
+    if not chunks:
+        return b''
+    if len(chunks) == 1:
+        return chunks[0]
+    return b''.join(chunks)
 
 
 def parse_cookies(scope) -> dict[str, str]:

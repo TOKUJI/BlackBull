@@ -99,10 +99,11 @@ class FrameBase:
         self.type_ = type_
         self.flags = flags
         self.stream_id = stream_id
-        logger.debug(f'type={self.type_}, '
-                     f'flag={self.flags}, '
-                     f'stream_id={self.stream_id} '
-                     f'and payload size={self.length}')
+        # Guarded: __init__ runs on every frame in both directions, so the
+        # f-string must not be built when DEBUG is off (Tier 1).
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug('type=%s, flag=%s, stream_id=%s and payload size=%s',
+                         self.type_, self.flags, self.stream_id, self.length)
 
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)
@@ -133,7 +134,8 @@ class FrameBase:
         res += self.flags.to_bytes(1, 'big', signed=False)
         res += self.stream_id.to_bytes(4, 'big', signed=False)
 
-        logger.debug(f'FrameBase is saving a frame {res}')
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug('FrameBase is saving a frame %r', res)
         return res
 
     def has_continuation(self) -> bool:
@@ -429,7 +431,10 @@ class Headers(FrameBase):
         self.length = len(payload)
 
         base = super().save()
-        logger.debug(base + payload)
+        # Guarded: fires on every HEADERS write; the unguarded form also
+        # allocated `base + payload` purely to log it (Tier 1).
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug('Headers.save: %r', base + payload)
         return base + payload
 
     def has_continuation(self) -> bool:
@@ -541,7 +546,9 @@ class RstStream(FrameBase):
             self.error_code = ErrorCodes(raw)
         except ValueError:
             self.error_code = raw
-        logger.debug(f'error_code: {self.error_code}')
+        # Lazy %-args defer formatting until the record is emitted; RST_STREAM
+        # is rare and the arg is cheap, so no isEnabledFor guard is needed.
+        logger.debug('error_code: %s', self.error_code)
 
     def save(self):
         base = super().save()
@@ -595,13 +602,16 @@ class Priority(FrameBase):
         payload = BytesIO(data or b'')
 
         _t = int.from_bytes(payload.read(4), 'big', signed=False)
-        logger.info(_t)
 
         self.exclusion = 0x80000000 & _t
         self.dependent_stream = _t & 0x7fffffff
         # RFC 7540 §6.3: wire value is weight − 1; add 1 to get true weight (1–256).
         self.weight = int.from_bytes(payload.read(1), 'big', signed=False) + 1
-        logger.info(f'exclusion: {self.exclusion}, dependent_stream: {self.dependent_stream}, weight: {self.weight}')
+        # Lazy %-args defer formatting until emit; PRIORITY frames are rare, so
+        # the plain call (no isEnabledFor guard) is enough.  The bare
+        # `logger.info(_t)` debug-leftover above was removed.
+        logger.info('exclusion: %s, dependent_stream: %s, weight: %s',
+                    self.exclusion, self.dependent_stream, self.weight)
 
     def save(self):
         base = super().save()

@@ -244,7 +244,10 @@ class Stream:
 
 
 def eos(frame):  # eos: end of stream
-    logger.debug(f'{frame}, {frame.FrameType()}, {frame.flags}')
+    # Guarded: eos() runs on every DATA/HEADERS frame; the f-string (which
+    # formats the frame repr) must not be built when DEBUG is off (Tier 1).
+    if logger.isEnabledFor(logging.DEBUG):
+        logger.debug('%s, %s, %s', frame, frame.FrameType(), frame.flags)
     if frame.FrameType() == FrameTypes.DATA and frame.flags & DataFrameFlags.END_STREAM > 0 or\
        frame.FrameType() == FrameTypes.HEADERS and frame.flags & HeaderFrameFlags.END_STREAM > 0:
         return True
