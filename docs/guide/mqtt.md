@@ -128,12 +128,60 @@ mosquitto_pub -t 'sensors/room1/temperature' -m '21.5' -p 1883 -V 5
 The message appears in the subscriber's terminal and in any matching
 `@mqtt.on_message` handler.
 
+## Documenting the taps with AsyncAPI
+
+OpenAPI documents BlackBull's HTTP surface, but it has no vocabulary for topics
+or the publish/subscribe direction, so the broker is invisible to it. The
+messaging-world counterpart is [AsyncAPI](https://www.asyncapi.com/), and
+`AsyncAPIExtension` emits an AsyncAPI 3.0 document for the topic taps your app
+registered — served over HTTP, exactly as `/openapi.json` is. It is a normal
+extension and coexists with `OpenAPIExtension`:
+
+```python
+from blackbull import BlackBull
+from blackbull.mqtt import MQTTExtension, AsyncAPIExtension, Message
+
+app = BlackBull()
+mqtt = app.add_extension(MQTTExtension(port=1883))
+app.add_extension(AsyncAPIExtension(title='Sensor Gateway', version='1.0.0'))
+
+@mqtt.on_message(topic='sensors/{room}/temperature')
+async def on_temp(msg: Message, room: str):
+    """Temperature readings per room."""
+```
+
+After `app.run()` the document is at `/asyncapi.json` and an HTML viewer (a
+CDN-hosted AsyncAPI renderer — no new Python dependency) at `/asyncapi`. Each
+`on_message` filter becomes a *channel* whose `address` is the filter as you
+wrote it (`{name}` captures preserved); each callback becomes a `receive`
+*operation* (the application *receives* PUBLISHes), with its docstring summary.
+Pass `docs_path=None` to skip the HTML page, or `server_host=` to override the
+advertised broker host (default `localhost:<port>`).
+
+The document is generated lazily on each request, so taps registered *after*
+`add_extension(AsyncAPIExtension(...))` are still included. The MQTT extension
+must be present when the spec route is hit, or the request raises
+`RuntimeError`.
+
+Three honest caveats — also stated in the document's `info.description`:
+
+- It documents the **application's taps**, not "the broker's API". A broker
+  accepts any topic from any client; `on_message` filters describe only what
+  *this* app observes.
+- **QoS and retain are not captured** — taps fire regardless of QoS, so MQTT
+  channel bindings are omitted until the tap API carries that metadata.
+- **Payloads are opaque bytes** (`application/octet-stream`) until a future
+  opt-in `schema=` on `on_message` lands.
+
 ## Limitations
 
 - **Cleartext only.** TLS / MQTT-over-WebSocket transport is not yet wired up,
   matching the bridge's current limits.
-- **Single process.** Broker state (subscriptions, sessions, retained messages)
-  lives in the serving process; it is not shared across workers and is not
-  persisted across restarts.
+- **Single owner (HTTP still scales).** The broker runs on **worker 0** only —
+  its state (subscriptions, sessions, retained messages) lives in that one
+  process and is neither shared across workers nor persisted across restarts.
+  HTTP, however, scales across all workers: `app.run(workers=4)` alongside the
+  broker runs HTTP on every worker and the broker on worker 0. (`--reload` still
+  pins `workers=1` when a broker is registered.)
 - **In-memory sessions.** Sessions are retained for the process lifetime rather
   than expired on a timer; restarting the broker clears all session state.

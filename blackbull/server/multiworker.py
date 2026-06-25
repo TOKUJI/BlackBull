@@ -65,12 +65,19 @@ class MultiWorkerServer:
                  ws_queue_depth: int = 256,
                  shutdown_timeout: float = _SHUTDOWN_TIMEOUT,
                  reload: bool = False,
-                 reload_paths=None):
+                 reload_paths=None,
+                 protocol_sockets=None):
         if workers < 1:
             raise ValueError(f'workers must be >= 1, got {workers}')
         self._app = app
         self._ssl_context = ssl_context
         self._num_workers = workers
+        # Stateful non-ASGI protocol listeners (eg MQTT), bound once by the
+        # master.  HTTP scales across every worker, but a stateful broker must
+        # have a single owner, so these go to worker 0 only — see
+        # ``_spawn_worker``.  The master keeps them open for the worker's
+        # lifetime so a respawned worker 0 re-inherits them.
+        self._protocol_sockets = list(protocol_sockets or [])
         self._max_connections = max_connections
         self._stream_queue_depth = stream_queue_depth
         self._ws_queue_depth = ws_queue_depth
@@ -166,11 +173,17 @@ class MultiWorkerServer:
     # ------------------------------------------------------------------
 
     def _spawn_worker(self, worker_id: int):
+        # Only worker 0 owns the stateful protocol listeners (MQTT, …); the
+        # rest serve HTTP only.  Worker 0 inherits the master's still-open
+        # protocol fds via fork, so a respawn after a crash re-adopts them
+        # and the broker resumes on the same port.
+        protocol_sockets = self._protocol_sockets if worker_id == 0 else None
         p = self._mp_ctx.Process(
             target=run_worker,
             args=(self._app, self._worker_sockets[worker_id], self._ssl_context,
                   worker_id, self._max_connections,
-                  self._stream_queue_depth, self._ws_queue_depth),
+                  self._stream_queue_depth, self._ws_queue_depth,
+                  protocol_sockets),
             daemon=False,  # workers must be reaped explicitly on shutdown
             name=f'bb-worker-{worker_id}',
         )

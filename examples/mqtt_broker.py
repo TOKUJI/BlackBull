@@ -38,13 +38,16 @@ the handler below, and the running count shows up at http://localhost:8000/statu
 import logging
 
 from blackbull import BlackBull
-from blackbull.mqtt import MQTTExtension, Message
+from blackbull.mqtt import MQTTExtension, AsyncAPIExtension, Message
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger('examples.mqtt')
 
 app = BlackBull()
 mqtt = app.add_extension(MQTTExtension(port=1883))
+# AsyncAPI 3.0 docs for the taps below — served at /asyncapi.json and /asyncapi,
+# the messaging-world counterpart of /openapi.json + /docs for HTTP.
+app.add_extension(AsyncAPIExtension(title='Sensor Gateway', version='1.0.0'))
 
 _seen: dict[str, int] = {}
 

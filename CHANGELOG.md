@@ -41,8 +41,32 @@ so the editable install's metadata catches up.
   `stream.py`) is now lazy `%`-args or `isEnabledFor`-guarded, so nothing is
   formatted or concatenated when the log level is off. DEBUG output is unchanged
   when DEBUG is on; two valueless per-frame traces were dropped.
+### Added
+- **`AsyncAPIExtension` — AsyncAPI 3.0 docs for the MQTT broker.** Parallel to
+  `OpenAPIExtension` (and coexisting with it), it serves an AsyncAPI 3.0
+  document describing the app's `@mqtt.on_message` topic taps at
+  `/asyncapi.json`, plus a CDN-hosted HTML viewer at `/asyncapi` (no new Python
+  dependency). Each tap filter becomes a channel (the `{name}`-preserved filter
+  as its address); each callback a `receive` operation. Generated lazily, so
+  taps registered after the extension are still documented. `MQTTExtension`
+  gains a public `iter_subscriptions()` accessor so the generator never reaches
+  into private handler state. Payloads are opaque bytes for now (a `schema=`
+  fast-follow is planned). `from blackbull.mqtt import AsyncAPIExtension`.
+- **HTTP scales across workers alongside a stateful protocol (MQTT).**
+  `app.run(port=8000, workers=4)` with, e.g., `MQTTExtension(port=1883)` no
+  longer forces the whole process to a single worker. The master binds the
+  protocol port once and hands it to **worker 0** only — the broker keeps its
+  single owner (required by the MQTT 5 spec) while HTTP runs on every worker. A
+  crashed worker 0 is respawned and re-inherits the still-open listener.
+  Auto-reload (`--reload`) with a port-bound protocol still pins `workers=1`
+  (the exec socket-handoff does not yet carry protocol listeners).
 
 ### Fixed
+- **`BB_SOCKET_REUSEPORT` is now honoured on the HTTP listener.** The setting
+  existed (`env.py`, CLI TOML mapping) but was never passed through
+  `Server.open_socket()` to `create_dual_stack_sockets()`, so `SO_REUSEPORT`
+  was silently inert on the bound HTTP sockets. Plumbed through (the stateful
+  protocol port is still bound *without* it, by design — a single owner).
 - **`WebSocketActor` no longer swallows `asyncio.CancelledError`.** `run()`
   caught `BaseException` (to isolate the connection from app/protocol errors),
   which also swallowed cancellation — so cancelling a WebSocket task completed it
