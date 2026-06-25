@@ -98,17 +98,29 @@ appears.
 
 ## Deployment notes
 
-### Raw protocol handlers are single-worker and cleartext-only
+### Raw protocol handlers: single-owner, HTTP still scales, cleartext-only
 
 When a non-ASGI protocol handler is registered via `app.raw_handler()` or
-`app.register_protocol_handler()`, BlackBull enforces two constraints:
+`app.register_protocol_handler()`, BlackBull applies these constraints:
 
-**Single-worker only** — if `workers > 1` is requested at startup, the
-server silently forces `workers=1` for the entire process.  The root cause
-is that inherited-socket adoption (used for `--reload`) does not tag sockets
-by protocol; distributing raw protocol sockets across worker processes would
-require SO_REUSEPORT with protocol-tagged socket sets or a dispatcher-worker
-model.  Still outstanding as of Sprint 54; no scheduled sprint.
+**The protocol has a single owner, but HTTP scales (Sprint 55).** A stateful
+broker must have one owner (see the MQTT section below), so the master binds
+the protocol port once and hands it to **worker 0** only; the broker lives
+there.  HTTP is stateless, so `app.run(port=8000, workers=4)` alongside, say,
+`MQTTExtension(port=1883)` now runs HTTP on **all** workers while the broker
+runs on worker 0.  If worker 0 crashes the master respawns it and it
+re-inherits the still-open listening socket, so the broker resumes on the same
+port (clients reconnect; in-memory broker state is not preserved — see below).
+
+The one exception is **auto-reload** (`--reload`): it hands listening sockets
+across an `exec` via fd inheritance, and that handoff does not yet include the
+protocol listeners, so `reload=True` with a port-bound protocol still forces
+`workers=1`.  Run without reload to scale HTTP alongside the broker.
+
+`BB_SOCKET_REUSEPORT=1` makes each HTTP worker bind its own kernel accept
+queue (best load distribution); without it the workers share the master's
+listening socket.  The protocol port is always bound without `SO_REUSEPORT`
+— a single owner is the point.
 
 **Cleartext only** — raw protocol sockets are bound without TLS regardless
 of whether a TLS certificate is configured.  Adding TLS support for raw
@@ -119,12 +131,13 @@ raw socket.
 ### MQTT broker: best-effort taps, in-memory single-process state
 
 The MQTT 5 broker (`blackbull.mqtt`, opt-in via `blackbull[mqtt]`) rides
-the raw-protocol bridge above, so it inherits both constraints there —
-**single-worker** and **cleartext only** (front a TLS terminator for
+the raw-protocol bridge above, so it inherits its constraints —
+**single-owner** (the broker runs on worker 0; HTTP still scales across all
+workers) and **cleartext only** (front a TLS terminator for
 MQTT-over-TLS).  Beyond those:
 
-**Why single-worker is a protocol requirement, not an implementation
-limitation.**  The MQTT 5.0 specification (OASIS Committee Specification
+**Why a single broker owner is a protocol requirement, not an
+implementation limitation.**  The MQTT 5.0 specification (OASIS Committee Specification
 02, March 2019) defines semantics that depend on broker-side state visible
 to every connection: publish-subscribe matching (§3.3), retained messages
 (§3.3.2.3), session state across Clean Start = 0 reconnects (§3.1.2.11),
@@ -145,10 +158,11 @@ back-pressure routing.  Use a real MQTT subscription when you need
 guaranteed delivery; treat a tap as a probe.
 
 **Broker state is in-memory and per-process.**  Subscriptions, sessions,
-and retained messages live in the serving process — not shared across
-workers (hence single-worker) and not persisted across a restart.  A
-restart clears all session and retained state.  Sessions are also kept
-for the process lifetime rather than expired on a timer.
+and retained messages live in the one serving process (worker 0) — not
+shared across workers (hence the single-owner model) and not persisted
+across a restart.  A restart, or a worker-0 respawn after a crash, clears
+all session and retained state.  Sessions are also kept for the process
+lifetime rather than expired on a timer.
 
 **Subscription options are persisted but not fully enforced.**  No Local
 and Retain As Published are parsed and stored in the session (and survive

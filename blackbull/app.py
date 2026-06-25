@@ -838,15 +838,22 @@ def serve(app, *,
     workers = workers if workers is not None else _cfg.workers
     workers = workers or (_os.cpu_count() or 1)
 
-    # Sprint 50: port-bound non-ASGI protocols are bound only in the
-    # single-worker path (inherited-socket adoption does not tag sockets by
-    # protocol, so multi-worker raw ports are a carry-forward).  Force
-    # workers=1 so ``app.run(port=8000)`` with a raw_handler "just works".
+    # Stateful non-ASGI protocols (MQTT, …) must have a single owner, but HTTP
+    # is stateless and should scale.  The master binds the protocol port once
+    # and hands it to worker 0 only (see MultiWorkerServer), so multi-worker +
+    # MQTT now works: HTTP uses every worker, the broker lives on worker 0.
+    #
+    # The one exception is auto-reload: it carries listening sockets across an
+    # exec via fd inheritance, and that handoff does not yet include the
+    # protocol listeners.  Keep reload + stateful protocols single-worker until
+    # that is wired up.
     if (isinstance(app, BlackBull) and app._protocol_registry is not None
-            and app._protocol_registry.has_port_bindings() and workers > 1):
+            and app._protocol_registry.has_port_bindings() and workers > 1
+            and reload):
         logger.warning(
-            'Non-ASGI protocol handlers are single-worker only; '
-            'forcing workers=1 (was %d).', workers)
+            'Auto-reload does not yet hand stateful protocol listeners across '
+            'its exec; forcing workers=1 (was %d). Run without reload to scale '
+            'HTTP alongside the broker.', workers)
         workers = 1
     max_connections = max_connections if max_connections is not None else _cfg.max_connections
     stream_queue_depth = (stream_queue_depth if stream_queue_depth is not None
@@ -917,6 +924,9 @@ def serve(app, *,
         ws_queue_depth=ws_queue_depth,
         reload=reload,
         reload_paths=reload_paths,
+        # Bound by master_server.open_socket(); handed to worker 0 only so the
+        # broker has a single owner while HTTP scales across all workers.
+        protocol_sockets=master_server._protocol_sockets,
     ).run()
 
     master_server.close_socket()

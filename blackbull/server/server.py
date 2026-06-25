@@ -458,6 +458,11 @@ class Server:
             rcvbuf=_cfg.socket_rcvbuf,
             user_timeout_ms=_cfg.tcp_user_timeout_ms,
             keepalive=False,  # replaced by app-level keep_alive_timeout
+            # Honour BB_SOCKET_REUSEPORT on the HTTP listener so forked
+            # workers can co-bind the same port and the kernel load-balances
+            # accepts across them.  (Stateful protocol ports below are bound
+            # WITHOUT reuseport on purpose — they must have a single owner.)
+            reuseport=_cfg.socket_reuseport,
         )
 
         if not raw_sockets:

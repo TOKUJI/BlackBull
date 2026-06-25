@@ -31,7 +31,22 @@ so the editable install's metadata catches up.
 
 ## [Unreleased]
 
+### Added
+- **HTTP scales across workers alongside a stateful protocol (MQTT).**
+  `app.run(port=8000, workers=4)` with, e.g., `MQTTExtension(port=1883)` no
+  longer forces the whole process to a single worker. The master binds the
+  protocol port once and hands it to **worker 0** only — the broker keeps its
+  single owner (required by the MQTT 5 spec) while HTTP runs on every worker. A
+  crashed worker 0 is respawned and re-inherits the still-open listener.
+  Auto-reload (`--reload`) with a port-bound protocol still pins `workers=1`
+  (the exec socket-handoff does not yet carry protocol listeners).
+
 ### Fixed
+- **`BB_SOCKET_REUSEPORT` is now honoured on the HTTP listener.** The setting
+  existed (`env.py`, CLI TOML mapping) but was never passed through
+  `Server.open_socket()` to `create_dual_stack_sockets()`, so `SO_REUSEPORT`
+  was silently inert on the bound HTTP sockets. Plumbed through (the stateful
+  protocol port is still bound *without* it, by design — a single owner).
 - **`WebSocketActor` no longer swallows `asyncio.CancelledError`.** `run()`
   caught `BaseException` (to isolate the connection from app/protocol errors),
   which also swallowed cancellation — so cancelling a WebSocket task completed it
