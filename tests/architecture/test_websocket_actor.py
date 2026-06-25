@@ -194,4 +194,34 @@ async def test_protocol_violation_closes_writer(
     actor = WebSocketActor(fake_bad_frame_reader, fake_writer, scope, app, aggregator)
     await actor.run()
 
+
+@pytest.mark.asyncio
+async def test_cancellation_propagates_and_is_not_reported_as_error(
+        fake_writer) -> None:
+    """Cancelling the actor's task must raise CancelledError (the task really
+    cancels instead of completing normally) and must NOT be reported via
+    on_error — cancellation is not an error.  Regression: run() used to catch
+    BaseException, swallowing CancelledError."""
+    aggregator = AsyncMock(spec_set=EventAggregator)
+    scope = {'type': 'websocket', '_connection_id': 'test-id'}
+    accepted = asyncio.Event()
+
+    async def app(scope, receive, send):
+        await receive()  # websocket.connect
+        await send({'type': 'websocket.accept'})
+        accepted.set()
+        await asyncio.Event().wait()  # block until cancelled
+
+    actor = WebSocketActor(_FakeReader(b''), fake_writer, scope, app, aggregator)
+    task = asyncio.create_task(actor.run())
+    await accepted.wait()
+    task.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    aggregator.on_error.assert_not_called()
+    # The finally cleanup still fires on cancellation.
+    aggregator.on_websocket_disconnected.assert_called_once()
+
     assert fake_writer.closed, 'writer.close() must be called after protocol violation'

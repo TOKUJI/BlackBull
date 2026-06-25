@@ -29,6 +29,25 @@ so the editable install's metadata catches up.
 
 ---
 
+## [Unreleased]
+
+### Fixed
+- **`WebSocketActor` no longer swallows `asyncio.CancelledError`.** `run()`
+  caught `BaseException` (to isolate the connection from app/protocol errors),
+  which also swallowed cancellation — so cancelling a WebSocket task completed it
+  *normally* and reported the cancellation through `on_error` instead of
+  propagating it. It now re-raises `CancelledError` before the generic handler
+  (mirroring `HTTP1Actor`); the disconnect/close cleanup still runs in `finally`.
+  (CodeQL `py/catch-base-exception`.)
+
+### Internal
+- CodeQL quality analysis is scoped to the shipped package (`blackbull/`) plus
+  `examples/`; `tests/`, `bench/`, `templates/`, and `docs/` are excluded via
+  `.github/codeql/codeql-config.yml`, removing ~196 style-lint alerts in
+  non-shipped code.
+
+---
+
 ## [0.44.0] — 2026-06-25
 
 Combined release of Sprint 50 through Sprint 54 (see the Versioning note above).
