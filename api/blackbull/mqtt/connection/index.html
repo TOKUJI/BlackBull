@@ -2865,19 +2865,19 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#blackbull.mqtt.connection.MQTTConnectionActor" class="md-nav__link">
+  <a href="#blackbull.mqtt.connection.MQTT5Actor" class="md-nav__link">
     <span class="md-ellipsis">
       
-        MQTTConnectionActor
+        MQTT5Actor
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="MQTTConnectionActor">
+    <nav class="md-nav" aria-label="MQTT5Actor">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#blackbull.mqtt.connection.MQTTConnectionActor.read_loop" class="md-nav__link">
+  <a href="#blackbull.mqtt.connection.MQTT5Actor.read_loop" class="md-nav__link">
     <span class="md-ellipsis">
       
         read_loop
@@ -4338,19 +4338,19 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#blackbull.mqtt.connection.MQTTConnectionActor" class="md-nav__link">
+  <a href="#blackbull.mqtt.connection.MQTT5Actor" class="md-nav__link">
     <span class="md-ellipsis">
       
-        MQTTConnectionActor
+        MQTT5Actor
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="MQTTConnectionActor">
+    <nav class="md-nav" aria-label="MQTT5Actor">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#blackbull.mqtt.connection.MQTTConnectionActor.read_loop" class="md-nav__link">
+  <a href="#blackbull.mqtt.connection.MQTT5Actor.read_loop" class="md-nav__link">
     <span class="md-ellipsis">
       
         read_loop
@@ -4428,7 +4428,7 @@
     <div class="doc doc-contents first">
 
         <p>MQTT 5.0 per-connection actor and its raw-protocol entry point.</p>
-<p>:class:<code>MQTTConnectionActor</code> is one per connection. Its <strong>inbox carries only
+<p>:class:<code>MQTT5Actor</code> is one per connection. Its <strong>inbox carries only
 outbound packets</strong> (:class:<code>~blackbull.mqtt.broker.Send</code> /
 :class:<code>~blackbull.mqtt.broker.Close</code> from the broker, plus the two stateless
 replies it generates itself), and its <code>run()</code> — draining that inbox — is the
@@ -4461,11 +4461,11 @@ the two together.</p>
 
 
 
-<h3 id="blackbull.mqtt.connection.MQTTConnectionActor" class="doc doc-heading">
-            <code>MQTTConnectionActor</code>
+<h3 id="blackbull.mqtt.connection.MQTT5Actor" class="doc doc-heading">
+            <code>MQTT5Actor</code>
 
 
-<a href="#blackbull.mqtt.connection.MQTTConnectionActor" class="headerlink" title="Permanent link">&para;</a></h3>
+<a href="#blackbull.mqtt.connection.MQTT5Actor" class="headerlink" title="Permanent link">&para;</a></h3>
 
 
     <div class="doc doc-contents ">
@@ -4474,7 +4474,7 @@ the two together.</p>
 
 
 
-        <p>One per MQTT connection; the sole writer to its socket.</p>
+        <p>One per MQTT 5.0 connection; the sole writer to its socket.</p>
 <p>Tap dispatch is selected at construction: pass a running :class:<code>TapActor</code>
 as <em>tap</em> for decoupled (actor-mode) dispatch, or <em>app_handlers</em> for inline
 dispatch on this connection (the Sprint 53 contract).</p>
@@ -4503,14 +4503,14 @@ dispatch on this connection (the Sprint 53 contract).</p>
 <div class="doc doc-object doc-function">
 
 
-<h4 id="blackbull.mqtt.connection.MQTTConnectionActor.read_loop" class="doc doc-heading">
+<h4 id="blackbull.mqtt.connection.MQTT5Actor.read_loop" class="doc doc-heading">
             <code class="highlight language-python"><span class="n">read_loop</span><span class="p">(</span><span class="n">reader</span><span class="p">)</span></code>
 
   <span class="doc doc-labels">
       <small class="doc doc-label doc-label-async"><code>async</code></small>
   </span>
 
-<a href="#blackbull.mqtt.connection.MQTTConnectionActor.read_loop" class="headerlink" title="Permanent link">&para;</a></h4>
+<a href="#blackbull.mqtt.connection.MQTT5Actor.read_loop" class="headerlink" title="Permanent link">&para;</a></h4>
 
 
     <div class="doc doc-contents ">

@@ -4813,7 +4813,7 @@ etc.</p>
   owner).</li>
 <li>The handler is where a protocol's own actors live.  MQTT, for
   example, runs a lifespan-owned <code>BrokerActor</code> and <code>TapActor</code>
-  plus a per-connection <code>MQTTConnectionActor</code> beneath it — and
+  plus a per-connection <code>MQTT5Actor</code> beneath it — and
   these are the framework's <strong>first genuine users of the <code>Actor</code>
   inbox</strong> (the HTTP actors override <code>run()</code> and call each other
   directly).  See

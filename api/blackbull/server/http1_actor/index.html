@@ -4692,6 +4692,10 @@ response code from :class:<code>BadRequestError</code>'s 400).</p>
 <p>Spawned by HTTP1Actor, awaited to completion.  Calls the ASGI app and
 emits before_handler / after_handler / request_completed / error via
 EventAggregator.</p>
+<p>When no Level B event listeners are registered, the entire aggregator
+indirection is skipped and the app is called directly — matching the
+pre-Sprint-53 hot path and avoiding ~4 async function-call frames
+per request.</p>
 
 
 

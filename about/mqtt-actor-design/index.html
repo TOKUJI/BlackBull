@@ -4189,10 +4189,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#mqttconnectionactor-the-sole-socket-writer" class="md-nav__link">
+  <a href="#mqtt5actor-the-sole-socket-writer" class="md-nav__link">
     <span class="md-ellipsis">
       
-        MQTTConnectionActor — the sole socket writer
+        MQTT5Actor — the sole socket writer
       
     </span>
   </a>
@@ -4381,10 +4381,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#mqttconnectionactor-the-sole-socket-writer" class="md-nav__link">
+  <a href="#mqtt5actor-the-sole-socket-writer" class="md-nav__link">
     <span class="md-ellipsis">
       
-        MQTTConnectionActor — the sole socket writer
+        MQTT5Actor — the sole socket writer
       
     </span>
   </a>
@@ -4491,7 +4491,7 @@ message at a time, so concurrent connections can never interleave inside it.</p>
 <td>client control events (<code>Attach</code>, <code>ClientPublish</code>, …)</td>
 </tr>
 <tr>
-<td><code>MQTTConnectionActor</code></td>
+<td><code>MQTT5Actor</code></td>
 <td>one per connection</td>
 <td>one socket's write side</td>
 <td>outbound packets (<code>Send</code>, <code>Close</code>)</td>
@@ -4505,13 +4505,13 @@ message at a time, so concurrent connections can never interleave inside it.</p>
 </tbody>
 </table>
 <p>Each lives in its own module: <code>BrokerActor</code> in <code>blackbull.mqtt.broker</code>,
-<code>MQTTConnectionActor</code> in <code>blackbull.mqtt.connection</code>, <code>TapActor</code> (with the
+<code>MQTT5Actor</code> in <code>blackbull.mqtt.connection</code>, <code>TapActor</code> (with the
 <code>Message</code> read-model) in <code>blackbull.mqtt.tap</code>, and the user-facing
 <code>MQTTExtension</code> wiring in <code>blackbull.mqtt.extension</code>. The wire codec is separate
 again, in <code>blackbull.mqtt.messages</code>.</p>
 <h2 id="the-two-actor-data-plane">The two-actor data plane<a class="headerlink" href="#the-two-actor-data-plane" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code>            ┌──────────────────────── one per connection ────────────────────────┐
-  socket →  reader loop ──decode──►  MQTTConnectionActor.run()  ──write──►  socket
+  socket →  reader loop ──decode──►  MQTT5Actor.run()  ──write──►  socket
   (bytes)        │  (control packets)        ▲   (sole writer, drains its inbox)
                  │                           │
                  ▼  send(ClientPublish, …)   │  send(Send(packet=…)), send(Close)
@@ -4530,8 +4530,8 @@ connection actor and moves on.</p>
 connections are handled one after another, never concurrently — so the routing
 table and session dicts are plain Python objects with <strong>no locks and no shared
 mutable state</strong>. This is the property the actor model buys.</p>
-<h3 id="mqttconnectionactor-the-sole-socket-writer"><code>MQTTConnectionActor</code> — the sole socket writer<a class="headerlink" href="#mqttconnectionactor-the-sole-socket-writer" title="Permanent link">&para;</a></h3>
-<p>Each connection has one <code>MQTTConnectionActor</code>. Its inbox carries <em>only outbound
+<h3 id="mqtt5actor-the-sole-socket-writer"><code>MQTT5Actor</code> — the sole socket writer<a class="headerlink" href="#mqtt5actor-the-sole-socket-writer" title="Permanent link">&para;</a></h3>
+<p>Each connection has one <code>MQTT5Actor</code>. Its inbox carries <em>only outbound
 packets</em>, and its <code>run()</code> loop — draining that inbox — is the <strong>only</strong> code that
 writes to the socket. That single-writer invariant means there are no
 cross-task write races, even though the broker, the keep-alive path, and the
@@ -4591,7 +4591,7 @@ contract. Historically the <strong>HTTP</strong> actors (<code>ConnectionActor</
 <code>HTTP2Actor</code>, <code>StreamActor</code>, …) override <code>run()</code> and call each other through
 direct method calls — the inbox is defined but latent on that path.</p>
 <p>The MQTT broker is the <strong>first production code that uses the inbox for real</strong>:
-<code>BrokerActor</code>, <code>MQTTConnectionActor</code>, and <code>TapActor</code> all keep the base <code>run()</code>
+<code>BrokerActor</code>, <code>MQTT5Actor</code>, and <code>TapActor</code> all keep the base <code>run()</code>
 loop, override <code>_handle()</code>, and communicate exclusively by <code>await
 other.send(message)</code>. That is why the broker needs no locks — the "one message
 at a time" guarantee is the base-class <code>run()</code> draining the queue, not a

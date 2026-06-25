@@ -1991,6 +1991,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#blackbull.event_aggregator.EventAggregator.has_any_request_listeners" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        has_any_request_listeners
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.event_aggregator.EventAggregator.on_after_handler" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4480,6 +4491,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#blackbull.event_aggregator.EventAggregator.has_any_request_listeners" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        has_any_request_listeners
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.event_aggregator.EventAggregator.on_after_handler" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4757,6 +4779,28 @@ It is a framework-internal component.</p>
 
 
 
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.event_aggregator.EventAggregator.has_any_request_listeners" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">has_any_request_listeners</span><span class="p">()</span></code>
+
+<a href="#blackbull.event_aggregator.EventAggregator.has_any_request_listeners" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Return True if <em>any</em> request-lifecycle event has listeners.</p>
+<p>Callers on the hot path use this to short-circuit the entire
+<code>RequestActor</code> indirection when no Level B event handlers are
+registered — matching the pre-Sprint-53 direct <code>self._app()</code>
+call path.</p>
+
+
+    </div>
+
+</div>
 
 <div class="doc doc-object doc-function">
 
