@@ -177,8 +177,11 @@ Three honest caveats — also stated in the document's `info.description`:
 
 - **Cleartext only.** TLS / MQTT-over-WebSocket transport is not yet wired up,
   matching the bridge's current limits.
-- **Single process.** Broker state (subscriptions, sessions, retained messages)
-  lives in the serving process; it is not shared across workers and is not
-  persisted across restarts.
+- **Single owner (HTTP still scales).** The broker runs on **worker 0** only —
+  its state (subscriptions, sessions, retained messages) lives in that one
+  process and is neither shared across workers nor persisted across restarts.
+  HTTP, however, scales across all workers: `app.run(workers=4)` alongside the
+  broker runs HTTP on every worker and the broker on worker 0. (`--reload` still
+  pins `workers=1` when a broker is registered.)
 - **In-memory sessions.** Sessions are retained for the process lifetime rather
   than expired on a timer; restarting the broker clears all session state.

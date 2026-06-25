@@ -112,11 +112,15 @@ if ctx.aggregator is not None:
 
 `connection_accepted` and `connection_closed` fire automatically.
 
-## Limitations (Sprint 50)
+## Limitations
 
 - **Cleartext only.** TLS termination for raw protocols is not yet wired up.
-- **Single worker.** Port-bound protocols are served only when `workers=1`;
-  `app.run()` with a `raw_handler` forces single-worker automatically.
+- **Single owner, but HTTP still scales.** A port-bound protocol is served by
+  **worker 0** only (a stateful broker must have one owner), while HTTP runs on
+  every worker. So `app.run(port=8000, workers=4)` with a `raw_handler` scales
+  HTTP across all four workers and runs the protocol on worker 0; if worker 0
+  crashes it is respawned and re-adopts the listener. The exception is
+  `--reload`, which still pins `workers=1` for port-bound protocols.
 - **Port-based routing only.** Sharing one port between HTTP and a raw protocol
   (first-byte sniffing) is planned for a later release.
 

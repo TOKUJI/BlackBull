@@ -206,6 +206,57 @@ class TestOpenSocket:
             assert sock.fileno() == -1, "Socket was not closed by close_socket()"
 
 
+@pytest.mark.skipif(
+    not hasattr(socket, 'SO_REUSEPORT'),
+    reason='SO_REUSEPORT not supported on this platform',
+)
+class TestOpenSocketReusePort:
+    """open_socket() must plumb BB_SOCKET_REUSEPORT through to the HTTP
+    listener so forked workers can co-bind the port (Sprint 55 G1, step 1).
+
+    Regression: the setting existed but was never passed to
+    create_dual_stack_sockets() from open_socket(), so it was silently
+    inert on the HTTP listener.
+    """
+
+    def test_reuseport_enabled_sets_so_reuseport_on_http_sockets(self, monkeypatch):
+        from blackbull import env as _env
+
+        monkeypatch.setenv('BB_SOCKET_REUSEPORT', '1')
+        _env.reset_settings_cache()
+        server = ASGIServer(_noop_app)
+        server.open_socket(port=0)
+        try:
+            assert server.raw_sockets, 'open_socket bound no sockets'
+            for sock in server.raw_sockets:
+                opt = sock.getsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT)
+                assert opt == 1, (
+                    'BB_SOCKET_REUSEPORT=1 but SO_REUSEPORT is not set on the '
+                    'HTTP listener — the setting is not plumbed through '
+                    'open_socket().'
+                )
+        finally:
+            server.close_socket()
+            _env.reset_settings_cache()
+
+    def test_reuseport_disabled_leaves_so_reuseport_unset(self, monkeypatch):
+        from blackbull import env as _env
+
+        monkeypatch.setenv('BB_SOCKET_REUSEPORT', '0')
+        _env.reset_settings_cache()
+        server = ASGIServer(_noop_app)
+        server.open_socket(port=0)
+        try:
+            for sock in server.raw_sockets:
+                opt = sock.getsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT)
+                assert opt == 0, (
+                    'SO_REUSEPORT should be unset when BB_SOCKET_REUSEPORT=0.'
+                )
+        finally:
+            server.close_socket()
+            _env.reset_settings_cache()
+
+
 class TestASGIServerRun:
     """ASGIServer.run() must start without TypeError and accept connections."""
 
