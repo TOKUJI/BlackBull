@@ -4478,9 +4478,12 @@ mosquitto_pub<span class="w"> </span>-t<span class="w"> </span><span class="s1">
 <ul>
 <li><strong>Cleartext only.</strong> TLS / MQTT-over-WebSocket transport is not yet wired up,
   matching the bridge's current limits.</li>
-<li><strong>Single process.</strong> Broker state (subscriptions, sessions, retained messages)
-  lives in the serving process; it is not shared across workers and is not
-  persisted across restarts.</li>
+<li><strong>Single owner (HTTP still scales).</strong> The broker runs on <strong>worker 0</strong> only —
+  its state (subscriptions, sessions, retained messages) lives in that one
+  process and is neither shared across workers nor persisted across restarts.
+  HTTP, however, scales across all workers: <code>app.run(workers=4)</code> alongside the
+  broker runs HTTP on every worker and the broker on worker 0. (<code>--reload</code> still
+  pins <code>workers=1</code> when a broker is registered.)</li>
 <li><strong>In-memory sessions.</strong> Sessions are retained for the process lifetime rather
   than expired on a timer; restarting the broker clears all session state.</li>
 </ul>

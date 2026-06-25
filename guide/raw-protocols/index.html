@@ -742,10 +742,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#limitations-sprint-50" class="md-nav__link">
+  <a href="#limitations" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Limitations (Sprint 50)
+        Limitations
       
     </span>
   </a>
@@ -4335,10 +4335,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#limitations-sprint-50" class="md-nav__link">
+  <a href="#limitations" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Limitations (Sprint 50)
+        Limitations
       
     </span>
   </a>
@@ -4498,11 +4498,15 @@ parsed an application-level message, via the aggregator on <code>ctx</code>:</p>
     <span class="k">await</span> <span class="n">ctx</span><span class="o">.</span><span class="n">aggregator</span><span class="o">.</span><span class="n">on_message_received</span><span class="p">(</span><span class="s1">&#39;echo&#39;</span><span class="p">,</span> <span class="s1">&#39;data&#39;</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">data</span><span class="p">))</span>
 </code></pre></div>
 <p><code>connection_accepted</code> and <code>connection_closed</code> fire automatically.</p>
-<h2 id="limitations-sprint-50">Limitations (Sprint 50)<a class="headerlink" href="#limitations-sprint-50" title="Permanent link">&para;</a></h2>
+<h2 id="limitations">Limitations<a class="headerlink" href="#limitations" title="Permanent link">&para;</a></h2>
 <ul>
 <li><strong>Cleartext only.</strong> TLS termination for raw protocols is not yet wired up.</li>
-<li><strong>Single worker.</strong> Port-bound protocols are served only when <code>workers=1</code>;
-  <code>app.run()</code> with a <code>raw_handler</code> forces single-worker automatically.</li>
+<li><strong>Single owner, but HTTP still scales.</strong> A port-bound protocol is served by
+  <strong>worker 0</strong> only (a stateful broker must have one owner), while HTTP runs on
+  every worker. So <code>app.run(port=8000, workers=4)</code> with a <code>raw_handler</code> scales
+  HTTP across all four workers and runs the protocol on worker 0; if worker 0
+  crashes it is respawned and re-adopts the listener. The exception is
+  <code>--reload</code>, which still pins <code>workers=1</code> for port-bound protocols.</li>
 <li><strong>Port-based routing only.</strong> Sharing one port between HTTP and a raw protocol
   (first-byte sniffing) is planned for a later release.</li>
 </ul>

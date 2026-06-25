@@ -4393,7 +4393,7 @@ ASGIServer with those sockets.</p>
 
 
 <h3 id="blackbull.server.worker.run_worker" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">run_worker</span><span class="p">(</span><span class="n">app</span><span class="p">,</span> <span class="n">raw_sockets</span><span class="p">,</span> <span class="n">ssl_context</span><span class="p">,</span> <span class="n">worker_id</span><span class="p">,</span> <span class="n">max_connections</span><span class="p">,</span> <span class="n">stream_queue_depth</span><span class="o">=</span><span class="mi">64</span><span class="p">,</span> <span class="n">ws_queue_depth</span><span class="o">=</span><span class="mi">256</span><span class="p">)</span></code>
+            <code class="highlight language-python"><span class="n">run_worker</span><span class="p">(</span><span class="n">app</span><span class="p">,</span> <span class="n">raw_sockets</span><span class="p">,</span> <span class="n">ssl_context</span><span class="p">,</span> <span class="n">worker_id</span><span class="p">,</span> <span class="n">max_connections</span><span class="p">,</span> <span class="n">stream_queue_depth</span><span class="o">=</span><span class="mi">64</span><span class="p">,</span> <span class="n">ws_queue_depth</span><span class="o">=</span><span class="mi">256</span><span class="p">,</span> <span class="n">protocol_sockets</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
 
 <a href="#blackbull.server.worker.run_worker" class="headerlink" title="Permanent link">&para;</a></h3>
 
@@ -4411,7 +4411,13 @@ ssl_context:
 worker_id:
     Zero-based index used only for logging.
 max_connections:
-    Per-worker connection limit; passed to ASGIServer.</p>
+    Per-worker connection limit; passed to ASGIServer.
+protocol_sockets:
+    Pre-bound listener sets for stateful non-ASGI protocols (eg the MQTT
+    broker), as <code>[(socks, binding), …]</code>.  The master hands these to a
+    single worker only (HTTP scales across all workers, but a stateful
+    broker must have one owner), so this is non-empty for that worker and
+    <code>None</code> for the rest.</p>
 
 
     </div>
