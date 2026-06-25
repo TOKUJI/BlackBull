@@ -105,7 +105,7 @@ codes, and `topic_matches_filter`). The broker is an actor model split across a
 few small modules: `blackbull.mqtt.broker` holds the `BrokerActor`, which owns
 all routing state (subscriptions, sessions, retained messages) and, processing
 its inbox serially, needs no locks; `blackbull.mqtt.connection` holds the
-`MQTTConnectionActor` (one per connection — the sole writer to its socket,
+`MQTT5Actor` (one per connection — the sole writer to its socket,
 forwarding decoded control packets to the broker) and `serve_connection`, which
 wires the two; `blackbull.mqtt.tap` holds the `TapActor` and the `Message`
 read-model; and `blackbull.mqtt.extension` holds `MQTTExtension` and

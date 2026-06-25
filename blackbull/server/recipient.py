@@ -227,6 +227,11 @@ class PrefixReader(AbstractReader):
         return head + await self._reader.readexactly(n - len(head))
 
     async def readuntil(self, sep: bytes) -> bytes:
+        # Short-circuit: once the prefix is drained (the common keep-alive
+        # case), delegate directly to the underlying reader's native,
+        # buffered readuntil without any per-call overhead.
+        if not self._buf:
+            return await self._reader.readuntil(sep)
         idx = self._buf.find(sep)
         if idx != -1:
             end = idx + len(sep)

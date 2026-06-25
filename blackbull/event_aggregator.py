@@ -23,6 +23,30 @@ class EventAggregator:
         self._dispatcher = dispatcher
 
     # ------------------------------------------------------------------
+    # Hot-path optimisation: skip the indirection when nothing is listening
+    # ------------------------------------------------------------------
+    # Every event a request may emit between RequestActor.run() entry and
+    # exit.  If ANY of these has a listener, the fast path below must be
+    # skipped so the listener still fires.  ``error`` is included because
+    # ``on_error`` emits ``Event("error", …)`` — omitting it would silently
+    # bypass an ``@app.on('error')``-only handler on the fast path.
+    _REQUEST_EVENTS = (
+        'request_received', 'before_handler', 'after_handler',
+        'request_completed', 'request_disconnected', 'error',
+    )
+
+    def has_any_request_listeners(self) -> bool:
+        """Return True if *any* request-lifecycle event has listeners.
+
+        Callers on the hot path use this to short-circuit the entire
+        ``RequestActor`` indirection when no Level B event handlers are
+        registered — matching the pre-Sprint-53 direct ``self._app()``
+        call path.
+        """
+        has = self._dispatcher.has_listeners
+        return any(has(n) for n in self._REQUEST_EVENTS)
+
+    # ------------------------------------------------------------------
     # Server lifecycle
     # ------------------------------------------------------------------
 

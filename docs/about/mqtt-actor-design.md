@@ -21,11 +21,11 @@ BlackBull's broker is three kinds of actor:
 | Actor | Count | Owns | Inbox carries |
 |-------|-------|------|---------------|
 | `BrokerActor` | one per app/worker | all routing/session/retained state | client control events (`Attach`, `ClientPublish`, …) |
-| `MQTTConnectionActor` | one per connection | one socket's write side | outbound packets (`Send`, `Close`) |
+| `MQTT5Actor` | one per connection | one socket's write side | outbound packets (`Send`, `Close`) |
 | `TapActor` | one per app/worker | nothing (stateless dispatch) | published messages for `on_message` taps |
 
 Each lives in its own module: `BrokerActor` in `blackbull.mqtt.broker`,
-`MQTTConnectionActor` in `blackbull.mqtt.connection`, `TapActor` (with the
+`MQTT5Actor` in `blackbull.mqtt.connection`, `TapActor` (with the
 `Message` read-model) in `blackbull.mqtt.tap`, and the user-facing
 `MQTTExtension` wiring in `blackbull.mqtt.extension`. The wire codec is separate
 again, in `blackbull.mqtt.messages`.
@@ -34,7 +34,7 @@ again, in `blackbull.mqtt.messages`.
 
 ```
             ┌──────────────────────── one per connection ────────────────────────┐
-  socket →  reader loop ──decode──►  MQTTConnectionActor.run()  ──write──►  socket
+  socket →  reader loop ──decode──►  MQTT5Actor.run()  ──write──►  socket
   (bytes)        │  (control packets)        ▲   (sole writer, drains its inbox)
                  │                           │
                  ▼  send(ClientPublish, …)   │  send(Send(packet=…)), send(Close)
@@ -57,9 +57,9 @@ connections are handled one after another, never concurrently — so the routing
 table and session dicts are plain Python objects with **no locks and no shared
 mutable state**. This is the property the actor model buys.
 
-### `MQTTConnectionActor` — the sole socket writer
+### `MQTT5Actor` — the sole socket writer
 
-Each connection has one `MQTTConnectionActor`. Its inbox carries *only outbound
+Each connection has one `MQTT5Actor`. Its inbox carries *only outbound
 packets*, and its `run()` loop — draining that inbox — is the **only** code that
 writes to the socket. That single-writer invariant means there are no
 cross-task write races, even though the broker, the keep-alive path, and the
@@ -129,7 +129,7 @@ contract. Historically the **HTTP** actors (`ConnectionActor`, `HTTP1Actor`,
 direct method calls — the inbox is defined but latent on that path.
 
 The MQTT broker is the **first production code that uses the inbox for real**:
-`BrokerActor`, `MQTTConnectionActor`, and `TapActor` all keep the base `run()`
+`BrokerActor`, `MQTT5Actor`, and `TapActor` all keep the base `run()`
 loop, override `_handle()`, and communicate exclusively by `await
 other.send(message)`. That is why the broker needs no locks — the "one message
 at a time" guarantee is the base-class `run()` draining the queue, not a
