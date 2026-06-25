@@ -4,7 +4,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-from typing import Any
+from typing import Any, Callable, Iterator, NamedTuple
 
 from ..extension import Extension
 from ..server.protocol_registry import ProtocolDetector
@@ -13,6 +13,19 @@ from .connection import serve_connection
 from .tap import TapActor, compile_tap
 
 logger = logging.getLogger(__name__)
+
+
+class Subscription(NamedTuple):
+    """A read-only view of one registered ``on_message`` tap.
+
+    Yielded by :meth:`MQTTExtension.iter_subscriptions` so documentation tools
+    (``AsyncAPIExtension``) can describe an app's taps without reaching into the
+    private ``_handlers`` list.  ``topic`` is the filter as the application
+    wrote it (``{name}`` captures restored); ``callback`` is the registered
+    coroutine function (its ``__name__``/docstring name the AsyncAPI operation).
+    """
+    topic: str
+    callback: Callable[..., Any]
 
 
 class MQTTProtocolDetector(ProtocolDetector):
@@ -86,6 +99,18 @@ class MQTTExtension(Extension):
             self._handlers.append(compile_tap(topic, callback))
             return callback
         return decorator
+
+    def iter_subscriptions(self) -> Iterator[Subscription]:
+        """Yield a :class:`Subscription` for each registered ``on_message`` tap.
+
+        A stable, public, read-only accessor over the compiled handlers — the
+        seam ``AsyncAPIExtension`` reads instead of touching ``_handlers``.
+        Reflects the handlers registered *at call time*, so a documentation
+        endpoint that calls this per request picks up taps added after the
+        documenting extension was wired in.
+        """
+        for tap in self._handlers:
+            yield Subscription(topic=tap.display_filter, callback=tap.callback)
 
     def init_app(self, app: Any) -> None:
         broker = self._broker
