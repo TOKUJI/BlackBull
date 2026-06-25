@@ -43,8 +43,10 @@ class FrameFactory:
         self.encoder = Encoder()
 
     def create(self, type_: FrameTypes, flags: FrameFlags | int, stream_id: int, *, data: bytes = b'', **kwds):
-        logger.info(f'type:{type_}, flags:{flags}, id:{stream_id}')
-
+        # NB: no per-create trace here — create() runs on every outbound frame
+        # and every inbound load(), so an eager f-string here is pure overhead
+        # on the hottest H2 loop (frame-assembly-fast-path Tier 1).  The frame's
+        # fields are available via its __repr__ when a caller needs them.
         frame = FrameBase._registry[type_](
             len(data),
             type_,

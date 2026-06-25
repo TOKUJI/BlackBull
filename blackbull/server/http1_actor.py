@@ -917,18 +917,26 @@ class HTTP1Actor(Actor):
         exception class regardless of which side caught the overflow.
         """
         import asyncio  # noqa: PLC0415
-        while not self._request.endswith(_REQ_END):
+        # Accumulate into a bytearray (amortised O(1) append) instead of the
+        # O(n²) bytes ``+=`` growth, then publish back as bytes.  The loop
+        # condition and size check are byte-for-byte equivalent to the prior
+        # form (copy-reduction-http1 P2).
+        buf = bytearray(self._request)
+        while not buf.endswith(_REQ_END):
             try:
                 line = await self._reader.readuntil(b'\r\n')
             except asyncio.LimitOverrunError as exc:
+                self._request = bytes(buf)
                 raise HeaderTooLargeError(
                     f'asyncio buffer overflow ({exc.consumed} bytes) '
                     f'while reading headers') from exc
-            self._request += line
-            if max_total > 0 and len(self._request) > max_total:
+            buf += line
+            if max_total > 0 and len(buf) > max_total:
+                self._request = bytes(buf)
                 raise HeaderTooLargeError(
-                    f'header block {len(self._request)} bytes > '
+                    f'header block {len(buf)} bytes > '
                     f'BB_HEADER_MAX_TOTAL={max_total}')
+        self._request = bytes(buf)
 
     def _should_keep_alive(self, scope: dict) -> bool:
         """Return True if the connection should persist after this request."""

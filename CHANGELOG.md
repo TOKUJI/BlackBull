@@ -31,6 +31,17 @@ so the editable install's metadata catches up.
 
 ## [Unreleased]
 
+### Changed
+- **Hot-path copy + logging reduction (no behaviour change).** Three low-risk
+  perf wins on the HTTP/1.1 and HTTP/2 hot paths: `read_body()` collects chunks
+  and joins once (single-chunk bodies returned with no copy at all);
+  `HTTP1Actor._read_headers()` accumulates the header block in a `bytearray`
+  (amortised O(1)) instead of the O(n²) `bytes +=`; and the eager per-frame
+  logging on the H2 frame-assembly path (`frame.py` / `frame_types.py` /
+  `stream.py`) is now lazy `%`-args or `isEnabledFor`-guarded, so nothing is
+  formatted or concatenated when the log level is off. DEBUG output is unchanged
+  when DEBUG is on; two valueless per-frame traces were dropped.
+
 ### Fixed
 - **`WebSocketActor` no longer swallows `asyncio.CancelledError`.** `run()`
   caught `BaseException` (to isolate the connection from app/protocol errors),

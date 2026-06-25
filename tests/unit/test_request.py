@@ -46,6 +46,51 @@ async def test_read_body_missing_body_key():
     assert await read_body(receive) == b''
 
 
+@pytest.mark.asyncio
+async def test_read_body_single_chunk_is_returned_without_copy():
+    """P1 fast path: a single-chunk body is returned as the *same* object,
+    not an O(n²)-accumulated copy."""
+    payload = b'x' * 4096
+
+    async def receive():
+        return {'body': payload, 'more_body': False}
+
+    result = await read_body(receive)
+    assert result is payload, 'single-chunk body must avoid an intermediate copy'
+
+
+@pytest.mark.asyncio
+async def test_read_body_three_chunks_join_in_order():
+    chunks = [
+        {'body': b'one', 'more_body': True},
+        {'body': b'two', 'more_body': True},
+        {'body': b'three', 'more_body': False},
+    ]
+    it = iter(chunks)
+
+    async def receive():
+        return next(it)
+
+    assert await read_body(receive) == b'onetwothree'
+
+
+@pytest.mark.asyncio
+async def test_read_body_skips_empty_intermediate_chunks():
+    """An empty chunk with more_body=True must not corrupt the result and must
+    not count toward the single-chunk fast path."""
+    chunks = [
+        {'body': b'a', 'more_body': True},
+        {'body': b'', 'more_body': True},
+        {'body': b'b', 'more_body': False},
+    ]
+    it = iter(chunks)
+
+    async def receive():
+        return next(it)
+
+    assert await read_body(receive) == b'ab'
+
+
 # ---------------------------------------------------------------------------
 # parse_cookies
 # ---------------------------------------------------------------------------
