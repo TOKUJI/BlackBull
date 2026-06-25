@@ -19,9 +19,8 @@ from ..headers import Headers
 from .deadline import ConnectionDeadline
 from .recipient import AbstractReader, IncompleteReadError, RecipientFactory, _WS_EVENT_QUEUE_DEPTH
 from .sender import AbstractWriter, SenderFactory
-from .access_log import AccessLogRecord as _AccessLogRecord, _make_capturing_send, _make_disconnect_detecting_receive, emit_access_log as _emit_access_log
+from .access_log import AccessLogRecord as _AccessLogRecord, _make_disconnect_detecting_receive, emit_access_log as _emit_access_log
 from .cap_log import log_cap_hit
-from .constants import WSCloseCode
 
 logger = logging.getLogger(__name__)
 

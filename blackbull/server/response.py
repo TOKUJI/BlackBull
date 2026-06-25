@@ -1,7 +1,4 @@
-from functools import partial
-import traceback
-
-from ..protocol.stream import Stream, StreamState
+from ..protocol.stream import StreamState
 from ..protocol.frame_types import (
     ErrorCodes, FrameTypes, PingFrameFlags, SettingFrameFlags,
 )

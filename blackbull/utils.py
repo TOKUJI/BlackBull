@@ -64,12 +64,12 @@ class serializable(ABC):
 
     @abstractmethod
     def save(self):
-        ...
+        pass
 
     @classmethod
     @abstractmethod
     def load(cls, str_):  # must return a pair (serializable, remaining_text)
-        ...
+        pass
 
 
 # RFC 5322 Date and Time specification

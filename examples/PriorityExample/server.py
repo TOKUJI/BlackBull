@@ -44,10 +44,9 @@ Run (HTTPS required for HTTP/2):
 """
 import argparse
 import asyncio
-import json
 import logging
 
-from blackbull import BlackBull, JSONResponse, Response
+from blackbull import BlackBull, JSONResponse
 
 logging.basicConfig(level=logging.INFO,
                     format='%(levelname)s %(name)s: %(message)s')

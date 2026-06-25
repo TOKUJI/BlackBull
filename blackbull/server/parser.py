@@ -1,8 +1,5 @@
-from functools import partial
-import traceback
 from urllib.parse import urlparse
 
-from ..protocol.stream import Stream
 from ..protocol.frame_types import FrameTypes, PseudoHeaders
 import logging
 from ..headers import Headers

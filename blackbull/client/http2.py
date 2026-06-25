@@ -11,7 +11,6 @@ import asyncio
 import ssl as _ssl
 from dataclasses import dataclass, field
 from http import HTTPMethod, HTTPStatus
-from typing import Iterable
 
 import logging
 from ..protocol.frame import FrameFactory
@@ -169,7 +168,7 @@ class HTTP2Client:
             try:
                 await self._receive_task
             except (asyncio.CancelledError, Exception):
-                pass
+                pass  # teardown: the receive task was just cancelled; ignore its unwind.
 
         # Fail any still-pending responses so awaiters don't hang.
         for pending in self._responses.values():
@@ -183,7 +182,7 @@ class HTTP2Client:
                 self._raw_writer.close()
                 await self._raw_writer.wait_closed()
             except Exception:
-                pass
+                pass  # best-effort close; the connection may already be gone.
 
     # ---- public API ------------------------------------------------------
 

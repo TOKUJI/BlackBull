@@ -1,4 +1,4 @@
-from blackbull import BlackBull, Response
+from blackbull import BlackBull
 
 app = BlackBull()
 

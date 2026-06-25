@@ -47,7 +47,6 @@ import hashlib
 import logging
 import time
 from collections import OrderedDict
-from typing import Any
 
 from ..asgi import ASGIEvent
 from .utils import as_middleware
@@ -308,12 +307,12 @@ def _response_max_age(headers: list[tuple[bytes, bytes]]) -> int | None:
                 try:
                     s_max = int(t[9:])
                 except ValueError:
-                    pass
+                    pass  # malformed s-maxage → ignore this directive.
             elif t.startswith(b'max-age='):
                 try:
                     max_age = int(t[8:])
                 except ValueError:
-                    pass
+                    pass  # malformed max-age → ignore this directive.
     return s_max if s_max is not None else max_age
 
 

@@ -70,13 +70,13 @@ def _detect_codecs(brotli_quality: int = _BROTLI_QUALITY) -> dict[str, Callable[
         import brotli  # type: ignore[import-untyped]
         available['br'] = functools.partial(brotli.compress, quality=brotli_quality)
     except ImportError:
-        pass
+        pass  # brotli not installed → 'br' codec unavailable.
     try:
         import zstandard  # type: ignore[import-untyped]
         cctx = zstandard.ZstdCompressor()
         available['zstd'] = cctx.compress
     except ImportError:
-        pass
+        pass  # zstandard not installed → 'zstd' codec unavailable.
     available['gzip'] = gzip.compress
     return available
 
@@ -150,7 +150,7 @@ class Compression:
                     try:
                         q = float(param[2:])
                     except ValueError:
-                        pass
+                        pass  # malformed q-value → keep the default quality.
             if name:
                 result.append((q, name))
         result.sort(key=lambda x: x[0], reverse=True)

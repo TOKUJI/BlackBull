@@ -36,7 +36,6 @@ Run:
 Default credentials: admin / admin  (seeded into tasks.db at first startup)
 """
 import argparse
-import asyncio
 import json
 import logging
 import pathlib

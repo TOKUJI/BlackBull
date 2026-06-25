@@ -15,7 +15,7 @@ from collections.abc import Iterable
 import dataclasses
 from dataclasses import dataclass, field
 import typing
-from typing import Any, Callable, List, Tuple, Type, Optional, Union, get_args, get_origin
+from typing import Any, Callable, Tuple, Type, Optional, Union, get_args, get_origin
 from functools import wraps, partial
 from http import HTTPStatus, HTTPMethod
 import json
@@ -404,7 +404,7 @@ def _adapt_handler(fn, path: str):
             if n in resolved_hints:
                 annotations[n] = resolved_hints[n]
     except Exception:
-        pass
+        pass  # unresolved forward refs / bad annotations → keep the raw annotations.
 
     # A handler may have **at most one** body parameter — either a literal
     # name ``body`` or a dataclass-typed parameter (or both, if they're the

@@ -238,7 +238,6 @@ class Stream:
         [child.close() for child in self.children.values()]
         if self.parent is not None:
             self.parent.drop_child(self.stream_id)
-        del self
 
     def __repr__(self):
         return f'Stream(ID: {self.stream_id}, scope={self.scope}, end_stream={self.end_stream})'

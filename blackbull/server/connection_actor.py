@@ -2,7 +2,6 @@
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable
-from typing import Any
 
 from ..actor import Actor, Message
 from ..event_aggregator import EventAggregator
@@ -175,7 +174,6 @@ class ConnectionActor(Actor):
         return bytes(buf)
 
     async def _dispatch(self) -> None:
-        import asyncio  # noqa: PLC0415
         from ..env import get_settings as _get_settings  # noqa: PLC0415
         cfg = _get_settings()
 

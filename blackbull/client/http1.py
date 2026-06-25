@@ -332,7 +332,7 @@ class HTTP1Client:
                 self._raw_writer.close()
                 await self._raw_writer.wait_closed()
             except Exception:
-                pass
+                pass  # best-effort close on context exit; peer may already be gone.
 
     # ---- public API ------------------------------------------------------
 

@@ -52,7 +52,7 @@ def adopt_inherited_sockets() -> list[socket.socket] | None:
         try:
             os.set_inheritable(sock.fileno(), False)
         except OSError:
-            pass
+            pass  # best-effort; a socket we can't mark non-inheritable is still usable.
         sockets.append(sock)
         logger.info('Adopted inherited listening socket fd=%d %s',
                     fd, sock.getsockname())

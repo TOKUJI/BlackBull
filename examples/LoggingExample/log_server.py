@@ -98,6 +98,6 @@ if __name__ == '__main__':
     try:
         server.serve_forever()
     except KeyboardInterrupt:
-        pass
+        pass  # Ctrl-C → fall through to the finally cleanup below.
     finally:
         server.server_close()

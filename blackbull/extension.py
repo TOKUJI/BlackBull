@@ -45,7 +45,6 @@ class Extension(ABC):
         ``app.*`` API, then call :meth:`_register` to store ``self`` at
         ``app.extensions[extension_key]``.
         """
-        ...
 
     async def startup(self, app: Any) -> None:
         """Async startup hook, run at lifespan ``app_startup``.  Default no-op."""

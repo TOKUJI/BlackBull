@@ -205,7 +205,7 @@ class StaticFiles:
                         if float(p[2:]) <= 0:
                             return False
                     except ValueError:
-                        pass
+                        pass  # malformed q-value → treat as acceptable.
             return True
         return False
 

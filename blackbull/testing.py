@@ -158,14 +158,14 @@ class _LifespanManager:
                 try:
                     self.loop_thread.run_coro(self._await_task(), timeout=self.shutdown_timeout)
                 except Exception:
-                    pass
+                    pass  # shutdown best-effort; a lifespan exit error is surfaced elsewhere.
 
     async def _await_task(self):
         assert self._app_task is not None
         try:
             await self._app_task
         except Exception:
-            pass
+            pass  # the app task's own error is reported elsewhere; just drain it here.
 
     def _wait_for_lifespan_event(self, timeout: float):
         """Return the next lifespan event, or None if the app finished without one.
@@ -346,7 +346,7 @@ class WebSocketTestSession:
             try:
                 self._send_client_event({'type': 'websocket.disconnect', 'code': code})
             except Exception:
-                pass
+                pass  # best-effort disconnect notification during teardown.
         self._teardown()
 
     def _send_client_event(self, event: dict) -> None:
@@ -377,11 +377,11 @@ class WebSocketTestSession:
                     try:
                         await asyncio.wait_for(self._app_task, timeout=self.timeout)
                     except (asyncio.TimeoutError, Exception):
-                        pass
+                        pass  # teardown: app task timed out or errored; nothing to surface.
                 try:
                     self._loop_thread.run_coro(_await(), timeout=self.timeout + 1.0)
                 except Exception:
-                    pass
+                    pass  # teardown best-effort; ignore failures awaiting the app task.
         finally:
             self._loop_thread.stop()
 

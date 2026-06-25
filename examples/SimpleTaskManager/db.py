@@ -27,7 +27,11 @@ async def _run(fn, *args):
 
 
 def _hash_password(password: str, salt: str) -> str:
-    return hashlib.sha256((salt + password).encode()).hexdigest()
+    # PBKDF2-HMAC-SHA256: a deliberately expensive KDF.  A bare SHA-256 is far
+    # too fast for password storage (an attacker can try billions/sec); a KDF
+    # with a high iteration count is the right tool.
+    return hashlib.pbkdf2_hmac(
+        'sha256', password.encode(), salt.encode(), 100_000).hex()
 
 
 def _row_to_task(row) -> dict:

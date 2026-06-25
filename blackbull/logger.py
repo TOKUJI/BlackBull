@@ -4,7 +4,6 @@ import logging.handlers
 import queue as _queue_mod
 from functools import wraps
 from inspect import iscoroutinefunction
-from logging import Formatter
 from copy import copy
 from typing import Literal
 
@@ -56,11 +55,11 @@ PREFIX = '\033['
 SUFFIX = '\033[0m'
 
 
-class ColoredFormatter(Formatter):
+class ColoredFormatter(logging.Formatter):
 
     def __init__(self, fmt=None, datefmt=None,
                  style: Literal['%', '{', '$'] = '%'):
-        Formatter.__init__(self, fmt=fmt, datefmt=datefmt, style=style)
+        logging.Formatter.__init__(self, fmt=fmt, datefmt=datefmt, style=style)
 
     def format(self, record):
         colored_record = copy(record)
@@ -69,7 +68,7 @@ class ColoredFormatter(Formatter):
         colored_levelname = ('{0}{1}m{2}{3}').format(PREFIX, seq, levelname, SUFFIX)
 
         colored_record.levelname = colored_levelname
-        return Formatter.format(self, colored_record)
+        return logging.Formatter.format(self, colored_record)
 
 
 _listener: logging.handlers.QueueListener | None = None
@@ -135,7 +134,6 @@ def teardown_async_logging() -> None:
 
 
 if __name__ == '__main__':
-    import logging
     logger = logging.getLogger('blackbull.test')
     logger.setLevel(logging.DEBUG)
 
