@@ -1,4 +1,5 @@
 """WebSocket Actor — Phase 6 Step 5."""
+import asyncio
 import logging
 from collections.abc import Awaitable, Callable
 from typing import Any
@@ -81,6 +82,11 @@ class WebSocketActor(Actor):
     async def run(self) -> None:
         try:
             await self._app(self._scope, self._receive, self._send)
+        except asyncio.CancelledError:
+            # Cancellation is not an error: re-raise so the task actually
+            # cancels rather than completing normally.  (Mirrors HTTP1Actor;
+            # the finally below still runs the disconnect/close cleanup.)
+            raise
         except BaseException as exc:
             await self._aggregator.on_error(self._scope, exc)
         finally:
