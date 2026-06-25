@@ -191,6 +191,11 @@ class RequestActor(Actor):
     Spawned by HTTP1Actor, awaited to completion.  Calls the ASGI app and
     emits before_handler / after_handler / request_completed / error via
     EventAggregator.
+
+    When no Level B event listeners are registered, the entire aggregator
+    indirection is skipped and the app is called directly — matching the
+    pre-Sprint-53 hot path and avoiding ~4 async function-call frames
+    per request.
     """
 
     def __init__(
@@ -209,6 +214,14 @@ class RequestActor(Actor):
         self._aggregator = aggregator
 
     async def run(self) -> None:  # override: single-shot, no inbox loop
+        # Fast path: when no Level B event handlers are registered at
+        # all, skip the entire EventAggregator indirection and call the
+        # app directly.  This reclaims the ~4 async function-call frames
+        # per request that Sprint 53 added for the MQTT broker pattern.
+        if not self._aggregator.has_any_request_listeners():
+            await self._call_app(self._scope, self._receive, self._send)
+            return
+
         await self._aggregator.on_request_received(self._scope)
         exc: BaseException | None = None
         try:

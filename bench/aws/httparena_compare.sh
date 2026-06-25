@@ -148,26 +148,35 @@ BB_ACCESS_LOG="${BB_ACCESS_LOG:-0}"
 BLACKBULL_VERSION="${BLACKBULL_VERSION:-$(grep -E '^version' "$REPO_ROOT/pyproject.toml" | sed -E 's/.*"([^"]+)".*/\1/')}"
 
 if [ "$LOCAL_BB_WHEEL" = "1" ]; then
-    echo ">>> LOCAL_BB_WHEEL=1 — building wheel from local source ..."
-    # Require the 'build' frontend; fail early with a helpful message.
-    if ! python3 -c 'import build' 2>/dev/null; then
-        echo "ERROR: 'build' package not found; install it with:" >&2
-        echo "  pip install build" >&2
-        exit 1
+    # BB_WHEEL_PATH: use a pre-built wheel instead of building from source.
+    # Set this to compare a wheel built from a different commit without
+    # touching the working tree.  The wheel must be a valid blackbull-*.whl.
+    if [ -n "${BB_WHEEL_PATH:-}" ] && [ -f "$BB_WHEEL_PATH" ]; then
+        echo ">>> LOCAL_BB_WHEEL=1 — using pre-built wheel: $BB_WHEEL_PATH"
+        LOCAL_WHEEL="$BB_WHEEL_PATH"
+        LOCAL_WHEEL_NAME="$(basename "$LOCAL_WHEEL")"
+    else
+        echo ">>> LOCAL_BB_WHEEL=1 — building wheel from local source ..."
+        # Require the 'build' frontend; fail early with a helpful message.
+        if ! python3 -c 'import build' 2>/dev/null; then
+            echo "ERROR: 'build' package not found; install it with:" >&2
+            echo "  pip install build" >&2
+            exit 1
+        fi
+        # Build the wheel into dist/ (--wheel skips the sdist).
+        (
+            cd "$REPO_ROOT"
+            python3 -m build --wheel --outdir dist/ >/dev/null
+        )
+        # Resolve the exact wheel filename just built.
+        LOCAL_WHEEL="$(ls -t "$REPO_ROOT/dist/blackbull-"*.whl 2>/dev/null | head -1)"
+        if [ -z "$LOCAL_WHEEL" ]; then
+            echo "ERROR: no blackbull-*.whl found under $REPO_ROOT/dist/ after build" >&2
+            exit 1
+        fi
+        LOCAL_WHEEL_NAME="$(basename "$LOCAL_WHEEL")"
+        echo "    wheel: $LOCAL_WHEEL_NAME"
     fi
-    # Build the wheel into dist/ (--wheel skips the sdist).
-    (
-        cd "$REPO_ROOT"
-        python3 -m build --wheel --outdir dist/ >/dev/null
-    )
-    # Resolve the exact wheel filename just built.
-    LOCAL_WHEEL="$(ls -t "$REPO_ROOT/dist/blackbull-"*.whl 2>/dev/null | head -1)"
-    if [ -z "$LOCAL_WHEEL" ]; then
-        echo "ERROR: no blackbull-*.whl found under $REPO_ROOT/dist/ after build" >&2
-        exit 1
-    fi
-    LOCAL_WHEEL_NAME="$(basename "$LOCAL_WHEEL")"
-    echo "    wheel: $LOCAL_WHEEL_NAME"
     echo ">>> BlackBull version: $BLACKBULL_VERSION (from LOCAL wheel)"
 else
     echo ">>> BlackBull version: $BLACKBULL_VERSION (from PyPI)"
@@ -176,9 +185,14 @@ fi
 # ---------------------------------------------------------------------------
 # Step 1 — provision EC2 (and arm a teardown trap so we don't leak the
 # instance on error or Ctrl-C).
+# SKIP_PROVISION=1: re-use an already-running instance (requires valid
+# .state file from a previous run with KEEP_INSTANCE=1).
 # ---------------------------------------------------------------------------
-echo ">>> bench/aws/up.sh ..."
-bash "$(dirname "$0")/up.sh"
+SKIP_PROVISION="${SKIP_PROVISION:-0}"
+if [ "$SKIP_PROVISION" != "1" ]; then
+    echo ">>> bench/aws/up.sh ..."
+    bash "$(dirname "$0")/up.sh"
+fi
 
 _teardown() {
     local rc=$?
@@ -207,8 +221,14 @@ echo "    instance: $SERVER_PUBLIC_IP"
 # h2load come from apt (nghttp2-client provides h2load on Ubuntu).
 # Kernel 6.1+ with io_uring is a gcannon precondition; the c7i.xlarge
 # Ubuntu 24.04 AMI ships kernel 6.8+, so the precondition is met.
+#
+# Each sub-step echoes progress so the orchestrator can tell whether
+# the SSH pipe is alive or hung.  The apt-get + source-build phases
+# can saturate the CPU and make SSH unresponsive for minutes — the
+# local echo markers bracketing each phase are the heartbeat.
 # ---------------------------------------------------------------------------
 echo ">>> installing Docker + HttpArena load tooling on the instance ..."
+echo "    [1/4] apt-get update + install packages ..."
 ssh "${SSH_OPTS[@]}" "$SERVER_REMOTE" '
     set -euo pipefail
     sudo apt-get update -qq
@@ -218,39 +238,56 @@ ssh "${SSH_OPTS[@]}" "$SERVER_REMOTE" '
         wrk nghttp2-client >/dev/null
     sudo systemctl enable --now docker >/dev/null
     sudo usermod -aG docker ubuntu
+    echo "    apt-get done."
+'
+echo "    [1/4] packages installed."
 
-    # liburing 2.9 (gcannon dep) — build from source, install to /usr.
-    if ! pkg-config --atleast-version=2.9 liburing 2>/dev/null; then
-        echo "  building liburing 2.9 ..."
-        cd /tmp
-        rm -rf liburing
-        git clone --quiet --depth 1 --branch liburing-2.9 \
-            https://github.com/axboe/liburing.git
-        cd liburing
-        ./configure --prefix=/usr >/dev/null
-        make -s -j"$(nproc)" -C src
-        sudo make -s install -C src >/dev/null
-        sudo ldconfig
-        cd ..
+echo "    [2/4] liburing 2.9 (source build) ..."
+ssh "${SSH_OPTS[@]}" "$SERVER_REMOTE" '
+    set -euo pipefail
+    if pkg-config --atleast-version=2.9 liburing 2>/dev/null; then
+        echo "    liburing already >= 2.9, skipping."
+        exit 0
     fi
+    cd /tmp
+    rm -rf liburing
+    git clone --quiet --depth 1 --branch liburing-2.9 \
+        https://github.com/axboe/liburing.git
+    cd liburing
+    ./configure --prefix=/usr >/dev/null
+    make -s -j"$(nproc)" -C src
+    sudo make -s install -C src >/dev/null
+    sudo ldconfig
+    echo "    liburing 2.9 built."
+'
+echo "    [2/4] liburing done."
 
-    # gcannon (HttpArena io_uring load generator).
-    if ! command -v gcannon >/dev/null; then
-        echo "  building gcannon ..."
-        cd /tmp
-        rm -rf gcannon
-        git clone --quiet --depth 1 https://github.com/MDA2AV/gcannon.git
-        cd gcannon
-        make -s
-        sudo cp gcannon /usr/local/bin/
-        cd ..
+echo "    [3/4] gcannon (source build, io_uring loadgen) ..."
+ssh "${SSH_OPTS[@]}" "$SERVER_REMOTE" '
+    set -euo pipefail
+    if command -v gcannon >/dev/null; then
+        echo "    gcannon already installed, skipping."
+        exit 0
     fi
+    cd /tmp
+    rm -rf gcannon
+    git clone --quiet --depth 1 https://github.com/MDA2AV/gcannon.git
+    cd gcannon
+    make -s
+    sudo cp gcannon /usr/local/bin/
+    echo "    gcannon built."
+'
+echo "    [3/4] gcannon done."
 
-    # Verify the three load tools are now resolvable.
+echo "    [4/4] verify load tools ..."
+ssh "${SSH_OPTS[@]}" "$SERVER_REMOTE" '
+    set -euo pipefail
     command -v gcannon >/dev/null || { echo "FATAL: gcannon not on PATH" >&2; exit 1; }
     command -v wrk     >/dev/null || { echo "FATAL: wrk not on PATH" >&2; exit 1; }
     command -v h2load  >/dev/null || { echo "FATAL: h2load not on PATH" >&2; exit 1; }
+    echo "    all load tools verified."
 '
+echo "    [4/4] toolchain ready."
 
 # ---------------------------------------------------------------------------
 # Step 3 — clone HttpArena fresh on the instance.
@@ -259,7 +296,7 @@ echo ">>> cloning MDA2AV/HttpArena on the instance ..."
 ssh "${SSH_OPTS[@]}" "$SERVER_REMOTE" '
     set -euo pipefail
     cd ~
-    rm -rf HttpArena
+    sudo rm -rf HttpArena
     git clone --depth 1 https://github.com/MDA2AV/HttpArena.git
 '
 
@@ -395,207 +432,40 @@ done
 # ---------------------------------------------------------------------------
 # Step 6 — install the docker-bench shim AFTER pre-building images.
 #
-# The shim wraps every subsequent `docker run` call to inject tuning:
-#
-#   Web-server containers  → --ulimit nofile=WEB_NOFILE:WEB_NOFILE
-#                            -e WEB_WORKERS=<value>       (when set)
-#                            -e WEB_CONCURRENCY=<value>   (when set; FastAPI)
-#   wrk containers         → --ulimit nofile=WRK_NOFILE:WRK_NOFILE
-#                            (WRK_CPUS handled via GCANNON_CPUS/taskset in Step 7)
-#
-# Strategy:
-#   1. Resolve the real docker binary path and save it as DOCKER_REAL
-#      (e.g. /usr/bin/docker.real).
-#   2. Hard-copy the real binary to that new path.
-#   3. Write the shim to ~/docker-bench-shim (user-writable).
-#   4. sudo install the shim over /usr/bin/docker.
-#   5. The shim's REAL_DOCKER variable points to /usr/bin/docker.real
-#      — NOT to /usr/bin/docker — so there is NO infinite recursion.
-#
-# The shim is removed in Step 9 by restoring /usr/bin/docker from the
-# saved real binary.
-#
-# FD limits are logged to stderr on every docker run so the values
-# appear in all benchmark and validate logs.
+# The shim wraps every subsequent `docker run` call to inject tuning
+# (ulimit, WEB_WORKERS, WRK_CPUS, etc.).  The shim script is uploaded
+# as a plain file and executed on the instance — no SSH heredoc.
 # ---------------------------------------------------------------------------
 echo ">>> installing docker-bench shim on the instance ..."
-# Pass the four tuning values as positional arguments to avoid
-# quoting/expansion pitfalls with environment-variable injection.
-ssh "${SSH_OPTS[@]}" "$SERVER_REMOTE" bash -s \
-    -- "${WEB_WORKERS}" "${WEB_NOFILE}" "${WRK_CPUS}" "${WRK_NOFILE}" "${BB_ACCESS_LOG}" "${BB_PHASE_TRACE}" <<'REMOTE_SHIM'
-set -euo pipefail
 
-_WEB_WORKERS="${1:-}"
-_WEB_NOFILE="${2:-}"
-_WRK_CPUS="${3:-}"
-_WRK_NOFILE="${4:-}"
-_BB_ACCESS_LOG="${5:-}"
-_BB_PHASE_TRACE="${6:-}"
+# Upload the shim installer script.
+scp "${SSH_OPTS[@]}" \
+    "$REPO_ROOT/bench/httparena/install_docker_shim.sh" \
+    "$SERVER_REMOTE:~/install_docker_shim.sh"
 
-# Locate the docker binary currently on PATH (not yet shimmed).
-DOCKER_ON_PATH="$(command -v docker)"
-
-# Choose a stable "real binary" path that the shim can always exec.
-# We copy (not move) the binary to a fixed name so /usr/bin/docker can
-# be replaced with the shim without changing anything else on the system.
-DOCKER_REAL="${DOCKER_ON_PATH}.real"
-
-sudo cp -f "$DOCKER_ON_PATH" "$DOCKER_REAL"
-sudo chmod 0755 "$DOCKER_REAL"
-
-SHIM_STAGING="$HOME/docker-bench-shim"
-
-# Write the shim to a user-writable location, then sudo-install it.
-cat > "$SHIM_STAGING" <<SHIM_INNER
-#!/usr/bin/env bash
-# docker-bench-shim — wraps 'docker run' to inject web-server / wrk tuning.
-# Generated by bench/aws/httparena_compare.sh — do not edit by hand.
-#
-# REAL_DOCKER points to the copy of the original binary made at shim-
-# install time.  It must NOT point to /usr/bin/docker (shim itself).
-
-REAL_DOCKER="${DOCKER_REAL}"
-WEB_WORKERS="${_WEB_WORKERS}"
-WEB_NOFILE="${_WEB_NOFILE}"
-WRK_CPUS="${_WRK_CPUS}"
-WRK_NOFILE="${_WRK_NOFILE}"
-BB_ACCESS_LOG="${_BB_ACCESS_LOG}"
-BB_PHASE_TRACE="${_BB_PHASE_TRACE}"
-
-# Pass non-run subcommands (build, pull, inspect, ps, …) straight through.
-if [ "\${1:-}" != "run" ]; then
-    exec "\$REAL_DOCKER" "\$@"
-fi
-
-# ---- classify this 'docker run' call ----
-# Scan all arguments (including 'run' itself) for the image-name pattern.
-# wrk image names contain the string "wrk" (e.g. wrk:local).
-# All other 'docker run' calls are treated as web-server containers.
-is_wrk=0
-for arg in "\$@"; do
-    case "\$arg" in
-        *wrk*) is_wrk=1; break ;;
-    esac
-done
-
-shift  # remove the 'run' token; \$@ is now the rest of the original args
-
-if [ "\$is_wrk" -eq 1 ]; then
-    # --- wrk load-generator container ---
-    echo "[bench-shim] wrk container: WRK_NOFILE=\$WRK_NOFILE WRK_CPUS=\${WRK_CPUS:-<no limit>}" >&2
-    extra=(--ulimit "nofile=\${WRK_NOFILE}:\${WRK_NOFILE}")
-    [ -n "\$WRK_CPUS" ] && extra+=(--cpus "\$WRK_CPUS")
-    exec "\$REAL_DOCKER" run "\${extra[@]}" "\$@"
-else
-    # --- web-server container ---
-    echo "[bench-shim] web-server container: WEB_NOFILE=\$WEB_NOFILE WEB_WORKERS=\${WEB_WORKERS:-<framework default>} BB_ACCESS_LOG=\${BB_ACCESS_LOG:-0}" >&2
-    extra=(--ulimit "nofile=\${WEB_NOFILE}:\${WEB_NOFILE}")
-    extra+=(-v /home/ubuntu/results:/results)
-    if [ -n "\$WEB_WORKERS" ]; then
-        # WEB_WORKERS: read by BlackBull's launcher.py
-        # WEB_CONCURRENCY: read by uvicorn/FastAPI (standard uvicorn env var)
-        # Both are injected so the same WEB_WORKERS value works for all frameworks.
-        extra+=(
-            -e "WEB_WORKERS=\${WEB_WORKERS}"
-            -e "WEB_CONCURRENCY=\${WEB_WORKERS}"
-        )
-    fi
-    # BB_ACCESS_LOG: forwarded as env var so launcher.py enables the StreamHandler
-    # that writes every request to stderr with a "[ACCESS]" prefix.
-    # benchmark.sh's save_result() captures docker logs (including stderr) to
-    # site/static/logs/<profile>/<conns>/blackbull.log before the container is
-    # removed; httparena_compare.sh greps [ACCESS] lines from that file.
-    [ -n "\$BB_ACCESS_LOG" ] && extra+=(-e "BB_ACCESS_LOG=\${BB_ACCESS_LOG}")
-    [ -n "\$BB_PHASE_TRACE" ] && extra+=(-e "BB_PHASE_TRACE=\${BB_PHASE_TRACE}")
-    exec "\$REAL_DOCKER" run "\${extra[@]}" "\$@"
-fi
-SHIM_INNER
-
-chmod +x "$SHIM_STAGING"
-
-# Atomically replace /usr/bin/docker with the shim.
-sudo install -o root -g root -m 0755 "$SHIM_STAGING" "$DOCKER_ON_PATH"
-echo "    shim installed: $DOCKER_ON_PATH → shim (real binary saved as $DOCKER_REAL)"
-REMOTE_SHIM
+# Execute it with tuning values as arguments.
+ssh "${SSH_OPTS[@]}" "$SERVER_REMOTE" \
+    "bash ~/install_docker_shim.sh '${WEB_WORKERS}' '${WEB_NOFILE}' '${WRK_CPUS}' '${WRK_NOFILE}' '${BB_ACCESS_LOG}' '${BB_PHASE_TRACE}'"
+echo "    shim installed."
 
 # ---------------------------------------------------------------------------
-# Step 7 — run HttpArena's official validate + benchmark scripts for
-# each (framework × profile) combination.  Output is captured under
+# Step 7 — run HttpArena's official validate + benchmark scripts via
+# an uploaded plain script (no SSH heredoc).  Output captured under
 # ~/results/ on the instance and rsync'd back at the end.
-#
-# wrk stdout/stderr are captured to separate files:
-#   ~/results/wrk-<fw>-<prof>.log   (stdout from docker logs)
-#   ~/results/wrk-<fw>-<prof>.err   (stderr / shim annotations)
 # ---------------------------------------------------------------------------
-ssh "${SSH_OPTS[@]}" "$SERVER_REMOTE" 'mkdir -p results'
+echo ">>> uploading run_httparena.sh ..."
+scp "${SSH_OPTS[@]}" \
+    "$REPO_ROOT/bench/httparena/run_httparena.sh" \
+    "$SERVER_REMOTE:~/run_httparena.sh"
 
-if [ "$SKIP_VALIDATE" != "1" ]; then
-    echo ">>> HttpArena validate (correctness check) ..."
-    for fw in $FRAMEWORKS; do
-        echo "  - $fw"
-        # VALIDATE_TIMEOUT=600 gives 10 minutes headroom.
-        # The image is already cached from Step 5, so the docker build
-        # inside validate.sh completes in <5 seconds from the layer cache.
-        ssh "${SSH_OPTS[@]}" "$SERVER_REMOTE" "
-            set -euo pipefail
-            cd HttpArena
-            sudo VALIDATE_TIMEOUT=600 ./scripts/validate.sh $fw 2>&1 | tee ~/results/validate-${fw}.log
-        " || echo "    (validate non-zero for $fw — kept going; see log)"
-    done
-fi
+# Convert space-separated lists to comma-separated for the script arg.
+_FW_CSV=$(echo "$FRAMEWORKS" | tr ' ' ',')
+_PROF_CSV=$(echo "$PROFILES" | tr ' ' ',')
 
-echo ">>> HttpArena benchmark ..."
-# ---------------------------------------------------------------------------
-# benchmark.sh を (framework × profile) の組み合わせごとに呼ぶ。
-#
-# WRK_CPUS → GCANNON_CPUS:
-#   HttpArena の wrk_run() が `taskset -c "$GCANNON_CPUS" wrk …` で
-#   CPU ピニングを行う。`sudo` は env を落とすため `env KEY=VAL` を
-#   sudo の後ろに置いてポリシーによらず注入する。
-#   平整数 ("24") は "0-23" に変換、範囲文字列はそのまま渡す。
-# ---------------------------------------------------------------------------
-
-# GCANNON_CPUS を一度だけ計算する（ループ外）
-if [ -n "${WRK_CPUS}" ]; then
-    if [[ "${WRK_CPUS}" =~ ^[0-9]+$ ]]; then
-        _GCANNON_CPUS="0-$(( WRK_CPUS - 1 ))"
-    else
-        _GCANNON_CPUS="${WRK_CPUS}"
-    fi
-    _SUDO_ENV="env GCANNON_CPUS=${_GCANNON_CPUS}"
-else
-    _SUDO_ENV=""
-fi
-
-for fw in $FRAMEWORKS; do
-    for prof in $PROFILES; do
-        echo "  - $fw / $prof"
-        ssh "${SSH_OPTS[@]}" "$SERVER_REMOTE" "
-            set -euo pipefail
-            cd HttpArena
-            # --save invokes save_result() which writes docker logs to
-            # site/static/logs/<profile>/<conns>/<fw>.log before the container
-            # is removed.  Without --save that file is never created, so the
-            # [ACCESS] grep below finds nothing and bb-access-*.log stays empty.
-            sudo ${_SUDO_ENV} ./scripts/benchmark.sh $fw $prof --save 2>&1 \
-                | tee ~/results/benchmark-${fw}-${prof}.log
-
-            # Extract shim annotations for wrk from combined output.
-            grep -E '^\[bench-shim\].*wrk' \
-                ~/results/benchmark-${fw}-${prof}.log \
-                > ~/results/wrk-${fw}-${prof}.log 2>/dev/null || true
-
-            # Best-effort: grab docker logs from any exited wrk containers.
-            for cid in \$(sudo docker ps -a --filter 'ancestor=wrk' -q 2>/dev/null); do
-                sudo docker logs \"\$cid\" \
-                    >> ~/results/wrk-${fw}-${prof}.log \
-                    2>> ~/results/wrk-${fw}-${prof}.err \
-                    || true
-            done
-
-        " || echo "    (benchmark non-zero for $fw / $prof — kept going)"
-    done
-done
+echo ">>> HttpArena validate + benchmark ..."
+ssh "${SSH_OPTS[@]}" "$SERVER_REMOTE" \
+    "bash ~/run_httparena.sh '${_FW_CSV}' '${_PROF_CSV}' '${SKIP_VALIDATE}' '${WRK_CPUS}'" \
+    || echo "  (run_httparena.sh exited non-zero — kept going)"
 
 # ---------------------------------------------------------------------------
 # Step 8 — remove the shim and restore the real docker binary.
