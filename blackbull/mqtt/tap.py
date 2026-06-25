@@ -75,6 +75,24 @@ class Tap:
         levels = topic.split('/')
         return {name: levels[i] for i, name in self.captures if i < len(levels)}
 
+    @property
+    def display_filter(self) -> str:
+        """The topic filter as originally written, with ``{name}`` captures
+        restored (``match_filter`` rewrites each to ``+`` for matching).
+
+        ``'sensors/{room}/temperature'`` round-trips back to itself; a plain
+        ``'sensors/+/temperature'`` stays as ``'sensors/+/temperature'``.  Used
+        by documentation tooling (``AsyncAPIExtension``) that wants to show the
+        filter the application declared rather than the internal match form.
+        """
+        if not self.captures:
+            return self.match_filter
+        levels = self.match_filter.split('/')
+        for i, name in self.captures:
+            if i < len(levels):
+                levels[i] = '{' + name + '}'
+        return '/'.join(levels)
+
 
 def compile_tap(topic: str, callback: Any) -> Tap:
     """Compile a topic filter (possibly with ``{name}`` captures) into a :class:`Tap`."""

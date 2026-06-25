@@ -32,6 +32,16 @@ so the editable install's metadata catches up.
 ## [Unreleased]
 
 ### Added
+- **`AsyncAPIExtension` — AsyncAPI 3.0 docs for the MQTT broker.** Parallel to
+  `OpenAPIExtension` (and coexisting with it), it serves an AsyncAPI 3.0
+  document describing the app's `@mqtt.on_message` topic taps at
+  `/asyncapi.json`, plus a CDN-hosted HTML viewer at `/asyncapi` (no new Python
+  dependency). Each tap filter becomes a channel (the `{name}`-preserved filter
+  as its address); each callback a `receive` operation. Generated lazily, so
+  taps registered after the extension are still documented. `MQTTExtension`
+  gains a public `iter_subscriptions()` accessor so the generator never reaches
+  into private handler state. Payloads are opaque bytes for now (a `schema=`
+  fast-follow is planned). `from blackbull.mqtt import AsyncAPIExtension`.
 - **HTTP scales across workers alongside a stateful protocol (MQTT).**
   `app.run(port=8000, workers=4)` with, e.g., `MQTTExtension(port=1883)` no
   longer forces the whole process to a single worker. The master binds the
