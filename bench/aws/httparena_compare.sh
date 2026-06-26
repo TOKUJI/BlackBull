@@ -85,7 +85,7 @@ _bench_aws_check_env
 # on one host with --network host).
 export TOPO=single
 
-PROFILES="${PROFILES:-baseline json json-tls static}"
+: "${PROFILES:?must be set explicitly, space-separated (e.g. 'baseline baseline-h2 echo-ws json json-comp json-tls limited-conn pipelined static static-h2 upload')}"
 FRAMEWORKS="${FRAMEWORKS:-blackbull fastapi}"
 KEEP_INSTANCE="${KEEP_INSTANCE:-0}"
 SKIP_VALIDATE="${SKIP_VALIDATE:-0}"
@@ -110,6 +110,13 @@ TS="$(date -u +%Y%m%d-%H%M%SZ)"
 SPRINT_TAG="${SPRINT_TAG:-sprint29}"
 LOCAL_DEST="$REPO_ROOT/bench/results/httparena/${SPRINT_TAG}-${TS}"
 mkdir -p "$LOCAL_DEST"
+
+# Self-document the run: capture the entire driver console — provisioning,
+# image builds, the watchdog heartbeats, and the streamed validate/benchmark
+# output — into the result directory itself, so the orchestration + remote
+# health trail lives alongside the artefacts instead of in an ad-hoc external
+# tee.  (The caller may still pipe to its own log; this is independent.)
+exec > >(tee -a "$LOCAL_DEST/driver.log") 2>&1
 
 echo "=== bench/aws/httparena_compare.sh ==="
 echo "  destination:   $LOCAL_DEST"
@@ -463,9 +470,47 @@ _FW_CSV=$(echo "$FRAMEWORKS" | tr ' ' ',')
 _PROF_CSV=$(echo "$PROFILES" | tr ' ' ',')
 
 echo ">>> HttpArena validate + benchmark ..."
+
+# --- remote-state watchdog ---------------------------------------------------
+# The validate+benchmark SSH below blocks for ~50 min.  A wedged docker daemon
+# (e.g. an instance reused after a killed run) emits NOTHING for the full 600s
+# validate gate, so a frozen log line is indistinguishable from slow progress.
+# This sidecar probes the server independently every WATCHDOG_INTERVAL seconds
+# and prints a one-line heartbeat (docker responsiveness, live containers,
+# :8080 listen state, loadavg) into the same streamed output.  It is strictly
+# observational — it never touches the benchmark commands, profiles, or
+# connection counts.  Every probe is `timeout`-wrapped so it can never itself
+# hang the run, and it is killed the moment the run SSH returns.  The probe is
+# 4 cheap syscalls every 30 s on a 32-vCPU box — far below the measurement
+# noise band.  Set WATCHDOG_INTERVAL=0 to disable.
+_REMOTE_PROBE='set +e; if names=$(timeout 5 sudo docker ps --format "{{.Names}}" 2>/dev/null); then c=$(printf "%s" "$names" | paste -sd, -); [ -n "$c" ] || c="(none)"; else c=HUNG; fi; p=$(ss -ltn 2>/dev/null | grep -qE ":8080|:8443" && echo up || echo down); printf "docker=%s port8080=%s load=%s\n" "$c" "$p" "$(cut -d" " -f1 /proc/loadavg)"'
+_watchdog() {
+    local interval="${WATCHDOG_INTERVAL:-30}" strikes=0 probe
+    [ "$interval" -gt 0 ] 2>/dev/null || return 0
+    while true; do
+        sleep "$interval"
+        if probe=$(timeout 12 ssh "${SSH_OPTS[@]}" "$SERVER_REMOTE" "$_REMOTE_PROBE" 2>/dev/null) \
+           && [ -n "$probe" ] && [[ "$probe" != *docker=HUNG* ]]; then
+            strikes=0
+            echo "  [watchdog $(date +%H:%M:%S)] $probe"
+        else
+            strikes=$((strikes + 1))
+            echo "  [watchdog $(date +%H:%M:%S)] ⚠ remote unresponsive (strike ${strikes}) — ${probe:-probe ssh timed out}"
+            if [ "$strikes" -ge "${WATCHDOG_MAX_STRIKES:-4}" ]; then
+                echo "  [watchdog] ✗ docker/instance wedged for ${strikes} consecutive probes — abort manually (Ctrl-C) and re-provision; do not trust this run."
+                strikes=0
+            fi
+        fi
+    done
+}
+_watchdog & _WATCHDOG_PID=$!
+
 ssh "${SSH_OPTS[@]}" "$SERVER_REMOTE" \
     "bash ~/run_httparena.sh '${_FW_CSV}' '${_PROF_CSV}' '${SKIP_VALIDATE}' '${WRK_CPUS}'" \
     || echo "  (run_httparena.sh exited non-zero — kept going)"
+
+kill "$_WATCHDOG_PID" 2>/dev/null || true
+wait "$_WATCHDOG_PID" 2>/dev/null || true
 
 # ---------------------------------------------------------------------------
 # Step 8 — remove the shim and restore the real docker binary.
