@@ -31,6 +31,10 @@ so the editable install's metadata catches up.
 
 ## [Unreleased]
 
+---
+
+## [0.45.0] — 2026-06-27
+
 Sprint 56 close — **DX consolidation** (no new protocol; gRPC stays queued).
 A MINOR of additive developer-experience and perf items: `BLACKBULL_*` env-var /
 `.env` resolution for `run()`, `RedirectResponse`, `read_json` / `read_text`
