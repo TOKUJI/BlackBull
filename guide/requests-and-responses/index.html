@@ -626,6 +626,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#read_json-and-read_text" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        read_json and read_text
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#recommended-json-body-middleware" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -730,6 +741,17 @@
     <span class="md-ellipsis">
       
         JSONResponse
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#redirectresponse" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        RedirectResponse
       
     </span>
   </a>
@@ -4498,6 +4520,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#read_json-and-read_text" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        read_json and read_text
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#recommended-json-body-middleware" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4602,6 +4635,17 @@
     <span class="md-ellipsis">
       
         JSONResponse
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#redirectresponse" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        RedirectResponse
       
     </span>
   </a>
@@ -4757,6 +4801,31 @@ handler itself).</p>
 returns one chunk with <code>more_body=True</code> until the final chunk
 arrives with <code>more_body=False</code>.  <code>read_body</code> is a convenience
 wrapper that buffers all chunks before returning.</p>
+<h3 id="read_json-and-read_text"><code>read_json</code> and <code>read_text</code><a class="headerlink" href="#read_json-and-read_text" title="Permanent link">&para;</a></h3>
+<p>For the two most common body shapes, <code>read_json</code> and <code>read_text</code>
+wrap <code>read_body</code> so the handler skips the parse/decode boilerplate:</p>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">http</span><span class="w"> </span><span class="kn">import</span> <span class="n">HTTPStatus</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">blackbull</span><span class="w"> </span><span class="kn">import</span> <span class="n">read_json</span><span class="p">,</span> <span class="n">read_text</span><span class="p">,</span> <span class="n">JSONResponse</span>
+
+<span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">&#39;/api/things&#39;</span><span class="p">,</span> <span class="n">methods</span><span class="o">=</span><span class="p">[</span><span class="n">HTTPMethod</span><span class="o">.</span><span class="n">POST</span><span class="p">])</span>
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">create_thing</span><span class="p">(</span><span class="n">scope</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
+    <span class="n">data</span> <span class="o">=</span> <span class="k">await</span> <span class="n">read_json</span><span class="p">(</span><span class="n">receive</span><span class="p">)</span>        <span class="c1"># dict | list | … | None</span>
+    <span class="k">if</span> <span class="n">data</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">await</span> <span class="n">send</span><span class="p">(</span><span class="n">JSONResponse</span><span class="p">({</span><span class="s1">&#39;error&#39;</span><span class="p">:</span> <span class="s1">&#39;invalid JSON&#39;</span><span class="p">},</span>
+                                <span class="n">status</span><span class="o">=</span><span class="n">HTTPStatus</span><span class="o">.</span><span class="n">BAD_REQUEST</span><span class="p">))</span>
+        <span class="k">return</span>
+    <span class="k">await</span> <span class="n">send</span><span class="p">(</span><span class="n">JSONResponse</span><span class="p">({</span><span class="s1">&#39;created&#39;</span><span class="p">:</span> <span class="n">data</span><span class="p">}))</span>
+
+<span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">&#39;/api/note&#39;</span><span class="p">,</span> <span class="n">methods</span><span class="o">=</span><span class="p">[</span><span class="n">HTTPMethod</span><span class="o">.</span><span class="n">POST</span><span class="p">])</span>
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">note</span><span class="p">(</span><span class="n">scope</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
+    <span class="n">text</span> <span class="o">=</span> <span class="k">await</span> <span class="n">read_text</span><span class="p">(</span><span class="n">receive</span><span class="p">)</span>        <span class="c1"># str (errors=&#39;replace&#39;)</span>
+    <span class="k">await</span> <span class="n">send</span><span class="p">(</span><span class="n">Response</span><span class="p">(</span><span class="n">text</span><span class="p">))</span>
+</code></pre></div>
+<p><code>read_json</code> returns <code>None</code> when the body is empty, not valid JSON, or
+not decodable — treat <code>None</code> as a client error.  <code>read_text</code> never
+raises on malformed bytes (undecodable bytes become U+FFFD); pass
+<code>encoding=</code> for non-UTF-8 payloads.  Both consume the stream, so call
+at most once per request, exactly like <code>read_body</code>.</p>
 <h3 id="recommended-json-body-middleware">Recommended JSON-body middleware<a class="headerlink" href="#recommended-json-body-middleware" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">json</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">http</span><span class="w"> </span><span class="kn">import</span> <span class="n">HTTPStatus</span>
@@ -4912,6 +4981,18 @@ via the <code>content_type</code> parameter:</p>
 <span class="k">await</span> <span class="n">send</span><span class="p">(</span><span class="n">JSONResponse</span><span class="p">({</span><span class="s1">&#39;id&#39;</span><span class="p">:</span> <span class="mi">1</span><span class="p">,</span> <span class="s1">&#39;title&#39;</span><span class="p">:</span> <span class="s1">&#39;Buy milk&#39;</span><span class="p">},</span> <span class="n">status</span><span class="o">=</span><span class="n">HTTPStatus</span><span class="o">.</span><span class="n">CREATED</span><span class="p">))</span>
 </code></pre></div>
 <p><code>Content-Type</code> is set to <code>application/json</code> automatically.</p>
+<h3 id="redirectresponse"><code>RedirectResponse</code><a class="headerlink" href="#redirectresponse" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">blackbull</span><span class="w"> </span><span class="kn">import</span> <span class="n">RedirectResponse</span>
+
+<span class="k">await</span> <span class="n">send</span><span class="p">(</span><span class="n">RedirectResponse</span><span class="p">(</span><span class="s1">&#39;/new-url&#39;</span><span class="p">))</span>                                    <span class="c1"># 302 Found</span>
+<span class="k">await</span> <span class="n">send</span><span class="p">(</span><span class="n">RedirectResponse</span><span class="p">(</span><span class="s1">&#39;/permanent&#39;</span><span class="p">,</span> <span class="n">status</span><span class="o">=</span><span class="n">HTTPStatus</span><span class="o">.</span><span class="n">MOVED_PERMANENTLY</span><span class="p">))</span>  <span class="c1"># 301</span>
+<span class="k">return</span> <span class="n">RedirectResponse</span><span class="p">(</span><span class="s1">&#39;/login&#39;</span><span class="p">,</span> <span class="n">status</span><span class="o">=</span><span class="n">HTTPStatus</span><span class="o">.</span><span class="n">SEE_OTHER</span><span class="p">)</span>             <span class="c1"># 303</span>
+</code></pre></div>
+<p>Sets the <code>Location</code> header from the URL and an empty body. The default
+status is <code>302 Found</code> — the safer general-purpose default, since it does
+not ask the client to preserve the original request method. The URL must be
+ASCII (RFC 9110 §10.2.2 — <code>Location</code> is a URI-reference); percent-encode
+non-ASCII URLs before passing them in. Extra <code>headers=</code> are merged in.</p>
 <h3 id="custom-response-headers">Custom response headers<a class="headerlink" href="#custom-response-headers" title="Permanent link">&para;</a></h3>
 <p>Both <code>Response</code> and <code>JSONResponse</code> accept <code>headers=[(bytes, bytes), ...]</code>:</p>
 <div class="highlight"><pre><span></span><code><span class="k">await</span> <span class="n">send</span><span class="p">(</span><span class="n">JSONResponse</span><span class="p">({</span><span class="s1">&#39;ok&#39;</span><span class="p">:</span> <span class="kc">True</span><span class="p">},</span> <span class="n">headers</span><span class="o">=</span><span class="p">[</span>

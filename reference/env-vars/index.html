@@ -4613,6 +4613,11 @@ first-hit-then-summary rate-limit model.</p>
 <td>Maximum total bytes in the entire HTTP/1.1 header block.  Exceeded → <code>431</code>.</td>
 </tr>
 <tr>
+<td><code>BB_BODY_CHUNK_SIZE</code></td>
+<td><code>65536</code></td>
+<td>Slice size (bytes) for streaming an HTTP/1.1 <code>Content-Length</code> request body to the ASGI app.  The body is delivered as successive <code>http.request</code> events (<code>more_body: True</code> until exhausted) instead of one giant <code>readexactly(content_length)</code> allocation — capping per-connection buffering at O(chunk × connections).  64 KiB matches asyncio's default <code>StreamReader</code> buffer.  Must be <code>&gt; 0</code> (invalid values fall back to the default).</td>
+</tr>
+<tr>
 <td><code>BB_STREAM_QUEUE_DEPTH</code></td>
 <td><code>64</code></td>
 <td><code>asyncio.Queue</code> depth for HTTP/2 per-stream request-body events.  Caps memory growth when an ASGI handler is slower than the client uploading data.</td>

@@ -1905,6 +1905,28 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#blackbull.config.log_config_sources" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        log_config_sources
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.config.resolve_run_config" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        resolve_run_config
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -4307,6 +4329,28 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#blackbull.config.log_config_sources" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        log_config_sources
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.config.resolve_run_config" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        resolve_run_config
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -4364,18 +4408,25 @@ app = BlackBull(config=AppConfig(
 if __name__ == '__main__':
     app.run()          # picks up the config; no flags to thread through
 </code></pre>
-<p>Resolution precedence in :meth:<code>BlackBull.run</code> is, highest to lowest:</p>
+<p>Resolution precedence in :meth:<code>BlackBull.run</code> is, highest to lowest
+(see :func:<code>resolve_run_config</code>):</p>
 <ol>
 <li>an explicit keyword argument to <code>run(...)</code> — <code>app.run(port=9000)</code>
     always wins;</li>
+<li>a <code>BLACKBULL_*</code> environment variable, for the deploy-time settings
+    (<code>BLACKBULL_PORT</code> / <code>CERT</code> / <code>KEY</code> / <code>UNIX_PATH</code> / <code>RELOAD</code>);</li>
+<li>the same <code>BLACKBULL_*</code> key in a <code>.env</code> file in the working directory
+    (requires the <code>[dotenv]</code> extra; absent it, only the real environment is
+    consulted);</li>
 <li>the value declared on the bound :class:<code>AppConfig</code> (if any);</li>
 <li>the built-in default baked into :func:<code>blackbull.serve</code>.</li>
 </ol>
 <p><code>AppConfig</code> deliberately mirrors <em>only</em> the parameters <code>serve</code> already
 exposes — it is not a general-purpose settings store.  Per-request and
 server-tuning knobs (window sizes, timeouts, queue depths beyond the two
-listed here, …) continue to live in :mod:<code>blackbull.env</code> and are sourced
-from <code>BB_*</code> environment variables.</p>
+listed here, <code>workers</code>, <code>max_connections</code>, …) continue to live in
+:mod:<code>blackbull.env</code> and are sourced from <code>BB_*</code> environment variables —
+<code>BLACKBULL_*</code> is the deployment namespace, <code>BB_*</code> the tuning one.</p>
 <p><code>host</code> is intentionally absent: BlackBull's socket layer binds dual-stack
 on all interfaces (see :meth:<code>blackbull.server.ASGIServer.open_socket</code>), so
 a per-interface <code>host</code> field would silently do nothing.  Use <code>unix_path</code>
@@ -4455,6 +4506,61 @@ explicit <code>run(...)</code> argument overrides them.</p>
 
 </div>
 
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="blackbull.config.log_config_sources" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">log_config_sources</span><span class="p">(</span><span class="n">resolved</span><span class="p">,</span> <span class="n">sources</span><span class="p">)</span></code>
+
+<a href="#blackbull.config.log_config_sources" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Log one INFO line per deploy setting that was configured non-trivially.</p>
+<p>Only the <code>BLACKBULL_*</code>-resolvable deploy settings whose value came from
+an environment variable, <code>.env</code>, or an :class:<code>AppConfig</code> are reported —
+explicit call-site arguments (the author already knows them) and plain
+defaults are left silent to keep startup quiet.  Paths are logged; secrets
+are not (a <code>keyfile</code> path is configuration, its contents never touch the
+log).</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="blackbull.config.resolve_run_config" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">resolve_run_config</span><span class="p">(</span><span class="n">explicit</span><span class="p">,</span> <span class="n">config</span><span class="p">)</span></code>
+
+<a href="#blackbull.config.resolve_run_config" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Resolve every <code>run()</code> setting and record where each value came from.</p>
+<p>Precedence, highest to lowest:</p>
+<ol>
+<li>an explicit <code>run(...)</code> keyword argument (anything not <code>None</code>);</li>
+<li>a <code>BLACKBULL_*</code> environment variable (for the deploy-time settings in
+   :data:<code>_ENV_VARS</code>);</li>
+<li>a <code>BLACKBULL_*</code> entry in a <code>.env</code> file (<code>[dotenv]</code> extra);</li>
+<li>the bound :class:<code>AppConfig</code> field, if declared (non-default);</li>
+<li>the built-in default.</li>
+</ol>
+<p>Returns <code>(resolved, sources)</code> where <em>resolved</em> maps each <code>run()</code>
+parameter to its final value and <em>sources</em> maps it to a short provenance
+label (<code>argument</code> / <code>$BLACKBULL_PORT</code> / <code>.env</code> / <code>AppConfig</code> /
+<code>default</code>) for startup logging.</p>
+
+
+    </div>
+
+</div>
 
 
 

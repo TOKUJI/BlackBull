@@ -930,6 +930,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Declarative startup with AppConfig">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#env-files" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        .env files
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
         
       </ul>
@@ -4422,6 +4439,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Declarative startup with AppConfig">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#env-files" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        .env files
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
         
       </ul>
@@ -4612,6 +4646,11 @@ general-purpose settings store — server-tuning knobs stay in the
 <ol>
 <li>an explicit <code>run(...)</code> keyword argument — <code>app.run(port=9000)</code>
    always wins;</li>
+<li>a <code>BLACKBULL_*</code> environment variable, for the deploy-time
+   settings (<code>BLACKBULL_PORT</code>, <code>BLACKBULL_CERT</code>, <code>BLACKBULL_KEY</code>,
+   <code>BLACKBULL_UNIX_PATH</code>, <code>BLACKBULL_RELOAD</code>);</li>
+<li>the same <code>BLACKBULL_*</code> key in a <code>.env</code> file in the working
+   directory (needs the <code>[dotenv]</code> extra — see below);</li>
 <li>the value declared on the bound <code>AppConfig</code>;</li>
 <li><code>serve()</code>'s built-in default.</li>
 </ol>
@@ -4619,9 +4658,36 @@ general-purpose settings store — server-tuning knobs stay in the
 <span class="n">app</span><span class="o">.</span><span class="n">run</span><span class="p">()</span>              <span class="c1"># binds 8443 with TLS from the config</span>
 <span class="n">app</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="n">port</span><span class="o">=</span><span class="mi">9000</span><span class="p">)</span>     <span class="c1"># explicit arg overrides the config&#39;s 8443</span>
 </code></pre></div>
-<p>There is no <code>host</code> field: BlackBull's socket layer binds dual-stack
-on all interfaces, so a per-interface <code>host</code> would silently do
-nothing.  Use <code>unix_path</code> or <code>inherited_fd</code> for non-TCP binds.</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># Same app.py, no code change — the env var overrides the config&#39;s 8443:</span>
+<span class="nv">BLACKBULL_PORT</span><span class="o">=</span><span class="m">9000</span><span class="w"> </span><span class="nv">BLACKBULL_CERT</span><span class="o">=</span>/etc/ssl/c.pem<span class="w"> </span><span class="nv">BLACKBULL_KEY</span><span class="o">=</span>/etc/ssl/k.pem<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>python<span class="w"> </span>app.py
+</code></pre></div>
+<p><code>BLACKBULL_*</code> is the <strong>deployment</strong> namespace (the handful of
+settings you change per environment); server-tuning knobs
+(<code>workers</code>, <code>max_connections</code>, queue depths, timeouts) keep their
+<code>BB_*</code> variables — they are not duplicated under <code>BLACKBULL_*</code>. The
+provenance of each non-default deploy setting is logged once at
+startup on the <code>blackbull.config</code> logger, e.g.
+<code>config: port=9000 (from $BLACKBULL_PORT)</code>.</p>
+<p>There is no <code>host</code> field / <code>BLACKBULL_HOST</code>: BlackBull's socket
+layer binds dual-stack on all interfaces, so a per-interface <code>host</code>
+would silently do nothing.  Use <code>unix_path</code> or <code>inherited_fd</code> for
+non-TCP binds.</p>
+<h4 id="env-files"><code>.env</code> files<a class="headerlink" href="#env-files" title="Permanent link">&para;</a></h4>
+<p>Install the optional extra to let <code>app.run()</code> (and the <code>blackbull</code>
+CLI) read <code>BLACKBULL_*</code> values from a <code>.env</code> file in the working
+directory:</p>
+<div class="highlight"><pre><span></span><code>pip<span class="w"> </span>install<span class="w"> </span><span class="s1">&#39;blackbull[dotenv]&#39;</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><span class="c1"># .env</span>
+<span class="nv">BLACKBULL_PORT</span><span class="o">=</span><span class="m">8443</span>
+<span class="nv">BLACKBULL_CERT</span><span class="o">=</span>/etc/ssl/cert.pem
+<span class="nv">BLACKBULL_KEY</span><span class="o">=</span>/etc/ssl/key.pem
+</code></pre></div>
+<p>The real process environment always wins over <code>.env</code> (so a
+<code>docker run -e BLACKBULL_PORT=9000</code> overrides the file). Without the
+extra, <code>.env</code> files are ignored and only the real environment is
+consulted — <code>BLACKBULL_*</code> resolution still works.</p>
 <h2 id="serving-static-files-with-blackbull-serve">Serving static files with <code>blackbull serve</code><a class="headerlink" href="#serving-static-files-with-blackbull-serve" title="Permanent link">&para;</a></h2>
 <p>For a quick static file server — a drop-in upgrade over
 <code>python -m http.server</code> — point the <code>serve</code> subcommand at a

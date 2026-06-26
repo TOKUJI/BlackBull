@@ -4547,6 +4547,11 @@ BB_HEADER_MAX_TOTAL
     Maximum total bytes in the entire HTTP/1.1 request header block
     (request-line + all headers + CRLFCRLF).  Default: <code>65536</code>
     (matches typical reverse-proxy defaults).
+BB_BODY_CHUNK_SIZE
+    Slice size (bytes) for streaming an HTTP/1.1 <code>Content-Length</code> request
+    body to the ASGI app as successive <code>http.request</code> events instead of one
+    giant allocation.  Default: <code>65536</code> (asyncio's <code>StreamReader</code> buffer).
+    Must be <code>&gt; 0</code>.
 BB_H2_INITIAL_WINDOW_SIZE
     Per-stream flow-control window size (bytes) advertised to HTTP/2 peers in the
     server's initial SETTINGS frame.  Larger values allow peers to send more data

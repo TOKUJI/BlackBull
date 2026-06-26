@@ -4796,6 +4796,9 @@ It is a framework-internal component.</p>
 <code>RequestActor</code> indirection when no Level B event handlers are
 registered — matching the pre-Sprint-53 direct <code>self._app()</code>
 call path.</p>
+<p>Result is cached against the dispatcher's registration generation, so
+the 6-event scan runs only when listeners change (effectively once,
+at startup) rather than on every request.</p>
 
 
     </div>

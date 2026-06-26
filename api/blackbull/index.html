@@ -4321,10 +4321,12 @@
 <li><code>BlackBull</code>: the main application object; wraps routing, middleware, and lifespan hooks.</li>
 <li><code>AppConfig</code>: declarative, immutable holder for the startup settings <code>run()</code> accepts (port, TLS, workers, …).</li>
 <li><code>serve</code>: synchronous entry point that runs any ASGI 3.0 callable (also used by the <code>blackbull</code> console script).</li>
-<li><code>Response</code>, <code>JSONResponse</code>, <code>StreamingResponse</code>, <code>EventSourceResponse</code>, <code>WebSocketResponse</code>: response helpers.</li>
+<li><code>Response</code>, <code>JSONResponse</code>, <code>RedirectResponse</code>, <code>StreamingResponse</code>, <code>EventSourceResponse</code>, <code>WebSocketResponse</code>: response helpers.</li>
 <li><code>Headers</code>: case-insensitive, ordered, multi-valued HTTP header store.</li>
 <li><code>cookie_header</code>: builds a <code>Set-Cookie</code> header tuple.</li>
 <li><code>read_body</code>: reads and buffers the full request body from the ASGI receive channel.</li>
+<li><code>read_json</code>: reads the body and parses it as JSON (<code>None</code> on empty/invalid).</li>
+<li><code>read_text</code>: reads the body and decodes it as text.</li>
 <li><code>parse_cookies</code>: parses the <code>Cookie</code> header into a plain <code>dict</code>.</li>
 <li><code>CORS</code>: adds <code>Access-Control-*</code> headers; handles preflight OPTIONS requests.</li>
 <li><code>as_middleware</code>: decorator that marks an async function or class as middleware; normalises <code>send</code> so inner wrappers see only ASGI event dicts.</li>

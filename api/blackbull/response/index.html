@@ -3284,6 +3284,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.response.RedirectResponse" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        RedirectResponse
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.response.Response" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4391,6 +4402,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.response.RedirectResponse" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        RedirectResponse
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.response.Response" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4496,6 +4518,7 @@
 <ul>
 <li><code>Response</code>: plain HTTP response (HTML / plain text / binary).</li>
 <li><code>JSONResponse</code>: convenience subclass that serialises a Python object to JSON.</li>
+<li><code>RedirectResponse</code>: convenience subclass that sets a <code>Location</code> header + 3xx status.</li>
 <li><code>StreamingResponse</code>: pushes an async iterator to the client without buffering.</li>
 <li><code>EventSourceResponse</code>: WHATWG Server-Sent Events on top of StreamingResponse.</li>
 <li><code>WebSocketResponse</code>: wraps text, bytes, or dict data as a WebSocket send event.</li>
@@ -4608,6 +4631,64 @@ async def stream():
 <pre><code>await send(JSONResponse({'ok': True}))
 await send(JSONResponse({'error': 'Not found'}, status=HTTPStatus.NOT_FOUND))
 </code></pre>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="blackbull.response.RedirectResponse" class="doc doc-heading">
+            <code>RedirectResponse</code>
+
+
+<a href="#blackbull.response.RedirectResponse" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><a class="autorefs autorefs-internal" title="Response (blackbull.response.Response)" href="#blackbull.response.Response">Response</a></code></p>
+
+
+
+        <p>HTTP redirect response carrying a <code>Location</code> header.</p>
+<p>Completes the <code>Response</code> convenience family alongside <code>JSONResponse</code>.
+The body is empty; <em>url</em> becomes the <code>Location</code> header value and <em>status</em>
+a 3xx redirect code (default <code>302 Found</code> — the safer general-purpose
+default, since it does not force the client to preserve the request method).</p>
+<p>Pass directly to the ASGI <code>send</code> callable, or return it from a handler::</p>
+<pre><code>await send(RedirectResponse('/new-url'))
+return RedirectResponse('/permanent', status=HTTPStatus.MOVED_PERMANENTLY)
+</code></pre>
+<p><em>url</em> must be ASCII (RFC 9110 §10.2.2 — the Location field value is a
+URI-reference); percent-encode non-ASCII URLs before passing them in.</p>
 
 
 
