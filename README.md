@@ -191,6 +191,11 @@ parameters.  Dataclass-typed bodies are also deserialized at runtime
 — `async def h(body: CreateTask): ...` receives a constructed
 instance, no manual `json.loads`.
 
+For the MQTT broker there is a messaging counterpart: `AsyncAPIExtension`
+publishes an AsyncAPI 3.0 document for your `@mqtt.on_message` taps at
+`/asyncapi.json` (with an HTML viewer at `/asyncapi`).  See
+[`docs/guide/mqtt.md`](https://github.com/TOKUJI/BlackBull/blob/master/docs/guide/mqtt.md).
+
 ## Fault injection
 
 BlackBull's single most distinctive feature: a programmable
