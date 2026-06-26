@@ -31,6 +31,17 @@ so the editable install's metadata catches up.
 
 ## [Unreleased]
 
+---
+
+## [0.44.1] — 2026-06-26
+
+Sprint 55 close. A PATCH on top of `v0.44.0`: HTTP now scales across workers
+while a stateful single-owner protocol (the MQTT 5 broker) runs alongside,
+AsyncAPI 3.0 docs for the broker taps, and behaviour-preserving hot-path perf.
+Measured **+8.7% FA-normalized mean HTTP/1.1 throughput** vs `v0.44.0` across the
+HttpArena suite (c7i.8xlarge, FastAPI reference; validation 47/0 + WS 7/0), with
+the largest gains on the connection-churn / pipelining lanes.
+
 ### Changed
 - **Hot-path copy + logging reduction (no behaviour change).** Three low-risk
   perf wins on the HTTP/1.1 and HTTP/2 hot paths: `read_body()` collects chunks
