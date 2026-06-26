@@ -3,8 +3,12 @@
 Provides:
 
 - `read_body`: buffers all ASGI ``http.request`` chunks into a single ``bytes`` object.
+- `read_json`: buffers the body and parses it as JSON (``None`` on empty/invalid).
+- `read_text`: buffers the body and decodes it as text.
 - `parse_cookies`: parses the ``Cookie`` request header into a ``dict[str, str]``.
 """
+import json
+from typing import Any
 
 
 async def read_body(receive) -> bytes:
@@ -27,6 +31,43 @@ async def read_body(receive) -> bytes:
     if len(chunks) == 1:
         return chunks[0]
     return b''.join(chunks)
+
+
+async def read_json(receive) -> Any:
+    """Read the request body and parse it as JSON.
+
+    Returns the parsed JSON value (``dict``, ``list``, ``str``, ``int``,
+    ``float``, ``bool``), or ``None`` when the body is empty, not valid JSON,
+    or not decodable.  Callers should treat ``None`` as a client error and
+    respond ``400``::
+
+        data = await read_json(receive)
+        if data is None:
+            await send(JSONResponse({'error': 'invalid JSON'},
+                                    status=HTTPStatus.BAD_REQUEST))
+            return
+
+    Note that a literal JSON ``null`` body also parses to ``None``; if that
+    distinction matters, read the body yourself with :func:`read_body`.
+    """
+    body = await read_body(receive)
+    if not body:
+        return None
+    try:
+        return json.loads(body)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return None
+
+
+async def read_text(receive, encoding: str = 'utf-8') -> str:
+    """Read the request body and decode it as text.
+
+    Uses ``errors='replace'`` so undecodable bytes become U+FFFD rather than
+    raising — a malformed body never crashes the handler.  Override
+    *encoding* for non-UTF-8 payloads.
+    """
+    body = await read_body(receive)
+    return body.decode(encoding, errors='replace')
 
 
 def parse_cookies(scope) -> dict[str, str]:

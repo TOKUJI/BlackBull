@@ -24,6 +24,36 @@ returns one chunk with `more_body=True` until the final chunk
 arrives with `more_body=False`.  `read_body` is a convenience
 wrapper that buffers all chunks before returning.
 
+### `read_json` and `read_text`
+
+For the two most common body shapes, `read_json` and `read_text`
+wrap `read_body` so the handler skips the parse/decode boilerplate:
+
+```python
+from http import HTTPStatus
+from blackbull import read_json, read_text, JSONResponse
+
+@app.route(path='/api/things', methods=[HTTPMethod.POST])
+async def create_thing(scope, receive, send):
+    data = await read_json(receive)        # dict | list | … | None
+    if data is None:
+        await send(JSONResponse({'error': 'invalid JSON'},
+                                status=HTTPStatus.BAD_REQUEST))
+        return
+    await send(JSONResponse({'created': data}))
+
+@app.route(path='/api/note', methods=[HTTPMethod.POST])
+async def note(scope, receive, send):
+    text = await read_text(receive)        # str (errors='replace')
+    await send(Response(text))
+```
+
+`read_json` returns `None` when the body is empty, not valid JSON, or
+not decodable — treat `None` as a client error.  `read_text` never
+raises on malformed bytes (undecodable bytes become U+FFFD); pass
+`encoding=` for non-UTF-8 payloads.  Both consume the stream, so call
+at most once per request, exactly like `read_body`.
+
 ### Recommended JSON-body middleware
 
 ```python
@@ -200,6 +230,22 @@ await send(JSONResponse({'id': 1, 'title': 'Buy milk'}, status=HTTPStatus.CREATE
 ```
 
 `Content-Type` is set to `application/json` automatically.
+
+### `RedirectResponse`
+
+```python
+from blackbull import RedirectResponse
+
+await send(RedirectResponse('/new-url'))                                    # 302 Found
+await send(RedirectResponse('/permanent', status=HTTPStatus.MOVED_PERMANENTLY))  # 301
+return RedirectResponse('/login', status=HTTPStatus.SEE_OTHER)             # 303
+```
+
+Sets the `Location` header from the URL and an empty body. The default
+status is `302 Found` — the safer general-purpose default, since it does
+not ask the client to preserve the original request method. The URL must be
+ASCII (RFC 9110 §10.2.2 — `Location` is a URI-reference); percent-encode
+non-ASCII URLs before passing them in. Extra `headers=` are merged in.
 
 ### Custom response headers
 

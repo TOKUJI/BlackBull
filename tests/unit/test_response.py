@@ -5,7 +5,7 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from blackbull import Response, JSONResponse, WebSocketResponse
+from blackbull import Response, JSONResponse, RedirectResponse, WebSocketResponse
 from blackbull.response import cookie_header
 from blackbull.app import _wrap_send
 
@@ -97,6 +97,57 @@ def test_jsonresponse_extra_headers():
     extra = [(b'set-cookie', b'sid=abc')]
     r = JSONResponse({}, headers=extra)
     assert (b'set-cookie', b'sid=abc') in r.headers
+
+
+# ---------------------------------------------------------------------------
+# RedirectResponse
+# ---------------------------------------------------------------------------
+
+def test_redirectresponse_default_status_is_302():
+    assert RedirectResponse('/new').status == HTTPStatus.FOUND
+
+
+def test_redirectresponse_custom_status():
+    r = RedirectResponse('/perm', status=HTTPStatus.MOVED_PERMANENTLY)
+    assert r.status == HTTPStatus.MOVED_PERMANENTLY
+
+
+def test_redirectresponse_sets_location_header():
+    assert (b'location', b'/static/favicon.svg') in \
+        RedirectResponse('/static/favicon.svg').headers
+
+
+def test_redirectresponse_empty_body():
+    assert RedirectResponse('/new').body == b''
+
+
+def test_redirectresponse_merges_extra_headers():
+    r = RedirectResponse('/new', headers=[(b'set-cookie', b'sid=abc')])
+    assert (b'location', b'/new') in r.headers
+    assert (b'set-cookie', b'sid=abc') in r.headers
+
+
+def test_redirectresponse_rejects_non_ascii_url():
+    # RFC 9110 §10.2.2 — Location is a URI-reference (ASCII); callers
+    # percent-encode non-ASCII URLs before passing them in.
+    with pytest.raises(UnicodeEncodeError):
+        RedirectResponse('/café')
+
+
+@pytest.mark.asyncio
+async def test_wrap_send_unpacks_redirectresponse():
+    calls = []
+
+    async def raw(event):
+        calls.append(event)
+
+    r = RedirectResponse('/login', status=HTTPStatus.SEE_OTHER)
+    await _wrap_send(raw)(r)
+    assert len(calls) == 2
+    start, body = calls
+    assert start['status'] == int(HTTPStatus.SEE_OTHER)
+    assert (b'location', b'/login') in start['headers']
+    assert body == {'type': 'http.response.body', 'body': b'', 'more_body': False}
 
 
 # ---------------------------------------------------------------------------

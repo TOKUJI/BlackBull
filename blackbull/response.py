@@ -4,6 +4,7 @@ Provides:
 
 - `Response`: plain HTTP response (HTML / plain text / binary).
 - `JSONResponse`: convenience subclass that serialises a Python object to JSON.
+- `RedirectResponse`: convenience subclass that sets a ``Location`` header + 3xx status.
 - `StreamingResponse`: pushes an async iterator to the client without buffering.
 - `EventSourceResponse`: WHATWG Server-Sent Events on top of StreamingResponse.
 - `WebSocketResponse`: wraps text, bytes, or dict data as a WebSocket send event.
@@ -82,6 +83,32 @@ class JSONResponse(Response):
                  status: HTTPStatus = HTTPStatus.OK,
                  headers: list | None = None):
         super().__init__(json.dumps(content).encode(), status, 'application/json', headers)
+
+
+class RedirectResponse(Response):
+    """HTTP redirect response carrying a ``Location`` header.
+
+    Completes the ``Response`` convenience family alongside ``JSONResponse``.
+    The body is empty; *url* becomes the ``Location`` header value and *status*
+    a 3xx redirect code (default ``302 Found`` — the safer general-purpose
+    default, since it does not force the client to preserve the request method).
+
+    Pass directly to the ASGI ``send`` callable, or return it from a handler::
+
+        await send(RedirectResponse('/new-url'))
+        return RedirectResponse('/permanent', status=HTTPStatus.MOVED_PERMANENTLY)
+
+    *url* must be ASCII (RFC 9110 §10.2.2 — the Location field value is a
+    URI-reference); percent-encode non-ASCII URLs before passing them in.
+    """
+
+    def __init__(self, url: str,
+                 status: HTTPStatus = HTTPStatus.FOUND,
+                 headers: list | None = None):
+        merged = [(b'location', url.encode('ascii'))]
+        if headers:
+            merged.extend(headers)
+        super().__init__(b'', status=status, headers=merged)
 
 
 def cookie_header(name: str, value: str, path: str = '/',

@@ -640,6 +640,89 @@ class TestHTTP1Recipient:
         second = await r()
         assert second == {'type': 'http.disconnect'}
 
+    # -- P4: Content-Length body streaming (chunk_size slices) --------------
+
+    @pytest.mark.asyncio
+    async def test_content_length_streams_in_chunks(self):
+        """A body larger than chunk_size arrives as several http.request events."""
+        from blackbull.server.recipient import HTTP1Recipient
+        scope = {'headers': [(b'content-length', b'10')]}
+        reader = self._make_reader(b'0123456789')
+        r = HTTP1Recipient(reader, scope, chunk_size=4)
+        events = []
+        while True:
+            e = await r()
+            events.append(e)
+            if not e.get('more_body', False):
+                break
+        assert [e['body'] for e in events] == [b'0123', b'4567', b'89']
+        assert [e['more_body'] for e in events] == [True, True, False]
+        assert b''.join(e['body'] for e in events) == b'0123456789'
+
+    @pytest.mark.asyncio
+    async def test_single_chunk_more_body_false(self):
+        from blackbull.server.recipient import HTTP1Recipient
+        scope = {'headers': [(b'content-length', b'5')]}
+        reader = self._make_reader(b'hello')
+        r = HTTP1Recipient(reader, scope, chunk_size=65536)
+        event = await r()
+        assert event == {'type': 'http.request', 'body': b'hello', 'more_body': False}
+
+    @pytest.mark.asyncio
+    async def test_exact_multiple_of_chunk_size(self):
+        """No spurious empty trailing event when the body divides evenly."""
+        from blackbull.server.recipient import HTTP1Recipient
+        scope = {'headers': [(b'content-length', b'8')]}
+        reader = self._make_reader(b'abcdefgh')
+        r = HTTP1Recipient(reader, scope, chunk_size=4)
+        events = []
+        while True:
+            e = await r()
+            events.append(e)
+            if not e.get('more_body', False):
+                break
+        assert [e['body'] for e in events] == [b'abcd', b'efgh']
+        assert events[-1]['more_body'] is False
+
+    @pytest.mark.asyncio
+    async def test_empty_content_length_one_event(self):
+        from blackbull.server.recipient import HTTP1Recipient
+        scope = {'headers': [(b'content-length', b'0')]}
+        reader = self._make_reader(b'')
+        r = HTTP1Recipient(reader, scope, chunk_size=4)
+        event = await r()
+        assert event == {'type': 'http.request', 'body': b'', 'more_body': False}
+
+    @pytest.mark.asyncio
+    async def test_no_body_headers_one_empty_event(self):
+        from blackbull.server.recipient import HTTP1Recipient
+        scope = {'headers': []}
+        reader = self._make_reader(b'')
+        r = HTTP1Recipient(reader, scope, chunk_size=4)
+        event = await r()
+        assert event == {'type': 'http.request', 'body': b'', 'more_body': False}
+
+    @pytest.mark.asyncio
+    async def test_body_chunk_size_from_env(self, monkeypatch):
+        """When chunk_size is not injected, BB_BODY_CHUNK_SIZE drives slicing."""
+        import blackbull.env as env
+        from blackbull.server.recipient import HTTP1Recipient
+        monkeypatch.setenv('BB_BODY_CHUNK_SIZE', '3')
+        env.get_settings.cache_clear()
+        try:
+            scope = {'headers': [(b'content-length', b'7')]}
+            reader = self._make_reader(b'abcdefg')
+            r = HTTP1Recipient(reader, scope)        # no chunk_size → env
+            sizes = []
+            while True:
+                e = await r()
+                sizes.append(len(e['body']))
+                if not e.get('more_body', False):
+                    break
+            assert sizes == [3, 3, 1]
+        finally:
+            env.get_settings.cache_clear()
+
 
 class TestHTTP2Recipient:
     @pytest.mark.asyncio

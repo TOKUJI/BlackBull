@@ -8,10 +8,12 @@ Public API exports:
 - `BlackBull`: the main application object; wraps routing, middleware, and lifespan hooks.
 - `AppConfig`: declarative, immutable holder for the startup settings ``run()`` accepts (port, TLS, workers, …).
 - `serve`: synchronous entry point that runs any ASGI 3.0 callable (also used by the ``blackbull`` console script).
-- `Response`, `JSONResponse`, `StreamingResponse`, `EventSourceResponse`, `WebSocketResponse`: response helpers.
+- `Response`, `JSONResponse`, `RedirectResponse`, `StreamingResponse`, `EventSourceResponse`, `WebSocketResponse`: response helpers.
 - `Headers`: case-insensitive, ordered, multi-valued HTTP header store.
 - `cookie_header`: builds a ``Set-Cookie`` header tuple.
 - `read_body`: reads and buffers the full request body from the ASGI receive channel.
+- `read_json`: reads the body and parses it as JSON (``None`` on empty/invalid).
+- `read_text`: reads the body and decodes it as text.
 - `parse_cookies`: parses the ``Cookie`` header into a plain ``dict``.
 - `CORS`: adds ``Access-Control-*`` headers; handles preflight OPTIONS requests.
 - `as_middleware`: decorator that marks an async function or class as middleware; normalises ``send`` so inner wrappers see only ASGI event dicts.
@@ -41,10 +43,10 @@ except PackageNotFoundError:
 from .app import BlackBull, serve
 from .config import AppConfig
 from .headers import Headers
-from .request import read_body, parse_cookies
+from .request import read_body, read_json, read_text, parse_cookies
 from .response import (
-    Response, JSONResponse, StreamingResponse, EventSourceResponse,
-    WebSocketResponse, cookie_header,
+    Response, JSONResponse, RedirectResponse, StreamingResponse,
+    EventSourceResponse, WebSocketResponse, cookie_header,
 )
 from .event import Event, EventHandler
 from .asgi import ResponseStart, ResponseBody, parse_response_event

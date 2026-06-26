@@ -756,15 +756,21 @@ class BlackBull:
         For ``workers > 1`` *or* ``reload=True`` the master pre-binds
         sockets, forks workers, and blocks until SIGTERM / SIGINT.
 
-        Each argument left unset (``None``) falls back to the value declared
-        on the bound :class:`~blackbull.AppConfig` (if the app was built with
-        ``BlackBull(config=...)``), then to :func:`blackbull.serve`'s own
-        default.  An explicit argument always wins::
+        Each argument left unset (``None``) is resolved, highest precedence
+        first: the explicit argument → a ``BLACKBULL_*`` environment variable
+        (``BLACKBULL_PORT`` / ``CERT`` / ``KEY`` / ``UNIX_PATH`` / ``RELOAD``)
+        → a ``.env`` file in the working directory (needs the ``[dotenv]``
+        extra) → the bound :class:`~blackbull.AppConfig` → :func:`blackbull.serve`'s
+        own default.  Server-tuning knobs (``workers``, ``max_connections``,
+        queue depths) keep their ``BB_*`` environment variables; ``BLACKBULL_*``
+        is the deployment namespace.  The provenance of each non-default deploy
+        setting is logged once at startup on the ``blackbull.config`` logger::
 
             app = BlackBull(config=AppConfig(port=8443, certfile='c.pem',
                                              keyfile='k.pem'))
             app.run()              # binds 8443 with TLS from the config
             app.run(port=9000)     # explicit arg overrides the config's 8443
+            # BLACKBULL_PORT=9000 python app.py   # env overrides the config too
 
         For embedded use under an existing event loop, or for pre-binding
         a socket before forking a test subprocess, instantiate
@@ -779,29 +785,24 @@ class BlackBull:
             app.run(port=8443, certfile='cert.pem', keyfile='key.pem', reload=True)
             app.run(unix_path='/run/blackbull.sock')
         """
-        cfg = self._config
+        from .config import resolve_run_config, log_config_sources  # noqa: PLC0415
 
-        def _pick(explicit, attr, fallback):
-            if explicit is not None:
-                return explicit
-            if cfg is not None:
-                return getattr(cfg, attr)
-            return fallback
-
-        serve(
-            self,
-            certfile=_pick(certfile, 'certfile', None),
-            keyfile=_pick(keyfile, 'keyfile', None),
-            port=_pick(port, 'port', 0),
-            unix_path=_pick(unix_path, 'unix_path', None),
-            inherited_fd=_pick(inherited_fd, 'inherited_fd', None),
-            workers=_pick(workers, 'workers', None),
-            max_connections=_pick(max_connections, 'max_connections', None),
-            stream_queue_depth=_pick(stream_queue_depth, 'stream_queue_depth', None),
-            ws_queue_depth=_pick(ws_queue_depth, 'ws_queue_depth', None),
-            reload=_pick(reload, 'reload', False),
-            reload_paths=_pick(reload_paths, 'reload_paths', None),
+        # Resolve each setting through: explicit arg → BLACKBULL_* env var →
+        # .env → AppConfig → default (see resolve_run_config), then surface the
+        # provenance of any non-default deploy setting at startup.
+        resolved, sources = resolve_run_config(
+            {
+                'certfile': certfile, 'keyfile': keyfile, 'port': port,
+                'unix_path': unix_path, 'inherited_fd': inherited_fd,
+                'workers': workers, 'max_connections': max_connections,
+                'stream_queue_depth': stream_queue_depth,
+                'ws_queue_depth': ws_queue_depth,
+                'reload': reload, 'reload_paths': reload_paths,
+            },
+            self._config,
         )
+        log_config_sources(resolved, sources)
+        serve(self, **resolved)
 
 
 def serve(app, *,

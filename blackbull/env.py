@@ -113,6 +113,11 @@ BB_HEADER_MAX_TOTAL
     Maximum total bytes in the entire HTTP/1.1 request header block
     (request-line + all headers + CRLFCRLF).  Default: ``65536``
     (matches typical reverse-proxy defaults).
+BB_BODY_CHUNK_SIZE
+    Slice size (bytes) for streaming an HTTP/1.1 ``Content-Length`` request
+    body to the ASGI app as successive ``http.request`` events instead of one
+    giant allocation.  Default: ``65536`` (asyncio's ``StreamReader`` buffer).
+    Must be ``> 0``.
 BB_H2_INITIAL_WINDOW_SIZE
     Per-stream flow-control window size (bytes) advertised to HTTP/2 peers in the
     server's initial SETTINGS frame.  Larger values allow peers to send more data
@@ -433,6 +438,15 @@ class Settings:
     #: typical reverse-proxy defaults.
     header_max_total: int = 65536
 
+    #: Chunk size (bytes) for streaming an HTTP/1.1 ``Content-Length`` request
+    #: body to the ASGI app.  Instead of one ``readexactly(content_length)``
+    #: giant allocation, the body is delivered in fixed-size ``http.request``
+    #: events (``more_body: True`` until exhausted) — capping per-connection
+    #: buffering at O(chunk × connections) and letting the app start work
+    #: before the whole body arrives.  64 KiB matches asyncio's default
+    #: ``StreamReader`` buffer limit.  Must be > 0.
+    body_chunk_size: int = 65536
+
     #: Per-stream HTTP/2 flow-control window advertised in the server's SETTINGS.
     #: 65535 is the RFC 9113 §6.9.2 default.  Production deployments serving
     #: large responses should raise this — see
@@ -569,6 +583,7 @@ def get_settings() -> Settings:
         write_timeout=_float_env_nonneg('BB_WRITE_TIMEOUT', 30.0),
         header_max_line=_int_env_nonneg('BB_HEADER_MAX_LINE', 8192),
         header_max_total=_int_env_nonneg('BB_HEADER_MAX_TOTAL', 65536),
+        body_chunk_size=_int_env('BB_BODY_CHUNK_SIZE', 65536),
         # RFC 9113 §6.9.2 default initial window size.  See
         # docs/reference/env-vars.md "Performance recommendations" for the
         # values commonly used on tuned production deployments.

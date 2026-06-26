@@ -33,6 +33,55 @@ so the editable install's metadata catches up.
 
 ---
 
+## [0.45.0] — 2026-06-27
+
+Sprint 56 close — **DX consolidation** (no new protocol; gRPC stays queued).
+A MINOR of additive developer-experience and perf items: `BLACKBULL_*` env-var /
+`.env` resolution for `run()`, `RedirectResponse`, `read_json` / `read_text`
+body helpers, HTTP/1.1 `Content-Length` body streaming, and two pay-for-what-you-use
+hot-path wins (cached request-listener check, lazy per-connection cap counter).
+
+### Added
+- **`BLACKBULL_*` environment-variable + `.env` resolution for `app.run()`.**
+  The deploy-time settings — `BLACKBULL_PORT` / `CERT` / `KEY` / `UNIX_PATH` /
+  `RELOAD` — now resolve with documented precedence: explicit `run(...)` argument
+  → `BLACKBULL_*` env var → `.env` file → bound `AppConfig` → built-in default
+  (see `blackbull.config.resolve_run_config`). `.env` loading is gated behind a
+  new optional extra `blackbull[dotenv]` (no new hard dependency); without it,
+  resolution from the real process environment still works. One INFO line per
+  non-default deploy setting is logged at startup on the `blackbull.config`
+  logger, naming each value's source (key paths are logged, never contents).
+  `BLACKBULL_*` is the deployment namespace; `BB_*` remains the tuning namespace.
+- **`RedirectResponse`** — `Response` convenience subclass that sets a `Location`
+  header and a 3xx status (default `302 Found`), completing the
+  `JSONResponse` / `StreamingResponse` family. Exported from `blackbull`.
+- **`read_json` / `read_text`** — request-body helpers wrapping `read_body`.
+  `read_json(receive)` returns the parsed JSON value or `None` on empty / invalid /
+  undecodable bodies; `read_text(receive, encoding='utf-8')` decodes with
+  `errors='replace'` so malformed bytes never raise. Both exported from `blackbull`.
+- **`BB_BODY_CHUNK_SIZE` — streamed HTTP/1.1 `Content-Length` request bodies.**
+  A `Content-Length` body is now delivered to the ASGI app as successive
+  `http.request` events of at most `BB_BODY_CHUNK_SIZE` bytes (default 64 KiB,
+  must be > 0; `more_body: True` until exhausted) instead of one
+  `readexactly(content_length)` allocation — capping per-connection buffering and
+  letting the app start work before the whole body arrives. The exact-bytes
+  contract is preserved (a short body still raises `IncompleteReadError`).
+
+### Changed
+- **Cached request-listener check on the request hot path.** `RequestActor.run()`'s
+  `has_any_request_listeners()` fast-path guard no longer re-scans the six
+  request-lifecycle events on every request; the result is cached against a new
+  `EventDispatcher.generation` counter (bumped on `on` / `intercept`) and
+  recomputed only when listeners change — effectively once, at startup. Behaviour
+  is identical, including for listeners registered after the first request.
+- **Lazy per-connection cap counter (`connection-accept` fast path).** The
+  `CapHitCounter` and its `os.urandom` connection id are now built only if a cap
+  actually fires (`_LazyCapHitCounter`). On the keep-alive / healthy path this
+  removes a `getrandom(2)` syscall, an allocation, and a flush from every accepted
+  connection; cross-task propagation and cap-hit logging are unchanged.
+
+---
+
 ## [0.44.1] — 2026-06-26
 
 Sprint 55 close. A PATCH on top of `v0.44.0`: HTTP now scales across workers

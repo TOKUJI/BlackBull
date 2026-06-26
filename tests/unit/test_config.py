@@ -14,6 +14,7 @@ import pytest
 
 import blackbull.app as app_module
 from blackbull import AppConfig, BlackBull
+from blackbull.config import resolve_run_config
 
 
 @pytest.fixture()
@@ -105,3 +106,108 @@ def test_config_unix_path_and_queue_depths_flow_through(captured_serve):
     assert captured_serve['stream_queue_depth'] == 128
     assert captured_serve['ws_queue_depth'] == 512
     assert captured_serve['max_connections'] == 1024
+
+
+# ---------------------------------------------------------------------------
+# BLACKBULL_* environment variable resolution
+# ---------------------------------------------------------------------------
+
+def test_env_port_resolved_and_coerced_to_int(captured_serve, monkeypatch):
+    monkeypatch.setenv('BLACKBULL_PORT', '9001')
+    BlackBull().run()
+    assert captured_serve['port'] == 9001          # str → int
+
+
+def test_env_overrides_appconfig(captured_serve, monkeypatch):
+    monkeypatch.setenv('BLACKBULL_PORT', '9001')
+    BlackBull(config=AppConfig(port=8443)).run()
+    assert captured_serve['port'] == 9001          # env beats config
+
+
+def test_explicit_arg_overrides_env(captured_serve, monkeypatch):
+    monkeypatch.setenv('BLACKBULL_PORT', '9001')
+    BlackBull().run(port=7000)
+    assert captured_serve['port'] == 7000          # explicit beats env
+
+
+def test_env_cert_and_key(captured_serve, monkeypatch):
+    monkeypatch.setenv('BLACKBULL_CERT', '/etc/ssl/cert.pem')
+    monkeypatch.setenv('BLACKBULL_KEY', '/etc/ssl/key.pem')
+    BlackBull().run()
+    assert captured_serve['certfile'] == '/etc/ssl/cert.pem'
+    assert captured_serve['keyfile'] == '/etc/ssl/key.pem'
+
+
+@pytest.mark.parametrize('raw,expected', [
+    ('1', True), ('true', True), ('TRUE', True), ('yes', True), ('on', True),
+    ('0', False), ('false', False), ('no', False), ('', False),
+])
+def test_env_reload_bool_parsing(captured_serve, monkeypatch, raw, expected):
+    monkeypatch.setenv('BLACKBULL_RELOAD', raw)
+    BlackBull().run()
+    assert captured_serve['reload'] is expected
+
+
+def test_tuning_knob_not_resolved_from_blackbull_namespace(captured_serve, monkeypatch):
+    # workers is a BB_* tuning knob, not a BLACKBULL_* deploy setting: a
+    # BLACKBULL_WORKERS var must NOT be picked up (no double-sourcing).
+    monkeypatch.setenv('BLACKBULL_WORKERS', '8')
+    BlackBull().run()
+    assert captured_serve['workers'] is None        # serve() applies BB_WORKERS
+
+
+# ---------------------------------------------------------------------------
+# .env file resolution (lowest of the env tiers)
+# ---------------------------------------------------------------------------
+
+def test_dotenv_file_resolved(captured_serve, monkeypatch, tmp_path):
+    monkeypatch.delenv('BLACKBULL_PORT', raising=False)
+    (tmp_path / '.env').write_text('BLACKBULL_PORT=9100\n')
+    monkeypatch.chdir(tmp_path)
+    BlackBull().run()
+    assert captured_serve['port'] == 9100
+
+
+def test_real_env_beats_dotenv(captured_serve, monkeypatch, tmp_path):
+    (tmp_path / '.env').write_text('BLACKBULL_PORT=9100\n')
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv('BLACKBULL_PORT', '9200')
+    BlackBull().run()
+    assert captured_serve['port'] == 9200           # process env wins over .env
+
+
+# ---------------------------------------------------------------------------
+# resolve_run_config — source attribution
+# ---------------------------------------------------------------------------
+
+def test_sources_label_argument_env_config_default(monkeypatch):
+    monkeypatch.setenv('BLACKBULL_CERT', '/c.pem')
+    monkeypatch.delenv('BLACKBULL_PORT', raising=False)
+    resolved, sources = resolve_run_config(
+        {'keyfile': '/explicit.key'},
+        AppConfig(port=8443),
+    )
+    assert sources['keyfile'] == 'argument'
+    assert sources['certfile'] == '$BLACKBULL_CERT'
+    assert sources['port'] == 'AppConfig'
+    assert sources['reload'] == 'default'
+    assert resolved['port'] == 8443
+    assert resolved['certfile'] == '/c.pem'
+
+
+def test_startup_logging_reports_non_default_sources(monkeypatch, caplog):
+    import logging
+    monkeypatch.setenv('BLACKBULL_PORT', '9001')
+
+    def _fake_serve(app, **kwargs):
+        pass
+
+    monkeypatch.setattr(app_module, 'serve', _fake_serve)
+    with caplog.at_level(logging.INFO, logger='blackbull.config'):
+        BlackBull().run(certfile='/explicit.pem')
+
+    msgs = [r.getMessage() for r in caplog.records if r.name == 'blackbull.config']
+    # env-sourced port is reported; explicit certfile and default keyfile are not.
+    assert any('port=9001' in m and 'BLACKBULL_PORT' in m for m in msgs)
+    assert not any('certfile' in m for m in msgs)
+    assert not any('keyfile' in m for m in msgs)

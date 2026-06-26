@@ -4,7 +4,7 @@ name = "blackbull"
 # minor per closed sprint); PATCH covers bug fixes / harness work
 # between sprints.  No 1.0 commitment until the framework's identity
 # and surface have stabilised across several sprints.  See CHANGELOG.md.
-version = "0.44.1"
+version = "0.45.0"
 description = "Async ASGI 3.0 framework with a from-scratch HTTP/1.1 parser, HTTP/2 frame layer, and WebSocket codec. HPACK delegates to the hpack library."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -96,6 +96,8 @@ testing = [
     "httpx[http2]",
     "websockets",
     "hypothesis",
+    # Exercises the `.env` resolution path in app.run() (blackbull[dotenv]).
+    "python-dotenv",
     # Validates the generated OpenAPI 3.1 documents against the upstream
     # schema in tests/unit/test_openapi.py — proves the spec we emit is
     # consumable by the wider OpenAPI ecosystem.
@@ -116,6 +118,14 @@ speed = [
 
 reload = [
     "watchfiles",
+]
+
+# `.env` file resolution for app.run() / the blackbull CLI.  Without this extra,
+# app.run() still resolves BLACKBULL_* from the real process environment; the
+# extra only adds support for loading a `.env` file from the working directory.
+# Install with `pip install 'blackbull[dotenv]'`.
+dotenv = [
+    "python-dotenv",
 ]
 
 # Deliberate-misbehaviour toolkit (blackbull.fault_injection).  The

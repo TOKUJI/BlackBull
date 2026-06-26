@@ -159,8 +159,13 @@ Resolution order in `run()` is, highest to lowest:
 
 1. an explicit `run(...)` keyword argument — `app.run(port=9000)`
    always wins;
-2. the value declared on the bound `AppConfig`;
-3. `serve()`'s built-in default.
+2. a `BLACKBULL_*` environment variable, for the deploy-time
+   settings (`BLACKBULL_PORT`, `BLACKBULL_CERT`, `BLACKBULL_KEY`,
+   `BLACKBULL_UNIX_PATH`, `BLACKBULL_RELOAD`);
+3. the same `BLACKBULL_*` key in a `.env` file in the working
+   directory (needs the `[dotenv]` extra — see below);
+4. the value declared on the bound `AppConfig`;
+5. `serve()`'s built-in default.
 
 ```python
 app = BlackBull(config=AppConfig(port=8443, certfile='c.pem', keyfile='k.pem'))
@@ -168,9 +173,46 @@ app.run()              # binds 8443 with TLS from the config
 app.run(port=9000)     # explicit arg overrides the config's 8443
 ```
 
-There is no `host` field: BlackBull's socket layer binds dual-stack
-on all interfaces, so a per-interface `host` would silently do
-nothing.  Use `unix_path` or `inherited_fd` for non-TCP binds.
+```bash
+# Same app.py, no code change — the env var overrides the config's 8443:
+BLACKBULL_PORT=9000 BLACKBULL_CERT=/etc/ssl/c.pem BLACKBULL_KEY=/etc/ssl/k.pem \
+  python app.py
+```
+
+`BLACKBULL_*` is the **deployment** namespace (the handful of
+settings you change per environment); server-tuning knobs
+(`workers`, `max_connections`, queue depths, timeouts) keep their
+`BB_*` variables — they are not duplicated under `BLACKBULL_*`. The
+provenance of each non-default deploy setting is logged once at
+startup on the `blackbull.config` logger, e.g.
+`config: port=9000 (from $BLACKBULL_PORT)`.
+
+There is no `host` field / `BLACKBULL_HOST`: BlackBull's socket
+layer binds dual-stack on all interfaces, so a per-interface `host`
+would silently do nothing.  Use `unix_path` or `inherited_fd` for
+non-TCP binds.
+
+#### `.env` files
+
+Install the optional extra to let `app.run()` (and the `blackbull`
+CLI) read `BLACKBULL_*` values from a `.env` file in the working
+directory:
+
+```bash
+pip install 'blackbull[dotenv]'
+```
+
+```bash
+# .env
+BLACKBULL_PORT=8443
+BLACKBULL_CERT=/etc/ssl/cert.pem
+BLACKBULL_KEY=/etc/ssl/key.pem
+```
+
+The real process environment always wins over `.env` (so a
+`docker run -e BLACKBULL_PORT=9000` overrides the file). Without the
+extra, `.env` files are ignored and only the real environment is
+consulted — `BLACKBULL_*` resolution still works.
 
 ## Serving static files with `blackbull serve`
 
