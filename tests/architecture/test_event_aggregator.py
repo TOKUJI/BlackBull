@@ -1,5 +1,5 @@
 import pytest
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 from blackbull.event import Event, EventDispatcher
 from blackbull.event_aggregator import EventAggregator
 
@@ -138,3 +138,37 @@ def test_has_any_request_listeners_ignores_non_request_events(event) -> None:
     d = EventDispatcher()
     d.on(event, AsyncMock())
     assert EventAggregator(d).has_any_request_listeners() is False
+
+
+# ---------------------------------------------------------------------------
+# Caching — the per-request guard must not recompute the 6-event scan every call
+# ---------------------------------------------------------------------------
+
+def test_has_any_request_listeners_invalidates_when_listener_added_late() -> None:
+    """A listener registered AFTER the first (cached) call must still flip the
+    result — the cache is keyed on the dispatcher's listener generation."""
+    d = EventDispatcher()
+    agg = EventAggregator(d)
+    assert agg.has_any_request_listeners() is False   # caches False
+    d.on('before_handler', AsyncMock())               # bumps generation
+    assert agg.has_any_request_listeners() is True     # recomputed, not stale
+
+
+def test_has_any_request_listeners_is_cached_between_calls() -> None:
+    """Repeat calls with no registration change must not re-scan the dispatcher."""
+    d = EventDispatcher()
+    agg = EventAggregator(d)
+    agg.has_any_request_listeners()                   # prime the cache
+    d.has_listeners = Mock(side_effect=AssertionError(
+        'has_listeners must not be called again while the generation is unchanged'))
+    assert agg.has_any_request_listeners() is False   # served from cache, no scan
+
+
+def test_dispatcher_generation_bumps_on_registration() -> None:
+    d = EventDispatcher()
+    g0 = d.generation
+    d.on('before_handler', AsyncMock())
+    g1 = d.generation
+    d.intercept('error', AsyncMock())
+    g2 = d.generation
+    assert g0 != g1 != g2 and len({g0, g1, g2}) == 3

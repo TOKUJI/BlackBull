@@ -55,14 +55,22 @@ class EventDispatcher:
         self._interceptors: defaultdict[str, list[EventHandler]] = defaultdict(list)
         self._pending_tasks: set[asyncio.Task] = set()
         self._shutdown_timeout = shutdown_timeout
+        # Monotonic counter bumped on every registration.  Hot-path callers
+        # (e.g. EventAggregator.has_any_request_listeners) cache a derived
+        # boolean keyed on this value, recomputing only when it changes —
+        # listeners are almost always registered before serving, so the
+        # per-request cost collapses to one int read + compare.
+        self.generation: int = 0
 
     def on(self, event_name: str, handler: EventHandler) -> None:
         """Register an observation handler for ``event_name``."""
         self._observers[event_name].append(handler)
+        self.generation += 1
 
     def intercept(self, event_name: str, handler: EventHandler) -> None:
         """Register an interception handler for ``event_name``."""
         self._interceptors[event_name].append(handler)
+        self.generation += 1
 
     def has_listeners(self, event_name: str) -> bool:
         """Return True if any interceptor or observer is registered for ``event_name``.

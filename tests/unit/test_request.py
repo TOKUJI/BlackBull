@@ -1,7 +1,90 @@
 import pytest
 
-from blackbull.request import read_body, parse_cookies
+from blackbull.request import read_body, read_json, read_text, parse_cookies
 from blackbull.headers import Headers
+
+
+def _receive_from(*chunks):
+    """Build an ASGI receive() that yields the given (body, more_body) events.
+
+    A single bytes argument is wrapped as one final chunk.
+    """
+    if len(chunks) == 1 and isinstance(chunks[0], (bytes, bytearray)):
+        events = [{'body': bytes(chunks[0]), 'more_body': False}]
+    else:
+        events = list(chunks)
+    it = iter(events)
+
+    async def receive():
+        return next(it)
+
+    return receive
+
+
+# ---------------------------------------------------------------------------
+# read_json
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_read_json_object():
+    assert await read_json(_receive_from(b'{"a": 1, "b": [2, 3]}')) == {'a': 1, 'b': [2, 3]}
+
+
+@pytest.mark.asyncio
+async def test_read_json_array():
+    assert await read_json(_receive_from(b'[1, 2, 3]')) == [1, 2, 3]
+
+
+@pytest.mark.asyncio
+async def test_read_json_empty_body_returns_none():
+    assert await read_json(_receive_from(b'')) is None
+
+
+@pytest.mark.asyncio
+async def test_read_json_invalid_returns_none():
+    assert await read_json(_receive_from(b'{not json')) is None
+
+
+@pytest.mark.asyncio
+async def test_read_json_invalid_utf8_returns_none():
+    # Lone continuation byte — not decodable as UTF-8, must not raise.
+    assert await read_json(_receive_from(b'\xff\xfe')) is None
+
+
+@pytest.mark.asyncio
+async def test_read_json_reassembles_multiple_chunks():
+    received = await read_json(_receive_from(
+        {'body': b'{"x":', 'more_body': True},
+        {'body': b' 42}', 'more_body': False},
+    ))
+    assert received == {'x': 42}
+
+
+# ---------------------------------------------------------------------------
+# read_text
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_read_text_decodes_utf8():
+    assert await read_text(_receive_from('héllo'.encode())) == 'héllo'
+
+
+@pytest.mark.asyncio
+async def test_read_text_empty_body():
+    assert await read_text(_receive_from(b'')) == ''
+
+
+@pytest.mark.asyncio
+async def test_read_text_invalid_utf8_uses_replacement():
+    # errors='replace' → never raises; undecodable bytes become U+FFFD.
+    result = await read_text(_receive_from(b'a\xffb'))
+    assert result == 'a�b'
+
+
+@pytest.mark.asyncio
+async def test_read_text_honours_encoding_argument():
+    assert await read_text(_receive_from('café'.encode('latin-1')),
+                           encoding='latin-1') == 'café'
 
 
 # ---------------------------------------------------------------------------

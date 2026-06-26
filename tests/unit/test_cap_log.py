@@ -16,7 +16,9 @@ import logging
 
 import pytest
 
-from blackbull.server.cap_log import log_cap_hit, CapHitCounter
+from blackbull.server.cap_log import (
+    log_cap_hit, CapHitCounter, _LazyCapHitCounter,
+)
 
 
 # ----------------------------------------------------------------------
@@ -359,3 +361,86 @@ async def test_flush_cancels_pending_interval_timer(cap_log_caplog):
     await _asyncio.sleep(0.2)
     records = [r for r in cap_log_caplog.records if r.name == 'blackbull.caps']
     assert records == []
+
+
+# ----------------------------------------------------------------------
+# _LazyCapHitCounter — defer construction (and os.urandom id) to first hit
+# ----------------------------------------------------------------------
+
+def test_lazy_holder_starts_unmaterialised():
+    holder = _LazyCapHitCounter()
+    assert holder.counter is None
+
+
+def test_lazy_holder_no_urandom_until_first_hit(monkeypatch, cap_log_caplog):
+    """A healthy (no-cap) connection draws no os.urandom connection id."""
+    import blackbull.server.cap_log as cap_log
+    calls = 0
+    real = cap_log._gen_connection_id
+
+    def counted():
+        nonlocal calls
+        calls += 1
+        return real()
+
+    monkeypatch.setattr(cap_log, '_gen_connection_id', counted)
+
+    holder = _LazyCapHitCounter()
+    with holder.bind():
+        pass                      # no log_cap_hit → no cap fired
+    holder.flush(peer=('127.0.0.1', 1234))
+
+    assert calls == 0
+    assert holder.counter is None
+
+
+def test_lazy_holder_materialises_on_first_hit(cap_log_caplog):
+    holder = _LazyCapHitCounter()
+    with holder.bind():
+        log_cap_hit('ws_max_frame_payload', 1, 2)
+    assert holder.counter is not None
+    records = [r for r in cap_log_caplog.records if r.name == 'blackbull.caps']
+    assert len(records) == 1
+    # The materialised counter minted a connection id for the emitted record.
+    assert records[0].connection_id == holder.counter.connection_id
+
+
+def test_lazy_holder_flush_is_noop_when_unmaterialised(cap_log_caplog):
+    holder = _LazyCapHitCounter()
+    holder.flush(peer=('127.0.0.1', 1234))   # must not raise
+    records = [r for r in cap_log_caplog.records if r.name == 'blackbull.caps']
+    assert records == []
+
+
+def test_lazy_holder_rate_limits_and_summarises_like_eager(cap_log_caplog):
+    """First hit emits; later hits suppress; flush summarises — same as eager."""
+    holder = _LazyCapHitCounter(flush_threshold=0, flush_interval=0)
+    with holder.bind():
+        for _ in range(4):       # 1 first-hit + 3 suppressed
+            log_cap_hit('ws_max_frame_payload', 1, 2)
+    holder.flush(peer=('127.0.0.1', 1234))
+
+    records = [r for r in cap_log_caplog.records if r.name == 'blackbull.caps']
+    first = [r for r in records if getattr(r, 'suppressed', None) is None]
+    summaries = [r for r in records if getattr(r, 'suppressed', None) is not None]
+    assert len(first) == 1
+    assert len(summaries) == 1
+    assert summaries[0].suppressed == 3
+
+
+def test_lazy_holder_shared_across_tasks(cap_log_caplog):
+    """A child task hitting the cap materialises the holder the parent flushes."""
+    import asyncio as _asyncio
+
+    async def main():
+        holder = _LazyCapHitCounter()
+        with holder.bind():
+            async with _asyncio.TaskGroup() as tg:
+                async def child():
+                    log_cap_hit('ws_max_frame_payload', 1, 2)
+                tg.create_task(child())
+            # Parent sees the counter the child materialised.
+            assert holder.counter is not None
+        holder.flush(peer=('127.0.0.1', 1234))
+
+    _asyncio.run(main())

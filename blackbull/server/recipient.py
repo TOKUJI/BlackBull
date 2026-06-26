@@ -354,7 +354,8 @@ class HTTP1Recipient(BaseRecipient):
 
     def __init__(self, reader: AbstractReader, scope: dict,
                  *, body_timeout: float = 0.0,
-                 deadline: ConnectionDeadline | None = None):
+                 deadline: ConnectionDeadline | None = None,
+                 chunk_size: int | None = None):
         super().__init__(reader)
         self._scope = scope
         headers = scope['headers']
@@ -367,7 +368,16 @@ class HTTP1Recipient(BaseRecipient):
                 f'Transfer-Encoding "{te.decode()}" is not supported.'
             )
         self._chunked = (te == b'chunked')
+        # Remaining Content-Length bytes; counts down as the body streams.
         self._content_length = int(cl) if cl else None
+        # P4: deliver a Content-Length body in fixed-size chunks instead of one
+        # giant ``readexactly(content_length)`` allocation.  Falls back to the
+        # ``BB_BODY_CHUNK_SIZE`` setting when not injected (direct-instantiation
+        # tests pass it explicitly).
+        if chunk_size is None:
+            from ..env import get_settings as _get_settings  # noqa: PLC0415
+            chunk_size = _get_settings().body_chunk_size
+        self._chunk_size = chunk_size
         self._done = False
         # Sprint 17 Phase 3 — body-read deadline.  0 = disabled.  Applied
         # per ``_read_with_timeout`` call (i.e. per chunk for chunked
@@ -419,14 +429,23 @@ class HTTP1Recipient(BaseRecipient):
                     self._reader.readuntil(b'\r\n'))        # consume CRLF after chunk data
                 return {'type': ASGIEvent.HTTP_REQUEST, 'body': data, 'more_body': True}
             else:
-                self._done = True
+                # P4: stream the Content-Length body in ``chunk_size`` slices so
+                # a large upload is delivered as several ``http.request`` events
+                # (``more_body: True`` until exhausted) rather than one giant
+                # allocation.  ``readexactly`` keeps the exact-bytes contract —
+                # a short body still raises IncompleteReadError below.
                 if self._content_length:
+                    n = min(self._content_length, self._chunk_size)
                     body = await self._read_with_timeout(
-                        self._reader.readexactly(self._content_length))
-                else:
-                    body = b''
-                logger.debug('HTTP1Recipient body: %r', body)
-                return {'type': ASGIEvent.HTTP_REQUEST, 'body': body, 'more_body': False}
+                        self._reader.readexactly(n))
+                    self._content_length -= n
+                    more = self._content_length > 0
+                    if not more:
+                        self._done = True
+                    return {'type': ASGIEvent.HTTP_REQUEST, 'body': body,
+                            'more_body': more}
+                self._done = True
+                return {'type': ASGIEvent.HTTP_REQUEST, 'body': b'', 'more_body': False}
 
         except (asyncio.TimeoutError, TimeoutError):
             # body_timeout exceeded — distinguish from EOF mid-body so

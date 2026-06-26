@@ -286,16 +286,59 @@ class CapHitCounter:
         self._suppressed.clear()
 
 
+class _LazyCapHitCounter:
+    """Deferred :class:`CapHitCounter` bound once per connection.
+
+    The accept path runs once per TCP connection, but a cap is hit only on
+    abuse/misconfiguration — so the overwhelming majority of connections build
+    a counter (and draw its ``os.urandom`` connection id, a ``getrandom(2)``
+    syscall) that never records anything.  This holder makes that machinery
+    pay-for-what-you-use: nothing is constructed until the first cap actually
+    fires.
+
+    Bound on the ambient contextvar by :class:`ConnectionActor`; TaskGroup
+    children inherit the *same* holder by reference, so whichever task hits the
+    first cap materialises the real counter for all of them — identical
+    cross-task propagation to an eager counter.
+    """
+
+    __slots__ = ('_counter', '_kwargs')
+
+    def __init__(self, **kwargs: Any) -> None:
+        self._counter: Optional[CapHitCounter] = None
+        self._kwargs = kwargs
+
+    def ensure(self) -> CapHitCounter:
+        """Return the real counter, constructing it (and its id) on first call."""
+        if self._counter is None:
+            self._counter = CapHitCounter(**self._kwargs)
+        return self._counter
+
+    @property
+    def counter(self) -> Optional[CapHitCounter]:
+        """The materialised counter, or ``None`` if no cap has fired yet."""
+        return self._counter
+
+    def bind(self) -> '_CapHitCounterScope':
+        """Install this holder as the ambient counter (mirrors ``CapHitCounter.bind``)."""
+        return _CapHitCounterScope(self)
+
+    def flush(self, **kwargs: Any) -> None:
+        """Flush the real counter if it was ever materialised; otherwise a no-op."""
+        if self._counter is not None:
+            self._counter.flush(**kwargs)
+
+
 class _CapHitCounterScope:
-    """Context manager bound to a single :class:`CapHitCounter`."""
+    """Context manager bound to a single :class:`CapHitCounter` or holder."""
 
     __slots__ = ('_counter', '_token')
 
-    def __init__(self, counter: CapHitCounter) -> None:
+    def __init__(self, counter: Union['CapHitCounter', '_LazyCapHitCounter']) -> None:
         self._counter = counter
         self._token = None
 
-    def __enter__(self) -> CapHitCounter:
+    def __enter__(self) -> Union['CapHitCounter', '_LazyCapHitCounter']:
         self._token = _current_counter.set(self._counter)
         return self._counter
 
@@ -352,6 +395,11 @@ def log_cap_hit(
     emits one summary per suppressed cap.
     """
     active = counter if counter is not None else _current_counter.get()
+    # A lazily-bound holder materialises its real counter (and its os.urandom
+    # connection id) here — the first cap hit is the first moment the id is
+    # actually needed.  Healthy connections never reach this branch.
+    if type(active) is _LazyCapHitCounter:
+        active = active.ensure()
     if active is not None and not active._first(cap):
         return
     if not _logger.isEnabledFor(logging.WARNING):

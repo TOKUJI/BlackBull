@@ -39,6 +39,7 @@ first-hit-then-summary rate-limit model.
 | `BB_TCP_USER_TIMEOUT_MS` | `0` (off, kernel default) | `TCP_USER_TIMEOUT` socket option (Linux).  Per-connection upper bound on how long an unacknowledged sent segment can linger before the kernel kills the connection.  Useful to evict dead peers behind NATs without waiting for keepalives.  See "Performance recommendations" below for production tuning. |
 | `BB_HEADER_MAX_LINE` | `8192` | Maximum bytes in a single HTTP/1.1 request-line or header line.  Matches Apache `LimitRequestLine` / nginx `large_client_header_buffers`.  Exceeded → `431 Request Header Fields Too Large`. |
 | `BB_HEADER_MAX_TOTAL` | `65536` | Maximum total bytes in the entire HTTP/1.1 header block.  Exceeded → `431`. |
+| `BB_BODY_CHUNK_SIZE` | `65536` | Slice size (bytes) for streaming an HTTP/1.1 `Content-Length` request body to the ASGI app.  The body is delivered as successive `http.request` events (`more_body: True` until exhausted) instead of one giant `readexactly(content_length)` allocation — capping per-connection buffering at O(chunk × connections).  64 KiB matches asyncio's default `StreamReader` buffer.  Must be `> 0` (invalid values fall back to the default). |
 | `BB_STREAM_QUEUE_DEPTH` | `64` | `asyncio.Queue` depth for HTTP/2 per-stream request-body events.  Caps memory growth when an ASGI handler is slower than the client uploading data. |
 | `BB_WS_QUEUE_DEPTH` | `256` | `asyncio.Queue` depth for inbound WebSocket events per connection. |
 

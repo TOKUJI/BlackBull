@@ -21,6 +21,11 @@ class EventAggregator:
 
     def __init__(self, dispatcher: EventDispatcher) -> None:
         self._dispatcher = dispatcher
+        # Cache for has_any_request_listeners(), keyed on the dispatcher's
+        # registration generation.  ``-1`` can never equal a real generation
+        # (which starts at 0), so the first call always computes.
+        self._listeners_cache_gen: int = -1
+        self._listeners_cache_val: bool = False
 
     # ------------------------------------------------------------------
     # Hot-path optimisation: skip the indirection when nothing is listening
@@ -42,9 +47,17 @@ class EventAggregator:
         ``RequestActor`` indirection when no Level B event handlers are
         registered — matching the pre-Sprint-53 direct ``self._app()``
         call path.
+
+        Result is cached against the dispatcher's registration generation, so
+        the 6-event scan runs only when listeners change (effectively once,
+        at startup) rather than on every request.
         """
-        has = self._dispatcher.has_listeners
-        return any(has(n) for n in self._REQUEST_EVENTS)
+        gen = self._dispatcher.generation
+        if gen != self._listeners_cache_gen:
+            has = self._dispatcher.has_listeners
+            self._listeners_cache_val = any(has(n) for n in self._REQUEST_EVENTS)
+            self._listeners_cache_gen = gen
+        return self._listeners_cache_val
 
     # ------------------------------------------------------------------
     # Server lifecycle

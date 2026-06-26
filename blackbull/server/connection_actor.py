@@ -5,7 +5,7 @@ from collections.abc import Awaitable, Callable
 
 from ..actor import Actor, Message
 from ..event_aggregator import EventAggregator
-from .cap_log import CapHitCounter
+from .cap_log import _LazyCapHitCounter
 from .deadline import ConnectionDeadline
 from .protocol_registry import (ConnectionView, ProtocolBinding,
                                 ProtocolRegistry)
@@ -76,7 +76,11 @@ class ConnectionActor(Actor):
         # senders) picks it up without constructor plumbing.  TaskGroup
         # children inherit the context automatically.
         import time  # noqa: PLC0415
-        counter = CapHitCounter()
+        # Lazy holder: the real CapHitCounter (and its os.urandom connection id)
+        # is built only if a cap actually fires.  On the keep-alive path this is
+        # a strict no-op; on connection-churn profiles it removes a getrandom(2)
+        # syscall + an allocation + a flush from every accepted connection.
+        counter = _LazyCapHitCounter()
         start = time.monotonic()
         with counter.bind():
             if self._aggregator is not None:
