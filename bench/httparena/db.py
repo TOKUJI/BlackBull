@@ -6,7 +6,11 @@ via environment variables (see ``launcher.py`` for the names we read).  This
 module owns:
 
   * a lazily-created :mod:`asyncpg` pool, sized from ``DATABASE_MAX_CONN``
-    (HttpArena's rule: size from the env var, **not** CPU count);
+    (HttpArena's rule: size from the env var, **not** CPU count) — and,
+    because every worker process builds its own pool, the env-var budget is
+    split across workers so ``workers × per_worker`` stays under the Postgres
+    sidecar's ``max_connections=256`` (HttpArena's own formula:
+    ``floor(min(DATABASE_MAX_CONN, 240) / workers)``);
   * the four queries the two profiles need (price-range select, paginated
     list, get-by-id, upsert/update);
   * an optional Redis cache for ``GET /crud/items/{id}`` (invalidated on
@@ -22,6 +26,7 @@ use, so this is import-safe in ``launcher.py``'s pre-fork parent.
 from __future__ import annotations
 
 import json
+import multiprocessing
 import os
 
 try:
@@ -44,6 +49,36 @@ try:
     DATABASE_MAX_CONN = int(os.environ.get('DATABASE_MAX_CONN', '256'))
 except ValueError:
     DATABASE_MAX_CONN = 256
+
+
+def _worker_count() -> int:
+    """How many worker processes will each open a pool.
+
+    Mirror ``launcher.py``'s ``WRK_COUNT`` logic exactly: an explicit
+    ``WEB_WORKERS`` wins, otherwise fall back to the CPU count.  Each worker
+    process imports this module and builds its own pool, so this is the
+    divisor that keeps the cluster under Postgres ``max_connections``.
+    """
+    env = os.environ.get('WEB_WORKERS', '').strip()
+    if env:
+        try:
+            return max(1, int(env))
+        except ValueError:
+            pass
+    try:
+        return max(1, multiprocessing.cpu_count())
+    except NotImplementedError:  # pragma: no cover
+        return 1
+
+
+# Per-worker pool ceiling.  HttpArena's rule (its own CHANGELOG): each worker's
+# ``max`` = ``floor(min(DATABASE_MAX_CONN, 240) / workers)`` so that
+# ``workers × per_worker`` stays under the sidecar's ``max_connections=256``
+# (the 240 cap leaves headroom for superuser/maintenance connections).  Sizing
+# the pool at the full ``DATABASE_MAX_CONN`` *per worker* — as a naive reading
+# suggests — opens ``workers × 256`` connections, starves the 256-connection
+# server, and collapses throughput into a long latency tail.
+POOL_MAX_SIZE = max(1, min(DATABASE_MAX_CONN, 240) // _worker_count())
 
 _CACHE_TTL = 30  # seconds; get-by-id cache entries
 
@@ -68,7 +103,7 @@ async def get_pool():
         _pool = await asyncpg.create_pool(
             dsn=DATABASE_URL,
             min_size=1,
-            max_size=DATABASE_MAX_CONN,
+            max_size=POOL_MAX_SIZE,
         )
     except Exception:  # noqa: BLE001 - any connect failure → DB-less mode
         _pool = None
