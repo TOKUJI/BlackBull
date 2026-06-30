@@ -46,4 +46,4 @@ if __name__ == '__main__':
     parser.add_argument('--cert')
     parser.add_argument('--key')
     args = parser.parse_args()
-    app.run(port=args.port, cert=args.cert, key=args.key)
+    app.run(port=args.port, certfile=args.cert, keyfile=args.key)
