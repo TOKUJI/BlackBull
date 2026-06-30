@@ -31,8 +31,10 @@ so the editable install's metadata catches up.
 
 ## [Unreleased]
 
+## [0.46.0] — 2026-06-30
+
 Sprint 57 — **gRPC** (the next protocol after MQTT) plus three supporting
-HTTP/2 hot-path items. Code-complete; not yet released.
+HTTP/2 hot-path items.
 
 ### Added
 - **Unary gRPC over HTTP/2** (`blackbull.grpc`): `GrpcServiceRegistry`,

@@ -4,7 +4,7 @@ name = "blackbull"
 # minor per closed sprint); PATCH covers bug fixes / harness work
 # between sprints.  No 1.0 commitment until the framework's identity
 # and surface have stabilised across several sprints.  See CHANGELOG.md.
-version = "0.45.0"
+version = "0.46.0"
 description = "Async ASGI 3.0 framework with a from-scratch HTTP/1.1 parser, HTTP/2 frame layer, and WebSocket codec. HPACK delegates to the hpack library."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -85,6 +85,13 @@ validation = []
 # transport deps (e.g. MQTT-over-WebSocket / TLS).  Install with
 # `pip install 'blackbull[mqtt]'`.
 mqtt = []
+
+# Unary gRPC over HTTP/2 (blackbull.grpc).  Pure-Python with no extra runtime
+# dependencies — handlers exchange raw message bytes, so protobuf is the
+# application's choice, not the framework's.  The extra marks gRPC as opt-in
+# and reserves the name; add `protobuf` / `grpcio-tools` yourself if you want
+# `protoc`-generated message classes.  Install with `pip install 'blackbull[grpc]'`.
+grpc = []
 
 testing = [
     "pytest",
