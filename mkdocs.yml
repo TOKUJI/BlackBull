@@ -50,6 +50,7 @@ nav:
     - HTTP/2: guide/http2.md
     - Non-ASGI protocols: guide/raw-protocols.md
     - MQTT broker: guide/mqtt.md
+    - gRPC: guide/grpc.md
     - Streaming: guide/streaming.md
     - Events: guide/events.md
     - Logging: guide/logging.md

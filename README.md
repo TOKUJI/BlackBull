@@ -48,9 +48,10 @@ Hello, world!
   real traffic can drive a programmable misbehaving client or
   server.  Test your own HTTP/2 client against half-closed streams,
   exhausted windows, and illegal SETTINGS — in CI.
-- **Multi-protocol, one process.** A pure-Python MQTT 5 broker rides
-  beside HTTP/2 and WebSocket on the same runtime; extensions add new
-  protocols without touching the core — still no C extension.
+- **Multi-protocol, one process.** A pure-Python MQTT 5 broker and
+  unary gRPC ride beside HTTP/2 and WebSocket on the same runtime;
+  extensions add new protocols without touching the core — still no
+  C extension.
 - **RFC-grade correctness.** Passes the same external conformance
   suites used to validate nginx and Envoy (`h2spec`, Autobahn).
 - **Typed throughout.** Your editor and `mypy` / `pyright` see
@@ -65,6 +66,7 @@ pip install 'blackbull[speed]'            # add uvloop event loop
 pip install 'blackbull[reload]'           # add watchfiles for --reload
 pip install 'blackbull[fault-injection]'  # add cryptography + httpx for the toolkit
 pip install 'blackbull[mqtt]'             # MQTT 5 broker extension
+pip install 'blackbull[grpc]'             # unary gRPC over HTTP/2
 ```
 
 ## Simplified handlers

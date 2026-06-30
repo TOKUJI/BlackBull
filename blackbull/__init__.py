@@ -9,6 +9,7 @@ Public API exports:
 - `AppConfig`: declarative, immutable holder for the startup settings ``run()`` accepts (port, TLS, workers, …).
 - `serve`: synchronous entry point that runs any ASGI 3.0 callable (also used by the ``blackbull`` console script).
 - `Response`, `JSONResponse`, `RedirectResponse`, `StreamingResponse`, `EventSourceResponse`, `WebSocketResponse`: response helpers.
+- `RouteInfo`: immutable ``(method, path, name)`` snapshot returned by ``app.get_routes()``.
 - `Headers`: case-insensitive, ordered, multi-valued HTTP header store.
 - `cookie_header`: builds a ``Set-Cookie`` header tuple.
 - `read_body`: reads and buffers the full request body from the ASGI receive channel.
@@ -41,6 +42,7 @@ except PackageNotFoundError:
     __version__ = '0.0.0+unknown'
 
 from .app import BlackBull, serve
+from .router import RouteInfo
 from .config import AppConfig
 from .headers import Headers
 from .request import read_body, read_json, read_text, parse_cookies

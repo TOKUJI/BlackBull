@@ -76,7 +76,7 @@ class DataResponder(Responder):
     FRAME_TYPE = FrameTypes.DATA
 
     async def respond(self, client) -> None:
-        client._on_response_data(self.frame)
+        await client._on_response_data(self.frame)
 
 
 class PingResponder(Responder):

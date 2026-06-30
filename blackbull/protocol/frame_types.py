@@ -264,6 +264,30 @@ _HOP_BY_HOP_HEADERS: frozenset[bytes] = frozenset((
 ))
 
 
+def field_name_is_valid(name: bytes) -> bool:
+    """RFC 9113 §8.2.1 — is *name* a legal HTTP/2 field name?
+
+    A field name MUST NOT contain characters in 0x00-0x20 (controls and SP),
+    0x41-0x5A (uppercase), or 0x7F-0xFF.  It MUST NOT include a colon (0x3A)
+    other than the single leading octet that marks a pseudo-header field.
+    Rejecting these closes a header-injection / request-smuggling vector.
+    """
+    if not name:
+        return False
+    # A leading colon is the only legal colon (pseudo-header marker); validate
+    # the remainder of a pseudo-header name with the colon prohibited.
+    start = 1 if name[0] == 0x3A else 0
+    for b in name[start:]:
+        if b <= 0x20 or b == 0x3A or 0x41 <= b <= 0x5A or b >= 0x7F:
+            return False
+    return True
+
+
+def field_value_is_valid(value: bytes) -> bool:
+    """RFC 9113 §8.2.1 — a field value MUST NOT contain NUL, LF, or CR."""
+    return not (0x00 in value or 0x0A in value or 0x0D in value)
+
+
 class Headers(FrameBase):
     FRAME_TYPE = FrameTypes.HEADERS
 
@@ -351,10 +375,16 @@ class Headers(FrameBase):
         seen_regular = False
         for k, v in fields:
             kb_raw = bytes(k)  # bytes(...) normalizes memoryview/bytearray
-            # RFC 9113 §8.2.1 — header field names MUST be lowercase; uppercase
-            # in incoming headers makes the message malformed.
-            if any(0x41 <= b <= 0x5A for b in kb_raw):
-                self._mark_malformed(f'uppercase in header field name: {kb_raw!r}')
+            vb = v if isinstance(v, bytes) else bytes(v)
+            # RFC 9113 §8.2.1 — field-name octet validation (rejects uppercase,
+            # controls/SP, 0x7F-0xFF, and a non-leading colon).
+            if not field_name_is_valid(kb_raw):
+                self._mark_malformed(f'invalid character in field name: {kb_raw!r}')
+                return
+            # RFC 9113 §8.2.1 — field values MUST NOT contain NUL, LF, or CR
+            # (applies to pseudo-header and regular field values alike).
+            if not field_value_is_valid(vb):
+                self._mark_malformed(f'prohibited character in field value: {vb!r}')
                 return
             kb = kb_raw  # already lowercase per the check above
 
@@ -378,7 +408,7 @@ class Headers(FrameBase):
                 if pseudo_key in self.pseudo_headers:
                     self._mark_malformed(f'duplicate pseudo-header: {kb!r}')
                     return
-                self.pseudo_headers[pseudo_key] = bytes(v).decode('utf-8')
+                self.pseudo_headers[pseudo_key] = vb.decode('utf-8')
                 if debug:
                     logger.debug('%r: %r', k_str, self.pseudo_headers[pseudo_key])
                 continue
@@ -390,7 +420,6 @@ class Headers(FrameBase):
                 return
             # RFC 9113 §8.2.2 — the "TE" header is allowed only with value
             # "trailers".
-            vb = v if isinstance(v, bytes) else bytes(v)
             if kb == b'te' and vb != b'trailers':
                 self._mark_malformed(f'invalid TE value: {vb!r}')
                 return
@@ -566,20 +595,25 @@ class Data(FrameBase):
         self.padded = DataFrameFlags.PADDED & self.flags
 
         if isinstance(data, str):
-            payload = BytesIO(data.encode())
-        else:
-            payload = BytesIO(data or b'')
+            data = data.encode()
+        elif data is None:
+            data = b''
 
         if self.padded:
+            payload = BytesIO(data)
             pad_length = int.from_bytes(payload.read(1), 'big', signed=False)
             if pad_length >= length:
                 raise ValueError(
                     f'DATA pad_length ({pad_length}) >= frame length ({length}): PROTOCOL_ERROR')
             data_length = length - pad_length - 1
+            self.payload = payload.read(data_length)
         else:
-            data_length = length
-
-        self.payload = payload.read(data_length)
+            # Non-padded is the common case: the payload IS the frame data, so
+            # skip the BytesIO wrap + read copy (copy-reduction-http2 P2).
+            # FrameFactory.load already sliced data to exactly ``length``; the
+            # conditional preserves BytesIO.read(length) semantics for the rare
+            # over-long input without copying when it already fits.
+            self.payload = data if len(data) == length else data[:length]
         logger.debug(self.payload)
 
     def save(self):

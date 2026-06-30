@@ -9,16 +9,17 @@ The client is intended for **wire-level testing** of BlackBull's
 """
 import asyncio
 import ssl as _ssl
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from http import HTTPMethod, HTTPStatus
 
 import logging
 from ..protocol.frame import FrameFactory
 from ..protocol.frame_types import (DEFAULT_INITIAL_WINDOW_SIZE,
-                                    DataFrameFlags, FrameBase, FrameTypes,
+                                    FrameBase, FrameTypes,
                                     HeaderFrameFlags, PseudoHeaders)
 from ..protocol.stream import Stream
-from ..headers import Headers, HeaderList
+from ..headers import Headers
 from ..server.recipient import AbstractReader, AsyncioReader
 from ..server.sender import AbstractWriter, AsyncioWriter, HTTP2Sender
 from ..utils import HTTP2 as _HTTP2_PREFACE
@@ -30,6 +31,13 @@ logger = logging.getLogger(__name__)
 
 # Number of bytes in the fixed HTTP/2 frame header (RFC 7540 §4.1).
 _FRAME_HEADER_BYTES = 9
+
+# Emit WINDOW_UPDATE once this many received-but-unacked DATA bytes have
+# accumulated (stream- and connection-level, tracked separately).  Mirrors
+# ``WebSocketH2Session._credit_returned``: batching avoids a WINDOW_UPDATE
+# per DATA frame while still reopening the peer's send window long before
+# the 65535-byte initial window is exhausted (RFC 9113 §6.9).
+_WINDOW_UPDATE_THRESHOLD = 32768
 
 
 @dataclass
@@ -53,6 +61,8 @@ class _PendingResponse:
     status: int = 0
     headers: list[tuple[bytes, bytes]] = field(default_factory=list)
     body_parts: list[bytes] = field(default_factory=list)
+    # Stream-level received-but-unacked DATA bytes (see _credit_received).
+    unacked: int = 0
 
 
 class HTTP2Client:
@@ -109,6 +119,11 @@ class HTTP2Client:
         self.connection_window_size: int = DEFAULT_INITIAL_WINDOW_SIZE
         self.stream_window_size: dict[int, int] = {}
         self.initial_window_size: int = DEFAULT_INITIAL_WINDOW_SIZE
+
+        # Connection-level received-but-unacked DATA bytes (see
+        # _credit_received).  Stream-level credit is tracked per
+        # _PendingResponse.
+        self._unacked_conn: int = 0
 
         # Set when the peer sends GOAWAY; subsequent request() calls raise.
         self._goaway_received: bool = False
@@ -187,7 +202,7 @@ class HTTP2Client:
     # ---- public API ------------------------------------------------------
 
     async def request(self, method: str | HTTPMethod, path: str, *,
-                      headers: HeaderList = (),
+                      headers: Iterable[tuple[str | bytes, str | bytes]] = (),
                       body: bytes = b'') -> ClientResponse:
         """Send one request and await the matching response.
 
@@ -225,10 +240,13 @@ class HTTP2Client:
         await sender(h_frame)
 
         if body:
-            d_frame = self._factory.create(
-                FrameTypes.DATA, DataFrameFlags.END_STREAM, stream_id, data=body,
-            )
-            await sender(d_frame)
+            # Use the sender's flow-controlled DATA path rather than a single
+            # raw DATA frame: it splits the body across SETTINGS_MAX_FRAME_SIZE
+            # chunks and blocks on flow-control credit, so bodies larger than
+            # one frame (e.g. >16 KiB gRPC messages) are sent correctly.
+            # WINDOW_UPDATE frames are routed to this sender in
+            # ``_on_window_update``, keeping its send window in sync.
+            await sender._write_data(body, end_stream=True)
 
         return await future
 
@@ -356,14 +374,46 @@ class HTTP2Client:
         if frame.end_stream:
             self._complete(frame.stream_id)
 
-    def _on_response_data(self, frame) -> None:
+    async def _on_response_data(self, frame) -> None:
         pending = self._responses.get(frame.stream_id)
         if pending is None:
             logger.debug('DATA for unknown stream %d — dropping', frame.stream_id)
             return
-        pending.body_parts.append(frame.payload)
+        payload = frame.payload
+        pending.body_parts.append(payload)
+        # RFC 9113 §6.9 — the receiver MUST return flow-control credit for
+        # consumed DATA via WINDOW_UPDATE.  Without this the server's send
+        # window drains and ``HTTP2Sender._write_data`` blocks once a
+        # response exceeds the 65535-byte initial window — a deadlock that
+        # affects any large HTTP/2 body, not just gRPC.
+        if payload:
+            await self._credit_received(
+                frame.stream_id, pending, len(payload),
+                end_stream=bool(frame.end_stream))
         if frame.end_stream:
             self._complete(frame.stream_id)
+
+    async def _credit_received(self, stream_id: int, pending: '_PendingResponse',
+                               n: int, *, end_stream: bool) -> None:
+        """Return *n* bytes of flow-control credit for received DATA.
+
+        Accumulates per-stream and per-connection and emits WINDOW_UPDATE
+        once either crosses :data:`_WINDOW_UPDATE_THRESHOLD`.  Stream-level
+        credit is skipped on the final DATA frame (the stream is about to
+        close, so the peer no longer needs it); connection-level credit is
+        always returned because the connection window is shared across
+        every stream.
+        """
+        pending.unacked += n
+        self._unacked_conn += n
+        if not end_stream and pending.unacked >= _WINDOW_UPDATE_THRESHOLD:
+            await self._send_raw_frame(
+                self._factory.window_update(stream_id, pending.unacked))
+            pending.unacked = 0
+        if self._unacked_conn >= _WINDOW_UPDATE_THRESHOLD:
+            await self._send_raw_frame(
+                self._factory.window_update(0, self._unacked_conn))
+            self._unacked_conn = 0
 
     def _complete(self, stream_id: int) -> None:
         pending = self._responses.pop(stream_id, None)

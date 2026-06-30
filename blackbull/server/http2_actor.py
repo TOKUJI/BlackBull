@@ -669,12 +669,23 @@ class HTTP2Actor(Actor):
             if frame.stream_id != 0 and stream is None:
                 if frame.stream_id in self._closed_streams:
                     # Late frame on a CLOSED stream (§5.1).
+                    closed_via_rst = self._closed_streams[frame.stream_id]
                     if frame_type == FrameTypes.PRIORITY:
                         pass  # PRIORITY is always allowed; let it through
                     elif frame_type in (FrameTypes.HEADERS, FrameTypes.CONTINUATION):
                         await self._connection_error(
                             ErrorCodes.STREAM_CLOSED,
                             f'{frame_type.name} on closed stream {frame.stream_id}')
+                        continue
+                    elif (not closed_via_rst and frame_type in (
+                            FrameTypes.WINDOW_UPDATE, FrameTypes.RST_STREAM)):
+                        # RFC 9113 §5.1 — for a stream we closed by sending
+                        # END_STREAM, a WINDOW_UPDATE or RST_STREAM the peer
+                        # emitted before it processed our END_STREAM MUST be
+                        # silently ignored, NOT answered with RST_STREAM.
+                        # (e.g. the client crediting the last response DATA it
+                        # received races our trailers' END_STREAM.)  Replying
+                        # with RST makes the client tear the stream down early.
                         continue
                     else:
                         await self.send_frame(self.factory.rst_stream(
@@ -913,6 +924,12 @@ class HTTP2Actor(Actor):
                 'unexpected CONTINUATION without preceding HEADERS')
             return True
 
+        # copy-reduction-http2 P3 — accumulate into a bytearray so each
+        # CONTINUATION is an amortised-O(1) in-place extend rather than the
+        # O(n²) ``bytes += bytes`` that reallocates the whole block per frame.
+        # parse_payload() wraps raw_block in BytesIO, which accepts bytearray.
+        if not isinstance(header_frame.raw_block, bytearray):
+            header_frame.raw_block = bytearray(header_frame.raw_block)
         header_frame.raw_block += frame.payload
 
         # CVE-class CONTINUATION flood — an attacker that opens a

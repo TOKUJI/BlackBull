@@ -160,6 +160,20 @@ etc.
 - Unlike the HTTP actors the handler does not run a request loop —
   it owns the connection until it decides to close (raw protocols
   are typically stateful and persistent).
+
+### gRPC: no dedicated actor
+
+Unary gRPC has **no Actor of its own**.  It is a dialect of HTTP/2, so it
+rides the existing `HTTP2Actor` → `StreamActor` stack: each gRPC call is
+just an HTTP/2 stream and therefore already gets per-stream actor
+isolation for free.  The gRPC-specific logic lives at the **application**
+layer — `BlackBull._dispatch` routes `content-type: application/grpc` to
+`blackbull.grpc.serve_grpc`, which uses the ordinary ASGI
+`(scope, receive, send)` interface (the `http.response.trailers` event
+carries `grpc-status`).  `ConnectionActor` and `HTTP2Actor` stay entirely
+gRPC-agnostic.  The full rationale — and where streaming RPCs may
+reopen the question — is in the
+[gRPC assessment](grpc-assessment.md#design-decision-grpc-rides-the-asgi-bridge-not-a-new-actor).
 - Connection timing, error isolation, and the `connection_closed`
   event are provided uniformly by `ConnectionActor.run()` for every
   protocol (an earlier `RawProtocolActor` Layer-2 wrapper was folded
