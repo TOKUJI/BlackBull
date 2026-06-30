@@ -31,7 +31,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy framework files last so app/launcher edits don't bust the
 # slow pip layer.
 VOLUME /results
-COPY app.py launcher.py ./
+COPY app.py launcher.py db.py grpc_bench.py ./
 EXPOSE 8080 8081 8443
 
 CMD ["python", "launcher.py"]

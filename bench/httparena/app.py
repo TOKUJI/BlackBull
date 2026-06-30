@@ -11,15 +11,23 @@ profiles BlackBull supports today:
   GET  /json-comp/{count}?m=<float>           → JSON, may be gzipped
   POST /upload          body                  → text/plain byte count
   GET  /ws (Upgrade)                          → echoes frames
+  GET  /async-db?min&max&limit                → JSON {items, count} (Postgres)
+  GET  /crud/items?category&page&limit        → JSON {items, total, page, limit}
+  POST /crud/items      body=Item             → 201 (upsert)
+  GET  /crud/items/{id}                       → JSON Item (Redis-cached)
+  PUT  /crud/items/{id} body                  → 200 (update + cache invalidate)
+  unary gRPC benchmark.BenchmarkService/GetSum → SumReply{a+b}
 
 Dataset is read from $DATASET_PATH (default /data/dataset.json — the
-read-only mount HttpArena's harness provides).
+read-only mount HttpArena's harness provides).  The ``async-db`` and ``crud``
+profiles use the seeded Postgres (and ``crud`` the Redis cache) sidecars the
+HttpArena harness provides; see ``db.py`` for the env vars.  ``api-4`` /
+``api-16`` are load-generator CPU-budget profiles over ``/baseline11`` (plus
+json / async-db) and need no dedicated endpoint.
 
 Profiles intentionally NOT implemented:
-  - async-db / crud   (no asyncpg integration)
-  - api-4 / api-16    (multi-endpoint compositions)
   - *-h3              (no HTTP/3 transport)
-  - *-grpc            (no gRPC support)
+  - StreamSum (gRPC server-streaming — BlackBull is unary-only this release)
   - production-stack / gateway / fortunes
 
 The container starts four BlackBull processes via ``launcher.py``:
@@ -47,6 +55,9 @@ if os.path.isdir(_repo_root) and _repo_root not in sys.path:
 
 from blackbull import BlackBull, JSONResponse, Response, read_body
 from blackbull.middleware.compression import Compression
+
+import db
+from grpc_bench import build_registry
 
 
 # ---------------------------------------------------------------------------
@@ -220,6 +231,79 @@ async def ws_echo(scope, receive, send):
         else:
             await send({'type': 'websocket.send',
                         'bytes': event.get('bytes') or b''})
+
+
+# ---------------------------------------------------------------------------
+# async-db profile — Postgres price-range query (db.py degrades to empty
+# when no database is configured, per the HttpArena contract).
+# ---------------------------------------------------------------------------
+
+def _int_qs(scope, name, default):
+    try:
+        return int(_qs(scope).get(name, [str(default)])[0])
+    except (ValueError, IndexError):
+        return default
+
+
+@app.route(path='/async-db', methods=[HTTPMethod.GET])
+async def async_db_endpoint(scope):
+    min_price = _int_qs(scope, 'min', 10)
+    max_price = _int_qs(scope, 'max', 50)
+    limit = max(1, min(_int_qs(scope, 'limit', 50), 50))
+    items = await db.async_db(min_price, max_price, limit)
+    return JSONResponse({'items': items, 'count': len(items)})
+
+
+# ---------------------------------------------------------------------------
+# crud profile — paginated list, upsert, cached get-by-id, update+invalidate.
+# ---------------------------------------------------------------------------
+
+@app.route(path='/crud/items', methods=[HTTPMethod.GET])
+async def crud_items_list(scope):
+    qs = _qs(scope)
+    category = qs.get('category', [None])[0]
+    page = _int_qs(scope, 'page', 1)
+    limit = max(1, min(_int_qs(scope, 'limit', 10), 50))
+    items = await db.crud_list(category, page, limit)
+    # Load-more semantics: total == items in this response (per the contract).
+    return JSONResponse({'items': items, 'total': len(items),
+                         'page': page, 'limit': limit})
+
+
+@app.route(path='/crud/items', methods=[HTTPMethod.POST])
+async def crud_items_create(body: bytes):
+    try:
+        data = json.loads(body)
+    except ValueError:
+        return Response(b'invalid JSON', status=400, content_type=_PLAIN)
+    ok = await db.crud_create(data)
+    if not ok:
+        return Response(b'unavailable', status=503, content_type=_PLAIN)
+    return JSONResponse({'id': data.get('id')}, status=201)
+
+
+@app.route(path='/crud/items/{item_id:int}', methods=[HTTPMethod.GET])
+async def crud_items_get(item_id: int):
+    item = await db.crud_get(item_id)
+    if item is None:
+        return Response(b'not found', status=404, content_type=_PLAIN)
+    return JSONResponse(item)
+
+
+@app.route(path='/crud/items/{item_id:int}', methods=[HTTPMethod.PUT])
+async def crud_items_update(item_id: int, body: bytes):
+    try:
+        data = json.loads(body)
+    except ValueError:
+        return Response(b'invalid JSON', status=400, content_type=_PLAIN)
+    ok = await db.crud_update(item_id, data)
+    if not ok:
+        return Response(b'not found', status=404, content_type=_PLAIN)
+    return JSONResponse({'id': item_id})
+
+
+# unary-grpc profile — benchmark.BenchmarkService/GetSum over h2c/h2.
+app.enable_grpc(build_registry())
 
 
 # ---------------------------------------------------------------------------
