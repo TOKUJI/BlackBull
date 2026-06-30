@@ -343,6 +343,17 @@ rsync -e "ssh ${SSH_OPTS[*]}" -az --delete \
     "${_BB_RSYNC_FILES[@]}" \
     "$SERVER_REMOTE:HttpArena/frameworks/blackbull/"
 
+# The upstream HttpArena repo vendors a stale frameworks/blackbull/.dockerignore
+# that whitelists only requirements.txt/app.py/launcher.py and excludes
+# everything else (`**`), so db.py / grpc_bench.py never enter the Docker build
+# context and `COPY ... db.py` fails the build.  We don't rsync .dockerignore
+# (so --delete won't remove it), and our rsync already controls exactly which
+# files land in the dir — so just delete the stale ignore file.  Print the
+# resulting build context so the driver log records what the build will see.
+ssh "${SSH_OPTS[@]}" "$SERVER_REMOTE" \
+    'rm -f HttpArena/frameworks/blackbull/.dockerignore
+     echo "    build context:"; ls -1 HttpArena/frameworks/blackbull/'
+
 if [ "$LOCAL_BB_WHEEL" = "1" ]; then
     echo "    uploading wheel $LOCAL_WHEEL_NAME ..."
     rsync -e "ssh ${SSH_OPTS[*]}" -az \

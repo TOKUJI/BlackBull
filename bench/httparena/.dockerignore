@@ -1,9 +1,14 @@
-# Build context = bench/httparena/.  Keep the image small: only
-# requirements.txt + app.py + launcher.py are copied into the image.
+# Build context = bench/httparena/.  Keep the image small: only the
+# framework modules + requirements.txt are copied into the image.
 **
 !requirements.txt
 !app.py
 !launcher.py
+# db.py / grpc_bench.py back the async-db / crud / unary-grpc profiles and
+# are COPYed by the Dockerfile — they MUST be whitelisted or the build fails
+# with "COPY failed: stat db.py: file does not exist".
+!db.py
+!grpc_bench.py
 # Dev-only: a locally-built wheel for Dockerfile.dev.  Untracked.
 !blackbull-*.whl
 **/__pycache__/
