@@ -21,6 +21,7 @@ use, so this is import-safe in ``launcher.py``'s pre-fork parent.
 """
 from __future__ import annotations
 
+import json
 import os
 
 try:
@@ -91,11 +92,24 @@ async def _get_redis():
 
 
 def _row_to_item(row) -> dict:
-    """Map an ``items`` row to the wire shape, nesting the rating columns."""
+    """Map an ``items`` row to the wire shape: nest the rating columns and
+    decode the ``tags`` column.
+
+    HttpArena's schema stores ``tags`` as a ``TEXT`` column holding a
+    JSON-encoded array (e.g. ``'["fast","new"]'``), but the wire contract — and
+    the validator — require ``tags`` to be a JSON *array*
+    (``isinstance(item['tags'], list)``).  So decode the string back to a list.
+    """
     item = dict(row)
     score = item.pop('rating_score', None)
     count = item.pop('rating_count', None)
     item['rating'] = {'score': score, 'count': count}
+    tags = item.get('tags')
+    if isinstance(tags, str):
+        try:
+            item['tags'] = json.loads(tags)
+        except (ValueError, TypeError):
+            item['tags'] = []
     return item
 
 
