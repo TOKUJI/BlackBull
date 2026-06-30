@@ -390,3 +390,100 @@ class TestFrameSavePayload:
             f'Error code in GoAway payload must be 0; '
             f'got {int.from_bytes(wire[13:17], "big")}'
         )
+
+
+# ---------------------------------------------------------------------------
+# copy-reduction-http2 P2/P3 — DATA payload extraction + CONTINUATION assembly
+# ---------------------------------------------------------------------------
+
+class TestDataCopyReduction:
+    """Data.__init__ must avoid the BytesIO read-copy for non-padded frames
+    (P2) while keeping byte-exact behaviour for padded frames."""
+
+    def _data(self, factory, flags, payload):
+        raw = _make_h2_frame(FrameTypes.DATA, flags, 1, payload)
+        return factory.load(raw)
+
+    def test_non_padded_payload_is_zero_copy(self):
+        factory = FrameFactory()
+        body = b'hello world payload'
+        # FrameFactory.load slices `data[9:9+length]`; that slice is what the
+        # Data frame must adopt directly (no further copy via BytesIO.read).
+        raw = _make_h2_frame(FrameTypes.DATA, DataFrameFlags.END_STREAM, 1, body)
+        sliced = raw[9:9 + len(body)]
+        # Reconstruct via load and confirm the payload equals the wire body.
+        frame = factory.load(raw)
+        assert frame.payload == body
+        # The non-padded path assigns the sliced bytes object straight through
+        # — construct Data directly to assert object identity (zero copy).
+        from blackbull.protocol.frame_types import Data
+        d = Data(len(sliced), FrameTypes.DATA.value,
+                 int(DataFrameFlags.END_STREAM), 1, data=sliced)
+        assert d.payload is sliced
+
+    def test_non_padded_empty_payload(self):
+        factory = FrameFactory()
+        frame = self._data(factory, DataFrameFlags.END_STREAM, b'')
+        assert frame.payload == b''
+
+    def test_padded_payload_strips_padding(self):
+        factory = FrameFactory()
+        # PADDED frame: [pad_length=3][data='abcd'][padding=3 zero bytes]
+        body = b'abcd'
+        payload = bytes([3]) + body + b'\x00\x00\x00'
+        frame = self._data(factory, DataFrameFlags.PADDED, payload)
+        assert frame.payload == body
+
+    def test_padded_pad_length_too_large_raises(self):
+        factory = FrameFactory()
+        # pad_length (10) >= frame length → PROTOCOL_ERROR
+        payload = bytes([10]) + b'ab'
+        with pytest.raises(ValueError):
+            self._data(factory, DataFrameFlags.PADDED, payload)
+
+
+class TestContinuationAssembly:
+    """CONTINUATION reassembly (P3) must remain byte-exact after switching the
+    accumulator from ``bytes +=`` to an in-place bytearray extend."""
+
+    @pytest.mark.asyncio
+    async def test_split_header_block_reassembles_correctly(self):
+        # Encode a header block, split it across HEADERS (END_HEADERS=0) + a
+        # CONTINUATION (END_HEADERS=1), and confirm the decoded scope matches.
+        recorded = {}
+
+        async def app(scope, receive, send):
+            recorded['headers'] = dict(scope['headers']) if not hasattr(
+                scope['headers'], 'getlist') else None
+            recorded['path'] = scope['path']
+            recorded['method'] = scope['method']
+            await send({'type': 'http.response.start', 'status': 200, 'headers': []})
+            await send({'type': 'http.response.body', 'body': b''})
+
+        handler = _make_handler(app)
+        encoder = Encoder()
+        block = encoder.encode([
+            (b':method', b'GET'), (b':path', b'/split'), (b':scheme', b'https'),
+            (b':authority', b'example.com'), (b'x-custom', b'continuation-value'),
+        ])
+        cut = len(block) // 2
+        part1, part2 = block[:cut], block[cut:]
+
+        # HEADERS without END_HEADERS, then CONTINUATION with END_HEADERS+END_STREAM.
+        from blackbull.protocol.frame_types import FrameTypes as FT
+        h = _make_h2_frame(FT.HEADERS, int(HeaderFrameFlags.END_STREAM), 1, part1)
+        c = _make_h2_frame(FT.CONTINUATION, int(HeaderFrameFlags.END_HEADERS), 1, part2)
+
+        # raw_block must end up byte-identical to the full block.
+        factory = handler.factory
+        hframe = factory.load(h)
+        assert not hframe.end_headers
+        # Simulate accumulation as _on_continuation_frame does.
+        if not isinstance(hframe.raw_block, bytearray):
+            hframe.raw_block = bytearray(hframe.raw_block)
+        cframe = factory.load(c)
+        hframe.raw_block += cframe.payload
+        assert bytes(hframe.raw_block) == block
+        hframe.parse_payload()
+        assert hframe.pseudo_headers[PseudoHeaders.PATH] == '/split'
+        assert (b'x-custom', b'continuation-value') in hframe.headers

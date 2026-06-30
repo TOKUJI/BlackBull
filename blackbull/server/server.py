@@ -99,14 +99,32 @@ class LifespanManager:
         return self
 
     async def __aexit__(self, *_):
-        await self._receive_q.put({'type': ASGIEvent.LIFESPAN_SHUTDOWN})
-        await self._send_q.get()   # lifespan.shutdown.complete
-        if self._task is not None:
-            self._task.cancel()
+        task = self._task
+        if task is None:
+            return False
+        # Drive the shutdown handshake only while the lifespan app is alive.
+        # A lifespan task that was cancelled out from under us — e.g. by
+        # asyncio.run()'s _cancel_all_tasks during interpreter teardown, which
+        # cancels *every* outstanding task at once — will never emit
+        # lifespan.shutdown.complete.  Waiting unconditionally on the send
+        # queue would then block __aexit__ forever and wedge the whole
+        # teardown (observed as an H2 "deadlock" in the flow-control
+        # conformance subprocess).  Race the acknowledgement against the task
+        # itself so a dead lifespan app can never strand us.
+        if not task.done():
+            await self._receive_q.put({'type': ASGIEvent.LIFESPAN_SHUTDOWN})
+            getter = asyncio.ensure_future(self._send_q.get())
             try:
-                await self._task   # drain finally blocks inside the lifespan app
-            except asyncio.CancelledError:
-                pass  # task was just cancelled; its unwind is expected.
+                await asyncio.wait(
+                    {getter, task}, return_when=asyncio.FIRST_COMPLETED)
+            finally:
+                getter.cancel()
+        if not task.done():
+            task.cancel()
+        try:
+            await task   # drain finally blocks inside the lifespan app
+        except asyncio.CancelledError:
+            pass  # task was just cancelled; its unwind is expected.
         return False
 
 

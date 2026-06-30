@@ -15,7 +15,7 @@ from collections.abc import Iterable
 import dataclasses
 from dataclasses import dataclass, field
 import typing
-from typing import Any, Callable, Tuple, Type, Optional, Union, get_args, get_origin
+from typing import Any, Callable, NamedTuple, Tuple, Type, Optional, Union, get_args, get_origin
 from functools import wraps, partial
 from http import HTTPStatus, HTTPMethod
 import json
@@ -195,6 +195,23 @@ class _RouteInfo:
     methods: tuple = ()            # tuple of HTTPMethod values
     scheme: Any = None             # Scheme | tuple[Scheme, ...] | _AnyScheme | None
     name: str | None = None
+
+
+class RouteInfo(NamedTuple):
+    """Immutable snapshot of a single registered route entry.
+
+    Returned by :meth:`BlackBull.get_routes`.  One entry is produced per
+    ``(route, method)`` pair — a route registered with
+    ``methods=[GET, POST]`` yields two ``RouteInfo`` records.
+
+    Attributes:
+        method: HTTP method string (e.g. ``"GET"``, ``"BREW"``).
+        path: URL template (e.g. ``"/api/echo/{name}"``).
+        name: Endpoint name, or ``""`` if the route was registered unnamed.
+    """
+    method: str
+    path: str
+    name: str = ""
 
 
 # Sentinel used when scheme is omitted, matching any scheme at lookup time
@@ -873,6 +890,26 @@ class Router(UserDict, BaseRouter):
         if missing:
             raise ValueError(f"url_path_for({name!r}): missing params {sorted(missing)}")
         return self._param_pattern.sub(lambda m: str(params[m.group(1)]), template)
+
+    def get_routes(self) -> list[RouteInfo]:
+        """Return a snapshot of all registered routes as :class:`RouteInfo`.
+
+        Routes are returned in registration order.  A route registered with
+        multiple methods (e.g. ``methods=[GET, POST]``) produces one entry
+        per method, in the order the methods were declared.  The returned
+        list is a fresh shallow copy — callers may sort, filter, or mutate
+        it without affecting the live router.
+        """
+        routes: list[RouteInfo] = []
+        for info in self._route_info:
+            name = info.name or ""
+            for method in info.methods:
+                routes.append(RouteInfo(
+                    method=method.value if isinstance(method, HTTPMethod) else str(method),
+                    path=info.template,
+                    name=name,
+                ))
+        return routes
 
     def validate(self) -> None:
         """Check all route definitions for consistency, then freeze the router.

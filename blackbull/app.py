@@ -28,7 +28,7 @@ import logging
 from .event import Event, EventDispatcher, EventHandler
 from .headers import Headers
 from .utils import Scheme
-from .router import Router, ErrorRouter, MethodNotApplicable, PathNotRegistered, ConfigurationError, has_middleware_param
+from .router import Router, RouteInfo, ErrorRouter, MethodNotApplicable, PathNotRegistered, ConfigurationError, has_middleware_param
 from .config import AppConfig
 logger = logging.getLogger(__name__)
 
@@ -242,6 +242,11 @@ class BlackBull:
         # is fully dormant).
         self._protocol_registry = None
 
+        # gRPC service registry — None until ``enable_grpc`` is called.  gRPC
+        # is HTTP/2 with ``content-type: application/grpc``; requests are
+        # multiplexed onto the same port and dispatched in ``_dispatch``.
+        self._grpc_registry = None
+
         if trusted_proxies is not None:
             from .middleware.proxy import TrustedProxy  # noqa: PLC0415
             self.use(TrustedProxy(trusted_proxies))
@@ -435,6 +440,20 @@ class BlackBull:
             await function(scope, receive, send)
             return
 
+        # gRPC — HTTP/2 with ``content-type: application/grpc``.  When a
+        # registry is installed, such requests bypass the HTTP router and are
+        # served as unary gRPC calls (grpc-status reported in trailers).  The
+        # check is a single header read on the HTTP path and is skipped
+        # entirely when ``enable_grpc`` was never called.
+        if self._grpc_registry is not None and scheme == Scheme.http:
+            headers = scope.get('headers')
+            getter = getattr(headers, 'get', None)
+            content_type = getter(b'content-type', b'') if getter is not None else b''
+            if content_type.strip().startswith(b'application/grpc'):
+                from .grpc import serve_grpc  # noqa: PLC0415 — optional subpackage
+                await serve_grpc(self._grpc_registry, scope, receive, send)
+                return
+
         # Normalise send for the HTTP path: handlers may emit Response objects
         # or the (bytes, status, headers) 3-arg form.  Apply _wrap_send here —
         # at the handler boundary, after the WebSocket branch — so middleware
@@ -616,6 +635,36 @@ class BlackBull:
     def url_path_for(self, name: str, /, **params) -> str:
         """Return the path for the named route with *params* substituted."""
         return self._router.url_path_for(name, **params)
+
+    def get_routes(self) -> 'list[RouteInfo]':
+        """Return a snapshot of all registered routes.
+
+        Each entry is a :class:`~blackbull.router.RouteInfo` named tuple
+        ``(method, path, name)``.  Routes are returned in registration
+        order, one entry per HTTP method.  The list is a shallow copy and
+        may be freely sorted, filtered, or mutated without affecting the
+        live router.
+
+        This is the public, stable alternative to reaching into the
+        internal ``app._router._route_info`` attribute — use it for
+        dashboards, OpenAPI generators, admin panels, and debug endpoints.
+        """
+        return self._router.get_routes()
+
+    def enable_grpc(self, registry) -> None:
+        """Serve unary gRPC calls from *registry* over the HTTP/2 layer.
+
+        gRPC is HTTP/2 with ``content-type: application/grpc``; once enabled,
+        such requests are dispatched to the registry's handlers (returning
+        ``grpc-status`` trailers) instead of the HTTP router, while REST and
+        WebSocket traffic on the same port is unaffected.
+
+        ``registry`` is a :class:`blackbull.grpc.GrpcServiceRegistry`.  gRPC
+        requires HTTP/2, so run the app with TLS+ALPN (or h2c) for real
+        clients.  Protobuf is not pulled in — handlers exchange raw message
+        bytes; see ``blackbull.grpc`` for the handler contract.
+        """
+        self._grpc_registry = registry
 
     def enable_openapi(self, *,
                        title: str = 'BlackBull API',

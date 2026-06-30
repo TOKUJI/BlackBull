@@ -31,6 +31,56 @@ so the editable install's metadata catches up.
 
 ## [Unreleased]
 
+## [0.46.0] — 2026-06-30
+
+Sprint 57 — **gRPC** (the next protocol after MQTT) plus three supporting
+HTTP/2 hot-path items.
+
+### Added
+- **Unary gRPC over HTTP/2** (`blackbull.grpc`): `GrpcServiceRegistry`,
+  `GrpcStatus` / `GrpcError`, the Length-Prefixed-Message codec
+  (`encode_message` / `decode_messages`), and the ASGI bridge
+  (`serve_grpc` + `GrpcContext`). Enable with `app.enable_grpc(registry)`;
+  gRPC requests (`content-type: application/grpc`) multiplex onto the same
+  HTTP/2 port as REST and WebSocket. Served through the existing ASGI bridge
+  (reusing the `http.response.trailers` emit path for `grpc-status`) — no new
+  protocol Actor. Protobuf is not a dependency; handlers exchange raw message
+  bytes. Optional `blackbull[grpc]` extra. Docs: `docs/guide/grpc.md`;
+  example: `examples/grpc_server.py`.
+- **`app.get_routes()` + `RouteInfo`** — public, stable route introspection
+  (replaces reaching into `app._router._route_info`).
+
+### Changed / Performance
+- **`frame-assembly-fast-path` Tier 2**: `build_response_headers` /
+  `build_trailers` in `server/sender.py` encode response HEADERS straight to
+  wire bytes, bypassing the receive-oriented `Headers` object on the send
+  path. All four response-HEADERS emitters use them; byte-for-byte equivalent
+  to the prior `Headers.save()` path. `build_trailers` is the gRPC
+  `grpc-status` trailers basis.
+- **`copy-reduction-http2`**: non-padded DATA frames skip the BytesIO
+  read-copy in `Data.__init__` (P2); CONTINUATION reassembly uses an in-place
+  bytearray extend instead of O(n²) `bytes +=` (P3).
+
+### Fixed
+- **HTTP/2 large-payload flow-control deadlock** (three pre-existing
+  transport bugs surfaced by gRPC conformance, affecting any bidirectional
+  exchange over the 65535-byte initial window): the `HTTP2Client` now emits
+  `WINDOW_UPDATE` for received DATA so the server's send window is replenished;
+  `HTTP2Sender._write_data` no longer loses a `WINDOW_UPDATE` that arrives
+  between the window check and `Event.clear()` (lost-wakeup race); and a
+  `WINDOW_UPDATE` / `RST_STREAM` arriving on a stream we already closed with
+  END_STREAM is now silently ignored per RFC 9113 §5.1 instead of being
+  answered with `RST_STREAM` (which tore the client's stream down early).
+- **Lifespan shutdown teardown race**: `LifespanManager.__aexit__` no longer
+  hangs when the lifespan task is cancelled out from under it during
+  `asyncio.run`'s interpreter teardown — it races the shutdown acknowledgement
+  against task completion and drains the task's `finally` blocks.
+- **RFC 9113 §8.2.1 field validation** (header-injection hardening): HTTP/2
+  field names containing a control octet, uppercase letter, `DEL`, or an
+  interior colon, and field values containing `NUL` / `CR` / `LF`, are now
+  rejected as malformed instead of being forwarded. New `field_name_is_valid`
+  / `field_value_is_valid` helpers in `protocol/frame_types.py`.
+
 ---
 
 ## [0.45.0] — 2026-06-27

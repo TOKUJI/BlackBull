@@ -4,7 +4,9 @@ import time
 from abc import ABC, abstractmethod
 from http import HTTPStatus
 from email.utils import formatdate
+from itertools import chain
 
+from ..protocol import hpack_fastpath
 from ..protocol.frame_types import (FrameTypes, HeaderFrameFlags, DataFrameFlags,
                                     FrameBase, PseudoHeaders,
                                     DEFAULT_INITIAL_WINDOW_SIZE, DEFAULT_MAX_FRAME_SIZE)
@@ -52,6 +54,68 @@ def _has_header(items, name: bytes) -> bool:
     """
     needle = name.lower()
     return any(k.lower() == needle for k, _ in items)
+
+
+# ---------------------------------------------------------------------------
+# Response-HEADERS fast-path builders (frame-assembly-fast-path Tier 2)
+# ---------------------------------------------------------------------------
+#
+# These encode a HEADERS frame straight to wire bytes, skipping
+# ``FrameFactory.create()``, the registry lookup, and the receive-oriented
+# ``Headers`` object — none of whose parsing machinery the send side reads.
+# They are wire-equivalent to ``Headers.save()`` for the response path:
+#  - the same shared per-connection HPACK ``Encoder`` is used, so dynamic
+#    table state stays coherent with every other emitter on the connection;
+#  - ``status_fast_bytes`` is the same static-table fast path ``Headers.save()``
+#    already uses (RFC 7541 §6.1 — static-indexed fields don't touch the
+#    dynamic table), just hoisted out of the object;
+#  - the 9-byte frame header is byte-identical to ``FrameBase.save()``.
+# Verified byte-for-byte against ``Headers.save()`` in
+# ``tests/conformance/http2/test_headers_fastpath_builder.py``.
+#
+# Assumption: the encoded block fits one frame (END_HEADERS always set).
+# BlackBull does not split outbound HEADERS across CONTINUATION; if that
+# ever changes these builders need a fallback.
+
+def build_response_headers(encoder, stream_id: int, status,
+                           headers, *, end_stream: bool) -> bytes:
+    """Encode a response HEADERS frame (carrying ``:status``) to wire bytes.
+
+    Injects a ``date`` header when the app did not supply one, mirroring the
+    ``Headers.save()`` send path.  ``status`` may be an ``HTTPStatus``, an
+    ``int``, or a ``str`` — it is normalised via ``str()`` exactly as the
+    object path does.
+    """
+    if _has_header(headers, b'date'):
+        fields = headers
+    else:
+        fields = (*headers, (b'date', _http_date()))
+
+    fast = hpack_fastpath.status_fast_bytes(str(status))
+    if fast is not None:
+        payload = fast + encoder.encode(fields)
+    else:
+        payload = encoder.encode(
+            chain(((PseudoHeaders.STATUS, str(status)),), fields))
+
+    flags = HeaderFrameFlags.END_HEADERS.value
+    if end_stream:
+        flags |= HeaderFrameFlags.END_STREAM.value
+    return (len(payload).to_bytes(3, 'big') + FrameTypes.HEADERS.value
+            + flags.to_bytes(1, 'big') + stream_id.to_bytes(4, 'big') + payload)
+
+
+def build_trailers(encoder, stream_id: int, headers) -> bytes:
+    """Encode a trailers HEADERS frame (END_HEADERS | END_STREAM, no
+    pseudo-headers) to wire bytes.
+
+    This is the basis for the gRPC ``grpc-status`` trailers path — a unary
+    RPC response carries a second HEADERS frame with regular fields only.
+    """
+    payload = encoder.encode(headers)
+    flags = HeaderFrameFlags.END_HEADERS.value | HeaderFrameFlags.END_STREAM.value
+    return (len(payload).to_bytes(3, 'big') + FrameTypes.HEADERS.value
+            + flags.to_bytes(1, 'big') + stream_id.to_bytes(4, 'big') + payload)
 
 
 # ---------------------------------------------------------------------------
@@ -649,17 +713,11 @@ class HTTP2Sender(BaseSender):
         expect_trailers: bool,
     ) -> None:
         """Write buffered HEADERS + first DATA body chunk together."""
-        h_frame = self._factory.create(
-            FrameTypes.HEADERS,
-            HeaderFrameFlags.END_HEADERS,
-            self._stream_id,
-        )
-        h_frame.pseudo_headers[PseudoHeaders.STATUS] = str(status)
-        for k, v in headers:
-            h_frame.headers.append((k, v))
-        if not _has_header(h_frame.headers, b'date'):
-            h_frame.headers.append((b'date', _http_date()))
-        h_bytes = h_frame.save()
+        # HEADERS never carries END_STREAM here — an empty DATA frame does
+        # (mirrors the object path this replaced).
+        h_bytes = build_response_headers(
+            self._factory.encoder, self._stream_id, status, headers,
+            end_stream=False)
 
         total = len(body)
         sid_bytes = self._stream_id.to_bytes(4, 'big')
@@ -696,17 +754,9 @@ class HTTP2Sender(BaseSender):
         the deferred flush, and the stream must stay open bidirectionally for
         the subsequent WebSocket DATA frames.
         """
-        h_frame = self._factory.create(
-            FrameTypes.HEADERS,
-            HeaderFrameFlags.END_HEADERS,
-            self._stream_id,
-        )
-        h_frame.pseudo_headers[PseudoHeaders.STATUS] = str(status)
-        for k, v in headers:
-            h_frame.headers.append((k, v))
-        if not _has_header(h_frame.headers, b'date'):
-            h_frame.headers.append((b'date', _http_date()))
-        await self._write(h_frame.save())
+        await self._write(build_response_headers(
+            self._factory.encoder, self._stream_id, status, headers,
+            end_stream=False))
 
     async def _write(self, data: bytes):
         """Write a frame to the transport.
@@ -742,6 +792,15 @@ class HTTP2Sender(BaseSender):
                 if self._window_open is None:
                     self._window_open = asyncio.Event()
                 self._window_open.clear()
+                # Re-check after clear(): a WINDOW_UPDATE delivered by the
+                # frame loop between the loop condition above and this
+                # clear() would have ``set()`` the event, and the clear()
+                # would then discard that wake-up.  Without this guard we
+                # would ``await`` an event no further WINDOW_UPDATE will set
+                # → permanent block (lost-wakeup race, RFC 9113 §6.9).
+                if (self.connection_window_size > 0 and
+                        self.stream_window_size[self._stream_id] > 0):
+                    break
                 await self._window_open.wait()
 
             chunk_size = min(
@@ -802,22 +861,13 @@ class HTTP2Sender(BaseSender):
                     'the response was complete)',
                     self._stream_id)
                 return
-            # High-level: build HEADERS + DATA frames from bytes + status
-            h_frame = self._factory.create(
-                FrameTypes.HEADERS,
-                HeaderFrameFlags.END_HEADERS,
-                self._stream_id,
-            )
-            h_frame.pseudo_headers[PseudoHeaders.STATUS] = str(status)
-            for k, v in headers:
-                h_frame.headers.append((k, v))
-            # RFC 9110 §6.6.1 — Date SHOULD be present.  HTTP/1.1 sender
-            # already injects it in ``_flush``; mirror that here so the
-            # wire shape matches across protocols.  Lowercase per RFC
-            # 9113 §8.2.1 (HTTP/2 field names are lowercase ASCII).
-            if not _has_header(h_frame.headers, b'date'):
-                h_frame.headers.append((b'date', _http_date()))
-            h_bytes = h_frame.save()
+            # High-level: build HEADERS + DATA frames from bytes + status.
+            # RFC 9110 §6.6.1 — Date SHOULD be present; the builder injects
+            # it when the app didn't (mirrors the HTTP/1.1 _flush path).
+            # END_STREAM always rides the DATA frame below, never HEADERS.
+            h_bytes = build_response_headers(
+                self._factory.encoder, self._stream_id, status, headers,
+                end_stream=False)
 
             total = len(body)
             sid_bytes = self._stream_id.to_bytes(4, 'big')
@@ -876,28 +926,16 @@ class HTTP2Sender(BaseSender):
             elif event_type == ASGIEvent.HTTP_RESPONSE_TRAILERS:
                 # Flush buffered start if no body preceded trailers.
                 if self._buffered_status is not None:
-                    h_frame = self._factory.create(
-                        FrameTypes.HEADERS,
-                        HeaderFrameFlags.END_HEADERS,
-                        self._stream_id,
-                    )
-                    h_frame.pseudo_headers[PseudoHeaders.STATUS] = str(self._buffered_status)
-                    for k, v in self._buffered_headers or ():
-                        h_frame.headers.append((k, v))
-                    if not _has_header(h_frame.headers, b'date'):
-                        h_frame.headers.append((b'date', _http_date()))
-                    await self._write(h_frame.save())
+                    await self._write(build_response_headers(
+                        self._factory.encoder, self._stream_id,
+                        self._buffered_status, self._buffered_headers or [],
+                        end_stream=False))
                     self._buffered_status = None
                     self._buffered_headers = None
 
-                frame = self._factory.create(
-                    FrameTypes.HEADERS,
-                    HeaderFrameFlags.END_HEADERS | HeaderFrameFlags.END_STREAM,
-                    self._stream_id,
-                )
-                for k, v in body.get('headers', []):
-                    frame.headers.append((k, v))
-                await self._write(frame.save())
+                await self._write(build_trailers(
+                    self._factory.encoder, self._stream_id,
+                    list(body.get('headers', []))))
                 self._end_stream_sent = True
 
             elif event_type == ASGIEvent.HTTP_RESPONSE_PUSH:

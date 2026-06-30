@@ -233,9 +233,16 @@ opt-in knob is sketched in the roadmap but not built.
 
 Out of scope.  Revisit if a real user need appears.
 
-### No gRPC
+### gRPC: unary only
 
-Out of scope.
+Unary gRPC over HTTP/2 ships in `blackbull.grpc` (`app.enable_grpc`):
+`application/grpc` requests multiplex onto the same HTTP/2 port as
+REST and WebSocket, with `grpc-status` reported in trailers.  Server-
+and client-streaming are **not** implemented yet, and there is no
+protobuf codegen toolchain — handlers exchange raw message bytes, so
+descriptor/message classes are the application's choice.  Message
+compression is also unsupported (the server advertises
+`grpc-accept-encoding: identity`).
 
 ### CLI `--bind` host is advisory
 

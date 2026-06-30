@@ -1410,3 +1410,100 @@ class TestCustomMethods:
         with pytest.raises(MethodNotApplicable) as exc_info:
             router[('/pot', 'WHEN', Scheme.http)]
         assert 'BREW' in exc_info.value.allowed_methods
+
+
+class TestGetRoutes:
+    """app.get_routes() / Router.get_routes() — public route introspection."""
+
+    def test_empty_app_returns_empty_list(self):
+        app = BlackBull()
+        assert app.get_routes() == []
+
+    def test_single_route(self):
+        app = BlackBull()
+
+        @app.route(path='/health')
+        async def health():
+            return 'ok'
+
+        routes = app.get_routes()
+        assert len(routes) == 1
+        assert routes[0].method == 'GET'
+        assert routes[0].path == '/health'
+        assert routes[0].name == ''
+
+    def test_multi_method_yields_one_entry_per_method(self):
+        app = BlackBull()
+
+        @app.route(path='/res', methods=[HTTPMethod.GET, HTTPMethod.POST])
+        async def res():
+            return 'ok'
+
+        routes = app.get_routes()
+        assert [(r.method, r.path) for r in routes] == [
+            ('GET', '/res'), ('POST', '/res')]
+
+    def test_path_params_preserved_as_template(self):
+        app = BlackBull()
+
+        @app.route(path='/tasks/{task_id:int}')
+        async def get_task(task_id: int):
+            return {'id': task_id}
+
+        routes = app.get_routes()
+        assert routes[0].path == '/tasks/{task_id:int}'
+
+    def test_name_reported(self):
+        app = BlackBull()
+
+        @app.route(path='/named', name='my_route')
+        async def named():
+            return 'ok'
+
+        assert app.get_routes()[0].name == 'my_route'
+
+    def test_custom_method_reported_as_string(self):
+        app = BlackBull()
+
+        @app.route(path='/pot', methods='BREW')
+        async def brew():
+            return 'ok'
+
+        assert app.get_routes()[0].method == 'BREW'
+
+    def test_registration_order_preserved(self):
+        app = BlackBull()
+
+        @app.route(path='/a')
+        async def a():
+            return 'a'
+
+        @app.route(path='/b')
+        async def b():
+            return 'b'
+
+        assert [r.path for r in app.get_routes()] == ['/a', '/b']
+
+    def test_returns_fresh_copy(self):
+        app = BlackBull()
+
+        @app.route(path='/x')
+        async def x():
+            return 'x'
+
+        first = app.get_routes()
+        first.clear()
+        assert len(app.get_routes()) == 1
+
+    def test_routeinfo_is_namedtuple(self):
+        from blackbull import RouteInfo
+        app = BlackBull()
+
+        @app.route(path='/y')
+        async def y():
+            return 'y'
+
+        r = app.get_routes()[0]
+        assert isinstance(r, RouteInfo)
+        method, path, name = r          # unpackable
+        assert (method, path, name) == ('GET', '/y', '')
