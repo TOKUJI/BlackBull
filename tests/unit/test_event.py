@@ -179,3 +179,97 @@ async def test_pending_tasks_are_removed_when_completed():
     d.on('test', quick)
     await d.emit(Event('test'))
     await asyncio.wait_for(d.aclose(), timeout=1.0)
+
+
+# ---------------------------------------------------------------------------
+# Blocking observers — the third delivery mode (awaited + isolated)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_blocking_observer_is_awaited_before_emit_returns():
+    """Unlike a detached observer, a blocking one completes before emit() returns."""
+    d = EventDispatcher()
+    done = []
+
+    async def cleanup(event):
+        await asyncio.sleep(0)  # yield, then finish
+        done.append('done')
+
+    d.on('test', cleanup, blocking=True)
+    await d.emit(Event('test'))
+    # No sleep / no aclose needed — it already ran to completion inside emit.
+    assert done == ['done']
+
+
+@pytest.mark.asyncio
+async def test_blocking_observers_run_in_registration_order():
+    d = EventDispatcher()
+    order = []
+
+    async def first(event):
+        await asyncio.sleep(0)
+        order.append('first')
+
+    async def second(event):
+        order.append('second')
+
+    d.on('test', first, blocking=True)
+    d.on('test', second, blocking=True)
+    await d.emit(Event('test'))
+    assert order == ['first', 'second']
+
+
+@pytest.mark.asyncio
+async def test_blocking_observer_exception_is_isolated():
+    """A blocking observer's exception is logged, not propagated, and does not
+    abort sibling blocking observers."""
+    d = EventDispatcher()
+    ran = []
+
+    async def boom(event):
+        raise RuntimeError('cleanup failed')
+
+    async def survivor(event):
+        ran.append('survivor')
+
+    d.on('test', boom, blocking=True)
+    d.on('test', survivor, blocking=True)
+    await d.emit(Event('test'))  # must NOT raise
+    assert ran == ['survivor']
+
+
+@pytest.mark.asyncio
+async def test_emit_order_interceptors_then_blocking_then_detached():
+    d = EventDispatcher()
+    order = []
+
+    async def interceptor(event):
+        order.append('intercept')
+
+    async def blocking(event):
+        order.append('blocking')
+
+    async def detached(event):
+        order.append('detached')
+
+    d.intercept('test', interceptor)
+    d.on('test', detached)               # detached
+    d.on('test', blocking, blocking=True)
+    await d.emit(Event('test'))
+    # Interceptor and blocking observer have run synchronously and in that
+    # order; the detached observer has not necessarily run yet.
+    assert order[:2] == ['intercept', 'blocking']
+    await asyncio.wait_for(d.aclose(), timeout=1.0)
+    assert 'detached' in order
+
+
+@pytest.mark.asyncio
+async def test_blocking_observer_counts_as_a_listener():
+    d = EventDispatcher()
+
+    async def cleanup(event):
+        pass
+
+    assert d.has_listeners('test') is False
+    d.on('test', cleanup, blocking=True)
+    assert d.has_listeners('test') is True

@@ -57,7 +57,7 @@ def _wrap_send(raw_send):
     ``middleware.utils._normalize_send``.  Response is a pure serialiser and
     ignores scope/receive, so ``None`` is passed for both.
     """
-    from .response import Response as _Response
+    from .response import Response as _Response, _emit_response
 
     async def _send(event, status=HTTPStatus.OK, headers=[]):
         if isinstance(event, _Response):
@@ -65,16 +65,8 @@ def _wrap_send(raw_send):
         elif isinstance(event, (bytes, bytearray, memoryview)):
             # ``send(body, status, headers)`` convenience form — used by
             # full-form handlers and custom error handlers.
-            await raw_send({
-                'type': 'http.response.start',
-                'status': int(status),
-                'headers': list(headers),
-            })
-            await raw_send({
-                'type': 'http.response.body',
-                'body': bytes(event) if not isinstance(event, bytes) else event,
-                'more_body': False,
-            })
+            body = bytes(event) if not isinstance(event, bytes) else event
+            await _emit_response(raw_send, body, status, headers)
         else:
             # ASGI dict (the common path) or any other shape — passed through
             # so the underlying sender's type checking decides what to do.
@@ -176,8 +168,8 @@ async def _default_error_handler(scope, receive, send):  # noqa: ARG001
         headers.append((b'content-type', b'text/plain; charset=utf-8'))
 
     headers.append((b'content-length', str(len(body)).encode()))
-    await send({'type': 'http.response.start', 'status': status, 'headers': headers})
-    await send({'type': 'http.response.body', 'body': body, 'more_body': False})
+    from .response import _emit_response
+    await _emit_response(send, body, status, headers)
 
 
 class RouteGroup:
@@ -338,15 +330,28 @@ class BlackBull:
         self._dispatcher.intercept('app_shutdown', _adapter)
         return fn
 
-    def on(self, event_name: str) -> Callable[[EventHandler], EventHandler]:
-        """Decorate a handler to observe ``event_name`` (fire-and-forget).
+    def on(self, event_name: str, *, blocking: bool = False
+           ) -> Callable[[EventHandler], EventHandler]:
+        """Decorate a handler to observe ``event_name``.
 
-        The handler is scheduled as an independent ``asyncio.Task`` each time
-        the event fires.  Exceptions raised by the handler are caught and
-        logged; they do not propagate to the emitter or affect other handlers.
+        With ``blocking=False`` (the default) the handler is scheduled as an
+        independent ``asyncio.Task`` each time the event fires — fire-and-forget,
+        never delaying the emitter.  Use it for telemetry that must not add
+        latency to the hot path.
+
+        With ``blocking=True`` the handler is *awaited* in registration order
+        before the emit completes, so a side effect is guaranteed to finish
+        within the event's lifetime.  Use it for resource cleanup keyed to an
+        event's completion — most notably ``scope_completed`` (close a
+        per-request DB session, delete a temp file).
+
+        Either way the handler's exceptions are isolated: they are caught and
+        logged and never propagate to the emitter or affect other handlers.
+        (For a hook that *may* affect the request, use :meth:`intercept`.)
 
         Args:
-            event_name: Name of the event to observe (e.g. ``'app_startup'``).
+            event_name: Name of the event to observe (e.g. ``'scope_completed'``).
+            blocking: Await the handler before emit returns (default ``False``).
 
         Returns:
             A decorator that registers the wrapped coroutine and returns it
@@ -354,13 +359,19 @@ class BlackBull:
 
         Example:
             ```python
-            @app.on('app_startup')
-            async def handler(event: Event):
-                print(event.detail)
+            @app.on('request_completed')            # detached telemetry
+            async def log_it(event: Event):
+                metrics.record(event.detail)
+
+            @app.on('scope_completed', blocking=True)   # awaited cleanup
+            async def close_session(event: Event):
+                session = event.detail['scope'].get('state', {}).get('db')
+                if session is not None:
+                    await session.close()
             ```
         """
         def decorator(handler):
-            self._dispatcher.on(event_name, handler)
+            self._dispatcher.on(event_name, handler, blocking=blocking)
             return handler
         return decorator
 
@@ -554,7 +565,38 @@ class BlackBull:
         if raw_headers is not None and not isinstance(raw_headers, Headers):
             scope['headers'] = Headers(raw_headers)
 
-        await self._chain(scope, receive, send)
+        # ``scope_completed`` — the guaranteed, cross-protocol terminal event.
+        # Emitted here, at the one point every scope (HTTP request, WebSocket
+        # connection, gRPC call) passes through exactly once, under *any* server
+        # (BlackBull's own actors, uvicorn, TestClient).  It is the application-
+        # level completion event (fires wherever the app runs), as distinct from
+        # the server-level telemetry events (``request_completed`` et al., which
+        # need wire data and fire only under BlackBull's server).  Register
+        # cleanup with ``@app.on('scope_completed', blocking=True)``.  Guarded so
+        # a request with no such listener pays only one dict lookup.
+        if not self._dispatcher.has_listeners('scope_completed'):
+            await self._chain(scope, receive, send)
+            return
+        exc: BaseException | None = None
+        try:
+            await self._chain(scope, receive, send)
+        except BaseException as e:
+            exc = e
+            raise
+        finally:
+            # ``exception`` reflects whether the scope encountered an error:
+            # either one that propagated out of the chain (exc), or a handler
+            # error that ``_dispatch`` already turned into a 500 and recorded in
+            # ``scope['state']['error_exception']``.  ``None`` for a clean
+            # request (including a 404, which is not an exception).
+            err = exc or scope.get('state', {}).get('error_exception')
+            await self._dispatcher.emit(Event('scope_completed', {
+                'scope':     scope,
+                'type':      scope.get('type', '-'),
+                'client_ip': str((scope.get('client') or ['-'])[0]),
+                'path':      scope.get('path', '-'),
+                'exception': err,
+            }))
 
     def route(self, methods: str | HTTPMethod | Iterable[str | HTTPMethod] = [HTTPMethod.GET],
               path: str = '/', scheme: Scheme | Iterable[Scheme] = Scheme.http,
@@ -573,6 +615,41 @@ class BlackBull:
     def group(self, middlewares=[]) -> 'RouteGroup':
         """Return a RouteGroup that prepends *middlewares* to every route."""
         return RouteGroup(self, middlewares)
+
+    def register_converter(self, type_: type, converter: Callable | None = None):
+        """Teach simplified handlers to return values of a custom *type_*.
+
+        A simplified handler may already return ``str``, ``bytes``, ``dict``,
+        ``list``, a dataclass, a ``Response``, or ``None``.  Register a
+        converter to extend that set — e.g. so a handler can
+        ``return my_orm_object`` and have it serialised automatically.  The
+        converter receives the returned value and must return a *natively
+        supported* sendable (a ``Response``, ``str``/``bytes``, ``None``, or a
+        JSON-able ``dict``/``list``/dataclass).
+
+        The registry is empty by default, so registering nothing costs nothing:
+        the coercion fast path never consults it for the built-in shapes.
+
+        Direct form::
+
+            app.register_converter(MyOrmObject, lambda o: o.to_dict())
+
+        Decorator form (omit *converter*)::
+
+            @app.register_converter(MyOrmObject)
+            def _(o):
+                return o.to_dict()
+
+        Converters registered after a route are still honoured — the registry
+        is shared with every adapted handler by reference.
+        """
+        if converter is None:
+            def _decorator(fn: Callable) -> Callable:
+                self._router.register_converter(type_, fn)
+                return fn
+            return _decorator
+        self._router.register_converter(type_, converter)
+        return converter
 
     def use(self, mw) -> None:
         """Register a global middleware applied to every non-lifespan request."""

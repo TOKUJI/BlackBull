@@ -386,8 +386,97 @@ def _instantiate_dataclass(cls: Any, data: dict) -> Any:
     return cls(**kwargs)
 
 
-def _adapt_handler(fn, path: str):
+def _lookup_converter(converters: dict, result_type: type):
+    """Find a registered converter for *result_type* (exact match, then MRO).
+
+    Only reached on the cold path — after a handler returns a value that is
+    none of the natively supported shapes — so the MRO walk costs nothing on
+    the common path.  Returns the converter callable or ``None``.
+    """
+    fn = converters.get(result_type)
+    if fn is not None:
+        return fn
+    for base in result_type.__mro__[1:]:
+        fn = converters.get(base)
+        if fn is not None:
+            return fn
+    return None
+
+
+async def _send_native(result, scope, receive, send) -> bool:
+    """Serialise a *natively supported* handler/converter return value to ASGI.
+
+    The single source of truth for return-value → ASGI mapping, shared by the
+    simplified-handler wrapper and the converter path.  Handles the shapes
+    BlackBull sends without an app-registered converter:
+
+    * ``None`` — send nothing;
+    * an existing ``StreamingResponse`` / ``EventSourceResponse`` instance, or a
+      bare async generator — driven directly so it owns its own start event;
+    * a ``Response`` (sent as-is);
+    * ``bytes`` / ``str`` (wrapped in a default ``Response``);
+    * a JSON-able ``dict`` / ``list`` / dataclass instance (``JSONResponse``).
+
+    Returns ``True`` when *result* matched one of those shapes (and has been
+    sent), ``False`` otherwise — leaving the caller to apply its own fallback
+    (the handler wrapper tries a registered converter, then raises;
+    ``_send_converted`` raises, since a converter must itself return a native
+    shape).
+    """
+    from .response import (
+        Response as _Response, JSONResponse as _JSONResponse,
+        StreamingResponse as _StreamingResponse,
+    )
+    if result is None:
+        return True
+    if isinstance(result, _StreamingResponse):
+        # Existing StreamingResponse / EventSourceResponse instance — let it
+        # drive scope/receive/send directly so subclasses keep control over
+        # the start event.
+        await result(scope, receive, send)
+    elif inspect.isasyncgen(result):
+        # ``async def stream(): yield ...`` shape — wrap in a default-typed
+        # StreamingResponse.  Backpressure flows naturally because each
+        # ``await send()`` on a body event blocks on flow-control credit
+        # (HTTP/2) or drain (HTTP/1).
+        await _StreamingResponse(result)(scope, receive, send)
+    elif isinstance(result, _Response):
+        await send(result)
+    elif isinstance(result, bytes):
+        await send(_Response(result))
+    elif isinstance(result, str):
+        await send(_Response(result.encode()))
+    elif dataclasses.is_dataclass(result) and not isinstance(result, type):
+        # Dataclass instance → recurse so nested dataclasses serialise too.
+        await send(_JSONResponse(_to_jsonable(result)))
+    elif isinstance(result, (dict, list)):
+        await send(_JSONResponse(_to_jsonable(result)))
+    else:
+        return False
+    return True
+
+
+async def _send_converted(value, scope, receive, send) -> None:
+    """Serialise a converter's output and send it.
+
+    A converter must return a *natively supported* sendable (see
+    :func:`_send_native`).  Anything else raises here — the intended loud
+    failure — rather than silently dropping the response.
+    """
+    if await _send_native(value, scope, receive, send):
+        return
+    raise TypeError(
+        'a registered converter must return a Response, StreamingResponse, '
+        f'bytes, str, dict, list, dataclass, or None; got {type(value).__name__!r}')
+
+
+def _adapt_handler(fn, path: str, converters: dict | None = None):
     """Wrap a simplified handler in an ASGI (scope, receive, send) coroutine.
+
+    *converters* is the app's ``type → callable`` registry (shared by
+    reference so converters registered after this route are still visible).
+    When a handler returns a value that is none of the natively supported
+    shapes, a matching converter — if any — maps it to a sendable.
 
     Parameter resolution:
     - Name matches a {param} in the path pattern → scope['path_params'][name],
@@ -404,10 +493,6 @@ def _adapt_handler(fn, path: str):
     None → no send; other → TypeError at call time.
     """
     from .request import read_body as _read_body
-    from .response import (
-        Response as _Response, JSONResponse as _JSONResponse,
-        StreamingResponse as _StreamingResponse,
-    )
 
     path_param_names: set[str] = {m.group(1) for m in Router._param_pattern.finditer(path)}
     params = inspect.signature(fn).parameters
@@ -485,35 +570,20 @@ def _adapt_handler(fn, path: str):
 
         result = (await fn(**kwargs)) if is_async else fn(**kwargs)
 
-        if result is None:
+        if await _send_native(result, scope, receive, send):
             return
-        elif isinstance(result, _StreamingResponse):
-            # Sprint 45: existing StreamingResponse / EventSourceResponse
-            # instance — let it drive scope/receive/send directly so
-            # subclasses keep control over the start event.
-            await result(scope, receive, send)
-        elif inspect.isasyncgen(result):
-            # Sprint 45: ``async def stream(): yield ...`` shape — wrap
-            # in a default-typed StreamingResponse.  Backpressure flows
-            # naturally because each ``await send()`` on a body event
-            # blocks on flow-control credit (HTTP/2) or drain (HTTP/1).
-            await _StreamingResponse(result)(scope, receive, send)
-        elif isinstance(result, _Response):
-            await send(result)
-        elif isinstance(result, bytes):
-            await send(_Response(result))
-        elif isinstance(result, str):
-            await send(_Response(result.encode()))
-        elif dataclasses.is_dataclass(result) and not isinstance(result, type):
-            # Dataclass instance → recurse so nested dataclasses serialise too.
-            await send(_JSONResponse(_to_jsonable(result)))
-        elif isinstance(result, (dict, list)):
-            await send(_JSONResponse(_to_jsonable(result)))
-        else:
-            raise TypeError(
-                f"Simplified handler {fn.__name__!r} returned unsupported type "
-                f"{type(result).__name__!r}."
-            )
+        if converters and (conv := _lookup_converter(converters, type(result))) is not None:
+            # Cold path: an app-registered type→sendable converter.  Guarded by
+            # ``converters`` truthiness so an empty registry costs nothing here
+            # and the common shapes above never reach this branch at all.
+            await _send_converted(conv(result), scope, receive, send)
+            return
+        raise TypeError(
+            f"Simplified handler {fn.__name__!r} returned unsupported type "
+            f"{type(result).__name__!r}.  Return a Response, str, bytes, "
+            f"dict, list, or None, or register a converter with "
+            f"app.register_converter({type(result).__name__}, ...)."
+        )
 
     return _wrapper
 
@@ -582,6 +652,16 @@ class Router(UserDict, BaseRouter):
         self._trie = _RouteTrie()
         self._raw_regex: dict = {}  # raw re.Pattern routes (not compiled from string paths)
         self._lookup_cache: OrderedDict = OrderedDict()
+        # type → callable registry for simplified-handler return coercion.
+        # Empty by default (falsy) so the common return paths never consult it.
+        # Shared by reference with every adapted handler, so a converter
+        # registered after a route is still honoured.
+        self._converters: dict[type, Callable] = {}
+
+    def register_converter(self, type_: type, converter: Callable) -> None:
+        """Register *converter* to turn a handler that returns *type_* into a
+        sendable (a Response, str/bytes, or JSON-able)."""
+        self._converters[type_] = converter
 
     def __setitem__(
         self,
@@ -812,7 +892,7 @@ class Router(UserDict, BaseRouter):
 
             original = fn
             if _is_simplified_handler(fn):
-                fn = _adapt_handler(fn, path)
+                fn = _adapt_handler(fn, path, self._converters)
 
             @wraps(fn)
             def wrapper(*args, **kwds):
@@ -1005,14 +1085,14 @@ class Router(UserDict, BaseRouter):
             fns = list(functions)
             original = fns[-1]
             if _is_simplified_handler(fns[-1]):
-                fns[-1] = _adapt_handler(fns[-1], path)
+                fns[-1] = _adapt_handler(fns[-1], path, self._converters)
             self._register_chain(fns, path, methods, scheme,
                                  name=name, original_handler=original)
             return lambda fn: fn
 
         if middlewares:
             def decorator(fn):
-                adapted = _adapt_handler(fn, path) if _is_simplified_handler(fn) else fn
+                adapted = _adapt_handler(fn, path, self._converters) if _is_simplified_handler(fn) else fn
                 self._register_chain(list(middlewares) + [adapted], path, methods, scheme,
                                      name=name, original_handler=fn)
                 return fn

@@ -65,6 +65,60 @@ def test_response_str_headers_reject_non_ascii():
 
 
 # ---------------------------------------------------------------------------
+# headers=dict  (FastAPI/Starlette/httpx convention)
+# ---------------------------------------------------------------------------
+
+def test_response_accepts_dict_headers():
+    # Regression: passing a dict used to iterate the dict's *keys* and unpack
+    # each key string into (k, v) — silent corruption.  A dict now maps to
+    # (name, value) tuples via .items(), coerced to bytes.
+    r = Response(b'', headers={'X-Foo': 'bar', 'X-Baz': 'qux'})
+    assert (b'X-Foo', b'bar') in r.headers
+    assert (b'X-Baz', b'qux') in r.headers
+    for k, v in r.headers:
+        assert isinstance(k, bytes) and isinstance(v, bytes)
+
+
+def test_jsonresponse_accepts_dict_headers():
+    r = JSONResponse({'ok': True}, headers={'X-Trace': 'abc123'})
+    assert (b'content-type', b'application/json') in r.headers
+    assert (b'X-Trace', b'abc123') in r.headers
+
+
+def test_redirectresponse_accepts_dict_headers():
+    r = RedirectResponse('/new', headers={b'set-cookie': b'sid=abc'})
+    assert (b'location', b'/new') in r.headers
+    assert (b'set-cookie', b'sid=abc') in r.headers
+
+
+def test_response_dict_headers_bytes_keys_and_values():
+    r = Response(b'', headers={b'X-A': b'1'})
+    assert (b'X-A', b'1') in r.headers
+
+
+def test_response_rejects_bare_string_headers():
+    # A bare string is iterable; the old loop would silently mangle it.
+    # Asserted on _normalize_headers directly: under beartype instrumentation
+    # the str is rejected earlier still, by Response's ``headers`` annotation
+    # (a BeartypeCallHintParamViolation) — so both layers reject it loudly.
+    from blackbull.response import _normalize_headers
+    with pytest.raises(TypeError):
+        _normalize_headers('X-Foo: bar')
+
+
+def test_response_rejects_non_pair_headers():
+    with pytest.raises(TypeError):
+        Response(b'', headers=[('only-one-element',)])
+    with pytest.raises(TypeError):
+        Response(b'', headers=[('a', 'b', 'c')])
+
+
+def test_response_rejects_non_str_bytes_header_value():
+    with pytest.raises(TypeError):
+        Response(b'', headers={'X-Count': 5})
+
+
+# ---------------------------------------------------------------------------
 # JSONResponse
 # ---------------------------------------------------------------------------
 

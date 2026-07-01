@@ -19,6 +19,69 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+def _normalize_headers(headers) -> list[tuple[bytes, bytes]]:
+    """Coerce a user-supplied ``headers=`` argument to ASGI's wire shape.
+
+    Accepts either
+
+    * a :class:`~collections.abc.Mapping` (``dict``-like) — matching the
+      FastAPI / Starlette / httpx convention, iterated by ``.items()``; or
+    * an iterable of ``(name, value)`` pairs (BlackBull's original shape).
+
+    Names and values may be ``str`` (encoded ASCII per RFC 9110 §5.5, so
+    non-ASCII raises ``UnicodeEncodeError`` at construction rather than
+    letting obs-text bytes onto the wire) or ``bytes``.  Any other shape —
+    a bare string, an iterable of non-pairs, a non-bytes/str value — raises
+    ``TypeError`` here, at construction, instead of silently corrupting the
+    response (the old ``for k, v in headers`` loop iterated a ``dict``'s
+    *keys* and unpacked each key string into ``(k, v)``) or blowing up later
+    in the sender's ``b''.join``.
+    """
+    if not headers:
+        return []
+    items = headers.items() if isinstance(headers, Mapping) else headers
+    out: list[tuple[bytes, bytes]] = []
+    for pair in items:
+        if isinstance(pair, (str, bytes, bytearray)):
+            raise TypeError(
+                'Response headers must be a mapping or an iterable of '
+                f'(name, value) pairs; got a bare {type(pair).__name__} '
+                f'element {pair!r}')
+        try:
+            k, v = pair
+        except (TypeError, ValueError):
+            raise TypeError(
+                'each header must be a (name, value) pair; '
+                f'got {pair!r}') from None
+        if isinstance(k, str):
+            k = k.encode('ascii')
+        if isinstance(v, str):
+            v = v.encode('ascii')
+        if not isinstance(k, (bytes, bytearray)) or not isinstance(v, (bytes, bytearray)):
+            raise TypeError(
+                'header name and value must be str or bytes; got '
+                f'({type(k).__name__}, {type(v).__name__})')
+        out.append((bytes(k), bytes(v)))
+    return out
+
+
+async def _emit_response(send, body: bytes, status, headers) -> None:
+    """Send a complete non-streamed HTTP response as ASGI ``start`` + ``body``.
+
+    The single source of truth for the ``http.response.start`` /
+    ``http.response.body`` event pair used by every non-streaming response
+    path — :meth:`Response.__call__`, the app's ``send(body, status, headers)``
+    convenience form (``_wrap_send``), and the default error handler.  *status*
+    may be an ``int`` or an ``HTTPStatus`` (coerced to ``int`` for the wire);
+    *headers* is any iterable of ``(bytes, bytes)`` pairs (copied defensively).
+    """
+    await send({'type': 'http.response.start',
+                'status': int(status),
+                'headers': list(headers)})
+    await send({'type': 'http.response.body',
+                'body': body, 'more_body': False})
+
+
 class Response:
     """HTTP response object carrying body, status, and headers.
 
@@ -31,7 +94,7 @@ class Response:
     def __init__(self, content: Union[str, bytes],
                  status: HTTPStatus = HTTPStatus.OK,
                  content_type: str = 'text/html; charset=utf-8',
-                 headers: list | None = None):
+                 headers: Mapping | list | None = None):
         if isinstance(content, str):
             self.body = content.encode()
         elif isinstance(content, bytes):
@@ -39,19 +102,11 @@ class Response:
         else:
             raise TypeError(f'Response expects str or bytes, got {type(content)}')
         self.status = status
+        # A dict or a list of (name, value) pairs; str or bytes names/values.
+        # See _normalize_headers for the accepted shapes and the ASCII /
+        # RFC 9110 §5.5 coercion rules.
         self.headers = [(b'content-type', content_type.encode())]
-        if headers:
-            # ASGI requires headers as bytes/bytes tuples; coerce str on the
-            # way in so callers may pass either shape without crashing the
-            # sender's b''.join later.  ASCII per RFC 9110 §5.5 — non-ASCII
-            # input raises UnicodeEncodeError at construction rather than
-            # letting obs-text bytes onto the wire.
-            for k, v in headers:
-                if isinstance(k, str):
-                    k = k.encode('ascii')
-                if isinstance(v, str):
-                    v = v.encode('ascii')
-                self.headers.append((k, v))
+        self.headers.extend(_normalize_headers(headers))
 
     async def __call__(self, scope, receive, send) -> None:
         """Drive this response as an ASGI app: emit ``start`` then ``body``.
@@ -63,11 +118,7 @@ class Response:
         start/body serialisation here means there is a single source of truth
         for turning a Response into ASGI events.
         """
-        await send({'type': 'http.response.start',
-                    'status': int(self.status),
-                    'headers': list(self.headers)})
-        await send({'type': 'http.response.body',
-                    'body': self.body, 'more_body': False})
+        await _emit_response(send, self.body, self.status, self.headers)
 
 
 class JSONResponse(Response):
@@ -81,7 +132,7 @@ class JSONResponse(Response):
 
     def __init__(self, content,
                  status: HTTPStatus = HTTPStatus.OK,
-                 headers: list | None = None):
+                 headers: Mapping | list | None = None):
         super().__init__(json.dumps(content).encode(), status, 'application/json', headers)
 
 
@@ -104,10 +155,8 @@ class RedirectResponse(Response):
 
     def __init__(self, url: str,
                  status: HTTPStatus = HTTPStatus.FOUND,
-                 headers: list | None = None):
-        merged = [(b'location', url.encode('ascii'))]
-        if headers:
-            merged.extend(headers)
+                 headers: Mapping | list | None = None):
+        merged = [(b'location', url.encode('ascii')), *_normalize_headers(headers)]
         super().__init__(b'', status=status, headers=merged)
 
 
@@ -136,11 +185,11 @@ class StreamingResponse:
     def __init__(self, content: AsyncIterator,
                  *,
                  status: int = 200,
-                 headers: list | None = None,
+                 headers: Mapping | list | None = None,
                  media_type: str = 'text/plain'):
         self._content = content
         self._status = status
-        self._headers = list(headers or [])
+        self._headers = _normalize_headers(headers)
         self._media_type = media_type
 
     async def __call__(self, scope, receive, send) -> None:
@@ -241,9 +290,9 @@ class EventSourceResponse(StreamingResponse):
     def __init__(self, content: AsyncIterator,
                  *,
                  status: int = 200,
-                 headers: list | None = None):
+                 headers: Mapping | list | None = None):
         # Caller-provided Cache-Control / Content-Type wins (case-insensitive).
-        h = list(headers or [])
+        h = _normalize_headers(headers)
         if not any(k.lower() == b'cache-control' for k, _ in h):
             h.append((b'cache-control', b'no-cache'))
         super().__init__(

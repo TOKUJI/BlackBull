@@ -31,6 +31,28 @@ so the editable install's metadata catches up.
 
 ## [Unreleased]
 
+### Added
+- **`scope_completed` event** — a guaranteed, cross-protocol terminal event
+  emitted once per ASGI scope (HTTP request, WebSocket connection, or gRPC
+  call), on success or error, under any server. It is the application-level
+  completion event (distinct from the server-level `request_completed`
+  telemetry), and the home of the resource-cleanup hook.
+- **Blocking observers** — `@app.on(name, blocking=True)` adds a third event
+  delivery mode: awaited in registration order (so cleanup completes within the
+  event's lifetime) yet isolated (a failing handler cannot break the emitter or
+  siblings). Pair with `scope_completed` to close a per-request DB session or
+  delete a temp file.
+- **`app.register_converter(type, fn)`** — extend simplified-handler return
+  coercion so a handler can `return my_orm_object`; the registry is empty by
+  default so the common return paths pay nothing. Direct and decorator forms.
+
+### Changed
+- **`Response(headers=...)` accepts a `dict`** (matching the
+  FastAPI/Starlette/httpx convention) as well as a list of `(name, value)`
+  pairs; names/values may be `str` or `bytes`. Malformed shapes now raise
+  `TypeError` at construction instead of silently corrupting the response
+  (the old loop iterated a dict's *keys*).
+
 ## [0.46.0] — 2026-06-30
 
 Sprint 57 — **gRPC** (the next protocol after MQTT) plus three supporting

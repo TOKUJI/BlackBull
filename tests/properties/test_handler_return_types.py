@@ -37,8 +37,8 @@ def _make_send():
     return _wrap_send(raw_send), body_parts
 
 
-def _run_handler(fn, path='/'):
-    wrapped = _adapt_handler(fn, path)
+def _run_handler(fn, path='/', converters=None):
+    wrapped = _adapt_handler(fn, path, converters)
 
     async def _go():
         send, body_parts = _make_send()
@@ -99,6 +99,61 @@ def test_none_return_sends_nothing():
 
     parts = _run_handler(handler)
     assert parts == []
+
+
+# ---------------------------------------------------------------------------
+# register_converter — custom return types via the type→callable registry
+# ---------------------------------------------------------------------------
+
+class _Widget:
+    def __init__(self, n):
+        self.n = n
+
+
+class _WidgetSub(_Widget):
+    pass
+
+
+@pytest.mark.properties
+@given(n=st.integers())
+def test_converter_maps_custom_type_to_json(n):
+    def to_dict(w):
+        return {'n': w.n}
+
+    async def handler():
+        return _Widget(n)
+
+    parts = _run_handler(handler, converters={_Widget: to_dict})
+    assert json.loads(b''.join(parts)) == {'n': n}
+
+
+@pytest.mark.properties
+@given(s=st.text())
+def test_converter_may_return_str(s):
+    async def handler():
+        return _Widget(s)
+
+    parts = _run_handler(handler, converters={_Widget: lambda w: str(w.n)})
+    assert b''.join(parts) == s.encode()
+
+
+@pytest.mark.properties
+def test_converter_matches_via_mro():
+    """A subclass with no exact registration uses the base-class converter."""
+    async def handler():
+        return _WidgetSub(7)
+
+    parts = _run_handler(handler, converters={_Widget: lambda w: {'n': w.n}})
+    assert json.loads(b''.join(parts)) == {'n': 7}
+
+
+@pytest.mark.properties
+def test_empty_converter_registry_still_raises_on_unknown_type():
+    async def handler():
+        return _Widget(1)
+
+    with pytest.raises(TypeError):
+        _run_handler(handler, converters={})
 
 
 @pytest.mark.properties

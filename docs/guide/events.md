@@ -5,26 +5,36 @@ request lifecycle.  Application code registers handlers with one
 of two decorators and the framework dispatches events at well-
 defined points in the application's lifetime.
 
-## Two hook kinds
+## Three hook kinds
 
-| Property | `@app.intercept(name)` | `@app.on(name)` |
-| --- | --- | --- |
-| Execution | Synchronous (awaited inline) | Asynchronous (fire-and-forget) |
-| Order | Registration order, serial | Independent, no inter-handler order |
-| Exceptions | Propagate to the emitter | Isolated, logged, never propagate |
-| Can short-circuit / modify flow | Yes | No |
-| Typical use | Auth, validation, rewriting | Logging, metrics, tracing |
+| Property | `@app.intercept(name)` | `@app.on(name, blocking=True)` | `@app.on(name)` |
+| --- | --- | --- | --- |
+| Execution | Awaited inline | Awaited inline | Fire-and-forget task |
+| Order | Registration order, serial | Registration order, serial | Independent, no order |
+| Exceptions | Propagate to the emitter | Isolated, logged | Isolated, logged |
+| Can short-circuit / modify flow | Yes | No | No |
+| Blocks the emitter? | Yes | Yes | No |
+| Typical use | Auth, validation, rewriting | Resource cleanup (`scope_completed`) | Logging, metrics, tracing |
 
-The split is a deliberate defence.  Writing an authentication
-check as an observer would silently let unauthorized requests
-through — the request proceeds before the observer has finished,
-and an observer cannot signal failure to the emitter.  Conversely,
-putting slow telemetry into an interceptor blocks the request
-path on every emission.
+Two axes are in play: **does the hook block the emitter** (is it
+awaited before `emit` returns?) and **can its failure affect the
+emitter** (does the exception propagate?).
 
-There is no third mode that "observes but blocks" or "intercepts
-but is fire-and-forget" — pick one based on whether the hook is
-allowed to affect the request.
+- `intercept` blocks *and* propagates — it participates in the
+  request and may abort it. Writing an authentication check as a
+  plain observer would silently let unauthorized requests through:
+  the request proceeds before the observer finishes, and an
+  observer cannot signal failure. Auth belongs here.
+- `on` (the default) neither blocks nor propagates — fire-and-forget
+  observation. Putting slow telemetry in an interceptor would add
+  latency to every request; put it here instead.
+- `on(..., blocking=True)` blocks but does **not** propagate — the
+  "observe but block" mode. Use it when a side effect must *complete*
+  within the event's lifetime yet must not be able to break what
+  emitted it. The canonical case is releasing a per-request resource
+  on `scope_completed` (close a DB session, delete a temp file): the
+  cleanup has to finish before the scope is gone, but a failing
+  cleanup must not corrupt a response that is already sent.
 
 ## `@app.intercept` — synchronous interception
 
@@ -68,6 +78,27 @@ to the emitter or to other observers.
 
 Use observers for telemetry, audit logging, cache warming, and
 other side-effects that the request path should not depend on.
+
+### `blocking=True` — awaited observation
+
+Pass `blocking=True` to await the observer in registration order
+*before* the emit returns, while keeping the isolation of `on`
+(exceptions logged, never propagated):
+
+```python
+@app.on('scope_completed', blocking=True)
+async def close_session(event: Event):
+    session = event.detail['scope'].get('state', {}).get('db_session')
+    if session is not None:
+        await session.close()
+```
+
+This is the right mode for cleanup keyed to an event's completion:
+the work is guaranteed to finish within the event's lifetime (unlike
+a detached observer, which may outlive the scope), but a failure in
+one cleanup handler neither aborts the others nor breaks the emitter.
+Blocking observers run after any interceptors and before any detached
+observers for the same event.
 
 ## The `Event` object
 
@@ -124,6 +155,7 @@ you want the consistency of writing every hook as
 | `before_handler` | Route matched, before handler dispatch | `scope`, `client_ip`, `method`, `path`, `http_version`, `headers` | `@app.on` and `@app.intercept`; raise to abort |
 | `after_handler` | Handler returned normally | `scope`, `client_ip`, `method`, `path`, `http_version` | Observation only |
 | `request_completed` | HTTP request finished — response fully sent (or failed before that) | `scope`, `client_ip`, `method`, `path`, `http_version`, `status`, `response_bytes`, `duration_ms` | Observation only; not fired if client disconnected or for WebSocket |
+| `scope_completed` | Any ASGI scope finished — HTTP request, WebSocket connection, or gRPC call | `scope`, `type`, `client_ip`, `path`, `exception` | Guaranteed once per scope, every protocol, on success or error; the cleanup hook. Pair with `@app.on(..., blocking=True)` |
 | `request_disconnected` | HTTP client closed connection before response complete | `scope`, `client_ip`, `method`, `path`, `http_version` | Observation only; mutually exclusive with `request_completed` |
 | `websocket_message` | WebSocket message fully received and reassembled, before the handler reads it | `scope`, `text`, `bytes` | Observation only |
 | `websocket_connected` | `websocket.accept` sent | `connection_id`, `path`, `client_ip`, `subprotocol` | Observation only |
@@ -132,10 +164,14 @@ you want the consistency of writing every hook as
 Request flow:
 
 ```
-request_received → routing → before_handler → handler → after_handler → request_completed
-                                                            ↑
-                                                         (or) request_disconnected
+request_received → routing → before_handler → handler → after_handler → request_completed → scope_completed
+                                                            ↑                                      ↑
+                                                         (or) request_disconnected ───────────────┘
 ```
+
+`scope_completed` is the terminal event on *every* path (including
+WebSocket and gRPC, which do not fire the HTTP-specific events
+above) — it always fires last, exactly once.
 
 ### `request_received` — earliest gate
 
@@ -187,6 +223,49 @@ async def log_request(event: Event):
 **Observation only.**  The response has already been sent by the
 time this fires; nothing an interceptor does can change what the
 client received.
+
+### `scope_completed` — the guaranteed terminal event
+
+Fires **exactly once for every ASGI scope** — every HTTP request,
+every WebSocket connection, and every gRPC call — when the
+application has finished handling it, whether it completed normally,
+returned an error, or was a 404. It is emitted from `BlackBull`'s
+entry point (the one place every scope passes through), so it fires
+under BlackBull's own server *and* under external ASGI servers
+(uvicorn, `httpx.ASGITransport`).
+
+This is the distinction from `request_completed`: that event is
+*server-level* telemetry (HTTP-only, carries wire data like status
+and byte counts, fires only under BlackBull's server).
+`scope_completed` is *application-level* — cross-protocol, fires
+wherever the app runs, and is meant for **resource cleanup**.
+
+| Key | Type | Description |
+| --- | --- | --- |
+| `scope` | `dict` | The ASGI scope dict |
+| `type` | `str` | Scope type: `'http'` (also gRPC) or `'websocket'` |
+| `client_ip` | `str` | Remote address (`'-'` when unavailable) |
+| `path` | `str` | Request / connection path |
+| `exception` | `BaseException` \| `None` | The error that occurred while handling the scope (whether it propagated or was turned into a 500), or `None` |
+
+Pair it with `blocking=True` so cleanup completes before the scope
+is gone:
+
+```python
+@app.on('scope_completed', blocking=True)
+async def cleanup(event: Event):
+    scope = event.detail['scope']
+    tmp = scope.get('state', {}).get('tempfile')
+    if tmp is not None:
+        os.unlink(tmp)
+    if event.detail['exception'] is not None:
+        metrics.increment('requests.failed')
+```
+
+Use plain `@app.on('scope_completed')` (detached) only for
+observation that need not finish before the scope ends; use
+`blocking=True` for anything that releases a resource the scope
+owns.
 
 ### `request_disconnected` — client gave up
 
@@ -265,9 +344,12 @@ Restated:
   do not run; the exception propagates to the emitter (the
   framework code that called `emit`).  For lifespan events, this
   typically aborts startup or shutdown.
-- **Observer raises** → the exception is caught and logged at
-  `ERROR` on the `blackbull` logger; other observers for the same
-  event continue to run; the emitter never sees the exception.
+- **Observer raises** (detached or `blocking=True`) → the exception
+  is caught and logged at `ERROR` on the `blackbull` logger; other
+  observers for the same event continue to run; the emitter never
+  sees the exception.  A blocking observer is awaited but still
+  isolated, so a failing cleanup on `scope_completed` cannot break a
+  response that has already been sent.
 
 There is no built-in re-emission of failures as a separate
 `error` event.  If you want one, register a wrapper observer
