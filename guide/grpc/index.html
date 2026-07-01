@@ -762,6 +762,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="The handler contract">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#server-streaming" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Server-streaming
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -4539,6 +4556,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="The handler contract">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#server-streaming" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Server-streaming
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -4652,6 +4686,32 @@ your own serialisation — <code>grpc_tools.protoc</code>-generated classes, the
 package, or hand-rolled. The <code>pip install 'blackbull[grpc]'</code> extra reserves the
 name but pulls in nothing; add <code>protobuf</code> yourself if you want generated
 message classes.</p>
+<h3 id="server-streaming">Server-streaming<a class="headerlink" href="#server-streaming" title="Permanent link">&para;</a></h3>
+<p>A <strong>server-streaming</strong> handler takes one request and returns many responses. Write
+it as an async generator that <code>yield</code>s each response message:</p>
+<div class="highlight"><pre><span></span><code><span class="nd">@grpc</span><span class="o">.</span><span class="n">method</span><span class="p">(</span><span class="s1">&#39;/pkg.Svc/StreamItems&#39;</span><span class="p">)</span>
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">stream_items</span><span class="p">(</span><span class="n">request</span><span class="p">:</span> <span class="nb">bytes</span><span class="p">,</span> <span class="n">context</span><span class="p">):</span>
+    <span class="k">for</span> <span class="n">item</span> <span class="ow">in</span> <span class="n">load_items</span><span class="p">(</span><span class="n">request</span><span class="p">):</span>
+        <span class="k">yield</span> <span class="n">item</span><span class="o">.</span><span class="n">SerializeToString</span><span class="p">()</span>
+</code></pre></div>
+<p>The registry detects the async-generator form automatically — no flag needed.
+(If a decorator hides the generator nature of your handler, force it with
+<code>grpc.method(path, streaming=True)</code> or <code>add_method(path, fn, streaming=True)</code>.)</p>
+<p>Semantics that match the gRPC spec:</p>
+<ul>
+<li>The status rides the trailing HEADERS frame after the last message. A handler
+  that fails <strong>after</strong> emitting messages reports its status in the trailers; one
+  that fails <strong>before</strong> the first message produces a clean Trailers-Only error,
+  exactly like a unary failure.</li>
+<li><code>context.set_trailing_metadata(...)</code> / <code>set_code(...)</code> apply to the final
+  trailers.</li>
+<li>The generator is always finalised (its <code>finally</code>/cleanup runs) when the client
+  cancels or disconnects mid-stream, so long streams stop producing promptly.</li>
+<li>A <code>grpc-timeout</code> deadline bounds the <strong>whole</strong> stream (<code>DEADLINE_EXCEEDED</code> on
+  expiry).</li>
+</ul>
+<p>Client-streaming and bidirectional streaming are not yet supported (they need the
+request delivered as a stream).</p>
 <h2 id="the-call-context">The call context<a class="headerlink" href="#the-call-context" title="Permanent link">&para;</a></h2>
 <p><code>GrpcContext</code> carries request metadata and lets the handler shape the outcome:</p>
 <table>
@@ -4699,9 +4759,9 @@ as <code>context.abort</code>. Any other unexpected exception becomes
 optional). Unknown methods return <code>GrpcStatus.UNIMPLEMENTED</code>.</p>
 <h2 id="scope-and-limits">Scope and limits<a class="headerlink" href="#scope-and-limits" title="Permanent link">&para;</a></h2>
 <ul>
-<li><strong>Unary RPCs only</strong> in this first cut. The wire path for streaming (DATA
-  frames + trailers) is already in place; streaming handler types are a
-  follow-up.</li>
+<li><strong>Unary and server-streaming</strong> RPCs are served (see above). Client-streaming
+  and bidirectional streaming are not yet supported — they need the request
+  delivered as a stream.</li>
 <li><strong>No message compression</strong> — a request with the compressed flag set is
   rejected with <code>UNIMPLEMENTED</code>.</li>
 <li><strong>HTTP/2 required.</strong> Run with TLS + ALPN (<code>h2</code>) for real clients; the gRPC

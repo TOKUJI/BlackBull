@@ -2524,6 +2524,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.grpc.GrpcServiceRegistry.lookup_method" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        lookup_method
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.grpc.GrpcServiceRegistry.method" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4783,6 +4794,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.grpc.GrpcServiceRegistry.lookup_method" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        lookup_method
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.grpc.GrpcServiceRegistry.method" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4893,8 +4915,10 @@ so this package adds only the gRPC-specific pieces:</p>
 </ul>
 <p>Wire it into an app with <code>app.enable_grpc(registry)</code>; gRPC requests
 (<code>content-type: application/grpc</code>) are then multiplexed onto the same
-HTTP/2 port as the app's REST and WebSocket traffic.  Only unary RPCs are
-served in this first cut.</p>
+HTTP/2 port as the app's REST and WebSocket traffic.  Unary and
+server-streaming RPCs are served (a server-streaming handler is an async
+generator); client-streaming and bidirectional streaming are not yet
+supported.</p>
 <p>Protobuf is <strong>not</strong> a dependency: handlers receive and return raw message
 bytes, so the application chooses its own serialisation (<code>grpc_tools.protoc</code>
 output, <code>protobuf</code>, or hand-rolled).</p>
@@ -5100,7 +5124,7 @@ a non-OK status.  <code>serve_grpc</code> translates it into <code>grpc-status</
 
 
 
-        <p>Holds the <code>path -&gt; handler</code> table for unary gRPC methods.</p>
+        <p>Holds the <code>path -&gt; GrpcMethod</code> table for gRPC methods.</p>
 
 
 
@@ -5127,7 +5151,7 @@ a non-OK status.  <code>serve_grpc</code> translates it into <code>grpc-status</
 
 
 <h4 id="blackbull.grpc.GrpcServiceRegistry.add_method" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">add_method</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="n">handler</span><span class="p">)</span></code>
+            <code class="highlight language-python"><span class="n">add_method</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="n">handler</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">streaming</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
 
 <a href="#blackbull.grpc.GrpcServiceRegistry.add_method" class="headerlink" title="Permanent link">&para;</a></h4>
 
@@ -5136,6 +5160,12 @@ a non-OK status.  <code>serve_grpc</code> translates it into <code>grpc-status</
 
         <p>Register <em>handler</em> for the fully-qualified method <em>path</em>
 (<code>/package.Service/Method</code> or <code>package.Service/Method</code>).</p>
+<p><em>streaming</em> selects server-streaming (the handler is an async generator
+that yields response messages).  When <code>None</code> (the default) it is
+auto-detected with :func:<code>inspect.isasyncgenfunction</code>; pass <code>True</code> to
+force streaming for a handler whose async-generator nature is hidden
+behind a wrapper, or <code>False</code> to force unary.  Forcing <code>False</code> on an
+async-generator function is a contradiction and raises <code>ValueError</code>.</p>
 
 
     </div>
@@ -5155,6 +5185,7 @@ a non-OK status.  <code>serve_grpc</code> translates it into <code>grpc-status</
 
         <p>Register every <code>method_name -&gt; handler</code> in <em>methods</em> under the
 fully-qualified <em>service</em> name (e.g. <code>"helloworld.Greeter"</code>).</p>
+<p>Each handler's streaming-ness is auto-detected individually.</p>
 
 
     </div>
@@ -5173,6 +5204,27 @@ fully-qualified <em>service</em> name (e.g. <code>"helloworld.Greeter"</code>).<
     <div class="doc doc-contents ">
 
         <p>Return the handler for <em>path</em>, or <code>None</code> if unregistered.</p>
+<p>Backwards-compatible accessor (returns just the callable); use
+:meth:<code>lookup_method</code> when the streaming flag is needed.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.grpc.GrpcServiceRegistry.lookup_method" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">lookup_method</span><span class="p">(</span><span class="n">path</span><span class="p">)</span></code>
+
+<a href="#blackbull.grpc.GrpcServiceRegistry.lookup_method" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Return the :class:<code>GrpcMethod</code> for <em>path</em>, or <code>None</code> if
+unregistered.</p>
 
 
     </div>
@@ -5183,7 +5235,7 @@ fully-qualified <em>service</em> name (e.g. <code>"helloworld.Greeter"</code>).<
 
 
 <h4 id="blackbull.grpc.GrpcServiceRegistry.method" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">method</span><span class="p">(</span><span class="n">path</span><span class="p">)</span></code>
+            <code class="highlight language-python"><span class="n">method</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">streaming</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
 
 <a href="#blackbull.grpc.GrpcServiceRegistry.method" class="headerlink" title="Permanent link">&para;</a></h4>
 
@@ -5279,8 +5331,9 @@ prefix or a message body shorter than its declared length.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Serve a single unary gRPC call through the ASGI (scope, receive, send)
-bridge.  Never raises: every failure path is reported as a gRPC status.</p>
+        <p>Serve a single gRPC call (unary or server-streaming) through the ASGI
+(scope, receive, send) bridge.  Never raises for handler/protocol errors:
+every failure path is reported as a gRPC status.</p>
 
 
     </div>

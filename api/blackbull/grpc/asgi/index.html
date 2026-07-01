@@ -4781,8 +4781,9 @@ abort the call outright.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Serve a single unary gRPC call through the ASGI (scope, receive, send)
-bridge.  Never raises: every failure path is reported as a gRPC status.</p>
+        <p>Serve a single gRPC call (unary or server-streaming) through the ASGI
+(scope, receive, send) bridge.  Never raises for handler/protocol errors:
+every failure path is reported as a gRPC status.</p>
 
 
     </div>
