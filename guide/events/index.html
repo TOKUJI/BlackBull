@@ -810,10 +810,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#two-hook-kinds" class="md-nav__link">
+  <a href="#three-hook-kinds" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Two hook kinds
+        Three hook kinds
       
     </span>
   </a>
@@ -839,6 +839,23 @@
       
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="@app.on — fire-and-forget observation">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#blockingtrue-awaited-observation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        blocking=True — awaited observation
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -892,6 +909,17 @@
     <span class="md-ellipsis">
       
         request_completed — access-log-shaped
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#scope_completed-the-guaranteed-terminal-event" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        scope_completed — the guaranteed terminal event
       
     </span>
   </a>
@@ -4636,10 +4664,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#two-hook-kinds" class="md-nav__link">
+  <a href="#three-hook-kinds" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Two hook kinds
+        Three hook kinds
       
     </span>
   </a>
@@ -4665,6 +4693,23 @@
       
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="@app.on — fire-and-forget observation">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#blockingtrue-awaited-observation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        blocking=True — awaited observation
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -4718,6 +4763,17 @@
     <span class="md-ellipsis">
       
         request_completed — access-log-shaped
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#scope_completed-the-guaranteed-terminal-event" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        scope_completed — the guaranteed terminal event
       
     </span>
   </a>
@@ -4820,52 +4876,75 @@
 request lifecycle.  Application code registers handlers with one
 of two decorators and the framework dispatches events at well-
 defined points in the application's lifetime.</p>
-<h2 id="two-hook-kinds">Two hook kinds<a class="headerlink" href="#two-hook-kinds" title="Permanent link">&para;</a></h2>
+<h2 id="three-hook-kinds">Three hook kinds<a class="headerlink" href="#three-hook-kinds" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
 <tr>
 <th>Property</th>
 <th><code>@app.intercept(name)</code></th>
+<th><code>@app.on(name, blocking=True)</code></th>
 <th><code>@app.on(name)</code></th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td>Execution</td>
-<td>Synchronous (awaited inline)</td>
-<td>Asynchronous (fire-and-forget)</td>
+<td>Awaited inline</td>
+<td>Awaited inline</td>
+<td>Fire-and-forget task</td>
 </tr>
 <tr>
 <td>Order</td>
 <td>Registration order, serial</td>
-<td>Independent, no inter-handler order</td>
+<td>Registration order, serial</td>
+<td>Independent, no order</td>
 </tr>
 <tr>
 <td>Exceptions</td>
 <td>Propagate to the emitter</td>
-<td>Isolated, logged, never propagate</td>
+<td>Isolated, logged</td>
+<td>Isolated, logged</td>
 </tr>
 <tr>
 <td>Can short-circuit / modify flow</td>
+<td>Yes</td>
+<td>No</td>
+<td>No</td>
+</tr>
+<tr>
+<td>Blocks the emitter?</td>
+<td>Yes</td>
 <td>Yes</td>
 <td>No</td>
 </tr>
 <tr>
 <td>Typical use</td>
 <td>Auth, validation, rewriting</td>
+<td>Resource cleanup (<code>scope_completed</code>)</td>
 <td>Logging, metrics, tracing</td>
 </tr>
 </tbody>
 </table>
-<p>The split is a deliberate defence.  Writing an authentication
-check as an observer would silently let unauthorized requests
-through — the request proceeds before the observer has finished,
-and an observer cannot signal failure to the emitter.  Conversely,
-putting slow telemetry into an interceptor blocks the request
-path on every emission.</p>
-<p>There is no third mode that "observes but blocks" or "intercepts
-but is fire-and-forget" — pick one based on whether the hook is
-allowed to affect the request.</p>
+<p>Two axes are in play: <strong>does the hook block the emitter</strong> (is it
+awaited before <code>emit</code> returns?) and <strong>can its failure affect the
+emitter</strong> (does the exception propagate?).</p>
+<ul>
+<li><code>intercept</code> blocks <em>and</em> propagates — it participates in the
+  request and may abort it. Writing an authentication check as a
+  plain observer would silently let unauthorized requests through:
+  the request proceeds before the observer finishes, and an
+  observer cannot signal failure. Auth belongs here.</li>
+<li><code>on</code> (the default) neither blocks nor propagates — fire-and-forget
+  observation. Putting slow telemetry in an interceptor would add
+  latency to every request; put it here instead.</li>
+<li><code>on(..., blocking=True)</code> blocks but does <strong>not</strong> propagate — the
+  "observe but block" mode. Use it when a side effect must <em>complete</em>
+  within the event's lifetime yet must not be able to break what
+  emitted it. The canonical case is releasing a per-request resource
+  on <code>scope_completed</code> (close a DB session, delete a temp file): the
+  cleanup has to finish before the scope is gone, but a failing
+  cleanup must not corrupt a response that is already sent.</li>
+</ul>
 <h2 id="appintercept-synchronous-interception"><code>@app.intercept</code> — synchronous interception<a class="headerlink" href="#appintercept-synchronous-interception" title="Permanent link">&para;</a></h2>
 <p>Register an interceptor for a named event:</p>
 <div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">blackbull</span><span class="w"> </span><span class="kn">import</span> <span class="n">BlackBull</span><span class="p">,</span> <span class="n">Event</span>
@@ -4898,6 +4977,22 @@ block the emitter, and their exceptions are caught, logged on the
 to the emitter or to other observers.</p>
 <p>Use observers for telemetry, audit logging, cache warming, and
 other side-effects that the request path should not depend on.</p>
+<h3 id="blockingtrue-awaited-observation"><code>blocking=True</code> — awaited observation<a class="headerlink" href="#blockingtrue-awaited-observation" title="Permanent link">&para;</a></h3>
+<p>Pass <code>blocking=True</code> to await the observer in registration order
+<em>before</em> the emit returns, while keeping the isolation of <code>on</code>
+(exceptions logged, never propagated):</p>
+<div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">on</span><span class="p">(</span><span class="s1">&#39;scope_completed&#39;</span><span class="p">,</span> <span class="n">blocking</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">close_session</span><span class="p">(</span><span class="n">event</span><span class="p">:</span> <span class="n">Event</span><span class="p">):</span>
+    <span class="n">session</span> <span class="o">=</span> <span class="n">event</span><span class="o">.</span><span class="n">detail</span><span class="p">[</span><span class="s1">&#39;scope&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;state&#39;</span><span class="p">,</span> <span class="p">{})</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;db_session&#39;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">session</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">await</span> <span class="n">session</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+</code></pre></div>
+<p>This is the right mode for cleanup keyed to an event's completion:
+the work is guaranteed to finish within the event's lifetime (unlike
+a detached observer, which may outlive the scope), but a failure in
+one cleanup handler neither aborts the others nor breaks the emitter.
+Blocking observers run after any interceptors and before any detached
+observers for the same event.</p>
 <h2 id="the-event-object">The <code>Event</code> object<a class="headerlink" href="#the-event-object" title="Permanent link">&para;</a></h2>
 <p>Both decorators register handlers with the signature
 <code>async def handler(event: Event)</code>.  <code>Event</code> is a frozen dataclass:</p>
@@ -4978,6 +5073,12 @@ you want the consistency of writing every hook as
 <td>Observation only; not fired if client disconnected or for WebSocket</td>
 </tr>
 <tr>
+<td><code>scope_completed</code></td>
+<td>Any ASGI scope finished — HTTP request, WebSocket connection, or gRPC call</td>
+<td><code>scope</code>, <code>type</code>, <code>client_ip</code>, <code>path</code>, <code>exception</code></td>
+<td>Guaranteed once per scope, every protocol, on success or error; the cleanup hook. Pair with <code>@app.on(..., blocking=True)</code></td>
+</tr>
+<tr>
 <td><code>request_disconnected</code></td>
 <td>HTTP client closed connection before response complete</td>
 <td><code>scope</code>, <code>client_ip</code>, <code>method</code>, <code>path</code>, <code>http_version</code></td>
@@ -5004,10 +5105,13 @@ you want the consistency of writing every hook as
 </tbody>
 </table>
 <p>Request flow:</p>
-<div class="highlight"><pre><span></span><code>request_received → routing → before_handler → handler → after_handler → request_completed
-                                                            ↑
-                                                         (or) request_disconnected
+<div class="highlight"><pre><span></span><code>request_received → routing → before_handler → handler → after_handler → request_completed → scope_completed
+                                                            ↑                                      ↑
+                                                         (or) request_disconnected ───────────────┘
 </code></pre></div>
+<p><code>scope_completed</code> is the terminal event on <em>every</em> path (including
+WebSocket and gRPC, which do not fire the HTTP-specific events
+above) — it always fires last, exactly once.</p>
 <h3 id="request_received-earliest-gate"><code>request_received</code> — earliest gate<a class="headerlink" href="#request_received-earliest-gate" title="Permanent link">&para;</a></h3>
 <p>Fires after the request line and headers are parsed but before
 routing or handler dispatch.  Fires for both HTTP/1.1 and HTTP/2
@@ -5089,6 +5193,70 @@ the same site as the <code>blackbull.access</code> log record.</p>
 <p><strong>Observation only.</strong>  The response has already been sent by the
 time this fires; nothing an interceptor does can change what the
 client received.</p>
+<h3 id="scope_completed-the-guaranteed-terminal-event"><code>scope_completed</code> — the guaranteed terminal event<a class="headerlink" href="#scope_completed-the-guaranteed-terminal-event" title="Permanent link">&para;</a></h3>
+<p>Fires <strong>exactly once for every ASGI scope</strong> — every HTTP request,
+every WebSocket connection, and every gRPC call — when the
+application has finished handling it, whether it completed normally,
+returned an error, or was a 404. It is emitted from <code>BlackBull</code>'s
+entry point (the one place every scope passes through), so it fires
+under BlackBull's own server <em>and</em> under external ASGI servers
+(uvicorn, <code>httpx.ASGITransport</code>).</p>
+<p>This is the distinction from <code>request_completed</code>: that event is
+<em>server-level</em> telemetry (HTTP-only, carries wire data like status
+and byte counts, fires only under BlackBull's server).
+<code>scope_completed</code> is <em>application-level</em> — cross-protocol, fires
+wherever the app runs, and is meant for <strong>resource cleanup</strong>.</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>scope</code></td>
+<td><code>dict</code></td>
+<td>The ASGI scope dict</td>
+</tr>
+<tr>
+<td><code>type</code></td>
+<td><code>str</code></td>
+<td>Scope type: <code>'http'</code> (also gRPC) or <code>'websocket'</code></td>
+</tr>
+<tr>
+<td><code>client_ip</code></td>
+<td><code>str</code></td>
+<td>Remote address (<code>'-'</code> when unavailable)</td>
+</tr>
+<tr>
+<td><code>path</code></td>
+<td><code>str</code></td>
+<td>Request / connection path</td>
+</tr>
+<tr>
+<td><code>exception</code></td>
+<td><code>BaseException</code> | <code>None</code></td>
+<td>The error that occurred while handling the scope (whether it propagated or was turned into a 500), or <code>None</code></td>
+</tr>
+</tbody>
+</table>
+<p>Pair it with <code>blocking=True</code> so cleanup completes before the scope
+is gone:</p>
+<div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">on</span><span class="p">(</span><span class="s1">&#39;scope_completed&#39;</span><span class="p">,</span> <span class="n">blocking</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">cleanup</span><span class="p">(</span><span class="n">event</span><span class="p">:</span> <span class="n">Event</span><span class="p">):</span>
+    <span class="n">scope</span> <span class="o">=</span> <span class="n">event</span><span class="o">.</span><span class="n">detail</span><span class="p">[</span><span class="s1">&#39;scope&#39;</span><span class="p">]</span>
+    <span class="n">tmp</span> <span class="o">=</span> <span class="n">scope</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;state&#39;</span><span class="p">,</span> <span class="p">{})</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;tempfile&#39;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">tmp</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">os</span><span class="o">.</span><span class="n">unlink</span><span class="p">(</span><span class="n">tmp</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">event</span><span class="o">.</span><span class="n">detail</span><span class="p">[</span><span class="s1">&#39;exception&#39;</span><span class="p">]</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">metrics</span><span class="o">.</span><span class="n">increment</span><span class="p">(</span><span class="s1">&#39;requests.failed&#39;</span><span class="p">)</span>
+</code></pre></div>
+<p>Use plain <code>@app.on('scope_completed')</code> (detached) only for
+observation that need not finish before the scope ends; use
+<code>blocking=True</code> for anything that releases a resource the scope
+owns.</p>
 <h3 id="request_disconnected-client-gave-up"><code>request_disconnected</code> — client gave up<a class="headerlink" href="#request_disconnected-client-gave-up" title="Permanent link">&para;</a></h3>
 <p>Fires when an HTTP client closes the connection before the
 response has been fully sent.  <strong>Mutually exclusive</strong> with
@@ -5149,9 +5317,12 @@ driven by the ASGI handler, not by interceptors.</p>
   do not run; the exception propagates to the emitter (the
   framework code that called <code>emit</code>).  For lifespan events, this
   typically aborts startup or shutdown.</li>
-<li><strong>Observer raises</strong> → the exception is caught and logged at
-  <code>ERROR</code> on the <code>blackbull</code> logger; other observers for the same
-  event continue to run; the emitter never sees the exception.</li>
+<li><strong>Observer raises</strong> (detached or <code>blocking=True</code>) → the exception
+  is caught and logged at <code>ERROR</code> on the <code>blackbull</code> logger; other
+  observers for the same event continue to run; the emitter never
+  sees the exception.  A blocking observer is awaited but still
+  isolated, so a failing cleanup on <code>scope_completed</code> cannot break a
+  response that has already been sent.</li>
 </ul>
 <p>There is no built-in re-emission of failures as a separate
 <code>error</code> event.  If you want one, register a wrapper observer

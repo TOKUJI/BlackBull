@@ -4716,14 +4716,24 @@
 
         <p>Event-driven dispatcher.</p>
 <p>Implements the minimal Pub/Sub dispatcher used by <code>BlackBull.on</code> /
-<code>BlackBull.intercept</code>.  Two delivery modes are supported:</p>
+<code>BlackBull.intercept</code>.  Three delivery modes are supported:</p>
 <ul>
 <li><strong>Interception</strong> (<code>intercept</code>): handlers are awaited in registration order;
   exceptions propagate to the emitter and abort subsequent interceptors.</li>
+<li><strong>Blocking observation</strong> (<code>on(..., blocking=True)</code>): handlers are awaited in
+  registration order <em>before</em> <code>emit</code> returns, but their exceptions are caught
+  and logged — they never reach the emitter or abort siblings.  This is the
+  "observe but block" mode: use it when a side effect must <em>complete</em> within the
+  event's lifetime (resource cleanup on <code>scope_completed</code>) yet must not be
+  able to break the thing that emitted it.</li>
 <li><strong>Observation</strong> (<code>on</code>): handlers are scheduled as independent
   <code>asyncio.Task</code>s (fire-and-forget); exceptions are caught and logged and
   never reach the emitter or other observers.</li>
 </ul>
+<p>The two observation modes share isolation (a failing observer is contained);
+they differ only in whether <code>emit</code> waits for them.  Blocking is the right
+default for cleanup that must finish before the request context is gone;
+detached is right for telemetry that must not add latency to the hot path.</p>
 
 
 
@@ -4920,11 +4930,17 @@ cancelled.</p>
     <div class="doc doc-contents ">
 
         <p>Dispatch <code>event</code> to all registered handlers.</p>
-<p>Interception handlers are awaited in registration order; their
-exceptions propagate.  Observation handlers are scheduled as
-independent tasks and their exceptions are isolated.
-Tasks are tracked so they can be drained at shutdown via 
-:meth:<code>aclose</code>.</p>
+<p>Delivery order:</p>
+<ol>
+<li><strong>Interceptors</strong> — awaited in registration order; their exceptions
+   propagate (and abort the remaining interceptors).</li>
+<li><strong>Blocking observers</strong> — awaited in registration order; their
+   exceptions are caught and logged (isolated).  <code>emit</code> does not
+   return until they finish, so cleanup registered here is guaranteed
+   to complete within the event's lifetime.</li>
+<li><strong>Detached observers</strong> — scheduled as independent tasks (isolated),
+   tracked so they can be drained at shutdown via :meth:<code>aclose</code>.</li>
+</ol>
 
 
     </div>
@@ -4974,7 +4990,7 @@ for missing keys without inserting an empty list.</p>
 
 
 <h4 id="blackbull.event.EventDispatcher.on" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">on</span><span class="p">(</span><span class="n">event_name</span><span class="p">,</span> <span class="n">handler</span><span class="p">)</span></code>
+            <code class="highlight language-python"><span class="n">on</span><span class="p">(</span><span class="n">event_name</span><span class="p">,</span> <span class="n">handler</span><span class="p">,</span> <span class="n">blocking</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span></code>
 
 <a href="#blackbull.event.EventDispatcher.on" class="headerlink" title="Permanent link">&para;</a></h4>
 
@@ -4982,6 +4998,12 @@ for missing keys without inserting an empty list.</p>
     <div class="doc doc-contents ">
 
         <p>Register an observation handler for <code>event_name</code>.</p>
+<p>With <code>blocking=False</code> (the default) the handler is scheduled as an
+independent task when the event fires — it never delays the emitter.
+With <code>blocking=True</code> the handler is awaited in registration order
+before <code>emit</code> returns, so a side effect (e.g. resource cleanup) is
+guaranteed to finish within the event's lifetime; its exceptions are
+still isolated (logged, never propagated).</p>
 
 
     </div>

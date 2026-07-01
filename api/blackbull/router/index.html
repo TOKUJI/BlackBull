@@ -3652,6 +3652,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.router.Router.register_converter" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        register_converter
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.router.Router.route" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4825,6 +4836,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.router.Router.register_converter" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        register_converter
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.router.Router.route" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5384,6 +5406,25 @@ multiple methods (e.g. <code>methods=[GET, POST]</code>) produces one entry
 per method, in the order the methods were declared.  The returned
 list is a fresh shallow copy — callers may sort, filter, or mutate
 it without affecting the live router.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.router.Router.register_converter" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">register_converter</span><span class="p">(</span><span class="n">type_</span><span class="p">,</span> <span class="n">converter</span><span class="p">)</span></code>
+
+<a href="#blackbull.router.Router.register_converter" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Register <em>converter</em> to turn a handler that returns <em>type_</em> into a
+sendable (a Response, str/bytes, or JSON-able).</p>
 
 
     </div>

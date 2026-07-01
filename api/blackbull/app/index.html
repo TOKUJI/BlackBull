@@ -1637,6 +1637,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.app.BlackBull.register_converter" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        register_converter
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.app.BlackBull.register_protocol_handler" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4868,6 +4879,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.app.BlackBull.register_converter" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        register_converter
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.app.BlackBull.register_protocol_handler" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5313,17 +5335,26 @@ registered for the same event.</p>
 
 
 <h4 id="blackbull.app.BlackBull.on" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">on</span><span class="p">(</span><span class="n">event_name</span><span class="p">)</span></code>
+            <code class="highlight language-python"><span class="n">on</span><span class="p">(</span><span class="n">event_name</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">blocking</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span></code>
 
 <a href="#blackbull.app.BlackBull.on" class="headerlink" title="Permanent link">&para;</a></h4>
 
 
     <div class="doc doc-contents ">
 
-        <p>Decorate a handler to observe <code>event_name</code> (fire-and-forget).</p>
-<p>The handler is scheduled as an independent <code>asyncio.Task</code> each time
-the event fires.  Exceptions raised by the handler are caught and
-logged; they do not propagate to the emitter or affect other handlers.</p>
+        <p>Decorate a handler to observe <code>event_name</code>.</p>
+<p>With <code>blocking=False</code> (the default) the handler is scheduled as an
+independent <code>asyncio.Task</code> each time the event fires — fire-and-forget,
+never delaying the emitter.  Use it for telemetry that must not add
+latency to the hot path.</p>
+<p>With <code>blocking=True</code> the handler is <em>awaited</em> in registration order
+before the emit completes, so a side effect is guaranteed to finish
+within the event's lifetime.  Use it for resource cleanup keyed to an
+event's completion — most notably <code>scope_completed</code> (close a
+per-request DB session, delete a temp file).</p>
+<p>Either way the handler's exceptions are isolated: they are caught and
+logged and never propagate to the emitter or affect other handlers.
+(For a hook that <em>may</em> affect the request, use :meth:<code>intercept</code>.)</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -5346,11 +5377,27 @@ logged; they do not propagate to the emitter or affect other handlers.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Name of the event to observe (e.g. <code>'app_startup'</code>).</p>
+                <p>Name of the event to observe (e.g. <code>'scope_completed'</code>).</p>
               </div>
             </td>
             <td>
                 <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>blocking</code>
+            </td>
+            <td>
+                  <code><span title="bool">bool</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Await the handler before emit returns (default <code>False</code>).</p>
+              </div>
+            </td>
+            <td>
+                  <code>False</code>
             </td>
           </tr>
       </tbody>
@@ -5392,9 +5439,15 @@ logged; they do not propagate to the emitter or affect other handlers.</p>
 
 <details class="example" open>
   <summary>Example</summary>
-  <div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">on</span><span class="p">(</span><span class="s1">&#39;app_startup&#39;</span><span class="p">)</span>
-<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">handler</span><span class="p">(</span><span class="n">event</span><span class="p">:</span> <span class="n">Event</span><span class="p">):</span>
-    <span class="nb">print</span><span class="p">(</span><span class="n">event</span><span class="o">.</span><span class="n">detail</span><span class="p">)</span>
+  <div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">on</span><span class="p">(</span><span class="s1">&#39;request_completed&#39;</span><span class="p">)</span>            <span class="c1"># detached telemetry</span>
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">log_it</span><span class="p">(</span><span class="n">event</span><span class="p">:</span> <span class="n">Event</span><span class="p">):</span>
+    <span class="n">metrics</span><span class="o">.</span><span class="n">record</span><span class="p">(</span><span class="n">event</span><span class="o">.</span><span class="n">detail</span><span class="p">)</span>
+
+<span class="nd">@app</span><span class="o">.</span><span class="n">on</span><span class="p">(</span><span class="s1">&#39;scope_completed&#39;</span><span class="p">,</span> <span class="n">blocking</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>   <span class="c1"># awaited cleanup</span>
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">close_session</span><span class="p">(</span><span class="n">event</span><span class="p">:</span> <span class="n">Event</span><span class="p">):</span>
+    <span class="n">session</span> <span class="o">=</span> <span class="n">event</span><span class="o">.</span><span class="n">detail</span><span class="p">[</span><span class="s1">&#39;scope&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;state&#39;</span><span class="p">,</span> <span class="p">{})</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;db&#39;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">session</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">await</span> <span class="n">session</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
 </code></pre></div>
 </details>
 
@@ -5648,6 +5701,43 @@ async def echo(reader, writer, ctx):
     while data := await reader.read(1024):
         await writer.write(data)
 </code></pre>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.app.BlackBull.register_converter" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">register_converter</span><span class="p">(</span><span class="n">type_</span><span class="p">,</span> <span class="n">converter</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
+
+<a href="#blackbull.app.BlackBull.register_converter" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Teach simplified handlers to return values of a custom <em>type_</em>.</p>
+<p>A simplified handler may already return <code>str</code>, <code>bytes</code>, <code>dict</code>,
+<code>list</code>, a dataclass, a <code>Response</code>, or <code>None</code>.  Register a
+converter to extend that set — e.g. so a handler can
+<code>return my_orm_object</code> and have it serialised automatically.  The
+converter receives the returned value and must return a <em>natively
+supported</em> sendable (a <code>Response</code>, <code>str</code>/<code>bytes</code>, <code>None</code>, or a
+JSON-able <code>dict</code>/<code>list</code>/dataclass).</p>
+<p>The registry is empty by default, so registering nothing costs nothing:
+the coercion fast path never consults it for the built-in shapes.</p>
+<p>Direct form::</p>
+<pre><code>app.register_converter(MyOrmObject, lambda o: o.to_dict())
+</code></pre>
+<p>Decorator form (omit <em>converter</em>)::</p>
+<pre><code>@app.register_converter(MyOrmObject)
+def _(o):
+    return o.to_dict()
+</code></pre>
+<p>Converters registered after a route are still honoured — the registry
+is shared with every adapted handler by reference.</p>
 
 
     </div>
