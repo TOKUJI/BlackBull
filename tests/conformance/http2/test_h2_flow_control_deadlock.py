@@ -1,8 +1,11 @@
 """Conformance test: H2 flow-control for payloads above the 65535-byte
 initial window (Sprint 57).
 
-Three sequential RFC-compliance checks in one test function — each
-step gates the next.  Subprocess isolation is required because the
+Four sequential RFC-compliance checks in one test function — each
+step gates the next.  Steps 1-3 pin the three fixed bugs at the window
+boundary; step 4 adds a large *bidirectional* payload that forces
+multiple WINDOW_UPDATE refills in both directions at once.  Subprocess
+isolation is required because the
 deadlocks survive ``CancelledError``, ``@pytest.mark.timeout``, and
 ``asyncio.wait_for`` (they block at the C-level socket / event-loop
 teardown).  **However, the scenario logic lives in plain async
@@ -111,6 +114,49 @@ async def _scenario_step2_grpc_65531b():
         assert r.status == 200
 
 
+async def _scenario_step4_grpc_128kb_bidir():
+    """Large *bidirectional* payload: gRPC Echo of 128 KiB.
+
+    Steps 1-3 hit the deadlocks at the window boundary (step 2 is 65536
+    bytes — a single WINDOW_UPDATE refill).  This step sends *and* receives
+    128 KiB, forcing ~2 full window refills in **each** direction at once:
+    the client must credit received DATA (bug #1) *while* the server's
+    sender resumes on incoming WINDOW_UPDATEs (bug #2), with neither side
+    able to drain the other in one window.  A regression in either
+    direction's flow control wedges here even if the boundary cases pass.
+    """
+    from blackbull import BlackBull
+    from blackbull.grpc import GrpcServiceRegistry, encode_message, decode_messages
+    from blackbull.client.http2 import HTTP2Client
+    from blackbull.server.server import ASGIServer
+
+    app = BlackBull()
+    reg = GrpcServiceRegistry()
+
+    @reg.method('/echo.Echo/Echo')
+    async def echo(request, context):
+        return request
+
+    app.enable_grpc(reg)
+
+    srv = ASGIServer(app)
+    srv.open_socket(port=0)
+    port = srv.port
+    asyncio.create_task(srv.run())
+    await asyncio.sleep(0.15)
+
+    payload = bytes((i % 256) for i in range(131072))  # 128 KiB, ~2x the window
+    async with HTTP2Client('127.0.0.1', port) as c:
+        r = await c.request(
+            'POST', '/echo.Echo/Echo',
+            headers=[('content-type', 'application/grpc')],
+            body=encode_message(payload))
+        assert r.status == 200
+        # The echoed body must survive intact — a partial/dropped refill
+        # would truncate it even if the stream did not hang.
+        assert decode_messages(r.body) == [(False, payload)]
+
+
 async def _scenario_step3_rapid_30():
     """Bug #3: 30 rapid gRPC Echo — late WU on closed stream."""
     from blackbull import BlackBull
@@ -151,6 +197,7 @@ _SCENARIOS = {
     'step1': _scenario_step1_rest_100kb,
     'step2': _scenario_step2_grpc_65531b,
     'step3': _scenario_step3_rapid_30,
+    'step4': _scenario_step4_grpc_128kb_bidir,
 }
 
 
@@ -203,6 +250,17 @@ def test_h2_flow_control_deadlocks():
         f'ignored.\n'
         f'Bug #3: blackbull/server/http2_actor.py sends RST_STREAM instead.\n'
         f'Fix: continue (ignore) for WU/RST/PRIORITY on CLOSED streams.')
+
+    # Step 4 — RFC 9113 §6.9: large *bidirectional* payload (128 KiB each
+    # way) forces multiple WINDOW_UPDATE refills in both directions at once,
+    # not just the single-refill boundary of steps 1-2.
+    ok, reason = _run_scenario('step4')
+    assert ok, (
+        f'STEP 4 FAILED ({reason})\n'
+        f'RFC 9113 §6.9: sustained bidirectional flow control — 128 KiB up '
+        f'and 128 KiB down must both credit and resume repeatedly.\n'
+        f'A regression in client crediting (bug #1) or sender resume '
+        f'(bug #2) that survives the boundary cases deadlocks here.')
 
 
 # ====================================================================

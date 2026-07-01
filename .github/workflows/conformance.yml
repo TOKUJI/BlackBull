@@ -10,7 +10,8 @@ name: RFC conformance
 #                     fuzz/user-corpus/ diff entries
 #   h2-flow-control — docker-free RFC 9113 flow-control deadlock gate
 #                     (the three payload > 65535-byte deadlocks fixed
-#                     in v0.46.0), subprocess-isolated per scenario
+#                     in v0.46.0, plus a large 128 KiB bidirectional
+#                     stress), subprocess-isolated per scenario
 #   grpc-interop   — docker-free real-client (grpcio) gRPC interop over
 #                     h2c: the only test that puts a spec-strict external
 #                     gRPC client on the wire (guards the Trailers-Only
@@ -234,11 +235,13 @@ jobs:
       - name: Run H2 flow-control deadlock regression gate
         # Docker-free, subprocess-isolated regression gate for the three RFC
         # 9113 flow-control deadlocks fixed in v0.46.0 (client crediting,
-        # sender lost-wakeup, WU-on-closed-stream).  Each scenario runs in a
-        # child interpreter (`sys.executable`) with an 8s per-step guard; the
-        # outer 90s bounds the whole job in case the subprocess guard itself
-        # wedges.  Runs on every push/PR so a reintroduced deadlock blocks
-        # merge instead of surfacing only in the weekly full tier.
+        # sender lost-wakeup, WU-on-closed-stream) plus a large 128 KiB
+        # bidirectional payload that forces multiple WINDOW_UPDATE refills in
+        # both directions.  Each scenario runs in a child interpreter
+        # (`sys.executable`) with an 8s per-step guard; the outer 90s bounds
+        # the whole job in case the subprocess guard itself wedges.  Runs on
+        # every push/PR so a reintroduced deadlock blocks merge instead of
+        # surfacing only in the weekly full tier.
         run: |
           timeout 90 python -m pytest --timeout=60 -v \
               tests/conformance/http2/test_h2_flow_control_deadlock.py
