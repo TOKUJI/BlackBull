@@ -11,6 +11,10 @@ name: RFC conformance
 #   h2-flow-control — docker-free RFC 9113 flow-control deadlock gate
 #                     (the three payload > 65535-byte deadlocks fixed
 #                     in v0.46.0), subprocess-isolated per scenario
+#   grpc-interop   — docker-free real-client (grpcio) gRPC interop over
+#                     h2c: the only test that puts a spec-strict external
+#                     gRPC client on the wire (guards the Trailers-Only
+#                     framing regression fixed in Sprint 58)
 #
 # The workflow's pass/fail status becomes the badge linked from the
 # README.  An individual job failure surfaces in the badge as a red
@@ -238,3 +242,32 @@ jobs:
         run: |
           timeout 90 python -m pytest --timeout=60 -v \
               tests/conformance/http2/test_h2_flow_control_deadlock.py
+
+  grpc-interop:
+    name: gRPC real-client interop (h2c)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0   # v7.0.0
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1   # v6.3.0
+        with:
+          python-version: '3.12'
+
+      - name: Install BlackBull (with testing + grpcio interop client)
+        # grpc-interop pulls in grpcio — the spec-strict third-party client.
+        # Without it the interop module skips (pytest.importorskip), so the
+        # gate would silently pass on nothing; install it explicitly here.
+        run: pip install -e '.[testing,grpc-interop]'
+
+      - name: Run real-client gRPC interop conformance
+        # Docker-free interop gate: a real grpcio client drives BlackBull's
+        # unary gRPC over a real h2c socket.  Guards the Trailers-Only framing
+        # regression (Sprint 58) — the error path must land grpc-status in a
+        # trailing HEADERS frame or strict clients decode every error as
+        # UNKNOWN.  Runs on every push/PR, not just the weekly full tier.
+        run: |
+          timeout 90 python -m pytest --timeout=60 -v \
+              tests/conformance/grpc/test_grpc_real_client_h2c.py

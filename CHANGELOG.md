@@ -45,6 +45,13 @@ so the editable install's metadata catches up.
 - **`app.register_converter(type, fn)`** — extend simplified-handler return
   coercion so a handler can `return my_orm_object`; the registry is empty by
   default so the common return paths pay nothing. Direct and decorator forms.
+- **Real-client gRPC interop conformance** — a new
+  `tests/conformance/grpc/test_grpc_real_client_h2c.py` suite drives BlackBull's
+  unary gRPC over a real h2c socket with an actual `grpcio` client (success,
+  every error status, large-response flow control, and concurrent multiplexed
+  calls). It is the only test that puts a spec-strict external gRPC client on
+  the wire; a dedicated docker-free `grpc-interop` CI job runs it on every
+  push/PR (install with `pip install 'blackbull[grpc-interop]'`).
 
 ### Changed
 - **`Response(headers=...)` accepts a `dict`** (matching the
@@ -52,6 +59,18 @@ so the editable install's metadata catches up.
   pairs; names/values may be `str` or `bytes`. Malformed shapes now raise
   `TypeError` at construction instead of silently corrupting the response
   (the old loop iterated a dict's *keys*).
+
+### Fixed
+- **gRPC Trailers-Only framing (real-client interop)** — unary gRPC error
+  responses now carry `grpc-status` in a *trailing* HEADERS frame instead of a
+  non-terminal HEADERS frame followed by an empty `END_STREAM` DATA frame. A
+  spec-strict third-party client (grpcio, grpc-go) reads the status only from a
+  HEADERS frame with `END_STREAM` or a trailing HEADERS frame, so the old shape
+  decoded **every** error — `INTERNAL`, `PERMISSION_DENIED`, `UNIMPLEMENTED`, …
+  — as `UNKNOWN` ("Stream removed (Data frame with END_STREAM flag received)").
+  BlackBull's own `HTTP2Client` was lenient about the framing, which hid the bug
+  until a real gRPC client (`ghz`/grpcio) exercised the wire path. The success
+  path was already correct; only the error/Trailers-Only path changed.
 
 ## [0.46.0] — 2026-06-30
 

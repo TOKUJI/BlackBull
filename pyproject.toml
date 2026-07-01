@@ -93,6 +93,16 @@ mqtt = []
 # `protoc`-generated message classes.  Install with `pip install 'blackbull[grpc]'`.
 grpc = []
 
+# Real-client gRPC interop testing.  ``grpcio`` is a spec-strict, third-party
+# gRPC client used by tests/conformance/grpc/test_grpc_real_client_h2c.py to
+# drive BlackBull over a real h2c socket — the only test that puts an external
+# gRPC client on the wire.  Not needed to *use* BlackBull's gRPC (that layer is
+# pure-Python); only to run the interop conformance suite (the grpc-interop CI
+# job installs it).  Install with `pip install 'blackbull[grpc-interop]'`.
+grpc-interop = [
+    "grpcio",
+]
+
 testing = [
     "pytest",
     "pytest-asyncio",

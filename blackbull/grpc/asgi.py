@@ -144,14 +144,28 @@ def _status_trailers(status: GrpcStatus, details: str,
 
 async def _send_trailers_only(send, status: GrpcStatus, details: str,
                               content_type: bytes = _GRPC_CONTENT_TYPE) -> None:
-    """Emit a Trailers-Only-style error: HTTP 200 + grpc-status in the
-    response headers and an empty, end-of-stream body (no message)."""
-    headers = [(b'content-type', content_type),
-               (b'grpc-accept-encoding', _GRPC_ACCEPT_ENCODING)]
-    headers.extend(_status_trailers(status, details))
+    """Emit a gRPC error response: HTTP 200, no message, ``grpc-status`` in
+    a *trailing* HEADERS frame.
+
+    A strict gRPC client (grpcio, grpc-go) reads ``grpc-status`` only from a
+    HEADERS frame carrying END_STREAM (true Trailers-Only) or from a trailing
+    HEADERS frame — never from a non-terminal HEADERS frame.  The earlier
+    implementation put ``grpc-status`` in the initial HEADERS and then sent an
+    empty END_STREAM DATA frame; the client read the HEADERS as ordinary
+    initial metadata, found no trailing status, and surfaced UNKNOWN
+    ("Stream removed (Data frame with END_STREAM flag received)").  BlackBull's
+    own ``HTTP2Client`` is lenient about this, which hid the bug.
+
+    Routing through ``http.response.start(trailers=True)`` + ``…trailers`` emits
+    Response-Headers followed by a trailing HEADERS frame (END_STREAM) with the
+    status — the same trailers machinery the success path uses, minus the DATA
+    frame — which every conformant gRPC client accepts."""
     await send({'type': 'http.response.start', 'status': 200,
-                'headers': headers})
-    await send({'type': 'http.response.body', 'body': b'', 'more_body': False})
+                'headers': [(b'content-type', content_type),
+                            (b'grpc-accept-encoding', _GRPC_ACCEPT_ENCODING)],
+                'trailers': True})
+    await send({'type': 'http.response.trailers',
+                'headers': _status_trailers(status, details)})
 
 
 async def serve_grpc(registry: GrpcServiceRegistry, scope, receive, send) -> None:
