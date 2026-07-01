@@ -59,6 +59,16 @@ so the editable install's metadata catches up.
   pairs; names/values may be `str` or `bytes`. Malformed shapes now raise
   `TypeError` at construction instead of silently corrupting the response
   (the old loop iterated a dict's *keys*).
+- **Access-log hot-path cost cut (~28–30% less event-loop work per emit** in a
+  200k-emit producer microbenchmark, ~9.3µs → ~6.6µs). The access record is now
+  self-formatting and handed to the logger *as the message*, so the `format()`
+  string build (and the stdlib `QueueHandler`'s eager format + record copy)
+  moves off the event loop to the logging listener thread via a new
+  deferred-format `QueueHandler`. The request duration is snapshotted at emit so
+  the deferred format still reports real request duration, not duration + queue
+  latency. Structured `extra` fields (the documented access-log API) stay eager
+  and unchanged; ordinary debug/warning logs keep the stdlib's eager,
+  mutation-safe formatting.
 
 ### Fixed
 - **gRPC Trailers-Only framing (real-client interop)** — unary gRPC error
