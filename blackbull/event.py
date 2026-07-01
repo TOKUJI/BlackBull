@@ -1,13 +1,24 @@
 """Event-driven dispatcher.
 
 Implements the minimal Pub/Sub dispatcher used by ``BlackBull.on`` /
-``BlackBull.intercept``.  Two delivery modes are supported:
+``BlackBull.intercept``.  Three delivery modes are supported:
 
 - **Interception** (``intercept``): handlers are awaited in registration order;
   exceptions propagate to the emitter and abort subsequent interceptors.
+- **Blocking observation** (``on(..., blocking=True)``): handlers are awaited in
+  registration order *before* ``emit`` returns, but their exceptions are caught
+  and logged — they never reach the emitter or abort siblings.  This is the
+  "observe but block" mode: use it when a side effect must *complete* within the
+  event's lifetime (resource cleanup on ``scope_completed``) yet must not be
+  able to break the thing that emitted it.
 - **Observation** (``on``): handlers are scheduled as independent
   ``asyncio.Task``s (fire-and-forget); exceptions are caught and logged and
   never reach the emitter or other observers.
+
+The two observation modes share isolation (a failing observer is contained);
+they differ only in whether ``emit`` waits for them.  Blocking is the right
+default for cleanup that must finish before the request context is gone;
+detached is right for telemetry that must not add latency to the hot path.
 """
 import asyncio
 import logging
@@ -52,6 +63,7 @@ class EventDispatcher:
 
     def __init__(self, shutdown_timeout: float = 5.0) -> None:
         self._observers: defaultdict[str, list[EventHandler]] = defaultdict(list)
+        self._blocking_observers: defaultdict[str, list[EventHandler]] = defaultdict(list)
         self._interceptors: defaultdict[str, list[EventHandler]] = defaultdict(list)
         self._pending_tasks: set[asyncio.Task] = set()
         self._shutdown_timeout = shutdown_timeout
@@ -62,9 +74,21 @@ class EventDispatcher:
         # per-request cost collapses to one int read + compare.
         self.generation: int = 0
 
-    def on(self, event_name: str, handler: EventHandler) -> None:
-        """Register an observation handler for ``event_name``."""
-        self._observers[event_name].append(handler)
+    def on(self, event_name: str, handler: EventHandler,
+           blocking: bool = False) -> None:
+        """Register an observation handler for ``event_name``.
+
+        With ``blocking=False`` (the default) the handler is scheduled as an
+        independent task when the event fires — it never delays the emitter.
+        With ``blocking=True`` the handler is awaited in registration order
+        before ``emit`` returns, so a side effect (e.g. resource cleanup) is
+        guaranteed to finish within the event's lifetime; its exceptions are
+        still isolated (logged, never propagated).
+        """
+        if blocking:
+            self._blocking_observers[event_name].append(handler)
+        else:
+            self._observers[event_name].append(handler)
         self.generation += 1
 
     def intercept(self, event_name: str, handler: EventHandler) -> None:
@@ -79,20 +103,29 @@ class EventDispatcher:
         when no one will receive the event.  ``defaultdict.get`` returns ``None``
         for missing keys without inserting an empty list.
         """
-        return bool(self._interceptors.get(event_name)) or bool(
-            self._observers.get(event_name))
+        return (bool(self._interceptors.get(event_name))
+                or bool(self._blocking_observers.get(event_name))
+                or bool(self._observers.get(event_name)))
 
     async def emit(self, event: Event) -> None:
         """Dispatch ``event`` to all registered handlers.
 
-        Interception handlers are awaited in registration order; their
-        exceptions propagate.  Observation handlers are scheduled as
-        independent tasks and their exceptions are isolated.
-        Tasks are tracked so they can be drained at shutdown via 
-        :meth:`aclose`.
+        Delivery order:
+
+        1. **Interceptors** — awaited in registration order; their exceptions
+           propagate (and abort the remaining interceptors).
+        2. **Blocking observers** — awaited in registration order; their
+           exceptions are caught and logged (isolated).  ``emit`` does not
+           return until they finish, so cleanup registered here is guaranteed
+           to complete within the event's lifetime.
+        3. **Detached observers** — scheduled as independent tasks (isolated),
+           tracked so they can be drained at shutdown via :meth:`aclose`.
         """
         for h in self._interceptors.get(event.name, []):
             await h(event)
+
+        for h in self._blocking_observers.get(event.name, []):
+            await self._safe_observe(h, event)
 
         for h in self._observers.get(event.name, []):
             task = asyncio.create_task(self._safe_observe(h, event))
