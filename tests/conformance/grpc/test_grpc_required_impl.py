@@ -132,20 +132,59 @@ class TestRequiredGrpcTimeout:
 # ---------------------------------------------------------------------------
 
 class TestRequiredBaseExceptionHandling:
-    def test_baseexception_handler_is_implemented(self):
-        import inspect
-        # Guard the *serving path* as a whole, not one function: serve_grpc
-        # delegates handler execution to _serve_unary / _serve_server_streaming,
-        # so the BaseException isolation + CancelledError propagation live there.
-        # Inspect the module source so the guard survives that refactor while
-        # still catching a genuine removal.
-        src = inspect.getsource(inspect.getmodule(serve_grpc))
-        assert 'BaseException' in src, (
-            'BaseException handler is missing from the gRPC serving path — '
-            'regression detected')
-        assert 'CancelledError' in src, (
-            'CancelledError propagation is missing from the gRPC serving path — '
-            'regression detected')
+    """Handler isolation: an ordinary handler bug is reported as INTERNAL, but
+    control-flow ``BaseException``\\ s (cancellation, interpreter shutdown) must
+    propagate rather than being masked into a gRPC status.  Asserted
+    behaviourally — this survives refactoring the serving path (``_serve_unary``
+    / ``_serve_server_streaming``) and does not depend on which ``except`` clause
+    is written."""
+
+    @pytest.mark.asyncio
+    async def test_handler_exception_is_isolated_as_internal(self):
+        reg = GrpcServiceRegistry()
+
+        @reg.method('/svc/Boom')
+        async def boom(request, context):
+            raise RuntimeError('handler bug')
+
+        events, send = _collector()
+        await serve_grpc(reg, _grpc_scope('/svc/Boom'),
+                         _receive_with(encode_message(b'')), send)
+        assert _all_headers(events)[b'grpc-status'] == \
+            str(int(GrpcStatus.INTERNAL)).encode()
+
+    @pytest.mark.asyncio
+    async def test_streaming_handler_exception_is_isolated_as_internal(self):
+        reg = GrpcServiceRegistry()
+
+        @reg.method('/svc/StreamBoom')
+        async def stream_boom(request, context):
+            raise RuntimeError('handler bug')
+            yield b''  # pragma: no cover — marks this an async generator
+
+        events, send = _collector()
+        await serve_grpc(reg, _grpc_scope('/svc/StreamBoom'),
+                         _receive_with(encode_message(b'')), send)
+        assert _all_headers(events)[b'grpc-status'] == \
+            str(int(GrpcStatus.INTERNAL)).encode()
+
+    @pytest.mark.asyncio
+    async def test_cancellederror_propagates_and_is_not_swallowed(self):
+        # Cancellation (a BaseException, not Exception) must escape the serving
+        # path so the surrounding task actually cancels — never be turned into a
+        # gRPC status.
+        reg = GrpcServiceRegistry()
+
+        @reg.method('/svc/Cancel')
+        async def cancel(request, context):
+            raise asyncio.CancelledError
+
+        events, send = _collector()
+        with pytest.raises(asyncio.CancelledError):
+            await serve_grpc(reg, _grpc_scope('/svc/Cancel'),
+                             _receive_with(encode_message(b'')), send)
+        # And no status was emitted (the error was not masked into a response).
+        assert b'grpc-status' not in _all_headers(events)
 
 
 # ---------------------------------------------------------------------------

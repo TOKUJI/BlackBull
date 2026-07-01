@@ -79,6 +79,14 @@ so the editable install's metadata catches up.
   latency. Structured `extra` fields (the documented access-log API) stay eager
   and unchanged; ordinary debug/warning logs keep the stdlib's eager,
   mutation-safe formatting.
+- **gRPC handler isolation now catches `Exception`, not `BaseException`.** A
+  handler bug (any `Exception`) is still isolated as `INTERNAL`, but a
+  non-`Exception` throwable — `CancelledError`, `KeyboardInterrupt`,
+  `SystemExit`, `GeneratorExit`, or a raw `BaseException` — now propagates
+  instead of being masked into a status, so task cancellation and interpreter
+  shutdown are honoured (and a server-streaming generator's `GeneratorExit`
+  cleanup is no longer swallowed). Each call runs in its own stream task, so a
+  propagating throwable unwinds only that stream.
 
 ### Fixed
 - **gRPC Trailers-Only framing (real-client interop)** — unary gRPC error

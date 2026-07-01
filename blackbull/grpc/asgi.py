@@ -238,9 +238,11 @@ async def _serve_unary(handler, request, context, send, content_type,
         await _send_trailers_only(
             send, GrpcStatus.DEADLINE_EXCEEDED, 'deadline exceeded', content_type)
         return
-    except (asyncio.CancelledError, KeyboardInterrupt, SystemExit):
-        raise
-    except BaseException as exc:  # noqa: BLE001 — handler isolation
+    except Exception as exc:  # noqa: BLE001 — handler isolation
+        # Isolate handler bugs as INTERNAL.  CancelledError / KeyboardInterrupt /
+        # SystemExit / GeneratorExit derive from BaseException (not Exception),
+        # so they propagate here rather than being masked — task cancellation and
+        # interpreter shutdown must never be turned into a gRPC status.
         logger.exception('gRPC unary handler raised')
         await _send_trailers_only(send, GrpcStatus.INTERNAL, str(exc), content_type)
         return
@@ -286,14 +288,17 @@ async def _serve_server_streaming(handler, request, context, send, content_type,
     except GrpcError as exc:
         await _finish_stream_error(send, started, exc.status, exc.details, content_type)
         return
-    except (asyncio.CancelledError, KeyboardInterrupt, SystemExit):
-        raise
     except (asyncio.TimeoutError, TimeoutError):
         await _finish_stream_error(
             send, started, GrpcStatus.DEADLINE_EXCEEDED, 'deadline exceeded',
             content_type)
         return
-    except BaseException as exc:  # noqa: BLE001 — handler isolation
+    except Exception as exc:  # noqa: BLE001 — handler isolation
+        # Isolate handler bugs as INTERNAL.  CancelledError / KeyboardInterrupt /
+        # SystemExit / GeneratorExit derive from BaseException (not Exception),
+        # so they propagate here — client cancellation still unwinds the stream
+        # (and finalises the generator via the finally below) instead of being
+        # reported as a gRPC status.
         logger.exception('gRPC server-streaming handler raised')
         await _finish_stream_error(
             send, started, GrpcStatus.INTERNAL, str(exc), content_type)
