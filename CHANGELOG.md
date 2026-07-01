@@ -100,6 +100,20 @@ so the editable install's metadata catches up.
   until a real gRPC client (`ghz`/grpcio) exercised the wire path. The success
   path was already correct; only the error/Trailers-Only path changed.
 
+### Internal
+- **Reload watcher unit tests pinned to polling** — `test_watcher_fires_callback_on_py_change`
+  / `test_watcher_ignores_non_py` now force watchfiles into polling mode (as the
+  reload *integration* test already did in its subprocess), removing the inotify
+  startup-race flake where the first `.py` write was silently dropped under
+  suite contention. These run in the fast tier on every PR, so the flake blocked
+  merges; the watcher logic under test is identical either way.
+- **H2 flow-control deadlock gate now covers a large bidirectional payload** — a
+  4th subprocess-isolated scenario echoes 128 KiB of gRPC (up *and* down),
+  forcing multiple `WINDOW_UPDATE` refills in both directions at once rather than
+  the single-refill window boundary of the existing steps. A regression in
+  client crediting or sender resume that survives the boundary cases deadlocks
+  here. Rides the existing `h2-flow-control` conformance CI job (every push/PR).
+
 ## [0.46.0] — 2026-06-30
 
 Sprint 57 — **gRPC** (the next protocol after MQTT) plus three supporting

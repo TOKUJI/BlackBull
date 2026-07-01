@@ -68,21 +68,43 @@ def test_adopt_builds_sockets_and_clears_env(monkeypatch):
 # FileChangeWatcher
 # ---------------------------------------------------------------------------
 
+@pytest.fixture
+def force_polling_watcher(monkeypatch):
+    """Force watchfiles into polling mode for the in-process watcher tests.
+
+    ``FileChangeWatcher`` uses watchfiles' default backend (inotify on
+    Linux).  inotify has a startup window where the arming races with the
+    first write, and on WSL2's drvfs/9p — and under the CPU/IO contention
+    of the full test suite — it silently drops that first event.  That is
+    the exact flake ``tests/integration/test_reload.py`` fixed by forcing
+    polling in its subprocess env; these unit tests run the watcher
+    in-process and were still on the flaky inotify path.
+
+    watchfiles reads ``WATCHFILES_FORCE_POLLING`` at ``watch()`` time (in
+    its Rust thread), so setting it before ``watcher.start()`` is enough.
+    Polling is backend-agnostic and reliable across filesystems; the
+    watcher logic under test is identical either way.  ``monkeypatch``
+    restores the environment after the test.
+    """
+    monkeypatch.setenv('WATCHFILES_FORCE_POLLING', '1')
+    monkeypatch.setenv('WATCHFILES_POLL_DELAY_MS', '50')
+
+
 def test_default_filter_accepts_only_py():
     assert _default_filter(None, '/x/y/app.py') is True
     assert _default_filter(None, '/x/y/notes.md') is False
     assert _default_filter(None, '/x/y/__pycache__/app.cpython-312.pyc') is False
 
 
-def test_watcher_fires_callback_on_py_change(tmp_path: Path):
+def test_watcher_fires_callback_on_py_change(tmp_path: Path, force_polling_watcher):
     """Touching a .py file inside the watched dir must invoke the callback.
 
-    Robustness note: watchfiles' Rust backend has a startup window where
-    its inotify install races with our first write; on WSL2 we have seen
-    the very first event lost.  Instead of a single fixed sleep we keep
-    rewriting the file at a slow cadence until the callback fires or the
-    test deadline expires — the real reload path has the same shape
-    (user mashes Save until they see effect).
+    Robustness note: the ``force_polling_watcher`` fixture pins watchfiles
+    to polling so the first write is not lost to an inotify startup race.
+    We still keep rewriting the file at a slow cadence until the callback
+    fires or the deadline expires — the real reload path has the same
+    shape (user mashes Save until they see effect), and it costs nothing
+    when the very first poll already catches the change.
     """
     target = tmp_path / 'app.py'
     target.write_text('print("v1")\n')
@@ -103,7 +125,7 @@ def test_watcher_fires_callback_on_py_change(tmp_path: Path):
         watcher.stop()
 
 
-def test_watcher_ignores_non_py(tmp_path: Path):
+def test_watcher_ignores_non_py(tmp_path: Path, force_polling_watcher):
     """Editing a .md file must NOT fire the callback (default filter)."""
     py = tmp_path / 'app.py'
     py.write_text('print("v1")\n')
