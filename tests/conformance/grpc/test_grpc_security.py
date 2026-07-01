@@ -433,8 +433,30 @@ class TestHandlerIsolation:
         assert trailers[b'grpc-status'] == str(int(GrpcStatus.INTERNAL)).encode()
 
     @pytest.mark.asyncio
-    async def test_handler_raising_baseexception_is_caught(self):
-        """Even ``BaseException`` (not ``Exception``) must not crash the bridge."""
+    async def test_ordinary_handler_exception_is_isolated(self):
+        """An ordinary handler bug (any ``Exception`` subclass) is isolated as
+        INTERNAL — it never escapes the serving path to disturb the bridge or
+        other in-flight calls."""
+        reg = GrpcServiceRegistry()
+
+        @reg.method('/svc/Boom')
+        async def boom(request, context):
+            raise RuntimeError('catastrophic')
+
+        events, send = _collector()
+        await serve_grpc(reg, _grpc_scope('/svc/Boom'),
+                         _receive_with(encode_message(b'')), send)
+        trailers = _trailers_of(events)
+        assert trailers[b'grpc-status'] == str(int(GrpcStatus.INTERNAL)).encode()
+
+    @pytest.mark.asyncio
+    async def test_non_exception_baseexception_propagates(self):
+        """A non-``Exception`` throwable (a raw ``BaseException``, and by the
+        same rule ``CancelledError`` / ``KeyboardInterrupt`` / ``SystemExit`` /
+        ``GeneratorExit``) is *not* masked into a gRPC status: it propagates so
+        task cancellation and interpreter shutdown are honoured.  Each call runs
+        in its own stream task, so this unwinds only that stream — it does not
+        crash the bridge."""
         reg = GrpcServiceRegistry()
 
         @reg.method('/svc/BaseBoom')
@@ -442,10 +464,11 @@ class TestHandlerIsolation:
             raise BaseException('catastrophic')
 
         events, send = _collector()
-        await serve_grpc(reg, _grpc_scope('/svc/BaseBoom'),
-                         _receive_with(encode_message(b'')), send)
-        trailers = _trailers_of(events)
-        assert trailers[b'grpc-status'] == str(int(GrpcStatus.INTERNAL)).encode()
+        with pytest.raises(BaseException, match='catastrophic'):
+            await serve_grpc(reg, _grpc_scope('/svc/BaseBoom'),
+                             _receive_with(encode_message(b'')), send)
+        # No status was emitted — the throwable was propagated, not reported.
+        assert not any(e['type'] == 'http.response.trailers' for e in events)
 
     @pytest.mark.asyncio
     async def test_handler_exception_message_in_grpc_message(self):

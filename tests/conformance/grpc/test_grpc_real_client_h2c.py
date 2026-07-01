@@ -60,6 +60,20 @@ def _make_grpc_app() -> BlackBull:
         # under a real client on the success path.
         return b'Z' * 100_000
 
+    @reg.method('/echo.Echo/Stream')
+    async def stream(request, context):
+        # Server-streaming: request bytes = ascii count; yield that many.
+        n = int(request.decode() or '0')
+        for i in range(n):
+            yield f'msg{i}'.encode()
+
+    @reg.method('/echo.Echo/StreamBoom')
+    async def stream_boom(request, context):
+        # Emits one message then fails — the client must see the message then
+        # the error status in trailers.
+        yield b'first'
+        raise GrpcError(GrpcStatus.PERMISSION_DENIED, 'stop')
+
     @reg.method('/err.Err/Explode')
     async def explode(request, context):
         raise RuntimeError('kaboom')
@@ -122,6 +136,32 @@ async def _unary(port: int, method: str, payload: bytes = b''):
     return await asyncio.to_thread(_blocking_unary, port, method, payload)
 
 
+def _blocking_server_stream(port: int, method: str, payload: bytes):
+    """Issue one blocking server-streaming call with a real grpcio channel.
+
+    Returns ``(messages, error)`` — ``error`` is ``None`` on a clean OK stream
+    or the ``grpc.RpcError`` if the stream ended non-OK (``messages`` still
+    holds whatever arrived before the error)."""
+    messages: list[bytes] = []
+    with grpc.insecure_channel(f'127.0.0.1:{port}') as channel:
+        grpc.channel_ready_future(channel).result(timeout=_CALL_TIMEOUT)
+        call = channel.unary_stream(
+            method,
+            request_serializer=lambda b: b,
+            response_deserializer=lambda b: b,
+        )
+        try:
+            for msg in call(payload, timeout=_CALL_TIMEOUT):
+                messages.append(msg)
+            return (messages, None)
+        except grpc.RpcError as exc:  # noqa: BLE001 — surface the status
+            return (messages, exc)
+
+
+async def _server_stream(port: int, method: str, payload: bytes = b''):
+    return await asyncio.to_thread(_blocking_server_stream, port, method, payload)
+
+
 # ---------------------------------------------------------------------------
 # Success path
 # ---------------------------------------------------------------------------
@@ -174,6 +214,42 @@ class TestRealClientErrorStatus:
         ok, exc = await _unary(grpc_server_port, '/nope.No/Method')
         assert not ok
         assert exc.code() == grpc.StatusCode.UNIMPLEMENTED, exc
+
+
+# ---------------------------------------------------------------------------
+# Server-streaming — a real grpcio unary_stream call (the ghz stream-grpc shape).
+# ---------------------------------------------------------------------------
+
+class TestRealClientServerStreaming:
+    @pytest.mark.asyncio
+    async def test_stream_yields_messages_in_order(self, grpc_server_port):
+        msgs, err = await _server_stream(grpc_server_port, '/echo.Echo/Stream', b'5')
+        assert err is None, f'unexpected stream error: {err}'
+        assert msgs == [f'msg{i}'.encode() for i in range(5)]
+
+    @pytest.mark.asyncio
+    async def test_empty_stream(self, grpc_server_port):
+        msgs, err = await _server_stream(grpc_server_port, '/echo.Echo/Stream', b'0')
+        assert err is None, f'unexpected stream error: {err}'
+        assert msgs == []
+
+    @pytest.mark.asyncio
+    async def test_large_stream_flow_control(self, grpc_server_port):
+        # 5000 messages — the HttpArena StreamSum shape; exercises multi-DATA
+        # flow control end-to-end with a strict client.
+        msgs, err = await _server_stream(grpc_server_port, '/echo.Echo/Stream', b'5000')
+        assert err is None, f'unexpected stream error: {err}'
+        assert len(msgs) == 5000
+        assert msgs[0] == b'msg0' and msgs[-1] == b'msg4999'
+
+    @pytest.mark.asyncio
+    async def test_mid_stream_error_surfaces_after_message(self, grpc_server_port):
+        msgs, err = await _server_stream(grpc_server_port, '/echo.Echo/StreamBoom', b'')
+        # The delivered message arrives, then the error status in trailers.
+        assert msgs == [b'first']
+        assert err is not None
+        assert err.code() == grpc.StatusCode.PERMISSION_DENIED, err
+        assert err.details() == 'stop'
 
 
 # ---------------------------------------------------------------------------
