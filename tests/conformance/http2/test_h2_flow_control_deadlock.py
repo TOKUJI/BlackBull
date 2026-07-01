@@ -8,7 +8,7 @@ deadlocks survive ``CancelledError``, ``@pytest.mark.timeout``, and
 teardown).  **However, the scenario logic lives in plain async
 functions in this file — no embedded script strings.**
 
-Full analysis: ``.claude/planning/proposals/h2-flow-control-deadlock.md``
+Full analysis: ``.claude/planning/archives/h2-flow-control-deadlock.md``
 Sprint log: ``bench/sprint-logs/sprint-57.md``
 """
 from __future__ import annotations
@@ -21,7 +21,11 @@ import sys
 import pytest
 
 
-_VENV_PYTHON = str(pathlib.Path(__file__).parents[3] / '.venv' / 'bin' / 'python')
+# Reuse the interpreter running the test suite so the subprocess sees the same
+# installed BlackBull.  ``sys.executable`` is the local ``.venv`` when run from
+# there and the CI runner's system Python on GitHub Actions — no hardcoded
+# ``.venv`` path (which doesn't exist on the runner's ``pip install -e``).
+_SUBPROCESS_PYTHON = sys.executable
 _TIMEOUT = 8  # seconds per subprocess
 
 
@@ -158,7 +162,7 @@ def _run_scenario(name: str) -> tuple[bool, str]:
     """
     try:
         subprocess.run(
-            [_VENV_PYTHON, __file__, name],
+            [_SUBPROCESS_PYTHON, __file__, name],
             capture_output=True, timeout=_TIMEOUT,
             cwd=str(pathlib.Path(__file__).parents[3]),
         )
