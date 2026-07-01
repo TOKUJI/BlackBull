@@ -581,9 +581,17 @@ class TestResponseShape:
         ], f'unexpected event sequence: {types}'
 
     @pytest.mark.asyncio
-    async def test_trailers_only_error_has_start_only(self):
-        """Error responses should be 'Trailers-Only': a single HEADERS frame
-        with END_STREAM, containing grpc-status, and no DATA frame."""
+    async def test_error_response_carries_status_in_trailers(self):
+        """Error responses must carry ``grpc-status`` in a *trailing* HEADERS
+        frame, not the initial (non-terminal) HEADERS.
+
+        gRPC-over-HTTP2 requires the status to arrive either as true
+        Trailers-Only (initial HEADERS *with* END_STREAM) or in a trailing
+        HEADERS frame.  BlackBull emits Response-Headers → trailers (no
+        message), so the ASGI shape is ``start(trailers=True) → trailers`` with
+        no body event.  A strict client (grpcio/grpc-go) reads status from the
+        trailers; the earlier ``start + empty-DATA`` shape put grpc-status in
+        the non-terminal HEADERS and real clients reported UNKNOWN."""
         reg = GrpcServiceRegistry()
 
         @reg.method('/svc/Err')
@@ -594,16 +602,17 @@ class TestResponseShape:
         await serve_grpc(reg, _grpc_scope('/svc/Err'),
                          _receive_with(encode_message(b'')), send)
         types = [e['type'] for e in events]
-        assert types == ['http.response.start', 'http.response.body'], (
-            f'trailers-only should be start + body(empty,more_body=False), got {types}')
-        # The body must be empty
-        assert events[1]['body'] == b''
-        assert events[1]['more_body'] is False
+        assert types == ['http.response.start', 'http.response.trailers'], (
+            f'error path should be start(trailers=True) + trailers, got {types}')
+        # The start must announce trailers and carry no grpc-status itself.
+        start_headers = dict(events[0]['headers'])
+        assert events[0].get('trailers') is True
+        assert b'grpc-status' not in start_headers
 
     @pytest.mark.asyncio
-    async def test_trailers_only_includes_grpc_status_in_headers(self):
-        """For trailers-only response, grpc-status must appear in the
-        response start headers (not in a separate trailers event)."""
+    async def test_error_status_appears_in_trailers_event(self):
+        """``grpc-status`` (and ``grpc-message``) must appear in the trailers
+        event, not the response start headers."""
         reg = GrpcServiceRegistry()
 
         @reg.method('/svc/Err')
@@ -615,10 +624,11 @@ class TestResponseShape:
                          _receive_with(encode_message(b'')), send)
         start = events[0]
         assert start['type'] == 'http.response.start'
-        start_headers = dict(start['headers'])
-        assert start_headers.get(b'grpc-status') == \
-            str(int(GrpcStatus.PERMISSION_DENIED)).encode()
         assert start['status'] == 200  # gRPC errors still use HTTP 200
+        trailers = dict(events[-1]['headers'])
+        assert events[-1]['type'] == 'http.response.trailers'
+        assert trailers.get(b'grpc-status') == \
+            str(int(GrpcStatus.PERMISSION_DENIED)).encode()
 
     @pytest.mark.asyncio
     async def test_response_has_correct_content_type(self):
