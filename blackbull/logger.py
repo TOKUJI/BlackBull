@@ -71,6 +71,32 @@ class ColoredFormatter(logging.Formatter):
         return logging.Formatter.format(self, colored_record)
 
 
+class _DeferredFormatQueueHandler(logging.handlers.QueueHandler):
+    """QueueHandler that defers formatting of self-formatting records.
+
+    The stdlib :class:`~logging.handlers.QueueHandler.prepare` eagerly calls
+    ``self.format(record)`` on the *producer* thread (here, the event loop) so
+    the record is safe to hand across a process boundary.  For BlackBull's
+    access log that means the expensive ``AccessLogRecord.format()`` string
+    build runs on the hot path even though the actual write happens on the
+    listener thread.
+
+    Records whose message object is marked ``_bb_deferred_format`` (the
+    :class:`AccessLogRecord`) are enqueued *without* formatting or copying, so
+    the string build moves to the listener thread.  This is safe because the
+    queue is in-process (``SimpleQueue`` — no pickling) and an access record is
+    created fresh per request and never mutated after emit (its duration is
+    snapshotted by ``finalize()``).  Every other record keeps the stdlib's
+    eager-format, copy-and-sanitize behaviour, so mutable ``%``-args in
+    debug/warning logs still render their value-at-log-time.
+    """
+
+    def prepare(self, record: logging.LogRecord) -> logging.LogRecord:
+        if getattr(record.msg, '_bb_deferred_format', False):
+            return record
+        return super().prepare(record)
+
+
 _listener: logging.handlers.QueueListener | None = None
 
 
@@ -103,7 +129,7 @@ def setup_async_logging(handlers: list[logging.Handler] | None = None) -> None:
         handlers = existing if existing else [logging.StreamHandler()]
 
     log_queue: _queue_mod.SimpleQueue = _queue_mod.SimpleQueue()
-    queue_handler = logging.handlers.QueueHandler(log_queue)  # type: ignore[arg-type]
+    queue_handler = _DeferredFormatQueueHandler(log_queue)  # type: ignore[arg-type]
 
     for h in list(bb_logger.handlers):
         bb_logger.removeHandler(h)

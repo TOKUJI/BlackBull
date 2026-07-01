@@ -5,6 +5,7 @@ import logging
 import os
 import time
 from dataclasses import dataclass, field
+from typing import ClassVar
 
 from ..asgi import ASGIEvent
 # Imported at runtime (not under TYPE_CHECKING) so beartype can resolve
@@ -26,15 +27,25 @@ PHASE_TRACE: bool = os.environ.get('BB_PHASE_TRACE', '0') == '1'
 def emit_access_log(record: 'AccessLogRecord') -> None:
     """Emit *record* on the access logger if INFO is enabled.
 
-    The isEnabledFor gate matters: ``record.format()`` and
-    ``record.as_extra()`` are evaluated before ``logger.info`` decides to
+    The isEnabledFor gate matters: ``record.as_extra()`` and (formerly)
+    ``record.format()`` are evaluated before ``logger.info`` decides to
     discard the call.  Profiling at -R 5000 with BB_ACCESS_LOG=0 showed
-    these two calls still costing ~1.2% of CPU.  Peers (uvicorn / granian /
+    these calls still costing ~1.2% of CPU.  Peers (uvicorn / granian /
     daphne) skip the work entirely when access logging is disabled; gating
     here matches that behaviour.
+
+    The *record itself* is handed to ``logger.info`` as the message (it is
+    self-formatting via ``__str__``), so the expensive ``format()`` string
+    build is deferred to the logging listener thread by the deferred-format
+    QueueHandler (``blackbull.logger``) instead of running on the event loop.
+    ``finalize()`` snapshots the duration first so that deferred format still
+    reports the request's real duration, not duration + queue latency.  The
+    structured ``extra`` fields stay eager — they are the documented public
+    access-log API (guide.md §14; ``tests/integration/test_access_log.py``).
     """
     if _access_logger.isEnabledFor(logging.INFO):
-        _access_logger.info(record.format(), extra=record.as_extra())
+        record.finalize()
+        _access_logger.info(record, extra=record.as_extra())
 
 
 @dataclass
@@ -66,6 +77,18 @@ class AccessLogRecord:
     # name → (perf_counter_seconds, process_time_seconds).  Only written
     # when PHASE_TRACE is on; empty otherwise.
     phases: dict[str, tuple[float, float]] = field(default_factory=dict, repr=False)
+    # Duration snapshot taken by finalize() at emit time so a format() run
+    # later on the logging listener thread reports the real request duration
+    # (not duration + queue latency).  None until finalize()/emit.
+    _duration_ms_snapshot: float | None = field(default=None, repr=False)
+    # Cached format() output — filled on first str() (listener thread).  Cached
+    # because several sink handlers may each format the same record.
+    _formatted: str | None = field(default=None, repr=False)
+
+    # Marker read by the deferred-format QueueHandler (blackbull.logger) to
+    # move this record's format() off the event-loop thread.  A ClassVar, not
+    # a dataclass field, so it is not part of __init__/eq/repr.
+    _bb_deferred_format: ClassVar[bool] = True
 
     def mark(self, name: str) -> None:
         """Capture wall + CPU clocks for *name*.  No-op when phase
@@ -110,7 +133,29 @@ class AccessLogRecord:
         )
 
     def duration_ms(self) -> float:
+        # Return the finalize() snapshot when present so the value is stable
+        # across the emit → enqueue → listener-format hop; fall back to a live
+        # reading for records that were never finalized (e.g. direct callers).
+        if self._duration_ms_snapshot is not None:
+            return self._duration_ms_snapshot
         return (time.monotonic() - self._started_at) * 1000
+
+    def finalize(self) -> 'AccessLogRecord':
+        """Snapshot the duration at completion so a later (deferred) format()
+        reports the request's real duration rather than duration + the time the
+        record waited in the logging queue.  Idempotent; returns ``self``."""
+        if self._duration_ms_snapshot is None:
+            self._duration_ms_snapshot = (time.monotonic() - self._started_at) * 1000
+        return self
+
+    def __str__(self) -> str:
+        """Self-formatting message body.  ``emit_access_log`` hands the record
+        to ``logger.info`` as the message so this — and the ``format()`` string
+        build it wraps — runs on the logging listener thread, not the event
+        loop.  Cached because several sink handlers may format the same record."""
+        if self._formatted is None:
+            self._formatted = self.format()
+        return self._formatted
 
     def format(self) -> str:
         if self.close_code is not None:
