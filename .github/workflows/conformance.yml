@@ -8,6 +8,9 @@ name: RFC conformance
 #   autobahn       — RFC 6455 (WebSocket)
 #   corpus-replay  — docker-free regression replay of the curated
 #                     fuzz/user-corpus/ diff entries
+#   h2-flow-control — docker-free RFC 9113 flow-control deadlock gate
+#                     (the three payload > 65535-byte deadlocks fixed
+#                     in v0.46.0), subprocess-isolated per scenario
 #
 # The workflow's pass/fail status becomes the badge linked from the
 # README.  An individual job failure surfaces in the badge as a red
@@ -207,3 +210,31 @@ jobs:
         run: |
           timeout 60 python -m pytest --timeout=30 -v \
               tests/conformance/http1/test_h1_user_corpus_replay.py
+
+  h2-flow-control:
+    name: H2 flow-control deadlock gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0   # v7.0.0
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1   # v6.3.0
+        with:
+          python-version: '3.12'
+
+      - name: Install BlackBull (with testing extras)
+        run: pip install -e '.[testing]'
+
+      - name: Run H2 flow-control deadlock regression gate
+        # Docker-free, subprocess-isolated regression gate for the three RFC
+        # 9113 flow-control deadlocks fixed in v0.46.0 (client crediting,
+        # sender lost-wakeup, WU-on-closed-stream).  Each scenario runs in a
+        # child interpreter (`sys.executable`) with an 8s per-step guard; the
+        # outer 90s bounds the whole job in case the subprocess guard itself
+        # wedges.  Runs on every push/PR so a reintroduced deadlock blocks
+        # merge instead of surfacing only in the weekly full tier.
+        run: |
+          timeout 90 python -m pytest --timeout=60 -v \
+              tests/conformance/http2/test_h2_flow_control_deadlock.py
