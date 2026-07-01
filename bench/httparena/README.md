@@ -44,15 +44,29 @@ benchmark runs that do not exercise h2c.  `baseline-h2c` /
 `json-h2c` are runtime-capable on `:8082` but currently unclaimed in
 `meta.json`.
 
+Full-stack profiles implemented (v0.46.0+ — gRPC and the Postgres/Redis
+profiles):
+
+| Profile | Endpoint(s) | Backing |
+|---|---|---|
+| `async-db` | `GET /async-db?min&max&limit` | asyncpg pool (size = `DATABASE_MAX_CONN`), price-range `SELECT`; empty result when the DB is unavailable |
+| `crud` | `GET/POST /crud/items`, `GET/PUT /crud/items/{id}` | asyncpg + Redis cache (get-by-id cached, update invalidates) |
+| `api-4`, `api-16` | `/baseline11` (+ json / async-db) | load-generator CPU-budget profiles — no dedicated endpoint |
+| `unary-grpc`, `unary-grpc-tls` | `benchmark.BenchmarkService/GetSum` | BlackBull gRPC bridge (`app.enable_grpc`); hand-rolled `SumRequest`/`SumReply` codec, no protobuf dep |
+
+The `async-db` / `crud` profiles connect to the seeded Postgres (and Redis)
+sidecars the HttpArena harness starts; connection details come from
+`DATABASE_URL` / `REDIS_URL` / `DATABASE_MAX_CONN` (see `db.py`).  With no DB
+configured the read paths return empty results rather than erroring, so the
+container still boots for the protocol-only profiles.
+
 Profiles **not** implemented (intentional carve-out):
 
 | Profile | Why not |
 |---|---|
-| `static-h3` | HTTP/3 / QUIC transport is intentionally out-of-scope per the project roadmap. |
-| `async-db`, `crud`, `fortunes`, `api-4`, `api-16` | Out of scope.  BlackBull is a protocol-layer framework, not a full-stack one — Postgres-backed implementations belong in a separate submission if we ever pursue the leaderboard (see Flask's HttpArena entry for the pattern). |
-| `*-h3`           | HTTP/3 / QUIC is out-of-scope. |
-| `*-grpc`         | No gRPC. |
-| `gateway-*`, `production-stack` | Need sidecar + DB work first; same scope rationale as the DB profiles. |
+| `static-h3`, `*-h3` | HTTP/3 / QUIC transport is intentionally out-of-scope per the project roadmap. |
+| `StreamSum` (gRPC server-streaming) | BlackBull serves unary gRPC only this release; streaming is a follow-up. |
+| `fortunes`, `gateway-*`, `production-stack` | Templated/aggregation/sidecar workloads beyond the current harness scope. |
 
 ## Local smoke test
 

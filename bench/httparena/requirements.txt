@@ -1,1 +1,6 @@
-blackbull[compression]==0.33.1
+# gRPC (unary-grpc profile) needs the BlackBull gRPC bridge shipped in 0.46.0.
+blackbull[compression]==0.46.0
+# async-db / crud profiles: async Postgres driver + Redis cache client.
+# Pins live here; bump in lockstep with each release.
+asyncpg==0.31.0
+redis==8.0.1

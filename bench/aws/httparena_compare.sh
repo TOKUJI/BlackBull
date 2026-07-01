@@ -307,6 +307,15 @@ ssh "${SSH_OPTS[@]}" "$SERVER_REMOTE" '
     git clone --depth 1 https://github.com/MDA2AV/HttpArena.git
 '
 
+# Patch HttpArena cpusets for small instances.  Upstream redis.sh / benchmark.sh
+# pin the Redis sidecar + gcannon load tool to CPUs 0,64 / 32-63,96-127, which
+# do not exist on an 8-vCPU c7i.2xlarge and make the crud profile fail.
+# patch_cpuset.sh rewrites them to valid CPUs (0,2 and 7).  Idempotent.
+echo ">>> applying cpuset patch for small instances ..."
+scp "${SSH_OPTS[@]}" "$REPO_ROOT/bench/httparena/patch_cpuset.sh" \
+    "$SERVER_REMOTE:~/patch_cpuset.sh"
+ssh "${SSH_OPTS[@]}" "$SERVER_REMOTE" 'bash ~/patch_cpuset.sh'
+
 # ---------------------------------------------------------------------------
 # Step 4 — vendor bench/httparena/ as the `blackbull` framework.  Rewrite
 # the Dockerfile to install from PyPI.  Flip meta.json enabled=true so
@@ -324,6 +333,8 @@ _BB_RSYNC_FILES=(
     "$REPO_ROOT/bench/httparena/app.py"
     "$REPO_ROOT/bench/httparena/launcher.py"
     "$REPO_ROOT/bench/httparena/meta.json"
+    "$REPO_ROOT/bench/httparena/db.py"
+    "$REPO_ROOT/bench/httparena/grpc_bench.py"
 )
 if [ "${BB_ACCESS_LOG:-0}" != "0" ]; then
     _BB_RSYNC_FILES+=("$REPO_ROOT/bench/httparena/logging_access.ini")
@@ -331,6 +342,17 @@ fi
 rsync -e "ssh ${SSH_OPTS[*]}" -az --delete \
     "${_BB_RSYNC_FILES[@]}" \
     "$SERVER_REMOTE:HttpArena/frameworks/blackbull/"
+
+# The upstream HttpArena repo vendors a stale frameworks/blackbull/.dockerignore
+# that whitelists only requirements.txt/app.py/launcher.py and excludes
+# everything else (`**`), so db.py / grpc_bench.py never enter the Docker build
+# context and `COPY ... db.py` fails the build.  We don't rsync .dockerignore
+# (so --delete won't remove it), and our rsync already controls exactly which
+# files land in the dir — so just delete the stale ignore file.  Print the
+# resulting build context so the driver log records what the build will see.
+ssh "${SSH_OPTS[@]}" "$SERVER_REMOTE" \
+    'rm -f HttpArena/frameworks/blackbull/.dockerignore
+     echo "    build context:"; ls -1 HttpArena/frameworks/blackbull/'
 
 if [ "$LOCAL_BB_WHEEL" = "1" ]; then
     echo "    uploading wheel $LOCAL_WHEEL_NAME ..."
@@ -361,10 +383,11 @@ ENV PYTHONDONTWRITEBYTECODE=1 \\
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
 COPY ${LOCAL_WHEEL_NAME} /tmp/
-RUN cd /tmp && pip install --no-cache-dir "/tmp/${LOCAL_WHEEL_NAME}[compression]"
+# asyncpg + redis back the async-db / crud profiles (Postgres + Redis sidecars).
+RUN cd /tmp && pip install --no-cache-dir "/tmp/${LOCAL_WHEEL_NAME}[compression]" asyncpg redis
 VOLUME /results
 
-COPY app.py launcher.py /app/
+COPY app.py launcher.py db.py grpc_bench.py /app/
 ${_LOGGING_INI_COPY}
 EXPOSE 8080 8081 8443
 CMD ["python", "launcher.py"]
@@ -381,10 +404,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \\
     PIP_NO_CACHE_DIR=1 \\
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
-RUN pip install --no-cache-dir 'blackbull[compression]==${BLACKBULL_VERSION}'
+RUN pip install --no-cache-dir 'blackbull[compression]==${BLACKBULL_VERSION}' asyncpg redis
 VOLUME /results
 
-COPY app.py launcher.py /app/
+COPY app.py launcher.py db.py grpc_bench.py /app/
 ${_LOGGING_INI_COPY}
 EXPOSE 8080 8081 8443
 CMD ["python", "launcher.py"]
