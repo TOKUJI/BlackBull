@@ -10,8 +10,10 @@ so this package adds only the gRPC-specific pieces:
 
 Wire it into an app with ``app.enable_grpc(registry)``; gRPC requests
 (``content-type: application/grpc``) are then multiplexed onto the same
-HTTP/2 port as the app's REST and WebSocket traffic.  Only unary RPCs are
-served in this first cut.
+HTTP/2 port as the app's REST and WebSocket traffic.  Unary and
+server-streaming RPCs are served (a server-streaming handler is an async
+generator); client-streaming and bidirectional streaming are not yet
+supported.
 
 Protobuf is **not** a dependency: handlers receive and return raw message
 bytes, so the application chooses its own serialisation (``grpc_tools.protoc``

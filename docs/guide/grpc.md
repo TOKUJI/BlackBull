@@ -53,6 +53,38 @@ package, or hand-rolled. The `pip install 'blackbull[grpc]'` extra reserves the
 name but pulls in nothing; add `protobuf` yourself if you want generated
 message classes.
 
+### Server-streaming
+
+A **server-streaming** handler takes one request and returns many responses. Write
+it as an async generator that `yield`s each response message:
+
+```python
+@grpc.method('/pkg.Svc/StreamItems')
+async def stream_items(request: bytes, context):
+    for item in load_items(request):
+        yield item.SerializeToString()
+```
+
+The registry detects the async-generator form automatically — no flag needed.
+(If a decorator hides the generator nature of your handler, force it with
+`grpc.method(path, streaming=True)` or `add_method(path, fn, streaming=True)`.)
+
+Semantics that match the gRPC spec:
+
+- The status rides the trailing HEADERS frame after the last message. A handler
+  that fails **after** emitting messages reports its status in the trailers; one
+  that fails **before** the first message produces a clean Trailers-Only error,
+  exactly like a unary failure.
+- `context.set_trailing_metadata(...)` / `set_code(...)` apply to the final
+  trailers.
+- The generator is always finalised (its `finally`/cleanup runs) when the client
+  cancels or disconnects mid-stream, so long streams stop producing promptly.
+- A `grpc-timeout` deadline bounds the **whole** stream (`DEADLINE_EXCEEDED` on
+  expiry).
+
+Client-streaming and bidirectional streaming are not yet supported (they need the
+request delivered as a stream).
+
 ## The call context
 
 `GrpcContext` carries request metadata and lets the handler shape the outcome:
@@ -88,9 +120,9 @@ optional). Unknown methods return `GrpcStatus.UNIMPLEMENTED`.
 
 ## Scope and limits
 
-- **Unary RPCs only** in this first cut. The wire path for streaming (DATA
-  frames + trailers) is already in place; streaming handler types are a
-  follow-up.
+- **Unary and server-streaming** RPCs are served (see above). Client-streaming
+  and bidirectional streaming are not yet supported — they need the request
+  delivered as a stream.
 - **No message compression** — a request with the compressed flag set is
   rejected with `UNIMPLEMENTED`.
 - **HTTP/2 required.** Run with TLS + ALPN (`h2`) for real clients; the gRPC

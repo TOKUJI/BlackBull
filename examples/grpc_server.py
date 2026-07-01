@@ -32,6 +32,15 @@ async def reverse(request: bytes, context) -> bytes:
     return request[::-1]
 
 
+# Server-streaming: an async generator that *yields* response messages.  The
+# registry detects the async-generator form automatically — no extra flag.
+@grpc.method('/echo.Echo/Split')
+async def split(request: bytes, context):
+    """Yield each whitespace-separated token of the request as its own message."""
+    for token in request.split():
+        yield token
+
+
 app.enable_grpc(grpc)
 
 

@@ -168,79 +168,195 @@ async def _send_trailers_only(send, status: GrpcStatus, details: str,
                 'headers': _status_trailers(status, details)})
 
 
+async def _read_unary_request(receive) -> bytes:
+    """Read the request body and return the single de-framed request message.
+
+    Server-streaming still takes exactly one request message (only the response
+    streams), so unary and server-streaming share this.  Raises
+    :class:`GrpcError` on a malformed / multi-message / compressed / oversized
+    request."""
+    body = await read_body(receive)
+    try:
+        messages = decode_messages(body)
+    except GrpcDecodeError as exc:
+        raise GrpcError(GrpcStatus.INTERNAL, f'malformed request: {exc}')
+    if len(messages) != 1:
+        raise GrpcError(
+            GrpcStatus.UNIMPLEMENTED,
+            f'method expects exactly 1 request message, got {len(messages)}')
+    compressed, request = messages[0]
+    if compressed:
+        raise GrpcError(
+            GrpcStatus.UNIMPLEMENTED, 'message compression is not supported')
+    if len(request) > MAX_MESSAGE_SIZE:
+        raise GrpcError(
+            GrpcStatus.RESOURCE_EXHAUSTED,
+            f'request message ({len(request)} bytes) larger than the '
+            f'{MAX_MESSAGE_SIZE}-byte limit')
+    return request
+
+
+def _validate_response_message(response) -> bytes:
+    """Return *response* as ``bytes`` or raise :class:`GrpcError` (INTERNAL for
+    a wrong type, RESOURCE_EXHAUSTED when it exceeds the per-message limit)."""
+    if not isinstance(response, (bytes, bytearray)):
+        raise GrpcError(
+            GrpcStatus.INTERNAL,
+            f'handler returned {type(response).__name__}, expected bytes')
+    if len(response) > MAX_MESSAGE_SIZE:
+        raise GrpcError(
+            GrpcStatus.RESOURCE_EXHAUSTED,
+            f'response message ({len(response)} bytes) larger than the '
+            f'{MAX_MESSAGE_SIZE}-byte limit')
+    return bytes(response)
+
+
+def _response_start(content_type: bytes) -> dict:
+    return {'type': 'http.response.start', 'status': 200,
+            'headers': [(b'content-type', content_type),
+                        (b'grpc-accept-encoding', _GRPC_ACCEPT_ENCODING)],
+            'trailers': True}
+
+
+async def _serve_unary(handler, request, context, send, content_type,
+                       deadline: float | None) -> None:
+    """Run a unary handler and emit HEADERS → one DATA → status trailers.
+
+    Nothing is written until the response is computed, so any failure is
+    reported as a clean Trailers-Only error by the caller."""
+    try:
+        if deadline is not None:
+            response = await asyncio.wait_for(
+                handler(request, context), timeout=deadline)
+        else:
+            response = await handler(request, context)
+        response = _validate_response_message(response)
+    except GrpcError as exc:
+        await _send_trailers_only(send, exc.status, exc.details, content_type)
+        return
+    except asyncio.TimeoutError:
+        await _send_trailers_only(
+            send, GrpcStatus.DEADLINE_EXCEEDED, 'deadline exceeded', content_type)
+        return
+    except (asyncio.CancelledError, KeyboardInterrupt, SystemExit):
+        raise
+    except BaseException as exc:  # noqa: BLE001 — handler isolation
+        logger.exception('gRPC unary handler raised')
+        await _send_trailers_only(send, GrpcStatus.INTERNAL, str(exc), content_type)
+        return
+
+    await send(_response_start(content_type))
+    await send({'type': 'http.response.body',
+                'body': encode_message(response), 'more_body': True})
+    await send({'type': 'http.response.trailers',
+                'headers': _status_trailers(context.code, context.details,
+                                            context._trailing)})
+
+
+async def _serve_server_streaming(handler, request, context, send, content_type,
+                                  deadline: float | None) -> None:
+    """Drive a server-streaming (async-generator) handler.
+
+    Response-Headers are sent lazily, just before the first message, so a
+    handler that errors *before* yielding anything still produces a clean
+    Trailers-Only error (like a unary failure).  Once a message has gone out the
+    status can only ride the trailing HEADERS frame, so a mid-stream error is
+    reported there.  The generator is always finalised (``aclose``) — including
+    on client cancellation — so its ``finally``/cleanup runs."""
+    agen = handler(request, context)
+    started = False
+
+    async def _emit(msg) -> None:
+        nonlocal started
+        payload = _validate_response_message(msg)
+        if not started:
+            await send(_response_start(content_type))
+            started = True
+        await send({'type': 'http.response.body',
+                    'body': encode_message(payload), 'more_body': True})
+
+    try:
+        if deadline is not None:
+            async with asyncio.timeout(deadline):
+                async for msg in agen:
+                    await _emit(msg)
+        else:
+            async for msg in agen:
+                await _emit(msg)
+    except GrpcError as exc:
+        await _finish_stream_error(send, started, exc.status, exc.details, content_type)
+        return
+    except (asyncio.CancelledError, KeyboardInterrupt, SystemExit):
+        raise
+    except (asyncio.TimeoutError, TimeoutError):
+        await _finish_stream_error(
+            send, started, GrpcStatus.DEADLINE_EXCEEDED, 'deadline exceeded',
+            content_type)
+        return
+    except BaseException as exc:  # noqa: BLE001 — handler isolation
+        logger.exception('gRPC server-streaming handler raised')
+        await _finish_stream_error(
+            send, started, GrpcStatus.INTERNAL, str(exc), content_type)
+        return
+    finally:
+        # Finalise the generator so its cleanup runs on every exit path
+        # (normal completion, error, or client cancellation).  Best-effort:
+        # a raising aclose() must not mask the status we already reported.
+        try:
+            await agen.aclose()
+        except Exception:  # noqa: BLE001
+            logger.exception('gRPC server-streaming generator aclose() raised')
+
+    # Success.  For an empty stream (no message ever yielded) send the headers
+    # now so the client sees a well-formed Response-Headers + Trailers response.
+    if not started:
+        await send(_response_start(content_type))
+    await send({'type': 'http.response.trailers',
+                'headers': _status_trailers(context.code, context.details,
+                                            context._trailing)})
+
+
+async def _finish_stream_error(send, started: bool, status: GrpcStatus,
+                               details: str, content_type: bytes) -> None:
+    """Report a streaming error: in trailers if Response-Headers already went
+    out, otherwise as a Trailers-Only response."""
+    if started:
+        await send({'type': 'http.response.trailers',
+                    'headers': _status_trailers(status, details)})
+    else:
+        await _send_trailers_only(send, status, details, content_type)
+
+
 async def serve_grpc(registry: GrpcServiceRegistry, scope, receive, send) -> None:
-    """Serve a single unary gRPC call through the ASGI (scope, receive, send)
-    bridge.  Never raises: every failure path is reported as a gRPC status."""
+    """Serve a single gRPC call (unary or server-streaming) through the ASGI
+    (scope, receive, send) bridge.  Never raises for handler/protocol errors:
+    every failure path is reported as a gRPC status."""
     path = scope.get('path', '')
     context = GrpcContext(scope)
     # Echo the request's content-type subtype (application/grpc+proto, +json, …)
     # back on the response, defaulting to bare application/grpc.
     content_type = _resolve_content_type(context.metadata(b'content-type'))
 
-    handler = registry.lookup(path)
-    if handler is None:
+    method = registry.lookup_method(path)
+    if method is None:
         await _send_trailers_only(
             send, GrpcStatus.UNIMPLEMENTED, f'Method not found: {path}', content_type)
         return
 
+    # Front matter (request read + de-framing) — errors here precede any
+    # response bytes, so a clean Trailers-Only error is always valid.
     try:
-        body = await read_body(receive)
-        try:
-            messages = decode_messages(body)
-        except GrpcDecodeError as exc:
-            raise GrpcError(GrpcStatus.INTERNAL, f'malformed request: {exc}')
-        if len(messages) != 1:
-            raise GrpcError(
-                GrpcStatus.UNIMPLEMENTED,
-                f'unary method expects exactly 1 request message, got {len(messages)}')
-        compressed, request = messages[0]
-        if compressed:
-            raise GrpcError(
-                GrpcStatus.UNIMPLEMENTED, 'message compression is not supported')
-        if len(request) > MAX_MESSAGE_SIZE:
-            raise GrpcError(
-                GrpcStatus.RESOURCE_EXHAUSTED,
-                f'request message ({len(request)} bytes) larger than the '
-                f'{MAX_MESSAGE_SIZE}-byte limit')
-
-        # RFC: enforce the client's deadline (grpc-timeout) if it sent one.
-        deadline = _parse_grpc_timeout(context.metadata(b'grpc-timeout'))
-        if deadline is not None:
-            response = await asyncio.wait_for(
-                handler(request, context), timeout=deadline)
-        else:
-            response = await handler(request, context)
+        request = await _read_unary_request(receive)
     except GrpcError as exc:
         await _send_trailers_only(send, exc.status, exc.details, content_type)
         return
-    except asyncio.TimeoutError:
-        # grpc-timeout exceeded — report DEADLINE_EXCEEDED, not INTERNAL.
-        await _send_trailers_only(
-            send, GrpcStatus.DEADLINE_EXCEEDED, 'deadline exceeded', content_type)
-        return
-    except (asyncio.CancelledError, KeyboardInterrupt, SystemExit):
-        # Cooperative cancellation (RST_STREAM CANCEL, shutdown) and process-exit
-        # signals must propagate — never swallow them as a gRPC status.
-        raise
-    except BaseException as exc:  # noqa: BLE001 — handler isolation: a handler
-        # bug (even a bare BaseException) must report INTERNAL, not kill the stream.
-        logger.exception('gRPC handler raised for %s', path)
-        await _send_trailers_only(send, GrpcStatus.INTERNAL, str(exc), content_type)
-        return
 
-    if not isinstance(response, (bytes, bytearray)):
-        await _send_trailers_only(
-            send, GrpcStatus.INTERNAL,
-            f'handler returned {type(response).__name__}, expected bytes', content_type)
-        return
+    # RFC: enforce the client's deadline (grpc-timeout) if it sent one.
+    deadline = _parse_grpc_timeout(context.metadata(b'grpc-timeout'))
 
-    # Success: response HEADERS, one message DATA frame, then status trailers.
-    await send({'type': 'http.response.start', 'status': 200,
-                'headers': [(b'content-type', content_type),
-                            (b'grpc-accept-encoding', _GRPC_ACCEPT_ENCODING)],
-                'trailers': True})
-    await send({'type': 'http.response.body',
-                'body': encode_message(bytes(response)), 'more_body': True})
-    await send({'type': 'http.response.trailers',
-                'headers': _status_trailers(context.code, context.details,
-                                            context._trailing)})
+    if method.streaming:
+        await _serve_server_streaming(
+            method.handler, request, context, send, content_type, deadline)
+    else:
+        await _serve_unary(
+            method.handler, request, context, send, content_type, deadline)

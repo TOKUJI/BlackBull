@@ -32,6 +32,16 @@ so the editable install's metadata catches up.
 ## [Unreleased]
 
 ### Added
+- **Server-streaming gRPC** — a gRPC handler may now be an async generator that
+  `yield`s response messages (`async def m(request, context): yield ...`); the
+  registry auto-detects the streaming form (override with
+  `grpc.method(path, streaming=True)`). The status rides the trailing HEADERS
+  frame after the last message; a failure before the first message is a clean
+  Trailers-Only error, one after is reported in trailers. The generator is
+  finalized (its `finally` runs) on client cancellation, and `grpc-timeout`
+  bounds the whole stream. Unary handlers are unchanged. Verified with a real
+  `grpcio` `unary_stream` client, including the 5000-message flow-control shape.
+  Client-/bidi-streaming remain unsupported (they need a streamed request).
 - **`scope_completed` event** — a guaranteed, cross-protocol terminal event
   emitted once per ASGI scope (HTTP request, WebSocket connection, or gRPC
   call), on success or error, under any server. It is the application-level
