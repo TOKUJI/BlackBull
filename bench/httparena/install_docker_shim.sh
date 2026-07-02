@@ -83,7 +83,7 @@ else
     # instead of relying on the network warm-up that the cold-start collapse
     # consumes.  Eliminated the run-1 streaming collapse (104k ECONNREFUSED →
     # clean).  See bench/httparena/app.py (_grpc_self_warmup).
-    extra+=(-e "BB_GRPC_WARMUP=3")
+    extra+=(-e "BB_GRPC_WARMUP=0")
     # Early-bind: launcher.py pre-binds the listening socket (dual-stack, the
     # BB_SOCKET_BACKLOG-deep queue above) BEFORE the app.py child imports
     # blackbull + warms up + forks, and hands the fd over via BB_INHERIT_FDS.
