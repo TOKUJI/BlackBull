@@ -72,6 +72,27 @@ else
     echo "[bench-shim] web-server container: WEB_NOFILE=$WEB_NOFILE WEB_WORKERS=${WEB_WORKERS:-<framework default>} BB_ACCESS_LOG=${BB_ACCESS_LOG:-0}" >&2
     extra=(--ulimit "nofile=${WEB_NOFILE}:${WEB_NOFILE}")
     extra+=(-v /home/ubuntu/results:/results)
+    # Deep listen() backlog so the cold-start connection burst (64 conns +
+    # ghz reconnect storm) doesn't overflow the accept queue into ECONNREFUSED
+    # before the freshly-spawned workers warm up.  Capped by net.core.somaxconn,
+    # which install.sh raises to match.  Harmless for non-BlackBull images (they
+    # ignore the unknown env var).  See docs/reference/env-vars.md.
+    extra+=(-e "BB_SOCKET_BACKLOG=4096")
+    # Cold-start self-warm-up: drive the gRPC StreamSum path in-process per
+    # worker (before it accepts) so the allocator/GC + dispatch path are warm,
+    # instead of relying on the network warm-up that the cold-start collapse
+    # consumes.  Eliminated the run-1 streaming collapse (104k ECONNREFUSED →
+    # clean).  See bench/httparena/app.py (_grpc_self_warmup).
+    extra+=(-e "BB_GRPC_WARMUP=3")
+    # Early-bind: launcher.py pre-binds the listening socket (dual-stack, the
+    # BB_SOCKET_BACKLOG-deep queue above) BEFORE the app.py child imports
+    # blackbull + warms up + forks, and hands the fd over via BB_INHERIT_FDS.
+    # HttpArena's grpc readiness gate (`_wait_grpc`) is a no-op — ghz exits 0
+    # even on connection-refused — so benchmark run 1 fires into the cold
+    # window; pre-binding turns that burst from ECONNREFUSED into queued-then-
+    # served.  See bench/httparena/diagnostics/ (grpc-readiness-issue.md +
+    # cold-start-ab-results.md).  Off by default in the launcher; enabled here.
+    extra+=(-e "BB_EARLY_BIND=1")
     if [ -n "$WEB_WORKERS" ]; then
         extra+=(
             -e "WEB_WORKERS=${WEB_WORKERS}"
