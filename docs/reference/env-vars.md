@@ -18,6 +18,15 @@ For the precedence order (CLI flags > env > TOML), see
 | `BB_WORKERS` | `1` | Pre-fork worker count.  `0` resolves to `os.cpu_count()`.  Each worker runs its own asyncio event loop; combine with `BB_SOCKET_REUSEPORT=1` so the kernel load-balances accepts across workers. |
 | `BB_UVLOOP` | `0` | Install `uvloop`'s asyncio policy at startup.  Requires `pip install 'blackbull[speed]'`; falls back to the standard loop with a warning when uvloop is missing. |
 
+## Warm-up
+
+Warm-up runs any hooks registered with `@app.on_warmup` **once, in the master, before the listening socket is created and before workers fork**, so every worker inherits the warmed heap (specialized bytecode, primed codecs/TLS) via copy-on-write.  These knobs only matter when the app registers at least one warm-up hook; with none, warm-up is a no-op.
+
+| Variable | Default | Controls |
+|---|---|---|
+| `BB_WARMUP_BUDGET_S` | `60` | Hard wall-clock cap (seconds) on total warm-up.  A hook that overruns is cancelled and the master proceeds to bind — warm-up is best-effort and never blocks boot indefinitely. |
+| `BB_WARMUP_TLS_N` | `64` | Number of in-memory (`ssl.MemoryBIO`) TLS handshakes the framework performs to prime the OpenSSL/RSA/ALPN path, when the listener terminates TLS.  Runs automatically after the app's own warm-up hooks; `0` disables it. |
+
 ## Connection limits and timeouts
 
 Every cap in this section (plus the HTTP/2, WebSocket, and
@@ -47,7 +56,7 @@ first-hit-then-summary rate-limit model.
 
 | Variable | Default | Controls |
 |---|---|---|
-| `BB_SOCKET_BACKLOG` | `128` (kernel `somaxconn` default) | `listen()` backlog depth.  Linux caps the effective value at `net.core.somaxconn`.  See "Performance recommendations" below for production tuning. |
+| `BB_SOCKET_BACKLOG` | `1024` | `listen()` backlog depth.  A sane default for servers facing connection bursts (128 — the traditional `SOMAXCONN` — is shallow next to nginx's 511).  Linux caps the effective value at `net.core.somaxconn`.  See "Performance recommendations" below for production tuning. |
 | `BB_SOCKET_REUSEPORT` | `0` (kernel default) | When supported by the OS (Linux, modern BSDs), bind each worker to its own listening socket so the kernel hashes incoming connections across workers — eliminates the thundering-herd accept pattern.  No effect with one worker.  Enable on multi-worker deployments. |
 | `BB_SOCKET_SNDBUF` | `0` (kernel default) | `SO_SNDBUF` (bytes) on each accepted socket.  `0` leaves the kernel default unchanged.  Linux doubles the requested value internally; larger values help throughput for responses ≥ 64 kB. |
 | `BB_SOCKET_RCVBUF` | `0` (kernel default) | `SO_RCVBUF` (bytes) on each accepted socket.  `0` leaves the kernel default unchanged.  Same doubling rule as `BB_SOCKET_SNDBUF`. |
@@ -115,7 +124,7 @@ kernel/process memory and one custom socket option:
 
 | Variable | Default | Recommended | Why |
 |---|---|---|---|
-| `BB_SOCKET_BACKLOG` | `128` | `4096` | Reduces silent connection drops during burst arrivals when the accept loop is briefly behind.  Effective value is capped by `net.core.somaxconn` — bump it too (`sysctl -w net.core.somaxconn=4096`). |
+| `BB_SOCKET_BACKLOG` | `1024` | `4096` | Reduces silent connection drops during burst arrivals when the accept loop is briefly behind.  Effective value is capped by `net.core.somaxconn` — bump it too (`sysctl -w net.core.somaxconn=4096`). |
 | `BB_SOCKET_REUSEPORT` | `0` | `1` | When running > 1 worker on Linux, lets the kernel hash incoming connections across workers instead of a single accept loop fanning them out.  Eliminates thundering-herd and improves CPU affinity. |
 | `BB_SOCKET_SNDBUF` | `0` | `262144` | 256 kB requested → ~512 kB effective after the kernel doubles.  Helps throughput on responses ≥ 64 kB (static assets, JSON arrays, streamed bodies). |
 | `BB_SOCKET_RCVBUF` | `0` | `262144` | Same shape as `SNDBUF`, for inbound traffic (large `POST` bodies). |

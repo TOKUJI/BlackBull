@@ -352,11 +352,13 @@ class Settings:
     #: Emit one access log record per completed request on blackbull.access.
     access_log: bool = True
 
-    #: listen() backlog depth for the server socket.  128 is the
-    #: traditional kernel ``SOMAXCONN`` default.  Production deployments
-    #: under burst load should raise this — see
-    #: docs/reference/env-vars.md "Performance recommendations".
-    socket_backlog: int = 128
+    #: listen() backlog depth for the server socket.  1024 is a sane
+    #: default for servers facing connection bursts — 128 (the traditional
+    #: ``SOMAXCONN``) is shallow next to peers like nginx (511) and Node
+    #: (511).  The kernel still caps the effective queue at
+    #: ``net.core.somaxconn``, so raise that too for very high fan-in.
+    #: See docs/reference/env-vars.md "Performance recommendations".
+    socket_backlog: int = 1024
 
     #: SO_SNDBUF for accepted sockets (0 = leave kernel default).
     socket_sndbuf: int = 0
@@ -368,6 +370,11 @@ class Settings:
     #: Off by default — only meaningful under ``workers > 1``.  Production
     #: multi-worker deployments should enable it; see
     #: docs/reference/env-vars.md "Performance recommendations".
+    #:
+    #: NOTE: for the cold-start connection-burst workload SO_REUSEPORT is a
+    #: *pessimization* — it does not prevent accept-starvation (at cold start
+    #: every worker is equally cold, so N per-worker queues starve at once) and
+    #: it removes the shared queue's cross-worker load-balancing.
     socket_reuseport: bool = False
 
     #: Idle timeout (seconds) on a keep-alive connection that is awaiting
@@ -571,7 +578,7 @@ def get_settings() -> Settings:
         # Defaults match the Linux kernel baseline.  See
         # docs/reference/env-vars.md "Performance recommendations"
         # for the values to override these with on a tuned deployment.
-        socket_backlog=_int_env('BB_SOCKET_BACKLOG', 128),
+        socket_backlog=_int_env('BB_SOCKET_BACKLOG', 1024),
         socket_sndbuf=_int_env_nonneg('BB_SOCKET_SNDBUF', 0),
         socket_rcvbuf=_int_env_nonneg('BB_SOCKET_RCVBUF', 0),
         socket_reuseport=_bool_env('BB_SOCKET_REUSEPORT', False),

@@ -25,9 +25,13 @@ HttpArena harness provides; see ``db.py`` for the env vars.  ``api-4`` /
 ``api-16`` are load-generator CPU-budget profiles over ``/baseline11`` (plus
 json / async-db) and need no dedicated endpoint.
 
+The gRPC service exposes both ``GetSum`` (unary; ``unary-grpc`` /
+``unary-grpc-tls``) and ``StreamSum`` (server-streaming; ``stream-grpc`` /
+``stream-grpc-tls``) via ``app.enable_grpc(build_registry())`` — see
+``grpc_bench.py``.
+
 Profiles intentionally NOT implemented:
   - *-h3              (no HTTP/3 transport)
-  - StreamSum (gRPC server-streaming — BlackBull is unary-only this release)
   - production-stack / gateway / fortunes
 
 The container starts four BlackBull processes via ``launcher.py``:
@@ -304,6 +308,78 @@ async def crud_items_update(item_id: int, body: bytes):
 
 # unary-grpc profile — benchmark.BenchmarkService/GetSum over h2c/h2.
 app.enable_grpc(build_registry())
+
+
+# ---------------------------------------------------------------------------
+# Cold-start self-warm-up (opt-in via BB_GRPC_WARMUP=<seconds>).
+#
+# Registered as a core ``@app.on_warmup`` hook: it runs ONCE in the master,
+# before the listening socket is created and before workers fork, so every
+# worker is born warm via copy-on-write (see ``BlackBull.on_warmup``).  This
+# replaces the previous per-worker ``@app.on_startup`` + loopback warm-up, which
+# ran AFTER fork and AFTER the socket already accepted, raced the benchmark, and
+# fixed only the lightest profile.
+#
+# The hook drives the real ASGI dispatch + gRPC codec paths in-process via
+# ``app.drive_asgi`` (no socket): it faults in code pages and trips PEP 659
+# specialization on the GetSum (unary) and StreamSum (streaming) branches, which
+# then survive fork.  The TLS handshake path is primed automatically by the
+# framework (``warm_tls``) when the listener terminates TLS, so the hook itself
+# stays transport-agnostic.
+_GRPC_WARMUP_SECS = float(os.environ.get('BB_GRPC_WARMUP', '0') or 0)
+
+if _GRPC_WARMUP_SECS > 0:
+    import time as _time
+    from grpc_bench import _STREAMSUM_PATH, _GETSUM_PATH, _write_varint as _wv
+    from blackbull.grpc import encode_message as _encode_message
+
+    def _enc_stream_req(a: int, b: int, count: int) -> bytes:
+        # StreamRequest{a=1,b=2,count=3} → gRPC length-prefixed frame.
+        return _encode_message(b'\x08' + _wv(a) + b'\x10' + _wv(b)
+                               + b'\x18' + _wv(count))
+
+    def _enc_sum_req(a: int, b: int) -> bytes:
+        # SumRequest{a=1,b=2} → gRPC length-prefixed frame.
+        return _encode_message(b'\x08' + _wv(a) + b'\x10' + _wv(b))
+
+    def _grpc_scope(path: str) -> dict:
+        return {'type': 'http', 'method': 'POST', 'path': path,
+                'headers': [(b'content-type', b'application/grpc'),
+                            (b'te', b'trailers')]}
+
+    @app.on_warmup
+    async def _grpc_warmup(app) -> None:
+        import asyncio  # noqa: PLC0415
+        print(f'grpc warm-up: starting {_GRPC_WARMUP_SECS}s budget '
+              f'(pid={os.getpid()})', file=sys.stderr, flush=True)
+        # Warm BOTH gRPC dispatch paths: the streaming path (StreamSum, for the
+        # stream-grpc profiles) AND the unary path (GetSum, for the unary-grpc
+        # profiles).  The unary serve branch + coalescing sender are distinct
+        # code from streaming, so a StreamSum-only warm-up leaves unary cold.
+        stream_scope = _grpc_scope(_STREAMSUM_PATH)
+        unary_scope = _grpc_scope(_GETSUM_PATH)
+        stream_body = _enc_stream_req(13, 42, 5000)   # match benchmark shape
+        unary_body = _enc_sum_req(1, 2)
+        conc = int(os.environ.get('BB_GRPC_WARMUP_CONC', '64') or 64)
+
+        deadline = _time.monotonic() + _GRPC_WARMUP_SECS
+        n_stream = n_unary = 0
+        while _time.monotonic() < deadline:
+            await asyncio.gather(*[
+                app.drive_asgi(stream_scope, body=stream_body, n=1)
+                for _ in range(conc)])
+            n_stream += conc
+            # Unary calls are ~5000× lighter than a StreamSum call, so drive
+            # many more per pass to settle the unary path's allocations at a
+            # volume closer to what h2load will impose.
+            await asyncio.gather(*[
+                app.drive_asgi(unary_scope, body=unary_body, n=1)
+                for _ in range(conc * 8)])
+            n_unary += conc * 8
+
+        print(f'grpc warm-up: done {n_stream} StreamSum + {n_unary} GetSum '
+              f'in-process in {_GRPC_WARMUP_SECS}s (pid={os.getpid()})',
+              file=sys.stderr, flush=True)
 
 
 # ---------------------------------------------------------------------------
