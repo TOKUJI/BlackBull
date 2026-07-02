@@ -223,6 +223,10 @@ class BlackBull:
         self._static_roots: list[tuple[str, Path]] = []
         self._chain = None  # cached global middleware chain; rebuilt on first request
 
+        # Pre-fork warm-up hooks (see on_warmup).  Run once in the master
+        # before it binds/forks; empty means warm-up is a no-op.
+        self._warmup_hooks: list = []
+
         # Extension namespace — name→object registry used by third-party
         # integrations following the ``init_app(app)`` convention.  See
         # docs/guide/extensions.md.
@@ -329,6 +333,71 @@ class BlackBull:
             await fn()
         self._dispatcher.intercept('app_shutdown', _adapter)
         return fn
+
+    def on_warmup(self, fn: Callable[['BlackBull'], Awaitable[None]]
+                  ) -> Callable[['BlackBull'], Awaitable[None]]:
+        """Register a coroutine to warm the app **before it binds or forks**.
+
+        Unlike :meth:`on_startup` (which runs inside *each* worker's lifespan,
+        after ``fork()`` and after the listening socket already exists), an
+        ``on_warmup`` hook runs **once, in the master, before the socket is
+        created and before workers are forked**.  Forked workers then inherit
+        the warmed heap via copy-on-write (PEP 659 specialization survives
+        ``fork()``; the framework calls ``gc.collect()`` + ``gc.freeze()`` after
+        warm-up to keep those pages shared).  In single-worker mode the one
+        process is warmed before it binds.
+
+        Hooks receive the ``app`` and must do **pure warming only** — drive hot
+        code paths, prime codecs/TLS — and acquire **no** per-worker resources
+        (DB pools, sockets, live connections); those belong in
+        :meth:`on_startup`, which runs per worker.  Use :meth:`drive_asgi` to
+        exercise the ASGI dispatch/handler path in-process, and
+        :func:`blackbull.server.warmup.warm_tls` to prime the TLS handshake.
+
+        Warm-up is best-effort: a hook's exception is logged and swallowed
+        (the master degrades to a cold start), and total warm-up time is capped
+        by ``BB_WARMUP_BUDGET_S`` (default 60 s).  Multiple hooks run in
+        registration order.
+
+        Example::
+
+            @app.on_warmup
+            async def warm(app):
+                scope = {'type': 'http', 'method': 'POST', 'path': '/rpc',
+                         'headers': [(b'content-type', b'application/grpc')]}
+                await app.drive_asgi(scope, body=req_bytes, n=2000)
+        """
+        self._warmup_hooks.append(fn)
+        return fn
+
+    async def drive_asgi(self, scope: dict, *, body: bytes = b'', n: int = 1
+                         ) -> None:
+        """Invoke this ASGI app in-process *n* times to warm the request path.
+
+        A warm-up primitive: drives the full ``__call__`` → middleware →
+        ``_dispatch`` chain (HTTP, gRPC, whatever the *scope* routes to) with a
+        synthetic ``receive`` that yields *body* once and a ``send`` that
+        discards output.  Faults in code pages and trips PEP 659 specialization
+        on the dispatch + handler + codec — no socket, no wire I/O.  Intended
+        for use from an :meth:`on_warmup` hook; safe to call anytime.
+
+        *scope* is shallow-copied per call, so the same dict may be reused.
+        """
+        async def _send(_event) -> None:
+            pass
+
+        for _ in range(n):
+            sent = False
+
+            async def _receive():
+                nonlocal sent
+                if not sent:
+                    sent = True
+                    return {'type': 'http.request', 'body': body,
+                            'more_body': False}
+                return {'type': 'http.request', 'body': b'', 'more_body': False}
+
+            await self(dict(scope), _receive, _send)
 
     def on(self, event_name: str, *, blocking: bool = False
            ) -> Callable[[EventHandler], EventHandler]:
@@ -1032,6 +1101,13 @@ def serve(app, *,
                                max_connections=max_connections,
                                stream_queue_depth=stream_queue_depth,
                                ws_queue_depth=ws_queue_depth)
+
+    # Warm up ONCE in the master, before the listening socket exists and before
+    # workers are forked, so every worker inherits the warmed heap via COW.
+    # No-op unless the app registered @on_warmup hooks.
+    from .server.warmup import run_warmup  # noqa: PLC0415
+    run_warmup(app, master_server.ssl_context)
+
     master_server.open_socket(port, unix_path=unix_path, inherited_fd=inherited_fd)
     addr = (f'unix:{master_server.unix_path}'
             if master_server.unix_path else
@@ -1067,5 +1143,12 @@ async def _run_single(app, *, certfile, keyfile, port, unix_path, inherited_fd,
                         max_connections=max_connections,
                         stream_queue_depth=stream_queue_depth,
                         ws_queue_depth=ws_queue_depth)
+
+    # Warm up before binding.  No fork here, so no COW benefit, but the one
+    # process is still warm before it accepts its first connection.  Runs on
+    # the serving loop (no temporary loop needed).  No-op without @on_warmup.
+    from .server.warmup import warmup_inline  # noqa: PLC0415
+    await warmup_inline(app, server.ssl_context)
+
     server.open_socket(port, unix_path=unix_path, inherited_fd=inherited_fd)
     await server.run(port=port)
