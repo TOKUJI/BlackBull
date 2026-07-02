@@ -31,6 +31,8 @@ so the editable install's metadata catches up.
 
 ## [Unreleased]
 
+## [0.47.0] — 2026-07-03
+
 ### Added
 - **Server-streaming gRPC** — a gRPC handler may now be an async generator that
   `yield`s response messages (`async def m(request, context): yield ...`); the
@@ -62,8 +64,21 @@ so the editable install's metadata catches up.
   calls). It is the only test that puts a spec-strict external gRPC client on
   the wire; a dedicated docker-free `grpc-interop` CI job runs it on every
   push/PR (install with `pip install 'blackbull[grpc-interop]'`).
+- **Pre-fork warm-up hooks** — `@app.on_warmup` registers a coroutine that runs
+  **once in the master, before the listening socket is created and before
+  workers fork**, so every worker inherits the warmed heap (PEP 659
+  specialization, primed codecs/TLS) via copy-on-write. `app.drive_asgi(scope,
+  body=, n=)` drives the ASGI dispatch path in-process (no socket) to fault in
+  code pages, and `blackbull.server.warmup.warm_tls` primes the TLS handshake.
+  A no-op with no hooks registered (off by default); `BB_WARMUP_BUDGET_S` caps
+  total warm-up time and `BB_WARMUP_TLS_N` the number of in-memory TLS
+  handshakes.
 
 ### Changed
+- **Default `listen()` backlog raised from 128 to 1024** (`BB_SOCKET_BACKLOG`).
+  128 (the traditional `SOMAXCONN`) is shallow next to peers like nginx (511);
+  1024 reduces silent connection drops during burst arrivals. The kernel still
+  caps the effective queue at `net.core.somaxconn`.
 - **`Response(headers=...)` accepts a `dict`** (matching the
   FastAPI/Starlette/httpx convention) as well as a list of `(name, value)`
   pairs; names/values may be `str` or `bytes`. Malformed shapes now raise
