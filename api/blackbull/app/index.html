@@ -1527,6 +1527,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.app.BlackBull.drive_asgi" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        drive_asgi
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.app.BlackBull.enable_grpc" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1619,6 +1630,17 @@
     <span class="md-ellipsis">
       
         on_startup
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.app.BlackBull.on_warmup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        on_warmup
       
     </span>
   </a>
@@ -4349,6 +4371,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../server/warmup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    warmup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../server/websocket_actor/" class="md-nav__link">
         
   
@@ -4769,6 +4819,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.app.BlackBull.drive_asgi" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        drive_asgi
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.app.BlackBull.enable_grpc" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4861,6 +4922,17 @@
     <span class="md-ellipsis">
       
         on_startup
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.app.BlackBull.on_warmup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        on_warmup
       
     </span>
   </a>
@@ -5125,6 +5197,35 @@ async def on_temp(msg: Message):
     ...
 </code></pre>
 <p>Returns <em>ext</em> so it can be captured and configured further.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.app.BlackBull.drive_asgi" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">drive_asgi</span><span class="p">(</span><span class="n">scope</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">body</span><span class="o">=</span><span class="sa">b</span><span class="s1">&#39;&#39;</span><span class="p">,</span> <span class="n">n</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-async"><code>async</code></small>
+  </span>
+
+<a href="#blackbull.app.BlackBull.drive_asgi" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Invoke this ASGI app in-process <em>n</em> times to warm the request path.</p>
+<p>A warm-up primitive: drives the full <code>__call__</code> → middleware →
+<code>_dispatch</code> chain (HTTP, gRPC, whatever the <em>scope</em> routes to) with a
+synthetic <code>receive</code> that yields <em>body</em> once and a <code>send</code> that
+discards output.  Faults in code pages and trips PEP 659 specialization
+on the dispatch + handler + codec — no socket, no wire I/O.  Intended
+for use from an :meth:<code>on_warmup</code> hook; safe to call anytime.</p>
+<p><em>scope</em> is shallow-copied per call, so the same dict may be reused.</p>
 
 
     </div>
@@ -5678,6 +5779,49 @@ remaining handlers and prevents the completion event from being sent.</p>
     <span class="k">await</span> <span class="n">db</span><span class="o">.</span><span class="n">connect</span><span class="p">()</span>
 </code></pre></div>
 </details>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.app.BlackBull.on_warmup" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">on_warmup</span><span class="p">(</span><span class="n">fn</span><span class="p">)</span></code>
+
+<a href="#blackbull.app.BlackBull.on_warmup" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Register a coroutine to warm the app <strong>before it binds or forks</strong>.</p>
+<p>Unlike :meth:<code>on_startup</code> (which runs inside <em>each</em> worker's lifespan,
+after <code>fork()</code> and after the listening socket already exists), an
+<code>on_warmup</code> hook runs <strong>once, in the master, before the socket is
+created and before workers are forked</strong>.  Forked workers then inherit
+the warmed heap via copy-on-write (PEP 659 specialization survives
+<code>fork()</code>; the framework calls <code>gc.collect()</code> + <code>gc.freeze()</code> after
+warm-up to keep those pages shared).  In single-worker mode the one
+process is warmed before it binds.</p>
+<p>Hooks receive the <code>app</code> and must do <strong>pure warming only</strong> — drive hot
+code paths, prime codecs/TLS — and acquire <strong>no</strong> per-worker resources
+(DB pools, sockets, live connections); those belong in
+:meth:<code>on_startup</code>, which runs per worker.  Use :meth:<code>drive_asgi</code> to
+exercise the ASGI dispatch/handler path in-process, and
+:func:<code>blackbull.server.warmup.warm_tls</code> to prime the TLS handshake.</p>
+<p>Warm-up is best-effort: a hook's exception is logged and swallowed
+(the master degrades to a cold start), and total warm-up time is capped
+by <code>BB_WARMUP_BUDGET_S</code> (default 60 s).  Multiple hooks run in
+registration order.</p>
+<p>Example::</p>
+<pre><code>@app.on_warmup
+async def warm(app):
+    scope = {'type': 'http', 'method': 'POST', 'path': '/rpc',
+             'headers': [(b'content-type', b'application/grpc')]}
+    await app.drive_asgi(scope, body=req_bytes, n=2000)
+</code></pre>
+
 
     </div>
 

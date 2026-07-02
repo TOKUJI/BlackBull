@@ -1321,6 +1321,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#warm-up" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Warm-up
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#connection-limits-and-timeouts" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4212,6 +4223,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../api/blackbull/server/warmup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    warmup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../api/blackbull/server/websocket_actor/" class="md-nav__link">
         
   
@@ -4608,6 +4647,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#warm-up" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Warm-up
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#connection-limits-and-timeouts" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4773,6 +4823,29 @@ on busy production deployments, see
 </tr>
 </tbody>
 </table>
+<h2 id="warm-up">Warm-up<a class="headerlink" href="#warm-up" title="Permanent link">&para;</a></h2>
+<p>Warm-up runs any hooks registered with <code>@app.on_warmup</code> <strong>once, in the master, before the listening socket is created and before workers fork</strong>, so every worker inherits the warmed heap (specialized bytecode, primed codecs/TLS) via copy-on-write.  These knobs only matter when the app registers at least one warm-up hook; with none, warm-up is a no-op.</p>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Default</th>
+<th>Controls</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>BB_WARMUP_BUDGET_S</code></td>
+<td><code>60</code></td>
+<td>Hard wall-clock cap (seconds) on total warm-up.  A hook that overruns is cancelled and the master proceeds to bind — warm-up is best-effort and never blocks boot indefinitely.</td>
+</tr>
+<tr>
+<td><code>BB_WARMUP_TLS_N</code></td>
+<td><code>64</code></td>
+<td>Number of in-memory (<code>ssl.MemoryBIO</code>) TLS handshakes the framework performs to prime the OpenSSL/RSA/ALPN path, when the listener terminates TLS.  Runs automatically after the app's own warm-up hooks; <code>0</code> disables it.</td>
+</tr>
+</tbody>
+</table>
 <h2 id="connection-limits-and-timeouts">Connection limits and timeouts<a class="headerlink" href="#connection-limits-and-timeouts" title="Permanent link">&para;</a></h2>
 <p>Every cap in this section (plus the HTTP/2, WebSocket, and
 Compression caps below) emits one <code>WARNING</code> record on the
@@ -4864,8 +4937,8 @@ first-hit-then-summary rate-limit model.</p>
 <tbody>
 <tr>
 <td><code>BB_SOCKET_BACKLOG</code></td>
-<td><code>128</code> (kernel <code>somaxconn</code> default)</td>
-<td><code>listen()</code> backlog depth.  Linux caps the effective value at <code>net.core.somaxconn</code>.  See "Performance recommendations" below for production tuning.</td>
+<td><code>1024</code></td>
+<td><code>listen()</code> backlog depth.  A sane default for servers facing connection bursts (128 — the traditional <code>SOMAXCONN</code> — is shallow next to nginx's 511).  Linux caps the effective value at <code>net.core.somaxconn</code>.  See "Performance recommendations" below for production tuning.</td>
 </tr>
 <tr>
 <td><code>BB_SOCKET_REUSEPORT</code></td>
@@ -5060,7 +5133,7 @@ kernel/process memory and one custom socket option:</p>
 <tbody>
 <tr>
 <td><code>BB_SOCKET_BACKLOG</code></td>
-<td><code>128</code></td>
+<td><code>1024</code></td>
 <td><code>4096</code></td>
 <td>Reduces silent connection drops during burst arrivals when the accept loop is briefly behind.  Effective value is capped by <code>net.core.somaxconn</code> — bump it too (<code>sysctl -w net.core.somaxconn=4096</code>).</td>
 </tr>
