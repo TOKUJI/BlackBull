@@ -186,11 +186,14 @@ def _handshake_once(server_ctx, client_ctx) -> None:
             client.do_handshake()
             c_done = True
         except ssl.SSLWantReadError:
+            # Client needs more bytes from the server; server.do_handshake()
+            # below (and the next round) writes them into the shared MemoryBIO.
             pass
         try:
             server.do_handshake()
             s_done = True
         except ssl.SSLWantReadError:
+            # Server needs more bytes from the client; produced above / next round.
             pass
         if c_done and s_done:
             return
