@@ -29,7 +29,7 @@ so the editable install's metadata catches up.
 
 ---
 
-## [Unreleased]
+## [0.48.0] — 2026-07-04
 
 ### Added
 - **Async logging is now batch logging** (`BB_LOG_BATCH_SIZE`, default `64`) — the
