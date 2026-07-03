@@ -85,6 +85,37 @@ Set the level above `INFO`, or set the environment variable
 site — useful when running benchmarks that don't want logging
 overhead).
 
+## Built-in async logging sinks
+
+With `BB_ASYNC_LOGGING=1` (the default) BlackBull installs a `QueueHandler` on
+the `blackbull` logger so every log call from the event loop enqueues in O(1); a
+background `QueueListener` thread drains the queue and writes to a sink. You
+select the sink and format entirely with environment variables — no code:
+
+| Variable | Default | Effect |
+|---|---|---|
+| `BB_LOG_FILE` | *(stderr)* | Write to a file (append mode) instead of `stderr`. |
+| `BB_LOG_FORMAT` | *(plain)* | `json` → one structured JSON object per line (the `AccessLogRecord` fields become top-level keys). |
+| `BB_SYSLOG_ADDR` | *(unset)* | `host:port` → ship records via a UDP `SysLogHandler`. |
+| `BB_LOG_BATCH_SIZE` | `64` | Coalescing width — records joined into one `write()`+`flush()`. |
+| `BB_LOG_BATCH_TIMEOUT_MS` | `5` | Max time a partial batch waits before flushing. |
+
+**Async logging is batch logging.** The stream/file sink *always* coalesces
+records into one write per batch — a per-record `flush()` is the dominant cost of
+a high-rate access log (one flush syscall per request, contending for the GIL
+with the event loop). `BB_LOG_BATCH_SIZE` tunes the coalescing width, not an
+on/off switch; the timeout bounds visibility latency at low rate. To force an
+immediate per-record flush, disable async logging (`BB_ASYNC_LOGGING=0`, the
+synchronous path).
+
+When the access logger is left in its default state, records are enqueued on a
+fast path that skips the stdlib `logging.Logger._log` machinery (~93% of the
+per-emit cost). This is transparent: if you attach your own handlers or filters
+to `blackbull.access` (see the next section), BlackBull automatically uses the
+standard logging path so they are honoured.
+
+For the full list see [environment variables](../reference/env-vars.md).
+
 ## Extending the access log record from middleware
 
 The `AccessLogRecord` for the current request is stored at
@@ -333,12 +364,13 @@ through `json.dumps(record.__dict__)` cleanly.
 
 ## Not yet implemented
 
-- **HTTP/2 access logging** — per-stream entries.  Today the
-  access log covers HTTP/1.1 only.
 - **WebSocket access logging** — connection-level entry (client
   IP, path, close code, duration).  Today the `websocket_*`
   events from [Events](events.md) cover the same data; build
   your own logger on top if you need persistence.
+
+The access log covers both **HTTP/1.1 and HTTP/2** (one entry per
+completed request / stream).
 
 ## Next
 

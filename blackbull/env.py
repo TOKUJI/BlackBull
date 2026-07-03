@@ -378,13 +378,22 @@ class Settings:
     #: sink.  When set, records ship via a UDP SysLogHandler.
     log_syslog_addr: str = ''
 
-    #: Coalesce up to N formatted log lines into one write on the stderr sink
-    #: (approach 4 / O2).  1 (default) = off, one write per record.
-    log_batch_size: int = 1
+    #: Coalescing width of the async-logging sink (approach 4 / O2): up to N
+    #: formatted records are joined into a single write+flush.  Async logging is
+    #: batch logging — the sink always coalesces (min 2); the per-record flush of
+    #: a plain StreamHandler is the dominant access-log cost, so it is not an
+    #: async option.  Default 64.  To force per-record flush, disable async
+    #: logging (the synchronous path) instead.
+    log_batch_size: int = 64
 
-    #: Max milliseconds a partial log batch waits before flush.  Only meaningful
-    #: when log_batch_size > 1.
+    #: Max milliseconds a partial log batch waits before flush — bounds the
+    #: visibility latency of the async sink at low request rates.
     log_batch_timeout_ms: int = 5
+
+    #: Path for the async-logging sink to write to (append mode, approach 2).
+    #: '' (default) keeps the stderr sink.  Composes with log_format/batch; each
+    #: worker opens its own append stream post-fork.  Ignored for the syslog sink.
+    log_file: str = ''
 
     #: listen() backlog depth for the server socket.  1024 is a sane
     #: default for servers facing connection bursts — 128 (the traditional
@@ -628,8 +637,9 @@ def get_settings() -> Settings:
         access_log=_bool_env('BB_ACCESS_LOG', True),
         log_format=_str_env('BB_LOG_FORMAT', ''),
         log_syslog_addr=_str_env('BB_SYSLOG_ADDR', ''),
-        log_batch_size=_int_env('BB_LOG_BATCH_SIZE', 1),
+        log_batch_size=_int_env('BB_LOG_BATCH_SIZE', 64),
         log_batch_timeout_ms=_int_env('BB_LOG_BATCH_TIMEOUT_MS', 5),
+        log_file=_str_env('BB_LOG_FILE', ''),
         # Defaults match the Linux kernel baseline.  See
         # docs/reference/env-vars.md "Performance recommendations"
         # for the values to override these with on a tuned deployment.

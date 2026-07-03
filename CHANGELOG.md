@@ -32,13 +32,17 @@ so the editable install's metadata catches up.
 ## [Unreleased]
 
 ### Added
-- **Batched access-log writes** (`BB_LOG_BATCH_SIZE` > 1, default `1` = off) — an
-  opt-in `stderr` sink that coalesces up to N formatted log lines into a single
-  `write()` via one flusher thread, flushed when the batch fills or after
-  `BB_LOG_BATCH_TIMEOUT_MS` (default 5 ms). Cuts write syscalls under a
-  high-rate access log; drained at teardown so no trailing batch is lost. Not
-  applied to the syslog sink (UDP is one datagram per message). (Logging
-  optimization O2 / approach 4.)
+- **Async logging is now batch logging** (`BB_LOG_BATCH_SIZE`, default `64`) — the
+  async-logging stream/file sink *always* coalesces records into one
+  `write()`+`flush()` per batch (via one flusher thread, flushed when the batch
+  fills or after `BB_LOG_BATCH_TIMEOUT_MS`, default 5 ms). A per-record `flush()`
+  is the dominant cost of access logging — py-spy showed one flush syscall per
+  request churning the GIL against the event loop for ~16% of CPU and a −44%
+  throughput hit; coalescing removes it (single-process re-profile: −44% → −31%
+  and rising with width). `BB_LOG_BATCH_SIZE` is now the coalescing width (floored
+  at 2), not an on/off switch; to force per-record flush, disable async logging
+  (`BB_ASYNC_LOGGING=0`). Drained at teardown so no trailing batch is lost; not
+  applied to the syslog sink. (Logging optimization O2 / approach 4.)
 - **Structured JSON logging** (`BB_LOG_FORMAT=json`) — the async-logging sink can
   emit one JSON object per line instead of plain text. Access-log records expose
   `client_ip`, `method`, `path`, `http_version`, `status`, `response_bytes`,
@@ -50,6 +54,27 @@ so the editable install's metadata catches up.
   async-logging sink ships records via a UDP `SysLogHandler` instead of `stderr`;
   composes with `BB_LOG_FORMAT=json` (JSON lines over syslog). An unparseable
   address falls back to `stderr` with a warning. (Logging approach 6.)
+- **Access-log fast path — direct enqueue, bypassing `logging.Logger._log`**
+  (logging optimization O4). When async logging is active, `emit_access_log`
+  builds the `LogRecord` and puts it straight on the listener queue via
+  `enqueue_access_log`, skipping `Logger._log`'s `findCaller` stack walk, filter
+  chain, and `callHandlers` dispatch — py-spy attributed ~93% of the loop-side
+  emit cost to that stdlib machinery. Structured fields (`as_extra()`) are merged
+  onto the record, so JSON/structured sinks are unchanged; the self-formatting
+  message still renders on the listener thread (deferred format preserved). Falls
+  back to the synchronous `logger.info` path when async logging is off. Producer
+  microbench: **~7.5µs → ~5.7µs per emit (−24%)**; single-process server penalty
+  −33% → −24%. Transparent: the fast path runs only when `blackbull.access` has
+  no user-attached handlers or filters — if it does, the standard `logger.info`
+  path is used, so the documented custom-handler/filter access-log extension
+  keeps working.
+- **File log sink** (`BB_LOG_FILE=path`) — the async-logging sink can write to a
+  file (append mode) instead of `stderr`, composing with `BB_LOG_FORMAT=json` and
+  `BB_LOG_BATCH_SIZE`. The stream is opened on the listener side (post-fork) so a
+  multi-worker server never inherits a writer thread across `fork()`; access-log
+  lines (< `PIPE_BUF`) interleave atomically under `O_APPEND`. Ignored for the
+  syslog sink; an unopenable path falls back to `stderr` with a warning. (Logging
+  approach 2.)
 - **Connection-level TCP segment coalescing** (`BB_H2_CONN_BUFFER_US`, default
   `0` = off) — response frames from HTTP/2 streams that complete within a short
   window on one connection can be flushed as a single TCP segment instead of one

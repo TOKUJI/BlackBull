@@ -227,12 +227,13 @@ def test_load_config_maps_logging_sink_knobs(tmp_path):
     cfg_file = tmp_path / 'bb.toml'
     cfg_file.write_text(
         '[logging]\nlog_format = "json"\nsyslog_addr = "127.0.0.1:514"\n'
-        'batch_size = 128\nbatch_timeout_ms = 5\n')
+        'batch_size = 128\nbatch_timeout_ms = 5\nfile = "/var/log/bb.log"\n')
     result = _load_config(str(cfg_file))
     assert result['BB_LOG_FORMAT'] == 'json'
     assert result['BB_SYSLOG_ADDR'] == '127.0.0.1:514'
     assert result['BB_LOG_BATCH_SIZE'] == '128'
     assert result['BB_LOG_BATCH_TIMEOUT_MS'] == '5'
+    assert result['BB_LOG_FILE'] == '/var/log/bb.log'
 
 
 def test_load_config_tls_cert_and_key(tmp_path):

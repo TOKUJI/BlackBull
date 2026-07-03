@@ -1083,6 +1083,7 @@ def serve(app, *,
                 syslog_addr=_cfg.log_syslog_addr,
                 batch_size=_cfg.log_batch_size,
                 batch_timeout_ms=_cfg.log_batch_timeout_ms,
+                log_file=_cfg.log_file,
             )
         if not _cfg.access_log:
             _logging.getLogger('blackbull.access').setLevel(_logging.WARNING)

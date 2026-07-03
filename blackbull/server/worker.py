@@ -67,6 +67,7 @@ def run_worker(app, raw_sockets, ssl_context, worker_id: int,
             syslog_addr=cfg.log_syslog_addr,
             batch_size=cfg.log_batch_size,
             batch_timeout_ms=cfg.log_batch_timeout_ms,
+            log_file=cfg.log_file,
         )
     if not cfg.access_log:
         logging.getLogger('blackbull.access').setLevel(logging.WARNING)

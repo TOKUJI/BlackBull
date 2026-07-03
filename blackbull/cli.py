@@ -71,6 +71,7 @@ _TOML_TO_ENV: dict[tuple[str, str], str] = {
     ('logging', 'syslog_addr'):   'BB_SYSLOG_ADDR',
     ('logging', 'batch_size'):    'BB_LOG_BATCH_SIZE',
     ('logging', 'batch_timeout_ms'): 'BB_LOG_BATCH_TIMEOUT_MS',
+    ('logging', 'file'):          'BB_LOG_FILE',
 }
 
 
