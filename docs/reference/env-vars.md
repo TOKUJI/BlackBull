@@ -69,6 +69,8 @@ first-hit-then-summary rate-limit model.
 | `BB_ASYNC_LOGGING` | `1` | Install a `QueueHandler` on the `blackbull` logger so `logger.debug/info` calls from the event loop are non-blocking. |
 | `BB_LOG_FORMAT` | *(plain)* | Set to `json` to emit one structured JSON object per log line.  Access-log records expose `client_ip`, `method`, `path`, `http_version`, `status`, `response_bytes`, `duration_ms` (plus `close_code` on WebSocket disconnect) as top-level keys; every record carries `timestamp`, `level`, `logger`, `message`.  Applies to the default sink installed by async logging. |
 | `BB_SYSLOG_ADDR` | *(unset)* | `host:port` of a syslog/UDP collector (e.g. `127.0.0.1:514`).  When set, the async-logging sink ships records via a UDP `SysLogHandler` instead of `stderr`.  Composes with `BB_LOG_FORMAT=json`.  An unparseable value falls back to `stderr` with a warning. |
+| `BB_LOG_BATCH_SIZE` | `1` | When > 1, the `stderr` async-logging sink coalesces up to this many formatted lines into a single `write()` (fewer syscalls under a high-rate access log).  A single flusher thread emits the batch when it fills or `BB_LOG_BATCH_TIMEOUT_MS` elapses.  `1` (default) keeps the plain per-record `StreamHandler`.  Ignored for the syslog sink (UDP is one datagram per message). |
+| `BB_LOG_BATCH_TIMEOUT_MS` | `5` | Max time a partial batch waits before it is flushed, bounding log-visibility latency at low request rates.  Only meaningful when `BB_LOG_BATCH_SIZE` > 1. |
 
 The `blackbull.caps` logger has no env-var toggle — set its level
 via `logging.getLogger('blackbull.caps').setLevel(...)` at

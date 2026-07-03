@@ -32,6 +32,13 @@ so the editable install's metadata catches up.
 ## [Unreleased]
 
 ### Added
+- **Batched access-log writes** (`BB_LOG_BATCH_SIZE` > 1, default `1` = off) — an
+  opt-in `stderr` sink that coalesces up to N formatted log lines into a single
+  `write()` via one flusher thread, flushed when the batch fills or after
+  `BB_LOG_BATCH_TIMEOUT_MS` (default 5 ms). Cuts write syscalls under a
+  high-rate access log; drained at teardown so no trailing batch is lost. Not
+  applied to the syslog sink (UDP is one datagram per message). (Logging
+  optimization O2 / approach 4.)
 - **Structured JSON logging** (`BB_LOG_FORMAT=json`) — the async-logging sink can
   emit one JSON object per line instead of plain text. Access-log records expose
   `client_ip`, `method`, `path`, `http_version`, `status`, `response_bytes`,

@@ -6,8 +6,9 @@ import time
 
 import pytest
 
-from blackbull.logger import (JsonFormatter, _build_sink_handlers,
-                              setup_async_logging, teardown_async_logging)
+from blackbull.logger import (BatchWriteHandler, JsonFormatter,
+                              _build_sink_handlers, setup_async_logging,
+                              teardown_async_logging)
 
 
 @pytest.fixture(autouse=True)
@@ -193,6 +194,119 @@ def test_sink_json_over_syslog(monkeypatch):
     assert isinstance(handlers[0], logging.handlers.SysLogHandler)
     assert isinstance(handlers[0].formatter, JsonFormatter)
     handlers[0].close()
+
+
+# ---------------------------------------------------------------------------
+# BatchWriteHandler — approach 4 / O2 (batch writes)
+# ---------------------------------------------------------------------------
+
+class _RecordingStream:
+    """Stream double recording each write() call as one entry — so tests can
+    assert how many write syscalls a batch would produce (the whole point)."""
+
+    def __init__(self):
+        self.writes: list[str] = []
+
+    def write(self, data: str) -> None:
+        self.writes.append(data)
+
+    def flush(self) -> None:
+        pass
+
+
+def _wait_until(predicate, timeout=2.0):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if predicate():
+            return True
+        time.sleep(0.005)
+    return False
+
+
+def _plain(handler):
+    handler.setFormatter(logging.Formatter('%(message)s'))
+    return handler
+
+
+def test_batch_handler_coalesces_full_batch_into_one_write():
+    stream = _RecordingStream()
+    h = _plain(BatchWriteHandler(stream, batch_size=3, flush_interval=10.0))
+    try:
+        for i in range(3):
+            h.emit(_make_record(msg=f'line{i}'))
+        assert _wait_until(lambda: stream.writes), 'batch never flushed'
+        # One write() for the whole batch, lines preserved in order.
+        assert stream.writes == ['line0\nline1\nline2\n']
+    finally:
+        h.close()
+
+
+def test_batch_handler_flushes_partial_batch_after_interval():
+    stream = _RecordingStream()
+    h = _plain(BatchWriteHandler(stream, batch_size=100, flush_interval=0.01))
+    try:
+        h.emit(_make_record(msg='solo'))
+        assert _wait_until(lambda: stream.writes), 'interval flush never fired'
+        assert stream.writes == ['solo\n']
+    finally:
+        h.close()
+
+
+def test_batch_handler_close_flushes_trailing_batch():
+    stream = _RecordingStream()
+    h = _plain(BatchWriteHandler(stream, batch_size=100, flush_interval=10.0))
+    h.emit(_make_record(msg='a'))
+    h.emit(_make_record(msg='b'))
+    h.close()  # must drain the buffered pair even though neither trigger fired
+    assert stream.writes == ['a\nb\n']
+    assert not h._flusher.is_alive()  # thread joined
+
+
+def test_sink_batch_size_env_selects_batch_handler(monkeypatch):
+    monkeypatch.setenv('BB_LOG_BATCH_SIZE', '64')
+    monkeypatch.delenv('BB_SYSLOG_ADDR', raising=False)
+    handlers = _build_sink_handlers()
+    try:
+        assert isinstance(handlers[0], BatchWriteHandler)
+    finally:
+        handlers[0].close()
+
+
+def test_sink_default_batch_size_is_plain_stream(monkeypatch):
+    monkeypatch.delenv('BB_LOG_BATCH_SIZE', raising=False)
+    monkeypatch.delenv('BB_SYSLOG_ADDR', raising=False)
+    handlers = _build_sink_handlers()
+    # Default (unset / 1) → no batching, unchanged behaviour.
+    assert isinstance(handlers[0], logging.StreamHandler)
+    assert not isinstance(handlers[0], BatchWriteHandler)
+
+
+def test_sink_syslog_ignores_batch_size(monkeypatch):
+    """UDP is one datagram per message — batching does not apply to syslog."""
+    monkeypatch.setenv('BB_SYSLOG_ADDR', '127.0.0.1:5514')
+    monkeypatch.setenv('BB_LOG_BATCH_SIZE', '64')
+    handlers = _build_sink_handlers()
+    assert isinstance(handlers[0], logging.handlers.SysLogHandler)
+    handlers[0].close()
+
+
+def test_teardown_drains_batch_sink():
+    """A record still buffered in the batch sink at teardown must be flushed
+    (teardown closes BatchWriteHandler sinks), not lost with the daemon thread."""
+    stream = _RecordingStream()
+    sink = _plain(BatchWriteHandler(stream, batch_size=100, flush_interval=10.0))
+    setup_async_logging(handlers=[sink])
+
+    child = logging.getLogger('blackbull.test_batch_teardown')
+    child.setLevel(logging.INFO)
+    child.info('buffered')
+
+    # Let the listener dequeue into the batch sink (still buffered — batch not
+    # full, long interval), then teardown must drain it.
+    _wait_until(lambda: sink._buf or stream.writes)
+    teardown_async_logging()
+    assert stream.writes == ['buffered\n']
+    assert not sink._flusher.is_alive()
 
 
 def test_json_formatter_covers_real_access_record_extra():

@@ -4,6 +4,8 @@ import logging
 import logging.handlers
 import os
 import queue as _queue_mod
+import sys
+import threading
 from functools import wraps
 from inspect import iscoroutinefunction
 from copy import copy
@@ -112,6 +114,97 @@ class JsonFormatter(logging.Formatter):
         return json.dumps(payload, default=str)
 
 
+class BatchWriteHandler(logging.Handler):
+    """Coalesce formatted records into one write per batch (O2 — batch writes,
+    a.k.a. logging approach 4).
+
+    The stdlib ``StreamHandler`` issues ``stream.write()`` + ``stream.flush()``
+    per record — one flushed write syscall per log line.  Under a high-rate
+    access log that is the dominant cost on the listener thread.  This handler
+    instead appends each formatted line to an in-memory buffer and lets a single
+    long-lived flusher thread emit the batch as one ``write()`` when the buffer
+    reaches ``batch_size`` **or** ``flush_interval`` seconds elapse — whichever
+    comes first, so latency is bounded at low rate and syscalls collapse at high
+    rate.
+
+    Design notes:
+    - **One** flusher thread total (not a ``threading.Timer`` per batch — that
+      would churn a thread per ~``batch_size`` records under load).  It waits on
+      a ``Condition`` with the flush interval as its timeout: a full batch
+      notifies it awake, an idle interval wakes it to drain a partial batch.
+    - Formatting runs on the flusher thread, so a deferred-format access record
+      still builds its string off the event loop (as with the plain default).
+    - ``close()`` drains the buffer and joins the thread, so a partial trailing
+      batch is never lost at teardown.
+
+    Opt-in: only constructed when ``BB_LOG_BATCH_SIZE`` > 1.
+    """
+
+    def __init__(self, stream=None, *, batch_size: int = 128,
+                 flush_interval: float = 0.005):
+        super().__init__()
+        self._stream = stream if stream is not None else sys.stderr
+        self._batch_size = max(2, batch_size)
+        self._interval = flush_interval
+        self._buf: list[str] = []
+        self._cv = threading.Condition()
+        self._closed = False
+        self._flusher = threading.Thread(
+            target=self._run, name='bb-log-batch', daemon=True)
+        self._flusher.start()
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            msg = self.format(record)
+        except Exception:  # noqa: BLE001 — mirror logging.Handler.emit contract
+            self.handleError(record)
+            return
+        with self._cv:
+            was_empty = not self._buf
+            self._buf.append(msg)
+            # Wake the flusher when a batch opens (start the interval clock) or
+            # fills (flush now).  In between, it sleeps — no per-record wakeup.
+            if was_empty or len(self._buf) >= self._batch_size:
+                self._cv.notify()
+
+    def _run(self) -> None:
+        while True:
+            with self._cv:
+                while not self._buf and not self._closed:
+                    self._cv.wait()  # idle: block until the first record or close
+                if self._closed and not self._buf:
+                    return
+                # A batch is open: give it up to `interval` to fill (a full-batch
+                # emit notifies us awake early), then drain whatever accumulated.
+                if len(self._buf) < self._batch_size and not self._closed:
+                    self._cv.wait(self._interval)
+                batch = self._buf
+                self._buf = []
+                closing = self._closed
+            if batch:
+                self._write_batch(batch)
+            if closing:
+                return
+
+    def _write_batch(self, batch: list[str]) -> None:
+        try:
+            self._stream.write('\n'.join(batch) + '\n')
+            self._stream.flush()
+        except Exception:  # noqa: BLE001
+            # A broken sink must not kill the flusher thread; report once per
+            # batch via the stdlib handler-error path (honours logging.raiseExceptions).
+            self.handleError(logging.makeLogRecord({'msg': 'batch write failed'}))
+
+    def close(self) -> None:
+        with self._cv:
+            if self._closed:
+                return
+            self._closed = True
+            self._cv.notify()
+        self._flusher.join(timeout=1.0)
+        super().close()
+
+
 def _build_sink_handlers() -> list[logging.Handler]:
     """Build the async-logging sink handler(s) from the environment.
 
@@ -122,6 +215,10 @@ def _build_sink_handlers() -> list[logging.Handler]:
     - ``BB_SYSLOG_ADDR=host:port`` → a UDP ``SysLogHandler`` (approach 6).
       An unparseable value falls back to ``stderr`` with a warning rather than
       crashing startup.
+    - ``BB_LOG_BATCH_SIZE`` > 1 → a batching ``stderr`` sink (approach 4 / O2)
+      that coalesces up to that many lines into one write, flushed after
+      ``BB_LOG_BATCH_TIMEOUT_MS`` (default 5 ms).  Ignored for the syslog sink
+      (UDP is one datagram per message).
     - otherwise → ``StreamHandler(stderr)`` (approaches 1/2, the default).
 
     Formatter: ``JsonFormatter`` when ``BB_LOG_FORMAT=json`` (approach 3),
@@ -131,6 +228,7 @@ def _build_sink_handlers() -> list[logging.Handler]:
     """
     handler: logging.Handler
     syslog_addr = os.environ.get('BB_SYSLOG_ADDR', '').strip()
+    batch_size = _int_env('BB_LOG_BATCH_SIZE', 1)
     if syslog_addr:
         try:
             host, _, port = syslog_addr.partition(':')
@@ -141,12 +239,29 @@ def _build_sink_handlers() -> list[logging.Handler]:
                 'BB_SYSLOG_ADDR=%r unusable (%s); falling back to stderr',
                 syslog_addr, exc)
             handler = logging.StreamHandler()
+    elif batch_size > 1:
+        timeout_ms = _int_env('BB_LOG_BATCH_TIMEOUT_MS', 5)
+        handler = BatchWriteHandler(sys.stderr, batch_size=batch_size,
+                                    flush_interval=max(0, timeout_ms) / 1000.0)
     else:
         handler = logging.StreamHandler()
 
     if os.environ.get('BB_LOG_FORMAT', '').strip().lower() == 'json':
         handler.setFormatter(JsonFormatter())
     return [handler]
+
+
+def _int_env(name: str, default: int) -> int:
+    """Read an int env var, falling back to *default* on unset/unparseable.
+
+    Local to ``logger`` (mirrors ``blackbull.env._int_env``) so the module
+    stays free of the settings stack — logging is configured before, and
+    independently of, ``get_settings()``.
+    """
+    try:
+        return int(os.environ.get(name, default))
+    except (TypeError, ValueError):
+        return default
 
 
 class _DeferredFormatQueueHandler(logging.handlers.QueueHandler):
@@ -228,6 +343,11 @@ def teardown_async_logging() -> None:
         return
 
     _listener.stop()
+    # Drain and stop any batching sink so a partial trailing batch is flushed
+    # (its flusher is a daemon thread that would otherwise be killed at exit).
+    for h in _listener.handlers:
+        if isinstance(h, BatchWriteHandler):
+            h.close()
     _listener = None
 
     bb_logger = logging.getLogger('blackbull')
