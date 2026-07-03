@@ -318,6 +318,15 @@ class HTTP2Actor(Actor):
         # decremented via Task.add_done_callback when the task finishes.
         self._active_stream_count: int = 0
 
+        # Per-stream handler tasks, keyed by stream_id.  Kept so an inbound
+        # RST_STREAM (client cancellation) can cancel the running handler:
+        # otherwise a server-streaming handler abandoned mid-flight blocks
+        # forever in the sender's flow-control wait (the departed client never
+        # sends WINDOW_UPDATE), permanently holding a max_concurrent_streams
+        # slot.  Under a high-churn streaming client that leaks slots until new
+        # streams are REFUSED_STREAM'd — the "streaming collapse" the bench hit.
+        self._stream_tasks: dict[int, asyncio.Task] = {}
+
         # Per-stream recipients, keyed by stream_id.  Stored on the actor so
         # _make_done_cb can remove entries when streams complete.
         self._recipients: dict[int, _StreamRecipient] = {}
@@ -492,6 +501,7 @@ class HTTP2Actor(Actor):
             self._active_stream_count = max(0, self._active_stream_count - 1)
             if is_ws:
                 self._ws_stream_count = max(0, self._ws_stream_count - 1)
+            self._stream_tasks.pop(stream_id, None)
             self._senders.pop(stream_id, None)
             self._recipients.pop(stream_id, None)
             # Prune the stream node from the tree and remember it as closed-
@@ -831,7 +841,22 @@ class HTTP2Actor(Actor):
         else:
             task = tg.create_task(final_coro)
 
+        self._stream_tasks[stream_id] = task
         task.add_done_callback(self._make_done_cb(stream_id))
+
+    def _apply_priority_and_extensions(self, stream: 'Stream', scope: dict) -> None:
+        """Resolve stream priority and attach the H/2 ASGI extensions to *scope*.
+
+        Shared verbatim by the HEADERS and CONTINUATION completion paths.
+        ``scope['http2_priority']`` is retained for one release as a deprecation
+        alias — new apps should read
+        ``scope['extensions']['http.response.priority']`` instead.
+        """
+        priority = _resolve_priority(stream, scope)
+        scope['http2_priority'] = priority
+        scope['extensions'] = _build_h2_extensions(
+            stream.stream_id, priority,
+            self._peer_initial_window_size, self._connection_window_size)
 
     async def _on_headers_frame(
         self,
@@ -884,15 +909,7 @@ class HTTP2Actor(Actor):
             await self._handle_h2_websocket(stream, tg, log_record)
             return True
 
-        priority = _resolve_priority(stream, scope)
-        # ``scope['http2_priority']`` is retained for one release as a
-        # deprecation alias.  New apps should read
-        # ``scope['extensions']['http.response.priority']`` instead.
-        # Removal scheduled for v0.32.0.
-        scope['http2_priority'] = priority
-        scope['extensions'] = _build_h2_extensions(
-            stream.stream_id, priority,
-            self._peer_initial_window_size, self._connection_window_size)
+        self._apply_priority_and_extensions(stream, scope)
         stream_recipient = RecipientFactory.http2(queue_depth=self._stream_queue_depth)
         self._recipients[stream.stream_id] = stream_recipient
         stream.on_headers_received(end_stream=bool(frame.end_stream))
@@ -981,12 +998,7 @@ class HTTP2Actor(Actor):
                 self.factory.rst_stream(stream.stream_id, ErrorCodes.REFUSED_STREAM))
             return True
 
-        priority = _resolve_priority(stream, scope)
-        # See deprecation note at the HEADERS path above.
-        scope['http2_priority'] = priority
-        scope['extensions'] = _build_h2_extensions(
-            stream.stream_id, priority,
-            self._peer_initial_window_size, self._connection_window_size)
+        self._apply_priority_and_extensions(stream, scope)
         stream.scope = scope
         stream_recipient = RecipientFactory.http2(queue_depth=self._stream_queue_depth)
         self._recipients[stream.stream_id] = stream_recipient

@@ -301,9 +301,16 @@ class BlackBull:
                 await db.connect()
             ```
         """
+        return self._on_lifecycle_event('app_startup', fn)
+
+    def _on_lifecycle_event(self, event_name: str,
+                            fn: Callable[[], Awaitable[None]]) -> Callable[[], Awaitable[None]]:
+        """Wrap a zero-argument coroutine and register it as an interceptor
+        for *event_name*.  Shared by :meth:`on_startup` / :meth:`on_shutdown`;
+        the two differ only in the lifespan event they hook."""
         async def _adapter(_event: Event) -> None:
             await fn()
-        self._dispatcher.intercept('app_startup', _adapter)
+        self._dispatcher.intercept(event_name, _adapter)
         return fn
 
     def on_shutdown(self, fn: Callable[[], Awaitable[None]]) -> Callable[[], Awaitable[None]]:
@@ -329,10 +336,7 @@ class BlackBull:
                 await db.disconnect()
             ```
         """
-        async def _adapter(_event: Event) -> None:
-            await fn()
-        self._dispatcher.intercept('app_shutdown', _adapter)
-        return fn
+        return self._on_lifecycle_event('app_shutdown', fn)
 
     def on_warmup(self, fn: Callable[['BlackBull'], Awaitable[None]]
                   ) -> Callable[['BlackBull'], Awaitable[None]]:

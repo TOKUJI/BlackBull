@@ -333,19 +333,16 @@ def _coerce_value(ann: Any, value: Any) -> Any:
         raise TypeError(
             f"Value {value!r} matches no branch of union {ann!r}")
 
-    if origin is list:
+    if origin is list or origin is tuple:
+        # ``origin`` is itself the constructor (``list`` / ``tuple``); both
+        # accept an iterable of the element-coerced values.
         item_t = args[0] if args else None
         if not isinstance(value, list):
+            kind = 'array' if origin is list else 'array for tuple'
             raise TypeError(
-                f"Expected JSON array, got {type(value).__name__}")
-        return [_coerce_value(item_t, v) if item_t is not None else v for v in value]
-
-    if origin is tuple:
-        item_t = args[0] if args else None
-        if not isinstance(value, list):
-            raise TypeError(
-                f"Expected JSON array for tuple, got {type(value).__name__}")
-        return tuple(_coerce_value(item_t, v) if item_t is not None else v for v in value)
+                f"Expected JSON {kind}, got {type(value).__name__}")
+        return origin(_coerce_value(item_t, v) if item_t is not None else v
+                      for v in value)
 
     if origin is dict:
         v_t = args[1] if len(args) == 2 else None

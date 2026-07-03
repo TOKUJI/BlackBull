@@ -25,7 +25,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import IntEnum, IntFlag
-from typing import Any, ClassVar, NamedTuple
+from typing import Any, Callable, ClassVar, NamedTuple
 
 
 # ===========================================================================
@@ -402,20 +402,37 @@ def get_property_info(identifier: int) -> PropertyInfo | None:
     return _PROP_BY_ID.get(identifier)
 
 
+def _decode_vbi_at(data: bytes, pos: int, end: int) -> tuple[int, int]:
+    val, consumed = decode_variable_byte_integer(data[pos:end])
+    return val, pos + consumed
+
+
+# Wire type → (value encoder, value decoder).  Module-level constant, so both
+# property codec paths are a single dict lookup instead of a 6-branch chain
+# (the original ``_encode_prop_value`` used bare ``if`` — not ``elif`` — so every
+# branch was evaluated even after a match).  Encoders take the raw value and
+# return the encoded bytes *without* the property-id prefix; decoders share a
+# uniform ``(data, pos, end) -> (value, new_pos)`` signature.  ``_PAIR`` (user
+# properties) is handled by guard clauses in both callers, not via this table.
+_WIRE_CODECS: dict[str, tuple[Callable[[Any], bytes],
+                              Callable[[bytes, int, int], tuple[Any, int]]]] = {
+    _BYTE:   (lambda v: bytes([v & 0xFF]),
+              lambda d, p, e: (d[p], p + 1)),
+    _UINT16: (lambda v: int(v).to_bytes(2, 'big'),
+              lambda d, p, e: (int.from_bytes(d[p:p + 2], 'big'), p + 2)),
+    _UINT32: (lambda v: int(v).to_bytes(4, 'big'),
+              lambda d, p, e: (int.from_bytes(d[p:p + 4], 'big'), p + 4)),
+    _VBI:    (lambda v: encode_variable_byte_integer(int(v)), _decode_vbi_at),
+    _UTF8:   (_encode_utf8, lambda d, p, e: _decode_utf8(d, p)),
+    _BINARY: (_encode_binary, lambda d, p, e: _decode_binary(d, p)),
+}
+
+
 def _encode_prop_value(pid: int, wire_type: str, value: Any) -> bytes:
-    if wire_type == _BYTE:
-        return bytes([pid, value & 0xFF])
-    if wire_type == _UINT16:
-        return bytes([pid]) + int(value).to_bytes(2, 'big')
-    if wire_type == _UINT32:
-        return bytes([pid]) + int(value).to_bytes(4, 'big')
-    if wire_type == _VBI:
-        return bytes([pid]) + encode_variable_byte_integer(int(value))
-    if wire_type == _UTF8:
-        return bytes([pid]) + _encode_utf8(value)
-    if wire_type == _BINARY:
-        return bytes([pid]) + _encode_binary(value)
-    raise MQTTDecodeError(f'Unhandled property wire type {wire_type!r}')
+    codec = _WIRE_CODECS.get(wire_type)
+    if codec is None:
+        raise MQTTDecodeError(f'Unhandled property wire type {wire_type!r}')
+    return bytes([pid]) + codec[0](value)
 
 
 def encode_properties(properties: dict[str, Any]) -> bytes:
@@ -454,32 +471,15 @@ def decode_properties(data: bytes, offset: int = 0) -> tuple[dict[str, Any], int
             raise MQTTDecodeError(f'Unknown property identifier 0x{pid:02X}')
         wire_type = spec.wire_type
         runtime_key = _PROP_ID_TO_KEY[pid]
-        if wire_type == _BYTE:
-            props[runtime_key] = data[pos]
-            pos += 1
-        elif wire_type == _UINT16:
-            props[runtime_key] = int.from_bytes(data[pos:pos + 2], 'big')
-            pos += 2
-        elif wire_type == _UINT32:
-            props[runtime_key] = int.from_bytes(data[pos:pos + 4], 'big')
-            pos += 4
-        elif wire_type == _VBI:
-            val, c = decode_variable_byte_integer(data[pos:end])
-            props[runtime_key] = val
-            pos += c
-        elif wire_type == _UTF8:
-            val, pos = _decode_utf8(data, pos)
-        elif wire_type == _BINARY:
-            val, pos = _decode_binary(data, pos)
-        elif wire_type == _PAIR:
+        if wire_type == _PAIR:
             pair_key, pos = _decode_utf8(data, pos)
             pair_val, pos = _decode_utf8(data, pos)
             props.setdefault(runtime_key, []).append((pair_key, pair_val))
             continue
-        else:  # pragma: no cover - exhaustive above
+        codec = _WIRE_CODECS.get(wire_type)
+        if codec is None:  # pragma: no cover - exhaustive above
             raise MQTTDecodeError(f'Unhandled property wire type {wire_type!r}')
-        if wire_type in (_UTF8, _BINARY):
-            props[runtime_key] = val
+        props[runtime_key], pos = codec[1](data, pos, end)
     return props, end - offset
 
 
@@ -814,35 +814,38 @@ def _encode_reason_and_props(packet_type: MQTTPacketType,
     return _frame(packet_type, 0, bytes(body))
 
 
+# Concrete message class → encoder.  Module-level constant (allocated once at
+# import), so encode_packet is a single ``type(message)`` lookup + call rather
+# than an O(n) isinstance chain that walks each class's MRO.  The four
+# _PacketIdAck subclasses are enumerated explicitly because dict dispatch keys
+# on exact type, not base class.
+_ENCODERS: dict[type, Callable[[Any], bytes]] = {
+    MQTTConnect: _encode_connect,
+    MQTTConnack: _encode_connack,
+    MQTTPublish: _encode_publish,
+    MQTTPuback: _encode_packet_id_ack,
+    MQTTPubrec: _encode_packet_id_ack,
+    MQTTPubrel: _encode_packet_id_ack,
+    MQTTPubcomp: _encode_packet_id_ack,
+    MQTTSubscribe: _encode_subscribe,
+    MQTTSuback: _encode_suback,
+    MQTTUnsubscribe: _encode_unsubscribe,
+    MQTTUnsuback: _encode_unsuback,
+    MQTTPingreq: lambda m: _frame(MQTTPacketType.PINGREQ, 0, b''),
+    MQTTPingresp: lambda m: _frame(MQTTPacketType.PINGRESP, 0, b''),
+    MQTTDisconnect: lambda m: _encode_reason_and_props(
+        MQTTPacketType.DISCONNECT, m.reason_code, m.properties),
+    MQTTAuth: lambda m: _encode_reason_and_props(
+        MQTTPacketType.AUTH, m.reason_code, m.properties),
+}
+
+
 def encode_packet(message: MQTTMessage) -> bytes:
     """Serialize an MQTT control packet to its wire representation."""
-    if isinstance(message, MQTTConnect):
-        return _encode_connect(message)
-    if isinstance(message, MQTTConnack):
-        return _encode_connack(message)
-    if isinstance(message, MQTTPublish):
-        return _encode_publish(message)
-    if isinstance(message, _PacketIdAck):
-        return _encode_packet_id_ack(message)
-    if isinstance(message, MQTTSubscribe):
-        return _encode_subscribe(message)
-    if isinstance(message, MQTTSuback):
-        return _encode_suback(message)
-    if isinstance(message, MQTTUnsubscribe):
-        return _encode_unsubscribe(message)
-    if isinstance(message, MQTTUnsuback):
-        return _encode_unsuback(message)
-    if isinstance(message, MQTTPingreq):
-        return _frame(MQTTPacketType.PINGREQ, 0, b'')
-    if isinstance(message, MQTTPingresp):
-        return _frame(MQTTPacketType.PINGRESP, 0, b'')
-    if isinstance(message, MQTTDisconnect):
-        return _encode_reason_and_props(MQTTPacketType.DISCONNECT,
-                                        message.reason_code, message.properties)
-    if isinstance(message, MQTTAuth):
-        return _encode_reason_and_props(MQTTPacketType.AUTH,
-                                        message.reason_code, message.properties)
-    raise MQTTDecodeError(f'Cannot encode {type(message).__name__}')
+    encoder = _ENCODERS.get(type(message))
+    if encoder is None:
+        raise MQTTDecodeError(f'Cannot encode {type(message).__name__}')
+    return encoder(message)
 
 
 # ===========================================================================
@@ -994,6 +997,35 @@ def _decode_reason_and_props(body: bytes) -> tuple[int | None, dict[str, Any]]:
     return reason_code, properties
 
 
+def _decode_reason_props_msg(cls: type, body: bytes) -> MQTTMessage:
+    """DISCONNECT/AUTH share a ``reason_code`` + ``properties`` body shape."""
+    rc, props = _decode_reason_and_props(body)
+    return cls(reason_code=rc, properties=props)
+
+
+# Packet type → decoder, keyed on MQTTPacketType.  Module-level constant: one
+# hash + lookup per packet regardless of type, versus the O(n) elif chain's up
+# to 17 integer comparisons.  All decoders share a uniform ``(body, flags)``
+# signature; those that ignore flags simply don't read the second argument.
+_DECODERS: dict[MQTTPacketType, Callable[[bytes, int], MQTTMessage]] = {
+    MQTTPacketType.CONNECT:     lambda body, flags: _decode_connect(body, flags),
+    MQTTPacketType.CONNACK:     lambda body, flags: _decode_connack(body),
+    MQTTPacketType.PUBLISH:     lambda body, flags: _decode_publish(body, flags),
+    MQTTPacketType.PUBACK:      lambda body, flags: _decode_packet_id_ack(MQTTPuback, body),
+    MQTTPacketType.PUBREC:      lambda body, flags: _decode_packet_id_ack(MQTTPubrec, body),
+    MQTTPacketType.PUBREL:      lambda body, flags: _decode_packet_id_ack(MQTTPubrel, body),
+    MQTTPacketType.PUBCOMP:     lambda body, flags: _decode_packet_id_ack(MQTTPubcomp, body),
+    MQTTPacketType.SUBSCRIBE:   lambda body, flags: _decode_subscribe(body),
+    MQTTPacketType.SUBACK:      lambda body, flags: _decode_suback(body),
+    MQTTPacketType.UNSUBSCRIBE: lambda body, flags: _decode_unsubscribe(body),
+    MQTTPacketType.UNSUBACK:    lambda body, flags: _decode_unsuback(body),
+    MQTTPacketType.PINGREQ:     lambda body, flags: MQTTPingreq(),
+    MQTTPacketType.PINGRESP:    lambda body, flags: MQTTPingresp(),
+    MQTTPacketType.DISCONNECT:  lambda body, flags: _decode_reason_props_msg(MQTTDisconnect, body),
+    MQTTPacketType.AUTH:        lambda body, flags: _decode_reason_props_msg(MQTTAuth, body),
+}
+
+
 def decode_packet(data: bytes) -> MQTTMessage:
     """Decode the first MQTT control packet in *data*.
 
@@ -1030,40 +1062,10 @@ def decode_packet(data: bytes) -> MQTTMessage:
         raise IncompletePacket('Packet body truncated')
     body = data[header_len:total]
 
-    if packet_type == MQTTPacketType.CONNECT:
-        msg: MQTTMessage = _decode_connect(body, flags)
-    elif packet_type == MQTTPacketType.CONNACK:
-        msg = _decode_connack(body)
-    elif packet_type == MQTTPacketType.PUBLISH:
-        msg = _decode_publish(body, flags)
-    elif packet_type == MQTTPacketType.PUBACK:
-        msg = _decode_packet_id_ack(MQTTPuback, body)
-    elif packet_type == MQTTPacketType.PUBREC:
-        msg = _decode_packet_id_ack(MQTTPubrec, body)
-    elif packet_type == MQTTPacketType.PUBREL:
-        msg = _decode_packet_id_ack(MQTTPubrel, body)
-    elif packet_type == MQTTPacketType.PUBCOMP:
-        msg = _decode_packet_id_ack(MQTTPubcomp, body)
-    elif packet_type == MQTTPacketType.SUBSCRIBE:
-        msg = _decode_subscribe(body)
-    elif packet_type == MQTTPacketType.SUBACK:
-        msg = _decode_suback(body)
-    elif packet_type == MQTTPacketType.UNSUBSCRIBE:
-        msg = _decode_unsubscribe(body)
-    elif packet_type == MQTTPacketType.UNSUBACK:
-        msg = _decode_unsuback(body)
-    elif packet_type == MQTTPacketType.PINGREQ:
-        msg = MQTTPingreq()
-    elif packet_type == MQTTPacketType.PINGRESP:
-        msg = MQTTPingresp()
-    elif packet_type == MQTTPacketType.DISCONNECT:
-        rc, props = _decode_reason_and_props(body)
-        msg = MQTTDisconnect(reason_code=rc, properties=props)
-    elif packet_type == MQTTPacketType.AUTH:
-        rc, props = _decode_reason_and_props(body)
-        msg = MQTTAuth(reason_code=rc, properties=props)
-    else:  # pragma: no cover - exhaustive above
+    decoder = _DECODERS.get(packet_type)
+    if decoder is None:  # pragma: no cover - MQTTPacketType is exhaustive above
         raise MQTTDecodeError(f'Unhandled packet type {packet_type!r}')
+    msg = decoder(body, flags)
 
     msg._set_consumed(total)
     return msg
