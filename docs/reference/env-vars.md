@@ -66,12 +66,14 @@ first-hit-then-summary rate-limit model.
 | Variable | Default | Controls |
 |---|---|---|
 | `BB_ACCESS_LOG` | `1` | Emit one record on the `blackbull.access` logger per completed request.  Set to `0` to skip access-log formatting (useful during benchmarks). |
+| `BB_ASYNC_LOGGING` | `1` | Install a `QueueHandler` on the `blackbull` logger so `logger.debug/info` calls from the event loop are non-blocking. |
+| `BB_LOG_FORMAT` | *(plain)* | Set to `json` to emit one structured JSON object per log line.  Access-log records expose `client_ip`, `method`, `path`, `http_version`, `status`, `response_bytes`, `duration_ms` (plus `close_code` on WebSocket disconnect) as top-level keys; every record carries `timestamp`, `level`, `logger`, `message`.  Applies to the default sink installed by async logging. |
+| `BB_SYSLOG_ADDR` | *(unset)* | `host:port` of a syslog/UDP collector (e.g. `127.0.0.1:514`).  When set, the async-logging sink ships records via a UDP `SysLogHandler` instead of `stderr`.  Composes with `BB_LOG_FORMAT=json`.  An unparseable value falls back to `stderr` with a warning. |
 
 The `blackbull.caps` logger has no env-var toggle — set its level
 via `logging.getLogger('blackbull.caps').setLevel(...)` at
 startup.  Default level is `WARNING`; raise to `ERROR` to silence
 or drop to `INFO` to surface the rate-limit summary records.
-| `BB_ASYNC_LOGGING` | `1` | Install a `QueueHandler` on the `blackbull` logger so `logger.debug/info` calls from the event loop are non-blocking. |
 
 ## HTTP/2 internals
 

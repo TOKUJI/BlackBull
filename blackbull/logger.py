@@ -1,6 +1,8 @@
 import inspect
+import json
 import logging
 import logging.handlers
+import os
 import queue as _queue_mod
 from functools import wraps
 from inspect import iscoroutinefunction
@@ -71,6 +73,82 @@ class ColoredFormatter(logging.Formatter):
         return logging.Formatter.format(self, colored_record)
 
 
+class JsonFormatter(logging.Formatter):
+    """Emit one JSON object per log line (logging approach 3 — structured JSON).
+
+    Every record carries ``timestamp`` / ``level`` / ``logger`` / ``message``.
+    Access-log records (``blackbull.access``) additionally attach the structured
+    fields from :meth:`AccessLogRecord.as_extra` via ``extra=`` — those are
+    lifted to first-class JSON keys (``client_ip``, ``method``, ``path``,
+    ``http_version``, ``status``, ``response_bytes``, ``duration_ms``, and
+    ``close_code`` for WebSocket disconnects).  ``exc_info`` is rendered as a
+    formatted traceback string when present.
+
+    Runs on the ``QueueListener`` thread (it is the sink handler's formatter),
+    so the access record's ``format()`` string build still happens off the
+    event loop, exactly as with the plain-text default.
+    """
+
+    # Keys AccessLogRecord.as_extra() may attach to the LogRecord.  Emitted as
+    # top-level JSON keys when present; absent for normal framework logs.
+    _ACCESS_KEYS = ('client_ip', 'method', 'path', 'http_version',
+                    'status', 'response_bytes', 'duration_ms', 'close_code')
+
+    def format(self, record: logging.LogRecord) -> str:
+        payload: dict = {
+            'timestamp': self.formatTime(record, self.datefmt),
+            'level':     record.levelname,
+            'logger':    record.name,
+            'message':   record.getMessage(),
+        }
+        for key in self._ACCESS_KEYS:
+            value = getattr(record, key, None)
+            if value is not None:
+                payload[key] = value
+        if record.exc_info:
+            payload['exc_info'] = self.formatException(record.exc_info)
+        # default=str so a stray non-serialisable ``extra`` never crashes the
+        # logging thread — it degrades to that value's repr instead.
+        return json.dumps(payload, default=str)
+
+
+def _build_sink_handlers() -> list[logging.Handler]:
+    """Build the async-logging sink handler(s) from the environment.
+
+    Selects the *destination* and *format* for the background listener when
+    :func:`setup_async_logging` is called without explicit handlers (the
+    common path — the app has only the ``NullHandler`` from import):
+
+    - ``BB_SYSLOG_ADDR=host:port`` → a UDP ``SysLogHandler`` (approach 6).
+      An unparseable value falls back to ``stderr`` with a warning rather than
+      crashing startup.
+    - otherwise → ``StreamHandler(stderr)`` (approaches 1/2, the default).
+
+    Formatter: ``JsonFormatter`` when ``BB_LOG_FORMAT=json`` (approach 3),
+    otherwise the stdlib default (plain text — unchanged behaviour).  These are
+    read from ``os.environ`` directly (like ``BB_PHASE_TRACE``) so ``logger``
+    stays importable without the full settings stack.
+    """
+    handler: logging.Handler
+    syslog_addr = os.environ.get('BB_SYSLOG_ADDR', '').strip()
+    if syslog_addr:
+        try:
+            host, _, port = syslog_addr.partition(':')
+            handler = logging.handlers.SysLogHandler(
+                address=(host or '127.0.0.1', int(port) if port else 514))
+        except (ValueError, OSError) as exc:
+            logging.getLogger('blackbull').warning(
+                'BB_SYSLOG_ADDR=%r unusable (%s); falling back to stderr',
+                syslog_addr, exc)
+            handler = logging.StreamHandler()
+    else:
+        handler = logging.StreamHandler()
+
+    if os.environ.get('BB_LOG_FORMAT', '').strip().lower() == 'json':
+        handler.setFormatter(JsonFormatter())
+    return [handler]
+
+
 class _DeferredFormatQueueHandler(logging.handlers.QueueHandler):
     """QueueHandler that defers formatting of self-formatting records.
 
@@ -113,8 +191,9 @@ def setup_async_logging(handlers: list[logging.Handler] | None = None) -> None:
     ----------
     handlers:
         Handlers the background listener should write to.  Defaults to the
-        non-NullHandler handlers already on the ``blackbull`` logger, or a
-        single ``StreamHandler(stderr)`` when none exist.
+        non-NullHandler handlers already on the ``blackbull`` logger, or the
+        env-selected sink from :func:`_build_sink_handlers` when none exist
+        (``BB_SYSLOG_ADDR`` destination + ``BB_LOG_FORMAT=json`` formatting).
     """
     global _listener
 
@@ -126,7 +205,7 @@ def setup_async_logging(handlers: list[logging.Handler] | None = None) -> None:
     if handlers is None:
         existing = [h for h in bb_logger.handlers
                     if not isinstance(h, logging.NullHandler)]
-        handlers = existing if existing else [logging.StreamHandler()]
+        handlers = existing if existing else _build_sink_handlers()
 
     log_queue: _queue_mod.SimpleQueue = _queue_mod.SimpleQueue()
     queue_handler = _DeferredFormatQueueHandler(log_queue)  # type: ignore[arg-type]

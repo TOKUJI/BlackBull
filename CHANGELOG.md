@@ -32,6 +32,17 @@ so the editable install's metadata catches up.
 ## [Unreleased]
 
 ### Added
+- **Structured JSON logging** (`BB_LOG_FORMAT=json`) — the async-logging sink can
+  emit one JSON object per line instead of plain text. Access-log records expose
+  `client_ip`, `method`, `path`, `http_version`, `status`, `response_bytes`,
+  `duration_ms` (and `close_code` on WebSocket disconnect) as top-level keys;
+  every record carries `timestamp`, `level`, `logger`, `message`. Formatting runs
+  on the listener thread, so the access record's string build still happens off
+  the event loop. Opt-in; plain text stays the default. (Logging approach 3.)
+- **Syslog / UDP log shipping** (`BB_SYSLOG_ADDR=host:port`) — when set, the
+  async-logging sink ships records via a UDP `SysLogHandler` instead of `stderr`;
+  composes with `BB_LOG_FORMAT=json` (JSON lines over syslog). An unparseable
+  address falls back to `stderr` with a warning. (Logging approach 6.)
 - **Connection-level TCP segment coalescing** (`BB_H2_CONN_BUFFER_US`, default
   `0` = off) — response frames from HTTP/2 streams that complete within a short
   window on one connection can be flushed as a single TCP segment instead of one
