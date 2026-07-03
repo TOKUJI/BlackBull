@@ -1008,9 +1008,9 @@ def _decode_reason_props_msg(cls: type, body: bytes) -> MQTTMessage:
 # to 17 integer comparisons.  All decoders share a uniform ``(body, flags)``
 # signature; those that ignore flags simply don't read the second argument.
 _DECODERS: dict[MQTTPacketType, Callable[[bytes, int], MQTTMessage]] = {
-    MQTTPacketType.CONNECT:     lambda body, flags: _decode_connect(body, flags),
+    MQTTPacketType.CONNECT:     _decode_connect,
     MQTTPacketType.CONNACK:     lambda body, flags: _decode_connack(body),
-    MQTTPacketType.PUBLISH:     lambda body, flags: _decode_publish(body, flags),
+    MQTTPacketType.PUBLISH:     _decode_publish,
     MQTTPacketType.PUBACK:      lambda body, flags: _decode_packet_id_ack(MQTTPuback, body),
     MQTTPacketType.PUBREC:      lambda body, flags: _decode_packet_id_ack(MQTTPubrec, body),
     MQTTPacketType.PUBREL:      lambda body, flags: _decode_packet_id_ack(MQTTPubrel, body),
