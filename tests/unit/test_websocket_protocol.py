@@ -13,7 +13,8 @@ from hypothesis import strategies as st
 
 from blackbull.server.sender import WebSocketSender, AsyncioWriter, AbstractWriter
 from blackbull.server.recipient import WebSocketRecipient, AsyncioReader, AbstractReader
-from blackbull.server.ws_codec import encode_frame, read_frame, WSOpcode
+from blackbull.server.ws_codec import (encode_frame, encode_frame_header,
+                                       read_frame, WSOpcode)
 
 
 # ---------------------------------------------------------------------------
@@ -88,6 +89,13 @@ class _FakeWriter:
     def write(self, data: bytes):
         self.written += data
 
+    def writelines(self, parts):
+        # Mirror asyncio.StreamWriter.writelines (vectored write): the
+        # concatenated bytes are identical to a single write of the joined
+        # parts, so byte-level assertions on ``written`` still hold.
+        for part in parts:
+            self.written += part
+
     async def drain(self):
         pass
 
@@ -155,6 +163,37 @@ class TestEncodeFrame:
     def test_close_frame_opcode(self):
         frame = encode_frame(b'\x03\xe8', opcode=0x8)
         assert frame[0] & 0x0F == 0x8
+
+
+class TestEncodeFrameHeader:
+    """encode_frame_header must yield the same unmasked header bytes that
+    encode_frame prepends — so a vectored ``(header, payload)`` write is
+    byte-for-byte identical to the old single ``encode_frame`` frame."""
+
+    @given(payload=st.binary(min_size=0, max_size=70000),
+           opcode=st.sampled_from([0x1, 0x2, 0x8]))
+    def test_header_plus_payload_equals_encode_frame(self, payload, opcode):
+        """The load-bearing invariant behind the P2 vectored-send change:
+        header + payload over the wire == encode_frame(payload)."""
+        header = encode_frame_header(len(payload), opcode)
+        assert header + payload == encode_frame(payload, opcode=opcode)
+
+    def test_short_header_is_two_bytes(self):
+        header = encode_frame_header(7, WSOpcode.TEXT)
+        assert header == bytes((0x80 | 0x1, 7))
+
+    def test_rsv1_bit_is_set(self):
+        header = encode_frame_header(5, WSOpcode.TEXT, rsv1=True)
+        assert header[0] & 0x40  # RSV1
+        # …and matches encode_frame's own rsv1 header.
+        assert header + b'xxxxx' == encode_frame(b'xxxxx', opcode=WSOpcode.TEXT,
+                                                 rsv1=True)
+
+    def test_extended_16bit_and_64bit_lengths(self):
+        h16 = encode_frame_header(300, WSOpcode.BINARY)
+        assert h16[1] == 126 and int.from_bytes(h16[2:4], 'big') == 300
+        h64 = encode_frame_header(70000, WSOpcode.BINARY)
+        assert h64[1] == 127 and int.from_bytes(h64[2:10], 'big') == 70000
 
 
 # ---------------------------------------------------------------------------

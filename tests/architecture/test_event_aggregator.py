@@ -172,3 +172,42 @@ def test_dispatcher_generation_bumps_on_registration() -> None:
     d.intercept('error', AsyncMock())
     g2 = d.generation
     assert g0 != g1 != g2 and len({g0, g1, g2}) == 3
+
+
+# ---------------------------------------------------------------------------
+# has_websocket_message_listeners — the WebSocket receive hot-path guard
+# ---------------------------------------------------------------------------
+
+def test_has_websocket_message_listeners_false_when_empty() -> None:
+    agg = EventAggregator(EventDispatcher())
+    assert agg.has_websocket_message_listeners() is False
+
+
+def test_has_websocket_message_listeners_true_when_registered() -> None:
+    d = EventDispatcher()
+    d.on('websocket_message', AsyncMock())
+    assert EventAggregator(d).has_websocket_message_listeners() is True
+
+
+def test_has_websocket_message_listeners_ignores_other_events() -> None:
+    """A listener on some *other* event must not flip the WS-receive guard."""
+    d = EventDispatcher()
+    d.on('request_received', AsyncMock())
+    assert EventAggregator(d).has_websocket_message_listeners() is False
+
+
+def test_has_websocket_message_listeners_invalidates_late_registration() -> None:
+    d = EventDispatcher()
+    agg = EventAggregator(d)
+    assert agg.has_websocket_message_listeners() is False  # caches False
+    d.on('websocket_message', AsyncMock())                 # bumps generation
+    assert agg.has_websocket_message_listeners() is True    # recomputed
+
+
+def test_has_websocket_message_listeners_is_cached_between_calls() -> None:
+    d = EventDispatcher()
+    agg = EventAggregator(d)
+    agg.has_websocket_message_listeners()                  # prime the cache
+    d.has_listeners = Mock(side_effect=AssertionError(
+        'has_listeners must not be called again while generation is unchanged'))
+    assert agg.has_websocket_message_listeners() is False  # served from cache

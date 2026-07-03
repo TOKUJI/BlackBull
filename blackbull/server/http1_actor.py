@@ -355,12 +355,8 @@ class HTTP1Actor(Actor):
                             'after %d bytes; peer=%r',
                             len(self._request), self._peername,
                         )
-                        await send(
-                            b'400 Bad Request',
-                            HTTPStatus.BAD_REQUEST,
-                            [(b'connection', b'close'),
-                             (b'content-type', b'text/plain')],
-                        )
+                        await self._send_error_and_close(
+                            send, b'400 Bad Request', HTTPStatus.BAD_REQUEST)
                     return
                 except HeaderTooLargeError as exc:
                     # RFC 6585 §5 — 431 Request Header Fields Too Large.
@@ -371,12 +367,9 @@ class HTTP1Actor(Actor):
                                 requested=len(self._request),
                                 limit=cfg.header_max_total,
                                 peer=self._peername, protocol='http1')
-                    await send(
-                        b'431 Request Header Fields Too Large',
-                        HTTPStatus.REQUEST_HEADER_FIELDS_TOO_LARGE,
-                        [(b'connection', b'close'),
-                         (b'content-type', b'text/plain')],
-                    )
+                    await self._send_error_and_close(
+                        send, b'431 Request Header Fields Too Large',
+                        HTTPStatus.REQUEST_HEADER_FIELDS_TOO_LARGE)
                     return
                 except (asyncio.TimeoutError, TimeoutError):
                     logger.warning(
@@ -387,12 +380,8 @@ class HTTP1Actor(Actor):
                                 requested=cfg.header_timeout,
                                 limit=cfg.header_timeout,
                                 peer=self._peername, protocol='http1')
-                    await send(
-                        b'408 Request Timeout',
-                        HTTPStatus.REQUEST_TIMEOUT,
-                        [(b'connection', b'close'),
-                         (b'content-type', b'text/plain')],
-                    )
+                    await self._send_error_and_close(
+                        send, b'408 Request Timeout', HTTPStatus.REQUEST_TIMEOUT)
                     return
 
                 try:
@@ -405,12 +394,9 @@ class HTTP1Actor(Actor):
                                 requested=len(self._request),
                                 limit=cfg.header_max_line,
                                 peer=self._peername, protocol='http1')
-                    await send(
-                        b'431 Request Header Fields Too Large',
-                        HTTPStatus.REQUEST_HEADER_FIELDS_TOO_LARGE,
-                        [(b'connection', b'close'),
-                         (b'content-type', b'text/plain')],
-                    )
+                    await self._send_error_and_close(
+                        send, b'431 Request Header Fields Too Large',
+                        HTTPStatus.REQUEST_HEADER_FIELDS_TOO_LARGE)
                     return
                 except BadRequestError as exc:
                     # RFC 9112 §3 / §5 violation — answer with 400 and close.
@@ -418,12 +404,8 @@ class HTTP1Actor(Actor):
                     # we always terminate the connection rather than try to
                     # find the next message boundary.
                     logger.warning('400 Bad Request: %s', exc)
-                    await send(
-                        b'400 Bad Request',
-                        HTTPStatus.BAD_REQUEST,
-                        [(b'connection', b'close'),
-                         (b'content-type', b'text/plain')],
-                    )
+                    await self._send_error_and_close(
+                        send, b'400 Bad Request', HTTPStatus.BAD_REQUEST)
                     return
                 except NotImplementedFramingError as exc:
                     # Sprint 18 Phase 2 — RFC 9112 §6.1: server received a
@@ -432,12 +414,8 @@ class HTTP1Actor(Actor):
                     # dropped silently (Finding C in user-corpus).  Match
                     # nginx and answer with 501 then close.
                     logger.warning('501 Not Implemented: %s', exc)
-                    await send(
-                        b'501 Not Implemented',
-                        HTTPStatus.NOT_IMPLEMENTED,
-                        [(b'connection', b'close'),
-                         (b'content-type', b'text/plain')],
-                    )
+                    await self._send_error_and_close(
+                        send, b'501 Not Implemented', HTTPStatus.NOT_IMPLEMENTED)
                     return
                 self._fill_connection_info(scope)
 
@@ -520,12 +498,8 @@ class HTTP1Actor(Actor):
                                 scope_path=scope.get('path'),
                                 protocol='http1')
                     if not send._started:
-                        await send(
-                            b'408 Request Timeout',
-                            HTTPStatus.REQUEST_TIMEOUT,
-                            [(b'connection', b'close'),
-                             (b'content-type', b'text/plain')],
-                        )
+                        await self._send_error_and_close(
+                            send, b'408 Request Timeout', HTTPStatus.REQUEST_TIMEOUT)
                     break
                 if not ok:
                     break  # unhandled error — close connection
@@ -570,6 +544,19 @@ class HTTP1Actor(Actor):
     # ------------------------------------------------------------------
     # Private helpers
     # ------------------------------------------------------------------
+
+    @staticmethod
+    async def _send_error_and_close(send, body: bytes, status: HTTPStatus) -> None:
+        """Send a plain-text error response with ``Connection: close``.
+
+        Every framing/timeout guard in ``run()`` answers the same way: a
+        short body, the status line, and ``connection: close`` +
+        ``content-type: text/plain`` headers.
+        """
+        await send(
+            body, status,
+            [(b'connection', b'close'), (b'content-type', b'text/plain')],
+        )
 
     def _parse(self, data: bytes) -> dict:
         """Parse raw HTTP/1.1 request bytes into an ASGI scope dict.

@@ -66,12 +66,17 @@ first-hit-then-summary rate-limit model.
 | Variable | Default | Controls |
 |---|---|---|
 | `BB_ACCESS_LOG` | `1` | Emit one record on the `blackbull.access` logger per completed request.  Set to `0` to skip access-log formatting (useful during benchmarks). |
+| `BB_ASYNC_LOGGING` | `1` | Install a `QueueHandler` on the `blackbull` logger so `logger.debug/info` calls from the event loop are non-blocking. |
+| `BB_LOG_FORMAT` | *(plain)* | Set to `json` to emit one structured JSON object per log line.  Access-log records expose `client_ip`, `method`, `path`, `http_version`, `status`, `response_bytes`, `duration_ms` (plus `close_code` on WebSocket disconnect) as top-level keys; every record carries `timestamp`, `level`, `logger`, `message`.  Applies to the default sink installed by async logging. |
+| `BB_SYSLOG_ADDR` | *(unset)* | `host:port` of a syslog/UDP collector (e.g. `127.0.0.1:514`).  When set, the async-logging sink ships records via a UDP `SysLogHandler` instead of `stderr`.  Composes with `BB_LOG_FORMAT=json`.  An unparseable value falls back to `stderr` with a warning. |
+| `BB_LOG_FILE` | *(unset)* | Path for the async-logging sink to write to (append mode) instead of `stderr`.  Composes with `BB_LOG_FORMAT=json` and `BB_LOG_BATCH_SIZE`.  Each worker opens its own append stream on the listener side (post-fork), so no writer thread is inherited across `fork()`; access-log lines (< `PIPE_BUF`) interleave atomically under `O_APPEND`.  Ignored for the syslog sink.  An unopenable path falls back to `stderr` with a warning. |
+| `BB_LOG_BATCH_SIZE` | `64` | Coalescing width of the async-logging sink: up to this many formatted records are joined into a single `write()`+`flush()`. **Async logging is batch logging** — the stream/file sink always coalesces (floored at 2); a per-record flush is the dominant access-log cost (one flush syscall per request churns the GIL against the event loop — profiling showed ~16% CPU and a −44% throughput hit), so it is not an async option. A single flusher thread emits the batch when it fills or `BB_LOG_BATCH_TIMEOUT_MS` elapses. To force an immediate per-record flush, disable async logging (`BB_ASYNC_LOGGING=0`, the synchronous path) instead. Ignored for the syslog sink (UDP is one datagram per message). |
+| `BB_LOG_BATCH_TIMEOUT_MS` | `5` | Max time a partial batch waits before it is flushed, bounding log-visibility latency at low request rates. |
 
 The `blackbull.caps` logger has no env-var toggle — set its level
 via `logging.getLogger('blackbull.caps').setLevel(...)` at
 startup.  Default level is `WARNING`; raise to `ERROR` to silence
 or drop to `INFO` to surface the rate-limit summary records.
-| `BB_ASYNC_LOGGING` | `1` | Install a `QueueHandler` on the `blackbull` logger so `logger.debug/info` calls from the event loop are non-blocking. |
 
 ## HTTP/2 internals
 
@@ -83,6 +88,7 @@ or drop to `INFO` to surface the rate-limit summary records.
 | `BB_H2_ACTIVE_STREAMS` | `20` | Per-connection `asyncio.Semaphore` cap on stream handlers actually running concurrently, under multi-worker.  Prevents one high-mux connection from saturating a single event loop.  `0` disables (no cap beyond `BB_H2_MAX_CONCURRENT_STREAMS`). |
 | `BB_H2_ACTIVE_STREAMS_1W` | `20` | Same as above, but used when `BB_WORKERS=1`. |
 | `BB_FRAME_YIELD_EVERY` | `8` | Number of stream tasks spawned per connection before the frame loop inserts `await asyncio.sleep(0)`.  Caps the maximum synchronous run between yields under burst traffic.  `0` disables the cooperative yield (legacy behaviour). |
+| `BB_H2_CONN_BUFFER_US` | `0` (disabled) | Connection-level outbound frame **segment coalescing** hold time, in microseconds.  When `>0`, response frames from streams that complete within the window on one connection are flushed as a *single* TCP segment instead of one per stream — removing the per-response delayed-ACK stall that dominates at low connection counts / high multiplexing (e.g. a gRPC fan-out of many RPCs over one connection).  The first frame of an idle window is written immediately (no added latency for an isolated response); only frames arriving while a window is open are held.  Control frames (`SETTINGS`/`PING`/`WINDOW_UPDATE`/`GOAWAY`/`RST_STREAM`) always bypass the buffer, so flow control stays timely.  **Opt-in** — the single-segment shape can *regress* at higher connection counts, so the default is off (a transparent pass-through).  `40000` (40 ms, matching Linux's delayed-ACK timer) is a sensible starting value; gRPC workloads may prefer `~5000`. |
 
 ## WebSocket
 

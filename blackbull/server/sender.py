@@ -12,7 +12,7 @@ from ..protocol.frame_types import (FrameTypes, HeaderFrameFlags, DataFrameFlags
                                     DEFAULT_INITIAL_WINDOW_SIZE, DEFAULT_MAX_FRAME_SIZE)
 from .cap_log import log_cap_hit
 from .constants import WSCloseCode
-from .ws_codec import WSOpcode, encode_frame
+from .ws_codec import WSOpcode, encode_frame, encode_frame_header
 import logging
 from ..asgi import ASGIEvent
 from ..headers import Headers, HeaderList
@@ -195,41 +195,46 @@ class AsyncioWriter(AbstractWriter):
         self._sw = stream_writer
         self._write_timeout = write_timeout
 
+    async def _drain_with_timeout(self) -> None:
+        """Drain the underlying StreamWriter, bounded by ``_write_timeout``.
+
+        On timeout, close the transport (so the FD/connection slot is
+        reclaimed from a slow-read peer or dead TCP route) and surface a
+        ``ConnectionResetError`` so the sender's existing peer-disconnect
+        handling runs uniformly.  When no timeout is configured this is a
+        plain ``drain()``.
+        """
+        if self._write_timeout <= 0:
+            await self._sw.drain()
+            return
+        try:
+            await asyncio.wait_for(self._sw.drain(),
+                                   timeout=self._write_timeout)
+        except (asyncio.TimeoutError, TimeoutError):
+            logger.warning(
+                'write timeout (%.1fs) exceeded — closing connection',
+                self._write_timeout)
+            log_cap_hit('write_timeout',
+                        requested=self._write_timeout,
+                        limit=self._write_timeout)
+            try:
+                self._sw.close()
+            except Exception as close_exc:
+                # Best-effort transport teardown.  We're already in the
+                # timeout error path and the transport may be half-broken
+                # (SSL aborted, FD already reaped by a sibling task, etc.);
+                # swallowing here lets us still raise ConnectionResetError
+                # below so the peer-disconnect handling runs uniformly.
+                logger.debug(
+                    'write timeout: transport.close() also failed (%s) — '
+                    'continuing with ConnectionResetError', close_exc)
+            raise ConnectionResetError(
+                f'write timeout after {self._write_timeout:.1f}s'
+            ) from None
+
     async def write(self, data: bytes) -> None:
         self._sw.write(data)
-        if self._write_timeout > 0:
-            try:
-                await asyncio.wait_for(self._sw.drain(),
-                                       timeout=self._write_timeout)
-            except (asyncio.TimeoutError, TimeoutError):
-                # Slow-read peer / dead TCP route — close the transport
-                # so the FD is released and the connection slot is
-                # reclaimed, then surface as a peer disconnect for the
-                # sender's existing error-handling path.
-                logger.warning(
-                    'write timeout (%.1fs) exceeded — closing connection',
-                    self._write_timeout)
-                log_cap_hit('write_timeout',
-                            requested=self._write_timeout,
-                            limit=self._write_timeout)
-                try:
-                    self._sw.close()
-                except Exception as close_exc:
-                    # Best-effort transport teardown.  We're already in
-                    # the timeout error path and the transport may be in
-                    # a half-broken state (SSL aborted, FD already
-                    # reaped by a sibling task, etc.); swallowing here
-                    # lets us still raise ConnectionResetError below so
-                    # the sender's existing peer-disconnect handling
-                    # runs uniformly.
-                    logger.debug(
-                        'write timeout: transport.close() also failed (%s) — '
-                        'continuing with ConnectionResetError', close_exc)
-                raise ConnectionResetError(
-                    f'write timeout after {self._write_timeout:.1f}s'
-                ) from None
-        else:
-            await self._sw.drain()
+        await self._drain_with_timeout()
 
     async def writelines(self, parts) -> None:
         """Vectored write via the underlying StreamWriter.
@@ -242,28 +247,7 @@ class AsyncioWriter(AbstractWriter):
         the syscall.
         """
         self._sw.writelines(parts)
-        if self._write_timeout > 0:
-            try:
-                await asyncio.wait_for(self._sw.drain(),
-                                       timeout=self._write_timeout)
-            except (asyncio.TimeoutError, TimeoutError):
-                logger.warning(
-                    'write timeout (%.1fs) exceeded — closing connection',
-                    self._write_timeout)
-                log_cap_hit('write_timeout',
-                            requested=self._write_timeout,
-                            limit=self._write_timeout)
-                try:
-                    self._sw.close()
-                except Exception as close_exc:
-                    logger.debug(
-                        'write timeout: transport.close() also failed (%s) — '
-                        'continuing with ConnectionResetError', close_exc)
-                raise ConnectionResetError(
-                    f'write timeout after {self._write_timeout:.1f}s'
-                ) from None
-        else:
-            await self._sw.drain()
+        await self._drain_with_timeout()
 
     async def close(self) -> None:
         # ``self._sw.close()`` is synchronous: it initiates the TCP
@@ -300,6 +284,128 @@ class AsyncioWriter(AbstractWriter):
 
 
 # ---------------------------------------------------------------------------
+# Connection-level segment coalescing
+# ---------------------------------------------------------------------------
+
+class ConnCoalescer:
+    """Connection-level outbound frame batcher for TCP segment coalescing.
+
+    Owned by ``HTTP2Actor`` and shared by every per-stream ``HTTP2Sender`` on
+    that connection.  Batches stream-frame writes so that N streams completing
+    within a short window flush as a **single** TCP segment instead of N —
+    eliminating the per-response delayed-ACK stall that dominates at low
+    connection counts / high multiplexing (e.g. a gRPC fan-out of many RPCs
+    over one connection).
+
+    **Correctness invariants**
+
+    * *Wire order (FIFO).*  All stream frames — including HEADERS and trailing
+      HEADERS — flow through one FIFO buffer and flush in enqueue order.  Since
+      header blocks are HPACK-encoded (into the connection's shared encoder)
+      immediately before ``write()`` is called, FIFO flush order preserves the
+      encoder/decoder synchronisation the HPACK dynamic table requires, and a
+      stream's DATA can never precede its own HEADERS.
+    * *Control frames bypass.*  SETTINGS/PING/WINDOW_UPDATE/GOAWAY/RST_STREAM
+      go through the control sender (stream 0), which is **not** given a
+      coalescer, so flow-control credit and liveness stay timely.  They carry
+      no HPACK state, so writing them ahead of buffered HEADERS is safe.
+
+    **Latency**
+
+    The first frame of an idle window is written immediately, so an isolated
+    response pays no added latency; only frames arriving while a window is
+    already open are held (up to ``hold_us``).  ``hold_us <= 0`` makes this a
+    transparent pass-through — byte-for-byte identical to a direct write.
+
+    Peer-close tolerant: mirrors ``BaseSender``'s guard at connection scope —
+    once the transport is gone, further writes are dropped silently.
+    """
+
+    __slots__ = ('_writer', '_hold_s', '_threshold', '_loop',
+                 '_buf', '_nbytes', '_timer', '_open', '_closed')
+
+    def __init__(self, writer: AbstractWriter, hold_us: int,
+                 threshold: int = 16 * 1024) -> None:
+        self._writer = writer
+        self._hold_s = hold_us / 1_000_000 if hold_us > 0 else 0.0
+        self._threshold = threshold
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._buf: list[bytes] = []
+        self._nbytes = 0
+        self._timer: asyncio.TimerHandle | None = None
+        # ``_open`` is True while a batching window is active (timer armed).
+        self._open = False
+        self._closed = False
+
+    @property
+    def enabled(self) -> bool:
+        return self._hold_s > 0.0
+
+    async def write(self, data: bytes) -> None:
+        if self._hold_s <= 0.0:
+            await self._guarded(data)
+            return
+        if self._closed:
+            return
+        if not self._open:
+            # First frame of an idle window: send now (zero added latency for
+            # an isolated response) and open the batching window.
+            self._open = True
+            self._arm()
+            await self._guarded(data)
+            return
+        # Window already open — hold this frame for the batch.
+        self._buf.append(data)
+        self._nbytes += len(data)
+        if self._nbytes >= self._threshold:
+            await self._flush()
+
+    def _arm(self) -> None:
+        if self._loop is None:
+            self._loop = asyncio.get_running_loop()
+        self._timer = self._loop.call_later(self._hold_s, self._on_timer)
+
+    def _on_timer(self) -> None:
+        self._timer = None
+        if self._buf and not self._closed:
+            # Flush the batch asynchronously; a fresh window opens on the
+            # next write() (``_open`` reset inside _flush()).
+            assert self._loop is not None
+            self._loop.create_task(self._flush())
+        else:
+            self._open = False
+
+    async def _flush(self) -> None:
+        if self._timer is not None:
+            self._timer.cancel()
+            self._timer = None
+        self._open = False
+        if not self._buf:
+            return
+        data = b''.join(self._buf)
+        self._buf.clear()
+        self._nbytes = 0
+        await self._guarded(data)
+
+    async def flush(self) -> None:
+        """Flush any pending buffered bytes now — called before the connection
+        writes a GOAWAY or tears down, so a trailing batch is never lost."""
+        await self._flush()
+
+    async def _guarded(self, data: bytes) -> None:
+        if self._closed:
+            return
+        try:
+            await self._writer.write(data)
+        except (ConnectionResetError, BrokenPipeError) as exc:
+            self._closed = True
+            logger.debug('coalescer: peer closed write side (%s)', exc.__class__.__name__)
+        except OSError as exc:
+            self._closed = True
+            logger.debug('coalescer: write failed on closed transport (%s)', exc.__class__.__name__)
+
+
+# ---------------------------------------------------------------------------
 # Sender hierarchy
 # ---------------------------------------------------------------------------
 
@@ -332,19 +438,23 @@ class BaseSender(ABC):
     @abstractmethod
     async def __call__(self, body, status: HTTPStatus = HTTPStatus.OK, headers: HeaderList = []): pass
 
-    async def _write(self, data: bytes):
-        """Flush *data* through the writer.
+    async def _guarded_write(self, write_fn, arg) -> None:
+        """Run *write_fn(arg)* tolerant of peer-closed transports.
 
-        Tolerant of peer-closed transports: once a write hits
-        ``ConnectionResetError`` / ``BrokenPipeError`` / SSL EOF, the
-        sender marks itself closed and subsequent writes silently drop.
-        These exceptions used to propagate out as tracebacks under
-        wrk c=1024 sustained load — 22 per 30 s in the 141848 run.
+        Once a write hits ``ConnectionResetError`` / ``BrokenPipeError`` /
+        SSL EOF, the sender marks itself closed and subsequent writes
+        silently drop.  These exceptions used to propagate out as
+        tracebacks under wrk c=1024 sustained load — 22 per 30 s in the
+        141848 run.
+
+        ``_closed`` is bound in ``__init__`` for every sender, so a direct
+        attribute read is safe (and cheaper than the old ``getattr`` guard)
+        on this per-write hot path.
         """
-        if getattr(self, '_closed', False):
+        if self._closed:
             return
         try:
-            await self._writer.write(data)
+            await write_fn(arg)
         except (ConnectionResetError, BrokenPipeError) as exc:
             self._closed = True
             logger.debug('sender: peer closed write side (%s)', exc.__class__.__name__)
@@ -354,6 +464,10 @@ class BaseSender(ABC):
             self._closed = True
             logger.debug('sender: write failed on closed TLS transport (%s)', exc.__class__.__name__)
 
+    async def _write(self, data: bytes):
+        """Flush *data* through the writer (peer-close tolerant)."""
+        await self._guarded_write(self._writer.write, data)
+
     async def _write_many(self, parts) -> None:
         """Vectored variant of :meth:`_write` — avoids joining the parts.
 
@@ -361,16 +475,7 @@ class BaseSender(ABC):
         path: the body bytes already live in the static-file cache, and
         ``head + body`` would allocate a full-body copy on every hit.
         """
-        if getattr(self, '_closed', False):
-            return
-        try:
-            await self._writer.writelines(parts)
-        except (ConnectionResetError, BrokenPipeError) as exc:
-            self._closed = True
-            logger.debug('sender: peer closed write side (%s)', exc.__class__.__name__)
-        except OSError as exc:
-            self._closed = True
-            logger.debug('sender: write failed on closed TLS transport (%s)', exc.__class__.__name__)
+        await self._guarded_write(self._writer.writelines, parts)
 
 
 class HTTP1Sender(BaseSender):
@@ -683,14 +788,19 @@ class HTTP2Sender(BaseSender):
         'connection_window_size', 'stream_window_size',
         'max_frame_size', '_window_open', '_end_stream_sent',
         '_buffered_status', '_buffered_headers', '_expect_trailers',
+        '_buffered_body', '_coalescer',
     )
 
     def __init__(self, writer: AbstractWriter, factory, stream_id: int,
-                 push_callback=None):
+                 push_callback=None, coalescer: 'ConnCoalescer | None' = None):
         super().__init__(writer)
         self._factory = factory
         self._stream_id = stream_id
         self._push_callback = push_callback
+        # Connection-level segment coalescer (shared across this connection's
+        # per-stream senders).  ``None`` → direct writes (today's behaviour).
+        # Never set on the control sender (stream 0), so control frames bypass.
+        self._coalescer = coalescer
         self.connection_window_size = DEFAULT_INITIAL_WINDOW_SIZE
         self.stream_window_size = {stream_id: DEFAULT_INITIAL_WINDOW_SIZE}
         self.max_frame_size = DEFAULT_MAX_FRAME_SIZE
@@ -700,12 +810,18 @@ class HTTP2Sender(BaseSender):
         self._buffered_status: HTTPStatus | None = None
         self._buffered_headers: list[tuple[bytes, bytes]] | None = None
         self._expect_trailers: bool = False
+        # When trailers are expected, the first single-frame body chunk is held
+        # here so HEADERS + DATA + trailing HEADERS coalesce into one write at
+        # the trailers event (the unary-gRPC pattern).  Flushed early if a
+        # second body chunk arrives (multi-frame body / streaming).
+        self._buffered_body: bytes | None = None
 
     def reset_per_request_state(self) -> None:
         self._end_stream_sent = False
         self._buffered_status = None
         self._buffered_headers = None
         self._expect_trailers = False
+        self._buffered_body = None
 
     async def _flush_buffered_start(
         self, body: bytes, end_stream: bool,
@@ -765,7 +881,14 @@ class HTTP2Sender(BaseSender):
         HEADERS and control frames (SETTINGS, PING, WINDOW_UPDATE, RST_STREAM,
         GOAWAY, CONTINUATION) are not.  Flow-controlled writes go through
         :meth:`_write_data`.
+
+        When a connection-level coalescer is present, per-stream frames are
+        routed through it for TCP segment coalescing; otherwise they go
+        straight to the transport (today's behaviour).
         """
+        if self._coalescer is not None:
+            await self._coalescer.write(data)
+            return
         await super()._write(data)
 
     async def _write_data(self, body: bytes, end_stream: bool) -> None:
@@ -913,29 +1036,74 @@ class HTTP2Sender(BaseSender):
                 payload = body.get('body', b'')
                 end_stream = not body.get('more_body', False)
                 if self._buffered_status is not None:
-                    await self._flush_buffered_start(
-                        payload, end_stream, self._buffered_status,
-                        self._buffered_headers, self._expect_trailers)
-                    self._buffered_status = None
-                    self._buffered_headers = None
+                    # Trailers-coalescing fast path: when trailers are expected
+                    # and this is the first single-frame body chunk, hold it so
+                    # HEADERS + DATA + trailing HEADERS flush together at the
+                    # trailers event (halves the writes+drains for a unary RPC).
+                    # Only for a non-terminal chunk that fits one DATA frame and
+                    # the current flow-control windows.
+                    if (self._expect_trailers and not end_stream
+                            and self._buffered_body is None
+                            and 0 < len(payload) <= self.max_frame_size
+                            and len(payload) <= self.stream_window_size[self._stream_id]
+                            and len(payload) <= self.connection_window_size):
+                        self._buffered_body = payload
+                    else:
+                        # A second body chunk (or a multi-frame / terminal one):
+                        # flush any deferred first chunk with the HEADERS, then
+                        # write this chunk normally.
+                        if self._buffered_body is not None:
+                            await self._flush_buffered_start(
+                                self._buffered_body, False, self._buffered_status,
+                                self._buffered_headers, self._expect_trailers)
+                            self._buffered_status = None
+                            self._buffered_headers = None
+                            self._buffered_body = None
+                            await self._write_data(payload, end_stream=end_stream)
+                        else:
+                            await self._flush_buffered_start(
+                                payload, end_stream, self._buffered_status,
+                                self._buffered_headers, self._expect_trailers)
+                            self._buffered_status = None
+                            self._buffered_headers = None
                 else:
                     await self._write_data(payload, end_stream=end_stream)
                 if end_stream and not self._expect_trailers:
                     self._end_stream_sent = True
 
             elif event_type == ASGIEvent.HTTP_RESPONSE_TRAILERS:
-                # Flush buffered start if no body preceded trailers.
+                # HPACK's dynamic table is stateful, so header blocks MUST be
+                # encoded in wire order: the response HEADERS block first, then
+                # the trailing HEADERS block.  Encoding trailers before the
+                # deferred HEADERS would desync the peer's HPACK decoder.
                 if self._buffered_status is not None:
-                    await self._write(build_response_headers(
+                    # Start (and possibly one deferred body chunk) never flushed:
+                    # emit HEADERS [+ DATA] + trailing HEADERS in a single write.
+                    h_bytes = build_response_headers(
                         self._factory.encoder, self._stream_id,
                         self._buffered_status, self._buffered_headers or [],
-                        end_stream=False))
+                        end_stream=False)
+                    trailer_bytes = build_trailers(
+                        self._factory.encoder, self._stream_id,
+                        list(body.get('headers', [])))
+                    if self._buffered_body is not None:
+                        total = len(self._buffered_body)
+                        d_bytes = (total.to_bytes(3, 'big') + b'\x00'
+                                   + b'\x00'  # DATA flags: no END_STREAM (trailers carry it)
+                                   + self._stream_id.to_bytes(4, 'big')
+                                   + self._buffered_body)
+                        await self._write(h_bytes + d_bytes + trailer_bytes)
+                        self.connection_window_size -= total
+                        self.stream_window_size[self._stream_id] -= total
+                        self._buffered_body = None
+                    else:
+                        await self._write(h_bytes + trailer_bytes)
                     self._buffered_status = None
                     self._buffered_headers = None
-
-                await self._write(build_trailers(
-                    self._factory.encoder, self._stream_id,
-                    list(body.get('headers', []))))
+                else:
+                    await self._write(build_trailers(
+                        self._factory.encoder, self._stream_id,
+                        list(body.get('headers', []))))
                 self._end_stream_sent = True
 
             elif event_type == ASGIEvent.HTTP_RESPONSE_PUSH:
@@ -990,12 +1158,14 @@ class WebSocketSender(BaseSender):
                 else:
                     raw = body.get('bytes', b'')
                     opcode = WSOpcode.BINARY
-                if self._compressor is not None:
+                rsv1 = self._compressor is not None
+                if rsv1:
                     raw = self._compressor.compress(raw)
-                    frame = encode_frame(raw, opcode=opcode, rsv1=True)
-                else:
-                    frame = encode_frame(raw, opcode=opcode)
-                await self._write(frame)
+                # Vectored write: hand (header, payload) to writelines so the
+                # payload is never copied into a concatenated frame buffer
+                # (the header+payload join encode_frame would allocate).
+                header = encode_frame_header(len(raw), opcode, rsv1=rsv1)
+                await self._write_many((header, raw))
 
             case ASGIEvent.WS_CLOSE:
                 code = body.get('code', WSCloseCode.NORMAL)
@@ -1023,21 +1193,27 @@ class SenderFactory:
     """
 
     @staticmethod
-    def http1(stream_writer) -> HTTP1Sender:
+    def _ensure_writer(stream_writer) -> AbstractWriter:
+        """Normalise a raw asyncio stream writer to an ``AbstractWriter``.
+
+        Passes an ``AbstractWriter`` through unchanged (a caller-supplied
+        runtime adapter); otherwise wraps the raw writer in ``AsyncioWriter``.
+        """
         if isinstance(stream_writer, AbstractWriter):
-            return HTTP1Sender(stream_writer)
-        return HTTP1Sender(AsyncioWriter(stream_writer))
+            return stream_writer
+        return AsyncioWriter(stream_writer)
+
+    @staticmethod
+    def http1(stream_writer) -> HTTP1Sender:
+        return HTTP1Sender(SenderFactory._ensure_writer(stream_writer))
 
     @staticmethod
     def http2(stream_writer, factory, stream_id: int,
-              push_callback=None) -> HTTP2Sender:
-        if isinstance(stream_writer, AbstractWriter):
-            return HTTP2Sender(stream_writer, factory, stream_id, push_callback)
-        return HTTP2Sender(AsyncioWriter(stream_writer), factory,
-                           stream_id, push_callback)
+              push_callback=None, coalescer: 'ConnCoalescer | None' = None) -> HTTP2Sender:
+        return HTTP2Sender(SenderFactory._ensure_writer(stream_writer),
+                           factory, stream_id, push_callback, coalescer)
 
     @staticmethod
     def websocket(stream_writer, *, compressor=None) -> WebSocketSender:
-        if isinstance(stream_writer, AbstractWriter):
-            return WebSocketSender(stream_writer, compressor=compressor)
-        return WebSocketSender(AsyncioWriter(stream_writer), compressor=compressor)
+        return WebSocketSender(SenderFactory._ensure_writer(stream_writer),
+                               compressor=compressor)

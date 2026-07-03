@@ -46,6 +46,32 @@ class WSFrameHeader(NamedTuple):
     rsv3:   bool
 
 
+def encode_frame_header(length: int, opcode: WSOpcode | int = WSOpcode.TEXT,
+                        *, rsv1: bool = False) -> bytes:
+    """Encode just the **unmasked** 2-to-10-byte WebSocket frame header
+    (server → client, RFC 6455 §5.1/§5.2).
+
+    Server frames MUST NOT be masked, so this never sets the mask bit and
+    takes no masking key.  Callers that already hold the payload separately
+    (e.g. ``WebSocketSender``) write ``(header, payload)`` as a vectored
+    ``writelines`` — avoiding the header+payload concatenation copy that
+    ``encode_frame`` would otherwise allocate on every send.
+
+    ``rsv1`` (RFC 7692 §7) marks the FIRST frame of a permessage-deflate
+    compressed message.
+    """
+    first_byte = WSFrameBits.FIN | opcode
+    if rsv1:
+        first_byte |= WSFrameBits.RSV1
+    if length < 126:
+        # Common case: single 2-byte header built in one allocation.
+        return bytes((first_byte, length))
+    elif length < 65536:
+        return bytes((first_byte, 126)) + length.to_bytes(2, 'big')
+    else:
+        return bytes((first_byte, 127)) + length.to_bytes(8, 'big')
+
+
 def encode_frame(payload: bytes, opcode: WSOpcode | int = WSOpcode.TEXT,
                  *, mask: bool = False, rsv1: bool = False) -> bytes:
     """Encode *payload* as a WebSocket data frame (RFC 6455 §5).
@@ -62,23 +88,26 @@ def encode_frame(payload: bytes, opcode: WSOpcode | int = WSOpcode.TEXT,
     whose payload has been compressed with permessage-deflate.  Continuation
     frames in the same message keep ``rsv1=False``.
     """
+    if not mask:
+        # Server → client fast path: reuse the header builder and concatenate
+        # once (two allocations total vs. the old three).
+        return encode_frame_header(len(payload), opcode, rsv1=rsv1) + payload
+
     length = len(payload)
     first_byte = WSFrameBits.FIN | opcode
     if rsv1:
         first_byte |= WSFrameBits.RSV1
     header = bytes([first_byte])
-    mask_bit = WSFrameBits.MASK_BIT if mask else 0
+    mask_bit = WSFrameBits.MASK_BIT
     if length < 126:
         header += bytes([mask_bit | length])
     elif length < 65536:
         header += bytes([mask_bit | 126]) + length.to_bytes(2, 'big')
     else:
         header += bytes([mask_bit | 127]) + length.to_bytes(8, 'big')
-    if mask:
-        mask_key = os.urandom(4)
-        masked_payload = bytes(b ^ mask_key[i % 4] for i, b in enumerate(payload))
-        return header + mask_key + masked_payload
-    return header + payload
+    mask_key = os.urandom(4)
+    masked_payload = bytes(b ^ mask_key[i % 4] for i, b in enumerate(payload))
+    return header + mask_key + masked_payload
 
 
 async def read_frame_header(reader) -> WSFrameHeader:

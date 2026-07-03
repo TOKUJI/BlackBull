@@ -13,6 +13,7 @@ from ..asgi import ASGIEvent
 # ``_make_disconnect_detecting_receive``.  No circular-import risk —
 # ``event_aggregator`` does not import anything back from this module.
 from ..event_aggregator import EventAggregator  # noqa: TC002
+from ..logger import enqueue_access_log  # O4 fast path (no import cycle: logger imports nothing here)
 
 _access_logger = logging.getLogger('blackbull.access')
 
@@ -34,18 +35,33 @@ def emit_access_log(record: 'AccessLogRecord') -> None:
     daphne) skip the work entirely when access logging is disabled; gating
     here matches that behaviour.
 
-    The *record itself* is handed to ``logger.info`` as the message (it is
-    self-formatting via ``__str__``), so the expensive ``format()`` string
-    build is deferred to the logging listener thread by the deferred-format
-    QueueHandler (``blackbull.logger``) instead of running on the event loop.
-    ``finalize()`` snapshots the duration first so that deferred format still
-    reports the request's real duration, not duration + queue latency.  The
-    structured ``extra`` fields stay eager — they are the documented public
-    access-log API (guide.md §14; ``tests/integration/test_access_log.py``).
+    The *record itself* is the message (it is self-formatting via ``__str__``),
+    so the expensive ``format()`` string build is deferred to the logging
+    listener thread instead of running on the event loop.  ``finalize()``
+    snapshots the duration first so that deferred format still reports the
+    request's real duration, not duration + queue latency.  The structured
+    ``extra`` fields stay eager — they are the documented public access-log API
+    (guide.md §14; ``tests/integration/test_access_log.py``).
+
+    When async logging is active *and* the access logger has not been customised,
+    the record is enqueued directly onto the listener queue via
+    :func:`~blackbull.logger.enqueue_access_log` (O4), which bypasses
+    ``logging.Logger._log`` — ~93% of the loop-side emit cost lives in that
+    stdlib machinery.  The fast path is skipped (and the standard synchronous
+    ``logger.info`` path used) when async logging is off *or* the user has
+    attached their own handlers/filters to ``blackbull.access`` — those would be
+    bypassed by a direct enqueue, so we defer to the full path to keep the
+    documented "extend the access log via a custom handler/filter" pattern
+    working (see docs/guide/logging.md).
     """
     if _access_logger.isEnabledFor(logging.INFO):
         record.finalize()
-        _access_logger.info(record, extra=record.as_extra())
+        extra = record.as_extra()
+        # Fast path only when nobody has customised blackbull.access — an empty
+        # handlers/filters list is the default, so the common case stays fast.
+        if (_access_logger.handlers or _access_logger.filters
+                or not enqueue_access_log(record, extra)):
+            _access_logger.info(record, extra=extra)
 
 
 @dataclass

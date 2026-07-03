@@ -25,7 +25,7 @@ from .cap_log import log_cap_hit
 from .recipient import (AbstractReader, IncompleteReadError,
                         RecipientFactory, _HTTP2_STREAM_QUEUE_DEPTH)
 from .response import ResponderFactory
-from .sender import AbstractWriter, SenderFactory
+from .sender import AbstractWriter, ConnCoalescer, SenderFactory
 from .access_log import AccessLogRecord, _make_capturing_send, _make_disconnect_detecting_receive, emit_access_log as _emit_access_log
 from ..asgi import ASGIEvent
 from .http1_actor import RequestActor
@@ -282,6 +282,11 @@ class HTTP2Actor(Actor):
         # Read from env at construction so tests can override before run().
         from ..env import get_settings as _get_settings  # noqa: PLC0415
         _cfg = _get_settings()
+        # Connection-level segment coalescer, injected into per-stream senders
+        # (never the control sender above, so control frames bypass).  Disabled
+        # by default (hold_us=0 → transparent pass-through); opt in with
+        # BB_H2_CONN_BUFFER_US.  See ConnCoalescer for the ordering invariants.
+        self._coalescer = ConnCoalescer(self._writer, _cfg.h2_conn_buffer_us)
         self.max_concurrent_streams: int = _cfg.h2_max_concurrent_streams
         self._request_timeout: float = _cfg.request_timeout
         self._frame_yield_every: int = _cfg.frame_yield_every
@@ -317,6 +322,15 @@ class HTTP2Actor(Actor):
         # Concurrent-stream counter — incremented when a stream task is spawned,
         # decremented via Task.add_done_callback when the task finishes.
         self._active_stream_count: int = 0
+
+        # Per-stream handler tasks, keyed by stream_id.  Kept so an inbound
+        # RST_STREAM (client cancellation) can cancel the running handler:
+        # otherwise a server-streaming handler abandoned mid-flight blocks
+        # forever in the sender's flow-control wait (the departed client never
+        # sends WINDOW_UPDATE), permanently holding a max_concurrent_streams
+        # slot.  Under a high-churn streaming client that leaks slots until new
+        # streams are REFUSED_STREAM'd — the "streaming collapse" the bench hit.
+        self._stream_tasks: dict[int, asyncio.Task] = {}
 
         # Per-stream recipients, keyed by stream_id.  Stored on the actor so
         # _make_done_cb can remove entries when streams complete.
@@ -383,6 +397,7 @@ class HTTP2Actor(Actor):
             sender = SenderFactory.http2(
                 self._writer, self.factory, stream_id,
                 push_callback=self._handle_push,
+                coalescer=self._coalescer,
             )
             # Initialise with the windows the peer has currently granted us,
             # rather than the RFC defaults, which may already have been exceeded
@@ -460,6 +475,10 @@ class HTTP2Actor(Actor):
             return
         logger.warning(
             'HTTP/2 connection error %s: %s', error_code.name, reason)
+        # Flush any coalesced stream frames before the GOAWAY (which bypasses
+        # the coalescer via the control sender) so buffered responses reach the
+        # peer ahead of the connection-closing frame rather than being dropped.
+        await self._coalescer.flush()
         await self.send_frame(
             self.factory.goaway(self._last_peer_stream_id, error_code))
         self._goaway_sent = True
@@ -492,6 +511,7 @@ class HTTP2Actor(Actor):
             self._active_stream_count = max(0, self._active_stream_count - 1)
             if is_ws:
                 self._ws_stream_count = max(0, self._ws_stream_count - 1)
+            self._stream_tasks.pop(stream_id, None)
             self._senders.pop(stream_id, None)
             self._recipients.pop(stream_id, None)
             # Prune the stream node from the tree and remember it as closed-
@@ -553,6 +573,10 @@ class HTTP2Actor(Actor):
             await self._frame_loop(tg)
 
         self._task_group = None
+        # Flush any coalesced-but-unsent batch before the connection tears
+        # down, so a trailing group of responses is never lost to close.
+        # No-op when coalescing is disabled.
+        await self._coalescer.flush()
 
     async def _frame_loop(self, tg: asyncio.TaskGroup) -> None:
         """Read frames and dispatch stream tasks until EOF or GOAWAY."""
@@ -831,7 +855,22 @@ class HTTP2Actor(Actor):
         else:
             task = tg.create_task(final_coro)
 
+        self._stream_tasks[stream_id] = task
         task.add_done_callback(self._make_done_cb(stream_id))
+
+    def _apply_priority_and_extensions(self, stream: 'Stream', scope: dict) -> None:
+        """Resolve stream priority and attach the H/2 ASGI extensions to *scope*.
+
+        Shared verbatim by the HEADERS and CONTINUATION completion paths.
+        ``scope['http2_priority']`` is retained for one release as a deprecation
+        alias — new apps should read
+        ``scope['extensions']['http.response.priority']`` instead.
+        """
+        priority = _resolve_priority(stream, scope)
+        scope['http2_priority'] = priority
+        scope['extensions'] = _build_h2_extensions(
+            stream.stream_id, priority,
+            self._peer_initial_window_size, self._connection_window_size)
 
     async def _on_headers_frame(
         self,
@@ -884,15 +923,7 @@ class HTTP2Actor(Actor):
             await self._handle_h2_websocket(stream, tg, log_record)
             return True
 
-        priority = _resolve_priority(stream, scope)
-        # ``scope['http2_priority']`` is retained for one release as a
-        # deprecation alias.  New apps should read
-        # ``scope['extensions']['http.response.priority']`` instead.
-        # Removal scheduled for v0.32.0.
-        scope['http2_priority'] = priority
-        scope['extensions'] = _build_h2_extensions(
-            stream.stream_id, priority,
-            self._peer_initial_window_size, self._connection_window_size)
+        self._apply_priority_and_extensions(stream, scope)
         stream_recipient = RecipientFactory.http2(queue_depth=self._stream_queue_depth)
         self._recipients[stream.stream_id] = stream_recipient
         stream.on_headers_received(end_stream=bool(frame.end_stream))
@@ -981,12 +1012,7 @@ class HTTP2Actor(Actor):
                 self.factory.rst_stream(stream.stream_id, ErrorCodes.REFUSED_STREAM))
             return True
 
-        priority = _resolve_priority(stream, scope)
-        # See deprecation note at the HEADERS path above.
-        scope['http2_priority'] = priority
-        scope['extensions'] = _build_h2_extensions(
-            stream.stream_id, priority,
-            self._peer_initial_window_size, self._connection_window_size)
+        self._apply_priority_and_extensions(stream, scope)
         stream.scope = scope
         stream_recipient = RecipientFactory.http2(queue_depth=self._stream_queue_depth)
         self._recipients[stream.stream_id] = stream_recipient
@@ -1232,7 +1258,8 @@ class HTTP2Actor(Actor):
         push_recipient.mark_end_of_stream_on_headers()
         self._recipients[push_stream_id] = push_recipient
         push_sender = SenderFactory.http2(
-            self._writer, self.factory, push_stream_id, push_callback=None)
+            self._writer, self.factory, push_stream_id, push_callback=None,
+            coalescer=self._coalescer)
         log_record = _make_log_record(pushed_scope)
         capturing_send = _make_capturing_send(push_sender, log_record)
 

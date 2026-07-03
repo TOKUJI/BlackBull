@@ -40,6 +40,24 @@ BB_ACCESS_LOG
     production where a separate log aggregator consumes structured logs and the
     per-request overhead of the access logger is undesirable.
     Default: ``true``.
+BB_LOG_FORMAT
+    Async-logging sink format.  ``json`` emits one structured JSON object per
+    line; anything else (default) keeps plain text.
+    Default: `` `` (plain).
+BB_SYSLOG_ADDR
+    ``host:port`` of a syslog/UDP collector (e.g. ``127.0.0.1:514``).  When set,
+    the async-logging sink ships records via a UDP ``SysLogHandler`` instead of
+    ``stderr``.  Composes with ``BB_LOG_FORMAT=json``.
+    Default: `` `` (stderr sink).
+BB_LOG_BATCH_SIZE
+    When > 1, the ``stderr`` async-logging sink coalesces up to this many
+    formatted lines into a single ``write()``.  ``1`` (default) is one write per
+    record.  Ignored for the syslog sink.
+    Default: ``1``.
+BB_LOG_BATCH_TIMEOUT_MS
+    Max milliseconds a partial log batch waits before flush.  Only meaningful
+    when ``BB_LOG_BATCH_SIZE`` > 1.
+    Default: ``5``.
 BB_SOCKET_BACKLOG
     ``listen()`` backlog depth for the server socket.  Increasing this reduces
     silent connection drops during burst traffic when the accept loop falls
@@ -352,6 +370,31 @@ class Settings:
     #: Emit one access log record per completed request on blackbull.access.
     access_log: bool = True
 
+    #: Async-logging sink format: '' → plain text (default), 'json' → one
+    #: structured JSON object per line (approach 3).
+    log_format: str = ''
+
+    #: host:port of a syslog/UDP collector (approach 6).  '' keeps the stderr
+    #: sink.  When set, records ship via a UDP SysLogHandler.
+    log_syslog_addr: str = ''
+
+    #: Coalescing width of the async-logging sink (approach 4 / O2): up to N
+    #: formatted records are joined into a single write+flush.  Async logging is
+    #: batch logging — the sink always coalesces (min 2); the per-record flush of
+    #: a plain StreamHandler is the dominant access-log cost, so it is not an
+    #: async option.  Default 64.  To force per-record flush, disable async
+    #: logging (the synchronous path) instead.
+    log_batch_size: int = 64
+
+    #: Max milliseconds a partial log batch waits before flush — bounds the
+    #: visibility latency of the async sink at low request rates.
+    log_batch_timeout_ms: int = 5
+
+    #: Path for the async-logging sink to write to (append mode, approach 2).
+    #: '' (default) keeps the stderr sink.  Composes with log_format/batch; each
+    #: worker opens its own append stream post-fork.  Ignored for the syslog sink.
+    log_file: str = ''
+
     #: listen() backlog depth for the server socket.  1024 is a sane
     #: default for servers facing connection bursts — 128 (the traditional
     #: ``SOMAXCONN``) is shallow next to peers like nginx (511) and Node
@@ -468,6 +511,23 @@ class Settings:
     #: Maximum concurrent HTTP/2 streams per connection (SETTINGS_MAX_CONCURRENT_STREAMS).
     h2_max_concurrent_streams: int = 100
 
+    #: Connection-level outbound frame coalescing hold time, in microseconds.
+    #: When >0, per-stream response frames on one HTTP/2 connection are batched
+    #: so that N streams completing within the window flush as a single TCP
+    #: segment instead of N — eliminating the per-response delayed-ACK stall
+    #: that dominates at low connection counts / high multiplexing (e.g. a
+    #: gRPC fan-out of many RPCs over one connection).  The first frame of an
+    #: idle window is written immediately (no added latency for an isolated
+    #: response); only frames that arrive while a window is open are held.
+    #: Control frames (SETTINGS/PING/WINDOW_UPDATE/GOAWAY/RST_STREAM, stream 0)
+    #: always bypass the buffer so flow control and liveness stay timely.
+    #: Default ``0`` = disabled (a transparent pass-through, identical to a
+    #: direct write): the single-segment shape can *regress* at higher
+    #: connection counts, so this is opt-in.  40000 (40 ms, matching Linux's
+    #: delayed-ACK timer) is a sensible starting value; gRPC workloads may
+    #: prefer ~5000.  See docs/reference/env-vars.md.
+    h2_conn_buffer_us: int = 0
+
     #: Advertise SETTINGS_ENABLE_CONNECT_PROTOCOL=1 (RFC 8441 §3) so peers may
     #: bootstrap WebSocket over HTTP/2 via Extended CONNECT.  Off by default —
     #: this path has fewer conformance tests than the HTTP/1.1 upgrade path,
@@ -575,6 +635,11 @@ def get_settings() -> Settings:
         ws_queue_depth=_int_env('BB_WS_QUEUE_DEPTH', 256),
         async_logging=_bool_env('BB_ASYNC_LOGGING', True),
         access_log=_bool_env('BB_ACCESS_LOG', True),
+        log_format=_str_env('BB_LOG_FORMAT', ''),
+        log_syslog_addr=_str_env('BB_SYSLOG_ADDR', ''),
+        log_batch_size=_int_env('BB_LOG_BATCH_SIZE', 64),
+        log_batch_timeout_ms=_int_env('BB_LOG_BATCH_TIMEOUT_MS', 5),
+        log_file=_str_env('BB_LOG_FILE', ''),
         # Defaults match the Linux kernel baseline.  See
         # docs/reference/env-vars.md "Performance recommendations"
         # for the values to override these with on a tuned deployment.
@@ -596,6 +661,7 @@ def get_settings() -> Settings:
         # values commonly used on tuned production deployments.
         h2_initial_window_size=_int_env('BB_H2_INITIAL_WINDOW_SIZE', 65535),
         h2_connection_window_size=_int_env('BB_H2_CONNECTION_WINDOW_SIZE', 65535),
+        h2_conn_buffer_us=_int_env('BB_H2_CONN_BUFFER_US', 0),
         h2_max_concurrent_streams=_int_env('BB_H2_MAX_CONCURRENT_STREAMS', 100),
         h2_enable_websocket=_bool_env('BB_H2_ENABLE_WEBSOCKET', False),
         h2_ws_max_streams_per_connection=_int_env_nonneg(

@@ -26,6 +26,11 @@ class EventAggregator:
         # (which starts at 0), so the first call always computes.
         self._listeners_cache_gen: int = -1
         self._listeners_cache_val: bool = False
+        # Separate generation-keyed cache for the WebSocket receive hot path
+        # (has_websocket_message_listeners): a single-event lookup, cached so
+        # a 456K-msg/s echo workload never re-scans per frame.
+        self._ws_msg_cache_gen: int = -1
+        self._ws_msg_cache_val: bool = False
 
     # ------------------------------------------------------------------
     # Hot-path optimisation: skip the indirection when nothing is listening
@@ -167,6 +172,21 @@ class EventAggregator:
             "path":          scope.get('path', ''),
             "subprotocol":   subprotocol,
         }))
+
+    def has_websocket_message_listeners(self) -> bool:
+        """Return True if any ``websocket_message`` handler is registered.
+
+        The WebSocket receive path calls this per frame to skip the
+        ``Event`` + detail-dict allocation and the ``emit`` indirection when
+        nothing is listening (the common case on a throughput workload).
+        Cached against the dispatcher's registration generation, so the
+        lookup runs only when listeners change.
+        """
+        gen = self._dispatcher.generation
+        if gen != self._ws_msg_cache_gen:
+            self._ws_msg_cache_val = self._dispatcher.has_listeners('websocket_message')
+            self._ws_msg_cache_gen = gen
+        return self._ws_msg_cache_val
 
     async def on_websocket_message(
         self, scope: dict[str, Any], message: dict[str, Any]

@@ -157,19 +157,24 @@ class SettingFrame(FrameBase):
     initial_window_size = None
     FRAME_TYPE = FrameTypes.SETTINGS
 
+    # RFC 9113 §6.5.2 — SETTINGS identifier (2-byte) → attribute name.
+    # Module-level constant: allocated once at import, so parsing a SETTINGS
+    # frame is a single dict lookup + setattr per entry rather than a bound
+    # method per identifier.
+    _SETTING_ATTRS: dict[bytes, str] = {
+        b'\x00\x01': 'header_table_size',
+        b'\x00\x02': 'enable_push',
+        b'\x00\x03': 'max_concurrent_streams',
+        b'\x00\x04': 'initial_window_size',
+        b'\x00\x05': 'max_frame_size',
+        b'\x00\x06': 'max_header_list_size',
+        b'\x00\x08': 'enable_connect_protocol',
+    }
+
     def __init__(self, length: int, type_, flags: int, stream_id: int, *, data=None, **kwds):
         super().__init__(length, type_, flags, stream_id)
         logger.debug('SettingFrame is called.')
         self._payload = data or b''
-
-        self.params = {b'\x00\x01': self.set_header_table_size,
-                       b'\x00\x02': self.set_enable_push,
-                       b'\x00\x03': self.set_max_concurrent_streams,
-                       b'\x00\x04': self.set_initial_window_size,
-                       b'\x00\x05': self.set_max_frame_size,
-                       b'\x00\x06': self.set_max_header_list_size,
-                       b'\x00\x08': self.set_enable_connect_protocol,
-                       }
 
         payload = BytesIO(data or b'')
         while True:
@@ -180,39 +185,16 @@ class SettingFrame(FrameBase):
             value = payload.read(4)
             if len(value) != 4:
                 break
-            try:
-                self.params[identifier](value)
-            except KeyError:
-                logger.error(f'unknown identifier: {identifier}, '
-                             f'{int.from_bytes(value, "big", signed=False)}')
+            self._apply_setting(identifier, value)
 
-    def set_header_table_size(self, value):
-        self.header_table_size = int.from_bytes(value, 'big', signed=False)
-        logger.debug('header_table_size: {}'.format(self.header_table_size))
-
-    def set_enable_push(self, value):
-        self.enable_push = int.from_bytes(value, 'big', signed=False)
-        logger.debug('enable_push: {}'.format(self.enable_push))
-
-    def set_initial_window_size(self, value):
-        self.initial_window_size = int.from_bytes(value, 'big', signed=False)
-        logger.debug('initial_window_size: {}'.format(self.initial_window_size))
-
-    def set_max_concurrent_streams(self, value):
-        self.max_concurrent_streams = int.from_bytes(value, 'big', signed=False)
-        logger.debug('max_concurrent_streams: {}'.format(self.max_concurrent_streams))
-
-    def set_max_frame_size(self, value):
-        self.max_frame_size = int.from_bytes(value, 'big', signed=False)
-        logger.debug('max_frame_size: {}'.format(self.max_frame_size))
-
-    def set_max_header_list_size(self, value):
-        self.max_header_list_size = int.from_bytes(value, 'big', signed=False)
-        logger.debug('max_header_list_size: {}'.format(self.max_header_list_size))
-
-    def set_enable_connect_protocol(self, value):
-        self.enable_connect_protocol = int.from_bytes(value, 'big', signed=False)
-        logger.debug('enable_connect_protocol: {}'.format(self.enable_connect_protocol))
+    def _apply_setting(self, identifier: bytes, value: bytes) -> None:
+        attr = self._SETTING_ATTRS.get(identifier)
+        parsed = int.from_bytes(value, 'big', signed=False)
+        if attr is None:
+            logger.error(f'unknown identifier: {identifier}, {parsed}')
+            return
+        setattr(self, attr, parsed)
+        logger.debug('{}: {}'.format(attr, parsed))
 
     def save(self):
         self.length = len(self._payload)

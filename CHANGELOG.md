@@ -29,7 +29,81 @@ so the editable install's metadata catches up.
 
 ---
 
-## [Unreleased]
+## [0.48.0] — 2026-07-04
+
+### Added
+- **Async logging is now batch logging** (`BB_LOG_BATCH_SIZE`, default `64`) — the
+  async-logging stream/file sink *always* coalesces records into one
+  `write()`+`flush()` per batch (via one flusher thread, flushed when the batch
+  fills or after `BB_LOG_BATCH_TIMEOUT_MS`, default 5 ms). A per-record `flush()`
+  is the dominant cost of access logging — py-spy showed one flush syscall per
+  request churning the GIL against the event loop for ~16% of CPU and a −44%
+  throughput hit; coalescing removes it (single-process re-profile: −44% → −31%
+  and rising with width). `BB_LOG_BATCH_SIZE` is now the coalescing width (floored
+  at 2), not an on/off switch; to force per-record flush, disable async logging
+  (`BB_ASYNC_LOGGING=0`). Drained at teardown so no trailing batch is lost; not
+  applied to the syslog sink. (Logging optimization O2 / approach 4.)
+- **Structured JSON logging** (`BB_LOG_FORMAT=json`) — the async-logging sink can
+  emit one JSON object per line instead of plain text. Access-log records expose
+  `client_ip`, `method`, `path`, `http_version`, `status`, `response_bytes`,
+  `duration_ms` (and `close_code` on WebSocket disconnect) as top-level keys;
+  every record carries `timestamp`, `level`, `logger`, `message`. Formatting runs
+  on the listener thread, so the access record's string build still happens off
+  the event loop. Opt-in; plain text stays the default. (Logging approach 3.)
+- **Syslog / UDP log shipping** (`BB_SYSLOG_ADDR=host:port`) — when set, the
+  async-logging sink ships records via a UDP `SysLogHandler` instead of `stderr`;
+  composes with `BB_LOG_FORMAT=json` (JSON lines over syslog). An unparseable
+  address falls back to `stderr` with a warning. (Logging approach 6.)
+- **Access-log fast path — direct enqueue, bypassing `logging.Logger._log`**
+  (logging optimization O4). When async logging is active, `emit_access_log`
+  builds the `LogRecord` and puts it straight on the listener queue via
+  `enqueue_access_log`, skipping `Logger._log`'s `findCaller` stack walk, filter
+  chain, and `callHandlers` dispatch — py-spy attributed ~93% of the loop-side
+  emit cost to that stdlib machinery. Structured fields (`as_extra()`) are merged
+  onto the record, so JSON/structured sinks are unchanged; the self-formatting
+  message still renders on the listener thread (deferred format preserved). Falls
+  back to the synchronous `logger.info` path when async logging is off. Producer
+  microbench: **~7.5µs → ~5.7µs per emit (−24%)**; single-process server penalty
+  −33% → −24%. Transparent: the fast path runs only when `blackbull.access` has
+  no user-attached handlers or filters — if it does, the standard `logger.info`
+  path is used, so the documented custom-handler/filter access-log extension
+  keeps working.
+- **File log sink** (`BB_LOG_FILE=path`) — the async-logging sink can write to a
+  file (append mode) instead of `stderr`, composing with `BB_LOG_FORMAT=json` and
+  `BB_LOG_BATCH_SIZE`. The stream is opened on the listener side (post-fork) so a
+  multi-worker server never inherits a writer thread across `fork()`; access-log
+  lines (< `PIPE_BUF`) interleave atomically under `O_APPEND`. Ignored for the
+  syslog sink; an unopenable path falls back to `stderr` with a warning. (Logging
+  approach 2.)
+- **Connection-level TCP segment coalescing** (`BB_H2_CONN_BUFFER_US`, default
+  `0` = off) — response frames from HTTP/2 streams that complete within a short
+  window on one connection can be flushed as a single TCP segment instead of one
+  per stream, removing the per-response delayed-ACK stall that dominates at low
+  connection counts / high multiplexing (e.g. a gRPC fan-out of many RPCs over
+  one connection). The first frame of an idle window writes immediately (no
+  added latency for an isolated response); control frames
+  (`SETTINGS`/`PING`/`WINDOW_UPDATE`/`GOAWAY`/`RST_STREAM`) always bypass the
+  buffer, and wire/HPACK order is preserved by FIFO flushing. Opt-in — the
+  single-segment shape can regress at higher connection counts, so it is off by
+  default. See `docs/reference/env-vars.md`.
+
+### Changed
+- **WebSocket send hot path (fewer allocations, no behaviour change)** — outbound
+  data frames are now written vectored: the 2-to-10-byte frame header
+  (`encode_frame_header`) and the payload go to the transport as
+  `writelines((header, payload))`, so the payload is no longer copied into a
+  concatenated frame buffer on every send. `encode_frame` shares the same header
+  builder for its unmasked path (two allocations instead of three). The
+  per-message `websocket_message` event emit is now skipped entirely (no `Event`
+  or detail-dict build) when no handler is registered, via a generation-cached
+  `has_websocket_message_listeners()` guard — matching the existing
+  request-lifecycle fast path. Wire bytes are byte-for-byte identical.
+- **Internal refactors (no behaviour change)** — replaced mechanical repetition
+  in the frame, MQTT, sender, HTTP/1.1, HTTP/2, app, and router layers with
+  module-level dispatch tables and shared helpers (SETTINGS parsing, MQTT
+  encode/decode + property codecs, sender drain/guarded-write/writer helpers,
+  the HTTP/1.1 error-response path, HTTP/2 priority-extension setup, and app
+  lifecycle registration). Net −54 effective code lines; full suite unchanged.
 
 ## [0.47.0] — 2026-07-03
 
