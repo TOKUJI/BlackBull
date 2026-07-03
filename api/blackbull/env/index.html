@@ -4725,6 +4725,24 @@ BB_ACCESS_LOG
     production where a separate log aggregator consumes structured logs and the
     per-request overhead of the access logger is undesirable.
     Default: <code>true</code>.
+BB_LOG_FORMAT
+    Async-logging sink format.  <code>json</code> emits one structured JSON object per
+    line; anything else (default) keeps plain text.
+    Default: <code></code> (plain).
+BB_SYSLOG_ADDR
+    <code>host:port</code> of a syslog/UDP collector (e.g. <code>127.0.0.1:514</code>).  When set,
+    the async-logging sink ships records via a UDP <code>SysLogHandler</code> instead of
+    <code>stderr</code>.  Composes with <code>BB_LOG_FORMAT=json</code>.
+    Default: <code></code> (stderr sink).
+BB_LOG_BATCH_SIZE
+    When &gt; 1, the <code>stderr</code> async-logging sink coalesces up to this many
+    formatted lines into a single <code>write()</code>.  <code>1</code> (default) is one write per
+    record.  Ignored for the syslog sink.
+    Default: <code>1</code>.
+BB_LOG_BATCH_TIMEOUT_MS
+    Max milliseconds a partial log batch waits before flush.  Only meaningful
+    when <code>BB_LOG_BATCH_SIZE</code> &gt; 1.
+    Default: <code>5</code>.
 BB_SOCKET_BACKLOG
     <code>listen()</code> backlog depth for the server socket.  Increasing this reduces
     silent connection drops during burst traffic when the accept loop falls

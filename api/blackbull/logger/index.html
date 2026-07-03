@@ -2592,6 +2592,39 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#blackbull.logger.BatchWriteHandler" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        BatchWriteHandler
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.logger.JsonFormatter" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        JsonFormatter
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.logger.enqueue_access_log" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        enqueue_access_log
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.logger.log" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4587,6 +4620,39 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#blackbull.logger.BatchWriteHandler" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        BatchWriteHandler
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.logger.JsonFormatter" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        JsonFormatter
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.logger.enqueue_access_log" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        enqueue_access_log
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.logger.log" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4695,6 +4761,163 @@
 
 
 
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="blackbull.logger.BatchWriteHandler" class="doc doc-heading">
+            <code>BatchWriteHandler</code>
+
+
+<a href="#blackbull.logger.BatchWriteHandler" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="logging.Handler">Handler</span></code></p>
+
+
+
+        <p>Coalesce formatted records into one write per batch (O2 — batch writes,
+a.k.a. logging approach 4).</p>
+<p>The stdlib <code>StreamHandler</code> issues <code>stream.write()</code> + <code>stream.flush()</code>
+per record — one flushed write syscall per log line.  Under a high-rate
+access log that is the dominant cost on the listener thread.  This handler
+instead appends each formatted line to an in-memory buffer and lets a single
+long-lived flusher thread emit the batch as one <code>write()</code> when the buffer
+reaches <code>batch_size</code> <strong>or</strong> <code>flush_interval</code> seconds elapse — whichever
+comes first, so latency is bounded at low rate and syscalls collapse at high
+rate.</p>
+<p>Design notes:
+- <strong>One</strong> flusher thread total (not a <code>threading.Timer</code> per batch — that
+  would churn a thread per ~<code>batch_size</code> records under load).  It waits on
+  a <code>Condition</code> with the flush interval as its timeout: a full batch
+  notifies it awake, an idle interval wakes it to drain a partial batch.
+- Formatting runs on the flusher thread, so a deferred-format access record
+  still builds its string off the event loop (as with the plain default).
+- <code>close()</code> drains the buffer and joins the thread, so a partial trailing
+  batch is never lost at teardown.</p>
+<p>Opt-in: only constructed when <code>BB_LOG_BATCH_SIZE</code> &gt; 1.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="blackbull.logger.JsonFormatter" class="doc doc-heading">
+            <code>JsonFormatter</code>
+
+
+<a href="#blackbull.logger.JsonFormatter" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="logging.Formatter">Formatter</span></code></p>
+
+
+
+        <p>Emit one JSON object per log line (logging approach 3 — structured JSON).</p>
+<p>Every record carries <code>timestamp</code> / <code>level</code> / <code>logger</code> / <code>message</code>.
+Access-log records (<code>blackbull.access</code>) additionally attach the structured
+fields from :meth:<code>AccessLogRecord.as_extra</code> via <code>extra=</code> — those are
+lifted to first-class JSON keys (<code>client_ip</code>, <code>method</code>, <code>path</code>,
+<code>http_version</code>, <code>status</code>, <code>response_bytes</code>, <code>duration_ms</code>, and
+<code>close_code</code> for WebSocket disconnects).  <code>exc_info</code> is rendered as a
+formatted traceback string when present.</p>
+<p>Runs on the <code>QueueListener</code> thread (it is the sink handler's formatter),
+so the access record's <code>format()</code> string build still happens off the
+event loop, exactly as with the plain-text default.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="blackbull.logger.enqueue_access_log" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">enqueue_access_log</span><span class="p">(</span><span class="n">msg</span><span class="p">,</span> <span class="n">extra</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
+
+<a href="#blackbull.logger.enqueue_access_log" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>O4 fast path: enqueue an access-log record straight onto the async
+listener queue, bypassing <code>logging.Logger._log</code> (no <code>findCaller</code> stack
+walk, no filter chain, no <code>callHandlers</code> dispatch).</p>
+<p><em>msg</em> is the self-formatting <code>AccessLogRecord</code>; its <code>__str__</code>/<code>format()</code>
+still runs on the listener thread (deferred format preserved), because the
+sink formats the record there.  <em>extra</em> (<code>AccessLogRecord.as_extra()</code>) is
+merged onto the record so structured/JSON sinks keep their documented fields.</p>
+<p>Returns <code>True</code> when the record was enqueued (async logging active), or
+<code>False</code> when the caller must use the synchronous <code>logger</code> path (async
+logging disabled or torn down).  The level gate is the caller's job —
+<code>emit_access_log</code> checks <code>isEnabledFor(INFO)</code> before calling.</p>
+<p>This path does not run the logger's handler/filter chain, so
+<code>emit_access_log</code> only calls it when <code>blackbull.access</code> has no
+user-attached handlers or filters (see there); when it does, the standard
+<code>logger.info</code> path is used so those are honoured.</p>
+
+
+    </div>
+
+</div>
 
 <div class="doc doc-object doc-function">
 
@@ -4726,7 +4949,7 @@ functions.</p>
 
 
 <h3 id="blackbull.logger.setup_async_logging" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">setup_async_logging</span><span class="p">(</span><span class="n">handlers</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
+            <code class="highlight language-python"><span class="n">setup_async_logging</span><span class="p">(</span><span class="n">handlers</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">log_format</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">syslog_addr</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">batch_size</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">batch_timeout_ms</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">log_file</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
 
 <a href="#blackbull.logger.setup_async_logging" class="headerlink" title="Permanent link">&para;</a></h3>
 
@@ -4741,8 +4964,13 @@ enqueues a <code>LogRecord</code> and returns immediately.  A daemon thread
 <h5 id="blackbull.logger.setup_async_logging--parameters">Parameters<a class="headerlink" href="#blackbull.logger.setup_async_logging--parameters" title="Permanent link">&para;</a></h5>
 <p>handlers:
     Handlers the background listener should write to.  Defaults to the
-    non-NullHandler handlers already on the <code>blackbull</code> logger, or a
-    single <code>StreamHandler(stderr)</code> when none exist.</p>
+    non-NullHandler handlers already on the <code>blackbull</code> logger, or the
+    sink built by :func:<code>_build_sink_handlers</code> when none exist.
+log_format, syslog_addr, batch_size, batch_timeout_ms, log_file:
+    Sink configuration forwarded to :func:<code>_build_sink_handlers</code> (only used
+    when <em>handlers</em> is None and no handlers are pre-attached).  The server
+    startup passes these from <code>Settings</code> (<code>get_settings()</code>); each
+    defaults to <code>None</code> → the matching <code>BB_*</code> env var.</p>
 
 
     </div>

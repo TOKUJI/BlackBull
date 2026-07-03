@@ -4894,14 +4894,23 @@ discard the call.  Profiling at -R 5000 with BB_ACCESS_LOG=0 showed
 these calls still costing ~1.2% of CPU.  Peers (uvicorn / granian /
 daphne) skip the work entirely when access logging is disabled; gating
 here matches that behaviour.</p>
-<p>The <em>record itself</em> is handed to <code>logger.info</code> as the message (it is
-self-formatting via <code>__str__</code>), so the expensive <code>format()</code> string
-build is deferred to the logging listener thread by the deferred-format
-QueueHandler (<code>blackbull.logger</code>) instead of running on the event loop.
-<code>finalize()</code> snapshots the duration first so that deferred format still
-reports the request's real duration, not duration + queue latency.  The
-structured <code>extra</code> fields stay eager — they are the documented public
-access-log API (guide.md §14; <code>tests/integration/test_access_log.py</code>).</p>
+<p>The <em>record itself</em> is the message (it is self-formatting via <code>__str__</code>),
+so the expensive <code>format()</code> string build is deferred to the logging
+listener thread instead of running on the event loop.  <code>finalize()</code>
+snapshots the duration first so that deferred format still reports the
+request's real duration, not duration + queue latency.  The structured
+<code>extra</code> fields stay eager — they are the documented public access-log API
+(guide.md §14; <code>tests/integration/test_access_log.py</code>).</p>
+<p>When async logging is active <em>and</em> the access logger has not been customised,
+the record is enqueued directly onto the listener queue via
+:func:<code>~blackbull.logger.enqueue_access_log</code> (O4), which bypasses
+<code>logging.Logger._log</code> — ~93% of the loop-side emit cost lives in that
+stdlib machinery.  The fast path is skipped (and the standard synchronous
+<code>logger.info</code> path used) when async logging is off <em>or</em> the user has
+attached their own handlers/filters to <code>blackbull.access</code> — those would be
+bypassed by a direct enqueue, so we defer to the full path to keep the
+documented "extend the access log via a custom handler/filter" pattern
+working (see docs/guide/logging.md).</p>
 
 
     </div>

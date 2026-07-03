@@ -2030,6 +2030,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.event_aggregator.EventAggregator.has_websocket_message_listeners" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        has_websocket_message_listeners
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.event_aggregator.EventAggregator.on_after_handler" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4753,6 +4764,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.event_aggregator.EventAggregator.has_websocket_message_listeners" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        has_websocket_message_listeners
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.event_aggregator.EventAggregator.on_after_handler" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5050,6 +5072,29 @@ call path.</p>
 <p>Result is cached against the dispatcher's registration generation, so
 the 6-event scan runs only when listeners change (effectively once,
 at startup) rather than on every request.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.event_aggregator.EventAggregator.has_websocket_message_listeners" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">has_websocket_message_listeners</span><span class="p">()</span></code>
+
+<a href="#blackbull.event_aggregator.EventAggregator.has_websocket_message_listeners" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Return True if any <code>websocket_message</code> handler is registered.</p>
+<p>The WebSocket receive path calls this per frame to skip the
+<code>Event</code> + detail-dict allocation and the <code>emit</code> indirection when
+nothing is listening (the common case on a throughput workload).
+Cached against the dispatcher's registration generation, so the
+lookup runs only when listeners change.</p>
 
 
     </div>

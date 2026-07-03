@@ -877,6 +877,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#built-in-async-logging-sinks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Built-in async logging sinks
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#extending-the-access-log-record-from-middleware" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4704,6 +4715,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#built-in-async-logging-sinks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Built-in async logging sinks
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#extending-the-access-log-record-from-middleware" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4964,6 +4986,60 @@ available in a custom <code>logging.Formatter</code> format string:</p>
 <code>BB_ACCESS_LOG=0</code> (which gates record formatting at the call
 site — useful when running benchmarks that don't want logging
 overhead).</p>
+<h2 id="built-in-async-logging-sinks">Built-in async logging sinks<a class="headerlink" href="#built-in-async-logging-sinks" title="Permanent link">&para;</a></h2>
+<p>With <code>BB_ASYNC_LOGGING=1</code> (the default) BlackBull installs a <code>QueueHandler</code> on
+the <code>blackbull</code> logger so every log call from the event loop enqueues in O(1); a
+background <code>QueueListener</code> thread drains the queue and writes to a sink. You
+select the sink and format entirely with environment variables — no code:</p>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Default</th>
+<th>Effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>BB_LOG_FILE</code></td>
+<td><em>(stderr)</em></td>
+<td>Write to a file (append mode) instead of <code>stderr</code>.</td>
+</tr>
+<tr>
+<td><code>BB_LOG_FORMAT</code></td>
+<td><em>(plain)</em></td>
+<td><code>json</code> → one structured JSON object per line (the <code>AccessLogRecord</code> fields become top-level keys).</td>
+</tr>
+<tr>
+<td><code>BB_SYSLOG_ADDR</code></td>
+<td><em>(unset)</em></td>
+<td><code>host:port</code> → ship records via a UDP <code>SysLogHandler</code>.</td>
+</tr>
+<tr>
+<td><code>BB_LOG_BATCH_SIZE</code></td>
+<td><code>64</code></td>
+<td>Coalescing width — records joined into one <code>write()</code>+<code>flush()</code>.</td>
+</tr>
+<tr>
+<td><code>BB_LOG_BATCH_TIMEOUT_MS</code></td>
+<td><code>5</code></td>
+<td>Max time a partial batch waits before flushing.</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Async logging is batch logging.</strong> The stream/file sink <em>always</em> coalesces
+records into one write per batch — a per-record <code>flush()</code> is the dominant cost of
+a high-rate access log (one flush syscall per request, contending for the GIL
+with the event loop). <code>BB_LOG_BATCH_SIZE</code> tunes the coalescing width, not an
+on/off switch; the timeout bounds visibility latency at low rate. To force an
+immediate per-record flush, disable async logging (<code>BB_ASYNC_LOGGING=0</code>, the
+synchronous path).</p>
+<p>When the access logger is left in its default state, records are enqueued on a
+fast path that skips the stdlib <code>logging.Logger._log</code> machinery (~93% of the
+per-emit cost). This is transparent: if you attach your own handlers or filters
+to <code>blackbull.access</code> (see the next section), BlackBull automatically uses the
+standard logging path so they are honoured.</p>
+<p>For the full list see <a href="../../reference/env-vars/">environment variables</a>.</p>
 <h2 id="extending-the-access-log-record-from-middleware">Extending the access log record from middleware<a class="headerlink" href="#extending-the-access-log-record-from-middleware" title="Permanent link">&para;</a></h2>
 <p>The <code>AccessLogRecord</code> for the current request is stored at
 <code>scope['state']['access_log']</code>.  Middleware that runs before the
@@ -5244,13 +5320,13 @@ breadcrumbs, …).  The <code>extra</code> payload is designed to round-trip
 through <code>json.dumps(record.__dict__)</code> cleanly.</p>
 <h2 id="not-yet-implemented">Not yet implemented<a class="headerlink" href="#not-yet-implemented" title="Permanent link">&para;</a></h2>
 <ul>
-<li><strong>HTTP/2 access logging</strong> — per-stream entries.  Today the
-  access log covers HTTP/1.1 only.</li>
 <li><strong>WebSocket access logging</strong> — connection-level entry (client
   IP, path, close code, duration).  Today the <code>websocket_*</code>
   events from <a href="../events/">Events</a> cover the same data; build
   your own logger on top if you need persistence.</li>
 </ul>
+<p>The access log covers both <strong>HTTP/1.1 and HTTP/2</strong> (one entry per
+completed request / stream).</p>
 <h2 id="next">Next<a class="headerlink" href="#next" title="Permanent link">&para;</a></h2>
 <ul>
 <li><a href="../events/">Events</a> — <code>@app.on('request_completed')</code> for

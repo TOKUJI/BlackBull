@@ -4239,6 +4239,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.server.ws_codec.encode_frame_header" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        encode_frame_header
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.server.ws_codec.read_frame" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4638,6 +4649,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.server.ws_codec.encode_frame_header" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        encode_frame_header
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.server.ws_codec.read_frame" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4860,6 +4882,32 @@ binary frames, <code>WSOpcode.CLOSE</code> for close frames, etc.</p>
 <p>RSV1 (RFC 7692 §7): pass <code>rsv1=True</code> on the FIRST frame of a message
 whose payload has been compressed with permessage-deflate.  Continuation
 frames in the same message keep <code>rsv1=False</code>.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="blackbull.server.ws_codec.encode_frame_header" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">encode_frame_header</span><span class="p">(</span><span class="n">length</span><span class="p">,</span> <span class="n">opcode</span><span class="o">=</span><span class="n">WSOpcode</span><span class="o">.</span><span class="n">TEXT</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">rsv1</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span></code>
+
+<a href="#blackbull.server.ws_codec.encode_frame_header" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Encode just the <strong>unmasked</strong> 2-to-10-byte WebSocket frame header
+(server → client, RFC 6455 §5.1/§5.2).</p>
+<p>Server frames MUST NOT be masked, so this never sets the mask bit and
+takes no masking key.  Callers that already hold the payload separately
+(e.g. <code>WebSocketSender</code>) write <code>(header, payload)</code> as a vectored
+<code>writelines</code> — avoiding the header+payload concatenation copy that
+<code>encode_frame</code> would otherwise allocate on every send.</p>
+<p><code>rsv1</code> (RFC 7692 §7) marks the FIRST frame of a permessage-deflate
+compressed message.</p>
 
 
     </div>
