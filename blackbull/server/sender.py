@@ -284,6 +284,128 @@ class AsyncioWriter(AbstractWriter):
 
 
 # ---------------------------------------------------------------------------
+# Connection-level segment coalescing
+# ---------------------------------------------------------------------------
+
+class ConnCoalescer:
+    """Connection-level outbound frame batcher for TCP segment coalescing.
+
+    Owned by ``HTTP2Actor`` and shared by every per-stream ``HTTP2Sender`` on
+    that connection.  Batches stream-frame writes so that N streams completing
+    within a short window flush as a **single** TCP segment instead of N —
+    eliminating the per-response delayed-ACK stall that dominates at low
+    connection counts / high multiplexing (e.g. a gRPC fan-out of many RPCs
+    over one connection).
+
+    **Correctness invariants**
+
+    * *Wire order (FIFO).*  All stream frames — including HEADERS and trailing
+      HEADERS — flow through one FIFO buffer and flush in enqueue order.  Since
+      header blocks are HPACK-encoded (into the connection's shared encoder)
+      immediately before ``write()`` is called, FIFO flush order preserves the
+      encoder/decoder synchronisation the HPACK dynamic table requires, and a
+      stream's DATA can never precede its own HEADERS.
+    * *Control frames bypass.*  SETTINGS/PING/WINDOW_UPDATE/GOAWAY/RST_STREAM
+      go through the control sender (stream 0), which is **not** given a
+      coalescer, so flow-control credit and liveness stay timely.  They carry
+      no HPACK state, so writing them ahead of buffered HEADERS is safe.
+
+    **Latency**
+
+    The first frame of an idle window is written immediately, so an isolated
+    response pays no added latency; only frames arriving while a window is
+    already open are held (up to ``hold_us``).  ``hold_us <= 0`` makes this a
+    transparent pass-through — byte-for-byte identical to a direct write.
+
+    Peer-close tolerant: mirrors ``BaseSender``'s guard at connection scope —
+    once the transport is gone, further writes are dropped silently.
+    """
+
+    __slots__ = ('_writer', '_hold_s', '_threshold', '_loop',
+                 '_buf', '_nbytes', '_timer', '_open', '_closed')
+
+    def __init__(self, writer: AbstractWriter, hold_us: int,
+                 threshold: int = 16 * 1024) -> None:
+        self._writer = writer
+        self._hold_s = hold_us / 1_000_000 if hold_us > 0 else 0.0
+        self._threshold = threshold
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._buf: list[bytes] = []
+        self._nbytes = 0
+        self._timer: asyncio.TimerHandle | None = None
+        # ``_open`` is True while a batching window is active (timer armed).
+        self._open = False
+        self._closed = False
+
+    @property
+    def enabled(self) -> bool:
+        return self._hold_s > 0.0
+
+    async def write(self, data: bytes) -> None:
+        if self._hold_s <= 0.0:
+            await self._guarded(data)
+            return
+        if self._closed:
+            return
+        if not self._open:
+            # First frame of an idle window: send now (zero added latency for
+            # an isolated response) and open the batching window.
+            self._open = True
+            self._arm()
+            await self._guarded(data)
+            return
+        # Window already open — hold this frame for the batch.
+        self._buf.append(data)
+        self._nbytes += len(data)
+        if self._nbytes >= self._threshold:
+            await self._flush()
+
+    def _arm(self) -> None:
+        if self._loop is None:
+            self._loop = asyncio.get_running_loop()
+        self._timer = self._loop.call_later(self._hold_s, self._on_timer)
+
+    def _on_timer(self) -> None:
+        self._timer = None
+        if self._buf and not self._closed:
+            # Flush the batch asynchronously; a fresh window opens on the
+            # next write() (``_open`` reset inside _flush()).
+            assert self._loop is not None
+            self._loop.create_task(self._flush())
+        else:
+            self._open = False
+
+    async def _flush(self) -> None:
+        if self._timer is not None:
+            self._timer.cancel()
+            self._timer = None
+        self._open = False
+        if not self._buf:
+            return
+        data = b''.join(self._buf)
+        self._buf.clear()
+        self._nbytes = 0
+        await self._guarded(data)
+
+    async def flush(self) -> None:
+        """Flush any pending buffered bytes now — called before the connection
+        writes a GOAWAY or tears down, so a trailing batch is never lost."""
+        await self._flush()
+
+    async def _guarded(self, data: bytes) -> None:
+        if self._closed:
+            return
+        try:
+            await self._writer.write(data)
+        except (ConnectionResetError, BrokenPipeError) as exc:
+            self._closed = True
+            logger.debug('coalescer: peer closed write side (%s)', exc.__class__.__name__)
+        except OSError as exc:
+            self._closed = True
+            logger.debug('coalescer: write failed on closed transport (%s)', exc.__class__.__name__)
+
+
+# ---------------------------------------------------------------------------
 # Sender hierarchy
 # ---------------------------------------------------------------------------
 
@@ -662,15 +784,19 @@ class HTTP2Sender(BaseSender):
         'connection_window_size', 'stream_window_size',
         'max_frame_size', '_window_open', '_end_stream_sent',
         '_buffered_status', '_buffered_headers', '_expect_trailers',
-        '_buffered_body',
+        '_buffered_body', '_coalescer',
     )
 
     def __init__(self, writer: AbstractWriter, factory, stream_id: int,
-                 push_callback=None):
+                 push_callback=None, coalescer: 'ConnCoalescer | None' = None):
         super().__init__(writer)
         self._factory = factory
         self._stream_id = stream_id
         self._push_callback = push_callback
+        # Connection-level segment coalescer (shared across this connection's
+        # per-stream senders).  ``None`` → direct writes (today's behaviour).
+        # Never set on the control sender (stream 0), so control frames bypass.
+        self._coalescer = coalescer
         self.connection_window_size = DEFAULT_INITIAL_WINDOW_SIZE
         self.stream_window_size = {stream_id: DEFAULT_INITIAL_WINDOW_SIZE}
         self.max_frame_size = DEFAULT_MAX_FRAME_SIZE
@@ -751,7 +877,14 @@ class HTTP2Sender(BaseSender):
         HEADERS and control frames (SETTINGS, PING, WINDOW_UPDATE, RST_STREAM,
         GOAWAY, CONTINUATION) are not.  Flow-controlled writes go through
         :meth:`_write_data`.
+
+        When a connection-level coalescer is present, per-stream frames are
+        routed through it for TCP segment coalescing; otherwise they go
+        straight to the transport (today's behaviour).
         """
+        if self._coalescer is not None:
+            await self._coalescer.write(data)
+            return
         await super()._write(data)
 
     async def _write_data(self, body: bytes, end_stream: bool) -> None:
@@ -1070,9 +1203,9 @@ class SenderFactory:
 
     @staticmethod
     def http2(stream_writer, factory, stream_id: int,
-              push_callback=None) -> HTTP2Sender:
+              push_callback=None, coalescer: 'ConnCoalescer | None' = None) -> HTTP2Sender:
         return HTTP2Sender(SenderFactory._ensure_writer(stream_writer),
-                           factory, stream_id, push_callback)
+                           factory, stream_id, push_callback, coalescer)
 
     @staticmethod
     def websocket(stream_writer, *, compressor=None) -> WebSocketSender:

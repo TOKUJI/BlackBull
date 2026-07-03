@@ -25,7 +25,7 @@ from .cap_log import log_cap_hit
 from .recipient import (AbstractReader, IncompleteReadError,
                         RecipientFactory, _HTTP2_STREAM_QUEUE_DEPTH)
 from .response import ResponderFactory
-from .sender import AbstractWriter, SenderFactory
+from .sender import AbstractWriter, ConnCoalescer, SenderFactory
 from .access_log import AccessLogRecord, _make_capturing_send, _make_disconnect_detecting_receive, emit_access_log as _emit_access_log
 from ..asgi import ASGIEvent
 from .http1_actor import RequestActor
@@ -282,6 +282,11 @@ class HTTP2Actor(Actor):
         # Read from env at construction so tests can override before run().
         from ..env import get_settings as _get_settings  # noqa: PLC0415
         _cfg = _get_settings()
+        # Connection-level segment coalescer, injected into per-stream senders
+        # (never the control sender above, so control frames bypass).  Disabled
+        # by default (hold_us=0 → transparent pass-through); opt in with
+        # BB_H2_CONN_BUFFER_US.  See ConnCoalescer for the ordering invariants.
+        self._coalescer = ConnCoalescer(self._writer, _cfg.h2_conn_buffer_us)
         self.max_concurrent_streams: int = _cfg.h2_max_concurrent_streams
         self._request_timeout: float = _cfg.request_timeout
         self._frame_yield_every: int = _cfg.frame_yield_every
@@ -392,6 +397,7 @@ class HTTP2Actor(Actor):
             sender = SenderFactory.http2(
                 self._writer, self.factory, stream_id,
                 push_callback=self._handle_push,
+                coalescer=self._coalescer,
             )
             # Initialise with the windows the peer has currently granted us,
             # rather than the RFC defaults, which may already have been exceeded
@@ -469,6 +475,10 @@ class HTTP2Actor(Actor):
             return
         logger.warning(
             'HTTP/2 connection error %s: %s', error_code.name, reason)
+        # Flush any coalesced stream frames before the GOAWAY (which bypasses
+        # the coalescer via the control sender) so buffered responses reach the
+        # peer ahead of the connection-closing frame rather than being dropped.
+        await self._coalescer.flush()
         await self.send_frame(
             self.factory.goaway(self._last_peer_stream_id, error_code))
         self._goaway_sent = True
@@ -563,6 +573,10 @@ class HTTP2Actor(Actor):
             await self._frame_loop(tg)
 
         self._task_group = None
+        # Flush any coalesced-but-unsent batch before the connection tears
+        # down, so a trailing group of responses is never lost to close.
+        # No-op when coalescing is disabled.
+        await self._coalescer.flush()
 
     async def _frame_loop(self, tg: asyncio.TaskGroup) -> None:
         """Read frames and dispatch stream tasks until EOF or GOAWAY."""
@@ -1244,7 +1258,8 @@ class HTTP2Actor(Actor):
         push_recipient.mark_end_of_stream_on_headers()
         self._recipients[push_stream_id] = push_recipient
         push_sender = SenderFactory.http2(
-            self._writer, self.factory, push_stream_id, push_callback=None)
+            self._writer, self.factory, push_stream_id, push_callback=None,
+            coalescer=self._coalescer)
         log_record = _make_log_record(pushed_scope)
         capturing_send = _make_capturing_send(push_sender, log_record)
 

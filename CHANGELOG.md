@@ -31,6 +31,27 @@ so the editable install's metadata catches up.
 
 ## [Unreleased]
 
+### Added
+- **Connection-level TCP segment coalescing** (`BB_H2_CONN_BUFFER_US`, default
+  `0` = off) — response frames from HTTP/2 streams that complete within a short
+  window on one connection can be flushed as a single TCP segment instead of one
+  per stream, removing the per-response delayed-ACK stall that dominates at low
+  connection counts / high multiplexing (e.g. a gRPC fan-out of many RPCs over
+  one connection). The first frame of an idle window writes immediately (no
+  added latency for an isolated response); control frames
+  (`SETTINGS`/`PING`/`WINDOW_UPDATE`/`GOAWAY`/`RST_STREAM`) always bypass the
+  buffer, and wire/HPACK order is preserved by FIFO flushing. Opt-in — the
+  single-segment shape can regress at higher connection counts, so it is off by
+  default. See `docs/reference/env-vars.md`.
+
+### Changed
+- **Internal refactors (no behaviour change)** — replaced mechanical repetition
+  in the frame, MQTT, sender, HTTP/1.1, HTTP/2, app, and router layers with
+  module-level dispatch tables and shared helpers (SETTINGS parsing, MQTT
+  encode/decode + property codecs, sender drain/guarded-write/writer helpers,
+  the HTTP/1.1 error-response path, HTTP/2 priority-extension setup, and app
+  lifecycle registration). Net −54 effective code lines; full suite unchanged.
+
 ## [0.47.0] — 2026-07-03
 
 ### Added
