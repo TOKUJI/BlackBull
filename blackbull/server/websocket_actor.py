@@ -97,7 +97,10 @@ class WebSocketActor(Actor):
     async def _receive(self) -> dict[str, Any]:
         event = await self._ws_receive()
         if event.get('type') == ASGIEvent.WS_RECEIVE:
-            await self._aggregator.on_websocket_message(self._scope, event)
+            # Hot path: skip the Event + detail-dict build and emit indirection
+            # entirely when no ``websocket_message`` handler is registered.
+            if self._aggregator.has_websocket_message_listeners():
+                await self._aggregator.on_websocket_message(self._scope, event)
         elif event.get('type') == ASGIEvent.WS_DISCONNECT:
             self._disconnect_code = event.get('code', WSCloseCode.ABNORMAL)
         return event

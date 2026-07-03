@@ -45,6 +45,16 @@ so the editable install's metadata catches up.
   default. See `docs/reference/env-vars.md`.
 
 ### Changed
+- **WebSocket send hot path (fewer allocations, no behaviour change)** — outbound
+  data frames are now written vectored: the 2-to-10-byte frame header
+  (`encode_frame_header`) and the payload go to the transport as
+  `writelines((header, payload))`, so the payload is no longer copied into a
+  concatenated frame buffer on every send. `encode_frame` shares the same header
+  builder for its unmasked path (two allocations instead of three). The
+  per-message `websocket_message` event emit is now skipped entirely (no `Event`
+  or detail-dict build) when no handler is registered, via a generation-cached
+  `has_websocket_message_listeners()` guard — matching the existing
+  request-lifecycle fast path. Wire bytes are byte-for-byte identical.
 - **Internal refactors (no behaviour change)** — replaced mechanical repetition
   in the frame, MQTT, sender, HTTP/1.1, HTTP/2, app, and router layers with
   module-level dispatch tables and shared helpers (SETTINGS parsing, MQTT

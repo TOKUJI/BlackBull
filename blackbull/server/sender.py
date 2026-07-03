@@ -12,7 +12,7 @@ from ..protocol.frame_types import (FrameTypes, HeaderFrameFlags, DataFrameFlags
                                     DEFAULT_INITIAL_WINDOW_SIZE, DEFAULT_MAX_FRAME_SIZE)
 from .cap_log import log_cap_hit
 from .constants import WSCloseCode
-from .ws_codec import WSOpcode, encode_frame
+from .ws_codec import WSOpcode, encode_frame, encode_frame_header
 import logging
 from ..asgi import ASGIEvent
 from ..headers import Headers, HeaderList
@@ -446,8 +446,12 @@ class BaseSender(ABC):
         silently drop.  These exceptions used to propagate out as
         tracebacks under wrk c=1024 sustained load — 22 per 30 s in the
         141848 run.
+
+        ``_closed`` is bound in ``__init__`` for every sender, so a direct
+        attribute read is safe (and cheaper than the old ``getattr`` guard)
+        on this per-write hot path.
         """
-        if getattr(self, '_closed', False):
+        if self._closed:
             return
         try:
             await write_fn(arg)
@@ -1154,12 +1158,14 @@ class WebSocketSender(BaseSender):
                 else:
                     raw = body.get('bytes', b'')
                     opcode = WSOpcode.BINARY
-                if self._compressor is not None:
+                rsv1 = self._compressor is not None
+                if rsv1:
                     raw = self._compressor.compress(raw)
-                    frame = encode_frame(raw, opcode=opcode, rsv1=True)
-                else:
-                    frame = encode_frame(raw, opcode=opcode)
-                await self._write(frame)
+                # Vectored write: hand (header, payload) to writelines so the
+                # payload is never copied into a concatenated frame buffer
+                # (the header+payload join encode_frame would allocate).
+                header = encode_frame_header(len(raw), opcode, rsv1=rsv1)
+                await self._write_many((header, raw))
 
             case ASGIEvent.WS_CLOSE:
                 code = body.get('code', WSCloseCode.NORMAL)
