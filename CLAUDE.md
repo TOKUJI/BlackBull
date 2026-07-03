@@ -105,3 +105,34 @@ Framework internals use two separate logger hierarchies:
 - `blackbull.*` — DEBUG-level protocol/routing/TLS events
 - `blackbull.access` — INFO-level access log (one record per completed request)
 
+---
+
+## Working docs map (`.claude/` + `CLAUDE_DEV.md`)
+
+This file is the only doc auto-loaded every session. The docs below are **not**
+loaded automatically — open the relevant one when the trigger applies. Do not
+duplicate their content here; link, don't copy.
+
+| When you are… | Read |
+|---|---|
+| Doing any framework change (workflow, testing, type rules) | `CLAUDE_DEV.md` |
+| Writing/adjusting tests | `.claude/patterns/testing.md` |
+| Running benchmarks or profiling | `.claude/patterns/benchmarking.md` + the `bench-compare` skill |
+| Cutting a release / sprint close | `.claude/patterns/release.md`, then the `sprint-close` skill |
+| Reasoning about actors / events | `.claude/design/actor-model.md`, `.claude/design/event-catalogue.md` |
+| Checking a known gotcha before acting | `.claude/patterns/cautions.md` |
+| Picking/triaging what to build next | `.claude/planning/proposals/INDEX.md` |
+| Reading a point-in-time design | `.claude/planning/designs/` |
+
+**Skills** (invocable, harness-surfaced): `sprint-close`, `bench-compare`,
+`pre-release-docs`, `update-roadmap`, `create-test`, `type-check`, `add-event`,
+`new-http2-frame`, `protocol-handler`, `httparena-bench`.
+
+### Doc lifecycle (so docs don't rot)
+
+Every doc under `.claude/planning/` carries a status line near the top:
+`**Status**: active | shipped vX.Y.0 | superseded-by <file> | archived <date>`.
+When a proposal/design ships or dies, move it to `.claude/planning/archives/`
+(that pruning is a step in the `sprint-close` skill). `.claude/` is git-ignored,
+so deletions are **not** recoverable — prune deliberately, archive when unsure.
+
