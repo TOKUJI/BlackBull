@@ -40,6 +40,24 @@ BB_ACCESS_LOG
     production where a separate log aggregator consumes structured logs and the
     per-request overhead of the access logger is undesirable.
     Default: ``true``.
+BB_LOG_FORMAT
+    Async-logging sink format.  ``json`` emits one structured JSON object per
+    line; anything else (default) keeps plain text.
+    Default: `` `` (plain).
+BB_SYSLOG_ADDR
+    ``host:port`` of a syslog/UDP collector (e.g. ``127.0.0.1:514``).  When set,
+    the async-logging sink ships records via a UDP ``SysLogHandler`` instead of
+    ``stderr``.  Composes with ``BB_LOG_FORMAT=json``.
+    Default: `` `` (stderr sink).
+BB_LOG_BATCH_SIZE
+    When > 1, the ``stderr`` async-logging sink coalesces up to this many
+    formatted lines into a single ``write()``.  ``1`` (default) is one write per
+    record.  Ignored for the syslog sink.
+    Default: ``1``.
+BB_LOG_BATCH_TIMEOUT_MS
+    Max milliseconds a partial log batch waits before flush.  Only meaningful
+    when ``BB_LOG_BATCH_SIZE`` > 1.
+    Default: ``5``.
 BB_SOCKET_BACKLOG
     ``listen()`` backlog depth for the server socket.  Increasing this reduces
     silent connection drops during burst traffic when the accept loop falls
@@ -352,6 +370,22 @@ class Settings:
     #: Emit one access log record per completed request on blackbull.access.
     access_log: bool = True
 
+    #: Async-logging sink format: '' → plain text (default), 'json' → one
+    #: structured JSON object per line (approach 3).
+    log_format: str = ''
+
+    #: host:port of a syslog/UDP collector (approach 6).  '' keeps the stderr
+    #: sink.  When set, records ship via a UDP SysLogHandler.
+    log_syslog_addr: str = ''
+
+    #: Coalesce up to N formatted log lines into one write on the stderr sink
+    #: (approach 4 / O2).  1 (default) = off, one write per record.
+    log_batch_size: int = 1
+
+    #: Max milliseconds a partial log batch waits before flush.  Only meaningful
+    #: when log_batch_size > 1.
+    log_batch_timeout_ms: int = 5
+
     #: listen() backlog depth for the server socket.  1024 is a sane
     #: default for servers facing connection bursts — 128 (the traditional
     #: ``SOMAXCONN``) is shallow next to peers like nginx (511) and Node
@@ -592,6 +626,10 @@ def get_settings() -> Settings:
         ws_queue_depth=_int_env('BB_WS_QUEUE_DEPTH', 256),
         async_logging=_bool_env('BB_ASYNC_LOGGING', True),
         access_log=_bool_env('BB_ACCESS_LOG', True),
+        log_format=_str_env('BB_LOG_FORMAT', ''),
+        log_syslog_addr=_str_env('BB_SYSLOG_ADDR', ''),
+        log_batch_size=_int_env('BB_LOG_BATCH_SIZE', 1),
+        log_batch_timeout_ms=_int_env('BB_LOG_BATCH_TIMEOUT_MS', 5),
         # Defaults match the Linux kernel baseline.  See
         # docs/reference/env-vars.md "Performance recommendations"
         # for the values to override these with on a tuned deployment.

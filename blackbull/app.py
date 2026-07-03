@@ -1078,7 +1078,12 @@ def serve(app, *,
         from .server import ASGIServer  # noqa: PLC0415
         apply_event_loop_policy(_cfg)
         if _cfg.async_logging:
-            setup_async_logging()
+            setup_async_logging(
+                log_format=_cfg.log_format,
+                syslog_addr=_cfg.log_syslog_addr,
+                batch_size=_cfg.log_batch_size,
+                batch_timeout_ms=_cfg.log_batch_timeout_ms,
+            )
         if not _cfg.access_log:
             _logging.getLogger('blackbull.access').setLevel(_logging.WARNING)
         try:

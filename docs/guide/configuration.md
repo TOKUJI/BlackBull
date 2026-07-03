@@ -61,6 +61,10 @@ compression_min_size = 100
 [logging]
 access_log    = true
 async_logging = true
+log_format    = "json"        # "" (plain, default) or "json"
+syslog_addr   = "127.0.0.1:514"  # ship logs via UDP syslog (optional)
+batch_size    = 1             # >1 coalesces N stderr log lines per write
+batch_timeout_ms = 5          # max ms a partial batch waits before flush
 
 [tls]
 cert = "/etc/blackbull/cert.pem"

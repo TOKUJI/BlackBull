@@ -205,30 +205,47 @@ class BatchWriteHandler(logging.Handler):
         super().close()
 
 
-def _build_sink_handlers() -> list[logging.Handler]:
-    """Build the async-logging sink handler(s) from the environment.
+def _build_sink_handlers(
+    *,
+    log_format: str | None = None,
+    syslog_addr: str | None = None,
+    batch_size: int | None = None,
+    batch_timeout_ms: int | None = None,
+) -> list[logging.Handler]:
+    """Build the async-logging sink handler(s).
 
     Selects the *destination* and *format* for the background listener when
     :func:`setup_async_logging` is called without explicit handlers (the
     common path — the app has only the ``NullHandler`` from import):
 
-    - ``BB_SYSLOG_ADDR=host:port`` → a UDP ``SysLogHandler`` (approach 6).
+    - *syslog_addr* ``host:port`` → a UDP ``SysLogHandler`` (approach 6).
       An unparseable value falls back to ``stderr`` with a warning rather than
       crashing startup.
-    - ``BB_LOG_BATCH_SIZE`` > 1 → a batching ``stderr`` sink (approach 4 / O2)
-      that coalesces up to that many lines into one write, flushed after
-      ``BB_LOG_BATCH_TIMEOUT_MS`` (default 5 ms).  Ignored for the syslog sink
-      (UDP is one datagram per message).
+    - *batch_size* > 1 → a batching ``stderr`` sink (approach 4 / O2) that
+      coalesces up to that many lines into one write, flushed after
+      *batch_timeout_ms* (default 5 ms).  Ignored for the syslog sink (UDP is
+      one datagram per message).
     - otherwise → ``StreamHandler(stderr)`` (approaches 1/2, the default).
 
-    Formatter: ``JsonFormatter`` when ``BB_LOG_FORMAT=json`` (approach 3),
-    otherwise the stdlib default (plain text — unchanged behaviour).  These are
-    read from ``os.environ`` directly (like ``BB_PHASE_TRACE``) so ``logger``
-    stays importable without the full settings stack.
+    Formatter: ``JsonFormatter`` when *log_format* is ``json`` (approach 3),
+    otherwise the stdlib default (plain text — unchanged behaviour).
+
+    Each parameter defaults to ``None`` → the corresponding ``BB_*`` env var.
+    The typed server config (``Settings``/CLI) passes resolved values in via
+    :func:`setup_async_logging`; the env fallback keeps ``logger`` usable
+    standalone (tests, direct use) without importing the settings stack.
     """
+    if log_format is None:
+        log_format = os.environ.get('BB_LOG_FORMAT', '')
+    if syslog_addr is None:
+        syslog_addr = os.environ.get('BB_SYSLOG_ADDR', '')
+    if batch_size is None:
+        batch_size = _int_env('BB_LOG_BATCH_SIZE', 1)
+    if batch_timeout_ms is None:
+        batch_timeout_ms = _int_env('BB_LOG_BATCH_TIMEOUT_MS', 5)
+
     handler: logging.Handler
-    syslog_addr = os.environ.get('BB_SYSLOG_ADDR', '').strip()
-    batch_size = _int_env('BB_LOG_BATCH_SIZE', 1)
+    syslog_addr = syslog_addr.strip()
     if syslog_addr:
         try:
             host, _, port = syslog_addr.partition(':')
@@ -240,13 +257,12 @@ def _build_sink_handlers() -> list[logging.Handler]:
                 syslog_addr, exc)
             handler = logging.StreamHandler()
     elif batch_size > 1:
-        timeout_ms = _int_env('BB_LOG_BATCH_TIMEOUT_MS', 5)
         handler = BatchWriteHandler(sys.stderr, batch_size=batch_size,
-                                    flush_interval=max(0, timeout_ms) / 1000.0)
+                                    flush_interval=max(0, batch_timeout_ms) / 1000.0)
     else:
         handler = logging.StreamHandler()
 
-    if os.environ.get('BB_LOG_FORMAT', '').strip().lower() == 'json':
+    if log_format.strip().lower() == 'json':
         handler.setFormatter(JsonFormatter())
     return [handler]
 
@@ -293,7 +309,14 @@ class _DeferredFormatQueueHandler(logging.handlers.QueueHandler):
 _listener: logging.handlers.QueueListener | None = None
 
 
-def setup_async_logging(handlers: list[logging.Handler] | None = None) -> None:
+def setup_async_logging(
+    handlers: list[logging.Handler] | None = None,
+    *,
+    log_format: str | None = None,
+    syslog_addr: str | None = None,
+    batch_size: int | None = None,
+    batch_timeout_ms: int | None = None,
+) -> None:
     """Install a QueueHandler on the ``blackbull`` logger hierarchy.
 
     After this call every ``logger.debug/info/warning`` in the event loop
@@ -307,8 +330,12 @@ def setup_async_logging(handlers: list[logging.Handler] | None = None) -> None:
     handlers:
         Handlers the background listener should write to.  Defaults to the
         non-NullHandler handlers already on the ``blackbull`` logger, or the
-        env-selected sink from :func:`_build_sink_handlers` when none exist
-        (``BB_SYSLOG_ADDR`` destination + ``BB_LOG_FORMAT=json`` formatting).
+        sink built by :func:`_build_sink_handlers` when none exist.
+    log_format, syslog_addr, batch_size, batch_timeout_ms:
+        Sink configuration forwarded to :func:`_build_sink_handlers` (only used
+        when *handlers* is None and no handlers are pre-attached).  The server
+        startup passes these from ``Settings`` (``get_settings()``); each
+        defaults to ``None`` → the matching ``BB_*`` env var.
     """
     global _listener
 
@@ -320,7 +347,9 @@ def setup_async_logging(handlers: list[logging.Handler] | None = None) -> None:
     if handlers is None:
         existing = [h for h in bb_logger.handlers
                     if not isinstance(h, logging.NullHandler)]
-        handlers = existing if existing else _build_sink_handlers()
+        handlers = existing if existing else _build_sink_handlers(
+            log_format=log_format, syslog_addr=syslog_addr,
+            batch_size=batch_size, batch_timeout_ms=batch_timeout_ms)
 
     log_queue: _queue_mod.SimpleQueue = _queue_mod.SimpleQueue()
     queue_handler = _DeferredFormatQueueHandler(log_queue)  # type: ignore[arg-type]

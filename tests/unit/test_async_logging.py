@@ -290,6 +290,42 @@ def test_sink_syslog_ignores_batch_size(monkeypatch):
     handlers[0].close()
 
 
+def test_settings_carry_logging_sink_fields(monkeypatch):
+    """The sink knobs are first-class Settings fields (discoverable / typed),
+    read from BB_* like every other server knob."""
+    from blackbull.env import get_settings, reset_settings_cache
+    monkeypatch.setenv('BB_LOG_FORMAT', 'json')
+    monkeypatch.setenv('BB_SYSLOG_ADDR', '10.0.0.1:514')
+    monkeypatch.setenv('BB_LOG_BATCH_SIZE', '64')
+    monkeypatch.setenv('BB_LOG_BATCH_TIMEOUT_MS', '3')
+    reset_settings_cache()
+    try:
+        cfg = get_settings()
+        assert cfg.log_format == 'json'
+        assert cfg.log_syslog_addr == '10.0.0.1:514'
+        assert cfg.log_batch_size == 64
+        assert cfg.log_batch_timeout_ms == 3
+    finally:
+        reset_settings_cache()
+
+
+def test_explicit_params_take_precedence_over_env(monkeypatch):
+    """setup_async_logging passes Settings values in explicitly; those must win
+    over the env fallback so the typed config is authoritative."""
+    monkeypatch.setenv('BB_LOG_FORMAT', 'json')     # env says json…
+    handlers = _build_sink_handlers(log_format='')  # …but the caller says plain
+    assert not isinstance(handlers[0].formatter, JsonFormatter)
+
+
+def test_build_sink_handlers_falls_back_to_env_when_none(monkeypatch):
+    """None params fall back to env — keeps logger usable standalone."""
+    monkeypatch.setenv('BB_LOG_FORMAT', 'json')
+    monkeypatch.delenv('BB_SYSLOG_ADDR', raising=False)
+    monkeypatch.delenv('BB_LOG_BATCH_SIZE', raising=False)
+    handlers = _build_sink_handlers()  # all None → read env
+    assert isinstance(handlers[0].formatter, JsonFormatter)
+
+
 def test_teardown_drains_batch_sink():
     """A record still buffered in the batch sink at teardown must be flushed
     (teardown closes BatchWriteHandler sinks), not lost with the daemon thread."""
