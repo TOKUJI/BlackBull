@@ -29,6 +29,37 @@ so the editable install's metadata catches up.
 
 ---
 
+## [Unreleased]
+
+Sprint 60 — completing the gRPC **transport** (the dependency-free gaps; no
+protobuf on the wire). Committed on branch `grpc-streaming-sprint60`; release
+deferred.
+
+### Added
+- **Client-streaming and bidirectional-streaming gRPC** — all four RPC kinds are
+  now served over the ASGI bridge (no dedicated actor). A request-streaming
+  handler takes an async iterator of messages (`request_iter`); the request axis
+  is auto-detected from the first parameter name (or set explicitly via
+  `client_streaming=`). An incremental Length-Prefixed-Message de-framer
+  reassembles messages across `http.request` events. Real grpcio interop tests
+  for `stream_unary` and `stream_stream`.
+- **gRPC gzip message compression** (`blackbull/grpc/compression.py`) — compressed
+  requests (`grpc-encoding: gzip`, per-message Compressed-Flag) are decompressed
+  with a decompression-bomb guard (bounded output); the server advertises
+  `grpc-accept-encoding: identity,gzip` and gzip-compresses responses over a
+  threshold (`BB_GRPC_COMPRESS_MIN_BYTES`, default 1 KiB) when the client accepts
+  gzip and it shrinks the message. An unsupported encoding → `UNIMPLEMENTED`.
+- **Fuller `GrpcContext`** — `time_remaining()` (from `grpc-timeout`), `peer()`
+  (grpc-style `ipv4:host:port` / `ipv6:[host]:port`), `invocation_metadata()`, and
+  `send_initial_metadata()` to flush leading response metadata (initial HEADERS)
+  before the first message.
+
+### Fixed
+- **WINDOW_UPDATE(0) on empty END_STREAM DATA** (RFC 9113 §6.9) — a zero-length
+  DATA frame (grpcio closes a client-streaming request this way) no longer credits
+  a 0-byte window increment, which strict clients treat as a protocol error and
+  drop the connection.
+
 ## [0.48.0] — 2026-07-04
 
 ### Added
