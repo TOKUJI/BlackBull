@@ -149,6 +149,34 @@ def _validate_message_framing(headers: 'Headers') -> None:
 _HOST_FORBIDDEN_BYTES = frozenset(b'/?# \t')
 
 
+def _parse_host_header(value: bytes, default_port: int) -> tuple[str, int]:
+    """Split a Host header value into ``(host, port)``.
+
+    Handles the RFC 3986 §3.2.2 IPv6 bracket form ``[::1]:8100`` — a
+    naive ``value.split(b':')`` yields ``int(b'')`` → ``ValueError`` on
+    those (``b'[::1]:8100'.split(b':')`` == ``[b'[', b'', b'1]', b'8100']``).
+    Pre-fix that exception bubbled past ``HTTP1Actor.run`` and closed the
+    transport with no response bytes — every IPv6 request saw an "empty
+    reply from server".
+
+    A missing or non-numeric port falls back to *default_port*.
+    """
+    if value.startswith(b'['):
+        end = value.find(b']')
+        if end != -1:
+            host = value[1:end]
+            rest = value[end + 1:]
+            if rest.startswith(b':') and rest[1:].isdigit():
+                return host.decode('utf-8'), int(rest[1:])
+            return host.decode('utf-8'), default_port
+        # Unterminated bracket — treat the whole value as the host.
+        return value.decode('utf-8'), default_port
+    host, sep, port_s = value.rpartition(b':')
+    if sep and port_s.isdigit():
+        return host.decode('utf-8'), int(port_s)
+    return value.decode('utf-8'), default_port
+
+
 def _validate_host(headers: 'Headers') -> None:
     """RFC 9112 §3.2 / §7.2 — Host MUST be present and contain a valid
     URI-authority component.  Sprint 17 Finding B captured several
@@ -681,10 +709,9 @@ class HTTP1Actor(Actor):
         }
 
         if headers.getlist(b'host'):
-            parts = headers.get(b'host').split(b':')
-            host = parts[0]
-            port = int(parts[1]) if len(parts) > 1 else (_HTTPS_PORT if self._ssl else _HTTP_PORT)
-            scope['server'] = [host.decode('utf-8'), port]
+            default_port = _HTTPS_PORT if self._ssl else _HTTP_PORT
+            host, port = _parse_host_header(headers.get(b'host'), default_port)
+            scope['server'] = [host, port]
 
         if headers.getlist(b'upgrade'):
             scope['type'] = headers.get(b'upgrade').decode('utf-8').lower()
