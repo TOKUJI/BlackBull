@@ -74,6 +74,21 @@ def _make_grpc_app() -> BlackBull:
         yield b'first'
         raise GrpcError(GrpcStatus.PERMISSION_DENIED, 'stop')
 
+    @reg.method('/echo.Echo/Collect')
+    async def collect(request_iter, context):
+        # Client-streaming: concatenate every request message into one reply.
+        return b','.join([m async for m in request_iter])
+
+    @reg.method('/echo.Echo/CountBytes')
+    async def count_bytes(request_iter, context):
+        # Client-streaming over a large request stream: sum message lengths so
+        # the request side crosses the 65535-byte initial window under a real
+        # client (request-direction flow control).
+        total = 0
+        async for m in request_iter:
+            total += len(m)
+        return str(total).encode()
+
     @reg.method('/err.Err/Explode')
     async def explode(request, context):
         raise RuntimeError('kaboom')
@@ -160,6 +175,29 @@ def _blocking_server_stream(port: int, method: str, payload: bytes):
 
 async def _server_stream(port: int, method: str, payload: bytes = b''):
     return await asyncio.to_thread(_blocking_server_stream, port, method, payload)
+
+
+def _blocking_client_stream(port: int, method: str, payloads: list[bytes]):
+    """Issue one blocking client-streaming call with a real grpcio channel.
+
+    Streams every item of *payloads* as a request message and returns
+    ``(ok, value_or_error)`` — ``(True, response_bytes)`` on success,
+    ``(False, grpc.RpcError)`` on a non-OK status."""
+    with grpc.insecure_channel(f'127.0.0.1:{port}') as channel:
+        grpc.channel_ready_future(channel).result(timeout=_CALL_TIMEOUT)
+        call = channel.stream_unary(
+            method,
+            request_serializer=lambda b: b,
+            response_deserializer=lambda b: b,
+        )
+        try:
+            return (True, call(iter(payloads), timeout=_CALL_TIMEOUT))
+        except grpc.RpcError as exc:  # noqa: BLE001 — surface the status
+            return (False, exc)
+
+
+async def _client_stream(port: int, method: str, payloads: list[bytes]):
+    return await asyncio.to_thread(_blocking_client_stream, port, method, payloads)
 
 
 # ---------------------------------------------------------------------------
@@ -250,6 +288,36 @@ class TestRealClientServerStreaming:
         assert err is not None
         assert err.code() == grpc.StatusCode.PERMISSION_DENIED, err
         assert err.details() == 'stop'
+
+
+# ---------------------------------------------------------------------------
+# Client-streaming — a real grpcio stream_unary call (Sprint 60 G1a).
+# ---------------------------------------------------------------------------
+
+class TestRealClientClientStreaming:
+    @pytest.mark.asyncio
+    async def test_collects_all_request_messages(self, grpc_server_port):
+        ok, value = await _client_stream(
+            grpc_server_port, '/echo.Echo/Collect', [b'a', b'bb', b'ccc'])
+        assert ok, f'unexpected error: {value}'
+        assert value == b'a,bb,ccc'
+
+    @pytest.mark.asyncio
+    async def test_empty_request_stream(self, grpc_server_port):
+        ok, value = await _client_stream(grpc_server_port, '/echo.Echo/Collect', [])
+        assert ok, f'unexpected error: {value}'
+        assert value == b''
+
+    @pytest.mark.asyncio
+    async def test_large_request_stream_flow_control(self, grpc_server_port):
+        # 200 × 1 KiB request messages (~200 KiB) crosses the 65535-byte initial
+        # window on the *request* direction — exercises inbound flow control with
+        # a strict client, the mirror of the server-streaming large-response case.
+        payloads = [b'x' * 1024] * 200
+        ok, value = await _client_stream(
+            grpc_server_port, '/echo.Echo/CountBytes', payloads)
+        assert ok, f'unexpected error: {value}'
+        assert value == str(200 * 1024).encode()
 
 
 # ---------------------------------------------------------------------------

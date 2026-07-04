@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import struct
 
 from ..request import read_body
 from .codec import decode_messages, encode_message, GrpcDecodeError
@@ -220,6 +221,52 @@ async def _read_unary_request(receive) -> bytes:
     return request
 
 
+# 1-byte compressed flag + 4-byte big-endian length (gRPC LPM prefix).
+_LPM_PREFIX = struct.Struct('>BI')
+_PREFIX_LEN = _LPM_PREFIX.size
+
+
+async def _iter_request_messages(receive):
+    """Yield de-framed request messages as they arrive (client-/bidi-streaming).
+
+    Reassembles Length-Prefixed-Messages across ``http.request`` events — gRPC
+    messages don't align to DATA-frame boundaries, so a message may straddle
+    several events or several messages may share one.  A residual buffer holds
+    the partial tail between events.  Raises :class:`GrpcError` on a
+    compressed / oversized / truncated message, matching ``_read_unary_request``
+    (UNIMPLEMENTED / RESOURCE_EXHAUSTED / INTERNAL respectively)."""
+    buf = bytearray()
+    more = True
+    while more:
+        event = await receive()
+        if event.get('type') == 'http.disconnect':
+            raise GrpcError(GrpcStatus.CANCELLED, 'client disconnected mid-stream')
+        chunk = event.get('body', b'')
+        if chunk:
+            buf.extend(chunk)
+        more = event.get('more_body', False)
+        # Drain every complete message currently buffered.
+        while len(buf) >= _PREFIX_LEN:
+            flag, length = _LPM_PREFIX.unpack_from(buf, 0)
+            if length > MAX_MESSAGE_SIZE:
+                raise GrpcError(
+                    GrpcStatus.RESOURCE_EXHAUSTED,
+                    f'request message ({length} bytes) larger than the '
+                    f'{MAX_MESSAGE_SIZE}-byte limit')
+            if len(buf) - _PREFIX_LEN < length:
+                break  # body not fully arrived yet
+            if flag:
+                raise GrpcError(
+                    GrpcStatus.UNIMPLEMENTED, 'message compression is not supported')
+            message = bytes(buf[_PREFIX_LEN:_PREFIX_LEN + length])
+            del buf[:_PREFIX_LEN + length]
+            yield message
+    if buf:
+        raise GrpcError(
+            GrpcStatus.INTERNAL,
+            f'malformed request: {len(buf)} trailing byte(s) after last message')
+
+
 def _validate_response_message(response) -> bytes:
     """Return *response* as ``bytes`` or raise :class:`GrpcError` (INTERNAL for
     a wrong type, RESOURCE_EXHAUSTED when it exceeds the per-message limit)."""
@@ -408,20 +455,36 @@ async def serve_grpc(registry: GrpcServiceRegistry, scope, receive, send) -> Non
             send, GrpcStatus.UNIMPLEMENTED, f'Method not found: {path}', content_type)
         return
 
-    # Front matter (request read + de-framing) — errors here precede any
-    # response bytes, so a clean Trailers-Only error is always valid.
-    try:
-        request = await _read_unary_request(receive)
-    except GrpcError as exc:
-        await _send_trailers_only(send, exc.status, exc.details, content_type)
-        return
-
     # RFC: enforce the client's deadline (grpc-timeout) if it sent one.
     deadline = _parse_grpc_timeout(context.metadata(b'grpc-timeout'))
 
-    if method.streaming:
-        await _serve_server_streaming(
-            method.handler, request, context, send, content_type, deadline)
+    # Request axis.  Request-unary reads + de-frames the whole body up front, so
+    # a framing error precedes any response bytes (clean Trailers-Only).
+    # Request-streaming hands the handler a lazy async iterator; its framing
+    # errors surface while the handler runs and are reported by the serve
+    # helpers (in trailers if a message already went out, else Trailers-Only).
+    if method.client_streaming:
+        request = _iter_request_messages(receive)
     else:
-        await _serve_unary(
-            method.handler, request, context, send, content_type, deadline)
+        try:
+            request = await _read_unary_request(receive)
+        except GrpcError as exc:
+            await _send_trailers_only(send, exc.status, exc.details, content_type)
+            return
+
+    # Response axis reuses the same writers for both request kinds: passing the
+    # request iterator where a unary handler takes ``request`` just calls
+    # ``handler(request_iter, context)`` — client-streaming rides _serve_unary,
+    # bidirectional rides _serve_server_streaming.
+    try:
+        if method.streaming:
+            await _serve_server_streaming(
+                method.handler, request, context, send, content_type, deadline)
+        else:
+            await _serve_unary(
+                method.handler, request, context, send, content_type, deadline)
+    finally:
+        # Finalise the request generator so its cleanup runs even when the
+        # handler returned without draining it (client-/bidi-streaming only).
+        if method.client_streaming:
+            await request.aclose()

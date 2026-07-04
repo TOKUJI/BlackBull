@@ -34,18 +34,46 @@ from typing import NamedTuple
 
 GrpcHandler = Callable[..., Awaitable[bytes]]
 
+# First-parameter names that mark a handler as client-streaming (the request is
+# an async iterator of messages).  Detection mirrors the framework's simplified-
+# handler convention of inspecting parameter names; an explicit
+# ``client_streaming=`` override always wins.
+_REQUEST_STREAM_PARAMS = frozenset(
+    {'request_iter', 'request_iterator', 'requests', 'request_stream'})
+
+
+def _first_param_name(handler: Callable[..., object]) -> str | None:
+    """Return the handler's first request parameter name (skipping
+    ``self``/``cls``), or ``None`` if it takes no positional parameter."""
+    try:
+        params = inspect.signature(handler).parameters
+    except (ValueError, TypeError):
+        return None
+    for name in params:
+        if name in ('self', 'cls'):
+            continue
+        return name
+    return None
+
 
 class GrpcMethod(NamedTuple):
-    """A registered method: its *handler* and whether it server-streams.
+    """A registered method: its *handler* and the two streaming axes.
+
+    *streaming* is the **response** axis (the handler is an async generator that
+    yields response messages); *client_streaming* is the **request** axis (the
+    handler takes an async iterator of request messages instead of a single
+    ``request: bytes``).  The four combinations are unary, server-streaming,
+    client-streaming, and bidirectional.
 
     *handler* is annotated as a bare :class:`~collections.abc.Callable` rather
-    than :data:`GrpcHandler`: a server-streaming handler is an async generator
+    than :data:`GrpcHandler`: a response-streaming handler is an async generator
     function (its call returns an async iterator, not an ``Awaitable``), and a
     plain ``Callable`` is the one form that stays runtime-isinstanceable for the
-    NamedTuple field check.
+    NamedTuple field check (see memory ``beartype-namedtuple-callable-alias``).
     """
     handler: Callable[..., object]
     streaming: bool
+    client_streaming: bool = False
 
 
 def _normalise(path: str) -> str:
@@ -60,16 +88,24 @@ class GrpcServiceRegistry:
         self._methods: dict[str, GrpcMethod] = {}
 
     def add_method(self, path: str, handler: GrpcHandler, *,
-                   streaming: bool | None = None) -> None:
+                   streaming: bool | None = None,
+                   client_streaming: bool | None = None) -> None:
         """Register *handler* for the fully-qualified method *path*
         (``/package.Service/Method`` or ``package.Service/Method``).
 
-        *streaming* selects server-streaming (the handler is an async generator
-        that yields response messages).  When ``None`` (the default) it is
-        auto-detected with :func:`inspect.isasyncgenfunction`; pass ``True`` to
-        force streaming for a handler whose async-generator nature is hidden
-        behind a wrapper, or ``False`` to force unary.  Forcing ``False`` on an
-        async-generator function is a contradiction and raises ``ValueError``.
+        *streaming* is the **response** axis — server-streaming (the handler is
+        an async generator that yields response messages).  When ``None`` (the
+        default) it is auto-detected with :func:`inspect.isasyncgenfunction`;
+        pass ``True`` to force it for a handler whose async-generator nature is
+        hidden behind a wrapper, or ``False`` to force a single response.
+        Forcing ``False`` on an async-generator function is a contradiction and
+        raises ``ValueError``.
+
+        *client_streaming* is the **request** axis — the handler takes an async
+        iterator of request messages (first parameter ``request_iter`` /
+        ``requests`` / ``request_iterator`` / ``request_stream``) instead of a
+        single ``request: bytes``.  When ``None`` it is auto-detected from that
+        first parameter name; pass an explicit bool to override.
         """
         key = _normalise(path)
         if key in self._methods:
@@ -81,13 +117,17 @@ class GrpcServiceRegistry:
             raise ValueError(
                 f'{key!r}: handler is an async generator (server-streaming) but '
                 f'streaming=False was requested')
-        self._methods[key] = GrpcMethod(handler, streaming)
+        if client_streaming is None:
+            client_streaming = _first_param_name(handler) in _REQUEST_STREAM_PARAMS
+        self._methods[key] = GrpcMethod(handler, streaming, client_streaming)
 
-    def method(self, path: str, *, streaming: bool | None = None
+    def method(self, path: str, *, streaming: bool | None = None,
+               client_streaming: bool | None = None
                ) -> Callable[[GrpcHandler], GrpcHandler]:
         """Decorator form of :meth:`add_method`."""
         def decorator(handler: GrpcHandler) -> GrpcHandler:
-            self.add_method(path, handler, streaming=streaming)
+            self.add_method(path, handler, streaming=streaming,
+                            client_streaming=client_streaming)
             return handler
         return decorator
 
