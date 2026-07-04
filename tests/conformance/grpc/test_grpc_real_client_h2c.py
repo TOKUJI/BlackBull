@@ -159,6 +159,32 @@ async def _unary(port: int, method: str, payload: bytes = b''):
     return await asyncio.to_thread(_blocking_unary, port, method, payload)
 
 
+def _blocking_unary_gzip(port: int, method: str, payload: bytes):
+    """Like :func:`_blocking_unary` but asks grpcio to gzip the request.
+
+    ``compression=grpc.Compression.Gzip`` makes the client set the
+    Compressed-Flag + ``grpc-encoding: gzip`` on the request (server must
+    decompress), and it advertises ``grpc-accept-encoding: gzip`` so the server
+    may gzip the response back (client must decompress) — a full both-directions
+    wire-compat check against real grpcio."""
+    with grpc.insecure_channel(f'127.0.0.1:{port}') as channel:
+        grpc.channel_ready_future(channel).result(timeout=_CALL_TIMEOUT)
+        call = channel.unary_unary(
+            method,
+            request_serializer=lambda b: b,
+            response_deserializer=lambda b: b,
+        )
+        try:
+            return (True, call(payload, timeout=_CALL_TIMEOUT,
+                               compression=grpc.Compression.Gzip))
+        except grpc.RpcError as exc:  # noqa: BLE001 — surface the status
+            return (False, exc)
+
+
+async def _unary_gzip(port: int, method: str, payload: bytes = b''):
+    return await asyncio.to_thread(_blocking_unary_gzip, port, method, payload)
+
+
 def _blocking_server_stream(port: int, method: str, payload: bytes):
     """Issue one blocking server-streaming call with a real grpcio channel.
 
@@ -249,6 +275,29 @@ class TestRealClientSuccess:
     async def test_large_response_flow_control(self, grpc_server_port):
         # 100 KB response forces cross-window DATA framing to a strict client.
         ok, value = await _unary(grpc_server_port, '/echo.Echo/Big', b'x')
+        assert ok, f'unexpected error: {value}'
+        assert value == b'Z' * 100_000
+
+
+# ---------------------------------------------------------------------------
+# Compression (gzip) — real-client wire compatibility, both directions
+# ---------------------------------------------------------------------------
+
+class TestRealClientCompression:
+    @pytest.mark.asyncio
+    async def test_gzip_request_is_decompressed(self, grpc_server_port):
+        # grpcio gzips the request; the server must decompress it before the
+        # handler (which reverses the bytes) sees it.
+        payload = b'compress-me' * 500
+        ok, value = await _unary_gzip(grpc_server_port, '/echo.Echo/Echo', payload)
+        assert ok, f'unexpected error: {value}'
+        assert value == payload[::-1]
+
+    @pytest.mark.asyncio
+    async def test_gzip_large_response_round_trips(self, grpc_server_port):
+        # 100 KB of 'Z' is highly compressible: the server gzips the response
+        # (over threshold, client advertised gzip) and grpcio decompresses it.
+        ok, value = await _unary_gzip(grpc_server_port, '/echo.Echo/Big', b'x')
         assert ok, f'unexpected error: {value}'
         assert value == b'Z' * 100_000
 

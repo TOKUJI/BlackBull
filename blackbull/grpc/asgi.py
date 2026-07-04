@@ -22,7 +22,8 @@ import os
 import struct
 
 from ..request import read_body
-from .codec import decode_messages, encode_message, GrpcDecodeError
+from . import compression
+from .codec import decode_messages, encode_message, GrpcDecodeError, MAX_MESSAGE_LENGTH
 from .registry import GrpcServiceRegistry
 from .status import GrpcError, GrpcStatus
 
@@ -30,9 +31,9 @@ logger = logging.getLogger(__name__)
 
 _GRPC_CONTENT_TYPE = b'application/grpc'
 
-# We do not implement message compression, but the spec says a server SHOULD
-# advertise what it accepts so clients send uncompressed messages.
-_GRPC_ACCEPT_ENCODING = b'identity'
+# Advertised in ``grpc-accept-encoding`` so clients know which message
+# encodings the server can decode (``identity`` + ``gzip``).
+_GRPC_ACCEPT_ENCODING = compression.ACCEPT_ENCODING
 
 # Per-message size cap at the gRPC layer (RESOURCE_EXHAUSTED above it).  4 MiB
 # matches grpcio's default receive limit; override with BB_GRPC_MAX_MESSAGE_SIZE.
@@ -58,6 +59,17 @@ try:
     _STREAM_BATCH_BYTES = int(os.environ.get('BB_GRPC_STREAM_BATCH_BYTES', 16 * 1024))
 except ValueError:
     _STREAM_BATCH_BYTES = 16 * 1024
+
+# Response messages larger than this are gzip-compressed when the client's
+# grpc-accept-encoding lists gzip (and compression actually shrinks them).
+# Small messages compress poorly — the gzip header/trailer overhead can make
+# them *larger* — so a threshold avoids burning CPU for no bandwidth win.  Set
+# BB_GRPC_COMPRESS_MIN_BYTES very high to effectively disable response
+# compression.  Read at import; tests may monkeypatch this module attribute.
+try:
+    _COMPRESS_MIN_BYTES = int(os.environ.get('BB_GRPC_COMPRESS_MIN_BYTES', 1024))
+except ValueError:
+    _COMPRESS_MIN_BYTES = 1024
 
 # If pulling the next message took longer than this, the producer awaited
 # between messages (a slow/interactive stream) rather than yielding a
@@ -104,6 +116,54 @@ def _pct_encode_message(details: str) -> bytes:
         else:
             out += b'%%%02X' % b
     return bytes(out)
+
+
+def _accepts_gzip(accept: bytes) -> bool:
+    """Return ``True`` if the client's ``grpc-accept-encoding`` lists ``gzip``.
+
+    The header is a comma-separated list of message encodings the client can
+    decode (e.g. ``identity,deflate,gzip``); the server may compress responses
+    with any it recognises."""
+    return any(tok.strip().lower() == b'gzip'
+               for tok in (accept or b'').split(b','))
+
+
+def _decompress_message(message: bytes, encoding: bytes) -> bytes:
+    """Decompress a request message whose LPM Compressed-Flag is set, using the
+    request's ``grpc-encoding``.
+
+    Raises :class:`GrpcError`: UNIMPLEMENTED for an unsupported / absent
+    encoding (the server's ``grpc-accept-encoding`` is advertised on the
+    response so the client can retry uncompressed), RESOURCE_EXHAUSTED for a
+    decompression bomb, INTERNAL for a corrupt stream."""
+    if encoding == b'gzip':
+        try:
+            return compression.decompress_gzip(message, MAX_MESSAGE_SIZE)
+        except compression.DecompressionBombError as exc:
+            raise GrpcError(GrpcStatus.RESOURCE_EXHAUSTED, str(exc))
+        except compression.DecompressionError as exc:
+            raise GrpcError(GrpcStatus.INTERNAL, f'malformed request: {exc}')
+    name = encoding.decode('ascii', 'replace') or 'identity'
+    raise GrpcError(
+        GrpcStatus.UNIMPLEMENTED,
+        f'grpc-encoding {name!r} is not supported for compressed messages; '
+        f'server accepts {_GRPC_ACCEPT_ENCODING.decode()}')
+
+
+def _frame_response(payload: bytes, compress: bool) -> bytes:
+    """Frame *payload* as a Length-Prefixed-Message, gzip-compressing it
+    (Compressed-Flag = 1) when *compress* is set, the message is over
+    ``_COMPRESS_MIN_BYTES``, and compression actually shrinks it.
+
+    A per-message opt-out (sending an over-threshold-but-incompressible or a
+    small message uncompressed with Flag = 0) is valid even when the response's
+    ``grpc-encoding`` header advertises gzip — the flag, not the header, decides
+    each message."""
+    if compress and len(payload) > _COMPRESS_MIN_BYTES:
+        packed = compression.compress_gzip(payload)
+        if len(packed) < len(payload):
+            return encode_message(packed, compressed=True)
+    return encode_message(payload)
 
 
 class GrpcContext:
@@ -196,13 +256,15 @@ async def _send_trailers_only(send, status: GrpcStatus, details: str,
                 'headers': _status_trailers(status, details)})
 
 
-async def _read_unary_request(receive) -> bytes:
+async def _read_unary_request(receive, encoding: bytes) -> bytes:
     """Read the request body and return the single de-framed request message.
 
     Server-streaming still takes exactly one request message (only the response
-    streams), so unary and server-streaming share this.  Raises
-    :class:`GrpcError` on a malformed / multi-message / compressed / oversized
-    request."""
+    streams), so unary and server-streaming share this.  A compressed message
+    (Compressed-Flag = 1) is decompressed with the request's *encoding* (the
+    ``grpc-encoding`` header); the per-message size limit applies to the
+    decompressed output.  Raises :class:`GrpcError` on a malformed /
+    multi-message / unsupported-encoding / oversized request."""
     body = await read_body(receive)
     try:
         messages = decode_messages(body)
@@ -214,8 +276,7 @@ async def _read_unary_request(receive) -> bytes:
             f'method expects exactly 1 request message, got {len(messages)}')
     compressed, request = messages[0]
     if compressed:
-        raise GrpcError(
-            GrpcStatus.UNIMPLEMENTED, 'message compression is not supported')
+        request = _decompress_message(request, encoding)
     if len(request) > MAX_MESSAGE_SIZE:
         raise GrpcError(
             GrpcStatus.RESOURCE_EXHAUSTED,
@@ -229,15 +290,16 @@ _LPM_PREFIX = struct.Struct('>BI')
 _PREFIX_LEN = _LPM_PREFIX.size
 
 
-async def _iter_request_messages(receive):
+async def _iter_request_messages(receive, encoding: bytes):
     """Yield de-framed request messages as they arrive (client-/bidi-streaming).
 
     Reassembles Length-Prefixed-Messages across ``http.request`` events — gRPC
     messages don't align to DATA-frame boundaries, so a message may straddle
     several events or several messages may share one.  A residual buffer holds
-    the partial tail between events.  Raises :class:`GrpcError` on a
-    compressed / oversized / truncated message, matching ``_read_unary_request``
-    (UNIMPLEMENTED / RESOURCE_EXHAUSTED / INTERNAL respectively)."""
+    the partial tail between events.  A compressed message (Compressed-Flag = 1)
+    is decompressed with the request's *encoding*.  Raises :class:`GrpcError` on
+    an oversized / unsupported-encoding / truncated message, matching
+    ``_read_unary_request`` (RESOURCE_EXHAUSTED / UNIMPLEMENTED / INTERNAL)."""
     buf = bytearray()
     more = True
     while more:
@@ -251,18 +313,24 @@ async def _iter_request_messages(receive):
         # Drain every complete message currently buffered.
         while len(buf) >= _PREFIX_LEN:
             flag, length = _LPM_PREFIX.unpack_from(buf, 0)
-            if length > MAX_MESSAGE_SIZE:
+            # For an uncompressed frame the prefixed length *is* the message
+            # size, so the per-message limit applies directly.  A compressed
+            # frame's length is the *compressed* transfer size (which may
+            # inflate); it is bounded only by the codec safety floor here, and
+            # the real per-message limit is enforced on the decompressed output
+            # by _decompress_message.
+            limit = MAX_MESSAGE_LENGTH if flag else MAX_MESSAGE_SIZE
+            if length > limit:
                 raise GrpcError(
                     GrpcStatus.RESOURCE_EXHAUSTED,
                     f'request message ({length} bytes) larger than the '
-                    f'{MAX_MESSAGE_SIZE}-byte limit')
+                    f'{limit}-byte limit')
             if len(buf) - _PREFIX_LEN < length:
                 break  # body not fully arrived yet
-            if flag:
-                raise GrpcError(
-                    GrpcStatus.UNIMPLEMENTED, 'message compression is not supported')
             message = bytes(buf[_PREFIX_LEN:_PREFIX_LEN + length])
             del buf[:_PREFIX_LEN + length]
+            if flag:
+                message = _decompress_message(message, encoding)
             yield message
     if buf:
         raise GrpcError(
@@ -285,15 +353,23 @@ def _validate_response_message(response) -> bytes:
     return bytes(response)
 
 
-def _response_start(content_type: bytes) -> dict:
+def _response_start(content_type: bytes,
+                    response_encoding: bytes | None = None) -> dict:
+    headers = [(b'content-type', content_type),
+               (b'grpc-accept-encoding', _GRPC_ACCEPT_ENCODING)]
+    # Advertise the encoding used for any compressed response messages.  Present
+    # whenever gzip was negotiated, even if a particular message rides
+    # uncompressed (Flag = 0) — this mirrors grpcio, and the flag decides each
+    # message regardless.
+    if response_encoding:
+        headers.append((b'grpc-encoding', response_encoding))
     return {'type': 'http.response.start', 'status': 200,
-            'headers': [(b'content-type', content_type),
-                        (b'grpc-accept-encoding', _GRPC_ACCEPT_ENCODING)],
-            'trailers': True}
+            'headers': headers, 'trailers': True}
 
 
 async def _serve_unary(handler, request, context, send, content_type,
-                       deadline: float | None) -> None:
+                       deadline: float | None,
+                       response_encoding: bytes | None = None) -> None:
     """Run a unary handler and emit HEADERS → one DATA → status trailers.
 
     Nothing is written until the response is computed, so any failure is
@@ -321,16 +397,18 @@ async def _serve_unary(handler, request, context, send, content_type,
         await _send_trailers_only(send, GrpcStatus.INTERNAL, str(exc), content_type)
         return
 
-    await send(_response_start(content_type))
+    await send(_response_start(content_type, response_encoding))
     await send({'type': 'http.response.body',
-                'body': encode_message(response), 'more_body': True})
+                'body': _frame_response(response, response_encoding is not None),
+                'more_body': True})
     await send({'type': 'http.response.trailers',
                 'headers': _status_trailers(context.code, context.details,
                                             context._trailing)})
 
 
 async def _serve_server_streaming(handler, request, context, send, content_type,
-                                  deadline: float | None) -> None:
+                                  deadline: float | None,
+                                  response_encoding: bytes | None = None) -> None:
     """Drive a server-streaming (async-generator) handler.
 
     Response-Headers are sent lazily, just before the first message, so a
@@ -352,7 +430,7 @@ async def _serve_server_streaming(handler, request, context, send, content_type,
         if not buf:
             return
         if not started:
-            await send(_response_start(content_type))
+            await send(_response_start(content_type, response_encoding))
             started = True
         await send({'type': 'http.response.body',
                     'body': bytes(buf), 'more_body': True})
@@ -377,7 +455,8 @@ async def _serve_server_streaming(handler, request, context, send, content_type,
             except StopAsyncIteration:
                 return
             paused = (loop.time() - t0) > _STREAM_FLUSH_IDLE_S
-            buf.extend(encode_message(_validate_response_message(msg)))
+            buf.extend(_frame_response(_validate_response_message(msg),
+                                       response_encoding is not None))
             if len(buf) >= _STREAM_BATCH_BYTES or (paused and buf):
                 await _flush()
 
@@ -425,7 +504,7 @@ async def _serve_server_streaming(handler, request, context, send, content_type,
     # sent here so the client still sees Response-Headers + Trailers.
     await _flush()
     if not started:
-        await send(_response_start(content_type))
+        await send(_response_start(content_type, response_encoding))
     await send({'type': 'http.response.trailers',
                 'headers': _status_trailers(context.code, context.details,
                                             context._trailing)})
@@ -461,16 +540,24 @@ async def serve_grpc(registry: GrpcServiceRegistry, scope, receive, send) -> Non
     # RFC: enforce the client's deadline (grpc-timeout) if it sent one.
     deadline = _parse_grpc_timeout(context.metadata(b'grpc-timeout'))
 
+    # Compression negotiation.  The request's ``grpc-encoding`` names the coding
+    # of its compressed messages; the client's ``grpc-accept-encoding`` says
+    # what it can decode, so we may gzip responses only when it lists gzip.
+    request_encoding = context.metadata(b'grpc-encoding').strip().lower()
+    response_encoding = (
+        b'gzip' if _accepts_gzip(context.metadata(b'grpc-accept-encoding'))
+        else None)
+
     # Request axis.  Request-unary reads + de-frames the whole body up front, so
     # a framing error precedes any response bytes (clean Trailers-Only).
     # Request-streaming hands the handler a lazy async iterator; its framing
     # errors surface while the handler runs and are reported by the serve
     # helpers (in trailers if a message already went out, else Trailers-Only).
     if method.client_streaming:
-        request = _iter_request_messages(receive)
+        request = _iter_request_messages(receive, request_encoding)
     else:
         try:
-            request = await _read_unary_request(receive)
+            request = await _read_unary_request(receive, request_encoding)
         except GrpcError as exc:
             await _send_trailers_only(send, exc.status, exc.details, content_type)
             return
@@ -482,10 +569,12 @@ async def serve_grpc(registry: GrpcServiceRegistry, scope, receive, send) -> Non
     try:
         if method.streaming:
             await _serve_server_streaming(
-                method.handler, request, context, send, content_type, deadline)
+                method.handler, request, context, send, content_type, deadline,
+                response_encoding)
         else:
             await _serve_unary(
-                method.handler, request, context, send, content_type, deadline)
+                method.handler, request, context, send, content_type, deadline,
+                response_encoding)
     finally:
         # Finalise the request generator so its cleanup runs even when the
         # handler returned without draining it (client-/bidi-streaming only).
