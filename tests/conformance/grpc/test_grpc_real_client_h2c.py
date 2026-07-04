@@ -97,6 +97,19 @@ def _make_grpc_app() -> BlackBull:
         async for m in request_iter:
             yield m
 
+    @reg.method('/echo.Echo/Leading')
+    async def leading(request, context):
+        # Flush leading metadata before the reply so a real client reads it
+        # from the initial HEADERS (call.initial_metadata()).
+        await context.send_initial_metadata([(b'x-leading', b'hi')])
+        return b'body'
+
+    @reg.method('/echo.Echo/Peer')
+    async def peer(request, context):
+        # Echo the peer the server derived from the real socket back to the
+        # client (should be ipv4:127.0.0.1:<port>).
+        return context.peer().encode()
+
     @reg.method('/err.Err/Explode')
     async def explode(request, context):
         raise RuntimeError('kaboom')
@@ -183,6 +196,24 @@ def _blocking_unary_gzip(port: int, method: str, payload: bytes):
 
 async def _unary_gzip(port: int, method: str, payload: bytes = b''):
     return await asyncio.to_thread(_blocking_unary_gzip, port, method, payload)
+
+
+def _blocking_unary_with_initial_md(port: int, method: str, payload: bytes):
+    """Issue a unary call and return ``(response, initial_metadata)`` — the
+    leading metadata grpcio read from the initial HEADERS."""
+    with grpc.insecure_channel(f'127.0.0.1:{port}') as channel:
+        grpc.channel_ready_future(channel).result(timeout=_CALL_TIMEOUT)
+        call = channel.unary_unary(
+            method,
+            request_serializer=lambda b: b,
+            response_deserializer=lambda b: b,
+        )
+        future = call.future(payload, timeout=_CALL_TIMEOUT)
+        return (future.result(), tuple(future.initial_metadata()))
+
+
+async def _unary_with_initial_md(port: int, method: str, payload: bytes = b''):
+    return await asyncio.to_thread(_blocking_unary_with_initial_md, port, method, payload)
 
 
 def _blocking_server_stream(port: int, method: str, payload: bytes):
@@ -300,6 +331,27 @@ class TestRealClientCompression:
         ok, value = await _unary_gzip(grpc_server_port, '/echo.Echo/Big', b'x')
         assert ok, f'unexpected error: {value}'
         assert value == b'Z' * 100_000
+
+
+# ---------------------------------------------------------------------------
+# GrpcContext (G3) — leading metadata + peer over a real socket
+# ---------------------------------------------------------------------------
+
+class TestRealClientContext:
+    @pytest.mark.asyncio
+    async def test_send_initial_metadata_reaches_client(self, grpc_server_port):
+        response, initial_md = await _unary_with_initial_md(
+            grpc_server_port, '/echo.Echo/Leading', b'x')
+        assert response == b'body'
+        # grpcio surfaces leading metadata lowercased as (key, value) pairs.
+        assert ('x-leading', 'hi') in initial_md
+
+    @pytest.mark.asyncio
+    async def test_peer_is_derived_from_the_real_socket(self, grpc_server_port):
+        ok, value = await _unary(grpc_server_port, '/echo.Echo/Peer', b'x')
+        assert ok, f'unexpected error: {value}'
+        # ASGI gives the server the client's address; peer() formats it grpc-style.
+        assert value.startswith(b'ipv4:127.0.0.1:')
 
 
 # ---------------------------------------------------------------------------
