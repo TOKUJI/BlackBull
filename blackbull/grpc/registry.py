@@ -20,11 +20,22 @@ the yielded / returned value is a response message body.  Protobuf
 dependency-free.  Handlers signal a non-OK result by raising
 :class:`GrpcError` or calling ``context.abort(...)``.
 
-Server-streaming is detected automatically at registration via
-:func:`inspect.isasyncgenfunction`; pass ``streaming=`` explicitly to override
-when a decorator hides the async-generator nature of the wrapped function.
-Client-streaming and bidirectional streaming are not yet served (they need the
-request delivered as a stream).
+A **client-streaming** or **bidirectional** handler takes an async iterator of
+request messages instead of a single ``request``::
+
+    async def handler(request_iter, context) -> bytes:   # client-streaming
+        async for message in request_iter:
+            ...
+
+    async def handler(request_iter, context):            # bidirectional
+        async for message in request_iter:
+            yield ...
+
+Response-streaming is detected automatically at registration via
+:func:`inspect.isasyncgenfunction`; request-streaming is detected from the first
+parameter name (``request_iter`` / ``requests`` / ``request_iterator`` /
+``request_stream``).  Pass ``streaming=`` / ``client_streaming=`` explicitly to
+override when a decorator hides the handler's nature.
 """
 from __future__ import annotations
 

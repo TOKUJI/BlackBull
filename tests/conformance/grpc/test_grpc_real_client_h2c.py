@@ -89,6 +89,14 @@ def _make_grpc_app() -> BlackBull:
             total += len(m)
         return str(total).encode()
 
+    @reg.method('/echo.Echo/Chat')
+    async def chat(request_iter, context):
+        # Bidirectional: echo each request message back as its own response.
+        # Same-size echo means a large request stream also produces a large
+        # response stream — concurrent bidirectional flow control on one stream.
+        async for m in request_iter:
+            yield m
+
     @reg.method('/err.Err/Explode')
     async def explode(request, context):
         raise RuntimeError('kaboom')
@@ -198,6 +206,32 @@ def _blocking_client_stream(port: int, method: str, payloads: list[bytes]):
 
 async def _client_stream(port: int, method: str, payloads: list[bytes]):
     return await asyncio.to_thread(_blocking_client_stream, port, method, payloads)
+
+
+def _blocking_bidi(port: int, method: str, payloads: list[bytes]):
+    """Issue one blocking bidirectional-streaming call (grpcio stream_stream).
+
+    grpcio drives the request and response directions concurrently on one
+    stream, so this is the real concurrent-read/write flow-control path.
+    Returns ``(messages, error)`` like the server-streaming helper."""
+    messages: list[bytes] = []
+    with grpc.insecure_channel(f'127.0.0.1:{port}') as channel:
+        grpc.channel_ready_future(channel).result(timeout=_CALL_TIMEOUT)
+        call = channel.stream_stream(
+            method,
+            request_serializer=lambda b: b,
+            response_deserializer=lambda b: b,
+        )
+        try:
+            for msg in call(iter(payloads), timeout=_CALL_TIMEOUT):
+                messages.append(msg)
+            return (messages, None)
+        except grpc.RpcError as exc:  # noqa: BLE001 — surface the status
+            return (messages, exc)
+
+
+async def _bidi(port: int, method: str, payloads: list[bytes]):
+    return await asyncio.to_thread(_blocking_bidi, port, method, payloads)
 
 
 # ---------------------------------------------------------------------------
@@ -318,6 +352,53 @@ class TestRealClientClientStreaming:
             grpc_server_port, '/echo.Echo/CountBytes', payloads)
         assert ok, f'unexpected error: {value}'
         assert value == str(200 * 1024).encode()
+
+
+# ---------------------------------------------------------------------------
+# Bidirectional streaming — a real grpcio stream_stream call (Sprint 60 G1b).
+# ---------------------------------------------------------------------------
+
+class TestRealClientBidiStreaming:
+    @pytest.mark.asyncio
+    async def test_echo_each_message(self, grpc_server_port):
+        msgs, err = await _bidi(
+            grpc_server_port, '/echo.Echo/Chat', [b'a', b'bb', b'ccc'])
+        assert err is None, f'unexpected bidi error: {err}'
+        assert msgs == [b'a', b'bb', b'ccc']
+
+    @pytest.mark.asyncio
+    async def test_empty_stream(self, grpc_server_port):
+        msgs, err = await _bidi(grpc_server_port, '/echo.Echo/Chat', [])
+        assert err is None, f'unexpected bidi error: {err}'
+        assert msgs == []
+
+    @pytest.mark.asyncio
+    async def test_both_directions_within_window(self, grpc_server_port):
+        # 20 × 1 KiB (~20 KiB) each way — comfortably under both the 65535-byte
+        # initial window and the 64-deep recipient queue, so neither direction
+        # back-pressures.  Bidi's supported envelope: concurrent read/write on
+        # one stream, kept clear of the enqueue-time-crediting boundary.
+        payloads = [bytes([i % 256]) * 1024 for i in range(20)]
+        msgs, err = await _bidi(grpc_server_port, '/echo.Echo/Chat', payloads)
+        assert err is None, f'unexpected bidi error: {err}'
+        assert msgs == payloads
+
+    @pytest.mark.xfail(strict=False, reason=(
+        'Large concurrent bidi crosses the 65535-byte window BOTH ways; the '
+        'server credits inbound flow control on enqueue, not on app consumption, '
+        'so a handler that stalls reading (blocked on yield / response '
+        'back-pressure) overflows the 64-deep recipient queue and the stream is '
+        'RST_STREAM(ENHANCE_YOUR_CALM). Needs consume-based inbound flow control '
+        '(proposals/consume-based-inbound-flow-control.md). Intermittent, so '
+        'strict=False.'))
+    @pytest.mark.asyncio
+    async def test_large_both_directions_over_window(self, grpc_server_port):
+        # 200 × 1 KiB echoed back — BOTH directions cross the initial window
+        # concurrently.  Known limitation until consume-based crediting lands.
+        payloads = [bytes([i % 256]) * 1024 for i in range(200)]
+        msgs, err = await _bidi(grpc_server_port, '/echo.Echo/Chat', payloads)
+        assert err is None, f'unexpected bidi error: {err}'
+        assert msgs == payloads
 
 
 # ---------------------------------------------------------------------------

@@ -1,11 +1,14 @@
-"""ASGI bridge that serves unary gRPC calls over BlackBull's HTTP/2 layer.
+"""ASGI bridge that serves gRPC calls over BlackBull's HTTP/2 layer.
 
 gRPC is HTTP/2 with a fixed request shape (``POST /package.Service/Method``,
 ``content-type: application/grpc``) and a Length-Prefixed-Message body, where
 the call result is reported in ``grpc-status`` / ``grpc-message`` *trailers*.
 BlackBull's HTTP/2 sender already emits trailers via the
-``http.response.trailers`` ASGI event, so a gRPC unary call maps cleanly onto
-the existing (scope, receive, send) bridge — no new protocol Actor is needed.
+``http.response.trailers`` ASGI event, and ``HTTP2Recipient`` already delivers
+request DATA as incremental ``http.request`` events, so all four RPC kinds —
+unary, server-, client-, and bidirectional-streaming — map cleanly onto the
+existing (scope, receive, send) bridge; no new protocol Actor is needed
+(see ``.claude/planning/designs/grpc-streaming-request-design.md``).
 
 ``serve_grpc`` is dispatched from :meth:`BlackBull._dispatch` when the request
 content-type is ``application/grpc`` and a registry was installed via
