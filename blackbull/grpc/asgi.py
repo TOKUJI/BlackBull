@@ -38,6 +38,30 @@ try:
 except ValueError:
     MAX_MESSAGE_SIZE = 4 * 1024 * 1024
 
+# Server-streaming write-coalescing threshold.  Each yielded message otherwise
+# becomes its own ``http.response.body`` event → its own DATA frame → its own
+# drain; a handler streaming thousands of small messages then pays thousands of
+# per-message round-trips through the sender + event loop, and under many
+# concurrent streams that dominates (a 5000-message call took 0.1–2.3 s, so a
+# real gRPC client with a deadline times the call out / closes the connection
+# mid-stream — the "streaming collapse" the bench hit).  Coalescing consecutive
+# messages into one DATA frame (up to ~one default max-frame worth) cuts the
+# round-trips ~1000× for bulk streams.  Multiple length-prefixed gRPC messages
+# in one DATA frame is valid on the wire (clients frame on the 5-byte prefix,
+# not on DATA boundaries).  The buffer is always flushed at stream end and
+# before any trailing status, so no message is ever withheld past the call.
+try:
+    _STREAM_BATCH_BYTES = int(os.environ.get('BB_GRPC_STREAM_BATCH_BYTES', 16 * 1024))
+except ValueError:
+    _STREAM_BATCH_BYTES = 16 * 1024
+
+# If pulling the next message took longer than this, the producer awaited
+# between messages (a slow/interactive stream) rather than yielding a
+# synchronous burst — flush the partial batch now so its output isn't withheld
+# until the batch fills.  Comfortably above a synchronous __anext__'s cost
+# (sub-microsecond) and well below any human-perceptible streaming interval.
+_STREAM_FLUSH_IDLE_S = 0.0005
+
 # grpc-timeout unit → seconds (gRPC HTTP/2 protocol §"Timeout").
 _TIMEOUT_UNITS: dict[bytes, float] = {
     b'H': 3600.0, b'M': 60.0, b'S': 1.0,
@@ -267,28 +291,59 @@ async def _serve_server_streaming(handler, request, context, send, content_type,
     on client cancellation — so its ``finally``/cleanup runs."""
     agen = handler(request, context)
     started = False
+    # Coalesce consecutive messages into one DATA frame per flush.  Bytes are
+    # accumulated as already-gRPC-framed messages (5-byte prefix + body) so the
+    # buffer can be sent verbatim; flushed when it reaches _STREAM_BATCH_BYTES
+    # and, unconditionally, at stream end / before any trailing status.
+    buf = bytearray()
 
-    async def _emit(msg) -> None:
+    async def _flush() -> None:
         nonlocal started
-        payload = _validate_response_message(msg)
+        if not buf:
+            return
         if not started:
             await send(_response_start(content_type))
             started = True
         await send({'type': 'http.response.body',
-                    'body': encode_message(payload), 'more_body': True})
+                    'body': bytes(buf), 'more_body': True})
+        buf.clear()
+
+    loop = asyncio.get_event_loop()
+
+    async def _drive() -> None:
+        # Coalesce consecutive messages into one DATA frame.  A *synchronous*
+        # burst (the bulk case — thousands of tiny messages yielded without
+        # awaiting) buffers into ``buf`` and flushes only at ~one max-frame
+        # worth, turning thousands of per-message sends+drains into a handful.
+        # A producer that *awaits* between messages is detected by timing the
+        # pull: when it exceeds _STREAM_FLUSH_IDLE_S the partial batch is flushed
+        # so a slow/interactive stream isn't withheld.  The tail is flushed at
+        # stream end / before any trailing status.
+        it = agen.__aiter__()
+        while True:
+            t0 = loop.time()
+            try:
+                msg = await it.__anext__()
+            except StopAsyncIteration:
+                return
+            paused = (loop.time() - t0) > _STREAM_FLUSH_IDLE_S
+            buf.extend(encode_message(_validate_response_message(msg)))
+            if len(buf) >= _STREAM_BATCH_BYTES or (paused and buf):
+                await _flush()
 
     try:
         if deadline is not None:
             async with asyncio.timeout(deadline):
-                async for msg in agen:
-                    await _emit(msg)
+                await _drive()
         else:
-            async for msg in agen:
-                await _emit(msg)
+            await _drive()
     except GrpcError as exc:
+        # Deliver messages already committed by the generator, then the status.
+        await _flush()
         await _finish_stream_error(send, started, exc.status, exc.details, content_type)
         return
     except (asyncio.TimeoutError, TimeoutError):
+        await _flush()
         await _finish_stream_error(
             send, started, GrpcStatus.DEADLINE_EXCEEDED, 'deadline exceeded',
             content_type)
@@ -298,7 +353,10 @@ async def _serve_server_streaming(handler, request, context, send, content_type,
         # SystemExit / GeneratorExit derive from BaseException (not Exception),
         # so they propagate here — client cancellation still unwinds the stream
         # (and finalises the generator via the finally below) instead of being
-        # reported as a gRPC status.
+        # reported as a gRPC status.  Messages the generator successfully yielded
+        # before the crash are committed and delivered (they'd already be on the
+        # wire without batching); only the failed message is lost.
+        await _flush()
         logger.exception('gRPC server-streaming handler raised')
         await _finish_stream_error(
             send, started, GrpcStatus.INTERNAL, str(exc), content_type)
@@ -312,8 +370,10 @@ async def _serve_server_streaming(handler, request, context, send, content_type,
         except Exception:  # noqa: BLE001
             logger.exception('gRPC server-streaming generator aclose() raised')
 
-    # Success.  For an empty stream (no message ever yielded) send the headers
-    # now so the client sees a well-formed Response-Headers + Trailers response.
+    # Success: flush the final partial batch, then the OK trailer.  For an empty
+    # stream (nothing buffered / yielded) _flush is a no-op and the headers are
+    # sent here so the client still sees Response-Headers + Trailers.
+    await _flush()
     if not started:
         await send(_response_start(content_type))
     await send({'type': 'http.response.trailers',

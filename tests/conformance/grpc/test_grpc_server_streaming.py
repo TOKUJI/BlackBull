@@ -125,14 +125,21 @@ class TestServerStreamingShape:
                          _receive_with(encode_message(b'')), send)
 
         types = [e['type'] for e in events]
-        assert types == ['http.response.start', 'http.response.body',
-                         'http.response.body', 'http.response.body',
-                         'http.response.trailers']
+        # Response-Headers first, trailing HEADERS last, at least one DATA event
+        # between.  How many DATA events is an implementation detail: consecutive
+        # messages coalesce into one DATA frame (valid — clients frame on the
+        # 5-byte gRPC prefix, not DATA boundaries), so assert the shape and the
+        # decoded message stream, not the frame count.
+        assert types[0] == 'http.response.start'
+        assert types[-1] == 'http.response.trailers'
+        body_events = [e for e in events if e['type'] == 'http.response.body']
+        assert len(body_events) >= 1
+        assert all(t == 'http.response.body' for t in types[1:-1])
         # Response-Headers announce trailers and carry no grpc-status themselves.
         assert events[0].get('trailers') is True
         assert b'grpc-status' not in dict(events[0]['headers'])
-        # Every DATA event keeps the stream open; one message each, in order.
-        assert all(e['more_body'] for e in events[1:4])
+        # Every DATA event keeps the stream open; all messages arrive, in order.
+        assert all(e['more_body'] for e in body_events)
         assert _messages(events) == [b'm0', b'm1', b'm2']
         # Status rides the trailing HEADERS frame.
         assert _trailers(events)[b'grpc-status'] == b'0'
