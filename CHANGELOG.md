@@ -29,6 +29,21 @@ so the editable install's metadata catches up.
 
 ---
 
+## [0.48.1] — 2026-07-05
+
+### Fixed
+- **IPv6 requests returned an empty reply** (RFC 3986 §3.2.2) — parsing a
+  bracketed IPv6 Host header (`[::1]:8100`) with a naive `split(b':')` produced
+  `int(b'')` → `ValueError`, which propagated past `HTTP1Actor.run` and closed
+  the transport with no response bytes. Every IPv6 request saw "empty reply from
+  server" even though the TCP handshake succeeded; IPv4 on the same host worked.
+  Host parsing now understands the bracket form and falls back to the default
+  port on a missing/invalid port. This unblocks deployment behind IPv6-only
+  reverse proxies (e.g. Alwaysdata, whose proxy connects over `::`).
+- **IPv6 `scope['client']` / `scope['server']` were 4-tuples** — `AF_INET6`
+  `getpeername`/`getsockname` return `(host, port, flowinfo, scope_id)`; these
+  are now truncated to the ASGI-required `(host, port)` 2-tuple.
+
 ## [0.48.0] — 2026-07-04
 
 ### Added

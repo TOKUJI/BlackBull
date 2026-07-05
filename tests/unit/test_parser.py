@@ -111,6 +111,20 @@ class TestParse:
         scope = _get_scope(_http_request(headers={'Host': 'localhost:9000'}))
         assert scope['server'] == ['localhost', 9000]
 
+    def test_ipv6_bracketed_host_and_port_are_parsed(self):
+        """RFC 3986 §3.2.2 — ``[::1]:8100`` must not crash Host parsing.
+
+        Regression: ``b'[::1]:8100'.split(b':')`` gave ``int(b'')`` →
+        ValueError, which closed the connection with no response ("empty
+        reply from server") for every IPv6 request.
+        """
+        scope = _get_scope(_http_request(headers={'Host': '[::1]:8100'}))
+        assert scope['server'] == ['::1', 8100]
+
+    def test_ipv6_bracketed_host_without_port(self):
+        scope = _get_scope(_http_request(headers={'Host': '[2001:db8::1]'}))
+        assert scope['server'] == ['2001:db8::1', 80]
+
     def test_websocket_upgrade_sets_type_websocket(self):
         scope = _get_scope(_ws_request_dispatch())
         assert scope['type'] == 'websocket', (

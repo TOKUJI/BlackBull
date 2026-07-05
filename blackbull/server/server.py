@@ -319,6 +319,15 @@ class Server:
             sockname = (sockname, None)
         if isinstance(peername, str):
             peername = (peername or '', None)
+        # AF_INET6 get_extra_info returns a 4-tuple
+        # ``(host, port, flowinfo, scope_id)``; ASGI 3.0 §Connection Scope
+        # requires ``scope['client']`` / ``scope['server']`` to be
+        # ``(host, port)``.  Truncate so IPv6 peers get spec-compliant
+        # 2-tuples instead of ``['::1', port, 0, 0]``.
+        if isinstance(sockname, tuple) and len(sockname) > 2:
+            sockname = sockname[:2]
+        if isinstance(peername, tuple) and len(peername) > 2:
+            peername = peername[:2]
         ssl_object = transport.get_extra_info('ssl_object') if transport else None
         ssl_flag = ssl_object is not None
         alpn = ssl_object.selected_alpn_protocol() if ssl_object else None
