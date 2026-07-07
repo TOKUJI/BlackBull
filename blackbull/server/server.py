@@ -93,10 +93,37 @@ class LifespanManager:
         self._task = asyncio.create_task(
             self._app(scope, self._receive_q.get, self._send_q.put))
         await self._receive_q.put({'type': ASGIEvent.LIFESPAN_STARTUP})
-        event = await self._send_q.get()
-        if event.get('type') == ASGIEvent.LIFESPAN_STARTUP_FAILED:
-            raise RuntimeError(event.get('message', 'Lifespan startup failed'))
-        return self
+        # Race the startup ack against the lifespan task itself.  A lifespan
+        # app that dies before acking — e.g. a startup hook that raises and
+        # takes the task down with it — would otherwise strand __aenter__ on
+        # an empty send queue forever and the server would neither start nor
+        # error (bug 1.3).  Mirrors the FIRST_COMPLETED race in __aexit__.
+        getter = asyncio.ensure_future(self._send_q.get())
+        try:
+            await asyncio.wait(
+                {getter, self._task}, return_when=asyncio.FIRST_COMPLETED)
+        finally:
+            if not getter.done():
+                getter.cancel()
+        if getter.done() and not getter.cancelled():
+            event = getter.result()
+            if event.get('type') == ASGIEvent.LIFESPAN_STARTUP_FAILED:
+                raise RuntimeError(event.get('message', 'Lifespan startup failed'))
+            return self
+        # The task finished before acking startup.
+        if self._task.done():
+            exc = self._task.exception()
+            if exc is not None:
+                # The lifespan app raised before acking — a real startup
+                # failure (bug 1.3: previously this stranded __aenter__ on an
+                # empty send queue and the server never started).
+                raise RuntimeError(f'Lifespan startup failed: {exc!r}') from exc
+            # The app returned without implementing the lifespan protocol — a
+            # bare ASGI app that ignores the lifespan scope.  ASGI treats this
+            # as "lifespan unsupported": proceed to serve rather than hang or
+            # error.
+            return self
+        raise RuntimeError('Lifespan startup did not complete')
 
     async def __aexit__(self, *_):
         task = self._task

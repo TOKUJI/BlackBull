@@ -118,13 +118,12 @@ class TestRstStreamDuringGrpc:
         events, send = _collector()
         await serve_grpc(reg, _grpc_scope('/svc/M'),
                          _receive_disconnect_immediate(), send)
-        # read_body gets '' (empty body without http.request events)
-        # decode_messages(b'') returns [] → len != 1 → UNIMPLEMENTED
+        # An immediate http.disconnect (RST_STREAM before any DATA) makes
+        # read_body raise ClientDisconnected, which the bridge maps to the
+        # canonical gRPC CANCELLED — not a fabricated INTERNAL over an empty
+        # body (bug 1.11).
         trailers = _trailers_of(events)
-        assert trailers.get(b'grpc-status') in (
-            str(int(GrpcStatus.INTERNAL)).encode(),
-            str(int(GrpcStatus.UNIMPLEMENTED)).encode(),
-        )
+        assert trailers.get(b'grpc-status') == str(int(GrpcStatus.CANCELLED)).encode()
 
     @pytest.mark.asyncio
     async def test_disconnect_during_body_delivery(self):

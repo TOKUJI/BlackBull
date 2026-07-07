@@ -8,11 +8,12 @@ suites that need to exercise a client against a server that
 **deliberately** does the wrong thing — half-closed streams, exhausted
 flow-control windows, illegal SETTINGS, weird frame sequences.
 
-The server is an opt-in testing instrument.  It refuses to start when
-``BB_PRODUCTION`` is set in the environment so a deliberate-misbehaviour
-code path cannot accidentally fire on a production deployment.  This
-is the isolated, hard-opt-in design called out in the project's
-out-of-scope list as the only acceptable form for fault-injection
+The server is an opt-in testing instrument.  It refuses to start in a
+production context — when the framework's ``BLACKBULL_ENV=production``
+signal (or the explicit ``BB_PRODUCTION`` override) is set — so a
+deliberate-misbehaviour code path cannot accidentally fire on a production
+deployment.  This is the isolated, hard-opt-in design called out in the
+project's out-of-scope list as the only acceptable form for fault-injection
 machinery inside a correctness-focused framework.
 
 Tutorial: ``docs/guide/fault_injection.md``.
@@ -72,22 +73,40 @@ CLIENT_PREFACE = b'PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n'
 class H2FaultServerError(RuntimeError):
     """Raised when ``H2FaultServer`` cannot start.
 
-    The most common cause is ``BB_PRODUCTION`` being set in the
-    environment: deliberate-misbehaviour machinery refuses to run in
-    a production context regardless of how it was reached.
+    The most common cause is running in a production context: the
+    deliberate-misbehaviour machinery refuses to start when the framework's
+    production signal (``BLACKBULL_ENV=production``) — or the explicit
+    ``BB_PRODUCTION`` override — is set, regardless of how it was reached.
     """
 
 
 def _refuse_in_production() -> None:
-    """Hard-opt-out check.  ``BB_PRODUCTION=1`` blocks server start."""
-    value = os.environ.get('BB_PRODUCTION', '').strip().lower()
-    if value in ('1', 'true', 'yes', 'on'):
+    """Hard opt-out: refuse to start in a production context.
+
+    The framework's canonical production signal is
+    ``BLACKBULL_ENV=production`` (surfaced as ``Settings.env``); the previous
+    check keyed on ``BB_PRODUCTION`` alone — a var read nowhere else in the
+    codebase — so a standard production process did **not** trip the guard
+    (bug 1.22a).  ``BB_PRODUCTION`` is still honoured as an explicit override
+    so the guard also trips outside the Settings machinery.
+    """
+    override = os.environ.get('BB_PRODUCTION', '').strip().lower() in (
+        '1', 'true', 'yes', 'on')
+    in_production = False
+    try:
+        from ..env import get_settings, Environment  # noqa: PLC0415
+        in_production = get_settings().env == Environment.PRODUCTION
+    except Exception:
+        # If Settings can't be resolved for any reason, fall back to the
+        # explicit override alone rather than failing open silently.
+        pass
+    if override or in_production:
         raise H2FaultServerError(
-            "H2FaultServer refuses to run with BB_PRODUCTION set.  "
-            "This is a testing-only instrument that deliberately emits "
-            "wrong HTTP/2 responses; running it in a production process "
-            "would expose your service to the same misbehaviour.  Unset "
-            "BB_PRODUCTION to use it in a test harness."
+            "H2FaultServer refuses to run in a production context "
+            "(BLACKBULL_ENV=production or BB_PRODUCTION set).  This is a "
+            "testing-only instrument that deliberately emits wrong HTTP/2 "
+            "responses; running it in a production process would expose your "
+            "service to the same misbehaviour.  Run it only in a test harness."
         )
 
 

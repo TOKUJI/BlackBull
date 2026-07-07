@@ -5,7 +5,8 @@ RequestActor owns the lifetime of a single HTTP request.
 """
 import logging
 import re
-from base64 import b64encode
+from base64 import b64encode, b64decode
+from binascii import Error as BinasciiError
 from collections.abc import Awaitable, Callable
 from hashlib import sha1
 from http import HTTPStatus
@@ -28,6 +29,12 @@ _REQ_END = b'\r\n\r\n'
 _WS_GUID = b'258EAFA5-E914-47DA-95CA-C5AB0DC85B11'  # RFC 6455 §1.3
 _HTTP_PORT  = 80
 _HTTPS_PORT = 443
+
+# Upper bound on request-body bytes drained to recover keep-alive framing
+# when a handler leaves the body unread (bug 1.6).  A larger unread body
+# closes the connection rather than spending bandwidth draining it — nginx's
+# lingering-close does the same.
+_MAX_KEEPALIVE_DRAIN = 64 * 1024
 
 # Extensions advertised in scope['extensions'] for cleartext HTTP/1.1.
 # ``http.response.pathsend`` lets middleware (notably the static-file
@@ -532,6 +539,15 @@ class HTTP1Actor(Actor):
                 if not ok:
                     break  # unhandled error — close connection
 
+                # Drain any request body the handler left unread (e.g. a POST
+                # that 404s, or any handler that ignores ``receive``).  Without
+                # this the leftover body bytes are parsed as the next pipelined
+                # request line — a classic keep-alive framing desync.  A body
+                # larger than the drain bound closes the connection instead.
+                if inner_receive.needs_drain():
+                    if not await inner_receive.drain(_MAX_KEEPALIVE_DRAIN):
+                        break
+
                 # RFC 9112 §9.1 — honour Connection: close.  HTTP/1.0
                 # connections without ``Connection: keep-alive`` likewise
                 # default to non-persistent.
@@ -714,8 +730,15 @@ class HTTP1Actor(Actor):
             scope['server'] = [host, port]
 
         if headers.getlist(b'upgrade'):
-            scope['type'] = headers.get(b'upgrade').decode('utf-8').lower()
-            if scope['type'] == 'websocket':
+            # RFC 9110 §7.8 — a server MAY ignore an Upgrade it does not
+            # support; it MUST NOT fail the request over it.  Only WebSocket
+            # switches the scope type.  Any other token (notably curl's
+            # default ``Upgrade: h2c`` probe on ``--http2``) is ignored and
+            # the request is served as ordinary HTTP/1.1 — previously any
+            # unknown token became ``scope['type']`` and crashed dispatch,
+            # closing the connection with no reply.
+            if headers.get(b'upgrade').strip().lower() == b'websocket':
+                scope['type'] = 'websocket'
                 scope['scheme'] = 'ws'
 
         return scope
@@ -772,7 +795,19 @@ class HTTP1Actor(Actor):
         """
         send = SenderFactory.http1(self._writer)
         headers = scope.get('headers', Headers([]))
-        key = headers.get(b'sec-websocket-key', b'')
+        key = headers.get(b'sec-websocket-key', b'').strip()
+        # RFC 6455 §4.2.1 — the client MUST send a Sec-WebSocket-Key whose
+        # base64-decoded value is 16 bytes.  An absent or malformed key is a
+        # bad handshake; answer 400 rather than completing an accept hash over
+        # the GUID alone (which some clients would then wrongly accept).
+        try:
+            valid_key = bool(key) and len(b64decode(key)) == 16
+        except (ValueError, BinasciiError):
+            valid_key = False
+        if not valid_key:
+            await send(b'', HTTPStatus.BAD_REQUEST,
+                       [(b'content-type', b'text/plain')])
+            return False
         accept_key = b64encode(sha1(key + _WS_GUID).digest())
         version = headers.get(b'sec-websocket-version', b'')
         if version != b'13':

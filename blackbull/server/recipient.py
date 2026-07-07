@@ -391,6 +391,35 @@ class HTTP1Recipient(BaseRecipient):
         self._body_timeout = body_timeout
         self._deadline = deadline
 
+    def needs_drain(self) -> bool:
+        """True if a declared request body may still be buffered unread.
+
+        A handler that ignores ``receive`` (e.g. a 404/405 response to a POST)
+        leaves the body bytes in the reader; the next keep-alive request would
+        then parse them as its request line.  The actor consults this after
+        dispatch to decide whether to drain.  A body-less request (GET, no
+        Content-Length, not chunked) never needs draining.
+        """
+        return not self._done and (self._chunked or bool(self._content_length))
+
+    async def drain(self, max_bytes: int) -> bool:
+        """Discard any unread request body so the next pipelined request parses
+        cleanly.  Returns True if fully drained (or the peer disconnected),
+        False if the unread body exceeded *max_bytes* — the caller should then
+        close the connection rather than keep it alive.
+        """
+        drained = 0
+        while not self._done:
+            event = await self()
+            if event['type'] == ASGIEvent.HTTP_DISCONNECT:
+                # EOF / body_timeout mid-drain: nothing left to desync, and
+                # ``_done`` is now set so the loop would exit anyway.
+                return True
+            drained += len(event.get('body', b''))
+            if drained > max_bytes:
+                return False
+        return True
+
     async def _read_with_timeout(self, coro):
         """Run *coro* under the configured body_timeout, if any."""
         if self._body_timeout > 0 and self._deadline is not None:
@@ -423,8 +452,14 @@ class HTTP1Recipient(BaseRecipient):
                             break
                     self._done = True
                     return {'type': ASGIEvent.HTTP_REQUEST, 'body': b'', 'more_body': False}
+                # RFC 9112 §7.1 — the chunk-data is exactly ``chunk_size``
+                # octets.  ``readexactly`` (not the up-to-n ``read``) is
+                # required: a chunk split across TCP segments would otherwise
+                # return short, and the following ``readuntil(CRLF)`` would
+                # swallow the rest of the payload up to the first CRLF,
+                # silently corrupting the body and desyncing chunk framing.
                 data = await self._read_with_timeout(
-                    self._reader.read(chunk_size))
+                    self._reader.readexactly(chunk_size))
                 await self._read_with_timeout(
                     self._reader.readuntil(b'\r\n'))        # consume CRLF after chunk data
                 return {'type': ASGIEvent.HTTP_REQUEST, 'body': data, 'more_body': True}

@@ -10,6 +10,24 @@ Provides:
 import json
 from typing import Any
 
+from .asgi import ASGIEvent
+
+
+class ClientDisconnected(Exception):
+    """Raised when the client disconnects before the request body is complete.
+
+    ASGI signals a mid-body disconnect with an ``http.disconnect`` event that
+    carries no ``body``/``more_body`` keys.  Treating it as end-of-message
+    would return a *truncated* upload as if it were whole, so
+    :func:`read_body` raises this instead — the handler must not process a
+    partial body as complete.  The ``partial`` attribute holds whatever body
+    bytes had arrived before the disconnect.
+    """
+
+    def __init__(self, partial: bytes = b''):
+        super().__init__('client disconnected before the request body completed')
+        self.partial = partial
+
 
 async def read_body(receive) -> bytes:
     """Read the complete request body from the ASGI receive channel.
@@ -17,10 +35,19 @@ async def read_body(receive) -> bytes:
     Collects chunks in a list and joins once, rather than the O(n²) ``+=``
     growth.  A single-chunk body (the common case) is returned directly with
     no intermediate copy at all (copy-reduction-http1 P1).
+
+    Raises :class:`ClientDisconnected` if an ``http.disconnect`` arrives
+    before the body is complete, so a truncated upload is never silently
+    returned as if whole.
     """
     chunks: list[bytes] = []
     while True:
         event = await receive()
+        if event.get('type') == ASGIEvent.HTTP_DISCONNECT:
+            # Peer went away mid-body — the accumulated bytes are a partial
+            # upload, not a complete one.  Surface it rather than returning
+            # the truncated body as if it were the whole message.
+            raise ClientDisconnected(b''.join(chunks))
         chunk = event.get('body', b'')
         if chunk:
             chunks.append(chunk)
@@ -49,6 +76,10 @@ async def read_json(receive) -> Any:
 
     Note that a literal JSON ``null`` body also parses to ``None``; if that
     distinction matters, read the body yourself with :func:`read_body`.
+
+    A mid-body client disconnect propagates as :class:`ClientDisconnected`
+    rather than being reported as invalid JSON — a truncated body is a
+    transport failure, not a parse error.
     """
     body = await read_body(receive)
     if not body:
@@ -65,6 +96,10 @@ async def read_text(receive, encoding: str = 'utf-8') -> str:
     Uses ``errors='replace'`` so undecodable bytes become U+FFFD rather than
     raising — a malformed body never crashes the handler.  Override
     *encoding* for non-UTF-8 payloads.
+
+    A mid-body client disconnect still propagates as
+    :class:`ClientDisconnected`: a truncated upload must not be decoded and
+    returned as if it were the complete text.
     """
     body = await read_body(receive)
     return body.decode(encoding, errors='replace')

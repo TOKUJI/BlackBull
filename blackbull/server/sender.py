@@ -498,6 +498,7 @@ class HTTP1Sender(BaseSender):
     __slots__ = (
         '_buffered_status', '_buffered_headers', '_chunked',
         '_expect_trailers', '_head_mode', '_log_record', '_started',
+        '_completed',
     )
 
     def __init__(self, writer: AbstractWriter):
@@ -511,6 +512,13 @@ class HTTP1Sender(BaseSender):
         # consults this after BB_REQUEST_TIMEOUT expiry to decide
         # whether a synthetic 408 can still be emitted.
         self._started: bool = False
+        # Set True once a complete response has been written for this request
+        # (a full ``bytes`` response, a body event with ``more_body=False``,
+        # trailers, or a pathsend).  Further response events are then dropped
+        # (bug 1.4) so a handler that raises *after* completing its response
+        # can't write a second one onto the same keep-alive connection —
+        # mirrors the H2 sender's post-END_STREAM drop.
+        self._completed: bool = False
         # RFC 9110 §9.3.2 — when the request was HEAD, the response must
         # have the same headers (including Content-Length) as a GET would
         # but no body.  HTTP1Actor sets this before dispatch.
@@ -544,6 +552,16 @@ class HTTP1Sender(BaseSender):
         Unknown event types are logged and dropped; non-dict / non-bytes
         bodies raise ``TypeError``.
         """
+        if self._completed:
+            # bug 1.4 — a complete response has already gone out for this
+            # request; drop any further response events so a handler that
+            # raises after completing (→ the error handler emits a second
+            # response) can't splice two responses onto one connection.
+            # A disconnect signal still marks the writer closed.
+            if isinstance(body, dict) and body.get('type') == ASGIEvent.HTTP_DISCONNECT:
+                self._closed = True
+            return
+
         match body:
             case bytes():
                 h = headers if isinstance(headers, Headers) else Headers(headers)
@@ -551,6 +569,7 @@ class HTTP1Sender(BaseSender):
                     self._log_record.status = int(status)
                     self._log_record.response_bytes += len(body)
                 await self._flush(status, h, body)
+                self._completed = True
 
             case {'type': ASGIEvent.HTTP_RESPONSE_START}:
                 self._buffered_status = HTTPStatus(body.get('status', HTTPStatus.OK))
@@ -597,6 +616,8 @@ class HTTP1Sender(BaseSender):
                         # already wrote headers; HEAD response carries no body
                         if self._log_record is not None and not more_body:
                             self._log_record.mark('body_arm_out')
+                        if not more_body:
+                            self._completed = True
                         return
                     if self._chunked:
                         if content:
@@ -610,15 +631,19 @@ class HTTP1Sender(BaseSender):
                         await self._write(content)
                 if self._log_record is not None and not more_body:
                     self._log_record.mark('body_arm_out')
+                if not more_body:
+                    self._completed = True
 
             case {'type': ASGIEvent.HTTP_RESPONSE_TRAILERS}:
                 await self._write(b'0\r\n')
                 for name, value in body.get('headers', []):
                     await self._write(name + b': ' + value + b'\r\n')
                 await self._write(b'\r\n')
+                self._completed = True
 
             case {'type': ASGIEvent.HTTP_RESPONSE_PATHSEND}:
                 await self._pathsend(body['path'])
+                self._completed = True
 
             case {'type': ASGIEvent.HTTP_DISCONNECT}:
                 # http1_actor.py sends this on IncompleteReadError; the
@@ -644,6 +669,7 @@ class HTTP1Sender(BaseSender):
         self._chunked = False
         self._expect_trailers = False
         self._started = False
+        self._completed = False
         self._head_mode = False
         self._log_record = None
 
