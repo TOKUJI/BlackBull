@@ -3485,6 +3485,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#blackbull.request.ClientDisconnected" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ClientDisconnected
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.request.parse_cookies" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4609,6 +4620,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#blackbull.request.ClientDisconnected" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ClientDisconnected
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.request.parse_cookies" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4720,6 +4742,60 @@
 
 
 
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="blackbull.request.ClientDisconnected" class="doc doc-heading">
+            <code>ClientDisconnected</code>
+
+
+<a href="#blackbull.request.ClientDisconnected" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="Exception">Exception</span></code></p>
+
+
+
+        <p>Raised when the client disconnects before the request body is complete.</p>
+<p>ASGI signals a mid-body disconnect with an <code>http.disconnect</code> event that
+carries no <code>body</code>/<code>more_body</code> keys.  Treating it as end-of-message
+would return a <em>truncated</em> upload as if it were whole, so
+:func:<code>read_body</code> raises this instead — the handler must not process a
+partial body as complete.  The <code>partial</code> attribute holds whatever body
+bytes had arrived before the disconnect.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
 
 <div class="doc doc-object doc-function">
 
@@ -4772,6 +4848,9 @@ same result.</p>
 <p>Collects chunks in a list and joins once, rather than the O(n²) <code>+=</code>
 growth.  A single-chunk body (the common case) is returned directly with
 no intermediate copy at all (copy-reduction-http1 P1).</p>
+<p>Raises :class:<code>ClientDisconnected</code> if an <code>http.disconnect</code> arrives
+before the body is complete, so a truncated upload is never silently
+returned as if whole.</p>
 
 
     </div>
@@ -4806,6 +4885,9 @@ if data is None:
 </code></pre>
 <p>Note that a literal JSON <code>null</code> body also parses to <code>None</code>; if that
 distinction matters, read the body yourself with :func:<code>read_body</code>.</p>
+<p>A mid-body client disconnect propagates as :class:<code>ClientDisconnected</code>
+rather than being reported as invalid JSON — a truncated body is a
+transport failure, not a parse error.</p>
 
 
     </div>
@@ -4831,6 +4913,9 @@ distinction matters, read the body yourself with :func:<code>read_body</code>.</
 <p>Uses <code>errors='replace'</code> so undecodable bytes become U+FFFD rather than
 raising — a malformed body never crashes the handler.  Override
 <em>encoding</em> for non-UTF-8 payloads.</p>
+<p>A mid-body client disconnect still propagates as
+:class:<code>ClientDisconnected</code>: a truncated upload must not be decoded and
+returned as if it were the complete text.</p>
 
 
     </div>

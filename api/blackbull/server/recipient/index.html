@@ -4118,6 +4118,34 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="HTTP1Recipient">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.recipient.HTTP1Recipient.drain" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        drain
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.recipient.HTTP1Recipient.needs_drain" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        needs_drain
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
         
           <li class="md-nav__item">
@@ -4902,6 +4930,34 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="HTTP1Recipient">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.recipient.HTTP1Recipient.drain" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        drain
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.recipient.HTTP1Recipient.needs_drain" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        needs_drain
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
         
           <li class="md-nav__item">
@@ -5414,6 +5470,54 @@ or Transfer-Encoding header from <code>scope</code>.  Subsequent calls return
 
 
 
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.server.recipient.HTTP1Recipient.drain" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">drain</span><span class="p">(</span><span class="n">max_bytes</span><span class="p">)</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-async"><code>async</code></small>
+  </span>
+
+<a href="#blackbull.server.recipient.HTTP1Recipient.drain" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Discard any unread request body so the next pipelined request parses
+cleanly.  Returns True if fully drained (or the peer disconnected),
+False if the unread body exceeded <em>max_bytes</em> — the caller should then
+close the connection rather than keep it alive.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.server.recipient.HTTP1Recipient.needs_drain" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">needs_drain</span><span class="p">()</span></code>
+
+<a href="#blackbull.server.recipient.HTTP1Recipient.needs_drain" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>True if a declared request body may still be buffered unread.</p>
+<p>A handler that ignores <code>receive</code> (e.g. a 404/405 response to a POST)
+leaves the body bytes in the reader; the next keep-alive request would
+then parse them as its request line.  The actor consults this after
+dispatch to decide whether to drain.  A body-less request (GET, no
+Content-Length, not chunked) never needs draining.</p>
+
+
+    </div>
+
+</div>
 
 
 

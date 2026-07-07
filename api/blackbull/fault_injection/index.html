@@ -5421,9 +5421,10 @@
 </li>
 </ul>
 <p>This module is an opt-in testing instrument.  The HTTP/2 server refuses
-to start when <code>BB_PRODUCTION</code> is set in the environment so a
-deliberate-misbehaviour code path cannot accidentally fire on a
-production deployment (see <a href="../../.claude/skills/update-roadmap/out-of-scope.md"><code>out-of-scope.md</code></a>).</p>
+to start in a production context — when <code>BLACKBULL_ENV=production</code> (the
+framework's production signal) or the explicit <code>BB_PRODUCTION</code> override
+is set — so a deliberate-misbehaviour code path cannot accidentally fire on
+a production deployment (see <a href="../../.claude/skills/update-roadmap/out-of-scope.md"><code>out-of-scope.md</code></a>).</p>
 <p>See <code>docs/guide/fault_injection.md</code> for a tutorial.</p>
 
 
@@ -5769,9 +5770,10 @@ last_result:
 
 
         <p>Raised when <code>H2FaultServer</code> cannot start.</p>
-<p>The most common cause is <code>BB_PRODUCTION</code> being set in the
-environment: deliberate-misbehaviour machinery refuses to run in
-a production context regardless of how it was reached.</p>
+<p>The most common cause is running in a production context: the
+deliberate-misbehaviour machinery refuses to start when the framework's
+production signal (<code>BLACKBULL_ENV=production</code>) — or the explicit
+<code>BB_PRODUCTION</code> override — is set, regardless of how it was reached.</p>
 
 
 

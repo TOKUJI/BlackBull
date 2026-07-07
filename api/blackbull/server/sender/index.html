@@ -4233,6 +4233,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.server.sender.ConnectionWindow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ConnectionWindow
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.server.sender.HTTP1Sender" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4271,6 +4282,17 @@
   
     <nav class="md-nav" aria-label="HTTP2Sender">
       <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.sender.HTTP2Sender.connection_window_size" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        connection_window_size
+      
+    </span>
+  </a>
+  
+</li>
         
           <li class="md-nav__item">
   <a href="#blackbull.server.sender.HTTP2Sender.adjust_initial_window" class="md-nav__link">
@@ -4978,6 +5000,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.server.sender.ConnectionWindow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ConnectionWindow
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.server.sender.HTTP1Sender" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5016,6 +5049,17 @@
   
     <nav class="md-nav" aria-label="HTTP2Sender">
       <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.sender.HTTP2Sender.connection_window_size" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        connection_window_size
+      
+    </span>
+  </a>
+  
+</li>
         
           <li class="md-nav__item">
   <a href="#blackbull.server.sender.HTTP2Sender.adjust_initial_window" class="md-nav__link">
@@ -5592,6 +5636,63 @@ writes a GOAWAY or tears down, so a trailing batch is never lost.</p>
 
 
 
+<h3 id="blackbull.server.sender.ConnectionWindow" class="doc doc-heading">
+            <code>ConnectionWindow</code>
+
+
+<a href="#blackbull.server.sender.ConnectionWindow" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+
+
+        <p>Shared HTTP/2 connection-level (stream 0) send flow-control window.</p>
+<p>One instance per connection, referenced by every stream's
+:class:<code>HTTP2Sender</code>, so all senders debit and await a single budget.</p>
+<p>Without sharing (bug 1.2) each sender held a <em>private copy</em> of the
+connection window and debited only that copy, while the actor-level total
+was only ever incremented — so N concurrent streams could each spend a
+full 65535-byte window and the server could emit N×65535 bytes with zero
+real stream-0 credit.  A strict peer (nghttp2, grpc-go) treats that as a
+connection <code>FLOW_CONTROL_ERROR</code> and GOAWAYs (RFC 9113 §6.9.1).</p>
+<p>The object is a thin mutable holder: senders read/debit <code>size</code> directly
+and the owning actor fans out wake-ups to blocked senders on a
+connection-level <code>WINDOW_UPDATE</code> (it already tracks every live sender).</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
 <h3 id="blackbull.server.sender.HTTP1Sender" class="doc doc-heading">
             <code>HTTP1Sender</code>
 
@@ -5729,6 +5830,33 @@ bodies raise <code>TypeError</code>.</p>
 
 
 
+
+<div class="doc doc-object doc-attribute">
+
+
+
+<h4 id="blackbull.server.sender.HTTP2Sender.connection_window_size" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">connection_window_size</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-property"><code>property</code></small>
+      <small class="doc doc-label doc-label-writable"><code>writable</code></small>
+  </span>
+
+<a href="#blackbull.server.sender.HTTP2Sender.connection_window_size" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>The shared connection-level send window (bug 1.2).</p>
+<p>Proxies :attr:<code>ConnectionWindow.size</code> so existing call sites — the
+experimental client's per-sender crediting and flow-control tests —
+keep reading/writing <code>sender.connection_window_size</code> while the real
+state lives on the shared object.</p>
+
+    </div>
+
+</div>
 
 
 

@@ -3591,6 +3591,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.router.HTTPException" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        HTTPException
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.router.MethodNotApplicable" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4803,6 +4814,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.router.HTTPException" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        HTTPException
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.router.MethodNotApplicable" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5150,6 +5172,59 @@ handler = errors[KeyError]               # same, accepting the class directly
     </div>
 
 </div>
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="blackbull.router.HTTPException" class="doc doc-heading">
+            <code>HTTPException</code>
+
+
+<a href="#blackbull.router.HTTPException" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="Exception">Exception</span></code></p>
+
+
+
+        <p>An exception carrying the HTTP status the dispatcher should report.</p>
+<p>Raising this from a handler — or from the framework's own request-body
+adapter — makes <code>BlackBull._dispatch</code> answer with <code>status</code> instead of
+the generic 500, and (for 4xx) log it quietly as a client error rather
+than dumping a server traceback.  <code>detail</code> is an optional
+human-readable message surfaced in development-mode error pages.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
 
 
 

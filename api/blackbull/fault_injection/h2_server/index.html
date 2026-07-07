@@ -4780,11 +4780,12 @@ It is designed for client-library / proxy / security-research test
 suites that need to exercise a client against a server that
 <strong>deliberately</strong> does the wrong thing — half-closed streams, exhausted
 flow-control windows, illegal SETTINGS, weird frame sequences.</p>
-<p>The server is an opt-in testing instrument.  It refuses to start when
-<code>BB_PRODUCTION</code> is set in the environment so a deliberate-misbehaviour
-code path cannot accidentally fire on a production deployment.  This
-is the isolated, hard-opt-in design called out in the project's
-out-of-scope list as the only acceptable form for fault-injection
+<p>The server is an opt-in testing instrument.  It refuses to start in a
+production context — when the framework's <code>BLACKBULL_ENV=production</code>
+signal (or the explicit <code>BB_PRODUCTION</code> override) is set — so a
+deliberate-misbehaviour code path cannot accidentally fire on a production
+deployment.  This is the isolated, hard-opt-in design called out in the
+project's out-of-scope list as the only acceptable form for fault-injection
 machinery inside a correctness-focused framework.</p>
 <p>Tutorial: <code>docs/guide/fault_injection.md</code>.</p>
 <h4 id="blackbull.fault_injection.h2_server--quick-start">Quick start<a class="headerlink" href="#blackbull.fault_injection.h2_server--quick-start" title="Permanent link">&para;</a></h4>
@@ -4938,9 +4939,10 @@ last_result:
 
 
         <p>Raised when <code>H2FaultServer</code> cannot start.</p>
-<p>The most common cause is <code>BB_PRODUCTION</code> being set in the
-environment: deliberate-misbehaviour machinery refuses to run in
-a production context regardless of how it was reached.</p>
+<p>The most common cause is running in a production context: the
+deliberate-misbehaviour machinery refuses to start when the framework's
+production signal (<code>BLACKBULL_ENV=production</code>) — or the explicit
+<code>BB_PRODUCTION</code> override — is set, regardless of how it was reached.</p>
 
 
 
