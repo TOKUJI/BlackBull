@@ -399,6 +399,42 @@ class TestHTTP2MaxConcurrentStreams:
             'MAX_CONCURRENT_STREAMS=2. No RST_STREAM was sent.'
         )
 
+    async def test_inbound_rst_cancels_running_stream_task(self):
+        """An inbound RST_STREAM must cancel the running handler for that stream.
+
+        Regression for the gRPC server-streaming 'collapse': a streaming handler
+        the client abandons mid-flight otherwise blocks forever in the sender's
+        flow-control wait (no further WINDOW_UPDATE ever arrives from the
+        departed client), permanently holding its max_concurrent_streams slot.
+        Under a high-churn streaming client that leaks every slot until new
+        streams are REFUSED_STREAM'd.  Cancelling the handler on RST frees it.
+        """
+        async def blocking_app(scope, receive, send):
+            # Stand-in for a server-streaming call parked on flow control —
+            # never completes on its own; only cancellation ends it.
+            await asyncio.Event().wait()
+
+        h1 = _make_headers_frame(stream_id=1, end_stream=True,
+                                 method=b'POST', path=b'/stream')
+        # RST_STREAM(CANCEL) on stream 1 — no flags, 4-byte error code.
+        rst = _make_h2_frame(FrameTypes.RST_STREAM, 0, 1, (0x8).to_bytes(4, 'big'))
+
+        handler, _ = _make_h2_actor(app=blocking_app)
+        handler.receive = AsyncMock(side_effect=[h1, rst, None])
+
+        # With the fix, run() returns: the RST cancels the blocked task so the
+        # TaskGroup can exit.  Without it, the TaskGroup awaits the blocked task
+        # forever and this wait_for times out (the regression this guards).
+        await asyncio.wait_for(handler.run(), timeout=5)
+        # Let the task's done-callback fire (scheduled via call_soon).
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+
+        assert handler._active_stream_count == 0, \
+            'max_concurrent_streams slot leaked after inbound RST_STREAM'
+        assert 1 not in handler._stream_tasks, \
+            'stream task map not cleaned up after inbound RST_STREAM'
+
     async def test_closed_stream_frees_slot(self):
         """After a stream closes, a new one must be accepted within the limit."""
         h1 = _make_headers_frame(stream_id=1, end_stream=True)
