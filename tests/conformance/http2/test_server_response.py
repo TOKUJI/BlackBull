@@ -100,34 +100,36 @@ async def test_ping_responder_sends_ack():
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_window_update_connection_level_credits_all_senders():
+async def test_window_update_connection_level_credits_shared_window():
+    """Connection-level WINDOW_UPDATE credits the ONE shared connection window
+    (bug 1.2) — not a private copy per sender — and wakes every stream sender."""
+    from blackbull.server.sender import ConnectionWindow
     frame = MagicMock()
     frame.stream_id = 0
     frame.length = 4  # valid frame length
     frame.window_size = 1024
 
     sender_a = MagicMock()
-    sender_a.connection_window_size = 0
     sender_b = MagicMock()
-    sender_b.connection_window_size = 100
 
     handler = MagicMock()
     handler._senders = {'a': sender_a, 'b': sender_b}
-    handler._connection_window_size = 65535
+    handler._conn_window = ConnectionWindow(65535)
 
     responder = WindowUpdateResponder(frame)
     await responder.respond(handler)
 
-    assert sender_a.connection_window_size == 1024
-    assert sender_b.connection_window_size == 1124
+    # The single shared window is credited exactly once (not once per sender).
+    assert handler._conn_window.size == 65535 + 1024
     sender_a.wake_window.assert_called_once()
     sender_b.wake_window.assert_called_once()
 
 
 @pytest.mark.asyncio
-async def test_window_update_connection_level_updates_handler_tracking():
-    """Connection-level WINDOW_UPDATE must update handler._connection_window_size
-    so that stream senders created after the update inherit the correct budget."""
+async def test_window_update_connection_level_updates_shared_window():
+    """Connection-level WINDOW_UPDATE updates the shared window so that stream
+    senders created after the update read the current budget from it."""
+    from blackbull.server.sender import ConnectionWindow
     frame = MagicMock()
     frame.stream_id = 0
     frame.length = 4  # valid frame length
@@ -135,12 +137,12 @@ async def test_window_update_connection_level_updates_handler_tracking():
 
     handler = MagicMock()
     handler._senders = {}
-    handler._connection_window_size = 65535
+    handler._conn_window = ConnectionWindow(65535)
 
     responder = WindowUpdateResponder(frame)
     await responder.respond(handler)
 
-    assert handler._connection_window_size == 65535 + 4128769
+    assert handler._conn_window.size == 65535 + 4128769
 
 
 # ---------------------------------------------------------------------------
@@ -276,7 +278,7 @@ async def test_window_update_stream_level_only_credits_stream_window():
 
     sender.window_update(512)
 
-    assert sender.stream_window_size[1] == 65535 + 512
+    assert sender.stream_window_size == 65535 + 512
     assert sender.connection_window_size == original_conn_window, (
         "stream-level WINDOW_UPDATE must not change connection_window_size"
     )
@@ -481,7 +483,7 @@ async def test_body_exceeding_flow_control_window_is_chunked():
     sender = HTTP2Sender(AsyncioWriter(mock_writer), factory, stream_id=1)
     sender.max_frame_size = 300
     sender.connection_window_size = 200
-    sender.stream_window_size[1] = 200
+    sender.stream_window_size = 200
 
     body = b'y' * 500
 

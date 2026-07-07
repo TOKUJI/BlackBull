@@ -287,8 +287,8 @@ async def test_make_sender_uses_peer_initial_window_size(fake_writer, mock_app):
 
     sender = actor.make_sender(stream_id=5)
 
-    assert sender.stream_window_size[5] == peer_iws, (
-        f'Expected stream window {peer_iws}, got {sender.stream_window_size[5]}'
+    assert sender.stream_window_size == peer_iws, (
+        f'Expected stream window {peer_iws}, got {sender.stream_window_size}'
     )
 
 
@@ -297,12 +297,17 @@ async def test_make_sender_uses_current_connection_window(fake_writer, mock_app)
     """Stream senders created after a connection WINDOW_UPDATE must see the updated budget."""
     aggregator = AsyncMock(spec=EventAggregator)
     actor = HTTP2Actor(None, fake_writer, mock_app, aggregator)
-    actor._connection_window_size = 4194304  # simulates post-WINDOW_UPDATE value
+    actor._conn_window.size = 4194304  # simulates post-WINDOW_UPDATE value
 
     sender = actor.make_sender(stream_id=7)
 
+    # The sender shares the actor's connection window (bug 1.2), so it reads
+    # the current budget from the one object rather than a stale copy.
     assert sender.connection_window_size == 4194304, (
         f'Expected connection window 4194304, got {sender.connection_window_size}'
+    )
+    assert sender._conn_window is actor._conn_window, (
+        'stream senders must share the actor connection window, not copy it'
     )
 
 

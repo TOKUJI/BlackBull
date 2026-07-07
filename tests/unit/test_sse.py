@@ -230,7 +230,7 @@ async def test_http2_sender_blocks_when_window_closed():
     sender = HTTP2Sender(writer, FrameFactory(), stream_id=1)
     # Force the peer's window closed BEFORE the write starts.
     sender.connection_window_size = 0
-    sender.stream_window_size[1] = 0
+    sender.stream_window_size = 0
 
     write_done = asyncio.Event()
 
@@ -250,7 +250,7 @@ async def test_http2_sender_blocks_when_window_closed():
         # Reopen the window and signal the waiter — the write should now
         # run to completion and put the full payload on the wire.
         sender.connection_window_size = 100
-        sender.stream_window_size[1] = 100
+        sender.stream_window_size = 100
         assert sender._window_open is not None
         sender._window_open.set()
         await asyncio.wait_for(write_done.wait(), timeout=1.0)

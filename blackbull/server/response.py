@@ -108,9 +108,10 @@ class WindowUpdateResponder(Responder):
             return
 
         if self.frame.stream_id == 0:
-            # Connection-level: credit all cached stream senders and update the
-            # running total so future senders start with the current budget.
-            new_window = getattr(handler, '_connection_window_size', 65535) + increment
+            # Connection-level: credit the ONE shared connection window (bug
+            # 1.2), then wake every blocked stream sender so they re-check.
+            conn_window = handler._conn_window
+            new_window = conn_window.size + increment
             # RFC 9113 §6.9.1 — exceeding 2^31-1 is a connection-level
             # FLOW_CONTROL_ERROR with GOAWAY.
             if new_window > self._MAX_FLOW_WINDOW:
@@ -118,14 +119,13 @@ class WindowUpdateResponder(Responder):
                     ErrorCodes.FLOW_CONTROL_ERROR,
                     f'connection flow window overflow: {new_window}')
                 return
-            handler._connection_window_size = new_window
+            conn_window.size = new_window
             for sender in handler._senders.values():
-                sender.connection_window_size += increment
                 sender.wake_window()
         else:
             sender = handler.make_sender(self.frame.stream_id)
             sid = self.frame.stream_id
-            current = sender.stream_window_size.get(sid, 65535)
+            current = sender.stream_window_size
             if current + increment > self._MAX_FLOW_WINDOW:
                 # RFC 9113 §6.9.1 — stream-level flow window overflow is a
                 # stream error of type FLOW_CONTROL_ERROR.
@@ -235,7 +235,15 @@ class PriorityResponder(Responder):
         stream = handler.root_stream.find_child(stream_id)
 
         if not stream:
-            stream = handler.root_stream.find_child(self.frame.dependent_stream).add_child(stream_id)
+            # RFC 9113 §5.3.1 — a dependency on an unknown (or pruned-as-closed)
+            # stream is treated as a dependency on stream 0.  Previously
+            # find_child returned None and .add_child() raised AttributeError,
+            # unwinding the frame loop and killing every stream on the
+            # connection without a GOAWAY (bug 1.10).
+            parent = handler.root_stream.find_child(self.frame.dependent_stream)
+            if parent is None:
+                parent = handler.root_stream
+            stream = parent.add_child(stream_id)
 
         stream.weight = self.frame.weight
 
@@ -308,7 +316,7 @@ class RstStreamResponder(Responder):
         # from the peer on this identifier are detected by the frame-loop's
         # _closed_streams check and trigger STREAM_CLOSED.
         handler.root_stream.children.pop(stream_id, None)
-        handler._closed_streams[stream_id] = True
+        handler._mark_closed(stream_id, via_rst=True)
         handler._senders.pop(stream_id, None)
         handler._recipients.pop(stream_id, None)
 
