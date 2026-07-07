@@ -2469,10 +2469,54 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.grpc.asgi.GrpcContext.invocation_metadata" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        invocation_metadata
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.grpc.asgi.GrpcContext.metadata" class="md-nav__link">
     <span class="md-ellipsis">
       
         metadata
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.grpc.asgi.GrpcContext.peer" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        peer
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.grpc.asgi.GrpcContext.send_initial_metadata" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        send_initial_metadata
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.grpc.asgi.GrpcContext.time_remaining" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        time_remaining
       
     </span>
   </a>
@@ -2524,6 +2568,34 @@
     
   
     codec
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../compression/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    compression
   
 
     
@@ -4612,10 +4684,54 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.grpc.asgi.GrpcContext.invocation_metadata" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        invocation_metadata
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.grpc.asgi.GrpcContext.metadata" class="md-nav__link">
     <span class="md-ellipsis">
       
         metadata
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.grpc.asgi.GrpcContext.peer" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        peer
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.grpc.asgi.GrpcContext.send_initial_metadata" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        send_initial_metadata
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.grpc.asgi.GrpcContext.time_remaining" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        time_remaining
       
     </span>
   </a>
@@ -4678,13 +4794,16 @@
 
     <div class="doc doc-contents first">
 
-        <p>ASGI bridge that serves unary gRPC calls over BlackBull's HTTP/2 layer.</p>
+        <p>ASGI bridge that serves gRPC calls over BlackBull's HTTP/2 layer.</p>
 <p>gRPC is HTTP/2 with a fixed request shape (<code>POST /package.Service/Method</code>,
 <code>content-type: application/grpc</code>) and a Length-Prefixed-Message body, where
 the call result is reported in <code>grpc-status</code> / <code>grpc-message</code> <em>trailers</em>.
 BlackBull's HTTP/2 sender already emits trailers via the
-<code>http.response.trailers</code> ASGI event, so a gRPC unary call maps cleanly onto
-the existing (scope, receive, send) bridge — no new protocol Actor is needed.</p>
+<code>http.response.trailers</code> ASGI event, and <code>HTTP2Recipient</code> already delivers
+request DATA as incremental <code>http.request</code> events, so all four RPC kinds —
+unary, server-, client-, and bidirectional-streaming — map cleanly onto the
+existing (scope, receive, send) bridge; no new protocol Actor is needed
+(see <code>.claude/planning/designs/grpc-streaming-request-design.md</code>).</p>
 <p><code>serve_grpc</code> is dispatched from :meth:<code>BlackBull._dispatch</code> when the request
 content-type is <code>application/grpc</code> and a registry was installed via
 <code>app.enable_grpc(...)</code>.</p>
@@ -4724,9 +4843,13 @@ content-type is <code>application/grpc</code> and a registry was installed via
 
 
         <p>Per-call context handed to a gRPC handler.</p>
-<p>Exposes request metadata (the HTTP/2 headers) and lets the handler set
-the outgoing status, a human-readable message, and trailing metadata, or
-abort the call outright.</p>
+<p>Exposes request metadata (the HTTP/2 headers), the call deadline and peer,
+and lets the handler set the outgoing status, a human-readable message,
+leading/trailing metadata, or abort the call outright — the subset of
+grpcio's <code>ServicerContext</code> that a raw-bytes transport can honour.</p>
+<p>The response-start machinery (<code>_send</code> … <code>_started</code>) is bound by
+:func:<code>serve_grpc</code> just before the handler runs; handlers touch it only via
+:meth:<code>send_initial_metadata</code>.</p>
 
 
 
@@ -4770,6 +4893,27 @@ abort the call outright.</p>
 <div class="doc doc-object doc-function">
 
 
+<h4 id="blackbull.grpc.asgi.GrpcContext.invocation_metadata" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">invocation_metadata</span><span class="p">()</span></code>
+
+<a href="#blackbull.grpc.asgi.GrpcContext.invocation_metadata" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Return all request metadata (HTTP/2 headers) as <code>(name, value)</code>
+pairs — grpcio's <code>ServicerContext.invocation_metadata</code>.  Pseudo-
+headers (<code>:method</code>, <code>:path</code>, …) are excluded; they are call routing,
+not application metadata.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
 <h4 id="blackbull.grpc.asgi.GrpcContext.metadata" class="doc doc-heading">
             <code class="highlight language-python"><span class="n">metadata</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="sa">b</span><span class="s1">&#39;&#39;</span><span class="p">)</span></code>
 
@@ -4779,6 +4923,76 @@ abort the call outright.</p>
     <div class="doc doc-contents ">
 
         <p>Return a request header (call metadata) value, or <em>default</em>.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.grpc.asgi.GrpcContext.peer" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">peer</span><span class="p">()</span></code>
+
+<a href="#blackbull.grpc.asgi.GrpcContext.peer" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Return the client address as grpcio formats it (<code>ipv4:host:port</code> /
+<code>ipv6:[host]:port</code>), or <code>''</code> when the transport did not supply one.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.grpc.asgi.GrpcContext.send_initial_metadata" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">send_initial_metadata</span><span class="p">(</span><span class="n">metadata</span><span class="p">)</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-async"><code>async</code></small>
+  </span>
+
+<a href="#blackbull.grpc.asgi.GrpcContext.send_initial_metadata" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Send response leading metadata now (the initial HTTP/2 HEADERS),
+before the first response message — grpcio's
+<code>ServicerContext.send_initial_metadata</code>.</p>
+<p>Optional: if never called, the response HEADERS are still emitted lazily
+(just before the first message, or with the trailers for an empty
+response).  Calling it flushes them early with <em>metadata</em> attached — used
+to hand the client leading metadata (auth challenges, stream ids) up
+front.  Raises :class:<code>ValueError</code> once the HEADERS have already gone
+out (grpcio's "initial metadata no longer allowed").</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.grpc.asgi.GrpcContext.time_remaining" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">time_remaining</span><span class="p">()</span></code>
+
+<a href="#blackbull.grpc.asgi.GrpcContext.time_remaining" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Seconds left until the call deadline (never negative), or <code>None</code>
+when the client set no <code>grpc-timeout</code> — grpcio's
+<code>ServicerContext.time_remaining</code>.  Lets a handler shed work it cannot
+finish in time.</p>
 
 
     </div>

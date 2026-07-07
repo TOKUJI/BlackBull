@@ -13,7 +13,7 @@
         <link rel="canonical" href="https://TOKUJI.github.io/BlackBull/api/blackbull/grpc/registry/">
       
       
-        <link rel="prev" href="../codec/">
+        <link rel="prev" href="../compression/">
       
       
         <link rel="next" href="../status/">
@@ -2427,6 +2427,34 @@
                 
   
   
+  
+  
+    <li class="md-nav__item">
+      <a href="../compression/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    compression
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
     
   
   
@@ -4783,11 +4811,21 @@ the yielded / returned value is a response message body.  Protobuf
 (de)serialisation is the handler's responsibility — the framework stays
 dependency-free.  Handlers signal a non-OK result by raising
 :class:<code>GrpcError</code> or calling <code>context.abort(...)</code>.</p>
-<p>Server-streaming is detected automatically at registration via
-:func:<code>inspect.isasyncgenfunction</code>; pass <code>streaming=</code> explicitly to override
-when a decorator hides the async-generator nature of the wrapped function.
-Client-streaming and bidirectional streaming are not yet served (they need the
-request delivered as a stream).</p>
+<p>A <strong>client-streaming</strong> or <strong>bidirectional</strong> handler takes an async iterator of
+request messages instead of a single <code>request</code>::</p>
+<pre><code>async def handler(request_iter, context) -&gt; bytes:   # client-streaming
+    async for message in request_iter:
+        ...
+
+async def handler(request_iter, context):            # bidirectional
+    async for message in request_iter:
+        yield ...
+</code></pre>
+<p>Response-streaming is detected automatically at registration via
+:func:<code>inspect.isasyncgenfunction</code>; request-streaming is detected from the first
+parameter name (<code>request_iter</code> / <code>requests</code> / <code>request_iterator</code> /
+<code>request_stream</code>).  Pass <code>streaming=</code> / <code>client_streaming=</code> explicitly to
+override when a decorator hides the handler's nature.</p>
 
 
 
@@ -4825,12 +4863,17 @@ request delivered as a stream).</p>
 
 
 
-        <p>A registered method: its <em>handler</em> and whether it server-streams.</p>
+        <p>A registered method: its <em>handler</em> and the two streaming axes.</p>
+<p><em>streaming</em> is the <strong>response</strong> axis (the handler is an async generator that
+yields response messages); <em>client_streaming</em> is the <strong>request</strong> axis (the
+handler takes an async iterator of request messages instead of a single
+<code>request: bytes</code>).  The four combinations are unary, server-streaming,
+client-streaming, and bidirectional.</p>
 <p><em>handler</em> is annotated as a bare :class:<code>~collections.abc.Callable</code> rather
-than :data:<code>GrpcHandler</code>: a server-streaming handler is an async generator
+than :data:<code>GrpcHandler</code>: a response-streaming handler is an async generator
 function (its call returns an async iterator, not an <code>Awaitable</code>), and a
 plain <code>Callable</code> is the one form that stays runtime-isinstanceable for the
-NamedTuple field check.</p>
+NamedTuple field check (see memory <code>beartype-namedtuple-callable-alias</code>).</p>
 
 
 
@@ -4903,7 +4946,7 @@ NamedTuple field check.</p>
 
 
 <h4 id="blackbull.grpc.registry.GrpcServiceRegistry.add_method" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">add_method</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="n">handler</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">streaming</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
+            <code class="highlight language-python"><span class="n">add_method</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="n">handler</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">streaming</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">client_streaming</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
 
 <a href="#blackbull.grpc.registry.GrpcServiceRegistry.add_method" class="headerlink" title="Permanent link">&para;</a></h4>
 
@@ -4912,12 +4955,18 @@ NamedTuple field check.</p>
 
         <p>Register <em>handler</em> for the fully-qualified method <em>path</em>
 (<code>/package.Service/Method</code> or <code>package.Service/Method</code>).</p>
-<p><em>streaming</em> selects server-streaming (the handler is an async generator
-that yields response messages).  When <code>None</code> (the default) it is
-auto-detected with :func:<code>inspect.isasyncgenfunction</code>; pass <code>True</code> to
-force streaming for a handler whose async-generator nature is hidden
-behind a wrapper, or <code>False</code> to force unary.  Forcing <code>False</code> on an
-async-generator function is a contradiction and raises <code>ValueError</code>.</p>
+<p><em>streaming</em> is the <strong>response</strong> axis — server-streaming (the handler is
+an async generator that yields response messages).  When <code>None</code> (the
+default) it is auto-detected with :func:<code>inspect.isasyncgenfunction</code>;
+pass <code>True</code> to force it for a handler whose async-generator nature is
+hidden behind a wrapper, or <code>False</code> to force a single response.
+Forcing <code>False</code> on an async-generator function is a contradiction and
+raises <code>ValueError</code>.</p>
+<p><em>client_streaming</em> is the <strong>request</strong> axis — the handler takes an async
+iterator of request messages (first parameter <code>request_iter</code> /
+<code>requests</code> / <code>request_iterator</code> / <code>request_stream</code>) instead of a
+single <code>request: bytes</code>.  When <code>None</code> it is auto-detected from that
+first parameter name; pass an explicit bool to override.</p>
 
 
     </div>
@@ -4987,7 +5036,7 @@ unregistered.</p>
 
 
 <h4 id="blackbull.grpc.registry.GrpcServiceRegistry.method" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">method</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">streaming</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
+            <code class="highlight language-python"><span class="n">method</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">streaming</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">client_streaming</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
 
 <a href="#blackbull.grpc.registry.GrpcServiceRegistry.method" class="headerlink" title="Permanent link">&para;</a></h4>
 

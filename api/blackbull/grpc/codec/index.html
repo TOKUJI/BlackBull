@@ -16,7 +16,7 @@
         <link rel="prev" href="../asgi/">
       
       
-        <link rel="next" href="../registry/">
+        <link rel="next" href="../compression/">
       
       
         
@@ -2527,6 +2527,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../compression/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    compression
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../registry/" class="md-nav__link">
         
   
@@ -4653,8 +4681,9 @@ carries each message inside an HTTP/2 DATA stream as:</p>
 </code></pre>
 <p><code>Compressed-Flag</code> is 0 for an uncompressed message and 1 when the message
 body is compressed with the algorithm named in the <code>grpc-encoding</code> header.
-BlackBull's first cut does not implement message compression, so the encoder
-always emits 0 and the decoder reports the flag for the caller to reject.</p>
+This module is pure framing: it carries the flag but does not (de)compress —
+:mod:<code>~blackbull.grpc.compression</code> holds the gzip codec and the ASGI bridge
+sets/reads the flag around it.</p>
 <p>This module is pure binary framing — no protobuf dependency.  Protobuf
 serialisation is the application's concern; handlers receive and return the
 raw message bytes.</p>

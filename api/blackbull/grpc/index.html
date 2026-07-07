@@ -2441,10 +2441,54 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.grpc.GrpcContext.invocation_metadata" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        invocation_metadata
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.grpc.GrpcContext.metadata" class="md-nav__link">
     <span class="md-ellipsis">
       
         metadata
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.grpc.GrpcContext.peer" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        peer
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.grpc.GrpcContext.send_initial_metadata" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        send_initial_metadata
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.grpc.GrpcContext.time_remaining" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        time_remaining
       
     </span>
   </a>
@@ -2651,6 +2695,34 @@
     
   
     codec
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="compression/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    compression
   
 
     
@@ -4739,10 +4811,54 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.grpc.GrpcContext.invocation_metadata" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        invocation_metadata
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.grpc.GrpcContext.metadata" class="md-nav__link">
     <span class="md-ellipsis">
       
         metadata
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.grpc.GrpcContext.peer" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        peer
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.grpc.GrpcContext.send_initial_metadata" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        send_initial_metadata
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.grpc.GrpcContext.time_remaining" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        time_remaining
       
     </span>
   </a>
@@ -4937,16 +5053,17 @@
 so this package adds only the gRPC-specific pieces:</p>
 <ul>
 <li>:mod:<code>~blackbull.grpc.codec</code> — Length-Prefixed-Message framing.</li>
+<li>:mod:<code>~blackbull.grpc.compression</code> — gzip message compression (<code>grpc-encoding</code>).</li>
 <li>:class:<code>~blackbull.grpc.registry.GrpcServiceRegistry</code> — <code>/Service/Method</code> → handler.</li>
 <li>:class:<code>~blackbull.grpc.status.GrpcStatus</code> / :class:<code>GrpcError</code> — canonical codes.</li>
 <li>:func:<code>~blackbull.grpc.asgi.serve_grpc</code> + :class:<code>GrpcContext</code> — the ASGI bridge.</li>
 </ul>
 <p>Wire it into an app with <code>app.enable_grpc(registry)</code>; gRPC requests
 (<code>content-type: application/grpc</code>) are then multiplexed onto the same
-HTTP/2 port as the app's REST and WebSocket traffic.  Unary and
-server-streaming RPCs are served (a server-streaming handler is an async
-generator); client-streaming and bidirectional streaming are not yet
-supported.</p>
+HTTP/2 port as the app's REST and WebSocket traffic.  All four RPC kinds are
+served — unary, server-streaming, client-streaming, and bidirectional — where a
+response-streaming handler is an async generator and a request-streaming handler
+takes an async iterator of request messages (<code>request_iter</code>).</p>
 <p>Protobuf is <strong>not</strong> a dependency: handlers receive and return raw message
 bytes, so the application chooses its own serialisation (<code>grpc_tools.protoc</code>
 output, <code>protobuf</code>, or hand-rolled).</p>
@@ -4986,9 +5103,13 @@ output, <code>protobuf</code>, or hand-rolled).</p>
 
 
         <p>Per-call context handed to a gRPC handler.</p>
-<p>Exposes request metadata (the HTTP/2 headers) and lets the handler set
-the outgoing status, a human-readable message, and trailing metadata, or
-abort the call outright.</p>
+<p>Exposes request metadata (the HTTP/2 headers), the call deadline and peer,
+and lets the handler set the outgoing status, a human-readable message,
+leading/trailing metadata, or abort the call outright — the subset of
+grpcio's <code>ServicerContext</code> that a raw-bytes transport can honour.</p>
+<p>The response-start machinery (<code>_send</code> … <code>_started</code>) is bound by
+:func:<code>serve_grpc</code> just before the handler runs; handlers touch it only via
+:meth:<code>send_initial_metadata</code>.</p>
 
 
 
@@ -5032,6 +5153,27 @@ abort the call outright.</p>
 <div class="doc doc-object doc-function">
 
 
+<h4 id="blackbull.grpc.GrpcContext.invocation_metadata" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">invocation_metadata</span><span class="p">()</span></code>
+
+<a href="#blackbull.grpc.GrpcContext.invocation_metadata" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Return all request metadata (HTTP/2 headers) as <code>(name, value)</code>
+pairs — grpcio's <code>ServicerContext.invocation_metadata</code>.  Pseudo-
+headers (<code>:method</code>, <code>:path</code>, …) are excluded; they are call routing,
+not application metadata.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
 <h4 id="blackbull.grpc.GrpcContext.metadata" class="doc doc-heading">
             <code class="highlight language-python"><span class="n">metadata</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="sa">b</span><span class="s1">&#39;&#39;</span><span class="p">)</span></code>
 
@@ -5041,6 +5183,76 @@ abort the call outright.</p>
     <div class="doc doc-contents ">
 
         <p>Return a request header (call metadata) value, or <em>default</em>.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.grpc.GrpcContext.peer" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">peer</span><span class="p">()</span></code>
+
+<a href="#blackbull.grpc.GrpcContext.peer" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Return the client address as grpcio formats it (<code>ipv4:host:port</code> /
+<code>ipv6:[host]:port</code>), or <code>''</code> when the transport did not supply one.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.grpc.GrpcContext.send_initial_metadata" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">send_initial_metadata</span><span class="p">(</span><span class="n">metadata</span><span class="p">)</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-async"><code>async</code></small>
+  </span>
+
+<a href="#blackbull.grpc.GrpcContext.send_initial_metadata" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Send response leading metadata now (the initial HTTP/2 HEADERS),
+before the first response message — grpcio's
+<code>ServicerContext.send_initial_metadata</code>.</p>
+<p>Optional: if never called, the response HEADERS are still emitted lazily
+(just before the first message, or with the trailers for an empty
+response).  Calling it flushes them early with <em>metadata</em> attached — used
+to hand the client leading metadata (auth challenges, stream ids) up
+front.  Raises :class:<code>ValueError</code> once the HEADERS have already gone
+out (grpcio's "initial metadata no longer allowed").</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.grpc.GrpcContext.time_remaining" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">time_remaining</span><span class="p">()</span></code>
+
+<a href="#blackbull.grpc.GrpcContext.time_remaining" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Seconds left until the call deadline (never negative), or <code>None</code>
+when the client set no <code>grpc-timeout</code> — grpcio's
+<code>ServicerContext.time_remaining</code>.  Lets a handler shed work it cannot
+finish in time.</p>
 
 
     </div>
@@ -5179,7 +5391,7 @@ a non-OK status.  <code>serve_grpc</code> translates it into <code>grpc-status</
 
 
 <h4 id="blackbull.grpc.GrpcServiceRegistry.add_method" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">add_method</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="n">handler</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">streaming</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
+            <code class="highlight language-python"><span class="n">add_method</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="n">handler</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">streaming</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">client_streaming</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
 
 <a href="#blackbull.grpc.GrpcServiceRegistry.add_method" class="headerlink" title="Permanent link">&para;</a></h4>
 
@@ -5188,12 +5400,18 @@ a non-OK status.  <code>serve_grpc</code> translates it into <code>grpc-status</
 
         <p>Register <em>handler</em> for the fully-qualified method <em>path</em>
 (<code>/package.Service/Method</code> or <code>package.Service/Method</code>).</p>
-<p><em>streaming</em> selects server-streaming (the handler is an async generator
-that yields response messages).  When <code>None</code> (the default) it is
-auto-detected with :func:<code>inspect.isasyncgenfunction</code>; pass <code>True</code> to
-force streaming for a handler whose async-generator nature is hidden
-behind a wrapper, or <code>False</code> to force unary.  Forcing <code>False</code> on an
-async-generator function is a contradiction and raises <code>ValueError</code>.</p>
+<p><em>streaming</em> is the <strong>response</strong> axis — server-streaming (the handler is
+an async generator that yields response messages).  When <code>None</code> (the
+default) it is auto-detected with :func:<code>inspect.isasyncgenfunction</code>;
+pass <code>True</code> to force it for a handler whose async-generator nature is
+hidden behind a wrapper, or <code>False</code> to force a single response.
+Forcing <code>False</code> on an async-generator function is a contradiction and
+raises <code>ValueError</code>.</p>
+<p><em>client_streaming</em> is the <strong>request</strong> axis — the handler takes an async
+iterator of request messages (first parameter <code>request_iter</code> /
+<code>requests</code> / <code>request_iterator</code> / <code>request_stream</code>) instead of a
+single <code>request: bytes</code>.  When <code>None</code> it is auto-detected from that
+first parameter name; pass an explicit bool to override.</p>
 
 
     </div>
@@ -5263,7 +5481,7 @@ unregistered.</p>
 
 
 <h4 id="blackbull.grpc.GrpcServiceRegistry.method" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">method</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">streaming</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
+            <code class="highlight language-python"><span class="n">method</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">streaming</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">client_streaming</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
 
 <a href="#blackbull.grpc.GrpcServiceRegistry.method" class="headerlink" title="Permanent link">&para;</a></h4>
 
