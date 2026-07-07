@@ -24,7 +24,7 @@ from blackbull.router import (
     Router, BaseRouter, ErrorRouter,
     _middleware_param, has_middleware_param,
     _is_simplified_handler, _adapt_handler,
-    PathNotRegistered, MethodNotApplicable, ConfigurationError,
+    PathNotRegistered, MethodNotApplicable, ConfigurationError, HTTPException,
 )
 from blackbull import BlackBull, Response, JSONResponse
 from blackbull.router import RouteGroup
@@ -894,17 +894,21 @@ class TestDataclassBodyDeserialization:
 
     @pytest.mark.asyncio
     async def test_missing_required_field_raises(self):
+        """A body missing a required field is a client error → 400 (bug 1.12)."""
         async def fn(body: _Item): pass
         wrapper = _adapt_handler(fn, '/items')
-        with pytest.raises(TypeError):
+        with pytest.raises(HTTPException) as exc_info:
             await wrapper({}, self._receive_with(b'{"qty":3}'), AsyncMock())
+        assert exc_info.value.status == HTTPStatus.BAD_REQUEST
 
     @pytest.mark.asyncio
     async def test_unknown_field_raises(self):
+        """An unknown body field is a client error → 400 (bug 1.12)."""
         async def fn(body: _Item): pass
         wrapper = _adapt_handler(fn, '/items')
-        with pytest.raises(TypeError, match='Unknown field'):
+        with pytest.raises(HTTPException, match='Unknown field') as exc_info:
             await wrapper({}, self._receive_with(b'{"name":"x","extra":1}'), AsyncMock())
+        assert exc_info.value.status == HTTPStatus.BAD_REQUEST
 
     @pytest.mark.asyncio
     async def test_nested_dataclass(self):
@@ -960,10 +964,13 @@ class TestDataclassBodyDeserialization:
 
     @pytest.mark.asyncio
     async def test_invalid_json_raises(self):
+        """Malformed JSON in the body is a client error → 400 (bug 1.12),
+        not the raw JSONDecodeError that used to surface as a 500."""
         async def fn(body: _Item): pass
         wrapper = _adapt_handler(fn, '/items')
-        with pytest.raises(json.JSONDecodeError):
+        with pytest.raises(HTTPException) as exc_info:
             await wrapper({}, self._receive_with(b'not json'), AsyncMock())
+        assert exc_info.value.status == HTTPStatus.BAD_REQUEST
 
     @pytest.mark.asyncio
     async def test_bytes_body_still_works(self):

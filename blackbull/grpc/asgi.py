@@ -21,7 +21,7 @@ import logging
 import os
 import struct
 
-from ..request import read_body
+from ..request import read_body, ClientDisconnected
 from . import compression
 from .codec import decode_messages, encode_message, GrpcDecodeError, MAX_MESSAGE_LENGTH
 from .registry import GrpcServiceRegistry
@@ -345,7 +345,15 @@ async def _read_unary_request(receive, encoding: bytes) -> bytes:
     ``grpc-encoding`` header); the per-message size limit applies to the
     decompressed output.  Raises :class:`GrpcError` on a malformed /
     multi-message / unsupported-encoding / oversized request."""
-    body = await read_body(receive)
+    try:
+        body = await read_body(receive)
+    except ClientDisconnected as exc:
+        # RST_STREAM / client disconnect before the request finished — the
+        # canonical gRPC mapping is CANCELLED, not a fabricated INTERNAL over
+        # a truncated body (bug 1.11).
+        raise GrpcError(
+            GrpcStatus.CANCELLED,
+            'client disconnected before sending the request') from exc
     try:
         messages = decode_messages(body)
     except GrpcDecodeError as exc:

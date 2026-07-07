@@ -29,6 +29,96 @@ so the editable install's metadata catches up.
 
 ---
 
+## [0.49.1] — 2026-07-07
+
+Correctness patch — the HTTP/1.1 and HTTP/2 bug fixes from the 2026-07-07
+comprehensive audit (Sprints 61 + 62). No new features and no public-API
+removals; two small additions to the public API are noted below. Every fix
+ships with a regression test (`tests/unit/test_audit_sprint61.py`,
+`tests/conformance/http2/test_audit_sprint62.py`).
+
+### Fixed
+
+HTTP/1.1 + request handling:
+
+- **Chunked bodies split across TCP segments** are now reassembled whole — the
+  chunked path reads chunk-data with `readexactly`, not an up-to-`n` read
+  (RFC 9112 §7.1). *(audit 1.1)*
+- **A raising `app_startup` hook** now emits `lifespan.startup.failed` instead
+  of silently killing the lifespan task; `LifespanManager.__aenter__` races the
+  startup ack against the task so a failed startup can no longer hang the server
+  forever. *(audit 1.3)*
+- **Double-response splice**: `HTTP1Sender` drops response events once a
+  response has completed, so a handler that raises *after* completing can no
+  longer splice a second response onto the connection (mirrors the H2 sender's
+  post-`END_STREAM` drop). *(audit 1.4)*
+- **Non-WebSocket `Upgrade:` tokens** (e.g. curl's `Upgrade: h2c`) are ignored
+  rather than crashing dispatch and closing with no reply (RFC 9110 §7.8).
+  *(audit 1.5)*
+- **Keep-alive framing desync**: an unread request body is now drained (bounded)
+  or the connection is closed before the next pipelined request. *(audit 1.6)*
+- **Truncated uploads**: `read_body` raises the new `ClientDisconnected` on a
+  mid-body disconnect instead of returning a partial upload as if whole; the
+  gRPC bridge maps it to `CANCELLED`. *(audit 1.11)*
+- **Malformed JSON / dataclass request bodies** raise `HTTPException(400)`
+  instead of surfacing as a 500. *(audit 1.12)*
+- **A mid-path `{name:path}` wildcard** is rejected at registration time rather
+  than silently mis-routing. *(audit 1.13)*
+- **The WebSocket handshake** rejects an absent/malformed `Sec-WebSocket-Key`
+  with 400 (RFC 6455 §4.2.1). *(audit 1.15)*
+
+HTTP/2 flow control + lifecycle:
+
+- **Connection-level flow control** now uses one shared send window: every
+  stream sender references a single `ConnectionWindow`, so N concurrent streams
+  debit one stream-0 budget instead of each spending a full 65535-byte window.
+  A strict peer (nghttp2, grpc-go) no longer sees a connection
+  `FLOW_CONTROL_ERROR` + GOAWAY under concurrency (RFC 9113 §6.9.1). The
+  connection `WINDOW_UPDATE` handler credits the shared window once and wakes
+  all senders. *(audit 1.2; `stream_window_size` is now a plain int — refactor
+  2.5)*
+- **GOAWAY early-return** now signals recipients, so stream tasks blocked in
+  `receive()` get `http.disconnect` and the connection can drain instead of
+  wedging. *(audit 1.8)*
+- **Closed-stream tracking is bounded** (LRU cap + high-water mark), so a
+  long-lived connection cycling millions of streams no longer leaks memory.
+  *(audit 1.9)*
+- **A PRIORITY frame** naming an unknown dependency parents under the root
+  instead of crashing the frame loop. *(audit 1.10)*
+- **A single-frame HEADERS on an already-open stream** is treated as trailers
+  (clean end-of-stream), not respawned as a second request over the live
+  recipient/task. *(audit 1.14 #1)*
+- **Oversized-frame guard**: `receive()` rejects a frame whose declared payload
+  exceeds `SETTINGS_MAX_FRAME_SIZE` before buffering it — no 16 MiB allocation
+  on an attacker-declared length. *(audit 1.14 #3)*
+
+### Security
+
+- **`H2FaultServer`'s production guard** now checks the real signal
+  (`BLACKBULL_ENV=production`, with the `BB_PRODUCTION` override retained); the
+  previous `BB_PRODUCTION`-only check was a no-op in production. *(audit 1.22a)*
+- **`make_self_signed_h2_context`** registers a finalizer that removes its
+  tempdir, so the unencrypted private key no longer accumulates in `/tmp`.
+  *(audit 1.22b)*
+
+### Added (public API)
+
+- `ClientDisconnected` — raised by `read_body` on a mid-body client disconnect
+  (carries the `.partial` bytes read so far).
+- `HTTPException` — a status-carrying exception (`.status` / `.detail`) that the
+  dispatcher turns into the corresponding HTTP response.
+
+### Deferred (documented, not in this release)
+
+- **Refused multi-frame HEADERS / multi-frame trailers** (audit 1.14 #2) — needs
+  a CONTINUATION-accumulation restructure to keep HPACK decoder state coherent;
+  left for a focused follow-up rather than risking the H2 core.
+- **Consume-based inbound flow control**
+  (`proposals/consume-based-inbound-flow-control.md`) — credits the inbound
+  window on app consumption rather than enqueue, so a slow handler back-pressures
+  instead of triggering `RST_STREAM(ENHANCE_YOUR_CALM)`. Its strict-xfail gates
+  remain deferred; the large-over-window interop test stays a non-strict xfail.
+
 ## [0.49.0] — 2026-07-07
 
 Sprint 60 — completing the gRPC **transport** (the dependency-free gaps; no

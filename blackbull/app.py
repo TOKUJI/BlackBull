@@ -28,7 +28,8 @@ import logging
 from .event import Event, EventDispatcher, EventHandler
 from .headers import Headers
 from .utils import Scheme
-from .router import Router, RouteInfo, ErrorRouter, MethodNotApplicable, PathNotRegistered, ConfigurationError, has_middleware_param
+from .router import Router, RouteInfo, ErrorRouter, MethodNotApplicable, PathNotRegistered, ConfigurationError, HTTPException, has_middleware_param
+from .request import ClientDisconnected
 from .config import AppConfig
 logger = logging.getLogger(__name__)
 
@@ -495,7 +496,19 @@ class BlackBull:
                     self._logger.error('Route configuration error:\n%s', exc)
                     await send({'type': 'lifespan.startup.failed', 'message': str(exc)})
                     return
-                await self._dispatcher.emit(Event('app_startup'))
+                try:
+                    await self._dispatcher.emit(Event('app_startup'))
+                except Exception as exc:
+                    # A raising @app.on_startup / @app.intercept('app_startup')
+                    # hook must fail startup, not kill the lifespan task before
+                    # it acks — otherwise LifespanManager.__aenter__ blocks
+                    # forever and the server never starts (bug 1.3).  Sending
+                    # lifespan.startup.failed is also the ASGI-correct signal
+                    # under external servers (uvicorn/hypercorn).
+                    self._logger.error('app_startup hook failed:\n%s',
+                                       traceback.format_exc())
+                    await send({'type': 'lifespan.startup.failed', 'message': str(exc)})
+                    return
                 await send({'type': 'lifespan.startup.complete'})
             elif event['type'] == 'lifespan.shutdown':
                 self._logger.debug('lifespan shutdown')
@@ -589,6 +602,22 @@ class BlackBull:
                 'handler':   function.__name__,
             }))
             await function(scope, receive, send)
+        except ClientDisconnected as e:
+            # Peer vanished mid-body — there is no one to answer.  Record it
+            # for the after_handler event but log quietly and send nothing.
+            exc_caught = e
+            self._logger.debug('client disconnected before request body completed')
+        except HTTPException as e:
+            # A status-carrying error (e.g. a malformed request body → 400).
+            # 4xx are client faults: log quietly, no traceback.  5xx still
+            # get the full traceback below.
+            exc_caught = e
+            if e.status.is_server_error:
+                self._logger.error(traceback.format_exc())
+            else:
+                self._logger.info('%s on %s %s: %s', int(e.status),
+                                  scope.get('method', ''), scope.get('path', ''),
+                                  e.detail or e)
         except Exception as e:
             exc_caught = e
             self._logger.error(traceback.format_exc())
@@ -602,9 +631,11 @@ class BlackBull:
                 'exception': exc_caught,
             }))
 
-        if exc_caught is not None:
+        if exc_caught is not None and not isinstance(exc_caught, ClientDisconnected):
+            err_status = (exc_caught.status if isinstance(exc_caught, HTTPException)
+                          else HTTPStatus.INTERNAL_SERVER_ERROR)
             scope.setdefault('state', {}).update({
-                'error_status': HTTPStatus.INTERNAL_SERVER_ERROR,
+                'error_status': err_status,
                 'error_exception': exc_caught,
             })
             handler = self._error_router[exc_caught]

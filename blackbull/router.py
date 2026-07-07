@@ -97,13 +97,23 @@ class _RouteTrie:
         node = self.root
         param_specs: list[tuple] = []
 
-        for seg in segments:
+        for i, seg in enumerate(segments):
             if seg.startswith('{') and seg.endswith('}'):
                 inner = seg[1:-1]
                 name, _, spec = inner.partition(':')
                 spec = spec or 'str'
                 _, converter = _CONVERTERS.get(spec, (None, str))
                 if spec == 'path':
+                    # {name:path} consumes all remaining segments, so it must be
+                    # the final segment.  A route like ``/a/{p:path}/b`` used to
+                    # silently register as ``/a/{p:path}`` — dropping ``/b`` — so
+                    # reject it at registration (bug 1.13).
+                    if i != len(segments) - 1:
+                        raise ConfigurationError(
+                            f"path converter {seg!r} must be the last segment of "
+                            f"route {path!r}: a '{{name:path}}' wildcard consumes "
+                            f"all remaining segments, so nothing may follow it."
+                        )
                     # {name:path} consumes all remaining segments
                     param_specs.append((name, converter, True))
                     if node.wildcard_child is None:
@@ -185,6 +195,22 @@ class _RouteTrie:
 
 class ConfigurationError(Exception):
     """Raised by Router.validate() when route definitions are inconsistent."""
+
+
+class HTTPException(Exception):
+    """An exception carrying the HTTP status the dispatcher should report.
+
+    Raising this from a handler — or from the framework's own request-body
+    adapter — makes ``BlackBull._dispatch`` answer with ``status`` instead of
+    the generic 500, and (for 4xx) log it quietly as a client error rather
+    than dumping a server traceback.  ``detail`` is an optional
+    human-readable message surfaced in development-mode error pages.
+    """
+
+    def __init__(self, status: HTTPStatus, detail: str = ''):
+        super().__init__(detail or f'{int(status)} {status.phrase}')
+        self.status = status
+        self.detail = detail
 
 
 @dataclass
@@ -383,6 +409,32 @@ def _instantiate_dataclass(cls: Any, data: dict) -> Any:
     return cls(**kwargs)
 
 
+def _decode_json_body(cls: Any, raw: bytes, handler_name: str) -> Any:
+    """Parse *raw* JSON and instantiate the dataclass *cls*, mapping any
+    client-input error to a 400 (bug 1.12).
+
+    Malformed JSON, a wrong top-level shape, unknown/missing fields, or a
+    field that fails type coercion are all *client* errors — they must surface
+    as ``400 Bad Request``, not a generic ``500``.  ``_instantiate_dataclass``
+    signals these with ``JSONDecodeError`` / ``TypeError`` / ``ValueError``,
+    which this wrapper re-raises as :class:`HTTPException`.
+    """
+    try:
+        data = json.loads(raw)
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise HTTPException(
+            HTTPStatus.BAD_REQUEST,
+            f'malformed JSON body for handler {handler_name!r}: {exc}',
+        ) from exc
+    try:
+        return _instantiate_dataclass(cls, data)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(
+            HTTPStatus.BAD_REQUEST,
+            f'request body does not match {getattr(cls, "__name__", cls)!r}: {exc}',
+        ) from exc
+
+
 def _lookup_converter(converters: dict, result_type: type):
     """Find a registered converter for *result_type* (exact match, then MRO).
 
@@ -546,12 +598,12 @@ def _adapt_handler(fn, path: str, converters: dict | None = None):
             elif name == 'body':
                 raw = await _read_body(receive)
                 if _is_body_dataclass_annotation(ann):
-                    kwargs[name] = _instantiate_dataclass(ann, json.loads(raw))
+                    kwargs[name] = _decode_json_body(ann, raw, fn.__name__)
                 else:
                     kwargs[name] = raw
             elif _is_body_dataclass_annotation(ann) and name not in path_param_names:
                 raw = await _read_body(receive)
-                kwargs[name] = _instantiate_dataclass(ann, json.loads(raw))
+                kwargs[name] = _decode_json_body(ann, raw, fn.__name__)
             else:
                 raw = scope.get('path_params', {}).get(name, '')
                 if (ann is not inspect.Parameter.empty and isinstance(ann, type)

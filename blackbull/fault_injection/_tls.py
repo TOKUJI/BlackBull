@@ -15,8 +15,10 @@ from __future__ import annotations
 
 import datetime
 import ipaddress
+import shutil
 import ssl
 import tempfile
+import weakref
 from pathlib import Path
 
 
@@ -37,9 +39,12 @@ def make_self_signed_h2_context() -> ssl.SSLContext:
     extra (``pip install 'blackbull[fault-injection]'``).
     """
     cert_pem, key_pem = _generate_self_signed_pem()
-    # SSLContext.load_cert_chain demands file paths, not bytes.  We
-    # drop the PEMs into a tempdir; both files are removed when the
-    # context goes out of scope at process exit.
+    # SSLContext.load_cert_chain demands file paths, not bytes, so the PEMs
+    # (including the *unencrypted* private key) are written to a tempdir.  A
+    # weakref.finalize on the returned context removes that tempdir when the
+    # context is garbage-collected — or, failing that, at interpreter exit —
+    # so the key material doesn't accumulate in /tmp (bug 1.22b: the old code
+    # promised this cleanup but never registered it).
     tmp = Path(tempfile.mkdtemp(prefix='blackbull-fault-tls-'))
     cert_path = tmp / 'cert.pem'
     key_path = tmp / 'key.pem'
@@ -48,6 +53,7 @@ def make_self_signed_h2_context() -> ssl.SSLContext:
 
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     ctx.load_cert_chain(certfile=str(cert_path), keyfile=str(key_path))
+    weakref.finalize(ctx, shutil.rmtree, str(tmp), ignore_errors=True)
     # Real clients pick the strongest ALPN entry both sides advertise;
     # offering http/1.1 too keeps the example friendly to clients that
     # don't enable HTTP/2.

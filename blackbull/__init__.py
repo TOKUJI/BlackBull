@@ -42,10 +42,10 @@ except PackageNotFoundError:
     __version__ = '0.0.0+unknown'
 
 from .app import BlackBull, serve
-from .router import RouteInfo
+from .router import RouteInfo, HTTPException
 from .config import AppConfig
 from .headers import Headers
-from .request import read_body, read_json, read_text, parse_cookies
+from .request import read_body, read_json, read_text, parse_cookies, ClientDisconnected
 from .response import (
     Response, JSONResponse, RedirectResponse, StreamingResponse,
     EventSourceResponse, WebSocketResponse, cookie_header,

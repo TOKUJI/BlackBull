@@ -127,10 +127,10 @@ class TestHTTP2FlowControl:
         await handler.run()
 
         # _senders is pruned on stream completion (memory-leak fix); assert the
-        # actor-level source of truth used to seed new senders instead.
-        assert handler._connection_window_size >= 65535, (
-            f'Expected handler._connection_window_size >= 65535 after WINDOW_UPDATE, '
-            f'got {handler._connection_window_size}'
+        # shared connection window (bug 1.2) that seeds new senders instead.
+        assert handler._conn_window.size >= 65535, (
+            f'Expected handler._conn_window.size >= 65535 after WINDOW_UPDATE, '
+            f'got {handler._conn_window.size}'
         )
 
     @staticmethod
@@ -298,7 +298,7 @@ class TestHTTP2FlowControl:
         sender = HTTP2Sender(AsyncioWriter(mock_writer), factory, stream_id=1)
 
         sender.connection_window_size = 0
-        sender.stream_window_size[1] = 0
+        sender.stream_window_size = 0
 
         payload = b'x' * 100
 
@@ -336,7 +336,7 @@ class TestHTTP2FlowControl:
         mock_writer.drain = AsyncMock()
         sender = HTTP2Sender(AsyncioWriter(mock_writer), FrameFactory(), stream_id=1)
         sender.connection_window_size = 0
-        sender.stream_window_size[1] = 0
+        sender.stream_window_size = 0
 
         body = b'x' * 100
         task = asyncio.create_task(sender(body, HTTPStatus.OK, headers=[]))

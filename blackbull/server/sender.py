@@ -498,6 +498,7 @@ class HTTP1Sender(BaseSender):
     __slots__ = (
         '_buffered_status', '_buffered_headers', '_chunked',
         '_expect_trailers', '_head_mode', '_log_record', '_started',
+        '_completed',
     )
 
     def __init__(self, writer: AbstractWriter):
@@ -511,6 +512,13 @@ class HTTP1Sender(BaseSender):
         # consults this after BB_REQUEST_TIMEOUT expiry to decide
         # whether a synthetic 408 can still be emitted.
         self._started: bool = False
+        # Set True once a complete response has been written for this request
+        # (a full ``bytes`` response, a body event with ``more_body=False``,
+        # trailers, or a pathsend).  Further response events are then dropped
+        # (bug 1.4) so a handler that raises *after* completing its response
+        # can't write a second one onto the same keep-alive connection —
+        # mirrors the H2 sender's post-END_STREAM drop.
+        self._completed: bool = False
         # RFC 9110 §9.3.2 — when the request was HEAD, the response must
         # have the same headers (including Content-Length) as a GET would
         # but no body.  HTTP1Actor sets this before dispatch.
@@ -544,6 +552,16 @@ class HTTP1Sender(BaseSender):
         Unknown event types are logged and dropped; non-dict / non-bytes
         bodies raise ``TypeError``.
         """
+        if self._completed:
+            # bug 1.4 — a complete response has already gone out for this
+            # request; drop any further response events so a handler that
+            # raises after completing (→ the error handler emits a second
+            # response) can't splice two responses onto one connection.
+            # A disconnect signal still marks the writer closed.
+            if isinstance(body, dict) and body.get('type') == ASGIEvent.HTTP_DISCONNECT:
+                self._closed = True
+            return
+
         match body:
             case bytes():
                 h = headers if isinstance(headers, Headers) else Headers(headers)
@@ -551,6 +569,7 @@ class HTTP1Sender(BaseSender):
                     self._log_record.status = int(status)
                     self._log_record.response_bytes += len(body)
                 await self._flush(status, h, body)
+                self._completed = True
 
             case {'type': ASGIEvent.HTTP_RESPONSE_START}:
                 self._buffered_status = HTTPStatus(body.get('status', HTTPStatus.OK))
@@ -597,6 +616,8 @@ class HTTP1Sender(BaseSender):
                         # already wrote headers; HEAD response carries no body
                         if self._log_record is not None and not more_body:
                             self._log_record.mark('body_arm_out')
+                        if not more_body:
+                            self._completed = True
                         return
                     if self._chunked:
                         if content:
@@ -610,15 +631,19 @@ class HTTP1Sender(BaseSender):
                         await self._write(content)
                 if self._log_record is not None and not more_body:
                     self._log_record.mark('body_arm_out')
+                if not more_body:
+                    self._completed = True
 
             case {'type': ASGIEvent.HTTP_RESPONSE_TRAILERS}:
                 await self._write(b'0\r\n')
                 for name, value in body.get('headers', []):
                     await self._write(name + b': ' + value + b'\r\n')
                 await self._write(b'\r\n')
+                self._completed = True
 
             case {'type': ASGIEvent.HTTP_RESPONSE_PATHSEND}:
                 await self._pathsend(body['path'])
+                self._completed = True
 
             case {'type': ASGIEvent.HTTP_DISCONNECT}:
                 # http1_actor.py sends this on IncompleteReadError; the
@@ -644,6 +669,7 @@ class HTTP1Sender(BaseSender):
         self._chunked = False
         self._expect_trailers = False
         self._started = False
+        self._completed = False
         self._head_mode = False
         self._log_record = None
 
@@ -765,6 +791,30 @@ class HTTP1Sender(BaseSender):
                     await self._write(chunk)
 
 
+class ConnectionWindow:
+    """Shared HTTP/2 connection-level (stream 0) send flow-control window.
+
+    One instance per connection, referenced by every stream's
+    :class:`HTTP2Sender`, so all senders debit and await a single budget.
+
+    Without sharing (bug 1.2) each sender held a *private copy* of the
+    connection window and debited only that copy, while the actor-level total
+    was only ever incremented — so N concurrent streams could each spend a
+    full 65535-byte window and the server could emit N×65535 bytes with zero
+    real stream-0 credit.  A strict peer (nghttp2, grpc-go) treats that as a
+    connection ``FLOW_CONTROL_ERROR`` and GOAWAYs (RFC 9113 §6.9.1).
+
+    The object is a thin mutable holder: senders read/debit ``size`` directly
+    and the owning actor fans out wake-ups to blocked senders on a
+    connection-level ``WINDOW_UPDATE`` (it already tracks every live sender).
+    """
+
+    __slots__ = ('size',)
+
+    def __init__(self, size: int = DEFAULT_INITIAL_WINDOW_SIZE) -> None:
+        self.size = size
+
+
 class HTTP2Sender(BaseSender):
     """Translates content or ASGI HTTP send events into HTTP/2 frames.
 
@@ -785,14 +835,15 @@ class HTTP2Sender(BaseSender):
 
     __slots__ = (
         '_factory', '_stream_id', '_push_callback',
-        'connection_window_size', 'stream_window_size',
+        '_conn_window', 'stream_window_size',
         'max_frame_size', '_window_open', '_end_stream_sent',
         '_buffered_status', '_buffered_headers', '_expect_trailers',
         '_buffered_body', '_coalescer',
     )
 
     def __init__(self, writer: AbstractWriter, factory, stream_id: int,
-                 push_callback=None, coalescer: 'ConnCoalescer | None' = None):
+                 push_callback=None, coalescer: 'ConnCoalescer | None' = None,
+                 conn_window: 'ConnectionWindow | None' = None):
         super().__init__(writer)
         self._factory = factory
         self._stream_id = stream_id
@@ -801,8 +852,17 @@ class HTTP2Sender(BaseSender):
         # per-stream senders).  ``None`` → direct writes (today's behaviour).
         # Never set on the control sender (stream 0), so control frames bypass.
         self._coalescer = coalescer
-        self.connection_window_size = DEFAULT_INITIAL_WINDOW_SIZE
-        self.stream_window_size = {stream_id: DEFAULT_INITIAL_WINDOW_SIZE}
+        # Shared connection-level send window (bug 1.2).  The server passes one
+        # ``ConnectionWindow`` instance to every stream sender so they debit a
+        # single budget; when omitted (the experimental client, whose per-sender
+        # windowing is bug 1.20a and deferred) each sender gets a private one,
+        # preserving today's behaviour there.
+        self._conn_window = conn_window if conn_window is not None else ConnectionWindow()
+        # Per-stream send window.  Refactor 2.5 — a plain int (this was a
+        # dict-of-one keyed on the sender's own stream id, which obscured that
+        # it is scalar and invited readers to hunt for multi-stream semantics
+        # that never existed).
+        self.stream_window_size = DEFAULT_INITIAL_WINDOW_SIZE
         self.max_frame_size = DEFAULT_MAX_FRAME_SIZE
         self._window_open: asyncio.Event | None = None
         self._end_stream_sent: bool = False
@@ -815,6 +875,21 @@ class HTTP2Sender(BaseSender):
         # the trailers event (the unary-gRPC pattern).  Flushed early if a
         # second body chunk arrives (multi-frame body / streaming).
         self._buffered_body: bytes | None = None
+
+    @property
+    def connection_window_size(self) -> int:
+        """The shared connection-level send window (bug 1.2).
+
+        Proxies :attr:`ConnectionWindow.size` so existing call sites — the
+        experimental client's per-sender crediting and flow-control tests —
+        keep reading/writing ``sender.connection_window_size`` while the real
+        state lives on the shared object.
+        """
+        return self._conn_window.size
+
+    @connection_window_size.setter
+    def connection_window_size(self, value: int) -> None:
+        self._conn_window.size = value
 
     def reset_per_request_state(self) -> None:
         self._end_stream_sent = False
@@ -839,8 +914,8 @@ class HTTP2Sender(BaseSender):
         sid_bytes = self._stream_id.to_bytes(4, 'big')
         set_end_stream = end_stream and not expect_trailers
 
-        if (total <= self.connection_window_size and
-                total <= self.stream_window_size[self._stream_id] and
+        if (total <= self._conn_window.size and
+                total <= self.stream_window_size and
                 total <= self.max_frame_size):
             end_flag = DataFrameFlags.END_STREAM if set_end_stream else 0
             if total == 0:
@@ -849,8 +924,8 @@ class HTTP2Sender(BaseSender):
                 d_bytes = (total.to_bytes(3, 'big') + b'\x00'
                            + end_flag.to_bytes(1, 'big') + sid_bytes + body)
             await super()._write(h_bytes + d_bytes)
-            self.connection_window_size -= total
-            self.stream_window_size[self._stream_id] -= total
+            self._conn_window.size -= total
+            self.stream_window_size -= total
         else:
             await super()._write(h_bytes)
             await self._write_data(body, end_stream=set_end_stream)
@@ -910,8 +985,8 @@ class HTTP2Sender(BaseSender):
 
         offset = 0
         while offset < total:
-            while (self.connection_window_size <= 0 or
-                   self.stream_window_size[self._stream_id] <= 0):
+            while (self._conn_window.size <= 0 or
+                   self.stream_window_size <= 0):
                 if self._window_open is None:
                     self._window_open = asyncio.Event()
                 self._window_open.clear()
@@ -921,14 +996,14 @@ class HTTP2Sender(BaseSender):
                 # would then discard that wake-up.  Without this guard we
                 # would ``await`` an event no further WINDOW_UPDATE will set
                 # → permanent block (lost-wakeup race, RFC 9113 §6.9).
-                if (self.connection_window_size > 0 and
-                        self.stream_window_size[self._stream_id] > 0):
+                if (self._conn_window.size > 0 and
+                        self.stream_window_size > 0):
                     break
                 await self._window_open.wait()
 
             chunk_size = min(
-                self.connection_window_size,
-                self.stream_window_size[self._stream_id],
+                self._conn_window.size,
+                self.stream_window_size,
                 self.max_frame_size,
                 total - offset,
             )
@@ -939,12 +1014,12 @@ class HTTP2Sender(BaseSender):
             await super()._write(
                 chunk_size.to_bytes(3, 'big') + b'\x00' + flags.to_bytes(1, 'big') + sid_bytes + chunk
             )
-            self.connection_window_size -= chunk_size
-            self.stream_window_size[self._stream_id] -= chunk_size
+            self._conn_window.size -= chunk_size
+            self.stream_window_size -= chunk_size
             offset += chunk_size
 
     def window_update(self, increment: int) -> None:
-        self.stream_window_size[self._stream_id] += increment
+        self.stream_window_size += increment
         self.wake_window()
 
     def wake_window(self) -> None:
@@ -962,7 +1037,7 @@ class HTTP2Sender(BaseSender):
         by the change in SETTINGS_INITIAL_WINDOW_SIZE since the peer's last
         announcement.  The window may legitimately become negative.
         """
-        self.stream_window_size[self._stream_id] += delta
+        self.stream_window_size += delta
         if delta > 0:
             self.wake_window()
 
@@ -994,8 +1069,8 @@ class HTTP2Sender(BaseSender):
 
             total = len(body)
             sid_bytes = self._stream_id.to_bytes(4, 'big')
-            if (total <= self.connection_window_size and
-                    total <= self.stream_window_size[self._stream_id] and
+            if (total <= self._conn_window.size and
+                    total <= self.stream_window_size and
                     total <= self.max_frame_size):
                 # Fast path: body fits in one DATA frame — single write + drain
                 end_flag = DataFrameFlags.END_STREAM.to_bytes(1, 'big')
@@ -1004,8 +1079,8 @@ class HTTP2Sender(BaseSender):
                 else:
                     d_bytes = total.to_bytes(3, 'big') + b'\x00' + end_flag + sid_bytes + body
                 await super()._write(h_bytes + d_bytes)
-                self.connection_window_size -= total
-                self.stream_window_size[self._stream_id] -= total
+                self._conn_window.size -= total
+                self.stream_window_size -= total
             else:
                 await super()._write(h_bytes)
                 await self._write_data(body, end_stream=True)
@@ -1045,8 +1120,8 @@ class HTTP2Sender(BaseSender):
                     if (self._expect_trailers and not end_stream
                             and self._buffered_body is None
                             and 0 < len(payload) <= self.max_frame_size
-                            and len(payload) <= self.stream_window_size[self._stream_id]
-                            and len(payload) <= self.connection_window_size):
+                            and len(payload) <= self.stream_window_size
+                            and len(payload) <= self._conn_window.size):
                         self._buffered_body = payload
                     else:
                         # A second body chunk (or a multi-frame / terminal one):
@@ -1093,8 +1168,8 @@ class HTTP2Sender(BaseSender):
                                    + self._stream_id.to_bytes(4, 'big')
                                    + self._buffered_body)
                         await self._write(h_bytes + d_bytes + trailer_bytes)
-                        self.connection_window_size -= total
-                        self.stream_window_size[self._stream_id] -= total
+                        self._conn_window.size -= total
+                        self.stream_window_size -= total
                         self._buffered_body = None
                     else:
                         await self._write(h_bytes + trailer_bytes)
@@ -1209,9 +1284,11 @@ class SenderFactory:
 
     @staticmethod
     def http2(stream_writer, factory, stream_id: int,
-              push_callback=None, coalescer: 'ConnCoalescer | None' = None) -> HTTP2Sender:
+              push_callback=None, coalescer: 'ConnCoalescer | None' = None,
+              conn_window: 'ConnectionWindow | None' = None) -> HTTP2Sender:
         return HTTP2Sender(SenderFactory._ensure_writer(stream_writer),
-                           factory, stream_id, push_callback, coalescer)
+                           factory, stream_id, push_callback, coalescer,
+                           conn_window=conn_window)
 
     @staticmethod
     def websocket(stream_writer, *, compressor=None) -> WebSocketSender:
