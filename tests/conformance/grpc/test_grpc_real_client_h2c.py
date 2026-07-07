@@ -74,6 +74,42 @@ def _make_grpc_app() -> BlackBull:
         yield b'first'
         raise GrpcError(GrpcStatus.PERMISSION_DENIED, 'stop')
 
+    @reg.method('/echo.Echo/Collect')
+    async def collect(request_iter, context):
+        # Client-streaming: concatenate every request message into one reply.
+        return b','.join([m async for m in request_iter])
+
+    @reg.method('/echo.Echo/CountBytes')
+    async def count_bytes(request_iter, context):
+        # Client-streaming over a large request stream: sum message lengths so
+        # the request side crosses the 65535-byte initial window under a real
+        # client (request-direction flow control).
+        total = 0
+        async for m in request_iter:
+            total += len(m)
+        return str(total).encode()
+
+    @reg.method('/echo.Echo/Chat')
+    async def chat(request_iter, context):
+        # Bidirectional: echo each request message back as its own response.
+        # Same-size echo means a large request stream also produces a large
+        # response stream — concurrent bidirectional flow control on one stream.
+        async for m in request_iter:
+            yield m
+
+    @reg.method('/echo.Echo/Leading')
+    async def leading(request, context):
+        # Flush leading metadata before the reply so a real client reads it
+        # from the initial HEADERS (call.initial_metadata()).
+        await context.send_initial_metadata([(b'x-leading', b'hi')])
+        return b'body'
+
+    @reg.method('/echo.Echo/Peer')
+    async def peer(request, context):
+        # Echo the peer the server derived from the real socket back to the
+        # client (should be ipv4:127.0.0.1:<port>).
+        return context.peer().encode()
+
     @reg.method('/err.Err/Explode')
     async def explode(request, context):
         raise RuntimeError('kaboom')
@@ -136,6 +172,50 @@ async def _unary(port: int, method: str, payload: bytes = b''):
     return await asyncio.to_thread(_blocking_unary, port, method, payload)
 
 
+def _blocking_unary_gzip(port: int, method: str, payload: bytes):
+    """Like :func:`_blocking_unary` but asks grpcio to gzip the request.
+
+    ``compression=grpc.Compression.Gzip`` makes the client set the
+    Compressed-Flag + ``grpc-encoding: gzip`` on the request (server must
+    decompress), and it advertises ``grpc-accept-encoding: gzip`` so the server
+    may gzip the response back (client must decompress) — a full both-directions
+    wire-compat check against real grpcio."""
+    with grpc.insecure_channel(f'127.0.0.1:{port}') as channel:
+        grpc.channel_ready_future(channel).result(timeout=_CALL_TIMEOUT)
+        call = channel.unary_unary(
+            method,
+            request_serializer=lambda b: b,
+            response_deserializer=lambda b: b,
+        )
+        try:
+            return (True, call(payload, timeout=_CALL_TIMEOUT,
+                               compression=grpc.Compression.Gzip))
+        except grpc.RpcError as exc:  # noqa: BLE001 — surface the status
+            return (False, exc)
+
+
+async def _unary_gzip(port: int, method: str, payload: bytes = b''):
+    return await asyncio.to_thread(_blocking_unary_gzip, port, method, payload)
+
+
+def _blocking_unary_with_initial_md(port: int, method: str, payload: bytes):
+    """Issue a unary call and return ``(response, initial_metadata)`` — the
+    leading metadata grpcio read from the initial HEADERS."""
+    with grpc.insecure_channel(f'127.0.0.1:{port}') as channel:
+        grpc.channel_ready_future(channel).result(timeout=_CALL_TIMEOUT)
+        call = channel.unary_unary(
+            method,
+            request_serializer=lambda b: b,
+            response_deserializer=lambda b: b,
+        )
+        future = call.future(payload, timeout=_CALL_TIMEOUT)
+        return (future.result(), tuple(future.initial_metadata()))
+
+
+async def _unary_with_initial_md(port: int, method: str, payload: bytes = b''):
+    return await asyncio.to_thread(_blocking_unary_with_initial_md, port, method, payload)
+
+
 def _blocking_server_stream(port: int, method: str, payload: bytes):
     """Issue one blocking server-streaming call with a real grpcio channel.
 
@@ -162,6 +242,55 @@ async def _server_stream(port: int, method: str, payload: bytes = b''):
     return await asyncio.to_thread(_blocking_server_stream, port, method, payload)
 
 
+def _blocking_client_stream(port: int, method: str, payloads: list[bytes]):
+    """Issue one blocking client-streaming call with a real grpcio channel.
+
+    Streams every item of *payloads* as a request message and returns
+    ``(ok, value_or_error)`` — ``(True, response_bytes)`` on success,
+    ``(False, grpc.RpcError)`` on a non-OK status."""
+    with grpc.insecure_channel(f'127.0.0.1:{port}') as channel:
+        grpc.channel_ready_future(channel).result(timeout=_CALL_TIMEOUT)
+        call = channel.stream_unary(
+            method,
+            request_serializer=lambda b: b,
+            response_deserializer=lambda b: b,
+        )
+        try:
+            return (True, call(iter(payloads), timeout=_CALL_TIMEOUT))
+        except grpc.RpcError as exc:  # noqa: BLE001 — surface the status
+            return (False, exc)
+
+
+async def _client_stream(port: int, method: str, payloads: list[bytes]):
+    return await asyncio.to_thread(_blocking_client_stream, port, method, payloads)
+
+
+def _blocking_bidi(port: int, method: str, payloads: list[bytes]):
+    """Issue one blocking bidirectional-streaming call (grpcio stream_stream).
+
+    grpcio drives the request and response directions concurrently on one
+    stream, so this is the real concurrent-read/write flow-control path.
+    Returns ``(messages, error)`` like the server-streaming helper."""
+    messages: list[bytes] = []
+    with grpc.insecure_channel(f'127.0.0.1:{port}') as channel:
+        grpc.channel_ready_future(channel).result(timeout=_CALL_TIMEOUT)
+        call = channel.stream_stream(
+            method,
+            request_serializer=lambda b: b,
+            response_deserializer=lambda b: b,
+        )
+        try:
+            for msg in call(iter(payloads), timeout=_CALL_TIMEOUT):
+                messages.append(msg)
+            return (messages, None)
+        except grpc.RpcError as exc:  # noqa: BLE001 — surface the status
+            return (messages, exc)
+
+
+async def _bidi(port: int, method: str, payloads: list[bytes]):
+    return await asyncio.to_thread(_blocking_bidi, port, method, payloads)
+
+
 # ---------------------------------------------------------------------------
 # Success path
 # ---------------------------------------------------------------------------
@@ -179,6 +308,50 @@ class TestRealClientSuccess:
         ok, value = await _unary(grpc_server_port, '/echo.Echo/Big', b'x')
         assert ok, f'unexpected error: {value}'
         assert value == b'Z' * 100_000
+
+
+# ---------------------------------------------------------------------------
+# Compression (gzip) — real-client wire compatibility, both directions
+# ---------------------------------------------------------------------------
+
+class TestRealClientCompression:
+    @pytest.mark.asyncio
+    async def test_gzip_request_is_decompressed(self, grpc_server_port):
+        # grpcio gzips the request; the server must decompress it before the
+        # handler (which reverses the bytes) sees it.
+        payload = b'compress-me' * 500
+        ok, value = await _unary_gzip(grpc_server_port, '/echo.Echo/Echo', payload)
+        assert ok, f'unexpected error: {value}'
+        assert value == payload[::-1]
+
+    @pytest.mark.asyncio
+    async def test_gzip_large_response_round_trips(self, grpc_server_port):
+        # 100 KB of 'Z' is highly compressible: the server gzips the response
+        # (over threshold, client advertised gzip) and grpcio decompresses it.
+        ok, value = await _unary_gzip(grpc_server_port, '/echo.Echo/Big', b'x')
+        assert ok, f'unexpected error: {value}'
+        assert value == b'Z' * 100_000
+
+
+# ---------------------------------------------------------------------------
+# GrpcContext (G3) — leading metadata + peer over a real socket
+# ---------------------------------------------------------------------------
+
+class TestRealClientContext:
+    @pytest.mark.asyncio
+    async def test_send_initial_metadata_reaches_client(self, grpc_server_port):
+        response, initial_md = await _unary_with_initial_md(
+            grpc_server_port, '/echo.Echo/Leading', b'x')
+        assert response == b'body'
+        # grpcio surfaces leading metadata lowercased as (key, value) pairs.
+        assert ('x-leading', 'hi') in initial_md
+
+    @pytest.mark.asyncio
+    async def test_peer_is_derived_from_the_real_socket(self, grpc_server_port):
+        ok, value = await _unary(grpc_server_port, '/echo.Echo/Peer', b'x')
+        assert ok, f'unexpected error: {value}'
+        # ASGI gives the server the client's address; peer() formats it grpc-style.
+        assert value.startswith(b'ipv4:127.0.0.1:')
 
 
 # ---------------------------------------------------------------------------
@@ -250,6 +423,103 @@ class TestRealClientServerStreaming:
         assert err is not None
         assert err.code() == grpc.StatusCode.PERMISSION_DENIED, err
         assert err.details() == 'stop'
+
+
+# ---------------------------------------------------------------------------
+# Client-streaming — a real grpcio stream_unary call (Sprint 60 G1a).
+# ---------------------------------------------------------------------------
+
+class TestRealClientClientStreaming:
+    @pytest.mark.asyncio
+    async def test_collects_all_request_messages(self, grpc_server_port):
+        ok, value = await _client_stream(
+            grpc_server_port, '/echo.Echo/Collect', [b'a', b'bb', b'ccc'])
+        assert ok, f'unexpected error: {value}'
+        assert value == b'a,bb,ccc'
+
+    @pytest.mark.asyncio
+    async def test_empty_request_stream(self, grpc_server_port):
+        ok, value = await _client_stream(grpc_server_port, '/echo.Echo/Collect', [])
+        assert ok, f'unexpected error: {value}'
+        assert value == b''
+
+    @pytest.mark.asyncio
+    async def test_request_stream_within_window(self, grpc_server_port):
+        # 40 × 1 KiB (~40 KiB) — under both the 65535-byte initial window and the
+        # 64-deep recipient queue, so the request direction never back-pressures.
+        # Client-streaming's supported envelope, kept clear of the
+        # enqueue-time-crediting boundary (mirrors the bidi within-window gate).
+        payloads = [b'x' * 1024] * 40
+        ok, value = await _client_stream(
+            grpc_server_port, '/echo.Echo/CountBytes', payloads)
+        assert ok, f'unexpected error: {value}'
+        assert value == str(40 * 1024).encode()
+
+    @pytest.mark.xfail(strict=False, reason=(
+        'Large client-streaming crosses the 65535-byte window on the request '
+        'direction; the server credits inbound flow control on enqueue, not on '
+        'app consumption, so under CPU load the handler drains the 64-deep '
+        'recipient queue slower than frames arrive and the stream is '
+        'RST_STREAM(ENHANCE_YOUR_CALM). Same root cause as the bidi over-window '
+        'case — needs consume-based inbound flow control '
+        '(proposals/consume-based-inbound-flow-control.md). Passes in isolation, '
+        'intermittent under full-suite load, so strict=False.'))
+    @pytest.mark.asyncio
+    async def test_large_request_stream_over_window(self, grpc_server_port):
+        # 200 × 1 KiB (~200 KiB) crosses the initial window on the request
+        # direction. Known limitation until consume-based crediting lands.
+        payloads = [b'x' * 1024] * 200
+        ok, value = await _client_stream(
+            grpc_server_port, '/echo.Echo/CountBytes', payloads)
+        assert ok, f'unexpected error: {value}'
+        assert value == str(200 * 1024).encode()
+
+
+# ---------------------------------------------------------------------------
+# Bidirectional streaming — a real grpcio stream_stream call (Sprint 60 G1b).
+# ---------------------------------------------------------------------------
+
+class TestRealClientBidiStreaming:
+    @pytest.mark.asyncio
+    async def test_echo_each_message(self, grpc_server_port):
+        msgs, err = await _bidi(
+            grpc_server_port, '/echo.Echo/Chat', [b'a', b'bb', b'ccc'])
+        assert err is None, f'unexpected bidi error: {err}'
+        assert msgs == [b'a', b'bb', b'ccc']
+
+    @pytest.mark.asyncio
+    async def test_empty_stream(self, grpc_server_port):
+        msgs, err = await _bidi(grpc_server_port, '/echo.Echo/Chat', [])
+        assert err is None, f'unexpected bidi error: {err}'
+        assert msgs == []
+
+    @pytest.mark.asyncio
+    async def test_both_directions_within_window(self, grpc_server_port):
+        # 20 × 1 KiB (~20 KiB) each way — comfortably under both the 65535-byte
+        # initial window and the 64-deep recipient queue, so neither direction
+        # back-pressures.  Bidi's supported envelope: concurrent read/write on
+        # one stream, kept clear of the enqueue-time-crediting boundary.
+        payloads = [bytes([i % 256]) * 1024 for i in range(20)]
+        msgs, err = await _bidi(grpc_server_port, '/echo.Echo/Chat', payloads)
+        assert err is None, f'unexpected bidi error: {err}'
+        assert msgs == payloads
+
+    @pytest.mark.xfail(strict=False, reason=(
+        'Large concurrent bidi crosses the 65535-byte window BOTH ways; the '
+        'server credits inbound flow control on enqueue, not on app consumption, '
+        'so a handler that stalls reading (blocked on yield / response '
+        'back-pressure) overflows the 64-deep recipient queue and the stream is '
+        'RST_STREAM(ENHANCE_YOUR_CALM). Needs consume-based inbound flow control '
+        '(proposals/consume-based-inbound-flow-control.md). Intermittent, so '
+        'strict=False.'))
+    @pytest.mark.asyncio
+    async def test_large_both_directions_over_window(self, grpc_server_port):
+        # 200 × 1 KiB echoed back — BOTH directions cross the initial window
+        # concurrently.  Known limitation until consume-based crediting lands.
+        payloads = [bytes([i % 256]) * 1024 for i in range(200)]
+        msgs, err = await _bidi(grpc_server_port, '/echo.Echo/Chat', payloads)
+        assert err is None, f'unexpected bidi error: {err}'
+        assert msgs == payloads
 
 
 # ---------------------------------------------------------------------------

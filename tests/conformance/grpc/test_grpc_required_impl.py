@@ -272,7 +272,8 @@ class TestRequiredCompressionNegotiation:
         await serve_grpc(reg, _grpc_scope('/svc/Ok'),
                          _receive_with(encode_message(b'')), send)
         start = next(e for e in events if e['type'] == 'http.response.start')
-        assert dict(start['headers'])[b'grpc-accept-encoding'] == b'identity'
+        # Since Sprint 60 G2 the server decodes gzip as well as identity.
+        assert dict(start['headers'])[b'grpc-accept-encoding'] == b'identity,gzip'
 
     @pytest.mark.asyncio
     async def test_grpc_accept_encoding_advertised_on_error_path(self):
@@ -280,12 +281,27 @@ class TestRequiredCompressionNegotiation:
         events, send = _collector()
         await serve_grpc(reg, _grpc_scope('/svc/Missing'),
                          _receive_with(encode_message(b'')), send)
-        assert _all_headers(events)[b'grpc-accept-encoding'] == b'identity'
+        assert _all_headers(events)[b'grpc-accept-encoding'] == b'identity,gzip'
 
-    def test_compressed_message_returns_unimplemented_with_clear_message(self):
-        # Placeholder for future compression work — rejection is tested
-        # in test_grpc_security.py / test_grpc.py.
-        pass
+    @pytest.mark.asyncio
+    async def test_compressed_message_with_unsupported_encoding_is_unimplemented(self):
+        # A message with the Compressed-Flag set but an encoding the server
+        # cannot decode is rejected UNIMPLEMENTED; gzip itself is now handled
+        # (see test_grpc_compression.py for the accepted path).
+        import struct
+        reg = GrpcServiceRegistry()
+
+        @reg.method('/svc/Echo')
+        async def echo(request, context):
+            return request
+
+        scope = _grpc_scope('/svc/Echo',
+                            extra_headers=[(b'grpc-encoding', b'snappy')])
+        events, send = _collector()
+        await serve_grpc(reg, scope,
+                         _receive_with(struct.pack('>BI', 1, 3) + b'xyz'), send)
+        assert _all_headers(events)[b'grpc-status'] == \
+            str(int(GrpcStatus.UNIMPLEMENTED)).encode()
 
 
 # ---------------------------------------------------------------------------

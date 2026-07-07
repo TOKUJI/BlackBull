@@ -9,8 +9,9 @@ carries each message inside an HTTP/2 DATA stream as:
 
 ``Compressed-Flag`` is 0 for an uncompressed message and 1 when the message
 body is compressed with the algorithm named in the ``grpc-encoding`` header.
-BlackBull's first cut does not implement message compression, so the encoder
-always emits 0 and the decoder reports the flag for the caller to reject.
+This module is pure framing: it carries the flag but does not (de)compress —
+:mod:`~blackbull.grpc.compression` holds the gzip codec and the ASGI bridge
+sets/reads the flag around it.
 
 This module is pure binary framing — no protobuf dependency.  Protobuf
 serialisation is the application's concern; handlers receive and return the

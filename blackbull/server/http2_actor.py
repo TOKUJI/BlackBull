@@ -1051,17 +1051,27 @@ class HTTP2Actor(Actor):
         if stream.stream_id in self._recipients:
             recipient = self._recipients[stream.stream_id]
             delivered = recipient.put_DATAFrame(frame)
-            if delivered:
+            if delivered and frame.length:
                 # RFC 9113 §6.9.1 — DATA frames are subject to BOTH
                 # stream and connection-level flow control.  Crediting
                 # only the stream window leaves the connection-level
                 # window depleting toward zero across requests, which
                 # stalls any subsequent body once it hits 65,535 bytes
                 # cumulative.  Credit both.
+                #
+                # Guard on ``frame.length``: a zero-length DATA frame (e.g. the
+                # empty END_STREAM frame grpcio sends to close a client-streaming
+                # request) consumes no flow-control window, and a WINDOW_UPDATE
+                # with a 0 increment is a protocol error (§6.9.1) — a strict
+                # client (grpcio) drops the connection on it.  Client-streaming
+                # made this reachable; unary rarely sends a zero-length DATA.
                 await self.send_frame(
                     self.factory.window_update(stream.stream_id, frame.length))
                 await self.send_frame(
                     self.factory.window_update(0, frame.length))
+            elif delivered:
+                # Zero-length DATA delivered (carries END_STREAM); no credit owed.
+                pass
             elif getattr(recipient, 'backpressures_via_credit', False):
                 # Recipient buffered the bytes but signalled backpressure
                 # by withholding credit (HTTP2WSReader past its buffer

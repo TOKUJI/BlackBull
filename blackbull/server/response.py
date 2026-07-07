@@ -294,6 +294,16 @@ class RstStreamResponder(Responder):
             return
 
         logger.warning('stream_id=%d %s', stream_id, self.frame.error_code)
+        # Cancel the running handler for this stream.  Without this a
+        # server-streaming handler abandoned by the client blocks forever in the
+        # sender's flow-control wait (no further WINDOW_UPDATE will ever arrive),
+        # permanently holding a max_concurrent_streams slot — a high-churn
+        # streaming client leaks slots until new streams are REFUSED_STREAM'd.
+        # Cancellation cleanly interrupts the flow-control wait; the handler's
+        # finally/aclose still runs, and the done-callback frees the slot.
+        task = handler._stream_tasks.get(stream_id)
+        if task is not None and not task.done():
+            task.cancel()
         # Prune the stream node and record it as closed-via-RST.  Later frames
         # from the peer on this identifier are detected by the frame-loop's
         # _closed_streams check and trigger STREAM_CLOSED.
