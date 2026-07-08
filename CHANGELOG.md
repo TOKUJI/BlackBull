@@ -31,6 +31,8 @@ so the editable install's metadata catches up.
 
 ## [Unreleased]
 
+## [0.49.2] — 2026-07-08
+
 Sprint 63 — Http11Probe hardening (RFC 9112 §3.2 / §7.1) + audit bug 1.16.
 HTTP/1.1 request framing and request-target parsing are tightened to reject
 the smuggling / malformed-input vectors the Http11Probe baseline flagged;
