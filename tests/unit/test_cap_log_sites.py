@@ -684,6 +684,7 @@ _INVENTORY = (
     'write_timeout',
     'ws_max_frame_payload',
     'stream_queue_depth',
+    'h2_inbound_window_budget',
     'h2_max_concurrent_streams',
     'h2_ws_max_streams_per_connection',
     'compression_max_inflight',

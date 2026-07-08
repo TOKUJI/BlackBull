@@ -23,7 +23,8 @@ from ..headers import Headers
 from .parser import parse_headers
 from .cap_log import log_cap_hit
 from .recipient import (AbstractReader, IncompleteReadError,
-                        RecipientFactory, _HTTP2_STREAM_QUEUE_DEPTH)
+                        HTTP2Recipient, RecipientFactory,
+                        _HTTP2_STREAM_QUEUE_DEPTH)
 from .response import ResponderFactory
 from .sender import AbstractWriter, ConnCoalescer, ConnectionWindow, SenderFactory
 from .access_log import AccessLogRecord, _make_capturing_send, _make_disconnect_detecting_receive, emit_access_log as _emit_access_log
@@ -327,6 +328,17 @@ class HTTP2Actor(Actor):
         # created by ``make_sender`` references this one object, so N concurrent
         # streams debit a single stream-0 budget instead of N private copies.
         self._conn_window = ConnectionWindow(DEFAULT_INITIAL_WINDOW_SIZE)
+        # The per-stream inbound window we advertise in SETTINGS (run() sends
+        # SETTINGS_INITIAL_WINDOW_SIZE from the same settings object).  Doubles
+        # as each stream recipient's byte budget under consume-based inbound
+        # crediting: a conformant peer can never have more un-credited bytes
+        # in flight than this.
+        self._inbound_stream_window: int = _cfg.h2_initial_window_size
+        # Fire-and-forget WINDOW_UPDATE(0) replay tasks created when a stream
+        # is released with an un-consumed credit balance (see
+        # _release_recipient_credit).  Held so the loop's weak refs can't drop
+        # a pending replay.
+        self._credit_flush_tasks: set[asyncio.Task] = set()
 
         # Concurrent-stream counter — incremented when a stream task is spawned,
         # decremented via Task.add_done_callback when the task finishes.
@@ -426,6 +438,72 @@ class HTTP2Actor(Actor):
             sender.stream_window_size = self._peer_initial_window_size
             self._senders[stream_id] = sender
         return self._senders[stream_id]
+
+    def _make_stream_recipient(self, stream_id: int) -> HTTP2Recipient:
+        """Recipient with consume-time WINDOW_UPDATE crediting.
+
+        Consume-based inbound flow control (the Sprint 62 deferral,
+        ``proposals/consume-based-inbound-flow-control.md``): credit is
+        replayed when the app pops the event off the queue, not when the
+        DATA frame is enqueued, so a stalled handler closes the window and
+        back-pressures the peer instead of overflowing the recipient queue
+        into RST_STREAM(ENHANCE_YOUR_CALM).
+        """
+        async def _credit(n: int, sid: int = stream_id) -> None:
+            # Mirrors the per-frame enqueue-credit shape (and the WS reader's
+            # _replay_credit): stream + connection WINDOW_UPDATE, in that
+            # order.  Skip the stream-level frame once the stream is released
+            # (§5.1 forbids non-PRIORITY frames on a closed stream); the
+            # connection-level credit must still flow or stream-0 leaks shut.
+            if sid in self._recipients:
+                await self.send_frame(self.factory.window_update(sid, n))
+            await self.send_frame(self.factory.window_update(0, n))
+
+        return RecipientFactory.http2(
+            queue_depth=self._stream_queue_depth,
+            credit_callback=_credit,
+            credit_budget=self._inbound_stream_window,
+        )
+
+    def _release_recipient_credit(self, recipient) -> None:
+        """Replay a released stream's un-consumed inbound credit to stream 0.
+
+        Under consume-based crediting a handler that finished (or was RST)
+        without draining its request body never credited those DATA bytes
+        back.  The peer debited them from the shared CONNECTION window, which
+        would leak shut for every later stream on this connection — so the
+        balance is replayed as WINDOW_UPDATE(0) here.  Stream-level credit is
+        not replayed: the stream is closed (RFC 9113 §5.1).
+        """
+        take = getattr(recipient, 'take_uncredited', None)
+        balance = take() if take is not None else 0
+        if balance <= 0 or self._goaway_sent:
+            return
+
+        async def _replay() -> None:
+            try:
+                await self.send_frame(self.factory.window_update(0, balance))
+            except Exception:
+                logger.debug('post-stream connection credit replay failed',
+                             exc_info=True)
+
+        # Callers may be sync done-callbacks — schedule the replay.  Prefer
+        # the connection TaskGroup so run() awaits it; fall back to a bare
+        # loop task when the group is already closing (teardown).
+        coro = _replay()
+        try:
+            if self._task_group is not None:
+                task = self._task_group.create_task(coro)
+            else:
+                task = asyncio.get_running_loop().create_task(coro)
+        except RuntimeError:
+            try:
+                task = asyncio.get_running_loop().create_task(coro)
+            except RuntimeError:
+                coro.close()
+                return  # no running loop — nothing left to credit against
+        self._credit_flush_tasks.add(task)
+        task.add_done_callback(self._credit_flush_tasks.discard)
 
     def _fill_scope_connection(self, scope: dict) -> None:
         """Inject peername/sockname into a freshly-parsed HTTP/2 scope."""
@@ -533,7 +611,12 @@ class HTTP2Actor(Actor):
                 self._ws_stream_count = max(0, self._ws_stream_count - 1)
             self._stream_tasks.pop(stream_id, None)
             self._senders.pop(stream_id, None)
-            self._recipients.pop(stream_id, None)
+            released = self._recipients.pop(stream_id, None)
+            if released is not None:
+                # Consume-based crediting: a handler that never drained its
+                # body leaves un-credited DATA bytes debited from the shared
+                # connection window — replay the balance to stream 0.
+                self._release_recipient_credit(released)
             # Prune the stream node from the tree and remember it as closed-
             # via-END_STREAM (closed_via_rst=False) so late frames hit the
             # CLOSED branch of §5.1 validation without keeping a Stream
@@ -1012,7 +1095,7 @@ class HTTP2Actor(Actor):
             return True
 
         self._apply_priority_and_extensions(stream, scope)
-        stream_recipient = RecipientFactory.http2(queue_depth=self._stream_queue_depth)
+        stream_recipient = self._make_stream_recipient(stream.stream_id)
         self._recipients[stream.stream_id] = stream_recipient
         stream.on_headers_received(end_stream=bool(frame.end_stream))
         if frame.end_stream:
@@ -1102,7 +1185,7 @@ class HTTP2Actor(Actor):
 
         self._apply_priority_and_extensions(stream, scope)
         stream.scope = scope
-        stream_recipient = RecipientFactory.http2(queue_depth=self._stream_queue_depth)
+        stream_recipient = self._make_stream_recipient(stream.stream_id)
         self._recipients[stream.stream_id] = stream_recipient
         log_record = _make_log_record(scope)
         capturing_send = _make_capturing_send(send, log_record)
@@ -1139,7 +1222,16 @@ class HTTP2Actor(Actor):
         if stream.stream_id in self._recipients:
             recipient = self._recipients[stream.stream_id]
             delivered = recipient.put_DATAFrame(frame)
-            if delivered and frame.length:
+            if (delivered and frame.length
+                    and not getattr(recipient, 'credits_on_consume', False)):
+                # Enqueue-time credit — only for recipients WITHOUT a
+                # consume-time credit callback (HTTP2WSReader under its
+                # buffer cap, push streams, direct test constructions).
+                # Regular request streams credit at consume-time instead:
+                # the recipient replays WINDOW_UPDATE when the app pops the
+                # event (consume-based inbound flow control), so a stalled
+                # handler closes the window and back-pressures the peer.
+                #
                 # RFC 9113 §6.9.1 — DATA frames are subject to BOTH
                 # stream and connection-level flow control.  Crediting
                 # only the stream window leaves the connection-level
@@ -1158,7 +1250,10 @@ class HTTP2Actor(Actor):
                 await self.send_frame(
                     self.factory.window_update(0, frame.length))
             elif delivered:
-                # Zero-length DATA delivered (carries END_STREAM); no credit owed.
+                # Either a zero-length DATA (END_STREAM carrier — no credit
+                # owed) or a consume-crediting recipient (credit replayed by
+                # its callback when the app pops the event; nothing owed at
+                # enqueue).
                 pass
             elif getattr(recipient, 'backpressures_via_credit', False):
                 # Recipient buffered the bytes but signalled backpressure
@@ -1169,6 +1264,11 @@ class HTTP2Actor(Actor):
                 # RST_STREAM — the bytes are safe in the buffer.
                 pass
             else:
+                # True abuse backstop under consume-based crediting: the peer
+                # either overran the advertised inbound window it was never
+                # credited for, or dribbled a degenerate tiny-frame flood.  A
+                # conformant peer is back-pressured by the closing window and
+                # never reaches this.
                 await self.send_frame(
                     self.factory.rst_stream(stream.stream_id, ErrorCodes.ENHANCE_YOUR_CALM))
         else:

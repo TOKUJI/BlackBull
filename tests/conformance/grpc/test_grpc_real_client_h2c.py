@@ -291,6 +291,32 @@ async def _bidi(port: int, method: str, payloads: list[bytes]):
     return await asyncio.to_thread(_blocking_bidi, port, method, payloads)
 
 
+def _blocking_concurrent_unary(port: int, method: str, payloads: list[bytes],
+                               timeout: float = _CALL_TIMEOUT):
+    """Issue every payload as a concurrent unary call on ONE channel.
+
+    All futures are launched before any result is collected, so the calls
+    genuinely multiplex as concurrent streams over a single h2c connection —
+    unlike :func:`_unary`, which opens a fresh channel (connection) per call.
+    Returns the responses in payload order; raises ``grpc.RpcError`` if any
+    call failed."""
+    with grpc.insecure_channel(f'127.0.0.1:{port}') as channel:
+        grpc.channel_ready_future(channel).result(timeout=_CALL_TIMEOUT)
+        call = channel.unary_unary(
+            method,
+            request_serializer=lambda b: b,
+            response_deserializer=lambda b: b,
+        )
+        futures = [call.future(p, timeout=timeout) for p in payloads]
+        return [f.result(timeout=timeout) for f in futures]
+
+
+async def _concurrent_unary(port: int, method: str, payloads: list[bytes],
+                            timeout: float = _CALL_TIMEOUT):
+    return await asyncio.to_thread(
+        _blocking_concurrent_unary, port, method, payloads, timeout)
+
+
 # ---------------------------------------------------------------------------
 # Success path
 # ---------------------------------------------------------------------------
@@ -455,19 +481,15 @@ class TestRealClientClientStreaming:
         assert ok, f'unexpected error: {value}'
         assert value == str(40 * 1024).encode()
 
-    @pytest.mark.xfail(strict=False, reason=(
-        'Large client-streaming crosses the 65535-byte window on the request '
-        'direction; the server credits inbound flow control on enqueue, not on '
-        'app consumption, so under CPU load the handler drains the 64-deep '
-        'recipient queue slower than frames arrive and the stream is '
-        'RST_STREAM(ENHANCE_YOUR_CALM). Same root cause as the bidi over-window '
-        'case — needs consume-based inbound flow control '
-        '(proposals/consume-based-inbound-flow-control.md). Passes in isolation, '
-        'intermittent under full-suite load, so strict=False.'))
     @pytest.mark.asyncio
     async def test_large_request_stream_over_window(self, grpc_server_port):
-        # 200 × 1 KiB (~200 KiB) crosses the initial window on the request
-        # direction. Known limitation until consume-based crediting lands.
+        # 200 × 1 KiB (~200 KiB) crosses the initial 65535-byte window on the
+        # request direction.  Gate for consume-based inbound flow control
+        # (the Sprint 62 deferral): the server credits WINDOW_UPDATE as the
+        # handler consumes, so a slow drain closes the window and
+        # back-pressures grpcio instead of overflowing the recipient queue
+        # into RST_STREAM(ENHANCE_YOUR_CALM) — the pre-fix failure mode under
+        # CPU load.
         payloads = [b'x' * 1024] * 200
         ok, value = await _client_stream(
             grpc_server_port, '/echo.Echo/CountBytes', payloads)
@@ -504,18 +526,15 @@ class TestRealClientBidiStreaming:
         assert err is None, f'unexpected bidi error: {err}'
         assert msgs == payloads
 
-    @pytest.mark.xfail(strict=False, reason=(
-        'Large concurrent bidi crosses the 65535-byte window BOTH ways; the '
-        'server credits inbound flow control on enqueue, not on app consumption, '
-        'so a handler that stalls reading (blocked on yield / response '
-        'back-pressure) overflows the 64-deep recipient queue and the stream is '
-        'RST_STREAM(ENHANCE_YOUR_CALM). Needs consume-based inbound flow control '
-        '(proposals/consume-based-inbound-flow-control.md). Intermittent, so '
-        'strict=False.'))
     @pytest.mark.asyncio
     async def test_large_both_directions_over_window(self, grpc_server_port):
-        # 200 × 1 KiB echoed back — BOTH directions cross the initial window
-        # concurrently.  Known limitation until consume-based crediting lands.
+        # 200 × 1 KiB echoed back — BOTH directions cross the initial
+        # 65535-byte window concurrently.  Gate for consume-based inbound
+        # flow control (the Sprint 62 deferral): when the handler stalls
+        # reading (blocked on yield under response back-pressure) it stops
+        # crediting, the request-direction window closes, and grpcio
+        # back-pressures — pre-fix this overflowed the 64-deep recipient
+        # queue into RST_STREAM(ENHANCE_YOUR_CALM).
         payloads = [bytes([i % 256]) * 1024 for i in range(200)]
         msgs, err = await _bidi(grpc_server_port, '/echo.Echo/Chat', payloads)
         assert err is None, f'unexpected bidi error: {err}'
@@ -536,3 +555,21 @@ class TestRealClientConcurrency:
             assert value == payload[::-1]
 
         await asyncio.gather(*(one(i) for i in range(50)))
+
+    @pytest.mark.asyncio
+    async def test_concurrent_large_responses_share_connection_window(
+            self, grpc_server_port):
+        """Bug 1.2's wire-level gate (the missing Sprint 62 concurrency test):
+        N concurrent streams × 100 KB responses multiplexed on ONE connection.
+
+        Cumulative response bytes (10 × 100 KB) dwarf the 65535-byte
+        connection window, so every stream sender must debit the ONE shared
+        stream-0 budget and wait for connection-level credit.  With the
+        pre-fix per-sender window copies the server over-emits up to
+        N × 65535 un-credited bytes, and a strict peer (grpcio) kills the
+        whole connection with FLOW_CONTROL_ERROR (RFC 9113 §6.9.1) — every
+        call here would fail, not just one."""
+        responses = await _concurrent_unary(
+            grpc_server_port, '/echo.Echo/Big', [b'x'] * 10, timeout=15.0)
+        assert len(responses) == 10
+        assert all(r == b'Z' * 100_000 for r in responses)

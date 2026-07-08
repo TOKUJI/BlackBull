@@ -9,17 +9,26 @@ Pins the bugs from the 2026-07-07 comprehensive audit:
 - 1.14 (#1) HEADERS on an OPEN stream respawns a second request (trailers)
 - 1.14 (#3) 16 MiB allocation before frame-size validation
 - 2.5  stream_window_size dict-of-one → int
+
+Plus the Sprint 62 deferral landed later: consume-based inbound flow control
+(proposals/consume-based-inbound-flow-control.md) — WINDOW_UPDATE credit for a
+DATA frame is replayed when the app pops the event off the recipient queue,
+not when the frame is enqueued, so a stalled handler closes the window and
+back-pressures the peer instead of overflowing a 64-deep frame-count queue
+into RST_STREAM(ENHANCE_YOUR_CALM).
 """
+import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from blackbull.protocol.frame import FrameFactory
 from blackbull.protocol.frame_types import (
-    ErrorCodes, FrameTypes, HeaderFrameFlags, DEFAULT_INITIAL_WINDOW_SIZE,
-    DEFAULT_MAX_FRAME_SIZE,
+    Data, DataFrameFlags, ErrorCodes, FrameTypes, HeaderFrameFlags,
+    DEFAULT_INITIAL_WINDOW_SIZE, DEFAULT_MAX_FRAME_SIZE,
 )
 from blackbull.server.http2_actor import HTTP2Actor, _CLOSED_STREAMS_CAP
+from blackbull.server.recipient import HTTP2Recipient
 from blackbull.server.sender import (
     AsyncioWriter, ConnectionWindow, HTTP2Sender,
 )
@@ -278,3 +287,238 @@ async def test_trailers_do_not_respawn_request():
     # No PROTOCOL_ERROR was raised for the (valid, END_STREAM-carrying) trailers.
     assert not [c.args[0] for c in handler.send_frame.call_args_list
                 if getattr(c.args[0], 'error_code', None) == ErrorCodes.PROTOCOL_ERROR]
+
+
+# ---------------------------------------------------------------------------
+# Consume-based inbound flow control (the Sprint 62 deferral) — credit is
+# replayed when the app pops the event, not when the DATA frame is enqueued.
+# ---------------------------------------------------------------------------
+
+def _data(payload: bytes, stream_id: int = 1, end_stream: bool = False) -> Data:
+    flags = int(DataFrameFlags.END_STREAM) if end_stream else 0
+    return Data(len(payload), FrameTypes.DATA, flags, stream_id, data=payload)
+
+
+def _window_updates(handler):
+    """(stream_id, increment) for every WINDOW_UPDATE the actor sent."""
+    return [(f.stream_id, f.window_size)
+            for f in (c.args[0] for c in handler.send_frame.call_args_list)
+            if f.FrameType() == FrameTypes.WINDOW_UPDATE]
+
+
+@pytest.mark.asyncio
+async def test_recipient_credits_on_consume_not_on_enqueue():
+    """No WINDOW_UPDATE credit is owed at enqueue; each pop replays exactly
+    the popped frame's flow-control length through the credit callback."""
+    credits = []
+
+    async def cb(n):
+        credits.append(n)
+
+    r = HTTP2Recipient(credit_callback=cb)
+    assert r.put_DATAFrame(_data(b'aaa')) is True
+    assert r.put_DATAFrame(_data(b'bbbb', end_stream=True)) is True
+    assert credits == []                      # nothing credited at enqueue
+    ev = await r()
+    assert ev['body'] == b'aaa' and credits == [3]
+    ev = await r()
+    assert ev['body'] == b'bbbb' and credits == [3, 4]
+    assert ev['more_body'] is False
+
+
+@pytest.mark.asyncio
+async def test_recipient_zero_length_data_yields_no_credit():
+    """The empty END_STREAM DATA grpcio sends consumes no window; a
+    WINDOW_UPDATE with increment 0 is a §6.9.1 protocol error, so consuming
+    it must not invoke the credit callback."""
+    credits = []
+
+    async def cb(n):
+        credits.append(n)
+
+    r = HTTP2Recipient(credit_callback=cb)
+    assert r.put_DATAFrame(_data(b'', end_stream=True)) is True
+    ev = await r()
+    assert ev['more_body'] is False
+    assert credits == []
+
+
+@pytest.mark.asyncio
+async def test_recipient_byte_budget_is_the_abuse_backstop():
+    """put_DATAFrame refuses (→ RST) only when the peer overruns the
+    advertised inbound window it was never credited for — not at a frame
+    count a conformant peer can legitimately reach."""
+    async def cb(n):
+        pass
+
+    r = HTTP2Recipient(credit_callback=cb, credit_budget=10)
+    assert r.put_DATAFrame(_data(b'x' * 6)) is True
+    assert r.put_DATAFrame(_data(b'x' * 4)) is True    # exactly at budget: fine
+    assert r.put_DATAFrame(_data(b'x')) is False       # overrun: refused
+
+
+@pytest.mark.asyncio
+async def test_recipient_event_count_cap_stops_tiny_frame_floods():
+    """The byte budget cannot see a zero/tiny-frame flood; a generous
+    frame-count cap (queue_depth × 16) refuses degenerate dribble."""
+    async def cb(n):
+        pass
+
+    r = HTTP2Recipient(queue_depth=1, credit_callback=cb, credit_budget=10**6)
+    for _ in range(16):
+        assert r.put_DATAFrame(_data(b'')) is True
+    assert r.put_DATAFrame(_data(b'')) is False
+
+
+@pytest.mark.asyncio
+async def test_recipient_take_uncredited_returns_the_unconsumed_balance():
+    """take_uncredited() reports (and clears) bytes enqueued but never popped
+    — the balance the actor replays to the connection window on release."""
+    async def cb(n):
+        pass
+
+    r = HTTP2Recipient(credit_callback=cb)
+    r.put_DATAFrame(_data(b'aaa'))
+    r.put_DATAFrame(_data(b'bb', end_stream=True))
+    await r()                          # consume 3 bytes → credited via cb
+    assert r.take_uncredited() == 2    # the un-popped frame's balance
+    assert r.take_uncredited() == 0    # cleared
+
+
+def test_legacy_recipient_without_callback_keeps_bounded_queue():
+    """Direct constructions without a credit callback (tests, push streams)
+    keep the historical bounded-queue, credit-at-enqueue behaviour."""
+    r = HTTP2Recipient(queue_depth=2)
+    assert r.credits_on_consume is False
+    assert r.put_DATAFrame(_data(b'a')) is True
+    assert r.put_DATAFrame(_data(b'b')) is True
+    assert r.put_DATAFrame(_data(b'c')) is False   # QueueFull → refused
+
+
+@pytest.mark.asyncio
+async def test_over_queue_depth_burst_within_window_is_not_rst():
+    """The original failure mode: more DATA frames than the old 64-deep queue,
+    all within the 65535-byte window, while the handler is stalled.  With
+    consume-based crediting the burst is buffered (bounded by the window
+    budget), never RST_STREAM(ENHANCE_YOUR_CALM); once the handler drains,
+    stream + connection credit is replayed in full."""
+    from hpack import Encoder
+    all_delivered = asyncio.Event()
+    consumed = []
+
+    async def app(scope, receive, send):
+        await all_delivered.wait()     # stall until every frame is enqueued
+        while True:
+            ev = await receive()
+            if ev['type'] != 'http.request':
+                break
+            consumed.append(ev['body'])
+            if not ev.get('more_body', False):
+                break
+        await send({'type': 'http.response.start', 'status': 200, 'headers': []})
+        await send({'type': 'http.response.body', 'body': b'ok'})
+
+    handler = _make_actor(app)
+    enc = Encoder()
+    frames = [
+        _make_h2_frame(FrameTypes.SETTINGS, 0, 0, b''),
+        _make_h2_frame(FrameTypes.HEADERS, HeaderFrameFlags.END_HEADERS, 1,
+                       enc.encode([(b':method', b'POST'), (b':path', b'/up'),
+                                   (b':scheme', b'https')])),
+    ]
+    frames += [_make_h2_frame(FrameTypes.DATA, 0, 1, b'x' * 100)
+               for _ in range(64)]
+    frames.append(_make_h2_frame(
+        FrameTypes.DATA, int(DataFrameFlags.END_STREAM), 1, b'x' * 100))
+
+    async def fake_receive():
+        if frames:
+            return frames.pop(0)
+        all_delivered.set()
+        return None
+
+    handler.receive = fake_receive
+    await handler.run()
+
+    rsts = [f for f in (c.args[0] for c in handler.send_frame.call_args_list)
+            if f.FrameType() == FrameTypes.RST_STREAM]
+    assert not rsts, f'window-conformant burst must not be RST: {rsts}'
+    assert sum(len(b) for b in consumed) == 6500
+    wus = _window_updates(handler)
+    assert sum(n for sid, n in wus if sid == 1) == 6500
+    assert sum(n for sid, n in wus if sid == 0) == 6500
+
+
+@pytest.mark.asyncio
+async def test_unread_body_balance_flushes_to_connection_window():
+    """A handler that finishes without draining its body must not leak the
+    shared connection window shut: the un-consumed balance is replayed as
+    WINDOW_UPDATE(0) when the stream is released.  Stream-level credit is
+    NOT replayed — the stream is closed (RFC 9113 §5.1)."""
+    from hpack import Encoder
+
+    async def app(scope, receive, send):
+        await receive()                # reads ONLY the first 3-byte frame
+        await send({'type': 'http.response.start', 'status': 200, 'headers': []})
+        await send({'type': 'http.response.body', 'body': b'done'})
+
+    handler = _make_actor(app)
+    enc = Encoder()
+    settings = _make_h2_frame(FrameTypes.SETTINGS, 0, 0, b'')
+    headers = _make_h2_frame(
+        FrameTypes.HEADERS, HeaderFrameFlags.END_HEADERS, 1,
+        enc.encode([(b':method', b'POST'), (b':path', b'/up'),
+                    (b':scheme', b'https')]))
+    data1 = _make_h2_frame(FrameTypes.DATA, 0, 1, b'aaa')
+    data2 = _make_h2_frame(
+        FrameTypes.DATA, int(DataFrameFlags.END_STREAM), 1, b'bbbb')
+    handler.receive = AsyncMock(side_effect=[settings, headers, data1, data2, None])
+    await handler.run()
+    for _ in range(10):                # let the release-time flush task run
+        await asyncio.sleep(0)
+
+    wus = _window_updates(handler)
+    assert sum(n for sid, n in wus if sid == 1) == 3   # only the consumed frame
+    assert sum(n for sid, n in wus if sid == 0) == 7   # consumed + flushed balance
+
+
+@pytest.mark.asyncio
+async def test_window_overrun_is_rst_enhance_your_calm():
+    """A peer that keeps sending past the advertised 65535-byte inbound window
+    (i.e. ignores the closed window) hits the abuse backstop: the frame is
+    refused and the stream is RST_STREAM(ENHANCE_YOUR_CALM)."""
+    from hpack import Encoder
+    all_delivered = asyncio.Event()
+
+    async def app(scope, receive, send):
+        await all_delivered.wait()     # never consumes while frames arrive
+        while (await receive())['type'] != 'http.disconnect':
+            pass
+        await send({'type': 'http.response.start', 'status': 200, 'headers': []})
+        await send({'type': 'http.response.body', 'body': b''})
+
+    handler = _make_actor(app)
+    enc = Encoder()
+    frames = [
+        _make_h2_frame(FrameTypes.SETTINGS, 0, 0, b''),
+        _make_h2_frame(FrameTypes.HEADERS, HeaderFrameFlags.END_HEADERS, 1,
+                       enc.encode([(b':method', b'POST'), (b':path', b'/up'),
+                                   (b':scheme', b'https')])),
+    ]
+    # 5 × 16 KiB = 81920 bytes — crosses the 65535-byte budget at frame 4.
+    frames += [_make_h2_frame(FrameTypes.DATA, 0, 1, b'x' * 16384)
+               for _ in range(5)]
+
+    async def fake_receive():
+        if frames:
+            return frames.pop(0)
+        all_delivered.set()
+        return None
+
+    handler.receive = fake_receive
+    await handler.run()
+
+    calms = [f for f in (c.args[0] for c in handler.send_frame.call_args_list)
+             if f.FrameType() == FrameTypes.RST_STREAM
+             and f.error_code == ErrorCodes.ENHANCE_YOUR_CALM]
+    assert calms, 'window overrun must trip the ENHANCE_YOUR_CALM backstop'
