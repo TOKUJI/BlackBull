@@ -37,22 +37,84 @@ class IncompleteReadError(EOFError):
 
 _HEXDIG_SET = frozenset(b'0123456789abcdefABCDEF')
 
+# RFC 9110 §5.6.2 — ``token = 1*tchar``.  Used to validate ``chunk-ext-name``
+# and an unquoted ``chunk-ext-val`` (RFC 9112 §7.1.1).
+_TCHAR_SET = frozenset(
+    b"!#$%&'*+-.^_`|~"
+    b"0123456789"
+    b"abcdefghijklmnopqrstuvwxyz"
+    b"ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+
+
+def _bad_request(detail: str):
+    """Build the framework's status-carrying 400 exception.
+
+    Imported lazily so ``recipient`` (loaded early via the server) never
+    depends on ``router`` at module-import time.  ``HTTPException`` is the
+    dispatcher's typed-error seam — raising it from the body reader makes a
+    malformed chunked frame surface as ``400 Bad Request`` instead of a
+    fabricated 500.
+    """
+    from http import HTTPStatus  # noqa: PLC0415
+    from ..router import HTTPException  # noqa: PLC0415
+    return HTTPException(HTTPStatus.BAD_REQUEST, detail)
+
+
+def _validate_chunk_ext(ext: bytes) -> None:
+    """RFC 9112 §7.1.1::
+
+        chunk-ext      = *( BWS ";" BWS chunk-ext-name [ BWS "=" BWS chunk-ext-val ] )
+        chunk-ext-name = token
+        chunk-ext-val  = token / quoted-string
+
+    *ext* is the chunk line **from the first ``;``** onward.  Reject a bare
+    ``;`` (empty ext-name), a non-token ext-name/val, and control characters
+    — all silent-acceptance smuggling vectors before this guard.  A
+    quoted-string ext-val is accepted leniently (matched quotes, no bare
+    CTLs) since chunk extensions are ignored on receipt.
+    """
+    for element in ext.split(b';')[1:]:
+        element = element.strip(b' \t')          # BWS around the element
+        name, eq, val = element.partition(b'=')
+        name = name.rstrip(b' \t')
+        if not name or any(c not in _TCHAR_SET for c in name):
+            raise _bad_request(f'invalid chunk-ext-name {name!r}')
+        if eq:
+            val = val.strip(b' \t')
+            if val[:1] == b'"':
+                if len(val) < 2 or not val.endswith(b'"') or any(
+                        c < 0x20 and c != 0x09 for c in val):
+                    raise _bad_request(f'invalid quoted chunk-ext-val {val!r}')
+            elif not val or any(c not in _TCHAR_SET for c in val):
+                raise _bad_request(f'invalid chunk-ext-val {val!r}')
+
 
 def _parse_chunk_size(line: bytes) -> int:
-    """RFC 9112 §7.1.1 — ``chunk-size = 1*HEXDIG``, optionally followed
-    by ``chunk-ext`` (everything from the first ``;``).  Reject anything
-    that isn't a non-empty hexadecimal string in the size portion.
+    """RFC 9112 §7.1.1 — ``chunk-size = 1*HEXDIG`` optionally followed by
+    ``chunk-ext``.  Validate the size token strictly (no sign, no ``0x``
+    prefix, no ``_``, no stray whitespace) **before** ``int()``, and
+    validate the chunk-ext grammar, so malformed framing is rejected rather
+    than silently accepted or crashed on.
 
-    Raises :class:`ValueError` on malformed input; the caller turns that
-    into a connection-closing failure (the request body is now
-    unframeable).
+    The line must be CRLF-terminated: a bare-LF terminator (``5\\n``) is a
+    framing violation, so we require the trailing CRLF rather than stripping
+    either.  Raises :class:`HTTPException` (400) on any violation; the caller
+    marks the body unframeable and closes the connection.
     """
-    # Drop trailing CRLF and optional chunk-ext.
-    line = line.rstrip(b'\r\n')
-    size_part, _, _ext = line.partition(b';')
-    size_part = size_part.rstrip(b' \t')  # OWS between size and ';' is allowed
+    if not line.endswith(b'\r\n') or line.count(b'\n') != 1:
+        raise _bad_request(f'chunk-size line not CRLF-terminated: {line!r}')
+    line = line[:-2]
+    if b';' in line:
+        size_part, _, _ext = line.partition(b';')
+        # BWS is tolerated between the size and ';' (RFC 9112 §7.1.1 BWS).
+        size_part = size_part.rstrip(b' \t')
+        _validate_chunk_ext(line[len(size_part):])
+    else:
+        # No chunk-ext — the whole line is the size; NO trailing OWS allowed
+        # (a bare ``5 \r\n`` is a smuggling vector, not a valid chunk-size).
+        size_part = line
     if not size_part or any(c not in _HEXDIG_SET for c in size_part):
-        raise ValueError(f'invalid chunk-size {size_part!r}')
+        raise _bad_request(f'invalid chunk-size {size_part!r}')
     return int(size_part, 16)
 
 
@@ -390,6 +452,10 @@ class HTTP1Recipient(BaseRecipient):
         # preserved.
         self._body_timeout = body_timeout
         self._deadline = deadline
+        # Set once a chunked-framing violation is detected: the byte stream is
+        # now desynced, so the connection MUST close rather than keep-alive
+        # (draining would parse smuggled bytes as the next request).
+        self.framing_broken = False
 
     def needs_drain(self) -> bool:
         """True if a declared request body may still be buffered unread.
@@ -400,6 +466,8 @@ class HTTP1Recipient(BaseRecipient):
         dispatch to decide whether to drain.  A body-less request (GET, no
         Content-Length, not chunked) never needs draining.
         """
+        if self.framing_broken:
+            return False  # stream is desynced — close, don't drain
         return not self._done and (self._chunked or bool(self._content_length))
 
     async def drain(self, max_bytes: int) -> bool:
@@ -419,6 +487,16 @@ class HTTP1Recipient(BaseRecipient):
             if drained > max_bytes:
                 return False
         return True
+
+    def _parse_chunk_size_or_400(self, size_line: bytes) -> int:
+        """Parse the chunk-size line, marking the stream unframeable on any
+        violation so the actor closes the connection instead of keep-aliving
+        a desynced byte stream."""
+        try:
+            return _parse_chunk_size(size_line)
+        except BaseException:
+            self.framing_broken = True
+            raise
 
     async def _read_with_timeout(self, coro):
         """Run *coro* under the configured body_timeout, if any."""
@@ -440,7 +518,7 @@ class HTTP1Recipient(BaseRecipient):
             if self._chunked:
                 size_line = await self._read_with_timeout(
                     self._reader.readuntil(b'\r\n'))
-                chunk_size = _parse_chunk_size(size_line)
+                chunk_size = self._parse_chunk_size_or_400(size_line)
                 if chunk_size == 0:
                     # RFC 9112 §7.1.2 — last-chunk is followed by an
                     # optional trailer-part and then a final CRLF.  Read
@@ -455,13 +533,19 @@ class HTTP1Recipient(BaseRecipient):
                 # RFC 9112 §7.1 — the chunk-data is exactly ``chunk_size``
                 # octets.  ``readexactly`` (not the up-to-n ``read``) is
                 # required: a chunk split across TCP segments would otherwise
-                # return short, and the following ``readuntil(CRLF)`` would
-                # swallow the rest of the payload up to the first CRLF,
-                # silently corrupting the body and desyncing chunk framing.
+                # return short, silently corrupting the body.
                 data = await self._read_with_timeout(
                     self._reader.readexactly(chunk_size))
-                await self._read_with_timeout(
-                    self._reader.readuntil(b'\r\n'))        # consume CRLF after chunk data
+                # RFC 9112 §7.1 — chunk-data is followed by exactly CRLF.
+                # Read those two octets and verify: reading *until* CRLF would
+                # swallow trailing spill (SMUG-CHUNK-SPILL) up to the next
+                # CRLF, and would tolerate a bare CR/LF terminator.
+                term = await self._read_with_timeout(
+                    self._reader.readexactly(2))
+                if term != b'\r\n':
+                    self.framing_broken = True
+                    raise _bad_request(
+                        f'chunk-data not CRLF-terminated: {term!r}')
                 return {'type': ASGIEvent.HTTP_REQUEST, 'body': data, 'more_body': True}
             else:
                 # P4: stream the Content-Length body in ``chunk_size`` slices so

@@ -29,6 +29,66 @@ so the editable install's metadata catches up.
 
 ---
 
+## [Unreleased]
+
+Sprint 63 — Http11Probe hardening (RFC 9112 §3.2 / §7.1) + audit bug 1.16.
+HTTP/1.1 request framing and request-target parsing are tightened to reject
+the smuggling / malformed-input vectors the Http11Probe baseline flagged;
+malformed chunked framing now answers a clean `400` instead of a `500` or a
+silent `200`. No public-API changes.
+
+### Fixed
+
+- **Chunked request framing (RFC 9112 §7.1)** — the chunk-size token is
+  validated against the strict `1*HEXDIG` grammar *before* `int()` (rejecting
+  `-1`, `0x5`, `+0`, `1_0`, leading/trailing whitespace), the `chunk-ext`
+  grammar is validated (bare `;`, non-token names/values, and control
+  characters rejected), the size line must be CRLF-terminated (bare-LF
+  rejected), and the chunk-data terminator is checked as exactly `CRLF`
+  (chunk-data spill and bare CR/LF terminators rejected). Violations raise a
+  `400 Bad Request` and close the connection instead of surfacing as a
+  fabricated `500` or being silently accepted.
+- **Request-target forms (RFC 9112 §3.2)** — absolute-form
+  (`GET http://host/path`) is rewritten to origin-form for routing with the
+  request's authority overriding a spoofed/mismatched `Host`; asterisk-form
+  (`OPTIONS *`) is answered server-wide (`204` + `Allow`) rather than routed
+  to a 404, and is rejected (`400`) for any method other than OPTIONS;
+  `CONNECT` returns `501`; a raw non-ASCII byte in the request-target is
+  rejected (`400`).
+- **Header validation** — userinfo in the `Host` header (`user@host`) is
+  rejected (`400`, RFC 3986 §3.2); a duplicate `Content-Type` is rejected;
+  a `Transfer-Encoding` where `chunked` is not the sole final coding
+  (`chunked, gzip`, `chunked, chunked`) is `400` (undeterminable length),
+  distinct from an unimplemented coding (`gzip`) which stays `501`.
+- **Bug 1.16 — `X-Forwarded-Prefix` no longer trusted off the wire.** The
+  HTTP/1.1 and HTTP/2 parsers no longer set `scope['root_path']` from the
+  client-controlled `X-Forwarded-Prefix` header; only the `TrustedProxy`
+  middleware sets it, after verifying the direct peer — mirroring the
+  existing `X-Forwarded-For` / `X-Forwarded-Proto` trust model. A client
+  could previously spoof the application's mount prefix.
+
+### Added
+
+- `docs/about/architecture.md` — protocol ownership, the Actor model,
+  fault injection, conformance, and performance, with the reasoning
+  behind each design bet.
+- `docs/getting-started/why-blackbull.md` — a scenario-based guide for
+  deciding whether BlackBull fits a given project, plus the honest
+  trade-off table.
+
+### Docs
+
+- `docs/guide/grpc.md` and `KNOWN_LIMITATIONS.md` corrected — both
+  claimed client-streaming and bidirectional gRPC were unsupported and
+  that message compression was absent; both shipped in v0.49.0 (all
+  four RPC shapes + `gzip`).
+- `SECURITY.md` supported-versions table updated (`0.49.x` / `0.48.x`)
+  — it had not shifted when v0.49.0 (a MINOR release) shipped.
+- `README.md` gained an Actor-model bullet, a cross-reference line to
+  the two new docs pages, and an updated Architecture doc link.
+  `docs/index.md` now mentions gRPC and MQTT alongside HTTP/1.1, HTTP/2,
+  and WebSocket, and links the two new pages.
+
 ## [0.49.1] — 2026-07-07
 
 Correctness patch — the HTTP/1.1 and HTTP/2 bug fixes from the 2026-07-07

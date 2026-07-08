@@ -8,6 +8,12 @@ protocol-level test coverage behind the standards-compliance claims;
 this file is the narrative "things to know before you build on top
 of it" list.
 
+> **Read this alongside the strengths.** A gap list read on its own is
+> unbalanced.  For the architectural bets behind these trade-offs, see
+> [`docs/about/architecture.md`](docs/about/architecture.md); to decide
+> whether BlackBull fits your use case, see
+> [`docs/getting-started/why-blackbull.md`](docs/getting-started/why-blackbull.md).
+
 Every item here is something the project knows about and has a
 position on.  Behaviours that aren't listed below — anything that
 would surprise us as well — belong on the GitHub issue tracker.
@@ -233,17 +239,19 @@ opt-in knob is sketched in the roadmap but not built.
 
 Out of scope.  Revisit if a real user need appears.
 
-### gRPC: unary + server-streaming only
+### gRPC: no protobuf codegen toolchain
 
-Unary **and server-streaming** gRPC over HTTP/2 ship in `blackbull.grpc`
-(`app.enable_grpc`): `application/grpc` requests multiplex onto the same
-HTTP/2 port as REST and WebSocket, with `grpc-status` reported in trailers
-(a trailing HEADERS frame).  Client- and bidirectional-streaming are **not**
-implemented yet (they need a streamed request), and there is no protobuf
-codegen toolchain — handlers exchange raw message bytes, so
-descriptor/message classes are the application's choice.  Message
-compression is also unsupported (the server advertises
-`grpc-accept-encoding: identity`).
+All four gRPC RPC shapes — unary, server-streaming, client-streaming, and
+bidirectional — ship in `blackbull.grpc` (`app.enable_grpc`), with `gzip`
+message compression (`grpc-accept-encoding: identity,gzip`).
+`application/grpc` requests multiplex onto the same HTTP/2 port as REST and
+WebSocket, with `grpc-status` reported in trailers (a trailing HEADERS
+frame). What's still missing: a protobuf codegen toolchain — handlers
+exchange raw message bytes, so descriptor/message classes are the
+application's choice. A `blackbull-protobuf` package (codegen adapter,
+`grpc.health.v1`, reflection, rich errors) is planned as a separate,
+optional install — see
+[`docs/guide/grpc.md`](https://github.com/TOKUJI/BlackBull/blob/master/docs/guide/grpc.md).
 
 ### CLI `--bind` host is advisory
 

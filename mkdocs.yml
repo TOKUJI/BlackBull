@@ -37,6 +37,7 @@ plugins:
 nav:
   - Home: index.md
   - Getting Started:
+    - Why BlackBull?: getting-started/why-blackbull.md
     - Installation: getting-started/installation.md
     - Hello World: getting-started/hello-world.md
     - Your First App: getting-started/first-app.md
@@ -71,6 +72,7 @@ nav:
     - Environment variables: reference/env-vars.md
     - API: api/
   - About:
+    - Architecture: about/architecture.md
     - Conformance: about/conformance.md
     - Internals: about/internals.md
     - MQTT broker design: about/mqtt-actor-design.md

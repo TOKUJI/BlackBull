@@ -3,8 +3,9 @@
 BlackBull is a Python web framework that speaks the
 [**ASGI 3.0**](https://asgi.readthedocs.io/en/latest/specs/main.html)
 interface[^asgi], with pure-Python implementations of HTTP/1.1, HTTP/2
-(with ALPN), and WebSocket.  No required C extensions outside the
-standard library, one `pip install`, one deployable.
+(with ALPN), WebSocket, gRPC, and an MQTT 5 broker — all on one process,
+no reverse proxy or sidecar required.  No required C extensions outside
+the standard library, one `pip install`, one deployable.
 
 [^asgi]: ASGI is the async successor to WSGI — a single small interface
     that lets the same app object speak HTTP and WebSocket without
@@ -30,6 +31,10 @@ standard library, one `pip install`, one deployable.
 - **HTTP/1.1, HTTP/2, and WebSocket** on the same listener — ALPN
   negotiates HTTP/2; cleartext h2c is detected on first preface bytes;
   WebSocket-over-HTTP/2 (RFC 8441) is available as an opt-in.
+- **gRPC and MQTT 5 beside HTTP** — `app.enable_grpc()` serves gRPC
+  (all four RPC shapes, `gzip` compression) over the same HTTP/2 port;
+  `app.add_extension(MQTTExtension(...))` runs a pure-Python MQTT 5
+  broker on its own port, in the same process.
 - **Standards conformance** — RFC 9112 (HTTP/1.1), RFC 9113
   (HTTP/2 — h2spec passes), RFC 6455 (WebSocket — Autobahn passes),
   RFC 8441 (Extended CONNECT for WebSocket over HTTP/2).
@@ -79,10 +84,14 @@ ASGI-triplet form.
 
 ## Where to go next
 
+- Not sure BlackBull fits your project? [Why BlackBull?](getting-started/why-blackbull.md)
+  walks through the scenarios where its architectural bets pay off — and where
+  another framework may serve you better.
 - New to BlackBull? Start with [Installation](getting-started/installation.md).
 - Building something? The [Guide](guide/index.md) covers routing,
   middleware, WebSockets, error handling, HTTP/2, and configuration.
 - Deploying? See [Deployment](deployment/running.md) for multi-worker,
   TLS, AF_UNIX, systemd activation, and behind-nginx topologies.
-- Curious about the internals? [Internals](about/internals.md) walks
-  the actor model and the protocol stack.
+- Curious about the design? [Architecture](about/architecture.md) covers
+  the actor model, protocol ownership, and fault injection;
+  [Internals](about/internals.md) walks the implementation in detail.
