@@ -31,6 +31,59 @@ so the editable install's metadata catches up.
 
 ## [Unreleased]
 
+## [0.49.3] — 2026-07-09
+
+### Security
+
+- **HTTP/1.1 — chunk-framing line length bound (audit bug 1.24,
+  CVE-2023-39326 class)**: the chunk-size+extension line and every trailer
+  line are now capped at 8 KiB; an oversized line (probe
+  `MAL-CHUNK-EXT-64K`) answers 400 instead of escaping as a
+  `LimitOverrunError`-backed 500.  A bare-LF-terminated trailer section
+  (`SMUG-CHUNK-LF-TRAILER`) is rejected 400 instead of hanging until the
+  client gives up.
+- **HTTP/1.1 — prohibited trailer fields rejected (RFC 9110 §6.5.1)**:
+  framing / routing / authentication / content-handling fields
+  (`Transfer-Encoding`, `Content-Length`, `Host`, `Authorization`,
+  `Content-Type`, …) in a chunked trailer section now answer 400.
+- **HTTP/1.1 — strict Content-Length (RFC 9110 §8.6)**: leading zeros,
+  doubled/tab/trailing OWS around the value (probe `SMUG-CL-*`,
+  `MAL-CL-TAB-BEFORE-VALUE`) are rejected 400 before the generic OWS strip
+  hides them.
+- **HTTP/1.1 — underscore framing confusables**: `Content_Length` /
+  `Transfer_Encoding` header names (probe `NORM-UNDERSCORE-*`) are
+  rejected 400.
+
+### Fixed
+
+- **HTTP/1.1 — missing `Host` on an HTTP/1.1 request now 400**
+  (RFC 9112 §3.2, audit bug 1.25); HTTP/1.0 requests may still omit it.
+- **HTTP/1.1 — unsupported HTTP major version now 505** (RFC 9110
+  §15.6.6, audit bug 1.25): `GET / HTTP/9.9` was served as if 1.1.
+  `HTTP/1.x` minors above 1.1 remain accepted as 1.x-compatible.
+- **HTTP/1.1 — no `100 Continue` to HTTP/1.0 clients** (RFC 9110 §15.2,
+  probe `COMP-NO-1XX-HTTP10`): `Expect: 100-continue` from a 1.0 client
+  is ignored and the body read normally.
+- **HTTP/2 — refused multi-frame HEADERS no longer kills the connection**
+  (audit bug 1.14 #2): a HEADERS refused at `MAX_CONCURRENT_STREAMS` with
+  `END_HEADERS` unset now keeps consuming the header block; the refusal
+  (RST_STREAM `REFUSED_STREAM`) happens at `END_HEADERS`, after the HPACK
+  decode that keeps the dynamic table in sync, instead of the peer's
+  legal CONTINUATION tripping a bogus GOAWAY(PROTOCOL_ERROR).
+
+With these fixes the authoritative Http11Probe re-score reaches
+**161/161 (0 failed, 5 warnings)** — up from 156/161 (5 failed, 13
+warnings) at v0.49.2.
+
+### Docs
+
+- `bench/conformance/README.md` — CI status badge + per-job coverage
+  table; removed the stale "work in progress / h2spec only" framing.
+- `bench/peers/NOTES.private.md` — AI-agent stale-data note on the
+  2026-05-18 h2spec 51 % calibration section.
+- `KNOWN_LIMITATIONS.md` — corrected the swapped nginx/BlackBull columns
+  on the HTTP/9.9 differential-corpus row.
+
 ## [0.49.2] — 2026-07-08
 
 Sprint 63 — Http11Probe hardening (RFC 9112 §3.2 / §7.1) + audit bug 1.16 —
