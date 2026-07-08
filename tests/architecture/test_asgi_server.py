@@ -556,7 +556,8 @@ class TestTimeoutHandling:
         # Detection peek + the whole header block arrive in one read; the body
         # read (readexactly) is the one that hangs.
         reader.read = AsyncMock(
-            side_effect=[b'POST / HTTP/1.1\r\nContent-Length: 5\r\n\r\n'])
+            side_effect=[b'POST / HTTP/1.1\r\nHost: x\r\n'
+                         b'Content-Length: 5\r\n\r\n'])
         reader.readexactly = AsyncMock(side_effect=slow_body)
 
         async def noop_app(scope, receive, send):

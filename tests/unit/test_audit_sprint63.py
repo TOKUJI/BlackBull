@@ -351,3 +351,216 @@ class TestXForwardedPrefixTrust:
 
         await mw(scope, None, None, call_next)
         assert called['root_path'] == ''
+
+
+# ---------------------------------------------------------------------------
+# Sprint 63 remainder — chunk-line length bound (bug 1.24, MAL-CHUNK-EXT-64K)
+# ---------------------------------------------------------------------------
+
+class TestChunkLineLengthBound:
+    @pytest.mark.asyncio
+    async def test_oversized_chunk_ext_line_raises_400(self):
+        # MAL-CHUNK-EXT-64K / CVE-2023-39326 class — a 64 KiB chunk
+        # extension must be rejected with 400, not crash `readuntil` into
+        # a LimitOverrunError-backed 500.
+        wire = b'5;ext=' + b'a' * 65536 + b'\r\nhello\r\n0\r\n\r\n'
+        recipient = _chunked_recipient(wire)
+        with pytest.raises(HTTPException) as exc_info:
+            await _drain_body(recipient)
+        assert exc_info.value.status == HTTPStatus.BAD_REQUEST
+        assert recipient.framing_broken is True
+
+    @pytest.mark.asyncio
+    async def test_limit_overrun_from_reader_maps_to_400(self):
+        # The asyncio.StreamReader path raises LimitOverrunError *inside*
+        # readuntil before the line ever materialises; the recipient must
+        # translate it into the same 400, not let it escape as a 500.
+        import asyncio
+
+        class _OverrunReader(AbstractReader):
+            async def read(self, n: int) -> bytes:  # pragma: no cover
+                return b''
+
+            async def readuntil(self, sep: bytes) -> bytes:
+                raise asyncio.LimitOverrunError(
+                    'Separator is found, but chunk is longer than limit', 65536)
+
+        recipient = HTTP1Recipient(
+            _OverrunReader(),
+            {'headers': [(b'transfer-encoding', b'chunked')]},
+            chunk_size=64 * 1024,
+        )
+        with pytest.raises(HTTPException) as exc_info:
+            await recipient()
+        assert exc_info.value.status == HTTPStatus.BAD_REQUEST
+        assert recipient.framing_broken is True
+
+    @pytest.mark.asyncio
+    async def test_oversized_trailer_line_raises_400(self):
+        wire = b'5\r\nhello\r\n0\r\nx-pad: ' + b'a' * 65536 + b'\r\n\r\n'
+        recipient = _chunked_recipient(wire)
+        with pytest.raises(HTTPException) as exc_info:
+            await _drain_body(recipient)
+        assert exc_info.value.status == HTTPStatus.BAD_REQUEST
+        assert recipient.framing_broken is True
+
+
+# ---------------------------------------------------------------------------
+# Sprint 63 remainder — trailer-section strictness (SMUG-CHUNK-LF-TRAILER,
+# prohibited trailer fields per RFC 9110 §6.5.1)
+# ---------------------------------------------------------------------------
+
+class TestChunkedTrailerSection:
+    @pytest.mark.asyncio
+    async def test_benign_trailer_still_accepted(self):
+        wire = (b'5\r\nhello\r\n0\r\n'
+                b'x-checksum: abc123\r\n\r\n')
+        assert await _drain_body(_chunked_recipient(wire)) == b'hello'
+
+    @pytest.mark.asyncio
+    async def test_bare_lf_trailer_terminator_raises_400(self):
+        # SMUG-CHUNK-LF-TRAILER — bare LF terminating the trailer section
+        # (after the last-chunk ``0\r\n``).  Pre-fix the parser waited for
+        # a CRLF that never came and the request timed out.
+        wire = b'5\r\nhello\r\n0\r\n\n'
+        recipient = _chunked_recipient(wire)
+        with pytest.raises(HTTPException) as exc_info:
+            await _drain_body(recipient)
+        assert exc_info.value.status == HTTPStatus.BAD_REQUEST
+        assert recipient.framing_broken is True
+
+    @pytest.mark.asyncio
+    async def test_bare_lf_trailer_line_raises_400(self):
+        # A trailer *field line* terminated by bare LF is the same
+        # framing violation as a bare-LF chunk-size line.
+        wire = b'5\r\nhello\r\n0\r\nfoo: bar\n\r\n'
+        recipient = _chunked_recipient(wire)
+        with pytest.raises(HTTPException) as exc_info:
+            await _drain_body(recipient)
+        assert exc_info.value.status == HTTPStatus.BAD_REQUEST
+        assert recipient.framing_broken is True
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize('field', [
+        b'Transfer-Encoding: chunked',   # SMUG-TRAILER-TE
+        b'Content-Length: 999',          # SMUG-TRAILER-CL
+        b'Host: evil.example',           # SMUG-TRAILER-HOST
+        b'Authorization: Bearer evil',   # SMUG-TRAILER-AUTH
+        b'Content-Type: text/evil',      # SMUG-TRAILER-CONTENT-TYPE
+    ])
+    async def test_prohibited_trailer_field_raises_400(self, field):
+        # RFC 9110 §6.5.1 — framing, routing, authentication, and
+        # content-handling fields are prohibited in trailers.
+        wire = b'5\r\nhello\r\n0\r\n' + field + b'\r\n\r\n'
+        recipient = _chunked_recipient(wire)
+        with pytest.raises(HTTPException) as exc_info:
+            await _drain_body(recipient)
+        assert exc_info.value.status == HTTPStatus.BAD_REQUEST
+        assert recipient.framing_broken is True
+
+
+# ---------------------------------------------------------------------------
+# Sprint 63 remainder — request-line / header validation (bugs 1.25, WARN
+# hardening: strict Content-Length, underscore framing-header names)
+# ---------------------------------------------------------------------------
+
+class TestMissingHostAndVersion:
+    def test_http11_without_host_rejected(self):
+        # RFC9112-7.1-MISSING-HOST — RFC 9112 §3.2 mandates Host on 1.1.
+        from blackbull.server.http1_actor import BadRequestError
+        actor = _make_actor()
+        with pytest.raises(BadRequestError):
+            actor._parse(b'GET / HTTP/1.1\r\n\r\n')
+
+    def test_http10_without_host_still_accepted(self):
+        # COMP-HTTP10-NO-HOST — HTTP/1.0 predates Host; must stay 200.
+        actor = _make_actor()
+        scope = actor._parse(b'GET / HTTP/1.0\r\n\r\n')
+        assert scope['http_version'] == '1.0'
+
+    def test_unsupported_major_version_rejected_505(self):
+        # RFC9112-2.3-INVALID-VERSION — HTTP/9.9 → 505, not a happy 200.
+        from blackbull.server.http1_actor import UnsupportedVersionError
+        actor = _make_actor()
+        with pytest.raises(UnsupportedVersionError):
+            actor._parse(b'GET / HTTP/9.9\r\nHost: x\r\n\r\n')
+
+    def test_http09_rejected_505(self):
+        from blackbull.server.http1_actor import UnsupportedVersionError
+        actor = _make_actor()
+        with pytest.raises(UnsupportedVersionError):
+            actor._parse(b'GET / HTTP/0.9\r\nHost: x\r\n\r\n')
+
+    def test_http12_accepted_as_http1x(self):
+        # COMP-HTTP12-VERSION — a higher 1.x minor is 1.x-compatible and
+        # should be served, not rejected (RFC 9110 §2.5).
+        actor = _make_actor()
+        scope = actor._parse(b'GET / HTTP/1.2\r\nHost: x\r\n\r\n')
+        assert scope['http_version'] == '1.2'
+
+    def test_malformed_version_still_400(self):
+        # Grammar violations (not a valid HTTP-version token at all) stay
+        # on the 400 path, distinct from a well-formed unsupported version.
+        from blackbull.server.http1_actor import BadRequestError
+        actor = _make_actor()
+        with pytest.raises(BadRequestError):
+            actor._parse(b'GET / HTTP/1.1.1\r\nHost: x\r\n\r\n')
+
+
+class TestContentLengthStrict:
+    @pytest.mark.parametrize('cl', [b'5', b'0', b'123'])
+    def test_canonical_content_length_accepted(self, cl):
+        actor = _make_actor()
+        scope = actor._parse(b'POST /echo HTTP/1.1\r\nHost: x\r\n'
+                             b'Content-Length: ' + cl + b'\r\n\r\n')
+        assert scope['headers'].get(b'content-length') == cl
+
+    def test_no_space_after_colon_accepted(self):
+        actor = _make_actor()
+        scope = actor._parse(b'POST /echo HTTP/1.1\r\nHost: x\r\n'
+                             b'Content-Length:5\r\n\r\n')
+        assert scope['headers'].get(b'content-length') == b'5'
+
+    @pytest.mark.parametrize('raw_value', [
+        b' 005',    # SMUG-CL-LEADING-ZEROS
+        b' 00',     # SMUG-CL-DOUBLE-ZERO
+        b' 010',    # SMUG-CL-LEADING-ZEROS-OCTAL
+        b'5 ',      # SMUG-CL-TRAILING-SPACE (raw value b' 5 ' on the wire)
+        b'  5',     # SMUG-CL-EXTRA-LEADING-SP
+        b'\t5',     # MAL-CL-TAB-BEFORE-VALUE
+        b' 5 ',
+    ])
+    def test_ambiguous_content_length_rejected(self, raw_value):
+        # RFC 9110 §8.6 — anything but a canonical 1*DIGIT (single
+        # optional leading SP, no leading zeros) is a parser-disagreement
+        # smuggling vector and is rejected before OWS-stripping hides it.
+        from blackbull.server.http1_actor import BadRequestError
+        actor = _make_actor()
+        with pytest.raises(BadRequestError):
+            actor._parse(b'POST /echo HTTP/1.1\r\nHost: x\r\n'
+                         b'Content-Length:' + raw_value + b'\r\n\r\n')
+
+
+class TestUnderscoreFramingHeaderNames:
+    @pytest.mark.parametrize('line', [
+        b'Content_Length: 99',      # NORM-UNDERSCORE-CL
+        b'Transfer_Encoding: chunked',  # NORM-UNDERSCORE-TE
+    ])
+    def test_underscore_framing_confusable_rejected(self, line):
+        # Underscore is a valid tchar, but a header whose name differs
+        # from a framing header only by ``_`` vs ``-`` exists solely to
+        # desync front-ends that normalise it (nginx drops these by
+        # default).  Reject.
+        from blackbull.server.http1_actor import BadRequestError
+        actor = _make_actor()
+        with pytest.raises(BadRequestError):
+            actor._parse(b'POST /echo HTTP/1.1\r\nHost: x\r\n'
+                         b'Content-Length: 11\r\n' + line + b'\r\n\r\n')
+
+    def test_other_underscore_headers_still_accepted(self):
+        # Only the framing confusables are rejected — underscore is legal
+        # in tokens and arbitrary x_custom headers must keep working.
+        actor = _make_actor()
+        scope = actor._parse(b'GET / HTTP/1.1\r\nHost: x\r\n'
+                             b'x_request_id: abc\r\n\r\n')
+        assert scope['headers'].get(b'x_request_id') == b'abc'

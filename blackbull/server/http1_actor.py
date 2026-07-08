@@ -73,6 +73,22 @@ _HTTP_VERSION_RE = re.compile(rb'^HTTP/\d\.\d$')
 _FIELD_NAME_INVALID_RE = re.compile(rb"[^!#$%&'*+\-.^_`|~0-9A-Za-z]")
 _FIELD_VALUE_INVALID_RE = re.compile(rb"[\x00-\x08\x0a-\x1f\x7f]")
 
+# RFC 9110 §8.6 — strict Content-Length: at most one canonical leading SP
+# (the byte after the colon), then ``0`` or a no-leading-zero decimal.
+# Matched against the *raw* post-colon bytes, before the generic OWS strip
+# discards the evidence: leading zeros, doubled/tab OWS, and trailing OWS
+# are all parser-disagreement smuggling vectors (SMUG-CL-LEADING-ZEROS /
+# -DOUBLE-ZERO / -TRAILING-SPACE / -EXTRA-LEADING-SP,
+# MAL-CL-TAB-BEFORE-VALUE) that a lenient ``int()`` would silently accept.
+_CL_STRICT_RE = re.compile(rb'\A ?(?:0|[1-9][0-9]*)\Z')
+
+# NORM-UNDERSCORE-CL / -TE — header names that differ from a framing
+# header only by ``_`` vs ``-``.  Underscore is a legal tchar, but these
+# two exist solely to desync a front-end that normalises ``_`` to ``-``
+# (CGI-style); nginx drops them by default, we reject.
+_UNDERSCORE_FRAMING_NAMES = frozenset((
+    b'content_length', b'transfer_encoding'))
+
 
 class BadRequestError(Exception):
     """Raised by :meth:`HTTP1Actor._parse` on an RFC 9112 framing violation.
@@ -97,6 +113,14 @@ class NotImplementedFramingError(Exception):
     """RFC 9112 §6.1 — the request used a Transfer-Encoding the server
     does not implement.  Answered with 501 Not Implemented (a separate
     response code from :class:`BadRequestError`'s 400)."""
+
+
+class UnsupportedVersionError(Exception):
+    """RFC 9110 §15.6.6 — the request-line carried a well-formed
+    ``HTTP/x.y`` version whose major version the server does not support
+    (RFC9112-2.3-INVALID-VERSION).  Answered with 505 HTTP Version Not
+    Supported and the connection is closed.  Distinct from
+    :class:`BadRequestError`: the request *grammar* was valid."""
 
 
 def _validate_message_framing(headers: 'Headers') -> None:
@@ -230,11 +254,10 @@ def _validate_host(headers: 'Headers') -> None:
         raise BadRequestError(
             f'multiple Host headers ({len(hosts)} — smuggling vector)')
     if not hosts:
-        # HTTP/1.1 §3.2 requires Host but HTTP/1.0 doesn't; we don't
-        # check version here because absent-Host on 1.1 is already
-        # handled elsewhere if at all.  Leaving the strict-absent
-        # check to a separate Sprint 18 follow-up keeps the patch
-        # focused on the captured-corpus divergences.
+        # HTTP/1.1 §3.2 requires Host but HTTP/1.0 doesn't.  The
+        # version-aware presence check lives in ``_parse`` (which knows
+        # the request version); this helper only validates the value's
+        # grammar when a Host is present.
         return
     value = hosts[0][1].strip(b' \t')
     if not value:
@@ -481,13 +504,27 @@ class HTTP1Actor(Actor):
                     await self._send_error_and_close(
                         send, b'501 Not Implemented', HTTPStatus.NOT_IMPLEMENTED)
                     return
+                except UnsupportedVersionError as exc:
+                    # RFC 9110 §15.6.6 — well-formed request-line, but a
+                    # major HTTP version this server does not speak
+                    # (RFC9112-2.3-INVALID-VERSION).  505 then close.
+                    logger.warning('505 HTTP Version Not Supported: %s', exc)
+                    await self._send_error_and_close(
+                        send, b'505 HTTP Version Not Supported',
+                        HTTPStatus.HTTP_VERSION_NOT_SUPPORTED)
+                    return
                 self._fill_connection_info(scope)
 
                 if scope.get('type') == 'websocket':
                     await self._handle_upgrade(scope)
                     return
 
-                if scope['headers'].get(b'expect').lower() == b'100-continue':
+                # RFC 9110 §10.1.1 / §15.2 — a server MUST NOT send a 1xx
+                # response to an HTTP/1.0 client (COMP-NO-1XX-HTTP10); the
+                # Expect header is ignored and the body read normally.
+                if (scope['http_version'] != '1.0'
+                        and scope['headers'].get(b'expect').lower()
+                        == b'100-continue'):
                     await send(b'', HTTPStatus.CONTINUE)
 
                 log_record = _AccessLogRecord.from_scope(scope)
@@ -706,6 +743,15 @@ class HTTP1Actor(Actor):
         # HTTP-version (§2.5) — exactly ``HTTP/d.d``.
         if not _HTTP_VERSION_RE.match(version):
             raise BadRequestError(f'invalid HTTP-version {version!r}')
+        # RFC 9110 §2.5 / §15.6.6 — only major version 1 is served here
+        # (RFC9112-2.3-INVALID-VERSION: ``HTTP/9.9`` was answered 200).
+        # A higher 1.x minor (``HTTP/1.2``) is 1.x-compatible and served
+        # as 1.1; any other major → 505.  The HTTP/2 preface never reaches
+        # this parser — ``protocol_registry`` sniffs ``PRI * HTTP/2.0``
+        # off the socket before the HTTP/1.1 binding is selected.
+        if version[5:6] != b'1':
+            raise UnsupportedVersionError(
+                f'HTTP version {version!r} is not supported')
 
         # Request-target form dispatch (RFC 9112 §3.2).  Four forms:
         # origin (``/path``), absolute (``http://host/path``), authority
@@ -784,6 +830,17 @@ class HTTP1Actor(Actor):
             # field-name must be a valid token (§5.1 / RFC 9110 §5.6.2).
             if _FIELD_NAME_INVALID_RE.search(key):
                 raise BadRequestError(f'invalid header name {key!r}')
+            lkey = key.lower()
+            if lkey in _UNDERSCORE_FRAMING_NAMES:
+                raise BadRequestError(
+                    f'framing-confusable header name {key!r} '
+                    f'(NORM-UNDERSCORE)')
+            # Strict Content-Length — checked against the raw post-colon
+            # bytes, before the OWS strip below erases the evidence.
+            if lkey == b'content-length' and not _CL_STRICT_RE.match(value):
+                raise BadRequestError(
+                    f'ambiguous Content-Length value {value!r} '
+                    f'(RFC 9110 §8.6)')
             # Strip the OWS surrounding the value (§5).
             value = value.strip(b' \t')
             # field-value MUST NOT contain CTLs except HTAB.
@@ -791,7 +848,7 @@ class HTTP1Actor(Actor):
                 raise BadRequestError(
                     f'CTL in header value (smuggling / log-injection): '
                     f'{key!r}: {value!r}')
-            raw.append((key.lower(), value))
+            raw.append((lkey, value))
 
         # RFC 9112 §3.2.2 — for an absolute-form target the request's own
         # authority is definitive; replace any client Host so a mismatched or
@@ -813,6 +870,15 @@ class HTTP1Actor(Actor):
         # transfer-coding registry (§6.1 → 501 on unknown coding).
         _validate_message_framing(headers)
         _validate_host(headers)
+        # RFC 9112 §3.2 / §7.2 — every HTTP/1.1 (and later 1.x) request
+        # MUST carry a Host header (RFC9112-7.1-MISSING-HOST); only
+        # HTTP/1.0, which predates Host, may omit it (COMP-HTTP10-NO-HOST).
+        # ``_validate_host`` checks the value's grammar when present; the
+        # presence rule is version-aware, so it lives here.
+        if version != b'HTTP/1.0' and not headers.getlist(b'host'):
+            raise BadRequestError(
+                f'missing Host header on {version.decode("ascii")} request '
+                f'(RFC 9112 §3.2)')
 
         scope = {
             'type': 'http',
