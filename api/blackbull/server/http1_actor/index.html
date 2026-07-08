@@ -3885,6 +3885,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#blackbull.server.http1_actor.UnsupportedVersionError" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        UnsupportedVersionError
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -4766,6 +4777,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#blackbull.server.http1_actor.UnsupportedVersionError" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        UnsupportedVersionError
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -5056,6 +5078,41 @@ per request.</p>
 
 
   </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="blackbull.server.http1_actor.UnsupportedVersionError" class="doc doc-heading">
+            <code>UnsupportedVersionError</code>
+
+
+<a href="#blackbull.server.http1_actor.UnsupportedVersionError" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="Exception">Exception</span></code></p>
+
+
+
+        <p>RFC 9110 §15.6.6 — the request-line carried a well-formed
+<code>HTTP/x.y</code> version whose major version the server does not support
+(RFC9112-2.3-INVALID-VERSION).  Answered with 505 HTTP Version Not
+Supported and the connection is closed.  Distinct from
+:class:<code>BadRequestError</code>: the request <em>grammar</em> was valid.</p>
+
+
+
+
+
+
+
+
 
     </div>
 

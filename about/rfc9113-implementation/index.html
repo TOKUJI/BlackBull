@@ -5040,6 +5040,16 @@ this one, so just retry it" — and the client keeps all its other in-flight
 streams, re-sending only the stream that didn't fit.  A connection error would
 be the wrong tool: it tears down the whole connection and forces the client to
 replay <em>every</em> request, punishing it for the server's own limit.</p>
+<p>When the over-limit HEADERS arrives with <code>END_HEADERS</code> unset, the refusal is
+<strong>deferred to the end of the header block</strong>: the CONTINUATION frames are
+accumulated (still under the <code>BB_HEADER_MAX_TOTAL</code> flood cap) and
+<code>HTTP2Actor._on_continuation_frame()</code> re-checks the limit at <code>END_HEADERS</code>,
+after the HPACK decode.  <em>Because</em> two §6.10 obligations survive the refusal:
+the peer's in-flight CONTINUATION frames are legal (refusing early would make
+the frame loop misread them as "unexpected CONTINUATION" and escalate to a
+bogus connection error), and the block must be HPACK-decoded regardless to
+keep the shared dynamic table in sync (§4.3).  A stream that no longer
+exceeds the limit by the time its block completes is simply admitted.</p>
 <p><strong>§5.2 Flow Control</strong> ✅
 A DATA frame may be sent only when <strong>two</strong> windows both have credit — the
 stream window and the connection window.  On the <em>send</em> (outbound) side,
@@ -5117,8 +5127,9 @@ flow-control credit — so it carries the most invariants and touches the most c
 <p><strong>§6.2 HEADERS — <code>Headers(FrameBase)</code></strong> ✅
 A <code>Headers</code> frame is handled by <code>HTTP2Actor._on_headers_frame()</code>, which runs the
 admission gauntlet: concurrency check first → REFUSED_STREAM if over the limit
-(§5.1.2).  If <code>END_HEADERS</code> is unset, stash the frame and set the
-<code>_frame_loop()</code>-local flag <code>waiting_continuation</code> (§6.10).
+(§5.1.2) — unless <code>END_HEADERS</code> is unset, in which case the refusal waits for
+the block to complete (§5.1.2 above).  If <code>END_HEADERS</code> is unset, stash the
+frame and set the <code>_frame_loop()</code>-local flag <code>waiting_continuation</code> (§6.10).
 Malformed headers → RST PROTOCOL_ERROR before dispatch (§8.1.1).  Extended
 CONNECT (<code>:protocol</code>) routes to WebSocket (RFC 8441).  <em>Because</em> HEADERS is the
 stream's birth certificate — every admission, framing, and routing decision has
