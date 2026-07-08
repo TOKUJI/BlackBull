@@ -312,7 +312,10 @@ class TestScopePopulation:
 
     @pytest.mark.asyncio
     async def test_server_falls_back_to_sockname_when_no_host_header(self):
-        raw = _http_request(headers={})
+        # A Host-less request is only legal on HTTP/1.0 (RFC 9112 §3.2 —
+        # HTTP/1.1 without Host is now rejected 400), so the sockname
+        # fallback is exercised through a 1.0 request.
+        raw = _http_request(version='HTTP/1.0', headers={})
         captured = {}
 
         async def capture_app(scope, receive, send):

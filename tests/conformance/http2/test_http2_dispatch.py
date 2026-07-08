@@ -472,6 +472,50 @@ class TestHTTP2MaxConcurrentStreams:
         assert 1 not in handler._stream_tasks, \
             'stream task map not cleaned up after inbound RST_STREAM'
 
+    async def test_refused_multiframe_headers_consumes_continuation(self):
+        """Bug 1.14 #2 — refusing a HEADERS with END_HEADERS=0 must not turn
+        the peer's legal CONTINUATION into a bogus connection error.
+
+        RFC 9113 §6.10: after HEADERS without END_HEADERS the peer MUST send
+        the rest of the block as CONTINUATION frames.  A server that refuses
+        the stream at the HEADERS frame and forgets it was mid-block then
+        misreads those CONTINUATIONs as 'unexpected CONTINUATION' and kills
+        the whole connection with GOAWAY(PROTOCOL_ERROR).  The block must be
+        consumed and the stream refused with RST_STREAM(REFUSED_STREAM) only.
+        """
+        from blackbull.protocol.frame_types import ErrorCodes
+
+        encoder = Encoder()
+        block = encoder.encode([(b':method', b'GET'),
+                                (b':path', b'/'),
+                                (b':scheme', b'https')])
+        mid = len(block) // 2
+        h1 = _make_headers_frame(stream_id=1, end_stream=True)
+        h3 = _make_h2_frame(FrameTypes.HEADERS, 0, 3, block[:mid])
+        c3 = _make_h2_frame(FrameTypes.CONTINUATION,
+                            HeaderFrameFlags.END_HEADERS, 3, block[mid:])
+
+        handler, _ = _make_h2_actor()
+        handler.max_concurrent_streams = 1
+        handler.receive = AsyncMock(side_effect=[h1, h3, c3, None])
+        await asyncio.wait_for(handler.run(), timeout=5)
+
+        sent = [c.args[0] for c in handler.send_frame.call_args_list
+                if hasattr(c.args[0], 'FrameType')]
+        goaways = [f for f in sent if f.FrameType() == FrameTypes.GOAWAY]
+        assert not goaways, (
+            'refused mid-block stream escalated to a connection error '
+            '(GOAWAY) on the peer\'s legal CONTINUATION'
+        )
+        refused = [f for f in sent
+                   if f.FrameType() == FrameTypes.RST_STREAM
+                   and f.stream_id == 3
+                   and getattr(f, 'error_code', None) == ErrorCodes.REFUSED_STREAM]
+        assert len(refused) == 1, (
+            f'expected exactly one RST_STREAM(REFUSED_STREAM) for stream 3, '
+            f'got {len(refused)}'
+        )
+
     async def test_closed_stream_frees_slot(self):
         """After a stream closes, a new one must be accepted within the limit."""
         h1 = _make_headers_frame(stream_id=1, end_stream=True)

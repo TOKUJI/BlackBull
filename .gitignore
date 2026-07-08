@@ -160,3 +160,6 @@ bench/sprint-logs/
 bench/conformance/results/*.txt
 bench/conformance/results/*.xml
 bench/conformance/results/*.json
+
+# Http11Probe run output (kept directory, ignore data files)
+bench/http11probe/results/*.json

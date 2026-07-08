@@ -11,6 +11,9 @@ deliberate protocol misbehaviour.
 [![RFC conformance](https://github.com/TOKUJI/BlackBull/actions/workflows/conformance.yml/badge.svg)](https://github.com/TOKUJI/BlackBull/actions/workflows/conformance.yml)
 [![Benchmarked by HttpArena](https://cdn.jsdelivr.net/gh/MDA2AV/httparena-badge/wordmark.svg)](https://www.http-arena.com/leaderboard/)
 
+**[Live demo →](https://blackbull.alwaysdata.net/)** — BlackBull running in
+production on a free-tier host, no external server in front of it.
+
 ## Hello, world
 
 ```python

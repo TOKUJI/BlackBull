@@ -157,6 +157,17 @@ streams, re-sending only the stream that didn't fit.  A connection error would
 be the wrong tool: it tears down the whole connection and forces the client to
 replay *every* request, punishing it for the server's own limit.
 
+When the over-limit HEADERS arrives with `END_HEADERS` unset, the refusal is
+**deferred to the end of the header block**: the CONTINUATION frames are
+accumulated (still under the `BB_HEADER_MAX_TOTAL` flood cap) and
+`HTTP2Actor._on_continuation_frame()` re-checks the limit at `END_HEADERS`,
+after the HPACK decode.  *Because* two §6.10 obligations survive the refusal:
+the peer's in-flight CONTINUATION frames are legal (refusing early would make
+the frame loop misread them as "unexpected CONTINUATION" and escalate to a
+bogus connection error), and the block must be HPACK-decoded regardless to
+keep the shared dynamic table in sync (§4.3).  A stream that no longer
+exceeds the limit by the time its block completes is simply admitted.
+
 **§5.2 Flow Control** ✅
 A DATA frame may be sent only when **two** windows both have credit — the
 stream window and the connection window.  On the *send* (outbound) side,
@@ -242,8 +253,9 @@ flow-control credit — so it carries the most invariants and touches the most c
 **§6.2 HEADERS — `Headers(FrameBase)`** ✅
 A `Headers` frame is handled by `HTTP2Actor._on_headers_frame()`, which runs the
 admission gauntlet: concurrency check first → REFUSED_STREAM if over the limit
-(§5.1.2).  If `END_HEADERS` is unset, stash the frame and set the
-`_frame_loop()`-local flag `waiting_continuation` (§6.10).
+(§5.1.2) — unless `END_HEADERS` is unset, in which case the refusal waits for
+the block to complete (§5.1.2 above).  If `END_HEADERS` is unset, stash the
+frame and set the `_frame_loop()`-local flag `waiting_continuation` (§6.10).
 Malformed headers → RST PROTOCOL_ERROR before dispatch (§8.1.1).  Extended
 CONNECT (`:protocol`) routes to WebSocket (RFC 8441).  *Because* HEADERS is the
 stream's birth certificate — every admission, framing, and routing decision has

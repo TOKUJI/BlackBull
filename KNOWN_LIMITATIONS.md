@@ -93,7 +93,7 @@ treated as bugs:
 | Wire request | nginx | BlackBull | Why we're right |
 |---|---|---|---|
 | `GET&nbsp;&nbsp;http://localhost/x HTTP/1.0` (double-SP between method and target) | 200 | 400 | RFC 9112 §3 — request-line tokens are separated by exactly one SP.  nginx is lenient; we reject. |
-| `GET  /x HTTP/9.9` (validation-order on unknown version) | 400 | 505 | RFC 9110 §15 — unsupported HTTP version is 505 (HTTP Version Not Supported); nginx returns the more generic 400. |
+| `GET&nbsp;&nbsp;http://localhost/x HTTP/9.9` (double-SP **and** unknown version) | 505 | 400 | Validation-order choice: the request-line SP grammar (RFC 9112 §3) is checked before the HTTP version, so the malformed line is 400 first.  nginx reports the version problem (505) instead.  A *well-formed* request with an unsupported version does get 505 from BlackBull (RFC 9110 §15.6.6). |
 
 Both are documented in
 [`tests/conformance/http1/fuzz/user-corpus/diff_README.md`](tests/conformance/http1/fuzz/user-corpus/).

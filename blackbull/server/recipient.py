@@ -98,6 +98,28 @@ def _validate_chunk_ext(ext: bytes) -> None:
                 raise _bad_request(f'invalid chunk-ext-val {val!r}')
 
 
+# Bug 1.24 (MAL-CHUNK-EXT-64K, CVE-2023-39326 class) — hard bound on any
+# single chunk-framing line (chunk-size + chunk-ext, or one trailer field
+# line).  Mirrors the BB_HEADER_MAX_LINE default: extensions and trailers
+# are ignored on receipt, so nothing legitimate needs more.  Without the
+# bound, ``asyncio.StreamReader.readuntil`` hits its own buffer limit first
+# and raises ``LimitOverrunError`` — a ValueError the dispatcher's 400 seam
+# doesn't catch — surfacing as a 500.
+_CHUNK_LINE_MAX = 8192
+
+# RFC 9110 §6.5.1 — fields controlling message framing, routing, request
+# modifiers, authentication, or content handling are prohibited in a
+# chunked trailer section (SMUG-TRAILER-*).  BlackBull never merges
+# trailers into the header section, but silently swallowing these invites
+# a front-end that *does* merge them to be desynced through us — reject.
+_PROHIBITED_TRAILER_FIELDS = frozenset((
+    b'transfer-encoding', b'content-length', b'host', b'content-type',
+    b'content-encoding', b'content-range', b'trailer', b'te',
+    b'authorization', b'proxy-authorization', b'cookie', b'set-cookie',
+    b'cache-control', b'expect', b'max-forwards', b'pragma', b'range',
+))
+
+
 def _parse_chunk_size(line: bytes) -> int:
     """RFC 9112 §7.1.1 — ``chunk-size = 1*HEXDIG`` optionally followed by
     ``chunk-ext``.  Validate the size token strictly (no sign, no ``0x``
@@ -507,6 +529,38 @@ class HTTP1Recipient(BaseRecipient):
             self.framing_broken = True
             raise
 
+    async def _read_chunk_line(self) -> bytes:
+        """Read one line of chunked framing (chunk-size line or trailer
+        line) with a hard length bound.
+
+        Reads to bare LF, not CRLF: a bare-LF-terminated line then returns
+        immediately and fails the caller's CRLF check with a 400 instead of
+        blocking in ``readuntil`` until the peer gives up
+        (SMUG-CHUNK-LF-TERM / SMUG-CHUNK-LF-TRAILER were timeouts, not
+        rejections, before this).  Length violations — whether detected by
+        our own bound or pre-empted by ``asyncio.StreamReader``'s buffer
+        limit (``LimitOverrunError``) — surface as 400 with the stream
+        marked unframeable (bug 1.24, MAL-CHUNK-EXT-64K).
+        """
+        try:
+            line = await self._read_with_timeout(self._reader.readuntil(b'\n'))
+        except asyncio.LimitOverrunError as exc:
+            self.framing_broken = True
+            log_cap_hit('h1_chunk_line_length',
+                        requested=exc.consumed, limit=_CHUNK_LINE_MAX,
+                        scope_path=self._scope.get('path') if self._scope else None,
+                        protocol='http1')
+            raise _bad_request(
+                'chunk framing line exceeds length limit') from None
+        if len(line) > _CHUNK_LINE_MAX:
+            self.framing_broken = True
+            log_cap_hit('h1_chunk_line_length',
+                        requested=len(line), limit=_CHUNK_LINE_MAX,
+                        scope_path=self._scope.get('path') if self._scope else None,
+                        protocol='http1')
+            raise _bad_request('chunk framing line exceeds length limit')
+        return line
+
     async def _read_with_timeout(self, coro):
         """Run *coro* under the configured body_timeout, if any."""
         if self._body_timeout > 0 and self._deadline is not None:
@@ -525,18 +579,30 @@ class HTTP1Recipient(BaseRecipient):
 
         try:
             if self._chunked:
-                size_line = await self._read_with_timeout(
-                    self._reader.readuntil(b'\r\n'))
+                size_line = await self._read_chunk_line()
                 chunk_size = self._parse_chunk_size_or_400(size_line)
                 if chunk_size == 0:
                     # RFC 9112 §7.1.2 — last-chunk is followed by an
                     # optional trailer-part and then a final CRLF.  Read
-                    # lines until we hit the terminator.
+                    # lines until we hit the terminator.  Each line must be
+                    # CRLF-terminated (a bare-LF terminator is the same
+                    # framing violation as on the chunk-size line), and
+                    # RFC 9110 §6.5.1-prohibited fields are rejected.
                     while True:
-                        line = await self._read_with_timeout(
-                            self._reader.readuntil(b'\r\n'))
+                        line = await self._read_chunk_line()
                         if line == b'\r\n':
                             break
+                        if not line.endswith(b'\r\n'):
+                            self.framing_broken = True
+                            raise _bad_request(
+                                f'trailer line not CRLF-terminated: '
+                                f'{line[-8:]!r}')
+                        name = line.split(b':', 1)[0].strip(b' \t').lower()
+                        if name in _PROHIBITED_TRAILER_FIELDS:
+                            self.framing_broken = True
+                            raise _bad_request(
+                                f'prohibited trailer field {name!r} '
+                                f'(RFC 9110 §6.5.1)')
                     self._done = True
                     return {'type': ASGIEvent.HTTP_REQUEST, 'body': b'', 'more_body': False}
                 # RFC 9112 §7.1 — the chunk-data is exactly ``chunk_size``

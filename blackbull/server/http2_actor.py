@@ -1052,6 +1052,17 @@ class HTTP2Actor(Actor):
     ) -> bool:
         """Handle a HEADERS frame; return True if stream task spawned, False if awaiting CONTINUATION."""
         if self._active_stream_count >= self.max_concurrent_streams:
+            if not frame.end_headers:
+                # Bug 1.14 #2 — the header block legally continues in
+                # CONTINUATION frames (RFC 9113 §6.10); refusing here would
+                # leave run() not expecting them and escalate the peer's
+                # legal CONTINUATION into a bogus connection error.  Keep
+                # accumulating the block (the flood cap still bounds it);
+                # ``_on_continuation_frame`` re-checks capacity at
+                # END_HEADERS and refuses there — after the HPACK decode,
+                # which must happen regardless to keep the dynamic table
+                # in sync (§4.3).
+                return False
             log_cap_hit('h2_max_concurrent_streams',
                         requested=self._active_stream_count + 1,
                         limit=self.max_concurrent_streams,
