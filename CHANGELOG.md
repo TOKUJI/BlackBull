@@ -31,65 +31,40 @@ so the editable install's metadata catches up.
 
 ## [Unreleased]
 
-Closes the two Sprint 62 deferrals from the 2026-07-07 comprehensive audit:
-consume-based inbound HTTP/2 flow control
-(`proposals/consume-based-inbound-flow-control.md`) and the strict-peer
-multi-stream concurrency gate for the shared connection send window
-(audit bug 1.2).
-
-### Fixed
-
-- **Consume-based inbound HTTP/2 flow control** — `WINDOW_UPDATE` credit for
-  an inbound DATA frame is now replayed when the application *consumes* the
-  event off the stream's recipient queue, not when the frame is enqueued
-  (`HTTP2Recipient` gained a `credit_callback`, mirroring `HTTP2WSReader`'s
-  credit-replay shape). A handler that stalls reading (e.g. a bidi gRPC
-  handler blocked on `yield` under response back-pressure, or a
-  client-streaming handler starved of CPU) now closes the inbound window and
-  back-pressures the peer instead of overflowing the 64-deep recipient queue
-  into `RST_STREAM(ENHANCE_YOUR_CALM)` — grpcio no longer sees intermittent
-  `RESOURCE_EXHAUSTED` on over-window request streams. The recipient queue is
-  bounded by the advertised inbound window in *bytes* (plus a generous
-  frame-count cap against zero/tiny-frame floods), so the queue-full RST is
-  now strictly an abuse backstop for peers that ignore the closed window. A
-  stream released without draining its body (handler ignored `receive`,
-  or was cancelled by RST_STREAM) replays the un-consumed balance to the
-  *connection* window so the shared stream-0 budget cannot leak shut.
-  The two Sprint 60 `xfail(strict=False)` interop tests
-  (`test_large_both_directions_over_window`,
-  `test_large_request_stream_over_window`) are now hard gates in the
-  `grpc-interop` CI job.
-
-### Added
-
-- **Strict-peer multi-stream flow-control gate (audit bug 1.2)** —
-  `test_concurrent_large_responses_share_connection_window`: 10 concurrent
-  unary calls multiplexed on ONE grpcio channel × 100 KB responses, so
-  cumulative response bytes far exceed the 65535-byte connection window.
-  Guards the shared connection send window on the wire: per-stream window
-  copies would over-emit and a strict peer kills the connection with
-  `FLOW_CONTROL_ERROR`. Runs in the `grpc-interop` CI job on every push/PR.
-- `h2_inbound_window_budget` cap-hit log site (`log_cap_hit`) — emitted when
-  a peer overruns the advertised inbound stream window (the abuse backstop
-  above); registered in the cap inventory audit.
-
-### Changed
-
-- The four enqueue-time crediting tests in
-  `tests/conformance/http2/test_http2_dispatch.py::TestHTTP2FlowControl`
-  now assert the consume-time contract (spec change): crediting tests use a
-  body-draining app, and the >65535-byte cumulative-inbound test models a
-  window-respecting (credit-paced) peer.
-
 ## [0.49.2] — 2026-07-08
 
-Sprint 63 — Http11Probe hardening (RFC 9112 §3.2 / §7.1) + audit bug 1.16.
-HTTP/1.1 request framing and request-target parsing are tightened to reject
-the smuggling / malformed-input vectors the Http11Probe baseline flagged;
-malformed chunked framing now answers a clean `400` instead of a `500` or a
-silent `200`. No public-API changes.
+Sprint 63 — Http11Probe hardening (RFC 9112 §3.2 / §7.1) + audit bug 1.16 —
+**plus** the two Sprint 62 HTTP/2 flow-control deferrals from the
+2026-07-07 comprehensive audit: consume-based inbound flow control
+(`proposals/consume-based-inbound-flow-control.md`) and the strict-peer
+multi-stream concurrency gate for the shared connection send window (audit
+bug 1.2). HTTP/1.1 request framing and request-target parsing are tightened
+to reject the smuggling / malformed-input vectors the Http11Probe baseline
+flagged; malformed chunked framing now answers a clean `400` instead of a
+`500` or a silent `200`. No public-API changes.
 
 ### Fixed
+
+- **Consume-based inbound HTTP/2 flow control (Sprint 62)** —
+  `WINDOW_UPDATE` credit for an inbound DATA frame is now replayed when the
+  application *consumes* the event off the stream's recipient queue, not
+  when the frame is enqueued (`HTTP2Recipient` gained a `credit_callback`,
+  mirroring `HTTP2WSReader`'s credit-replay shape). A handler that stalls
+  reading (e.g. a bidi gRPC handler blocked on `yield` under response
+  back-pressure, or a client-streaming handler starved of CPU) now closes
+  the inbound window and back-pressures the peer instead of overflowing the
+  64-deep recipient queue into `RST_STREAM(ENHANCE_YOUR_CALM)` — grpcio no
+  longer sees intermittent `RESOURCE_EXHAUSTED` on over-window request
+  streams. The recipient queue is bounded by the advertised inbound window
+  in *bytes* (plus a generous frame-count cap against zero/tiny-frame
+  floods), so the queue-full RST is now strictly an abuse backstop for
+  peers that ignore the closed window. A stream released without draining
+  its body (handler ignored `receive`, or was cancelled by RST_STREAM)
+  replays the un-consumed balance to the *connection* window so the shared
+  stream-0 budget cannot leak shut. The two Sprint 60
+  `xfail(strict=False)` interop tests (`test_large_both_directions_over_window`,
+  `test_large_request_stream_over_window`) are now hard gates in the
+  `grpc-interop` CI job.
 
 - **Chunked request framing (RFC 9112 §7.1)** — the chunk-size token is
   validated against the strict `1*HEXDIG` grammar *before* `int()` (rejecting
@@ -127,6 +102,24 @@ silent `200`. No public-API changes.
 - `docs/getting-started/why-blackbull.md` — a scenario-based guide for
   deciding whether BlackBull fits a given project, plus the honest
   trade-off table.
+- **Strict-peer multi-stream flow-control gate (Sprint 62, audit bug 1.2)** —
+  `test_concurrent_large_responses_share_connection_window`: 10 concurrent
+  unary calls multiplexed on ONE grpcio channel × 100 KB responses, so
+  cumulative response bytes far exceed the 65535-byte connection window.
+  Guards the shared connection send window on the wire: per-stream window
+  copies would over-emit and a strict peer kills the connection with
+  `FLOW_CONTROL_ERROR`. Runs in the `grpc-interop` CI job on every push/PR.
+- `h2_inbound_window_budget` cap-hit log site (`log_cap_hit`) — emitted when
+  a peer overruns the advertised inbound stream window (the consume-based
+  crediting abuse backstop above); registered in the cap inventory audit.
+
+### Changed
+
+- The four enqueue-time crediting tests in
+  `tests/conformance/http2/test_http2_dispatch.py::TestHTTP2FlowControl`
+  now assert the consume-time contract (spec change, Sprint 62): crediting
+  tests use a body-draining app, and the >65535-byte cumulative-inbound test
+  models a window-respecting (credit-paced) peer.
 
 ### Docs
 
@@ -140,6 +133,10 @@ silent `200`. No public-API changes.
   the two new docs pages, and an updated Architecture doc link.
   `docs/index.md` now mentions gRPC and MQTT alongside HTTP/1.1, HTTP/2,
   and WebSocket, and links the two new pages.
+- `docs/about/rfc9113-implementation.md` §5.2/§6.1/§6.9.1 updated to
+  describe consume-time inbound crediting (Sprint 62); a pre-existing
+  staleness describing the pre-bug-1.2 per-sender window scalars was
+  fixed alongside.
 
 ## [0.49.1] — 2026-07-07
 
