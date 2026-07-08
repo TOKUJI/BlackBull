@@ -302,6 +302,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../../../getting-started/why-blackbull/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Why BlackBull?
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../../../getting-started/installation/" class="md-nav__link">
         
   
@@ -4161,6 +4189,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#blackbull.server.recipient.HTTP2Recipient.credits_on_consume" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        credits_on_consume
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.server.recipient.HTTP2Recipient.mark_end_of_stream_on_headers" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4198,6 +4237,17 @@
     <span class="md-ellipsis">
       
         put_event
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.recipient.HTTP2Recipient.take_uncredited" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        take_uncredited
       
     </span>
   </a>
@@ -4643,6 +4693,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../../../about/architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../../../about/conformance/" class="md-nav__link">
         
   
@@ -4973,6 +5051,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#blackbull.server.recipient.HTTP2Recipient.credits_on_consume" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        credits_on_consume
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.server.recipient.HTTP2Recipient.mark_end_of_stream_on_headers" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5010,6 +5099,17 @@
     <span class="md-ellipsis">
       
         put_event
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.recipient.HTTP2Recipient.take_uncredited" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        take_uncredited
       
     </span>
   </a>
@@ -5552,6 +5652,19 @@ hiding the concurrency from both sides.</p>
 invokes :meth:<code>mark_end_of_stream_on_headers</code> instead of pre-queuing an empty
 <code>http.request</code> event.  The Queue is then never allocated — the empty event
 is synthesized lazily in :meth:<code>__call__</code> only if the handler reads it.</p>
+<p><strong>Consume-based inbound flow control</strong> (the Sprint 62 deferral,
+<code>proposals/consume-based-inbound-flow-control.md</code>): when constructed with
+a <code>credit_callback</code>, WINDOW_UPDATE credit for a DATA frame is replayed
+through the callback when the app <em>pops</em> the event — not when the frame is
+enqueued.  A stalled handler then stops crediting, the peer's window
+closes, and the peer back-pressures instead of overflowing a frame-count
+queue into RST_STREAM(ENHANCE_YOUR_CALM).  In this mode the queue is
+bounded by <code>credit_budget</code> bytes (the advertised inbound window — a
+conformant peer cannot exceed it) plus a generous frame-count abuse cap;
+<code>put_DATAFrame</code> returning <code>False</code> therefore means the peer overran the
+closed window or dribbled degenerate frames, and the RST is a true abuse
+backstop.  Without a callback the historical bounded-queue,
+credit-at-enqueue behaviour is preserved (push streams, direct test use).</p>
 
 
 
@@ -5570,6 +5683,30 @@ is synthesized lazily in :meth:<code>__call__</code> only if the handler reads i
 
 
 
+
+<div class="doc doc-object doc-attribute">
+
+
+
+<h4 id="blackbull.server.recipient.HTTP2Recipient.credits_on_consume" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">credits_on_consume</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-property"><code>property</code></small>
+  </span>
+
+<a href="#blackbull.server.recipient.HTTP2Recipient.credits_on_consume" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>True when WINDOW_UPDATE credit is replayed at consume-time.</p>
+<p>The actor must then NOT credit at enqueue — the recipient's
+<code>credit_callback</code> owns the replay.</p>
+
+    </div>
+
+</div>
 
 
 
@@ -5605,7 +5742,9 @@ with a flag — saves one <code>asyncio.Queue</code> allocation per body-less re
 
     <div class="doc doc-contents ">
 
-        <p>Enqueue a DATA frame event. Returns False if the queue is full.</p>
+        <p>Enqueue a DATA frame event.  Returns False when the frame must be
+refused (the caller answers RST_STREAM): queue full in legacy mode;
+inbound-window overrun or a tiny-frame flood in consume-crediting mode.</p>
 
 
     </div>
@@ -5644,6 +5783,29 @@ was ever created — no consumer can be waiting.</p>
     <div class="doc doc-contents ">
 
         <p>Enqueue a pre-built event dict. Returns False if the queue is full.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.server.recipient.HTTP2Recipient.take_uncredited" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">take_uncredited</span><span class="p">()</span></code>
+
+<a href="#blackbull.server.recipient.HTTP2Recipient.take_uncredited" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Return and clear the un-consumed credit balance.</p>
+<p>Bytes enqueued but never popped by the app (a handler that finished —
+or was RST — without draining its body).  The actor replays this to
+the CONNECTION window when the stream is released, otherwise the
+shared window leaks shut for every later stream; the stream-level
+window is moot once the stream closes (RFC 9113 §5.1).</p>
 
 
     </div>

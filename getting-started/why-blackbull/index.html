@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://TOKUJI.github.io/BlackBull/deployment/behind-nginx/">
+        <link rel="canonical" href="https://TOKUJI.github.io/BlackBull/getting-started/why-blackbull/">
       
       
-        <link rel="prev" href="../tls/">
+        <link rel="prev" href="../..">
       
       
-        <link rel="next" href="../unix-and-fd/">
+        <link rel="next" href="../installation/">
       
       
         
@@ -27,7 +27,7 @@
     
     
       
-        <title>Behind nginx - BlackBull</title>
+        <title>Why BlackBull? - BlackBull</title>
       
     
     
@@ -72,7 +72,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#behind-nginx" class="md-skip">
+        <a href="#is-blackbull-right-for-your-project" class="md-skip">
           Skip to content
         </a>
       
@@ -108,7 +108,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Behind nginx
+              Why BlackBull?
             
           </span>
         </div>
@@ -252,18 +252,20 @@
       
   
   
+    
   
   
+  
     
     
     
     
     
-    <li class="md-nav__item md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" checked>
         
           
           <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
@@ -284,7 +286,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_2">
             <span class="md-nav__icon md-icon"></span>
             
@@ -299,10 +301,37 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../../getting-started/why-blackbull/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Why BlackBull?
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -318,6 +347,170 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#scenarios-where-blackbull-excels" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Scenarios where BlackBull excels
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Scenarios where BlackBull excels">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#multiple-protocols-in-one-process" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Multiple protocols in one process
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#you-want-to-see-what-your-http-server-is-doing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        You want to see what your HTTP server is doing
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#you-need-to-test-protocol-edge-cases" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        You need to test protocol edge cases
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#you-deploy-to-arm-risc-v-or-constrained-environments" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        You deploy to ARM, RISC-V, or constrained environments
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#throughput-matters-more-than-ecosystem-breadth" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Throughput matters more than ecosystem breadth
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#scenarios-where-another-framework-may-fit-better" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Scenarios where another framework may fit better
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Scenarios where another framework may fit better">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#a-standard-crud-api-with-rich-openapi" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A standard CRUD API with rich OpenAPI
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#built-in-authentication-and-rate-limiting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Built-in authentication and rate limiting
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#anyio-trio-compatibility" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        AnyIO / Trio compatibility
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#server-driven-ui-liveview-style" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Server-driven UI (LiveView-style)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-honest-trade-off" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The honest trade-off
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -330,7 +523,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../getting-started/installation/" class="md-nav__link">
+      <a href="../installation/" class="md-nav__link">
         
   
   
@@ -358,7 +551,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../getting-started/hello-world/" class="md-nav__link">
+      <a href="../hello-world/" class="md-nav__link">
         
   
   
@@ -386,7 +579,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../getting-started/first-app/" class="md-nav__link">
+      <a href="../first-app/" class="md-nav__link">
         
   
   
@@ -1004,20 +1197,18 @@
       
   
   
-    
   
   
-  
     
     
     
     
     
-    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
         
           
           <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
@@ -1038,7 +1229,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_4">
             <span class="md-nav__icon md-icon"></span>
             
@@ -1056,7 +1247,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../running/" class="md-nav__link">
+      <a href="../../deployment/running/" class="md-nav__link">
         
   
   
@@ -1084,7 +1275,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../workers/" class="md-nav__link">
+      <a href="../../deployment/workers/" class="md-nav__link">
         
   
   
@@ -1112,7 +1303,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../tls/" class="md-nav__link">
+      <a href="../../deployment/tls/" class="md-nav__link">
         
   
   
@@ -1137,37 +1328,10 @@
                 
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Behind nginx
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../../deployment/behind-nginx/" class="md-nav__link">
         
   
   
@@ -1183,92 +1347,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#setup" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Setup
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#complete-nginx-configuration" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Complete nginx configuration
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#trusted-proxy-headers" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Trusted-proxy headers
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#docker" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Docker
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#going-one-step-further-af_unix" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Going one step further — AF_UNIX
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#next" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Next
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -1281,7 +1359,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../unix-and-fd/" class="md-nav__link">
+      <a href="../../deployment/unix-and-fd/" class="md-nav__link">
         
   
   
@@ -1309,7 +1387,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../hot-reload/" class="md-nav__link">
+      <a href="../../deployment/hot-reload/" class="md-nav__link">
         
   
   
@@ -4654,65 +4732,143 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#setup" class="md-nav__link">
+  <a href="#scenarios-where-blackbull-excels" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Setup
+        Scenarios where BlackBull excels
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Scenarios where BlackBull excels">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#multiple-protocols-in-one-process" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Multiple protocols in one process
       
     </span>
   </a>
   
 </li>
-      
-        <li class="md-nav__item">
-  <a href="#complete-nginx-configuration" class="md-nav__link">
+        
+          <li class="md-nav__item">
+  <a href="#you-want-to-see-what-your-http-server-is-doing" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Complete nginx configuration
+        You want to see what your HTTP server is doing
       
     </span>
   </a>
   
 </li>
-      
-        <li class="md-nav__item">
-  <a href="#trusted-proxy-headers" class="md-nav__link">
+        
+          <li class="md-nav__item">
+  <a href="#you-need-to-test-protocol-edge-cases" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Trusted-proxy headers
+        You need to test protocol edge cases
       
     </span>
   </a>
   
 </li>
-      
-        <li class="md-nav__item">
-  <a href="#docker" class="md-nav__link">
+        
+          <li class="md-nav__item">
+  <a href="#you-deploy-to-arm-risc-v-or-constrained-environments" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Docker
+        You deploy to ARM, RISC-V, or constrained environments
       
     </span>
   </a>
   
 </li>
-      
-        <li class="md-nav__item">
-  <a href="#going-one-step-further-af_unix" class="md-nav__link">
+        
+          <li class="md-nav__item">
+  <a href="#throughput-matters-more-than-ecosystem-breadth" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Going one step further — AF_UNIX
+        Throughput matters more than ecosystem breadth
       
     </span>
   </a>
   
 </li>
+        
+      </ul>
+    </nav>
+  
+</li>
       
         <li class="md-nav__item">
-  <a href="#next" class="md-nav__link">
+  <a href="#scenarios-where-another-framework-may-fit-better" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Next
+        Scenarios where another framework may fit better
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Scenarios where another framework may fit better">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#a-standard-crud-api-with-rich-openapi" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A standard CRUD API with rich OpenAPI
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#built-in-authentication-and-rate-limiting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Built-in authentication and rate limiting
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#anyio-trio-compatibility" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        AnyIO / Trio compatibility
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#server-driven-ui-liveview-style" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Server-driven UI (LiveView-style)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-honest-trade-off" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The honest trade-off
       
     </span>
   </a>
@@ -4739,152 +4895,87 @@
   
 
 
-<h1 id="behind-nginx">Behind nginx<a class="headerlink" href="#behind-nginx" title="Permanent link">&para;</a></h1>
-<p>For most production deployments, running BlackBull behind a
-reverse proxy (nginx, Caddy) is the simplest topology — the
-proxy handles TLS termination, static files, and load balancing
-across multiple processes.</p>
-<p>This page covers the nginx side of that setup and the
-<code>TrustedProxy</code> middleware on the BlackBull side that recovers
-client IP and scheme from the proxy headers.</p>
-<h2 id="setup">Setup<a class="headerlink" href="#setup" title="Permanent link">&para;</a></h2>
-<p>Start BlackBull <strong>without</strong> TLS — nginx handles certificates:</p>
-<div class="highlight"><pre><span></span><code>python<span class="w"> </span>app.py<span class="w"> </span>--port<span class="w"> </span><span class="m">8000</span><span class="w">   </span><span class="c1"># plain HTTP/1.1; no --cert / --key</span>
-</code></pre></div>
-<p>nginx terminates TLS and HTTP/2 toward clients, then proxies to
-BlackBull over HTTP/1.1.  Regular HTTP requests, WebSocket
-upgrades, and Server-Sent Events all work through this topology.</p>
-<h2 id="complete-nginx-configuration">Complete nginx configuration<a class="headerlink" href="#complete-nginx-configuration" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><span class="k">upstream</span><span class="w"> </span><span class="s">blackbull</span><span class="w"> </span><span class="p">{</span>
-<span class="w">    </span><span class="kn">server</span><span class="w"> </span><span class="n">127.0.0.1</span><span class="p">:</span><span class="mi">8000</span><span class="p">;</span>
-<span class="w">    </span><span class="kn">keepalive</span><span class="w"> </span><span class="mi">64</span><span class="p">;</span>
-<span class="p">}</span>
-
-<span class="k">server</span><span class="w"> </span><span class="p">{</span>
-<span class="w">    </span><span class="kn">listen</span><span class="w"> </span><span class="mi">443</span><span class="w"> </span><span class="s">ssl</span><span class="p">;</span>
-<span class="w">    </span><span class="kn">http2</span><span class="w"> </span><span class="no">on</span><span class="p">;</span>
-<span class="w">    </span><span class="kn">server_name</span><span class="w"> </span><span class="s">example.com</span><span class="p">;</span>
-
-<span class="w">    </span><span class="kn">ssl_certificate</span><span class="w">     </span><span class="s">/etc/letsencrypt/live/example.com/fullchain.pem</span><span class="p">;</span>
-<span class="w">    </span><span class="kn">ssl_certificate_key</span><span class="w"> </span><span class="s">/etc/letsencrypt/live/example.com/privkey.pem</span><span class="p">;</span>
-
-<span class="w">    </span><span class="c1"># ── Regular HTTP requests ─────────────────────────────────────────</span>
-<span class="w">    </span><span class="kn">location</span><span class="w"> </span><span class="s">/</span><span class="w"> </span><span class="p">{</span>
-<span class="w">        </span><span class="kn">proxy_pass</span><span class="w">         </span><span class="s">http://blackbull</span><span class="p">;</span>
-<span class="w">        </span><span class="kn">proxy_http_version</span><span class="w"> </span><span class="mi">1</span><span class="s">.1</span><span class="p">;</span>
-<span class="w">        </span><span class="kn">proxy_set_header</span><span class="w">   </span><span class="s">Host</span><span class="w">              </span><span class="nv">$host</span><span class="p">;</span>
-<span class="w">        </span><span class="kn">proxy_set_header</span><span class="w">   </span><span class="s">X-Forwarded-For</span><span class="w">   </span><span class="nv">$proxy_add_x_forwarded_for</span><span class="p">;</span>
-<span class="w">        </span><span class="kn">proxy_set_header</span><span class="w">   </span><span class="s">X-Forwarded-Proto</span><span class="w"> </span><span class="nv">$scheme</span><span class="p">;</span>
-<span class="w">        </span><span class="kn">proxy_set_header</span><span class="w">   </span><span class="s">Connection</span><span class="w">        </span><span class="s">&quot;&quot;</span><span class="p">;</span><span class="w">   </span><span class="c1"># enable keep-alive to upstream</span>
-<span class="w">    </span><span class="p">}</span>
-
-<span class="w">    </span><span class="c1"># ── WebSocket ─────────────────────────────────────────────────────</span>
-<span class="w">    </span><span class="c1"># WebSocket requires HTTP/1.1 Upgrade; match paths that need it explicitly.</span>
-<span class="w">    </span><span class="kn">location</span><span class="w"> </span><span class="s">/ws</span><span class="w"> </span><span class="p">{</span>
-<span class="w">        </span><span class="kn">proxy_pass</span><span class="w">         </span><span class="s">http://blackbull</span><span class="p">;</span>
-<span class="w">        </span><span class="kn">proxy_http_version</span><span class="w"> </span><span class="mi">1</span><span class="s">.1</span><span class="p">;</span>
-<span class="w">        </span><span class="kn">proxy_set_header</span><span class="w">   </span><span class="s">Host</span><span class="w">       </span><span class="nv">$host</span><span class="p">;</span>
-<span class="w">        </span><span class="kn">proxy_set_header</span><span class="w">   </span><span class="s">Upgrade</span><span class="w">    </span><span class="nv">$http_upgrade</span><span class="p">;</span>
-<span class="w">        </span><span class="kn">proxy_set_header</span><span class="w">   </span><span class="s">Connection</span><span class="w"> </span><span class="s">&quot;upgrade&quot;</span><span class="p">;</span>
-<span class="w">        </span><span class="kn">proxy_read_timeout</span><span class="w"> </span><span class="s">3600s</span><span class="p">;</span><span class="w">     </span><span class="c1"># keep WS connection open</span>
-<span class="w">    </span><span class="p">}</span>
-
-<span class="w">    </span><span class="c1"># ── Server-Sent Events ────────────────────────────────────────────</span>
-<span class="w">    </span><span class="kn">location</span><span class="w"> </span><span class="s">/sse</span><span class="w"> </span><span class="p">{</span>
-<span class="w">        </span><span class="kn">proxy_pass</span><span class="w">                </span><span class="s">http://blackbull</span><span class="p">;</span>
-<span class="w">        </span><span class="kn">proxy_http_version</span><span class="w">        </span><span class="mi">1</span><span class="s">.1</span><span class="p">;</span>
-<span class="w">        </span><span class="kn">proxy_set_header</span><span class="w">          </span><span class="s">Host</span><span class="w"> </span><span class="nv">$host</span><span class="p">;</span>
-<span class="w">        </span><span class="kn">proxy_set_header</span><span class="w">          </span><span class="s">Connection</span><span class="w"> </span><span class="s">&quot;&quot;</span><span class="p">;</span>
-<span class="w">        </span><span class="kn">proxy_buffering</span><span class="w">           </span><span class="no">off</span><span class="p">;</span><span class="w">      </span><span class="c1"># flush SSE events immediately</span>
-<span class="w">        </span><span class="kn">proxy_cache</span><span class="w">               </span><span class="no">off</span><span class="p">;</span>
-<span class="w">        </span><span class="kn">proxy_read_timeout</span><span class="w">        </span><span class="s">3600s</span><span class="p">;</span>
-<span class="w">        </span><span class="kn">chunked_transfer_encoding</span><span class="w"> </span><span class="no">on</span><span class="p">;</span>
-<span class="w">    </span><span class="p">}</span>
-<span class="p">}</span>
-
-<span class="c1"># Redirect plain HTTP to HTTPS</span>
-<span class="k">server</span><span class="w"> </span><span class="p">{</span>
-<span class="w">    </span><span class="kn">listen</span><span class="w"> </span><span class="mi">80</span><span class="p">;</span>
-<span class="w">    </span><span class="kn">server_name</span><span class="w"> </span><span class="s">example.com</span><span class="p">;</span>
-<span class="w">    </span><span class="kn">return</span><span class="w"> </span><span class="mi">301</span><span class="w"> </span><span class="s">https://</span><span class="nv">$host$request_uri</span><span class="p">;</span>
-<span class="p">}</span>
-</code></pre></div>
-<h2 id="trusted-proxy-headers">Trusted-proxy headers<a class="headerlink" href="#trusted-proxy-headers" title="Permanent link">&para;</a></h2>
-<p>By default, <code>scope['client']</code> is the raw TCP peer (nginx's
-loopback address) and <code>scope['scheme']</code> is <code>'http'</code> even when
-the client connected via HTTPS.  Enable <code>TrustedProxy</code> to
-rewrite both from the proxy's forwarded headers:</p>
-<div class="highlight"><pre><span></span><code><span class="c1"># Shortcut on BlackBull — registers TrustedProxy automatically</span>
-<span class="n">app</span> <span class="o">=</span> <span class="n">BlackBull</span><span class="p">(</span><span class="n">trusted_proxies</span><span class="o">=</span><span class="p">[</span><span class="s1">&#39;127.0.0.1&#39;</span><span class="p">,</span> <span class="s1">&#39;::1&#39;</span><span class="p">])</span>
-
-<span class="c1"># Or register explicitly for more control (e.g. private subnet):</span>
-<span class="kn">from</span><span class="w"> </span><span class="nn">blackbull</span><span class="w"> </span><span class="kn">import</span> <span class="n">TrustedProxy</span>
-<span class="n">app</span><span class="o">.</span><span class="n">use</span><span class="p">(</span><span class="n">TrustedProxy</span><span class="p">([</span><span class="s1">&#39;127.0.0.1&#39;</span><span class="p">,</span> <span class="s1">&#39;::1&#39;</span><span class="p">,</span> <span class="s1">&#39;10.0.0.0/8&#39;</span><span class="p">]))</span>
-</code></pre></div>
-<p>With trusted-proxy support active:</p>
+<h1 id="is-blackbull-right-for-your-project">Is BlackBull right for your project?<a class="headerlink" href="#is-blackbull-right-for-your-project" title="Permanent link">&para;</a></h1>
+<p>BlackBull is not a general-purpose "use me for everything" framework. It makes
+specific <a href="../../about/architecture/">architectural bets</a> that pay off in
+specific scenarios and cost you elsewhere. This page helps you self-select in
+about 60 seconds.</p>
+<h2 id="scenarios-where-blackbull-excels">Scenarios where BlackBull excels<a class="headerlink" href="#scenarios-where-blackbull-excels" title="Permanent link">&para;</a></h2>
+<h3 id="multiple-protocols-in-one-process">Multiple protocols in one process<a class="headerlink" href="#multiple-protocols-in-one-process" title="Permanent link">&para;</a></h3>
+<p>You're building an IoT gateway that ingests MQTT sensor data, serves a
+WebSocket dashboard, exposes a REST API, and talks to backend services over
+gRPC — all from a single <code>python app.py</code> on a small box. Most Python stacks
+need a reverse proxy plus a separate MQTT broker; BlackBull serves all of it
+in one runtime, on one process.</p>
+<h3 id="you-want-to-see-what-your-http-server-is-doing">You want to see what your HTTP server is doing<a class="headerlink" href="#you-want-to-see-what-your-http-server-is-doing" title="Permanent link">&para;</a></h3>
+<p>Every frame, every stream-state transition, every HPACK encoding is visible
+in your debugger. The protocol implementations are pure Python — no C
+extensions, no opaque libraries. That makes BlackBull a strong platform for
+learning HTTP/2 internals or prototyping protocol-level behaviour.</p>
+<h3 id="you-need-to-test-protocol-edge-cases">You need to test protocol edge cases<a class="headerlink" href="#you-need-to-test-protocol-edge-cases" title="Permanent link">&para;</a></h3>
+<p>BlackBull ships a programmable fault-injection framework: craft malformed
+HTTP/2 frames, simulate connection drops mid-stream, run differential oracles
+against a reference implementation. If your product depends on HTTP/2
+correctness under adverse conditions, this toolchain is unusual and useful.</p>
+<h3 id="you-deploy-to-arm-risc-v-or-constrained-environments">You deploy to ARM, RISC-V, or constrained environments<a class="headerlink" href="#you-deploy-to-arm-risc-v-or-constrained-environments" title="Permanent link">&para;</a></h3>
+<p>Zero C extensions means zero cross-compilation pain. BlackBull runs anywhere
+CPython runs — no build step, no native dependencies to source for your
+target architecture.</p>
+<h3 id="throughput-matters-more-than-ecosystem-breadth">Throughput matters more than ecosystem breadth<a class="headerlink" href="#throughput-matters-more-than-ecosystem-breadth" title="Permanent link">&para;</a></h3>
+<p>BlackBull is competitive-to-faster than the popular Python async frameworks on
+identical hardware (see the <code>bench/</code> HttpArena results). The trade-off is
+fewer community extensions, tutorials, and Stack Overflow answers.</p>
+<h2 id="scenarios-where-another-framework-may-fit-better">Scenarios where another framework may fit better<a class="headerlink" href="#scenarios-where-another-framework-may-fit-better" title="Permanent link">&para;</a></h2>
+<h3 id="a-standard-crud-api-with-rich-openapi">A standard CRUD API with rich OpenAPI<a class="headerlink" href="#a-standard-crud-api-with-rich-openapi" title="Permanent link">&para;</a></h3>
+<p>If your primary need is Pydantic models → OpenAPI schema → Swagger UI, a stack
+with mature body-schema generation and security-scheme declaration will get
+you to production faster today. BlackBull's OpenAPI support is functional but
+not yet as complete.</p>
+<h3 id="built-in-authentication-and-rate-limiting">Built-in authentication and rate limiting<a class="headerlink" href="#built-in-authentication-and-rate-limiting" title="Permanent link">&para;</a></h3>
+<p>BlackBull currently leaves auth and rate limiting to application code. If you
+want batteries-included <code>AuthenticationMiddleware</code> and rate-limiting backends,
+another framework reduces boilerplate for standard API projects.</p>
+<h3 id="anyio-trio-compatibility">AnyIO / Trio compatibility<a class="headerlink" href="#anyio-trio-compatibility" title="Permanent link">&para;</a></h3>
+<p>BlackBull is asyncio-only. If your codebase or dependencies require Trio via
+AnyIO, that's a genuine mismatch.</p>
+<h3 id="server-driven-ui-liveview-style">Server-driven UI (LiveView-style)<a class="headerlink" href="#server-driven-ui-liveview-style" title="Permanent link">&para;</a></h3>
+<p>If your primary need is server-driven, component-model UI updates, a
+purpose-built stack for that pattern will serve you better. BlackBull's
+WebSocket support is excellent for data channels but is not a UI framework.</p>
+<h2 id="the-honest-trade-off">The honest trade-off<a class="headerlink" href="#the-honest-trade-off" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
 <tr>
-<th><code>scope</code> key</th>
-<th>Without middleware</th>
-<th>With middleware</th>
+<th>BlackBull invests in</th>
+<th>BlackBull defers to the ecosystem</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td><code>scope['client']</code></td>
-<td>nginx's loopback IP</td>
-<td>real client IP (from <code>X-Forwarded-For</code>)</td>
+<td>Protocol correctness (h2spec, Autobahn, differential oracle)</td>
+<td>Auth / rate-limiting middleware</td>
 </tr>
 <tr>
-<td><code>scope['scheme']</code></td>
-<td><code>'http'</code></td>
-<td><code>'https'</code> (from <code>X-Forwarded-Proto</code>)</td>
+<td>Multi-protocol density (five protocols, one process)</td>
+<td>ORM / DB integration</td>
+</tr>
+<tr>
+<td>Raw throughput on identical hardware</td>
+<td>Tutorial count / community size</td>
+</tr>
+<tr>
+<td>Testing infrastructure (fault injection, oracle, fuzzing)</td>
+<td>Pydantic-grade body-schema generation</td>
+</tr>
+<tr>
+<td>Pure Python (zero C extensions, easy deploy)</td>
+<td>AnyIO / Trio compatibility</td>
 </tr>
 </tbody>
 </table>
-<p>Supported headers, in precedence order:</p>
-<ol>
-<li>RFC 7239 <code>Forwarded</code> — <code>for=&lt;ip&gt;; proto=&lt;scheme&gt;</code></li>
-<li><code>X-Forwarded-For</code> — comma-separated chain; leftmost
-   non-trusted IP wins</li>
-<li><code>X-Forwarded-Proto</code></li>
-</ol>
-<p>Headers are <strong>only applied when the direct TCP peer is in the
-trusted set</strong>, preventing clients from spoofing their IP by
-forging <code>X-Forwarded-For</code>.</p>
-<h2 id="docker">Docker<a class="headerlink" href="#docker" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><span class="k">FROM</span><span class="w"> </span><span class="s">python:3.13-slim</span>
-<span class="k">WORKDIR</span><span class="w"> </span><span class="s">/app</span>
-<span class="k">COPY</span><span class="w"> </span>.<span class="w"> </span>.
-<span class="k">RUN</span><span class="w"> </span>pip<span class="w"> </span>install<span class="w"> </span>.
-<span class="k">EXPOSE</span><span class="w"> </span><span class="s">8000</span>
-<span class="k">CMD</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;python&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;app.py&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;--port&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;8000&quot;</span><span class="p">]</span>
-</code></pre></div>
-<p>Environment variables for secrets (never hardcode):</p>
-<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">os</span>
-<span class="n">DB_URL</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="p">[</span><span class="s1">&#39;DATABASE_URL&#39;</span><span class="p">]</span>
-<span class="n">SECRET</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="p">[</span><span class="s1">&#39;SECRET_KEY&#39;</span><span class="p">]</span>
-<span class="n">PORT</span>   <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;PORT&#39;</span><span class="p">,</span> <span class="mi">8000</span><span class="p">))</span>
-</code></pre></div>
-<h2 id="going-one-step-further-af_unix">Going one step further — <code>AF_UNIX</code><a class="headerlink" href="#going-one-step-further-af_unix" title="Permanent link">&para;</a></h2>
-<p>When the reverse proxy and BlackBull are on the same host, an
-<code>AF_UNIX</code> socket between them removes TCP overhead and avoids
-exposing a port on <code>0.0.0.0</code>.  See
-<a href="../unix-and-fd/">Unix and fd inheritance</a>.</p>
-<p>The nginx upstream then looks like:</p>
-<div class="highlight"><pre><span></span><code><span class="k">upstream</span><span class="w"> </span><span class="s">blackbull</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="kn">server</span><span class="w"> </span><span class="s">unix:/run/blackbull.sock</span><span class="p">;</span><span class="w"> </span><span class="p">}</span>
-</code></pre></div>
-<h2 id="next">Next<a class="headerlink" href="#next" title="Permanent link">&para;</a></h2>
-<ul>
-<li><a href="../workers/">Workers</a> — multi-worker is a natural fit behind
-  nginx; each worker can saturate one core while the proxy
-  load-balances.</li>
-<li><a href="../unix-and-fd/">Unix and fd inheritance</a> — <code>AF_UNIX</code> bind
-  pattern.</li>
-<li><a href="../tls/">TLS</a> — if you decide to terminate TLS in BlackBull
-  instead of upstream.</li>
-</ul>
+<p>For the reasoning behind these bets, see <a href="../../about/architecture/">Architecture</a>;
+for the current gaps in detail, see
+<a href="https://github.com/TOKUJI/BlackBull/blob/master/KNOWN_LIMITATIONS.md">Known limitations</a>.</p>
 
 
 

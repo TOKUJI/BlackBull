@@ -302,6 +302,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../getting-started/why-blackbull/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Why BlackBull?
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../getting-started/installation/" class="md-nav__link">
         
   
@@ -778,6 +806,17 @@
         
       </ul>
     </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#client-streaming-and-bidirectional-rpcs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Client-streaming and bidirectional RPCs
+      
+    </span>
+  </a>
   
 </li>
       
@@ -4437,6 +4476,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../about/architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../about/conformance/" class="md-nav__link">
         
   
@@ -4632,6 +4699,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#client-streaming-and-bidirectional-rpcs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Client-streaming and bidirectional RPCs
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#the-call-context" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4696,7 +4774,8 @@
 
 
 <h1 id="grpc">gRPC<a class="headerlink" href="#grpc" title="Permanent link">&para;</a></h1>
-<p>BlackBull serves <strong>unary gRPC</strong> calls over its own pure-Python HTTP/2 layer.
+<p>BlackBull serves <strong>gRPC</strong> — all four RPC shapes: unary, server-streaming,
+client-streaming, and bidirectional — over its own pure-Python HTTP/2 layer.
 gRPC is just HTTP/2 with <code>content-type: application/grpc</code> and a length-prefixed
 message body, where the call result is reported in <code>grpc-status</code> trailers — so a
 gRPC service multiplexes onto the <strong>same port</strong> as your REST and WebSocket
@@ -4766,8 +4845,28 @@ it as an async generator that <code>yield</code>s each response message:</p>
 <li>A <code>grpc-timeout</code> deadline bounds the <strong>whole</strong> stream (<code>DEADLINE_EXCEEDED</code> on
   expiry).</li>
 </ul>
-<p>Client-streaming and bidirectional streaming are not yet supported (they need the
-request delivered as a stream).</p>
+<h2 id="client-streaming-and-bidirectional-rpcs">Client-streaming and bidirectional RPCs<a class="headerlink" href="#client-streaming-and-bidirectional-rpcs" title="Permanent link">&para;</a></h2>
+<p>A handler whose first parameter is named <code>request_iter</code> (also accepted:
+<code>request_iterator</code>, <code>requests</code>, <code>request_stream</code>) receives the request as an
+<strong>async iterator</strong> of message bytes instead of one buffered <code>bytes</code> value —
+messages are delivered as they arrive on the wire. Pass
+<code>client_streaming=True</code> to override the name-based detection:</p>
+<div class="highlight"><pre><span></span><code><span class="nd">@grpc</span><span class="o">.</span><span class="n">method</span><span class="p">(</span><span class="s1">&#39;/pkg.Svc/Sum&#39;</span><span class="p">)</span>
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">sum_lengths</span><span class="p">(</span><span class="n">request_iter</span><span class="p">,</span> <span class="n">context</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bytes</span><span class="p">:</span>   <span class="c1"># client-streaming</span>
+    <span class="n">total</span> <span class="o">=</span> <span class="mi">0</span>
+    <span class="k">async</span> <span class="k">for</span> <span class="n">msg</span> <span class="ow">in</span> <span class="n">request_iter</span><span class="p">:</span>
+        <span class="n">total</span> <span class="o">+=</span> <span class="nb">len</span><span class="p">(</span><span class="n">msg</span><span class="p">)</span>
+    <span class="k">return</span> <span class="nb">str</span><span class="p">(</span><span class="n">total</span><span class="p">)</span><span class="o">.</span><span class="n">encode</span><span class="p">()</span>
+
+<span class="nd">@grpc</span><span class="o">.</span><span class="n">method</span><span class="p">(</span><span class="s1">&#39;/pkg.Svc/Echo&#39;</span><span class="p">)</span>
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">echo</span><span class="p">(</span><span class="n">request_iter</span><span class="p">,</span> <span class="n">context</span><span class="p">):</span>                   <span class="c1"># bidirectional</span>
+    <span class="k">async</span> <span class="k">for</span> <span class="n">msg</span> <span class="ow">in</span> <span class="n">request_iter</span><span class="p">:</span>
+        <span class="k">yield</span> <span class="n">msg</span>
+</code></pre></div>
+<p>The response axis is detected automatically (a plain coroutine returns one
+message; an async generator streams), so the four gRPC shapes — unary,
+server-streaming, client-streaming, and bidirectional — all register through
+the same decorator.</p>
 <h2 id="the-call-context">The call context<a class="headerlink" href="#the-call-context" title="Permanent link">&para;</a></h2>
 <p><code>GrpcContext</code> carries request metadata and lets the handler shape the outcome:</p>
 <table>
@@ -4815,11 +4914,12 @@ as <code>context.abort</code>. Any other unexpected exception becomes
 optional). Unknown methods return <code>GrpcStatus.UNIMPLEMENTED</code>.</p>
 <h2 id="scope-and-limits">Scope and limits<a class="headerlink" href="#scope-and-limits" title="Permanent link">&para;</a></h2>
 <ul>
-<li><strong>Unary and server-streaming</strong> RPCs are served (see above). Client-streaming
-  and bidirectional streaming are not yet supported — they need the request
-  delivered as a stream.</li>
-<li><strong>No message compression</strong> — a request with the compressed flag set is
-  rejected with <code>UNIMPLEMENTED</code>.</li>
+<li><strong>All four RPC shapes are served</strong>: unary, server-streaming,
+  client-streaming, and bidirectional (see above).</li>
+<li><strong>gzip message compression</strong> is supported (<code>grpc-encoding: gzip</code> /
+  <code>identity</code>); a compressed request in any other coding is rejected with
+  <code>UNIMPLEMENTED</code>, and the response advertises
+  <code>grpc-accept-encoding: identity,gzip</code> so the client can retry.</li>
 <li><strong>HTTP/2 required.</strong> Run with TLS + ALPN (<code>h2</code>) for real clients; the gRPC
   request must arrive over the HTTP/2 layer.</li>
 <li>BlackBull is <strong>server-side</strong>. For a client, use the standard <code>grpcio</code> client

@@ -14,7 +14,7 @@
       
       
       
-        <link rel="next" href="getting-started/installation/">
+        <link rel="next" href="getting-started/why-blackbull/">
       
       
         
@@ -383,6 +383,34 @@
 
           </label>
           <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="getting-started/why-blackbull/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Why BlackBull?
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
             
               
                 
@@ -4405,6 +4433,34 @@
   
   
     <li class="md-nav__item">
+      <a href="about/architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="about/conformance/" class="md-nav__link">
         
   
@@ -4639,8 +4695,9 @@
 <p>BlackBull is a Python web framework that speaks the
 <a href="https://asgi.readthedocs.io/en/latest/specs/main.html"><strong>ASGI 3.0</strong></a>
 interface<sup id="fnref:asgi"><a class="footnote-ref" href="#fn:asgi">1</a></sup>, with pure-Python implementations of HTTP/1.1, HTTP/2
-(with ALPN), and WebSocket.  No required C extensions outside the
-standard library, one <code>pip install</code>, one deployable.</p>
+(with ALPN), WebSocket, gRPC, and an MQTT 5 broker — all on one process,
+no reverse proxy or sidecar required.  No required C extensions outside
+the standard library, one <code>pip install</code>, one deployable.</p>
 <div class="admonition warning">
 <p class="admonition-title">Early Alpha</p>
 <p>BlackBull is in <strong>Early Alpha</strong>.  The API may change between MINOR
@@ -4658,6 +4715,10 @@ test coverage behind the standards-compliance claims.</p>
 <li><strong>HTTP/1.1, HTTP/2, and WebSocket</strong> on the same listener — ALPN
   negotiates HTTP/2; cleartext h2c is detected on first preface bytes;
   WebSocket-over-HTTP/2 (RFC 8441) is available as an opt-in.</li>
+<li><strong>gRPC and MQTT 5 beside HTTP</strong> — <code>app.enable_grpc()</code> serves gRPC
+  (all four RPC shapes, <code>gzip</code> compression) over the same HTTP/2 port;
+  <code>app.add_extension(MQTTExtension(...))</code> runs a pure-Python MQTT 5
+  broker on its own port, in the same process.</li>
 <li><strong>Standards conformance</strong> — RFC 9112 (HTTP/1.1), RFC 9113
   (HTTP/2 — h2spec passes), RFC 6455 (WebSocket — Autobahn passes),
   RFC 8441 (Extended CONNECT for WebSocket over HTTP/2).</li>
@@ -4698,13 +4759,17 @@ or <a href="getting-started/hello-world/">Hello World</a> for the full
 ASGI-triplet form.</p>
 <h2 id="where-to-go-next">Where to go next<a class="headerlink" href="#where-to-go-next" title="Permanent link">&para;</a></h2>
 <ul>
+<li>Not sure BlackBull fits your project? <a href="getting-started/why-blackbull/">Why BlackBull?</a>
+  walks through the scenarios where its architectural bets pay off — and where
+  another framework may serve you better.</li>
 <li>New to BlackBull? Start with <a href="getting-started/installation/">Installation</a>.</li>
 <li>Building something? The <a href="guide/">Guide</a> covers routing,
   middleware, WebSockets, error handling, HTTP/2, and configuration.</li>
 <li>Deploying? See <a href="deployment/running/">Deployment</a> for multi-worker,
   TLS, AF_UNIX, systemd activation, and behind-nginx topologies.</li>
-<li>Curious about the internals? <a href="about/internals/">Internals</a> walks
-  the actor model and the protocol stack.</li>
+<li>Curious about the design? <a href="about/architecture/">Architecture</a> covers
+  the actor model, protocol ownership, and fault injection;
+  <a href="about/internals/">Internals</a> walks the implementation in detail.</li>
 </ul>
 <div class="footnote">
 <hr />
