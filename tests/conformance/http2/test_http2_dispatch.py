@@ -134,11 +134,31 @@ class TestHTTP2FlowControl:
         )
 
     @staticmethod
+    def _draining_app():
+        """An app that reads its request body to completion then responds.
+
+        Consume-based inbound flow control credits WINDOW_UPDATE when the
+        app pops each body event — an app that ignores ``receive`` earns no
+        credit (its balance is flushed to the connection window only when
+        the stream is released), so these crediting tests must actually
+        consume.
+        """
+        async def app(scope, receive, send):
+            while True:
+                ev = await receive()
+                if ev['type'] != 'http.request' or not ev.get('more_body', False):
+                    break
+            await send({'type': 'http.response.start', 'status': 200,
+                        'headers': []})
+            await send({'type': 'http.response.body', 'body': b''})
+        return app
+
+    @staticmethod
     def _wu_increments(handler) -> list[int]:
         # Stream-level WINDOW_UPDATEs (stream_id > 0) reflect per-stream
         # DATA consumption.  Connection-level (stream_id == 0) is
         # asserted separately via :meth:`_wu_increments_conn` — the
-        # server now emits one of each per DATA frame so both windows
+        # server emits one of each per consumed DATA frame so both windows
         # stay credited (RFC 9113 §6.9.1).
         return [call.args[0].window_size
                 for call in handler.send_frame.call_args_list
@@ -164,15 +184,16 @@ class TestHTTP2FlowControl:
                 and call.args[0].stream_id == 0]
 
     async def test_single_data_frame_window_update_increment(self):
-        """Receiving one DATA frame must produce WINDOW_UPDATE with increment
-        equal to that frame's payload size (RFC 7540 §6.9)."""
+        """One DATA frame, once consumed by the app, must produce
+        WINDOW_UPDATE with increment equal to that frame's payload size
+        (RFC 7540 §6.9; credit is replayed at consume-time)."""
         payload = b'hello'
         stream_id = 1
         h_frame = _make_headers_frame(stream_id=stream_id, end_stream=False)
         d_frame = _make_h2_frame(FrameTypes.DATA, DataFrameFlags.END_STREAM,
                                  stream_id, payload)
 
-        handler, _ = _make_h2_actor()
+        handler, _ = _make_h2_actor(self._draining_app())
         handler.receive = AsyncMock(side_effect=[h_frame, d_frame, None])
         await handler.run()
 
@@ -184,7 +205,8 @@ class TestHTTP2FlowControl:
         )
 
     async def test_two_data_frames_window_update_sum(self):
-        """Two DATA frames → WINDOW_UPDATE increments must sum to total bytes."""
+        """Two DATA frames, consumed → WINDOW_UPDATE increments must sum to
+        total bytes."""
         chunk1 = b'hello'
         chunk2 = b' world'
         total = len(chunk1) + len(chunk2)
@@ -195,7 +217,7 @@ class TestHTTP2FlowControl:
         d_frame2 = _make_h2_frame(FrameTypes.DATA, DataFrameFlags.END_STREAM,
                                   stream_id, chunk2)
 
-        handler, _ = _make_h2_actor()
+        handler, _ = _make_h2_actor(self._draining_app())
         handler.receive = AsyncMock(side_effect=[h_frame, d_frame1, d_frame2, None])
         await handler.run()
 
@@ -217,21 +239,22 @@ class TestHTTP2FlowControl:
 
     async def test_single_data_frame_emits_connection_window_update(self):
         """Per RFC 9113 §6.9.1, a DATA frame consumes both the stream
-        and connection windows; the server must credit both back."""
+        and connection windows; the server must credit both back once the
+        app consumes the frame."""
         payload = b'hello'
         stream_id = 1
         h_frame = _make_headers_frame(stream_id=stream_id, end_stream=False)
         d_frame = _make_h2_frame(FrameTypes.DATA, DataFrameFlags.END_STREAM,
                                  stream_id, payload)
 
-        handler, _ = _make_h2_actor()
+        handler, _ = _make_h2_actor(self._draining_app())
         handler.receive = AsyncMock(side_effect=[h_frame, d_frame, None])
         await handler.run()
 
         conn_increments = self._wu_increments_conn(handler)
         assert any(inc == len(payload) for inc in conn_increments), (
             f'connection-level WINDOW_UPDATE with increment {len(payload)} '
-            f'must follow each delivered DATA frame; '
+            f'must follow each consumed DATA frame; '
             f'got conn-level increments={conn_increments}'
         )
 
@@ -248,6 +271,13 @@ class TestHTTP2FlowControl:
         Chunk size stays under RFC 9113 §4.2 ``max_frame_size``
         (default 16,384); 5 chunks at 16,000 bytes = 80,000 cumulative,
         which clears the 65,535 threshold.
+
+        Consume-based crediting note: a conformant peer is paced by the
+        credit it receives — it never has more than 65,535 un-credited
+        bytes in flight (a burst that ignores the closed window trips the
+        ENHANCE_YOUR_CALM abuse backstop instead).  The fake peer below
+        models that by yielding to the loop between frames so the
+        draining app consumes (and the server credits) as frames arrive.
         """
         chunk_size = 16_000  # under max_frame_size
         n_chunks = 5
@@ -263,9 +293,16 @@ class TestHTTP2FlowControl:
         total = n_chunks * chunk_size
         assert total > 65_535, 'sanity: total must exceed initial conn window'
 
-        handler, _ = _make_h2_actor()
-        handler.receive = AsyncMock(
-            side_effect=[h_frame, *data_frames, None])
+        handler, _ = _make_h2_actor(self._draining_app())
+        frames = [h_frame, *data_frames]
+
+        async def fake_receive():
+            # Yield first so the app drains what is already queued — the
+            # credit-paced behaviour of a window-respecting peer.
+            await asyncio.sleep(0)
+            return frames.pop(0) if frames else None
+
+        handler.receive = fake_receive
         await handler.run()
 
         conn_increments = self._wu_increments_conn(handler)

@@ -153,11 +153,15 @@ class TestParse:
         assert _get_scope(_http_request()).get('root_path') == ''
 
     @given(prefix=st.from_regex(r'/[a-zA-Z0-9/_-]{0,40}', fullmatch=True))
-    def test_root_path_preserved_from_x_forwarded_prefix(self, prefix):
+    def test_root_path_ignores_x_forwarded_prefix_off_the_wire(self, prefix):
+        # Spec change (audit bug 1.16, Sprint 63): a client-controlled
+        # X-Forwarded-Prefix must NOT set root_path at the parser layer —
+        # it is only honoured behind TrustedProxy (see
+        # tests/unit/test_audit_sprint63.py::TestXForwardedPrefixTrust).
         scope = _get_scope(_http_request(
             headers={'Host': 'localhost:8000', 'X-Forwarded-Prefix': prefix}
         ))
-        assert scope.get('root_path') == prefix
+        assert scope.get('root_path') == ''
 
     def test_root_path_not_set_when_prefix_absent(self):
         assert _get_scope(_http_request(headers={'Host': 'localhost:8000'})).get('root_path') == ''
@@ -365,12 +369,16 @@ class TestHTTP2ScopeFields:
         assert scope.get('root_path') == ''
 
     @given(prefix=st.from_regex(r'/[a-zA-Z0-9/_-]{0,40}', fullmatch=True))
-    def test_root_path_preserved_from_x_forwarded_prefix(self, prefix):
+    def test_x_forwarded_prefix_ignored_off_the_wire(self, prefix):
+        # Bug 1.16 (Sprint 63): same contract on the H2 path — the frame-level
+        # parser must not trust a client-supplied X-Forwarded-Prefix.  Only
+        # the TrustedProxy middleware may set root_path, after verifying the
+        # peer (see tests/unit/test_audit_sprint63.py::TestXForwardedPrefixTrust).
         frame = _make_h2_headers_frame_dispatch(
             extra_headers=[(b'x-forwarded-prefix', prefix.encode())]
         )
         scope = _ParserFactory.Get(frame, _FakeStream()).parse()
-        assert scope.get('root_path') == prefix
+        assert scope.get('root_path') == ''
 
 
 class TestHTTP11DuplicateHeaders:

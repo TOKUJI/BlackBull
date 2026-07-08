@@ -267,10 +267,20 @@ jobs:
 
       - name: Run real-client gRPC interop conformance
         # Docker-free interop gate: a real grpcio client drives BlackBull's
-        # unary gRPC over a real h2c socket.  Guards the Trailers-Only framing
-        # regression (Sprint 58) — the error path must land grpc-status in a
-        # trailing HEADERS frame or strict clients decode every error as
-        # UNKNOWN.  Runs on every push/PR, not just the weekly full tier.
+        # unary + streaming gRPC over a real h2c socket.  Guards three
+        # regressions against a spec-strict peer:
+        #   - Trailers-Only framing (Sprint 58) — grpc-status must land in a
+        #     trailing HEADERS frame or strict clients decode every error as
+        #     UNKNOWN;
+        #   - consume-based inbound flow control (Sprint 62 deferral) — the
+        #     over-window client-streaming/bidi gates
+        #     (test_large_request_stream_over_window,
+        #     test_large_both_directions_over_window) fail with
+        #     RESOURCE_EXHAUSTED if enqueue-time crediting regresses;
+        #   - the shared connection send window (bug 1.2) — the multi-stream
+        #     concurrency gate fails with FLOW_CONTROL_ERROR if per-stream
+        #     window copies come back.
+        # Runs on every push/PR, not just the weekly full tier.
         run: |
           timeout 90 python -m pytest --timeout=60 -v \
               tests/conformance/grpc/test_grpc_real_client_h2c.py

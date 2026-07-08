@@ -159,18 +159,23 @@ replay *every* request, punishing it for the server's own limit.
 
 **§5.2 Flow Control** ✅
 A DATA frame may be sent only when **two** windows both have credit — the
-stream window and the connection window.  `HTTP2Actor` tracks both:
-`HTTP2Actor._peer_initial_window_size` (per-stream) and
-`HTTP2Actor._connection_window_size` (connection-level), updated by
-`SettingsResponder` and
-`WindowUpdateResponder`; the credit mechanics — and the bug that follows from
-getting them wrong — are in §6.9.1.  *Because* the two windows do two jobs that
-a single window can't do at once.  The **stream** window stops any one stream
-from hogging the connection — fairness between streams.  The **connection**
-window caps the *total* data in flight across *all* streams at once — a bound on
-how much the receiver has to buffer.  You need both: per-stream fairness alone
-can't bound total memory, and a total bound alone can't stop one stream from
-starving the rest.
+stream window and the connection window.  On the *send* (outbound) side,
+`HTTP2Actor` tracks `HTTP2Actor._peer_initial_window_size` (seeds a new
+stream's window) and a single shared `HTTP2Actor._conn_window`
+(`ConnectionWindow`, `sender.py`) that every stream's `HTTP2Sender` debits and
+awaits — one object, not a per-sender copy, so N concurrent streams share one
+stream-0 budget rather than drifting apart (the bug this fixed: see §6.9.1's
+sibling note below). Updated by `SettingsResponder` and
+`WindowUpdateResponder`. On the *receive* (inbound) side each stream's
+`HTTP2Recipient` tracks its own byte budget against the window we advertised
+in SETTINGS — the credit mechanics, and the bug that follows from getting
+either direction wrong, are in §6.9.1.  *Because* the two windows do two jobs
+that a single window can't do at once.  The **stream** window stops any one
+stream from hogging the connection — fairness between streams.  The
+**connection** window caps the *total* data in flight across *all* streams at
+once — a bound on how much the receiver has to buffer.  You need both:
+per-stream fairness alone can't bound total memory, and a total bound alone
+can't stop one stream from starving the rest.
 
 **§5.3 Prioritization** ✅ (as deprecation)
 RFC 9113 **§5.3.2** deprecated the priority *tree* (dependencies and weights)
@@ -228,10 +233,11 @@ not one method but a chain of steps.
 the `Data` object is read in more than one place: a state check (DATA on
 HALF_CLOSED_REMOTE or CLOSED → RST STREAM_CLOSED, since the peer already sent
 END_STREAM), content-length accounting as bytes accumulate (§8.1.1), delivery to
-the stream's recipient, dual flow-control crediting (§6.9.1), and back-pressure
-(a full recipient queue → RST ENHANCE_YOUR_CALM).  *Because* DATA is the only
-frame that both moves application bytes and consumes flow-control credit — so it
-carries the most invariants and touches the most code.
+the stream's recipient, dual flow-control crediting on *consumption* (§6.9.1),
+and back-pressure (an inbound-window overrun or degenerate tiny-frame flood →
+RST ENHANCE_YOUR_CALM — the true abuse backstop once crediting is consume-based).
+*Because* DATA is the only frame that both moves application bytes and consumes
+flow-control credit — so it carries the most invariants and touches the most code.
 
 **§6.2 HEADERS — `Headers(FrameBase)`** ✅
 A `Headers` frame is handled by `HTTP2Actor._on_headers_frame()`, which runs the
@@ -305,19 +311,47 @@ FLOW_CONTROL_ERROR.  *Because* the two scopes share one frame type but mean
 different things — the responder must dispatch on the stream id.
 
 **§6.9.1 The Flow-Control Window** ✅
-The dual-credit mechanic in full:
+The dual-credit mechanic in full — credited on *consumption*, not delivery:
 
 ```python
-# in HTTP2Actor._on_data_frame() — after a DATA frame is delivered to the app
-await self.send_frame(factory.window_update(stream.stream_id, frame.length))  # stream
-await self.send_frame(factory.window_update(0, frame.length))                  # connection
+# in HTTP2Recipient.__call__() — when the app pops an event off the queue
+event, credit = await self._ensure_queue().get()
+if credit and self._credit_cb is not None:
+    self._uncredited -= credit
+    await self._credit_cb(credit)   # → window_update(stream_id, n); window_update(0, n)
 ```
 
 A single DATA frame debits *both* windows (§5.2), so both must be credited
-back — that is why there are two `window_update` calls, one on the stream and
-one on stream 0 (the connection).  Credit is sent **after** the recipient
-accepts the bytes, so a full application queue withholds credit and
-back-pressures the peer — the RFC's intended mechanism.
+back — one `WINDOW_UPDATE` on the stream, one on stream 0 (the connection).
+Credit is sent when the **application consumes** the event, not when the
+frame is *delivered* to the recipient's queue — a stalled handler (blocked on
+`yield` under response back-pressure, or simply CPU-starved) then stops
+crediting, the peer's window closes, and the peer back-pressures on its own:
+the RFC's intended mechanism, working end-to-end rather than stopping at the
+server's queue.
+
+*Because* enqueue-time crediting hides exactly the failure it should catch.
+Crediting the moment a frame lands in the queue reopens the peer's window
+whether or not the application is keeping up — so a queue with a bounded
+depth (frames, not bytes) becomes the only backstop, and once a slow-consumer
+handler fills it, the server's only remaining move is `RST_STREAM`. That
+surfaces as *application* churn (dropped streams under load) rather than the
+protocol back-pressure RFC 9113 actually describes. Crediting on consumption
+means the recipient's queue is sized in **bytes** — capped at the same
+value advertised in SETTINGS_INITIAL_WINDOW_SIZE, since a conformant peer can
+never have more un-credited bytes in flight than that — so `RST_STREAM` is
+reserved for a genuine abuse case (a peer that keeps sending past its closed
+window, or a degenerate flood of near-zero-length frames the byte budget
+can't see; the latter gets its own small frame-count cap).
+
+A stream that finishes — or is cancelled by `RST_STREAM` — without its
+handler draining the whole body leaves an "un-credited" balance: bytes the
+peer already debited from the shared *connection* window that were never
+paid back, because the app never popped them. `HTTP2Actor._release_recipient_credit`
+replays that balance to stream 0 when the stream is released (either
+completion path), so the connection window can't ratchet down to zero across
+a long-lived, high-churn connection. The stream-level side is not replayed —
+the stream is gone (§5.1) and any further frame on that id is `STREAM_CLOSED`.
 
 *Because* the connection window is the easy half to forget, and forgetting it
 fails *late*.  Credit only the stream window — the obvious half — and everything
@@ -325,7 +359,8 @@ works until ~65535 cumulative bytes have flowed; only then does the shared
 connection window reach zero, after which *every* stream stalls, even ones with
 plenty of their own credit.  A bug that surfaces only on a long-lived connection
 is exactly the kind that is easy to introduce and hard to notice, so crediting
-both windows on every DATA frame is the invariant to hold onto.
+both windows — accounting for every byte the peer was ever debited for,
+including ones an abandoned stream never read — is the invariant to hold onto.
 
 **§6.10 CONTINUATION — `Continuation(FrameBase)`** ✅
 A `Continuation` frame is handled by `HTTP2Actor._on_continuation_frame()`,

@@ -318,7 +318,12 @@ class RstStreamResponder(Responder):
         handler.root_stream.children.pop(stream_id, None)
         handler._mark_closed(stream_id, via_rst=True)
         handler._senders.pop(stream_id, None)
-        handler._recipients.pop(stream_id, None)
+        released = handler._recipients.pop(stream_id, None)
+        if released is not None:
+            # Consume-based crediting: DATA the cancelled handler never read
+            # was debited from the shared connection window — replay the
+            # balance to stream 0 so later streams aren't starved.
+            handler._release_recipient_credit(released)
 
     FRAME_TYPE = FrameTypes.RST_STREAM
 

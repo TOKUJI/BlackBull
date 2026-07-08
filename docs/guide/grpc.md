@@ -1,6 +1,7 @@
 # gRPC
 
-BlackBull serves **unary gRPC** calls over its own pure-Python HTTP/2 layer.
+BlackBull serves **gRPC** — all four RPC shapes: unary, server-streaming,
+client-streaming, and bidirectional — over its own pure-Python HTTP/2 layer.
 gRPC is just HTTP/2 with `content-type: application/grpc` and a length-prefixed
 message body, where the call result is reported in `grpc-status` trailers — so a
 gRPC service multiplexes onto the **same port** as your REST and WebSocket
@@ -82,8 +83,32 @@ Semantics that match the gRPC spec:
 - A `grpc-timeout` deadline bounds the **whole** stream (`DEADLINE_EXCEEDED` on
   expiry).
 
-Client-streaming and bidirectional streaming are not yet supported (they need the
-request delivered as a stream).
+## Client-streaming and bidirectional RPCs
+
+A handler whose first parameter is named `request_iter` (also accepted:
+`request_iterator`, `requests`, `request_stream`) receives the request as an
+**async iterator** of message bytes instead of one buffered `bytes` value —
+messages are delivered as they arrive on the wire. Pass
+`client_streaming=True` to override the name-based detection:
+
+```python
+@grpc.method('/pkg.Svc/Sum')
+async def sum_lengths(request_iter, context) -> bytes:   # client-streaming
+    total = 0
+    async for msg in request_iter:
+        total += len(msg)
+    return str(total).encode()
+
+@grpc.method('/pkg.Svc/Echo')
+async def echo(request_iter, context):                   # bidirectional
+    async for msg in request_iter:
+        yield msg
+```
+
+The response axis is detected automatically (a plain coroutine returns one
+message; an async generator streams), so the four gRPC shapes — unary,
+server-streaming, client-streaming, and bidirectional — all register through
+the same decorator.
 
 ## The call context
 
@@ -120,11 +145,12 @@ optional). Unknown methods return `GrpcStatus.UNIMPLEMENTED`.
 
 ## Scope and limits
 
-- **Unary and server-streaming** RPCs are served (see above). Client-streaming
-  and bidirectional streaming are not yet supported — they need the request
-  delivered as a stream.
-- **No message compression** — a request with the compressed flag set is
-  rejected with `UNIMPLEMENTED`.
+- **All four RPC shapes are served**: unary, server-streaming,
+  client-streaming, and bidirectional (see above).
+- **gzip message compression** is supported (`grpc-encoding: gzip` /
+  `identity`); a compressed request in any other coding is rejected with
+  `UNIMPLEMENTED`, and the response advertises
+  `grpc-accept-encoding: identity,gzip` so the client can retry.
 - **HTTP/2 required.** Run with TLS + ALPN (`h2`) for real clients; the gRPC
   request must arrive over the HTTP/2 layer.
 - BlackBull is **server-side**. For a client, use the standard `grpcio` client

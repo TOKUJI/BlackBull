@@ -149,8 +149,10 @@ def parse_headers(frame) -> dict:
             scope['path'], scope['raw_path'], scope['query_string'] = \
                 _split_h2_path(path)
         scope['headers'] = Headers(frame.headers)
-        scope['root_path'] = scope['headers'].get(
-            b'x-forwarded-prefix', b'').decode('utf-8')
+        # Bug 1.16 — root_path is NOT taken from the client-controlled
+        # X-Forwarded-Prefix; only TrustedProxy sets it after verifying the
+        # peer.  Default to the RFC-safe empty mount.
+        scope['root_path'] = ''
         raw_sp = scope['headers'].get(b'sec-websocket-protocol', b'')
         scope['subprotocols'] = (
             [p.strip().decode('utf-8', errors='replace') for p in raw_sp.split(b',')]
@@ -169,9 +171,9 @@ def parse_headers(frame) -> dict:
 
     scope['headers'] = Headers(frame.headers)
 
-    scope['root_path'] = scope['headers'].get(
-        b'x-forwarded-prefix', b''
-    ).decode('utf-8')
+    # Bug 1.16 — root_path is NOT taken from the client-controlled
+    # X-Forwarded-Prefix; only TrustedProxy sets it after verifying the peer.
+    scope['root_path'] = ''
 
     return scope
 
@@ -179,9 +181,10 @@ def parse_headers(frame) -> dict:
 class HTTP2HEADParser(HTTP2ParserBase):
     """Parses an HTTP/2 HEADERS frame into an ASGI ``http`` scope dict.
 
-    Pulls ``:method`` / ``:path`` / ``:scheme`` from the frame's pseudo-headers,
-    encodes the regular headers as ``bytes`` pairs into a ``Headers`` object,
-    and resolves ``root_path`` from the ``X-Forwarded-Prefix`` header.
+    Pulls ``:method`` / ``:path`` / ``:scheme`` from the frame's pseudo-headers
+    and encodes the regular headers as ``bytes`` pairs into a ``Headers``
+    object.  ``root_path`` defaults to empty — a client ``X-Forwarded-Prefix``
+    is not trusted here (bug 1.16); only ``TrustedProxy`` sets it.
     """
 
     FRAME_TYPE = FrameTypes.HEADERS

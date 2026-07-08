@@ -1,5 +1,6 @@
 import asyncio
 from abc import ABC, abstractmethod
+from typing import Awaitable, Callable, Optional
 
 from .cap_log import log_cap_hit
 from .deadline import ConnectionDeadline
@@ -11,7 +12,7 @@ from .ws_codec import (
 from .constants import WSCloseCode
 from ..asgi import ASGIEvent
 from ..headers import Headers
-from ..protocol.frame_types import FrameBase, Data
+from ..protocol.frame_types import FrameBase, Data, DEFAULT_INITIAL_WINDOW_SIZE
 from ..event import Event, EventDispatcher
 import logging
 
@@ -21,6 +22,14 @@ logger = logging.getLogger(__name__)
 # These cap memory growth under overload; see Phase 0 in bench/README.md.
 _HTTP2_STREAM_QUEUE_DEPTH = 64
 _WS_EVENT_QUEUE_DEPTH = 256
+
+# Consume-crediting mode bounds the HTTP/2 stream queue by BYTES (the
+# advertised inbound window), not frame count — a conformant peer sending
+# 65535 bytes as 1-byte frames must not be RST'd.  This multiplier bounds the
+# frame COUNT against zero/tiny-frame floods (CVE-2019-9518-style abuse) that
+# the byte budget cannot see: queue_depth × 16 (1024 by default) is far above
+# any conformant burst yet keeps per-stream event-dict overhead bounded.
+_EVENT_CAP_MULTIPLIER = 16
 
 
 # ---------------------------------------------------------------------------
@@ -37,22 +46,84 @@ class IncompleteReadError(EOFError):
 
 _HEXDIG_SET = frozenset(b'0123456789abcdefABCDEF')
 
+# RFC 9110 §5.6.2 — ``token = 1*tchar``.  Used to validate ``chunk-ext-name``
+# and an unquoted ``chunk-ext-val`` (RFC 9112 §7.1.1).
+_TCHAR_SET = frozenset(
+    b"!#$%&'*+-.^_`|~"
+    b"0123456789"
+    b"abcdefghijklmnopqrstuvwxyz"
+    b"ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+
+
+def _bad_request(detail: str):
+    """Build the framework's status-carrying 400 exception.
+
+    Imported lazily so ``recipient`` (loaded early via the server) never
+    depends on ``router`` at module-import time.  ``HTTPException`` is the
+    dispatcher's typed-error seam — raising it from the body reader makes a
+    malformed chunked frame surface as ``400 Bad Request`` instead of a
+    fabricated 500.
+    """
+    from http import HTTPStatus  # noqa: PLC0415
+    from ..router import HTTPException  # noqa: PLC0415
+    return HTTPException(HTTPStatus.BAD_REQUEST, detail)
+
+
+def _validate_chunk_ext(ext: bytes) -> None:
+    """RFC 9112 §7.1.1::
+
+        chunk-ext      = *( BWS ";" BWS chunk-ext-name [ BWS "=" BWS chunk-ext-val ] )
+        chunk-ext-name = token
+        chunk-ext-val  = token / quoted-string
+
+    *ext* is the chunk line **from the first ``;``** onward.  Reject a bare
+    ``;`` (empty ext-name), a non-token ext-name/val, and control characters
+    — all silent-acceptance smuggling vectors before this guard.  A
+    quoted-string ext-val is accepted leniently (matched quotes, no bare
+    CTLs) since chunk extensions are ignored on receipt.
+    """
+    for element in ext.split(b';')[1:]:
+        element = element.strip(b' \t')          # BWS around the element
+        name, eq, val = element.partition(b'=')
+        name = name.rstrip(b' \t')
+        if not name or any(c not in _TCHAR_SET for c in name):
+            raise _bad_request(f'invalid chunk-ext-name {name!r}')
+        if eq:
+            val = val.strip(b' \t')
+            if val[:1] == b'"':
+                if len(val) < 2 or not val.endswith(b'"') or any(
+                        c < 0x20 and c != 0x09 for c in val):
+                    raise _bad_request(f'invalid quoted chunk-ext-val {val!r}')
+            elif not val or any(c not in _TCHAR_SET for c in val):
+                raise _bad_request(f'invalid chunk-ext-val {val!r}')
+
 
 def _parse_chunk_size(line: bytes) -> int:
-    """RFC 9112 §7.1.1 — ``chunk-size = 1*HEXDIG``, optionally followed
-    by ``chunk-ext`` (everything from the first ``;``).  Reject anything
-    that isn't a non-empty hexadecimal string in the size portion.
+    """RFC 9112 §7.1.1 — ``chunk-size = 1*HEXDIG`` optionally followed by
+    ``chunk-ext``.  Validate the size token strictly (no sign, no ``0x``
+    prefix, no ``_``, no stray whitespace) **before** ``int()``, and
+    validate the chunk-ext grammar, so malformed framing is rejected rather
+    than silently accepted or crashed on.
 
-    Raises :class:`ValueError` on malformed input; the caller turns that
-    into a connection-closing failure (the request body is now
-    unframeable).
+    The line must be CRLF-terminated: a bare-LF terminator (``5\\n``) is a
+    framing violation, so we require the trailing CRLF rather than stripping
+    either.  Raises :class:`HTTPException` (400) on any violation; the caller
+    marks the body unframeable and closes the connection.
     """
-    # Drop trailing CRLF and optional chunk-ext.
-    line = line.rstrip(b'\r\n')
-    size_part, _, _ext = line.partition(b';')
-    size_part = size_part.rstrip(b' \t')  # OWS between size and ';' is allowed
+    if not line.endswith(b'\r\n') or line.count(b'\n') != 1:
+        raise _bad_request(f'chunk-size line not CRLF-terminated: {line!r}')
+    line = line[:-2]
+    if b';' in line:
+        size_part, _, _ext = line.partition(b';')
+        # BWS is tolerated between the size and ';' (RFC 9112 §7.1.1 BWS).
+        size_part = size_part.rstrip(b' \t')
+        _validate_chunk_ext(line[len(size_part):])
+    else:
+        # No chunk-ext — the whole line is the size; NO trailing OWS allowed
+        # (a bare ``5 \r\n`` is a smuggling vector, not a valid chunk-size).
+        size_part = line
     if not size_part or any(c not in _HEXDIG_SET for c in size_part):
-        raise ValueError(f'invalid chunk-size {size_part!r}')
+        raise _bad_request(f'invalid chunk-size {size_part!r}')
     return int(size_part, 16)
 
 
@@ -390,6 +461,10 @@ class HTTP1Recipient(BaseRecipient):
         # preserved.
         self._body_timeout = body_timeout
         self._deadline = deadline
+        # Set once a chunked-framing violation is detected: the byte stream is
+        # now desynced, so the connection MUST close rather than keep-alive
+        # (draining would parse smuggled bytes as the next request).
+        self.framing_broken = False
 
     def needs_drain(self) -> bool:
         """True if a declared request body may still be buffered unread.
@@ -400,6 +475,8 @@ class HTTP1Recipient(BaseRecipient):
         dispatch to decide whether to drain.  A body-less request (GET, no
         Content-Length, not chunked) never needs draining.
         """
+        if self.framing_broken:
+            return False  # stream is desynced — close, don't drain
         return not self._done and (self._chunked or bool(self._content_length))
 
     async def drain(self, max_bytes: int) -> bool:
@@ -419,6 +496,16 @@ class HTTP1Recipient(BaseRecipient):
             if drained > max_bytes:
                 return False
         return True
+
+    def _parse_chunk_size_or_400(self, size_line: bytes) -> int:
+        """Parse the chunk-size line, marking the stream unframeable on any
+        violation so the actor closes the connection instead of keep-aliving
+        a desynced byte stream."""
+        try:
+            return _parse_chunk_size(size_line)
+        except BaseException:
+            self.framing_broken = True
+            raise
 
     async def _read_with_timeout(self, coro):
         """Run *coro* under the configured body_timeout, if any."""
@@ -440,7 +527,7 @@ class HTTP1Recipient(BaseRecipient):
             if self._chunked:
                 size_line = await self._read_with_timeout(
                     self._reader.readuntil(b'\r\n'))
-                chunk_size = _parse_chunk_size(size_line)
+                chunk_size = self._parse_chunk_size_or_400(size_line)
                 if chunk_size == 0:
                     # RFC 9112 §7.1.2 — last-chunk is followed by an
                     # optional trailer-part and then a final CRLF.  Read
@@ -455,13 +542,19 @@ class HTTP1Recipient(BaseRecipient):
                 # RFC 9112 §7.1 — the chunk-data is exactly ``chunk_size``
                 # octets.  ``readexactly`` (not the up-to-n ``read``) is
                 # required: a chunk split across TCP segments would otherwise
-                # return short, and the following ``readuntil(CRLF)`` would
-                # swallow the rest of the payload up to the first CRLF,
-                # silently corrupting the body and desyncing chunk framing.
+                # return short, silently corrupting the body.
                 data = await self._read_with_timeout(
                     self._reader.readexactly(chunk_size))
-                await self._read_with_timeout(
-                    self._reader.readuntil(b'\r\n'))        # consume CRLF after chunk data
+                # RFC 9112 §7.1 — chunk-data is followed by exactly CRLF.
+                # Read those two octets and verify: reading *until* CRLF would
+                # swallow trailing spill (SMUG-CHUNK-SPILL) up to the next
+                # CRLF, and would tolerate a bare CR/LF terminator.
+                term = await self._read_with_timeout(
+                    self._reader.readexactly(2))
+                if term != b'\r\n':
+                    self.framing_broken = True
+                    raise _bad_request(
+                        f'chunk-data not CRLF-terminated: {term!r}')
                 return {'type': ASGIEvent.HTTP_REQUEST, 'body': data, 'more_body': True}
             else:
                 # P4: stream the Content-Length body in ``chunk_size`` slices so
@@ -512,13 +605,37 @@ class HTTP2Recipient(BaseRecipient):
     invokes :meth:`mark_end_of_stream_on_headers` instead of pre-queuing an empty
     ``http.request`` event.  The Queue is then never allocated — the empty event
     is synthesized lazily in :meth:`__call__` only if the handler reads it.
+
+    **Consume-based inbound flow control** (the Sprint 62 deferral,
+    ``proposals/consume-based-inbound-flow-control.md``): when constructed with
+    a ``credit_callback``, WINDOW_UPDATE credit for a DATA frame is replayed
+    through the callback when the app *pops* the event — not when the frame is
+    enqueued.  A stalled handler then stops crediting, the peer's window
+    closes, and the peer back-pressures instead of overflowing a frame-count
+    queue into RST_STREAM(ENHANCE_YOUR_CALM).  In this mode the queue is
+    bounded by ``credit_budget`` bytes (the advertised inbound window — a
+    conformant peer cannot exceed it) plus a generous frame-count abuse cap;
+    ``put_DATAFrame`` returning ``False`` therefore means the peer overran the
+    closed window or dribbled degenerate frames, and the RST is a true abuse
+    backstop.  Without a callback the historical bounded-queue,
+    credit-at-enqueue behaviour is preserved (push streams, direct test use).
     """
 
     def __init__(self, frame: FrameBase | None = None,
-                 queue_depth: int = _HTTP2_STREAM_QUEUE_DEPTH):
+                 queue_depth: int = _HTTP2_STREAM_QUEUE_DEPTH,
+                 credit_callback: Optional[
+                     Callable[[int], Awaitable[None]]] = None,
+                 credit_budget: int = DEFAULT_INITIAL_WINDOW_SIZE):
         super().__init__(None)
         self._queue: asyncio.Queue | None = None
         self._queue_depth = queue_depth
+        self._credit_cb = credit_callback
+        self._credit_budget = credit_budget
+        # Bytes enqueued but not yet consumed — and therefore not yet credited
+        # back to the peer.  For a conformant peer this can never exceed
+        # ``credit_budget``: the un-credited bytes ARE the closed part of the
+        # window the peer must respect.
+        self._uncredited: int = 0
         # When True, HEADERS carried END_STREAM — request has no body.
         # __call__() returns one empty http.request event without allocating a queue.
         self._end_of_stream_on_headers: bool = False
@@ -527,9 +644,23 @@ class HTTP2Recipient(BaseRecipient):
         if isinstance(frame, Data):
             self.put_DATAFrame(frame)
 
+    @property
+    def credits_on_consume(self) -> bool:
+        """True when WINDOW_UPDATE credit is replayed at consume-time.
+
+        The actor must then NOT credit at enqueue — the recipient's
+        ``credit_callback`` owns the replay.
+        """
+        return self._credit_cb is not None
+
     def _ensure_queue(self) -> asyncio.Queue:
         if self._queue is None:
-            self._queue = asyncio.Queue(maxsize=self._queue_depth)
+            # Consume-crediting mode enforces its own bounds (byte budget +
+            # frame-count abuse cap) in put_DATAFrame, so the queue itself is
+            # unbounded — put_disconnect can then always deliver.  Legacy mode
+            # keeps the historical frame-count maxsize.
+            maxsize = 0 if self._credit_cb is not None else self._queue_depth
+            self._queue = asyncio.Queue(maxsize=maxsize)
         return self._queue
 
     def mark_end_of_stream_on_headers(self) -> None:
@@ -548,9 +679,42 @@ class HTTP2Recipient(BaseRecipient):
         }
 
     def put_DATAFrame(self, frame: Data) -> bool:
-        """Enqueue a DATA frame event. Returns False if the queue is full."""
+        """Enqueue a DATA frame event.  Returns False when the frame must be
+        refused (the caller answers RST_STREAM): queue full in legacy mode;
+        inbound-window overrun or a tiny-frame flood in consume-crediting mode.
+        """
+        if self._credit_cb is not None:
+            # Flow-control debit is the full frame length including padding
+            # (RFC 9113 §6.9.1) — credit must mirror it exactly.
+            fc_len = frame.length
+            if self._uncredited + fc_len > self._credit_budget:
+                # The peer kept sending past the advertised inbound window it
+                # was never credited for — abuse, since a conformant peer is
+                # back-pressured by the closing window well before this.
+                logger.warning(
+                    'HTTP2Recipient inbound window overrun — refusing DATA frame')
+                log_cap_hit('h2_inbound_window_budget',
+                            requested=self._uncredited + fc_len,
+                            limit=self._credit_budget,
+                            protocol='http2')
+                return False
+            queue = self._ensure_queue()
+            event_cap = self._queue_depth * _EVENT_CAP_MULTIPLIER
+            if queue.qsize() >= event_cap:
+                # Zero/tiny-frame flood — invisible to the byte budget; see
+                # _EVENT_CAP_MULTIPLIER.
+                logger.warning(
+                    'HTTP2Recipient event-count cap hit — dropping DATA frame')
+                log_cap_hit('stream_queue_depth',
+                            requested=queue.qsize() + 1,
+                            limit=event_cap,
+                            protocol='http2')
+                return False
+            queue.put_nowait((self.make_event(frame), fc_len))
+            self._uncredited += fc_len
+            return True
         try:
-            self._ensure_queue().put_nowait(self.make_event(frame))
+            self._ensure_queue().put_nowait((self.make_event(frame), 0))
             return True
         except asyncio.QueueFull:
             logger.warning('HTTP2Recipient queue full on stream — dropping DATA frame')
@@ -563,7 +727,7 @@ class HTTP2Recipient(BaseRecipient):
     def put_event(self, event: dict) -> bool:
         """Enqueue a pre-built event dict. Returns False if the queue is full."""
         try:
-            self._ensure_queue().put_nowait(event)
+            self._ensure_queue().put_nowait((event, 0))
             return True
         except asyncio.QueueFull:
             logger.warning('HTTP2Recipient queue full on stream — dropping event %r', event.get('type'))
@@ -584,11 +748,26 @@ class HTTP2Recipient(BaseRecipient):
                 and self._initial_consumed):
             return
         try:
-            self._ensure_queue().put_nowait({'type': ASGIEvent.HTTP_DISCONNECT})
+            self._ensure_queue().put_nowait(
+                ({'type': ASGIEvent.HTTP_DISCONNECT}, 0))
         except asyncio.QueueFull:
             # If the queue is completely full the app task is hopelessly behind;
             # TaskGroup cancellation will clean up the stream regardless.
+            # (Unreachable in consume-crediting mode — that queue is unbounded.)
             logger.warning('HTTP2Recipient: could not deliver http.disconnect — queue full')
+
+    def take_uncredited(self) -> int:
+        """Return and clear the un-consumed credit balance.
+
+        Bytes enqueued but never popped by the app (a handler that finished —
+        or was RST — without draining its body).  The actor replays this to
+        the CONNECTION window when the stream is released, otherwise the
+        shared window leaks shut for every later stream; the stream-level
+        window is moot once the stream closes (RFC 9113 §5.1).
+        """
+        n = self._uncredited
+        self._uncredited = 0
+        return n
 
     async def __call__(self) -> dict:
         # Fast path: GET with END_STREAM on HEADERS and no body — synthesize the
@@ -598,7 +777,20 @@ class HTTP2Recipient(BaseRecipient):
                 and self._queue is None):
             self._initial_consumed = True
             return {'type': ASGIEvent.HTTP_REQUEST, 'body': b'', 'more_body': False}
-        return await self._ensure_queue().get()
+        event, credit = await self._ensure_queue().get()
+        if credit and self._credit_cb is not None:
+            # Decrement before the (interruptible) send so a racing
+            # take_uncredited() can never double-credit; worst case a
+            # cancellation mid-send under-credits by one frame.
+            self._uncredited -= credit
+            try:
+                await self._credit_cb(credit)
+            except Exception:
+                # Connection closing/gone — credit no longer matters; the
+                # disconnect event is the authoritative teardown signal.
+                logger.debug('consume-time WINDOW_UPDATE replay failed',
+                             exc_info=True)
+        return event
 
 
 class WebSocketRecipient(BaseRecipient):
@@ -926,8 +1118,13 @@ class RecipientFactory:
 
     @staticmethod
     def http2(frame: FrameBase | None = None,
-              queue_depth: int = _HTTP2_STREAM_QUEUE_DEPTH) -> HTTP2Recipient:
-        return HTTP2Recipient(frame, queue_depth=queue_depth)
+              queue_depth: int = _HTTP2_STREAM_QUEUE_DEPTH,
+              credit_callback: Optional[
+                  Callable[[int], Awaitable[None]]] = None,
+              credit_budget: int = DEFAULT_INITIAL_WINDOW_SIZE) -> HTTP2Recipient:
+        return HTTP2Recipient(frame, queue_depth=queue_depth,
+                              credit_callback=credit_callback,
+                              credit_budget=credit_budget)
 
     @staticmethod
     def websocket(reader, writer, *,

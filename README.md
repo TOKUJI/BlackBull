@@ -49,9 +49,14 @@ Hello, world!
   server.  Test your own HTTP/2 client against half-closed streams,
   exhausted windows, and illegal SETTINGS — in CI.
 - **Multi-protocol, one process.** A pure-Python MQTT 5 broker and
-  unary gRPC ride beside HTTP/2 and WebSocket on the same runtime;
+  gRPC ride beside HTTP/2 and WebSocket on the same runtime;
   extensions add new protocols without touching the core — still no
   C extension.
+- **Actor-model internals.** Connection-level isolation without a
+  single shared lock: a `ConnectionActor` spawns a per-connection
+  protocol actor whose inbox loop owns its own state.  The same
+  message-passing concurrency runs your HTTP routes, the MQTT broker,
+  and the gRPC handlers — one model across every protocol.
 - **RFC-grade correctness.** Passes the same external conformance
   suites used to validate nginx and Envoy (`h2spec`, Autobahn).
 - **Typed throughout.** Your editor and `mypy` / `pyright` see
@@ -138,6 +143,11 @@ Need a protocol BlackBull doesn't ship? `@app.raw_handler` hands you the
 raw reader/writer for a port. See
 [`docs/guide/mqtt.md`](https://github.com/TOKUJI/BlackBull/blob/master/docs/guide/mqtt.md)
 and [`docs/guide/raw-protocols.md`](https://github.com/TOKUJI/BlackBull/blob/master/docs/guide/raw-protocols.md).
+
+Deeper dives:
+[Architecture](https://github.com/TOKUJI/BlackBull/blob/master/docs/about/architecture.md) ·
+[Is BlackBull right for you?](https://github.com/TOKUJI/BlackBull/blob/master/docs/getting-started/why-blackbull.md) ·
+[Known limitations](https://github.com/TOKUJI/BlackBull/blob/master/KNOWN_LIMITATIONS.md)
 
 ## Event API
 
@@ -249,7 +259,8 @@ for the full tutorial.
 ## Documentation
 
 - **Guide**: [`docs/guide/index.md`](https://github.com/TOKUJI/BlackBull/blob/master/docs/guide/index.md)
-- **Architecture**: [`docs/about/internals.md`](https://github.com/TOKUJI/BlackBull/blob/master/docs/about/internals.md)
+- **Architecture & design rationale**: [`docs/about/architecture.md`](https://github.com/TOKUJI/BlackBull/blob/master/docs/about/architecture.md)
+- **Implementation internals**: [`docs/about/internals.md`](https://github.com/TOKUJI/BlackBull/blob/master/docs/about/internals.md)
 - **Changelog**: [`CHANGELOG.md`](https://github.com/TOKUJI/BlackBull/blob/master/CHANGELOG.md)
 
 ## Versioning

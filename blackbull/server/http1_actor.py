@@ -27,6 +27,10 @@ logger = logging.getLogger(__name__)
 
 _REQ_END = b'\r\n\r\n'
 _WS_GUID = b'258EAFA5-E914-47DA-95CA-C5AB0DC85B11'  # RFC 6455 §1.3
+# Methods advertised in the Allow header of a server-wide ``OPTIONS *``
+# response (RFC 9112 §3.2.4).  The origin implements the standard set; route
+# dispatch is bypassed for asterisk-form, so this is a server-level answer.
+_SERVER_WIDE_ALLOW = b'GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS'
 _HTTP_PORT  = 80
 _HTTPS_PORT = 443
 
@@ -137,23 +141,48 @@ def _validate_message_framing(headers: 'Headers') -> None:
             raise BadRequestError(
                 f'conflicting Content-Length values: {sorted(values)!r}')
 
-    # Sprint 18 Phase 2 — TE coding validation.  Match nginx's behaviour:
-    # only the bare ``chunked`` token is accepted; everything else (gzip,
-    # deflate, identity-as-comma-list, etc.) is 501.  Both nginx and
-    # BlackBull's corpus showed nginx returning 501 on ``identity,
-    # chunked`` and ``gzip``.
-    for _, raw_value in tes:
-        te = raw_value.strip().lower()
-        if te != b'chunked':
+    # Sprint 18 Phase 2 / Sprint 63 — Transfer-Encoding validation.
+    #
+    # RFC 9112 §6.1 distinguishes two failure modes:
+    #   * ``chunked`` present but NOT the final coding (``chunked, gzip``,
+    #     ``chunked, chunked``) ⇒ the message length is undeterminable ⇒
+    #     **400 Bad Request** (SMUG-TE-NOT-FINAL-CHUNKED).  A server MUST NOT
+    #     process such a message.
+    #   * a coding we don't implement where chunked is absent (``gzip``,
+    #     ``deflate``) ⇒ **501 Not Implemented** (nginx parity).
+    # We accept exactly a single bare ``chunked`` token.
+    if tes:
+        # Flatten comma-combined + multi-header codings, in order.
+        codings = [c.strip().lower()
+                   for _, raw_value in tes for c in raw_value.split(b',')]
+        if codings == [b'chunked']:
+            pass  # the one accepted form
+        elif b'chunked' not in codings:
+            # No chunked at all (``gzip``, ``deflate``) ⇒ a coding we don't
+            # implement ⇒ 501 (nginx parity).
             raise NotImplementedFramingError(
-                f'Transfer-Encoding {raw_value!r} is not implemented')
+                f'Transfer-Encoding {codings!r} is not implemented')
+        elif codings[-1] != b'chunked' or codings.count(b'chunked') > 1:
+            # chunked present but not the sole final coding (``chunked, gzip``,
+            # ``chunked, chunked``) ⇒ message length undeterminable ⇒ 400.
+            raise BadRequestError(
+                f'Transfer-Encoding with chunked not the sole final coding: '
+                f'{codings!r}')
+        else:
+            # chunked IS final but preceded by a coding we can't decode
+            # (``gzip, chunked``) ⇒ 501.
+            raise NotImplementedFramingError(
+                f'Transfer-Encoding {codings!r} applies an unimplemented '
+                f'content coding before chunked')
 
 
 # RFC 3986 §3.2 — authority = [userinfo "@"] host [":" port].  None of
 # these delimiter octets belong in a Host header value; their presence
 # (or an empty value) is a smuggling / SSRF vector that nginx rejects
-# with 400 and BlackBull, pre-Sprint-18, accepted silently.
-_HOST_FORBIDDEN_BYTES = frozenset(b'/?# \t')
+# with 400 and BlackBull, pre-Sprint-18, accepted silently.  ``@`` is
+# included (Sprint 63, COMP-HOST-WITH-USERINFO): the deprecated userinfo
+# component has no place in a Host header and enables credential-spoofing.
+_HOST_FORBIDDEN_BYTES = frozenset(b'/?# \t@')
 
 
 def _parse_host_header(value: bytes, default_port: int) -> tuple[str, int]:
@@ -503,6 +532,30 @@ class HTTP1Actor(Actor):
                     deadline=dl,
                 )
 
+                if scope.get('_asterisk_form'):
+                    # RFC 9112 §3.2.4 — ``OPTIONS *`` is a server-wide request
+                    # whose target is not a resource, so it never routes.
+                    # Answer at the server level with 204 + an Allow header
+                    # advertising the methods the origin implements.
+                    await capturing_send(b'', HTTPStatus.NO_CONTENT,
+                                         [(b'allow', _SERVER_WIDE_ALLOW)])
+                    ok = True
+                    if not self._should_keep_alive(scope):
+                        break
+                    self._request = b''
+                    try:
+                        if cfg.keep_alive_timeout > 0:
+                            with dl.guard(cfg.keep_alive_timeout):
+                                next_chunk = await self._reader.readuntil(_REQ_END)
+                        else:
+                            next_chunk = await self._reader.readuntil(_REQ_END)
+                    except (TimeoutError, IncompleteReadError):
+                        break
+                    if next_chunk == _REQ_END:
+                        break
+                    self._request = next_chunk
+                    continue
+
                 # Sprint 38 Task B — BB_REQUEST_TIMEOUT parity with the
                 # HTTP/2 path.  ``HTTP2Actor._spawn_stream_task`` wraps each
                 # stream coroutine with ``asyncio.wait_for``; the HTTP/1.1
@@ -654,18 +707,59 @@ class HTTP1Actor(Actor):
         if not _HTTP_VERSION_RE.match(version):
             raise BadRequestError(f'invalid HTTP-version {version!r}')
 
-        # Request-target — for origin-form, leading slash; reject CTLs.
-        if not path or any(b < 0x21 or b == 0x7F for b in path):
+        # Request-target form dispatch (RFC 9112 §3.2).  Four forms:
+        # origin (``/path``), absolute (``http://host/path``), authority
+        # (CONNECT only), and asterisk (``*``, server-wide OPTIONS).
+        authority_override: bytes | None = None
+        asterisk_form = False
+        if method == b'CONNECT':
+            # authority-form target (§3.2.3) — tunnel establishment, which
+            # BlackBull does not implement.  Answer 501, not a spurious 404.
+            raise NotImplementedFramingError(
+                f'CONNECT (tunneling) is not implemented: {path!r}')
+        if path == b'*':
+            # asterisk-form (§3.2.4) — a server-wide request, valid only for
+            # OPTIONS.  Flag it so the dispatcher answers at the server level
+            # rather than routing ``*`` to a 404.
+            if method != b'OPTIONS':
+                raise BadRequestError(
+                    f'asterisk-form request-target is valid only for OPTIONS, '
+                    f'not {method!r}')
+            asterisk_form = True
+        elif (_ss := path.find(b'://')) != -1 and b'/' not in path[:_ss]:
+            # absolute-form (§3.2.2): ``scheme "://" authority path-abempty``.
+            # Rewrite it to origin-form and let the authority override Host
+            # (§3.2.2 — the origin server MUST ignore the Host header here).
+            rest = path[_ss + 3:]
+            slash = rest.find(b'/')
+            if slash == -1:
+                authority_override, path = rest, b'/'
+            else:
+                authority_override, path = rest[:slash], rest[slash:]
+            if not authority_override:
+                raise BadRequestError(
+                    f'absolute-form request-target has empty authority: '
+                    f'{path!r}')
+
+        # Request-target octets — reject CTLs, DEL, and non-ASCII (§2.1 /
+        # RFC 3986: a raw byte ≥ 0x80 in the target is a normalisation /
+        # smuggling vector, MAL-NON-ASCII-URL).  Skipped for asterisk-form
+        # (the literal ``*`` is validated above).
+        if not asterisk_form and (
+                not path or any(b < 0x21 or b == 0x7F or b >= 0x80 for b in path)):
             raise BadRequestError(f'invalid request-target {path!r}')
 
-        # Sprint 25 Phase A — replicate urllib.parse.urlparse() semantics
-        # on the bytes request-target with three C-level partition calls:
-        # strip #fragment, split ?query, separate ;params.  ~12× faster
-        # than urlparse (pyperf microbench).  Output is byte-for-byte
-        # equivalent for the .path + .query attributes we use.
-        _no_frag, _, _ = path.partition(b'#')
-        _path_and_params, _, _query_string = _no_frag.partition(b'?')
-        _scope_path_b, _, _ = _path_and_params.partition(b';')
+        if asterisk_form:
+            _scope_path_b, _query_string = b'*', b''
+        else:
+            # Sprint 25 Phase A — replicate urllib.parse.urlparse() semantics
+            # on the bytes request-target with three C-level partition calls:
+            # strip #fragment, split ?query, separate ;params.  ~12× faster
+            # than urlparse (pyperf microbench).  Output is byte-for-byte
+            # equivalent for the .path + .query attributes we use.
+            _no_frag, _, _ = path.partition(b'#')
+            _path_and_params, _, _query_string = _no_frag.partition(b'?')
+            _scope_path_b, _, _ = _path_and_params.partition(b';')
 
         raw: list[tuple[bytes, bytes]] = []
         for line in lines[idx + 1:]:
@@ -698,7 +792,20 @@ class HTTP1Actor(Actor):
                     f'CTL in header value (smuggling / log-injection): '
                     f'{key!r}: {value!r}')
             raw.append((key.lower(), value))
+
+        # RFC 9112 §3.2.2 — for an absolute-form target the request's own
+        # authority is definitive; replace any client Host so a mismatched or
+        # spoofed Host cannot influence routing / host validation
+        # (SMUG-ABSOLUTE-URI-HOST-MISMATCH).
+        if authority_override is not None:
+            raw = [(k, v) for k, v in raw if k != b'host']
+            raw.append((b'host', authority_override))
         headers = Headers(raw)
+
+        # RFC 9110 §8.3 — Content-Type is a singleton; multiple values are
+        # ambiguous and a request-smuggling surface (COMP-DUPLICATE-CT).
+        if len(headers.getlist(b'content-type')) > 1:
+            raise BadRequestError('multiple Content-Type headers')
 
         # RFC 9112 §6 — message framing validation.  Done here so a bad
         # framing header is rejected before any body bytes are read.
@@ -716,13 +823,22 @@ class HTTP1Actor(Actor):
             'path': _scope_path_b.decode('utf-8'),
             'raw_path': path,
             'query_string': _query_string,
-            'root_path': headers.get(b'X-Forwarded-Prefix', b'').decode('utf-8'),
+            # RFC-safe default.  ``root_path`` (mount prefix) is NOT taken
+            # from the client-controlled ``X-Forwarded-Prefix`` here (bug
+            # 1.16 — a client could spoof the mount point); only the
+            # ``TrustedProxy`` middleware sets it, after verifying the peer.
+            'root_path': '',
             'headers': headers,
             'client': None,
             'server': None,
             'state': {},
             'extensions': _H1_PATHSEND_EXTENSIONS if not self._ssl else {},
         }
+
+        if asterisk_form:
+            # Server-wide OPTIONS (§3.2.4): mark it so the dispatcher answers
+            # at the server level (200 with Allow) rather than routing ``*``.
+            scope['_asterisk_form'] = True
 
         if headers.getlist(b'host'):
             default_port = _HTTPS_PORT if self._ssl else _HTTP_PORT
