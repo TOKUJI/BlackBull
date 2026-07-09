@@ -1,40 +1,45 @@
 """Integration tests for gRPC via BlackBull's full ASGI dispatch path.
 
-Uses :class:`TestClient` (in-process ``httpx.ASGITransport``) to verify
-that gRPC requests flow through the app correctly — from ``BlackBull.__call__``
-through ``_dispatch`` to ``serve_grpc``.
+Each test serves a real ``ASGIServer`` on an ephemeral h2c port and drives
+it with BlackBull's own ``HTTP2Client`` — verifying that gRPC requests flow
+through the whole app (``BlackBull.__call__`` → ``_dispatch`` →
+``serve_grpc``) over a real socket.
 
-.. important::
+.. note::
 
-   ``httpx.ASGITransport`` runs over HTTP/1.1 and does **not** support the
-   ``http.response.trailers`` ASGI event.  gRPC success responses use separate
-   trailers (HEADERS → DATA → TRAILERS), which crash httpx's ASGI transport.
+   These tests originally ran in-process over ``TestClient``
+   (``httpx.ASGITransport``).  That transport has no support for the
+   ``http.response.trailers`` ASGI event, and since Sprint 58 every gRPC
+   response — success *and* error — reports its status in **trailing
+   headers** (the framing real gRPC clients require).  httpx therefore never
+   observed response completion and its transport asserted
+   (``response_complete.is_set()``) on all gRPC calls — bug 1.23 in the
+   2026-07-07 audit.  ``HTTP2Client`` handles trailers natively, and folds
+   them into ``res.headers``.
 
-   Therefore, integration tests via ``TestClient`` can only verify:
-
-   * **Trailers-only error responses** (grpc-status embedded in response
-     HEADERS — no separate TRAILERS event).
-   * **Dispatch routing** — that ``application/grpc`` content-type correctly
-     activates the gRPC path.
-   * **REST + gRPC coexistence** — that non-gRPC requests are unaffected.
-
-   Full success-path validation (DATA frame + TRAILERS) is covered in
-   ``tests/conformance/grpc/`` using a direct ``serve_grpc`` harness.
+   Pure-REST assertions (no trailers on the wire) still use ``TestClient``.
 """
 from __future__ import annotations
+
+import asyncio
+from contextlib import asynccontextmanager
 
 import pytest
 
 from blackbull import BlackBull
 from blackbull.grpc import (
     GrpcServiceRegistry, GrpcStatus, GrpcError,
-    encode_message, decode_messages,
+    encode_message,
 )
+from blackbull.client.http2 import HTTP2Client
+from blackbull.server.server import ASGIServer
 from blackbull.testing import TestClient
 
 
 # Tag all tests in this file as integration tests.
 pytestmark = pytest.mark.integration
+
+_SERVER_STARTUP_WAIT_SECONDS = 0.15
 
 
 # ---------------------------------------------------------------------------
@@ -48,19 +53,41 @@ def _make_grpc_app() -> tuple[BlackBull, GrpcServiceRegistry]:
     return app, reg
 
 
-def _grpc_post(client: TestClient, path: str, payload: bytes,
-               headers: dict | None = None) -> tuple[int, bytes, dict]:
-    """Send a gRPC-style POST and return (status, body, response_headers).
+@asynccontextmanager
+async def _serve(app: BlackBull):
+    """Serve *app* on an ephemeral h2c port; yield the port."""
+    server = ASGIServer(app)
+    server.open_socket(port=0)
+    task = asyncio.create_task(server.run())
+    await asyncio.sleep(_SERVER_STARTUP_WAIT_SECONDS)
+    try:
+        yield server.port
+    finally:
+        task.cancel()
+        try:
+            await task
+        except (asyncio.CancelledError, Exception):
+            pass
 
-    gRPC errors use trailers-only: HTTP 200 + grpc-status in response headers.
-    gRPC success uses separate trailers which httpx cannot handle (see module
-    docstring).  Callers should check for error responses via headers.
+
+async def _grpc_call(port: int, path: str, payload: bytes,
+                     headers: list[tuple[str, str]] | None = None):
+    """Send one gRPC-style POST over a real h2c socket.
+
+    Returns the ``ClientResponse``; gRPC status/message ride in
+    ``res.headers`` (trailing headers are folded in by ``HTTP2Client``).
     """
-    h = {'Content-Type': 'application/grpc'}
-    if headers:
-        h.update(headers)
-    resp = client.post(path, content=payload, headers=h)
-    return resp.status_code, resp.content, dict(resp.headers)
+    hdrs = [('content-type', 'application/grpc')] + (headers or [])
+    async with HTTP2Client('127.0.0.1', port) as c:
+        return await c.request('POST', path, headers=hdrs, body=payload)
+
+
+def _grpc_status(res) -> str:
+    return res.headers.get(b'grpc-status', b'').decode()
+
+
+def _grpc_message(res) -> str:
+    return res.headers.get(b'grpc-message', b'').decode()
 
 
 # ---------------------------------------------------------------------------
@@ -71,28 +98,28 @@ class TestGrpcDispatchRouting:
     """Verify that ``BlackBull._dispatch`` routes ``application/grpc``
     requests to the gRPC bridge (not the HTTP router)."""
 
-    def test_grpc_content_type_triggers_grpc_path(self):
+    @pytest.mark.asyncio
+    async def test_grpc_content_type_triggers_grpc_path(self):
         """POST with ``Content-Type: application/grpc`` → UNIMPLEMENTED
         (if not registered) rather than 404 from HTTP router."""
         app, reg = _make_grpc_app()
         app.enable_grpc(reg)
 
-        with TestClient(app) as client:
-            status, _, headers = _grpc_post(
-                client, '/some/grpc/method', encode_message(b''))
-            assert status == 200
-            assert headers.get('grpc-status') == str(int(GrpcStatus.UNIMPLEMENTED))
+        async with _serve(app) as port:
+            res = await _grpc_call(port, '/some/grpc/method', encode_message(b''))
+        assert res.status == 200
+        assert _grpc_status(res) == str(int(GrpcStatus.UNIMPLEMENTED))
 
-    def test_unregistered_method_returns_unimplemented(self):
+    @pytest.mark.asyncio
+    async def test_unregistered_method_returns_unimplemented(self):
         """POST to a path with no registered gRPC handler → UNIMPLEMENTED (12)."""
         app, reg = _make_grpc_app()
         app.enable_grpc(reg)
 
-        with TestClient(app) as client:
-            status, _, headers = _grpc_post(
-                client, '/No.Such/Method', encode_message(b''))
-            assert status == 200
-            assert headers.get('grpc-status') == str(int(GrpcStatus.UNIMPLEMENTED))
+        async with _serve(app) as port:
+            res = await _grpc_call(port, '/No.Such/Method', encode_message(b''))
+        assert res.status == 200
+        assert _grpc_status(res) == str(int(GrpcStatus.UNIMPLEMENTED))
 
     def test_non_grpc_post_without_content_type_is_rest(self):
         """A POST without ``application/grpc`` content-type must go through
@@ -111,31 +138,32 @@ class TestGrpcDispatchRouting:
             # No REST route for POST /svc/Only → 405 or 404
             assert resp.status_code in (404, 405)
 
-    def test_content_type_with_charset_is_handled(self):
+    @pytest.mark.asyncio
+    async def test_content_type_with_charset_is_handled(self):
         """``Content-Type: application/grpc; charset=utf-8`` should match
         the ``startswith(b'application/grpc')`` check in ``_dispatch``."""
         app, reg = _make_grpc_app()
         app.enable_grpc(reg)
 
-        with TestClient(app) as client:
-            resp = client.post('/No.Such/Method',
-                               content=encode_message(b''),
-                               headers={'Content-Type': 'application/grpc; charset=utf-8'})
-            assert resp.status_code == 200
-            assert dict(resp.headers).get('grpc-status') == \
-                str(int(GrpcStatus.UNIMPLEMENTED))
+        async with _serve(app) as port:
+            hdrs = [('content-type', 'application/grpc; charset=utf-8')]
+            async with HTTP2Client('127.0.0.1', port) as c:
+                res = await c.request('POST', '/No.Such/Method',
+                                      headers=hdrs, body=encode_message(b''))
+        assert res.status == 200
+        assert _grpc_status(res) == str(int(GrpcStatus.UNIMPLEMENTED))
 
 
 # ---------------------------------------------------------------------------
-# §2 — Error handling: all error paths produce correct trailers-only responses
+# §2 — Error handling: all error paths report grpc-status in trailers
 # ---------------------------------------------------------------------------
 
 class TestGrpcErrorDispatch:
-    """gRPC errors must produce HTTP 200 with grpc-status in response
-    headers (trailers-only) — never HTTP 4xx/5xx.  These are all testable
-    via TestClient because no separate TRAILERS event is emitted."""
+    """gRPC errors must produce HTTP 200 with grpc-status in the trailing
+    headers — never HTTP 4xx/5xx."""
 
-    def test_grpc_error_returns_200_with_grpc_status(self):
+    @pytest.mark.asyncio
+    async def test_grpc_error_returns_200_with_grpc_status(self):
         app, reg = _make_grpc_app()
 
         @reg.method('/svc/Fail')
@@ -144,14 +172,13 @@ class TestGrpcErrorDispatch:
 
         app.enable_grpc(reg)
 
-        with TestClient(app) as client:
-            status, _, headers = _grpc_post(
-                client, '/svc/Fail', encode_message(b''))
-            assert status == 200
-            assert headers.get('grpc-status') == \
-                str(int(GrpcStatus.RESOURCE_EXHAUSTED))
+        async with _serve(app) as port:
+            res = await _grpc_call(port, '/svc/Fail', encode_message(b''))
+        assert res.status == 200
+        assert _grpc_status(res) == str(int(GrpcStatus.RESOURCE_EXHAUSTED))
 
-    def test_handler_exception_returns_internal(self):
+    @pytest.mark.asyncio
+    async def test_handler_exception_returns_internal(self):
         app, reg = _make_grpc_app()
 
         @reg.method('/svc/Boom')
@@ -160,14 +187,14 @@ class TestGrpcErrorDispatch:
 
         app.enable_grpc(reg)
 
-        with TestClient(app) as client:
-            status, _, headers = _grpc_post(
-                client, '/svc/Boom', encode_message(b''))
-            assert status == 200
-            assert headers.get('grpc-status') == str(int(GrpcStatus.INTERNAL))
-            assert 'unexpected failure' in headers.get('grpc-message', '')
+        async with _serve(app) as port:
+            res = await _grpc_call(port, '/svc/Boom', encode_message(b''))
+        assert res.status == 200
+        assert _grpc_status(res) == str(int(GrpcStatus.INTERNAL))
+        assert 'unexpected failure' in _grpc_message(res)
 
-    def test_invalid_message_body_returns_internal(self):
+    @pytest.mark.asyncio
+    async def test_invalid_message_body_returns_internal(self):
         app, reg = _make_grpc_app()
 
         @reg.method('/svc/Valid')
@@ -176,13 +203,13 @@ class TestGrpcErrorDispatch:
 
         app.enable_grpc(reg)
 
-        with TestClient(app) as client:
-            status, _, headers = _grpc_post(
-                client, '/svc/Valid', b'not a valid grpc frame')
-            assert status == 200
-            assert headers.get('grpc-status') == str(int(GrpcStatus.INTERNAL))
+        async with _serve(app) as port:
+            res = await _grpc_call(port, '/svc/Valid', b'not a valid grpc frame')
+        assert res.status == 200
+        assert _grpc_status(res) == str(int(GrpcStatus.INTERNAL))
 
-    def test_context_abort_produces_correct_status(self):
+    @pytest.mark.asyncio
+    async def test_context_abort_produces_correct_status(self):
         app, reg = _make_grpc_app()
 
         @reg.method('/svc/Abort')
@@ -192,33 +219,36 @@ class TestGrpcErrorDispatch:
 
         app.enable_grpc(reg)
 
-        with TestClient(app) as client:
-            status, _, headers = _grpc_post(
-                client, '/svc/Abort', encode_message(b''))
-            assert status == 200
-            assert headers.get('grpc-status') == \
-                str(int(GrpcStatus.PERMISSION_DENIED))
+        async with _serve(app) as port:
+            res = await _grpc_call(port, '/svc/Abort', encode_message(b''))
+        assert res.status == 200
+        assert _grpc_status(res) == str(int(GrpcStatus.PERMISSION_DENIED))
 
-    def test_all_17_status_codes_are_wireable_via_integration(self):
+    @pytest.mark.asyncio
+    async def test_all_17_status_codes_are_wireable_via_integration(self):
         """For each canonical gRPC status code, verify the correct
-        grpc-status trailer is emitted through the full dispatch path."""
-        for code in GrpcStatus:
-            app = BlackBull()
-            reg = GrpcServiceRegistry()
-            path = f'/svc/Code{code.value}'
+        grpc-status trailer is emitted through the full dispatch path.
 
-            @reg.method(path)
+        One app/server hosts a method per code — starting 17 servers
+        sequentially would dominate the suite's runtime.
+        """
+        app = BlackBull()
+        reg = GrpcServiceRegistry()
+        for code in GrpcStatus:
+            @reg.method(f'/svc/Code{code.value}')
             async def h(request, context, _code=code):
                 raise GrpcError(_code, f'status {_code.value}')
+        app.enable_grpc(reg)
 
-            app.enable_grpc(reg)
-
-            with TestClient(app) as client:
-                _, _, headers = _grpc_post(client, path, encode_message(b''))
-                assert headers.get('grpc-status') == str(int(code)), (
+        async with _serve(app) as port:
+            for code in GrpcStatus:
+                res = await _grpc_call(port, f'/svc/Code{code.value}',
+                                       encode_message(b''))
+                assert _grpc_status(res) == str(int(code)), (
                     f'GrpcStatus.{code.name} ({code.value}) failed')
 
-    def test_empty_body_zero_messages_returns_error(self):
+    @pytest.mark.asyncio
+    async def test_empty_body_zero_messages_returns_error(self):
         app, reg = _make_grpc_app()
 
         @reg.method('/svc/Unary')
@@ -227,15 +257,16 @@ class TestGrpcErrorDispatch:
 
         app.enable_grpc(reg)
 
-        with TestClient(app) as client:
-            status, _, headers = _grpc_post(client, '/svc/Unary', b'')
-            assert status == 200
-            assert headers.get('grpc-status') in (
-                str(int(GrpcStatus.INTERNAL)),
-                str(int(GrpcStatus.UNIMPLEMENTED)),
-            )
+        async with _serve(app) as port:
+            res = await _grpc_call(port, '/svc/Unary', b'')
+        assert res.status == 200
+        assert _grpc_status(res) in (
+            str(int(GrpcStatus.INTERNAL)),
+            str(int(GrpcStatus.UNIMPLEMENTED)),
+        )
 
-    def test_compressed_message_rejected_via_integration(self):
+    @pytest.mark.asyncio
+    async def test_compressed_message_rejected_via_integration(self):
         app, reg = _make_grpc_app()
 
         @reg.method('/svc/Unary')
@@ -244,13 +275,11 @@ class TestGrpcErrorDispatch:
 
         app.enable_grpc(reg)
 
-        with TestClient(app) as client:
-            status, _, headers = _grpc_post(
-                client, '/svc/Unary',
-                encode_message(b'data', compressed=True))
-            assert status == 200
-            assert headers.get('grpc-status') == \
-                str(int(GrpcStatus.UNIMPLEMENTED))
+        async with _serve(app) as port:
+            res = await _grpc_call(port, '/svc/Unary',
+                                   encode_message(b'data', compressed=True))
+        assert res.status == 200
+        assert _grpc_status(res) == str(int(GrpcStatus.UNIMPLEMENTED))
 
 
 # ---------------------------------------------------------------------------
@@ -274,7 +303,8 @@ class TestRestAndGrpcCoexistence:
             assert resp.status_code == 200
             assert resp.text == 'Hello from REST'
 
-    def test_grpc_content_type_to_root_returns_unimplemented(self):
+    @pytest.mark.asyncio
+    async def test_grpc_content_type_to_root_returns_unimplemented(self):
         app, reg = _make_grpc_app()
 
         @app.route(path='/')
@@ -283,17 +313,20 @@ class TestRestAndGrpcCoexistence:
 
         app.enable_grpc(reg)
 
-        with TestClient(app) as client:
-            # Normal REST GET — works
-            resp = client.get('/')
-            assert resp.status_code == 200
-            assert resp.text == 'home'
+        async with _serve(app) as port:
+            async with HTTP2Client('127.0.0.1', port) as c:
+                # Normal REST GET — works
+                rest = await c.request('GET', '/')
+                # POST with application/grpc → gRPC path → UNIMPLEMENTED
+                res = await c.request(
+                    'POST', '/',
+                    headers=[('content-type', 'application/grpc')],
+                    body=encode_message(b''))
 
-            # POST with application/grpc → gRPC path → UNIMPLEMENTED
-            status, _, headers = _grpc_post(client, '/', encode_message(b''))
-            assert status == 200
-            assert headers.get('grpc-status') == \
-                str(int(GrpcStatus.UNIMPLEMENTED))
+        assert rest.status == 200
+        assert rest.body == b'home'
+        assert res.status == 200
+        assert _grpc_status(res) == str(int(GrpcStatus.UNIMPLEMENTED))
 
     def test_grpc_disabled_does_not_crash(self):
         app = BlackBull()
@@ -321,10 +354,10 @@ class TestRestAndGrpcCoexistence:
 
 class TestGrpcMetadataDispatch:
     """Request metadata (HTTP headers) accessible via GrpcContext through
-    the full dispatch path.  Uses error responses to verify metadata
-    without hitting the trailers issue."""
+    the full dispatch path."""
 
-    def test_request_header_accessible_via_context_metadata(self):
+    @pytest.mark.asyncio
+    async def test_request_header_accessible_via_context_metadata(self):
         app, reg = _make_grpc_app()
 
         @reg.method('/svc/MetaEcho')
@@ -334,13 +367,13 @@ class TestGrpcMetadataDispatch:
 
         app.enable_grpc(reg)
 
-        with TestClient(app) as client:
-            _, _, headers = _grpc_post(
-                client, '/svc/MetaEcho', encode_message(b''),
-                headers={'x-token': 'secret-value'})
-            assert headers.get('grpc-message') == 'token=secret-value'
+        async with _serve(app) as port:
+            res = await _grpc_call(port, '/svc/MetaEcho', encode_message(b''),
+                                   headers=[('x-token', 'secret-value')])
+        assert _grpc_message(res) == 'token=secret-value'
 
-    def test_missing_header_returns_default(self):
+    @pytest.mark.asyncio
+    async def test_missing_header_returns_default(self):
         app, reg = _make_grpc_app()
 
         @reg.method('/svc/Default')
@@ -350,10 +383,9 @@ class TestGrpcMetadataDispatch:
 
         app.enable_grpc(reg)
 
-        with TestClient(app) as client:
-            _, _, headers = _grpc_post(
-                client, '/svc/Default', encode_message(b''))
-            assert headers.get('grpc-message') == 'val=fallback'
+        async with _serve(app) as port:
+            res = await _grpc_call(port, '/svc/Default', encode_message(b''))
+        assert _grpc_message(res) == 'val=fallback'
 
 
 # ---------------------------------------------------------------------------
@@ -363,19 +395,19 @@ class TestGrpcMetadataDispatch:
 class TestGrpcEdgeCases:
     """Corner cases that exercise the dispatch boundary."""
 
-    def test_very_long_path_returns_unimplemented(self):
+    @pytest.mark.asyncio
+    async def test_very_long_path_returns_unimplemented(self):
         app, reg = _make_grpc_app()
         app.enable_grpc(reg)
 
         long_path = '/' + 'x' * 4096 + '/y'
-        with TestClient(app) as client:
-            status, _, headers = _grpc_post(
-                client, long_path, encode_message(b''))
-            assert status == 200
-            assert headers.get('grpc-status') == \
-                str(int(GrpcStatus.UNIMPLEMENTED))
+        async with _serve(app) as port:
+            res = await _grpc_call(port, long_path, encode_message(b''))
+        assert res.status == 200
+        assert _grpc_status(res) == str(int(GrpcStatus.UNIMPLEMENTED))
 
-    def test_path_with_dots_and_slashes(self):
+    @pytest.mark.asyncio
+    async def test_path_with_dots_and_slashes(self):
         app, reg = _make_grpc_app()
 
         @reg.method('/my.package.MyService/MyMethod')
@@ -384,13 +416,14 @@ class TestGrpcEdgeCases:
 
         app.enable_grpc(reg)
 
-        with TestClient(app) as client:
-            _, _, headers = _grpc_post(
-                client, '/my.package.MyService/MyMethod', encode_message(b''))
-            assert headers.get('grpc-status') == str(int(GrpcStatus.OK))
-            assert headers.get('grpc-message') == 'found'
+        async with _serve(app) as port:
+            res = await _grpc_call(port, '/my.package.MyService/MyMethod',
+                                   encode_message(b''))
+        assert _grpc_status(res) == str(int(GrpcStatus.OK))
+        assert _grpc_message(res) == 'found'
 
-    def test_multiple_services_registered(self):
+    @pytest.mark.asyncio
+    async def test_multiple_services_registered(self):
         app = BlackBull()
         reg = GrpcServiceRegistry()
 
@@ -408,20 +441,18 @@ class TestGrpcEdgeCases:
         reg.add_method('/str.Text/Upper', upper)
         app.enable_grpc(reg)
 
-        with TestClient(app) as client:
-            _, _, headers = _grpc_post(
-                client, '/math.Arith/Add', encode_message(b''))
-            assert headers.get('grpc-message') == 'add called'
+        async with _serve(app) as port:
+            res = await _grpc_call(port, '/math.Arith/Add', encode_message(b''))
+            assert _grpc_message(res) == 'add called'
 
-            _, _, headers = _grpc_post(
-                client, '/math.Arith/Mul', encode_message(b''))
-            assert headers.get('grpc-message') == 'mul called'
+            res = await _grpc_call(port, '/math.Arith/Mul', encode_message(b''))
+            assert _grpc_message(res) == 'mul called'
 
-            _, _, headers = _grpc_post(
-                client, '/str.Text/Upper', encode_message(b''))
-            assert headers.get('grpc-message') == 'upper called'
+            res = await _grpc_call(port, '/str.Text/Upper', encode_message(b''))
+            assert _grpc_message(res) == 'upper called'
 
-    def test_query_string_does_not_affect_grpc_routing(self):
+    @pytest.mark.asyncio
+    async def test_query_string_does_not_affect_grpc_routing(self):
         app, reg = _make_grpc_app()
 
         @reg.method('/svc/NoQS')
@@ -430,7 +461,7 @@ class TestGrpcEdgeCases:
 
         app.enable_grpc(reg)
 
-        with TestClient(app) as client:
-            _, _, headers = _grpc_post(
-                client, '/svc/NoQS?ignored=1', encode_message(b''))
-            assert headers.get('grpc-message') == 'routed'
+        async with _serve(app) as port:
+            res = await _grpc_call(port, '/svc/NoQS?ignored=1',
+                                   encode_message(b''))
+        assert _grpc_message(res) == 'routed'
