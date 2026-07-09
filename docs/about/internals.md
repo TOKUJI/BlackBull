@@ -62,10 +62,14 @@ spawns a `ConnectionActor` task per accepted connection.
 Everything below it is an `Actor` subclass.
 
 A separate `EventAggregator` translates the low-level
-inter-actor messages into the user-facing events documented in
-[Events](../guide/events.md) — `request_received`,
-`before_handler`, `request_completed`, `websocket_message`,
-etc.
+inter-actor messages into the wire-level user-facing events
+documented in [Events](../guide/events.md) —
+`request_disconnected`, `error`, `websocket_message`,
+`connection_accepted`, etc.  The request-lifecycle events
+(`request_received`, `before_handler`, `after_handler`,
+`request_completed`) are emitted by the application layer
+(`BlackBull._dispatch`) instead, so they fire identically under
+BlackBull's own server and under external ASGI hosts.
 
 ## Responsibilities
 
@@ -115,8 +119,9 @@ etc.
 - Receives the parsed headers and body from `HTTP1Actor`.
 - Calls the ASGI app, collects the response, writes it back
   via the connection's writer.
-- Drives the `before_handler`, `after_handler`,
-  `request_completed`, and (on failure) error events.
+- Fires the `error` event when the app call raises.  (The
+  request-lifecycle events are emitted by the application
+  layer, not here.)
 
 ### `HTTP2Actor`
 

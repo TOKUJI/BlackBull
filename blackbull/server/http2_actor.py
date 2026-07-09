@@ -67,7 +67,14 @@ def _signal_recipients(recipients: dict[int, _StreamRecipient]) -> None:
 
 
 def _make_log_record(scope):
-    return AccessLogRecord.from_scope(scope)
+    record = AccessLogRecord.from_scope(scope)
+    # Publish the record for the app layer: BlackBull._dispatch sources the
+    # request_completed detail's wire fields (status / response_bytes /
+    # duration_ms) from scope['state']['access_log'] (Sprint 64 event
+    # consolidation) — same contract as the HTTP/1.1 actor.
+    if isinstance(scope.get('state'), dict):
+        scope['state']['access_log'] = record
+    return record
 
 _DEFAULT_PRIORITY: dict[str, int | bool] = {'urgency': 3, 'incremental': False}
 
@@ -997,12 +1004,9 @@ class HTTP2Actor(Actor):
             coro = stream_actor.run()
         else:
             from .server import _run_with_log  # noqa: PLC0415
-            dispatcher = getattr(self.app, '_dispatcher', None)
             coro = _run_with_log(
                 self.app(scope, recipient, send),
                 log_record,
-                dispatcher=dispatcher,
-                scope=scope,
             )
 
         timeout = self._request_timeout

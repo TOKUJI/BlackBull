@@ -10,7 +10,6 @@ import time
 
 # private library
 from ..utils import check_port
-from ..event import Event
 from ..protocol.rsock import (
     create_dual_stack_sockets, create_unix_socket,
     adopt_inherited_sockets, adopt_listening_fd,
@@ -23,27 +22,17 @@ from .cap_log import log_cap_hit
 from ..asgi import ASGIEvent
 logger = logging.getLogger(__name__)
 
-async def _run_with_log(coro, record: AccessLogRecord,
-                        dispatcher=None, scope: dict | None = None) -> None:
+async def _run_with_log(coro, record: AccessLogRecord) -> None:
     """Await *coro* then emit one access log entry on 'blackbull.access'.
 
     CancelledError re-raised so TaskGroup cancellation propagates correctly.
     All other exceptions are logged and swallowed so a failing stream does not
     cancel sibling streams through the TaskGroup.
+
+    Request-lifecycle Level B events are emitted by ``BlackBull._dispatch``
+    (Sprint 64 consolidation), not here.
     """
     try:
-        if dispatcher is not None and scope is not None and scope.get('type') == 'http':
-            await dispatcher.emit(Event(
-                'request_received',
-                detail={
-                    'scope':        scope,
-                    'client_ip':    record.client_ip,
-                    'method':       record.method,
-                    'path':         record.path,
-                    'http_version': record.http_version,
-                    'headers':      scope.get('headers', []),
-                },
-            ))
         await coro
     except asyncio.CancelledError:
         raise
@@ -51,22 +40,6 @@ async def _run_with_log(coro, record: AccessLogRecord,
         logger.exception('HTTP/2 stream raised an unhandled exception')
     finally:
         _emit_access_log(record)
-        if (dispatcher is not None and scope is not None
-                and scope.get('type') == 'http'
-                and not scope.get('_disconnected')):
-            await dispatcher.emit(Event(
-                'request_completed',
-                detail={
-                    'scope': scope,
-                    'client_ip': record.client_ip,
-                    'method': record.method,
-                    'path': record.path,
-                    'http_version': record.http_version,
-                    'status': record.status,
-                    'response_bytes': record.response_bytes,
-                    'duration_ms': record.duration_ms(),
-                },
-            ))
 
 
 

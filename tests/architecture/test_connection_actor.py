@@ -150,7 +150,7 @@ async def test_connection_dispatches_http1(
     await actor.run()
 
     aggregator.on_connection_accepted.assert_called_once()
-    aggregator.on_request_completed.assert_called_once()
+    mock_app.assert_awaited_once()
 
 
 @pytest.mark.asyncio
