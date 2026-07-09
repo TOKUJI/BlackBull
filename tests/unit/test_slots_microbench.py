@@ -135,8 +135,8 @@ def test_stream_priority_tree_still_works():
     assert root.find_child(3) is grandchild
     assert grandchild.parent is child
 
-    # Closing should remove the child from its parent.
-    grandchild.close()
+    # Dropping should remove the child from its parent.
+    child.drop_child(3)
     assert child.find_child(3) is None
 
 

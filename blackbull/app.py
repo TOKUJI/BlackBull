@@ -21,6 +21,7 @@ from collections.abc import Awaitable, Callable, Iterable
 from http import HTTPStatus, HTTPMethod
 from pathlib import Path
 import asyncio
+import re
 import traceback
 
 # import from this package
@@ -185,7 +186,7 @@ class RouteGroup:
         self._group_mw = list(middlewares)
 
     def route(self, methods: str | HTTPMethod | Iterable[str | HTTPMethod] = [HTTPMethod.GET],
-              path: str = '/', scheme: Scheme | Iterable[Scheme] = Scheme.http,
+              path: str | re.Pattern = '/', scheme: Scheme | Iterable[Scheme] = Scheme.http,
               middlewares: list = [], name: str | None = None):
         return self._app.route(
             methods=methods,
@@ -206,14 +207,9 @@ class BlackBull:
         self._config = config
         self._router = Router()
         self._logger = logger
-        self._error_router = ErrorRouter()
-
-        # Register the comprehensive default handler for every HTTPStatus error
-        # and the Exception base class so all unhandled errors are covered.
-        for status in HTTPStatus:
-            if status.is_client_error or status.is_server_error:
-                self._error_router[status] = _default_error_handler
-        self._error_router[Exception] = _default_error_handler
+        # Miss-fallback covers every error status and unhandled exception
+        # class; only user-registered handlers live in the registries.
+        self._error_router = ErrorRouter(default=_default_error_handler)
 
         self._dispatcher = EventDispatcher(shutdown_timeout=observer_shutdown_timeout)
         self._loop = loop
@@ -512,8 +508,20 @@ class BlackBull:
                 await send({'type': 'lifespan.startup.complete'})
             elif event['type'] == 'lifespan.shutdown':
                 self._logger.debug('lifespan shutdown')
-                await self._dispatcher.emit(Event('app_shutdown'))
-                await self._dispatcher.aclose()
+                try:
+                    await self._dispatcher.emit(Event('app_shutdown'))
+                    await self._dispatcher.aclose()
+                except Exception as exc:
+                    # ASGI lifespan spec — a raising @app.on_shutdown /
+                    # @app.intercept('app_shutdown') hook must answer with
+                    # lifespan.shutdown.failed, not unwind the lifespan task
+                    # silently (bug 1.18); external servers (uvicorn,
+                    # hypercorn) log the failure and exit non-zero.
+                    self._logger.error('app_shutdown hook failed:\n%s',
+                                       traceback.format_exc())
+                    await send({'type': 'lifespan.shutdown.failed',
+                                'message': str(exc)})
+                    return
                 await send({'type': 'lifespan.shutdown.complete'})
                 return
 
@@ -756,7 +764,7 @@ class BlackBull:
             }))
 
     def route(self, methods: str | HTTPMethod | Iterable[str | HTTPMethod] = [HTTPMethod.GET],
-              path: str = '/', scheme: Scheme | Iterable[Scheme] = Scheme.http,
+              path: str | re.Pattern = '/', scheme: Scheme | Iterable[Scheme] = Scheme.http,
               functions: list = [], middlewares: list = [],
               name: str | None = None):
         """Register a route handler, optionally wrapping it in middlewares."""

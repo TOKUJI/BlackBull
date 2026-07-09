@@ -10,7 +10,7 @@ next link.
 ``RouteGroup`` is defined in :mod:`blackbull.app` to avoid a circular
 import; this module re-exports it lazily through ``__getattr__``.
 """
-from collections import UserDict, OrderedDict
+from collections import OrderedDict
 from collections.abc import Iterable
 import dataclasses
 from dataclasses import dataclass, field
@@ -56,6 +56,11 @@ _SAMPLE_INPUTS: dict[str, str] = {
     'uuid': '00000000-0000-0000-0000-000000000000',
     'path': 'a/b/c',
 }
+
+# Characters that signal regex intent in a string path (after removing
+# {param} placeholders).  '.' is deliberately absent — it is common in
+# literal paths ('/openapi.json') and harmless.
+_REGEX_METACHARS = frozenset('^$*+?()[]|\\')
 
 
 # ---------------------------------------------------------------------------
@@ -671,18 +676,18 @@ class BaseRouter:
         raise NotImplementedError()
 
     def route(self, methods: str | HTTPMethod | Iterable[str | HTTPMethod] = [HTTPMethod.GET],
-              path: str = '/', scheme: Scheme | Iterable[Scheme] = Scheme.http,
+              path: str | re.Pattern = '/', scheme: Scheme | Iterable[Scheme] = Scheme.http,
               functions: list = []):
         raise NotImplementedError()
 
 
 
 # http://taichino.com/programming/1538
-class Router(UserDict, BaseRouter):
+class Router(BaseRouter):
     """
-    This class has 2 dictionaries: self.data and self.regex_.
-    key: str or re.Pattern
-    value: (function, methods, scheme)
+    String paths live in the routing trie (sole store, including
+    ``{param}`` segments); raw ``re.Pattern`` routes live in
+    ``self._raw_regex`` and are scanned only on a trie miss.
     """
     f_string = re.compile(r'\{([a-zA-Z_]\w*?)\}', flags=re.ASCII)
     _param_pattern = re.compile(r'\{([a-zA-Z_]\w*?)(?::([a-zA-Z_]\w*?))?\}', flags=re.ASCII)
@@ -691,14 +696,12 @@ class Router(UserDict, BaseRouter):
     # Bounded at 2048 entries; cleared whenever a route is registered.
     _LOOKUP_CACHE_MAX: int = 2048
 
-    def __init__(self, *args, **kwds):
-        super(Router, self).__init__(*args, **kwds)
-        self.regex_ = {}
-        self._param_converters: dict[re.Pattern, dict[str, Callable]] = {}
+    def __init__(self):
         self._route_info: list[_RouteInfo] = []
         self._named_routes: dict[str, tuple[str, dict[str, str]]] = {}
         self._frozen: bool = False
         self._trie = _RouteTrie()
+        self._string_paths: set[str] = set()  # registered string paths (for __contains__/__repr__)
         self._raw_regex: dict = {}  # raw re.Pattern routes (not compiled from string paths)
         self._lookup_cache: OrderedDict = OrderedDict()
         # type → callable registry for simplified-handler return coercion.
@@ -721,12 +724,12 @@ class Router(UserDict, BaseRouter):
     ):
         """
         If key[0] is a str:
-            - Store it in self.data under the normalised (path, methods, scheme) key.
-            - Also compile a regex from {param} / {param:converter} placeholders and
-              store it in self.regex_ together with per-param converter functions.
+            - Insert it into the routing trie under the normalised
+              (path, methods, scheme) key.  ``{param}`` / ``{param:converter}``
+              placeholders become parameter segments with converter functions.
 
         If key[0] is a re.Pattern:
-            - Store it in self.regex_ only.
+            - Store it in self._raw_regex (scanned on trie miss).
 
         When scheme is omitted it is stored as _ANY_SCHEME,
         which matches any scheme at lookup time.
@@ -763,33 +766,31 @@ class Router(UserDict, BaseRouter):
 
         # Dispatch on path type
         if isinstance(path, str):
-            # Store under the normalised 3-element key in self.data
-            self.data[(path, tuple(methods), scheme_key)] = value
-
-            # Expand {param} / {param:converter} placeholders into named capture groups
-            converters: dict[str, Callable] = {}
-
-            def _replace(m: re.Match) -> str:
-                name = m.group(1)
+            # Validate converter specs up front — the trie itself defaults an
+            # unknown spec to str, which would silently mis-register the route.
+            for m in self._param_pattern.finditer(path):
                 spec = m.group(2) or 'str'
                 if spec not in _CONVERTERS:
                     raise ValueError(
                         f"Unknown converter {spec!r} in path {path!r}. "
                         f"Valid converters: {sorted(_CONVERTERS)}")
-                regex_str, converter_fn = _CONVERTERS[spec]
-                converters[name] = converter_fn
-                return f'(?P<{name}>{regex_str})'
 
-            pattern_str = self._param_pattern.sub(_replace, path)
-            compiled = re.compile(f'^{pattern_str}$')
-            self.regex_[(compiled, tuple(methods), scheme_key)] = value
-            if converters:
-                self._param_converters[compiled] = converters
+            # String paths are matched literally (plus {param} placeholders).
+            # Before the trie became the sole string-path store, every string
+            # was also compiled as a regex, so a regex source string happened
+            # to work — reject it loudly rather than 404 silently.
+            stripped = self._param_pattern.sub('', path)
+            if any(c in _REGEX_METACHARS for c in stripped):
+                raise ValueError(
+                    f"Path {path!r} contains regex metacharacters; string "
+                    f"paths are matched literally (with {{param}} "
+                    f"placeholders). Pass a compiled re.Pattern for custom "
+                    f"regex routes.")
 
             self._trie.insert(path, tuple(methods), scheme_key, value)
+            self._string_paths.add(path)
 
         elif isinstance(path, re.Pattern):
-            self.regex_[(path, tuple(methods), scheme_key)] = value
             self._raw_regex[(path, tuple(methods), scheme_key)] = value
 
         else:
@@ -844,9 +845,9 @@ class Router(UserDict, BaseRouter):
                 return _inject
             return h
 
-        # --- 2. Full regex scan (fallback: raw re.Pattern and regex-string paths) ---
+        # --- 2. Regex scan (fallback: raw re.Pattern routes only) ----------
         allowed_methods: set = set(trie_allowed)
-        for (pattern, ms, ss), fn in self.regex_.items():
+        for (pattern, ms, ss), fn in self._raw_regex.items():
             m = pattern.match(key_path)
             if not m:
                 continue
@@ -854,12 +855,9 @@ class Router(UserDict, BaseRouter):
                 continue
             allowed_methods.update(ms)
             if self._method_matches(key_method, ms):
-                logger.debug("regex_ hit: pattern=%r fn=%r", pattern, fn)
+                logger.debug("raw-regex hit: pattern=%r fn=%r", pattern, fn)
                 if gdict := m.groupdict():
-                    _cvts = self._param_converters.get(pattern, {})
-                    _params = {k: _cvts[k](v) if k in _cvts else v
-                               for k, v in gdict.items()}
-                    _fn = fn
+                    _fn, _params = fn, gdict
                     async def _inject(scope, receive, send,
                                       _fn=_fn, _params=_params):
                         scope.setdefault('path_params', {}).update(_params)
@@ -876,33 +874,32 @@ class Router(UserDict, BaseRouter):
     def __contains__(self, item) -> bool:
         """
         Accept either a plain str (path only) or a (path, method, scheme) tuple.
-        Search both self.data and self.regex_.
+        True when the path was registered verbatim as a string route, or when
+        any raw re.Pattern route matches it.
         """
         # Extract only the path when a tuple is given
         if isinstance(item, tuple):
             path = item[0]
         else:
             path = item
- 
-        # Check for an exact path match in self.data
-        for (p, *_) in self.data:
-            if p == path:
-                return True
- 
-        # Check whether any pattern in self.regex_ matches
-        for (pattern, *_) in self.regex_:
+
+        if path in self._string_paths:
+            return True
+
+        # Check whether any raw re.Pattern route matches
+        for (pattern, *_) in self._raw_regex:
             m = pattern.match(path)
             if m:
                 logger.debug("%r matches %r? %r", pattern, path, m)
                 return True
- 
+
         return False
 
     def __repr__(self) -> str:
         return (
             f"{self.__class__.__name__}("
-            f"data={self.data!r}, "
-            f"regex_={self.regex_!r})"
+            f"paths={sorted(self._string_paths)!r}, "
+            f"raw_regex={self._raw_regex!r})"
         )
 
     @staticmethod
@@ -926,7 +923,7 @@ class Router(UserDict, BaseRouter):
 
     def route_fn(self,
                  methods: str | HTTPMethod | Iterable[str | HTTPMethod] = [HTTPMethod.GET],
-                 path: str = '/',
+                 path: str | re.Pattern = '/',
                  scheme: Scheme | Iterable[Scheme] = Scheme.http,
                  name: str | None = None):
 
@@ -943,17 +940,12 @@ class Router(UserDict, BaseRouter):
             if _is_simplified_handler(fn):
                 fn = _adapt_handler(fn, path, self._converters)
 
-            @wraps(fn)
-            def wrapper(*args, **kwds):
-                logger.debug('Router.route_fn.register.wrapper() is called.')
-                return fn(*args, **kwds)
-
             logger.debug((path, methods, scheme))
-            self[(path, methods, scheme)] = wrapper
+            self[(path, methods, scheme)] = fn
 
             self._record_route(path, original, name,
                                methods=_to_tuple(methods), scheme=scheme)
-            return wrapper
+            return fn
 
         return register
 
@@ -988,17 +980,28 @@ class Router(UserDict, BaseRouter):
         self._record_route(path, original_handler or fns[-1], name,
                            methods=_to_tuple(methods), scheme=scheme)
 
-    def _record_route(self, path: str, handler: Callable, name: str | None,
+    def _record_route(self, path: 'str | re.Pattern', handler: Callable,
+                      name: str | None,
                       methods: tuple = (), scheme: Any = None) -> None:
-        """Store route metadata for validation, url_path_for, and OpenAPI."""
-        param_specs = {m.group(1): (m.group(2) or 'str')
-                       for m in self._param_pattern.finditer(path)}
+        """Store route metadata for validation, url_path_for, and OpenAPI.
+
+        *path* may be a raw ``re.Pattern`` route (the documented custom-regex
+        form): its source string becomes the template and it has no
+        ``{param}`` specs — path params come from the pattern's named groups
+        at match time.
+        """
+        if isinstance(path, re.Pattern):
+            template, param_specs = path.pattern, {}
+        else:
+            template = path
+            param_specs = {m.group(1): (m.group(2) or 'str')
+                           for m in self._param_pattern.finditer(path)}
         if name is not None:
             if name in self._named_routes:
                 raise ValueError(f"Duplicate route name {name!r}")
-            self._named_routes[name] = (path, param_specs)
+            self._named_routes[name] = (template, param_specs)
         self._route_info.append(_RouteInfo(
-            template=path,
+            template=template,
             handler=handler,
             param_specs=param_specs,
             methods=methods,
@@ -1109,7 +1112,7 @@ class Router(UserDict, BaseRouter):
         self._frozen = True
 
     def route(self, methods: str | HTTPMethod | Iterable[str | HTTPMethod] = [HTTPMethod.GET],
-              path: str = '/', scheme: Scheme | Iterable[Scheme] = Scheme.http,
+              path: str | re.Pattern = '/', scheme: Scheme | Iterable[Scheme] = Scheme.http,
               functions: list = [], middlewares: list = [],
               name: str | None = None):
         """Register a function or middleware chain in the routing table.
@@ -1161,7 +1164,8 @@ class ErrorRouter:
       - HTTPStatus key: exact match only.
       - Exception class: walks the MRO so a handler registered for a base class
         (e.g. Exception) catches all unhandled subclasses.
-      - Returns None when no handler is found (caller decides the fallback).
+      - On a miss, returns the *default* handler passed at construction
+        (``None`` when no default was given — caller decides the fallback).
 
     Usage::
 
@@ -1180,9 +1184,14 @@ class ErrorRouter:
         handler = errors[KeyError]               # same, accepting the class directly
     """
 
-    def __init__(self):
+    def __init__(self, default: Callable | None = None):
+        """*default* is returned on any lookup miss (error statuses and
+        unmatched exceptions) instead of ``None``.  Only explicitly
+        registered handlers appear in the two registries, so "which statuses
+        have custom handlers" stays inspectable."""
         self._status_handlers: dict[HTTPStatus, Callable] = {}
         self._exc_handlers: dict[Type[BaseException], Callable] = {}
+        self._default = default
 
     # ------------------------------------------------------------------
     # Registration
@@ -1222,7 +1231,7 @@ class ErrorRouter:
           - exception instance   → MRO walk on type(key)
         """
         if isinstance(key, HTTPStatus):
-            return self._status_handlers.get(key)
+            return self._status_handlers.get(key, self._default)
 
         # Normalise instance → class
         exc_class = key if isinstance(key, type) else type(key)
@@ -1232,7 +1241,7 @@ class ErrorRouter:
         for cls in exc_class.__mro__:
             if cls in self._exc_handlers:
                 return self._exc_handlers[cls]
-        return None
+        return self._default
 
     def __contains__(self, key: HTTPStatus | Type[BaseException] | BaseException) -> bool:
         return self[key] is not None

@@ -9,7 +9,6 @@ from pathlib import Path
 import time
 
 # private library
-from ..utils import check_port
 from ..protocol.rsock import (
     create_dual_stack_sockets, create_unix_socket,
     adopt_inherited_sockets, adopt_listening_fd,
@@ -474,10 +473,6 @@ class Server:
             self.unix_path = unix_path
             return
 
-        if not check_port(port=port):
-            logger.error(f'Port ({port}) is not available. Try another port.')
-            raise RuntimeError(f'Port ({port}) is not available. Try another port.')
-
         raw_sockets = create_dual_stack_sockets(
             port,
             backlog=_cfg.socket_backlog,
@@ -493,8 +488,14 @@ class Server:
         )
 
         if not raw_sockets:
-            logger.error(f'Failed to open port ({port}). Try another port.')
-            return
+            # No connect-probe pre-check (that shape was racy, IPv4-localhost
+            # only, and hid the OS error): binding is the check.  The specific
+            # OS failure (e.g. EADDRINUSE naming the address) was already
+            # logged by _bind_socket.
+            logger.error(f'Failed to bind port {port}. Try another port.')
+            raise RuntimeError(
+                f'Failed to bind port {port} (see log for the OS error, '
+                f'e.g. address already in use). Try another port.')
 
         self.raw_sockets = raw_sockets
 

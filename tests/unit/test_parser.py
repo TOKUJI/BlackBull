@@ -1,39 +1,7 @@
-"""Tests for blackbull/server/parser.py — HTTP2ParserBase registration guards."""
+"""Tests for blackbull/server/parser.py — HTTP/1.1 and HTTP/2 scope parsing."""
 import pytest
-from unittest.mock import MagicMock
 from hypothesis import given
 from hypothesis import strategies as st
-
-from blackbull.server.parser import HTTP2ParserBase
-
-
-def test_subclass_frame_type_none_not_registered():
-    before = dict(HTTP2ParserBase._registry)
-
-    class AbstractSub(HTTP2ParserBase):
-        FRAME_TYPE = None
-
-    assert HTTP2ParserBase._registry == before
-
-
-def test_subclass_duplicate_frame_type_raises():
-    with pytest.raises(ValueError, match='Duplicate FRAME_TYPE'):
-        class DupA(HTTP2ParserBase):
-            FRAME_TYPE = 'parser_test_sentinel'
-
-        class DupB(HTTP2ParserBase):
-            FRAME_TYPE = 'parser_test_sentinel'
-
-    HTTP2ParserBase._registry.pop('parser_test_sentinel', None)
-
-
-def test_base_parse_not_implemented():
-    frame = MagicMock()
-    frame.stream_id = 1
-    stream = MagicMock()
-    parser = HTTP2ParserBase(frame, stream)
-    with pytest.raises(NotImplementedError):
-        parser.parse()
 
 
 # ---------------------------------------------------------------------------
@@ -41,7 +9,7 @@ def test_base_parse_not_implemented():
 # ---------------------------------------------------------------------------
 
 from blackbull.server.http1_actor import HTTP1Actor as _HTTP1Actor
-from blackbull.server.parser import _make_scope as _make_http2_scope, ParserFactory as _ParserFactory
+from blackbull.server.parser import _make_scope as _make_http2_scope, parse_headers as _parse_headers
 
 
 def _get_scope(raw_request: bytes) -> dict:
@@ -356,16 +324,12 @@ def _make_h2_headers_frame_dispatch(extra_headers: list | None = None) -> object
     return FrameFactory().load(raw)
 
 
-class _FakeStream:
-    identifier = 1
-
-
 class TestHTTP2ScopeFields:
-    """HTTP2HEADParser.parse() must populate scope fields correctly."""
+    """parse_headers() must populate scope fields correctly."""
 
     def test_root_path_default_empty_string(self):
         frame = _make_h2_headers_frame_dispatch()
-        scope = _ParserFactory.Get(frame, _FakeStream()).parse()
+        scope = _parse_headers(frame)
         assert scope.get('root_path') == ''
 
     @given(prefix=st.from_regex(r'/[a-zA-Z0-9/_-]{0,40}', fullmatch=True))
@@ -377,7 +341,7 @@ class TestHTTP2ScopeFields:
         frame = _make_h2_headers_frame_dispatch(
             extra_headers=[(b'x-forwarded-prefix', prefix.encode())]
         )
-        scope = _ParserFactory.Get(frame, _FakeStream()).parse()
+        scope = _parse_headers(frame)
         assert scope.get('root_path') == ''
 
 

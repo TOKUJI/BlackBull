@@ -125,7 +125,7 @@ def test_router_add_post(router):
 
 
 def test_router_regex(router):
-    path = r'^test/\d+$'
+    path = re.compile(r'^test/\d+$')
     scheme = Scheme.http
 
     @router.route(path=path, methods=[HTTPMethod.GET])
@@ -139,7 +139,10 @@ def test_router_regex(router):
 
 @pytest.mark.asyncio
 async def test_router_regex_with_group_name1(router):
-    path = r'^test/(?P<id_>\d+)$'
+    # Custom regex routes take a compiled re.Pattern (the documented
+    # contract).  A raw regex *string* is rejected at registration since
+    # Sprint 64 — see test_router_regex_source_string_rejected.
+    path = re.compile(r'^test/(?P<id_>\d+)$')
     scheme = Scheme.http
 
     @router.route(path=path, methods=[HTTPMethod.GET])
@@ -152,19 +155,13 @@ async def test_router_regex_with_group_name1(router):
     assert scope['path_params']['id_'] == '1234'
 
 
-@pytest.mark.asyncio
-async def test_router_regex_with_group_name2(router):
-    path = r'^test/(?P<id_>\d+)$'
-    scheme = Scheme.http
-
-    @router.route(path=path, methods=[HTTPMethod.GET])
-    async def fn(scope, receive, send):
-        pass
-
-    f = router[('test/1234', HTTPMethod.GET, scheme)]
-    scope = {}
-    await f(scope, None, None)
-    assert scope['path_params']['id_'] == '1234'
+def test_router_regex_source_string_rejected(router):
+    """A regex source passed as a *string* path must fail loudly at
+    registration (it would otherwise register as a literal path and 404)."""
+    with pytest.raises(ValueError, match='regex metacharacters'):
+        @router.route(path=r'^test/(?P<id_>\d+)$', methods=[HTTPMethod.GET])
+        async def fn(scope, receive, send):
+            pass
 
 
 @pytest.mark.asyncio
@@ -1072,9 +1069,9 @@ class TestRouterEdgeCases:
         async def fn(scope, receive, send): pass
         pattern = re.compile(r'^/api/\d+$')
         router[(pattern, HTTPMethod.GET, Scheme.http)] = fn
-        # Stored in regex_, not data
-        assert any(k[0] is pattern for k in router.regex_)
-        assert not any(k[0] == pattern for k in router.data)
+        # Stored as a raw-regex route, not a string path
+        assert any(k[0] is pattern for k in router._raw_regex)
+        assert not router._string_paths
 
     def test_getitem_scheme_mismatch_raises(self):
         router = Router()
