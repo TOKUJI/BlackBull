@@ -81,10 +81,15 @@ async def my_mw(scope, receive, send, call_next):
 async def log_it(event): ...
 
 @app.intercept('before_handler')     # synchronous; exceptions propagate to emitter
-async def auth(scope, receive, send, call_next):
-    ...
-    await call_next(scope, receive, send)
+async def auth(event):               # every handler receives the Event
+    if not valid(event.detail['scope']):
+        raise PermissionError('denied')
 ```
+
+The four request-lifecycle events (`request_received`, `before_handler`,
+`after_handler`, `request_completed`) are emitted from `BlackBull._dispatch`
+only (Sprint 64) — exactly once per request under any transport (own server,
+uvicorn, TestClient).
 
 ## Logging
 
