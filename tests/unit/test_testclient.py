@@ -119,6 +119,38 @@ def test_post_body_round_trip_via_simplified_handler() -> None:
     assert response.content == payload
 
 
+def test_request_object_end_to_end() -> None:
+    """A handler taking the opt-in Request sees method/headers/cookies/body."""
+    from blackbull import Request
+
+    app = BlackBull()
+
+    @app.route(path='/inspect', methods=[HTTPMethod.POST])
+    async def inspect(request: Request):
+        return {
+            'method': request.method,
+            'path': request.path,
+            'content_type': request.headers.get(b'content-type').decode(),
+            'session': request.cookies.get('session', ''),
+            'body': (await request.text()),
+        }
+
+    with TestClient(app) as client:
+        response = client.post(
+            '/inspect', content=b'ping',
+            headers=[('Content-Type', 'text/plain')],
+            cookies={'session': 'abc123'},
+        )
+    assert response.status_code == 200
+    assert response.json() == {
+        'method': 'POST',
+        'path': '/inspect',
+        'content_type': 'text/plain',
+        'session': 'abc123',
+        'body': 'ping',
+    }
+
+
 def test_post_streaming_body_via_full_form_handler() -> None:
     app = _make_app()
     payload = {'name': 'BlackBull', 'count': 3}

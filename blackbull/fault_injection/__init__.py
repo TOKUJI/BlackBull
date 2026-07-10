@@ -20,7 +20,7 @@ This module is an opt-in testing instrument.  The HTTP/2 server refuses
 to start in a production context — when ``BLACKBULL_ENV=production`` (the
 framework's production signal) or the explicit ``BB_PRODUCTION`` override
 is set — so a deliberate-misbehaviour code path cannot accidentally fire on
-a production deployment (see [`out-of-scope.md`](../../.claude/skills/update-roadmap/out-of-scope.md)).
+a production deployment.
 
 See ``docs/guide/fault_injection.md`` for a tutorial.
 """
