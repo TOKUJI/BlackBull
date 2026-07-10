@@ -95,22 +95,9 @@ def mock_app():
 
 
 # ---------------------------------------------------------------------------
-# Helper: aggregator mock that calls through on_before_handler
-# ---------------------------------------------------------------------------
-
-def _call_through_aggregator():
-    """AsyncMock(spec=EventAggregator) whose on_before_handler calls call_next."""
-    aggregator = AsyncMock(spec=EventAggregator)
-
-    async def _before(scope, receive, send, *, call_next):
-        await call_next(scope, receive, send)
-
-    aggregator.on_before_handler = AsyncMock(side_effect=_before)
-    return aggregator
-
-
-# ---------------------------------------------------------------------------
-# Test 1: single request → all four lifecycle events fire in order
+# Test 1: single request → the app is dispatched once; no error event.
+# (Request-lifecycle Level B events are emitted by BlackBull._dispatch since
+# Sprint 64 — the actor layer only calls the app and reports errors.)
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
@@ -119,16 +106,12 @@ async def test_request_lifecycle_events(mock_reader, mock_writer, mock_app) -> N
     actor = HTTP1Actor(mock_reader, mock_writer, mock_app, aggregator)
     await actor.run()
 
-    aggregator.on_request_received.assert_called_once()
-    aggregator.on_before_handler.assert_called_once()
-    aggregator.on_after_handler.assert_called_once_with(ANY, exception=None)
-    aggregator.on_request_completed.assert_called_once()
+    mock_app.assert_awaited_once()
     aggregator.on_error.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
-# Test 2: app exception → error fires, after_handler carries exception,
-#         request_completed does NOT fire
+# Test 2: app exception → Level B error fires with the exception
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
@@ -138,15 +121,11 @@ async def test_app_exception_fires_error(mock_reader, mock_writer) -> None:
     async def bad_app(scope, receive, send):
         raise boom
 
-    # Use a call-through aggregator so bad_app is actually invoked via call_next
-    aggregator = _call_through_aggregator()
+    aggregator = AsyncMock(spec=EventAggregator)
     actor = HTTP1Actor(mock_reader, mock_writer, bad_app, aggregator)
     await actor.run()  # isolate strategy: exception is swallowed after re-emitting
 
     aggregator.on_error.assert_called_once_with(ANY, boom)
-    call_args = aggregator.on_after_handler.call_args
-    assert call_args.kwargs["exception"] is boom
-    aggregator.on_request_completed.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -158,7 +137,7 @@ async def test_keep_alive_two_requests(mock_keep_alive_reader, mock_writer, mock
     aggregator = AsyncMock(spec=EventAggregator)
     actor = HTTP1Actor(mock_keep_alive_reader, mock_writer, mock_app, aggregator)
     await actor.run()
-    assert aggregator.on_request_completed.call_count == 2
+    assert mock_app.await_count == 2
 
 
 # ---------------------------------------------------------------------------
@@ -182,7 +161,7 @@ async def test_parse_connection_header_does_not_corrupt_scheme(mock_writer) -> N
         await send({'type': 'http.response.start', 'status': 200, 'headers': []})
         await send({'type': 'http.response.body', 'body': b''})
 
-    aggregator = _call_through_aggregator()
+    aggregator = AsyncMock(spec=EventAggregator)
     actor = HTTP1Actor(reader, mock_writer, capture_app, aggregator)
     await actor.run()
 
@@ -206,7 +185,7 @@ async def test_parse_host_without_port(mock_writer) -> None:
         await send({'type': 'http.response.start', 'status': 200, 'headers': []})
         await send({'type': 'http.response.body', 'body': b''})
 
-    aggregator = _call_through_aggregator()
+    aggregator = AsyncMock(spec=EventAggregator)
     actor = HTTP1Actor(reader, mock_writer, capture_app, aggregator)
     await actor.run()  # must not raise
 
@@ -228,7 +207,7 @@ async def test_request_disconnected_on_eof(mock_reader, mock_writer) -> None:
         await receive()  # consumes the body (http.request)
         await receive()  # HTTP1Recipient returns http.disconnect on second call
 
-    aggregator = _call_through_aggregator()
+    aggregator = AsyncMock(spec=EventAggregator)
 
     async def _on_disconnect(*args, **kwargs):
         nonlocal disconnected_called

@@ -417,3 +417,28 @@ async def test_dispatch_websocket_calls_handler():
     scope = {'type': 'websocket', 'path': '/ws', 'headers': []}
     await app._dispatch(scope, AsyncMock(), AsyncMock())
     assert called == [True]
+
+
+@pytest.mark.asyncio
+async def test_raising_shutdown_hook_sends_lifespan_shutdown_failed():
+    """ASGI lifespan spec: a raising shutdown hook must answer
+    lifespan.shutdown with lifespan.shutdown.failed (+ message), not
+    lifespan.shutdown.complete (bug 1.18)."""
+    app_ = BlackBull()
+
+    @app_.on_shutdown
+    async def bad_hook():
+        raise RuntimeError('shutdown hook boom')
+
+    sent = []
+    async def capture_send(event):
+        sent.append(event)
+
+    receive = _make_lifespan_receive('lifespan.startup', 'lifespan.shutdown')
+    await app_({'type': 'lifespan'}, receive, capture_send)
+
+    types = [e['type'] for e in sent]
+    assert 'lifespan.shutdown.failed' in types
+    assert 'lifespan.shutdown.complete' not in types
+    failed = next(e for e in sent if e['type'] == 'lifespan.shutdown.failed')
+    assert 'shutdown hook boom' in failed.get('message', '')

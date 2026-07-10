@@ -11,7 +11,7 @@ import asyncio
 import pytest
 from blackbull import BlackBull, StreamingResponse
 from blackbull.event import Event
-from blackbull.server.server import AccessLogRecord, _run_with_log
+from blackbull.server.server import AccessLogRecord
 from blackbull.server.http1_actor import HTTP1Actor
 from blackbull.server.recipient import AbstractReader
 from blackbull.server.sender import AbstractWriter
@@ -280,24 +280,26 @@ async def test_duration_is_nonnegative_float():
 
 @pytest.mark.asyncio
 async def test_event_fires_per_stream_on_http2():
-    """On HTTP/2, the event fires once per stream via _run_with_log."""
-    from blackbull.event import EventDispatcher
+    """On HTTP/2, the event fires once per stream (one ASGI dispatch each).
 
-    dispatcher = EventDispatcher()
+    Sprint 64 moved emission from the server layer (_run_with_log) into
+    BlackBull._dispatch, so per-stream firing is now per-app-call firing.
+    The detail's wire fields (status/response_bytes) are sourced from the
+    AccessLogRecord the server places in scope['state']['access_log'].
+    """
+    app = BlackBull()
     captured: list[Event] = []
     seen = asyncio.Event()
 
+    @app.on('request_completed')
     async def observer(event: Event) -> None:
         captured.append(event)
         seen.set()
 
-    dispatcher.on('request_completed', observer)
-
-    async def app(scope, receive, send):
-        pass
-
-    async def noop_send(event, *args, **kwargs):
-        pass
+    @app.route(path='/h2')
+    async def handler(scope, receive, send):
+        await send({'type': 'http.response.start', 'status': 200, 'headers': []})
+        await send({'type': 'http.response.body', 'body': b'', 'more_body': False})
 
     record = AccessLogRecord(
         client_ip='10.0.0.1', method='GET', path='/h2', http_version='2',
@@ -306,13 +308,16 @@ async def test_event_fires_per_stream_on_http2():
     scope = {
         'type': 'http', 'method': 'GET', 'path': '/h2',
         'http_version': '2', 'client': ['10.0.0.1', 0],
+        'headers': [], 'state': {'access_log': record},
     }
 
     async def fake_receive():
         return {'type': 'http.request', 'body': b'', 'more_body': False}
 
-    await _run_with_log(app(scope, fake_receive, noop_send), record,
-                        dispatcher=dispatcher, scope=scope)
+    async def noop_send(event, *args, **kwargs):
+        pass
+
+    await app(scope, fake_receive, noop_send)
     await asyncio.wait_for(seen.wait(), timeout=2.0)
     await asyncio.sleep(0.2)
     assert len(captured) == 1
@@ -320,6 +325,8 @@ async def test_event_fires_per_stream_on_http2():
     d = captured[0].detail
     assert d['path'] == '/h2'
     assert d['method'] == 'GET'
+    assert d['status'] == 200
+    assert d['response_bytes'] == 42
 
 
 # ---------------------------------------------------------------------------

@@ -21,6 +21,7 @@ from collections.abc import Awaitable, Callable, Iterable
 from http import HTTPStatus, HTTPMethod
 from pathlib import Path
 import asyncio
+import re
 import traceback
 
 # import from this package
@@ -185,7 +186,7 @@ class RouteGroup:
         self._group_mw = list(middlewares)
 
     def route(self, methods: str | HTTPMethod | Iterable[str | HTTPMethod] = [HTTPMethod.GET],
-              path: str = '/', scheme: Scheme | Iterable[Scheme] = Scheme.http,
+              path: str | re.Pattern = '/', scheme: Scheme | Iterable[Scheme] = Scheme.http,
               middlewares: list = [], name: str | None = None):
         return self._app.route(
             methods=methods,
@@ -206,14 +207,9 @@ class BlackBull:
         self._config = config
         self._router = Router()
         self._logger = logger
-        self._error_router = ErrorRouter()
-
-        # Register the comprehensive default handler for every HTTPStatus error
-        # and the Exception base class so all unhandled errors are covered.
-        for status in HTTPStatus:
-            if status.is_client_error or status.is_server_error:
-                self._error_router[status] = _default_error_handler
-        self._error_router[Exception] = _default_error_handler
+        # Miss-fallback covers every error status and unhandled exception
+        # class; only user-registered handlers live in the registries.
+        self._error_router = ErrorRouter(default=_default_error_handler)
 
         self._dispatcher = EventDispatcher(shutdown_timeout=observer_shutdown_timeout)
         self._loop = loop
@@ -512,13 +508,39 @@ class BlackBull:
                 await send({'type': 'lifespan.startup.complete'})
             elif event['type'] == 'lifespan.shutdown':
                 self._logger.debug('lifespan shutdown')
-                await self._dispatcher.emit(Event('app_shutdown'))
-                await self._dispatcher.aclose()
+                try:
+                    await self._dispatcher.emit(Event('app_shutdown'))
+                    await self._dispatcher.aclose()
+                except Exception as exc:
+                    # ASGI lifespan spec — a raising @app.on_shutdown /
+                    # @app.intercept('app_shutdown') hook must answer with
+                    # lifespan.shutdown.failed, not unwind the lifespan task
+                    # silently (bug 1.18); external servers (uvicorn,
+                    # hypercorn) log the failure and exit non-zero.
+                    self._logger.error('app_shutdown hook failed:\n%s',
+                                       traceback.format_exc())
+                    await send({'type': 'lifespan.shutdown.failed',
+                                'message': str(exc)})
+                    return
                 await send({'type': 'lifespan.shutdown.complete'})
                 return
 
     async def _dispatch(self, scope, receive, send):
-        """Route and dispatch a single non-lifespan request."""
+        """Route and dispatch a single non-lifespan request.
+
+        Single emission point for the request-lifecycle Level B events
+        (``request_received`` / ``before_handler`` / ``after_handler`` /
+        ``request_completed``) — Sprint 64 consolidated them here, the one
+        choke point every transport passes (BlackBull's own HTTP/1.1 and
+        HTTP/2 actors, uvicorn/hypercorn, TestClient), so each fires exactly
+        once per request regardless of how the app is served.  The protocol
+        actors emit only wire-level events (``request_disconnected``,
+        ``error``, websocket/connection lifecycle).
+
+        Each emission is guarded by ``has_listeners`` so a request with no
+        registered handlers pays only a dict lookup, not an ``Event`` +
+        detail-dict construction.
+        """
         self._logger.debug((scope, receive, send))
 
         try:
@@ -537,6 +559,43 @@ class BlackBull:
             await function(scope, receive, send)
             return
 
+        dispatcher = self._dispatcher
+        if dispatcher.has_listeners('request_received'):
+            client = scope.get('client') or ('-',)
+            await dispatcher.emit(Event('request_received', detail={
+                'scope':        scope,
+                'client_ip':    str(client[0]),
+                'method':       scope.get('method', '-'),
+                'path':         scope.get('path', '-'),
+                'http_version': scope.get('http_version', '-'),
+                'headers':      scope.get('headers', []),
+            }))
+        try:
+            await self._dispatch_http(scope, receive, send, scheme)
+        finally:
+            # Fires for every completed HTTP exchange — including 404/405 and
+            # handler errors answered by the error router — but not when the
+            # client disconnected mid-request.  Wire fields come from the
+            # AccessLogRecord BlackBull's own server publishes in
+            # scope['state']['access_log']; under external ASGI hosts they
+            # fall back to placeholders ('-'/0).
+            if (dispatcher.has_listeners('request_completed')
+                    and not scope.get('_disconnected')):
+                log = scope.get('state', {}).get('access_log')
+                client = scope.get('client') or ('-',)
+                await dispatcher.emit(Event('request_completed', detail={
+                    'scope':          scope,
+                    'client_ip':      str(client[0]),
+                    'method':         scope.get('method', '-'),
+                    'path':           scope.get('path', '-'),
+                    'http_version':   scope.get('http_version', '-'),
+                    'status':         log.status if log else '-',
+                    'response_bytes': log.response_bytes if log else 0,
+                    'duration_ms':    log.duration_ms() if log else 0.0,
+                }))
+
+    async def _dispatch_http(self, scope, receive, send, scheme):
+        """Route and run one HTTP request (the non-WebSocket half of _dispatch)."""
         # gRPC — HTTP/2 with ``content-type: application/grpc``.  When a
         # registry is installed, such requests bypass the HTTP router and are
         # served as unary gRPC calls (grpc-status reported in trailers).  The
@@ -594,13 +653,14 @@ class BlackBull:
         self._logger.debug((self, function))
         exc_caught: Exception | None = None
         try:
-            await self._dispatcher.emit(Event('before_handler', detail={
-                'scope':     scope,
-                'client_ip': scope['client'][0] if scope.get('client') else '',
-                'method':    scope.get('method', ''),
-                'path':      scope.get('path', ''),
-                'handler':   function.__name__,
-            }))
+            if self._dispatcher.has_listeners('before_handler'):
+                await self._dispatcher.emit(Event('before_handler', detail={
+                    'scope':     scope,
+                    'client_ip': scope['client'][0] if scope.get('client') else '',
+                    'method':    scope.get('method', ''),
+                    'path':      scope.get('path', ''),
+                    'handler':   function.__name__,
+                }))
             await function(scope, receive, send)
         except ClientDisconnected as e:
             # Peer vanished mid-body — there is no one to answer.  Record it
@@ -622,14 +682,15 @@ class BlackBull:
             exc_caught = e
             self._logger.error(traceback.format_exc())
         finally:
-            await self._dispatcher.emit(Event('after_handler', detail={
-                'scope':     scope,
-                'client_ip': scope['client'][0] if scope.get('client') else '',
-                'method':    scope.get('method', ''),
-                'path':      scope.get('path', ''),
-                'handler':   function.__name__,
-                'exception': exc_caught,
-            }))
+            if self._dispatcher.has_listeners('after_handler'):
+                await self._dispatcher.emit(Event('after_handler', detail={
+                    'scope':     scope,
+                    'client_ip': scope['client'][0] if scope.get('client') else '',
+                    'method':    scope.get('method', ''),
+                    'path':      scope.get('path', ''),
+                    'handler':   function.__name__,
+                    'exception': exc_caught,
+                }))
 
         if exc_caught is not None and not isinstance(exc_caught, ClientDisconnected):
             err_status = (exc_caught.status if isinstance(exc_caught, HTTPException)
@@ -703,7 +764,7 @@ class BlackBull:
             }))
 
     def route(self, methods: str | HTTPMethod | Iterable[str | HTTPMethod] = [HTTPMethod.GET],
-              path: str = '/', scheme: Scheme | Iterable[Scheme] = Scheme.http,
+              path: str | re.Pattern = '/', scheme: Scheme | Iterable[Scheme] = Scheme.http,
               functions: list = [], middlewares: list = [],
               name: str | None = None):
         """Register a route handler, optionally wrapping it in middlewares."""

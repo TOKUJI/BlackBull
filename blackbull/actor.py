@@ -46,7 +46,13 @@ class Actor:
             await self._handle(msg)
 
     async def send(self, msg: Message) -> None:
-        """Enqueue *msg* to this Actor's inbox (non-blocking)."""
+        """Enqueue *msg* to this Actor's inbox.
+
+        Returns immediately for an unbounded inbox (the default).  When the
+        Actor was constructed with ``inbox_maxsize > 0`` and the inbox is
+        full, this awaits until a slot frees up — backpressure on the
+        producer, per the bounded-inbox overflow policy.
+        """
         await self._inbox.put(msg)
 
     async def _inbox_iter(self) -> AsyncIterator[Message]:

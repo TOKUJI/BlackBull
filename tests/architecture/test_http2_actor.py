@@ -78,20 +78,6 @@ class _FakeWriter(AbstractWriter):
 
 
 # ---------------------------------------------------------------------------
-# Helper: aggregator that calls through on_before_handler
-# ---------------------------------------------------------------------------
-
-def _call_through_aggregator():
-    aggregator = AsyncMock(spec=EventAggregator)
-
-    async def _before(scope, receive, send, *, call_next):
-        await call_next(scope, receive, send)
-
-    aggregator.on_before_handler = AsyncMock(side_effect=_before)
-    return aggregator
-
-
-# ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
 
@@ -124,7 +110,9 @@ def mock_app():
 
 
 # ---------------------------------------------------------------------------
-# Test 1: single stream → all four lifecycle events fire
+# Test 1: single stream → the app is dispatched once; no error event.
+# (Request-lifecycle Level B events are emitted by BlackBull._dispatch since
+# Sprint 64 — the actor layer only calls the app and reports errors.)
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
@@ -133,8 +121,7 @@ async def test_stream_request_lifecycle(fake_h2_reader, fake_writer, mock_app) -
     actor = HTTP2Actor(fake_h2_reader, fake_writer, mock_app, aggregator)
     await actor.run()
 
-    aggregator.on_request_received.assert_called_once()
-    aggregator.on_request_completed.assert_called_once()
+    mock_app.assert_awaited_once()
     aggregator.on_error.assert_not_called()
 
 
@@ -147,7 +134,7 @@ async def test_two_concurrent_streams(fake_two_stream_reader, fake_writer, mock_
     aggregator = AsyncMock(spec=EventAggregator)
     actor = HTTP2Actor(fake_two_stream_reader, fake_writer, mock_app, aggregator)
     await actor.run()
-    assert aggregator.on_request_completed.call_count == 2
+    assert mock_app.await_count == 2
 
 
 # ---------------------------------------------------------------------------
@@ -157,21 +144,23 @@ async def test_two_concurrent_streams(fake_two_stream_reader, fake_writer, mock_
 @pytest.mark.asyncio
 async def test_stream_error_isolated(fake_two_stream_reader, fake_writer) -> None:
     call_count = 0
+    completed = 0
 
     async def app_with_one_error(scope, _receive, send):
-        nonlocal call_count
+        nonlocal call_count, completed
         call_count += 1
         if scope.get('path') == '/' and call_count == 1:
             raise RuntimeError('stream error')
         await send({'type': 'http.response.start', 'status': 200, 'headers': []})
         await send({'type': 'http.response.body', 'body': b''})
+        completed += 1
 
-    aggregator = _call_through_aggregator()
+    aggregator = AsyncMock(spec=EventAggregator)
     actor = HTTP2Actor(fake_two_stream_reader, fake_writer, app_with_one_error, aggregator)
     await actor.run()
 
     aggregator.on_error.assert_called_once()
-    aggregator.on_request_completed.assert_called_once()
+    assert call_count == 2 and completed == 1  # sibling stream unaffected
 
 
 # ---------------------------------------------------------------------------
@@ -188,7 +177,7 @@ async def test_scope_has_client_and_server(fake_h2_reader, fake_writer) -> None:
         await send({'type': 'http.response.start', 'status': 200, 'headers': []})
         await send({'type': 'http.response.body', 'body': b''})
 
-    aggregator = _call_through_aggregator()
+    aggregator = AsyncMock(spec=EventAggregator)
     actor = HTTP2Actor(
         fake_h2_reader, fake_writer, capture_app, aggregator,
         peername=('192.168.1.1', 54321),

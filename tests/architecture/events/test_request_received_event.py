@@ -7,10 +7,7 @@ import asyncio
 import pytest
 from unittest.mock import AsyncMock, patch
 from blackbull import BlackBull
-from blackbull.event import Event, EventDispatcher
-from blackbull.server.server import (
-    AccessLogRecord, _run_with_log,
-)
+from blackbull.event import Event
 from blackbull.server.http1_actor import HTTP1Actor
 from blackbull.server.websocket_actor import WebSocketActor
 from blackbull.server.recipient import AbstractReader
@@ -213,20 +210,25 @@ async def test_request_received_exactly_once():
 
 @pytest.mark.asyncio
 async def test_request_received_fires_per_http2_stream():
-    """On HTTP/2, request_received fires once per stream."""
-    dispatcher = EventDispatcher()
+    """On HTTP/2, request_received fires once per stream (one dispatch each).
+
+    Sprint 64 moved emission from the server layer into BlackBull._dispatch,
+    so per-stream firing is now per-app-call firing.
+    """
+    app = BlackBull()
     captured: list[Event] = []
     done = asyncio.Event()
 
+    @app.on('request_received')
     async def observer(event: Event) -> None:
         captured.append(event)
         if len(captured) >= 2:
             done.set()
 
-    dispatcher.on('request_received', observer)
-
-    async def noop_app(scope, receive, send):
-        pass
+    @app.route(path='/stream{n}')
+    async def handler(scope, receive, send):
+        await send({'type': 'http.response.start', 'status': 200, 'headers': []})
+        await send({'type': 'http.response.body', 'body': b'', 'more_body': False})
 
     async def noop_send(event, *args, **kwargs):
         pass
@@ -242,18 +244,15 @@ async def test_request_received_fires_per_http2_stream():
             'http_version': '2',
             'client': ['10.0.0.1', 0],
             'headers': Headers([]),
+            'state': {},
         }
 
     scope1 = _make_h2_scope('/stream1')
     scope2 = _make_h2_scope('/stream2')
-    record1 = AccessLogRecord.from_scope(scope1)
-    record2 = AccessLogRecord.from_scope(scope2)
 
     await asyncio.gather(
-        _run_with_log(noop_app(scope1, fake_receive, noop_send), record1,
-                      dispatcher=dispatcher, scope=scope1),
-        _run_with_log(noop_app(scope2, fake_receive, noop_send), record2,
-                      dispatcher=dispatcher, scope=scope2),
+        app(scope1, fake_receive, noop_send),
+        app(scope2, fake_receive, noop_send),
     )
 
     await asyncio.wait_for(done.wait(), timeout=2.0)
@@ -288,3 +287,47 @@ async def test_request_received_not_fired_for_websocket():
 
     await asyncio.sleep(0.2)
     assert len(fired) == 0
+
+
+# ---------------------------------------------------------------------------
+# 7. Exactly-once on the aggregator (production server) path
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_request_received_exactly_once_with_aggregator():
+    """Exactly one request_received per request under the production actor path.
+
+    Sprint 64 moved emission from the actor layer into BlackBull._dispatch;
+    this pins the no-double-fire property when an EventAggregator is wired
+    (the production server configuration).
+    """
+    from blackbull.event_aggregator import EventAggregator
+
+    app = BlackBull()
+    count = 0
+    seen = asyncio.Event()
+
+    @app.on('request_received')
+    async def observer(event: Event):
+        nonlocal count
+        count += 1
+        seen.set()
+
+    @app.route(path='/once-agg')
+    async def handler(scope, receive, send):
+        await send({'type': 'http.response.start', 'status': 200, 'headers': []})
+        await send({'type': 'http.response.body', 'body': b'', 'more_body': False})
+
+    writer = _FakeWriter()
+    raw = _raw_request(path='/once-agg')
+    actor = HTTP1Actor(
+        _FakeReader(b''), writer, app, EventAggregator(app._dispatcher),
+        request=raw,
+        peername=('127.0.0.1', 54321),
+        sockname=('0.0.0.0', 8000),
+    )
+    await actor.run()
+
+    await asyncio.wait_for(seen.wait(), timeout=2.0)
+    await asyncio.sleep(0.2)
+    assert count == 1

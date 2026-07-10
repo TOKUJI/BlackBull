@@ -1,6 +1,6 @@
 from urllib.parse import urlparse
 
-from ..protocol.frame_types import FrameTypes, PseudoHeaders
+from ..protocol.frame_types import PseudoHeaders
 import logging
 from ..headers import Headers
 
@@ -40,56 +40,6 @@ def _split_h2_path(raw):
     parsed = urlparse(raw)
     path = parsed.path
     return path, path.encode('utf-8'), parsed.query.encode('utf-8')
-
-
-class ParserFactory:
-    """Dispatches an incoming HTTP/2 frame to the parser registered for its type.
-
-    Each ``HTTP2ParserBase`` subclass registers itself in
-    ``HTTP2ParserBase._registry`` keyed on its ``FRAME_TYPE``;
-    ``Get(frame, stream)`` looks up that registry and instantiates the matching
-    parser bound to the given stream.
-    """
-
-    @staticmethod
-    def Get(frame, stream) -> 'HTTP2ParserBase':
-        return HTTP2ParserBase._registry[frame.FrameType()](frame, stream)
-
-
-class HTTP2ParserBase:
-    """Abstract base for HTTP/2 frame parsers that build an ASGI scope.
-
-    Subclasses set ``FRAME_TYPE`` to the ``FrameTypes`` value they handle and
-    implement ``parse()``.  ``__init_subclass__`` auto-registers each concrete
-    subclass in ``_registry`` so ``ParserFactory.Get`` can dispatch by frame type.
-    Setting ``FRAME_TYPE = None`` keeps a class abstract (skipped at registration).
-    """
-
-    FRAME_TYPE = None
-    _registry = {}
-
-    def __init__(self, frame, stream):
-        self.frame = frame
-        self.stream = stream
-        self.stream_id = frame.stream_id
-
-    def __init_subclass__(cls, **kwargs):
-        super().__init_subclass__(**kwargs)
-
-        # If FRAME_TYPE is None, we won't register it, as it's meant to be an abstract base class
-        if cls.FRAME_TYPE is None:
-            return
-
-        # Check for duplicate FRAME_TYPE to avoid overwriting existing entries in the registry
-        if cls.FRAME_TYPE in cls._registry:
-            raise ValueError(f"Duplicate FRAME_TYPE: {cls.FRAME_TYPE}")
-
-        # Register the subclass in the registry based on its FRAME_TYPE
-        # This allows us to create instances of the correct subclass based on the frame type
-        cls._registry[cls.FRAME_TYPE] = cls
-
-    def parse(self, payload=None):
-        raise NotImplementedError()
 
 
 def parse_headers(frame) -> dict:
@@ -176,34 +126,3 @@ def parse_headers(frame) -> dict:
     scope['root_path'] = ''
 
     return scope
-
-
-class HTTP2HEADParser(HTTP2ParserBase):
-    """Parses an HTTP/2 HEADERS frame into an ASGI ``http`` scope dict.
-
-    Pulls ``:method`` / ``:path`` / ``:scheme`` from the frame's pseudo-headers
-    and encodes the regular headers as ``bytes`` pairs into a ``Headers``
-    object.  ``root_path`` defaults to empty — a client ``X-Forwarded-Prefix``
-    is not trusted here (bug 1.16); only ``TrustedProxy`` sets it.
-    """
-
-    FRAME_TYPE = FrameTypes.HEADERS
-    def __init__(self, frame, stream):
-        super().__init__(frame, stream)
-
-    def parse(self, payload=None):
-        return parse_headers(self.frame)
-
-
-class HTTP2DATAParser(HTTP2ParserBase):
-    """Parses an HTTP/2 DATA frame.  Currently returns a fresh empty ASGI scope;
-    body bytes are delivered via ``HTTP2Recipient`` rather than this parser.
-    """
-
-    FRAME_TYPE = FrameTypes.DATA
-    def __init__(self, frame, stream):
-        super().__init__(frame, stream)
-
-    def parse(self, payload=None):
-        scope = _make_scope()
-        return scope

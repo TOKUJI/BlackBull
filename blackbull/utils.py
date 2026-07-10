@@ -3,18 +3,11 @@
 Provides:
 
 - `Scheme`: ``StrEnum`` with ``http`` and ``websocket`` values used throughout routing.
-- `check_port`: returns ``True`` when a host/port is not yet in use.
 - `pop_safe`: moves a key between dicts with an optional rename, no-op when absent.
-- `parse_post_data`: parses ``application/x-www-form-urlencoded`` bodies.
-- `EventEmitter`: lightweight async event-emitter backed by ``asyncio.create_task``.
+- `do_nothing`: awaitable no-op used as the innermost middleware-chain terminator.
+- `HTTP2`: the HTTP/2 client connection preface (RFC 9113 §3.4).
 """
-from abc import ABC, abstractmethod
-from collections import defaultdict
-import asyncio
-import re
-from enum import Enum, StrEnum, auto
-import socket
-from contextlib import closing
+from enum import StrEnum, auto
 
 import logging
 
@@ -30,18 +23,6 @@ class Scheme(StrEnum):
     websocket = auto()
 
 
-def check_port(host='localhost', port=None):
-    """
-    Returns True: Port is not used.
-    Returns False: Port is used.
-    """
-    with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as sock:
-        if sock.connect_ex((host, port)) == 0:
-            return False
-        else:
-            return True
-
-
 def pop_safe(key, source: dict, target: dict, *, new_key=None) -> dict:
     """Move ``source[key]`` into *target* (under *new_key* if given), if present.
 
@@ -55,99 +36,6 @@ def pop_safe(key, source: dict, target: dict, *, new_key=None) -> dict:
     return target
 
 
-class serializable(ABC):
-    """Abstract base for serializable classes. Subclasses must implement save() and load()."""
-    re = r''
-
-    def is_empty(self):
-        raise NotImplementedError('serializable.is_empty()')
-
-    @abstractmethod
-    def save(self):
-        pass
-
-    @classmethod
-    @abstractmethod
-    def load(cls, str_):  # must return a pair (serializable, remaining_text)
-        pass
-
-
-# RFC 5322 Date and Time specification
-IMFFixdate = '%a, %d %b %Y %H:%M:%S %Z'
-
-CRLF = '\r\n'
-URI = r'/?[0-9a-zA-Z]*?/?'
+# HTTP/2 client connection preface (RFC 9113 §3.4).
 HTTP2 = b'PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n'
-WebSocket = b'GET /chat HTTP/1.1\r\n'
 # 0x505249202a20485454502f322e300d0a0d0a534d0d0a0d0a
-
-
-def parse_post_data(string):
-    matches = re.findall(r'(\w+)=(\w+)&?', string)
-    d = {k: v for k, v in matches}
-    return d
-
-
-class EventEmitter:
-    """Lightweight async event-emitter backed by ``asyncio.create_task``.
-
-    !!! experimental
-        This class is under active development and its API is not yet stable.
-        Do not use in production code — method signatures and behaviour may
-        change without notice.
-
-    Listeners registered with `on` are called every time the event fires.
-    Listeners registered with `once` are called exactly once, then removed.
-    """
-    def __init__(self):
-        self._listeners = defaultdict(list)
-        self._listeners_once = defaultdict(list)
-
-    def on(self, event, listener):
-        """ Register a lister to this class. This listener will be called unless removed."""
-        self._listeners[event].append(listener)
-
-    def once(self, event, listener):
-        """ Register a lister to this class. """
-        self._listeners_once[event].append(listener)
-
-    def off(self, event, listener):
-        l = self._listeners[event]
-        index = max(loc for loc, val in enumerate(l) if val == listener)
-        l.pop(index)
-
-    def emit(self, event, *args, **kwds):
-        for l in self._listeners[event]:
-            async def f(*args, **kwds):
-                await event.wait()
-                l(*args, **kwds)
-
-            asyncio.create_task(f(*args, **kwds))
-
-        for l in self._listeners_once[event]:
-            async def f(*args, **kwds):
-                await event.wait()
-                l(*args, **kwds)
-
-            asyncio.create_task(f(*args, **kwds))
-        self._listeners_once.pop(event)
-
-        event.set()
-
-
-# type definitions
-class MessageType(Enum):
-    REQUEST = auto()
-    RESPONSE = auto()
-
-
-class HeaderFields(Enum):
-    CONTENT_TYPE = 'Content-Type'
-    TRANSFER_ENCODING = 'Transfer-Encoding'
-
-
-class TransferCodings(Enum):
-    CHUNKED = 'chunked'
-    COMPRESS = 'compress'
-    DEFLATE = 'deflate'
-    GZIP = 'gzip'

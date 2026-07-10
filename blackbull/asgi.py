@@ -40,6 +40,7 @@ class ASGIEvent:
     LIFESPAN_STARTUP_FAILED    = 'lifespan.startup.failed'
     LIFESPAN_SHUTDOWN          = 'lifespan.shutdown'
     LIFESPAN_SHUTDOWN_COMPLETE = 'lifespan.shutdown.complete'
+    LIFESPAN_SHUTDOWN_FAILED   = 'lifespan.shutdown.failed'
 
 
 class ResponseStart(dict):

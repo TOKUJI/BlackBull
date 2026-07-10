@@ -158,14 +158,6 @@ class TestInitAppConvention:
             assert resp.json() == {'user': 'testuser'}
             assert ext._whoami_called
 
-    @pytest.mark.xfail(
-        reason="'request_received' is emitted from the HTTP1/HTTP2/WS actor "
-               "layer, not from BlackBull.__call__. TestClient goes through "
-               "httpx.ASGITransport → __call__, so this event does not fire "
-               "in TestClient-driven tests. Cross-layer event-emission "
-               "consistency is out of Sprint 40 scope; carry-forward.",
-        strict=True,
-    )
     def test_extension_event_handler_is_fired(self):
         """Event handlers registered by ``init_app`` must fire on
         every request."""

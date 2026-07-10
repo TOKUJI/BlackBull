@@ -151,9 +151,9 @@ you want the consistency of writing every hook as
 | --- | --- | --- | --- |
 | `app_startup` | Server has bound its socket and is about to accept connections | *(empty)* | Sugar: `@app.on_startup` |
 | `app_shutdown` | Server has received a stop signal and is about to exit | *(empty)* | Sugar: `@app.on_shutdown` |
-| `request_received` | HTTP request headers parsed, before routing | `scope`, `client_ip`, `method`, `path`, `http_version`, `headers` | `@app.on` and `@app.intercept`; raise to abort |
-| `before_handler` | Route matched, before handler dispatch | `scope`, `client_ip`, `method`, `path`, `http_version`, `headers` | `@app.on` and `@app.intercept`; raise to abort |
-| `after_handler` | Handler returned normally | `scope`, `client_ip`, `method`, `path`, `http_version` | Observation only |
+| `request_received` | HTTP request entered the app, before routing | `scope`, `client_ip`, `method`, `path`, `http_version`, `headers` | `@app.on` and `@app.intercept`; raise to abort |
+| `before_handler` | Route matched, before handler dispatch (not for 404/405) | `scope`, `client_ip`, `method`, `path`, `handler` | `@app.on` and `@app.intercept`; raise to abort |
+| `after_handler` | Handler returned or raised | `scope`, `client_ip`, `method`, `path`, `handler`, `exception` | Observation only; `exception` is `None` on success |
 | `request_completed` | HTTP request finished — response fully sent (or failed before that) | `scope`, `client_ip`, `method`, `path`, `http_version`, `status`, `response_bytes`, `duration_ms` | Observation only; not fired if client disconnected or for WebSocket |
 | `scope_completed` | Any ASGI scope finished — HTTP request, WebSocket connection, or gRPC call | `scope`, `type`, `client_ip`, `path`, `exception` | Guaranteed once per scope, every protocol, on success or error; the cleanup hook. Pair with `@app.on(..., blocking=True)` |
 | `request_disconnected` | HTTP client closed connection before response complete | `scope`, `client_ip`, `method`, `path`, `http_version` | Observation only; mutually exclusive with `request_completed` |
@@ -175,9 +175,12 @@ above) — it always fires last, exactly once.
 
 ### `request_received` — earliest gate
 
-Fires after the request line and headers are parsed but before
-routing or handler dispatch.  Fires for both HTTP/1.1 and HTTP/2
-(once per stream).  WebSocket connections never fire this event.
+Fires when the request enters the application, before routing or
+handler dispatch.  Fires for both HTTP/1.1 and HTTP/2 (once per
+stream), and — like every request-lifecycle event — fires exactly
+once per request whether BlackBull serves the request itself or
+runs as an ASGI app under an external server (uvicorn, hypercorn,
+`TestClient`).  WebSocket connections never fire this event.
 
 ```python
 @app.intercept('request_received')
@@ -199,8 +202,11 @@ observation.
 
 Fires once per HTTP request after the response has been sent (or
 after the request has otherwise concluded — for example, after a
-404 or after an unhandled exception in the handler).  Fires from
-the same site as the `blackbull.access` log record.
+404 or after an unhandled exception in the handler).  The wire
+fields (`status`, `response_bytes`, `duration_ms`) are taken from
+the same record that feeds the `blackbull.access` log; under an
+external ASGI server (uvicorn, `TestClient`) that record does not
+exist and those keys carry placeholders (`'-'` / `0` / `0.0`).
 
 | Key | Type | Description |
 | --- | --- | --- |
@@ -235,10 +241,10 @@ under BlackBull's own server *and* under external ASGI servers
 (uvicorn, `httpx.ASGITransport`).
 
 This is the distinction from `request_completed`: that event is
-*server-level* telemetry (HTTP-only, carries wire data like status
-and byte counts, fires only under BlackBull's server).
-`scope_completed` is *application-level* — cross-protocol, fires
-wherever the app runs, and is meant for **resource cleanup**.
+HTTP-only telemetry whose wire data (status and byte counts) is
+meaningful under BlackBull's own server.  `scope_completed` is
+*application-level* — cross-protocol, fires for WebSocket scopes
+too, and is meant for **resource cleanup**.
 
 | Key | Type | Description |
 | --- | --- | --- |

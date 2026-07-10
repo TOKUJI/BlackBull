@@ -262,3 +262,48 @@ async def test_before_handler_not_fired_for_websocket():
 
     await asyncio.sleep(0.2)
     assert len(fired) == 0
+
+
+# ---------------------------------------------------------------------------
+# 7. Exactly-once on the aggregator (production server) path
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_before_handler_exactly_once_with_aggregator():
+    """Exactly one before_handler per request under the production actor path.
+
+    Regression for the Sprint 40 candidate-3 double fire: both the actor
+    layer (EventAggregator.on_before_handler) and BlackBull._dispatch used
+    to emit before_handler, so a request served by BlackBull's own HTTP/1.1
+    server fired it twice.  Sprint 64 consolidated emission into _dispatch.
+    """
+    from blackbull.event_aggregator import EventAggregator
+
+    app = BlackBull()
+    count = 0
+    seen = asyncio.Event()
+
+    @app.on('before_handler')
+    async def observer(event: Event):
+        nonlocal count
+        count += 1
+        seen.set()
+
+    @app.route(path='/hello')
+    async def handler(scope, receive, send):
+        await send({'type': 'http.response.start', 'status': 200, 'headers': []})
+        await send({'type': 'http.response.body', 'body': b'ok', 'more_body': False})
+
+    writer = _FakeWriter()
+    raw = _raw_request(path='/hello')
+    actor = HTTP1Actor(
+        _FakeReader(b''), writer, app, EventAggregator(app._dispatcher),
+        request=raw,
+        peername=('127.0.0.1', 54321),
+        sockname=('0.0.0.0', 8000),
+    )
+    await actor.run()
+
+    await asyncio.wait_for(seen.wait(), timeout=2.0)
+    await asyncio.sleep(0.2)
+    assert count == 1

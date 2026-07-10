@@ -275,14 +275,13 @@ def _validate_host(headers: 'Headers') -> None:
 class RequestActor(Actor):
     """Owns one HTTP/1.1 request lifetime.
 
-    Spawned by HTTP1Actor, awaited to completion.  Calls the ASGI app and
-    emits before_handler / after_handler / request_completed / error via
-    EventAggregator.
+    Spawned by HTTP1Actor, awaited to completion.  Calls the ASGI app.
 
-    When no Level B event listeners are registered, the entire aggregator
-    indirection is skipped and the app is called directly — matching the
-    pre-Sprint-53 hot path and avoiding ~4 async function-call frames
-    per request.
+    The request-lifecycle Level B events (request_received / before_handler /
+    after_handler / request_completed) are emitted by ``BlackBull._dispatch``
+    — the single cross-transport emission point (Sprint 64) — not here.  The
+    actor layer emits only the Level B ``error`` event, for exceptions that
+    escape the app call (e.g. a raising global middleware).
     """
 
     def __init__(
@@ -301,37 +300,11 @@ class RequestActor(Actor):
         self._aggregator = aggregator
 
     async def run(self) -> None:  # override: single-shot, no inbox loop
-        # Fast path: when no Level B event handlers are registered at
-        # all, skip the entire EventAggregator indirection and call the
-        # app directly.  This reclaims the ~4 async function-call frames
-        # per request that Sprint 53 added for the MQTT broker pattern.
-        if not self._aggregator.has_any_request_listeners():
-            await self._call_app(self._scope, self._receive, self._send)
-            return
-
-        await self._aggregator.on_request_received(self._scope)
-        exc: BaseException | None = None
         try:
-            await self._aggregator.on_before_handler(
-                self._scope, self._receive, self._send,
-                call_next=self._call_app,
-            )
+            await self._app(self._scope, self._receive, self._send)
         except BaseException as e:
-            exc = e
             await self._aggregator.on_error(self._scope, e)
             raise
-        finally:
-            await self._aggregator.on_after_handler(self._scope, exception=exc)
-            if exc is None:
-                await self._aggregator.on_request_completed(self._scope)
-
-    async def _call_app(
-        self,
-        scope: dict[str, Any],
-        receive: Callable[..., Awaitable[Any]],
-        send: Callable[..., Awaitable[Any]],
-    ) -> None:
-        await self._app(scope, receive, send)
 
     async def _handle(self, msg: Message) -> None:  # never reached
         raise NotImplementedError
@@ -1101,38 +1074,10 @@ class HTTP1Actor(Actor):
             else:
                 detecting_receive = inner_receive
             try:
-                if _dispatcher is not None:
-                    await _dispatcher.emit(Event(
-                        'request_received',
-                        detail={
-                            'scope':        scope,
-                            'client_ip':    log_record.client_ip,
-                            'method':       log_record.method,
-                            'path':         log_record.path,
-                            'http_version': log_record.http_version,
-                            'headers':      scope.get('headers', []),
-                        },
-                    ))
                 await self._app(scope, detecting_receive, capturing_send)
             finally:
                 log_record.mark('dispatch_done')
                 _emit_access_log(log_record)
-                if (_dispatcher is not None
-                        and scope.get('type') == 'http'
-                        and not scope.get('_disconnected')):
-                    await _dispatcher.emit(Event(
-                        'request_completed',
-                        detail={
-                            'scope':          scope,
-                            'client_ip':      log_record.client_ip,
-                            'method':         log_record.method,
-                            'path':           log_record.path,
-                            'http_version':   log_record.http_version,
-                            'status':         log_record.status,
-                            'response_bytes': log_record.response_bytes,
-                            'duration_ms':    log_record.duration_ms(),
-                        },
-                    ))
         return True
 
     async def _read_headers(self, max_total: int) -> None:
