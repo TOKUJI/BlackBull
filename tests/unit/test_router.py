@@ -21,12 +21,13 @@ _TYPE_ERRORS = (TypeError,) if _BeartypeViolation is None else (TypeError, _Bear
 from blackbull.utils import Scheme
 import uuid
 from blackbull.router import (
-    Router, BaseRouter, ErrorRouter,
+    Router, ErrorRouter,
     _middleware_param, has_middleware_param,
     _is_simplified_handler, _adapt_handler,
     PathNotRegistered, MethodNotApplicable, ConfigurationError, HTTPException,
 )
 from blackbull import BlackBull, Response, JSONResponse
+from blackbull.request import Request
 from blackbull.router import RouteGroup
 
 logger = getLogger(__name__)
@@ -663,6 +664,122 @@ class TestSimplifiedHandlerBodyInjection:
         assert called == []
 
 
+class TestSimplifiedHandlerRequestInjection:
+    """Injection matrix for the opt-in Request context object (Sprint 65)."""
+
+    @staticmethod
+    def _counting_receive(body: bytes = b'hello'):
+        calls = []
+
+        async def receive():
+            calls.append(True)
+            return {'type': 'http.request', 'body': body, 'more_body': False}
+
+        return receive, calls
+
+    @pytest.mark.asyncio
+    async def test_request_injected_by_annotation(self):
+        captured = {}
+        async def fn(request: Request): captured['request'] = request
+        wrapper = _adapt_handler(fn, '/')
+        scope = {'type': 'http', 'method': 'GET', 'path': '/', 'headers': []}
+        await wrapper(scope, None, AsyncMock())
+        assert isinstance(captured['request'], Request)
+        assert captured['request'].scope is scope
+
+    @pytest.mark.asyncio
+    async def test_request_injected_by_bare_name(self):
+        captured = {}
+        async def fn(request): captured['request'] = request
+        wrapper = _adapt_handler(fn, '/')
+        await wrapper({'headers': []}, None, AsyncMock())
+        assert isinstance(captured['request'], Request)
+
+    @pytest.mark.asyncio
+    async def test_request_annotation_under_any_name(self):
+        captured = {}
+        async def fn(req: Request): captured['req'] = req
+        wrapper = _adapt_handler(fn, '/')
+        await wrapper({'headers': []}, None, AsyncMock())
+        assert isinstance(captured['req'], Request)
+
+    @pytest.mark.asyncio
+    async def test_request_and_body_share_single_drain(self):
+        captured = {}
+        async def fn(request: Request, body: bytes):
+            captured['body'] = body
+            captured['via_request'] = await request.body()
+
+        receive, calls = self._counting_receive(b'payload')
+        wrapper = _adapt_handler(fn, '/')
+        await wrapper({'headers': []}, receive, AsyncMock())
+        assert captured['body'] == b'payload'
+        assert captured['via_request'] == b'payload'
+        assert len(calls) == 1
+
+    @pytest.mark.asyncio
+    async def test_request_with_path_params(self):
+        captured = {}
+        async def fn(task_id: int, request: Request):
+            captured.update({'task_id': task_id, 'request': request})
+        wrapper = _adapt_handler(fn, '/tasks/{task_id}')
+        await wrapper({'path_params': {'task_id': '42'}, 'headers': []}, None, AsyncMock())
+        assert captured['task_id'] == 42
+        assert isinstance(captured['request'], Request)
+
+    @pytest.mark.asyncio
+    async def test_request_with_scope(self):
+        captured = {}
+        async def fn(scope, request: Request):
+            captured.update({'scope': scope, 'request': request})
+        wrapper = _adapt_handler(fn, '/')
+        fake_scope = {'type': 'http', 'headers': []}
+        await wrapper(fake_scope, None, AsyncMock())
+        assert captured['scope'] is fake_scope
+        assert captured['request'].scope is fake_scope
+
+    @pytest.mark.asyncio
+    async def test_request_with_dataclass_body_single_drain(self):
+        from dataclasses import dataclass
+
+        @dataclass
+        class Item:
+            name: str
+
+        captured = {}
+        async def fn(item: Item, request: Request):
+            captured['item'] = item
+            captured['raw'] = await request.body()
+
+        receive, calls = self._counting_receive(b'{"name": "spanner"}')
+        wrapper = _adapt_handler(fn, '/')
+        await wrapper({'headers': []}, receive, AsyncMock())
+        assert captured['item'] == Item(name='spanner')
+        assert captured['raw'] == b'{"name": "spanner"}'
+        assert len(calls) == 1
+
+    def test_request_name_with_foreign_annotation_raises(self):
+        async def fn(request: int): pass
+        with pytest.raises(TypeError, match="cannot resolve parameter 'request'"):
+            _adapt_handler(fn, '/')
+
+    @pytest.mark.asyncio
+    async def test_no_request_param_never_constructs_request(self):
+        # Zero-cost check at the observable level: a handler without a
+        # Request param must not touch receive, and the raw scope object is
+        # handed through untouched (no wrapper dict).
+        async def fn(task_id): pass
+        called = []
+
+        async def should_not_be_called():
+            called.append(True)
+            return {'type': 'http.request', 'body': b'', 'more_body': False}
+
+        wrapper = _adapt_handler(fn, '/tasks/{task_id}')
+        await wrapper({'path_params': {'task_id': '1'}}, should_not_be_called, AsyncMock())
+        assert called == []
+
+
 class TestSimplifiedHandlerReturnValues:
     @pytest.mark.asyncio
     async def test_returns_response(self):
@@ -1026,32 +1143,6 @@ class TestDataclassBodyDeserialization:
 
 
 # ---------------------------------------------------------------------------
-# BaseRouter abstract method tests
-# ---------------------------------------------------------------------------
-
-class TestBaseRouter:
-    def test_setitem_raises(self):
-        r = BaseRouter()
-        with pytest.raises(NotImplementedError):
-            r['key'] = 'value'
-
-    def test_getitem_raises(self):
-        r = BaseRouter()
-        with pytest.raises(NotImplementedError):
-            _ = r['key']
-
-    def test_contains_raises(self):
-        r = BaseRouter()
-        with pytest.raises(NotImplementedError):
-            _ = 'key' in r
-
-    def test_route_raises(self):
-        r = BaseRouter()
-        with pytest.raises(NotImplementedError):
-            r.route()
-
-
-# ---------------------------------------------------------------------------
 # Router edge-case tests
 # ---------------------------------------------------------------------------
 
@@ -1328,6 +1419,19 @@ class TestStartupValidation:
 
         with pytest.raises(ConfigurationError, match="id"):
             router.validate()
+
+    def test_bare_param_with_annotation_passes(self):
+        # {id} (no explicit :converter) defaults to a 'str' router spec, but
+        # _adapt_handler re-coerces the captured string to the handler's own
+        # annotation at call time (docs/getting-started/first-app.md's
+        # "str captured, int() applied" pattern) — not a converter/annotation
+        # mismatch, unlike the explicit {id:int} case above.
+        router = Router()
+
+        @router.route(path='/items/{id}', methods=HTTPMethod.GET)
+        async def handler(id: int): return ''
+
+        router.validate()  # must not raise
 
     def test_validate_idempotent_after_error(self):
         router = Router()

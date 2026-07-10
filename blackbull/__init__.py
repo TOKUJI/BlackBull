@@ -11,6 +11,7 @@ Public API exports:
 - `Response`, `JSONResponse`, `RedirectResponse`, `StreamingResponse`, `EventSourceResponse`, `WebSocketResponse`: response helpers.
 - `RouteInfo`: immutable ``(method, path, name)`` snapshot returned by ``app.get_routes()``.
 - `Headers`: case-insensitive, ordered, multi-valued HTTP header store.
+- `Request`: opt-in context object for HTTP handlers (headers/cookies/client/``body()``/``json()``), injected by signature.
 - `cookie_header`: builds a ``Set-Cookie`` header tuple.
 - `read_body`: reads and buffers the full request body from the ASGI receive channel.
 - `read_json`: reads the body and parses it as JSON (``None`` on empty/invalid).
@@ -45,7 +46,7 @@ from .app import BlackBull, serve
 from .router import RouteInfo, HTTPException
 from .config import AppConfig
 from .headers import Headers
-from .request import read_body, read_json, read_text, parse_cookies, ClientDisconnected
+from .request import Request, read_body, read_json, read_text, parse_cookies, ClientDisconnected
 from .response import (
     Response, JSONResponse, RedirectResponse, StreamingResponse,
     EventSourceResponse, WebSocketResponse, cookie_header,

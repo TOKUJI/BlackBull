@@ -47,18 +47,26 @@ at registration time and wraps the function automatically:
 async def hello():
     return "Hello, world!"         # str → Response
 
-@app.route(path='/tasks/{task_id}')
+@app.route(path='/tasks/{task_id:int}')
 async def get_task(task_id: int):  # path param coerced to int
     return {"id": task_id}         # dict → JSONResponse
 
 @app.route(path='/echo', methods=[HTTPMethod.POST])
 async def echo(body: bytes):       # full body buffered automatically
     return body
+
+@app.route(path='/inspect', methods=[HTTPMethod.POST])
+async def inspect(request: Request):   # opt-in context object
+    return {'ua': request.headers.get(b'user-agent').decode(),
+            'data': await request.json()}
 ```
 
 Supported parameters: named path params (coerced to annotation type), `body: bytes`,
-`scope`. Return `str`, `bytes`, `dict`, `Response`, or `None`. Middleware functions
-and WebSocket handlers always use the full `(scope, receive, send)` form.
+`scope`, and `Request` (annotation `Request` under any name, or the bare name
+`request` unannotated) — `request.body()`/`json()`/`text()` cache one drain of
+`receive`, shared with a coexisting `body` param. Return `str`, `bytes`, `dict`,
+`Response`, or `None`. Middleware functions and WebSocket handlers always use the
+full `(scope, receive, send)` form.
 
 ## Middleware convention
 

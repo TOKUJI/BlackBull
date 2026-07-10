@@ -3,6 +3,52 @@
 How to read what the client sent, build the response, stream a body
 back, and detect when the client has gone away.
 
+## The `Request` object
+
+The easiest way to read the request is the opt-in `Request` context
+object.  Declare a parameter annotated `Request` (any name) — or a
+parameter named `request` with no annotation — and the router injects
+one, the same way it injects path params and `body`:
+
+```python
+from blackbull import BlackBull, Request
+
+app = BlackBull()
+
+@app.route(path='/users/{uid}', methods=[HTTPMethod.POST])
+async def show(uid: int, request: Request):
+    token = request.headers.get(b'authorization')   # Headers view
+    who   = request.client                          # (host, port) or None
+    lang  = request.cookies.get('lang', 'en')       # dict[str, str]
+    data  = await request.json()                    # parsed once, cached
+    return {'uid': uid, 'lang': lang, 'data': data}
+```
+
+Read-side surface:
+
+| member | value |
+|---|---|
+| `request.method` / `request.path` / `request.scheme` | `str` |
+| `request.client` | `(host, port)` tuple, or `None` |
+| `request.headers` | case-insensitive [`Headers`](#reading-request-headers) view |
+| `request.cookies` | `dict[str, str]`, parsed once (all protocols) |
+| `await request.body()` | complete body as `bytes`, buffered once and cached |
+| `await request.json()` | parsed JSON, or `None` on empty/invalid body |
+| `await request.text(encoding='utf-8')` | body decoded as text (`errors='replace'`) |
+| `request.scope` | the raw ASGI scope dict (escape hatch) |
+
+`body()` drains the receive channel at most once; `json()` and
+`text()` share the same cache, and a handler that also declares
+`body: bytes` (or a dataclass body parameter) receives the same
+cached bytes — the body is never read twice.  Handlers that don't
+declare a `Request` pay nothing: injection is decided when the route
+is registered, and the raw `(scope, receive, send)` form is
+unaffected.
+
+The sections below cover the same reads on the raw ASGI surface —
+useful inside middleware (which always uses the full form) and for
+streaming bodies chunk by chunk.
+
 ## Reading the request body
 
 ```python

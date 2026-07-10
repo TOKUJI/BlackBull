@@ -69,6 +69,25 @@ async def echo(body: bytes):
     return data          # dict → JSONResponse automatically
 ```
 
+## The `Request` object
+
+Annotate a parameter with `Request` (or just name it `request`) to
+receive a context object bundling the common reads — headers,
+cookies, client address, and the body helpers:
+
+```python
+from blackbull import Request
+
+@app.route(path='/items/{item_id:int}', methods=[HTTPMethod.POST])
+async def update_item(item_id: int, request: Request):
+    lang = request.headers.get(b'accept-language', b'en').decode()
+    data = await request.json()
+    return {"id": item_id, "lang": lang, "data": data}
+```
+
+See [Requests and responses](../guide/requests-and-responses.md)
+for the full surface.
+
 ## The `scope` dict
 
 Name a parameter `scope` to receive the full scope dict alongside

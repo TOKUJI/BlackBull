@@ -226,6 +226,14 @@ class _RouteInfo:
     methods: tuple = ()            # tuple of HTTPMethod values
     scheme: Any = None             # Scheme | tuple[Scheme, ...] | _AnyScheme | None
     name: str | None = None
+    # {param_name} written with an explicit ``:converter`` in the template
+    # (e.g. {task_id:int}), as opposed to defaulted to 'str'. validate()'s
+    # converter/annotation type-match check only applies to these: a bare
+    # {task_id} is matched as 'str' by the router but re-coerced to the
+    # handler's own annotation at call time by _adapt_handler, so the
+    # router-level 'str' spec and the handler annotation are expected to
+    # differ and that's not an error.
+    explicit_param_specs: frozenset = field(default_factory=frozenset)
 
 
 class RouteInfo(NamedTuple):
@@ -540,13 +548,17 @@ def _adapt_handler(fn, path: str, converters: dict | None = None):
       handled recursively.  ``body: SomeDataclass`` also works.
     - 'body' (un-annotated, or annotated as ``bytes``) → await read_body(receive)
     - 'scope' → the raw scope dict
+    - Annotation is ``Request`` (any name), or the name is ``request`` with no
+      annotation → a per-request ``Request(scope, receive)`` context object.
+      Its ``body()`` cache is the drain point for 'body' / dataclass params
+      too, so the body is read at most once per request.
     - Anything else → TypeError raised at registration time (fail fast).
 
     Return values: Response → send(result); bytes → send(Response(result));
     str → send(Response(result.encode())); dict → send(JSONResponse(result));
     None → no send; other → TypeError at call time.
     """
-    from .request import read_body as _read_body
+    from .request import Request as _Request, read_body as _read_body
 
     path_param_names: set[str] = {m.group(1) for m in Router._param_pattern.finditer(path)}
     params = inspect.signature(fn).parameters
@@ -562,10 +574,22 @@ def _adapt_handler(fn, path: str, converters: dict | None = None):
     except Exception:
         pass  # unresolved forward refs / bad annotations → keep the raw annotations.
 
+    # Request-param recognition happens here, at registration time, so the
+    # wrapper below never reflects per request.  Path params keep precedence;
+    # a dataclass annotation on a param named 'request' stays a body param.
+    request_param_names: frozenset[str] = frozenset(
+        n for n, ann in annotations.items()
+        if n not in path_param_names and n not in ('body', 'scope') and (
+            ann is _Request
+            or (n == 'request' and ann is inspect.Parameter.empty)
+        )
+    )
+
     # A handler may have **at most one** body parameter — either a literal
     # name ``body`` or a dataclass-typed parameter (or both, if they're the
     # same parameter).  Trying to consume the body twice would hang the
-    # second ``read_body`` call indefinitely.
+    # second ``read_body`` call indefinitely.  A ``Request`` param does not
+    # count: it drains lazily through the same cache the branches below use.
     body_param_count = sum(
         1 for n, p in params.items()
         if n not in path_param_names and n != 'scope' and (
@@ -576,12 +600,15 @@ def _adapt_handler(fn, path: str, converters: dict | None = None):
     for name in params:
         if name in path_param_names or name in ('body', 'scope'):
             continue
+        if name in request_param_names:
+            continue
         if _is_body_dataclass_annotation(annotations.get(name)):
             continue
         raise TypeError(
             f"Simplified handler {fn.__name__!r}: cannot resolve parameter {name!r}. "
             f"Expected path params {sorted(path_param_names)!r}, 'body', "
-            f"'scope', or a parameter annotated with a dataclass."
+            f"'scope', a parameter annotated with Request (or named "
+            f"'request'), or a parameter annotated with a dataclass."
         )
 
     if body_param_count > 1:
@@ -592,22 +619,28 @@ def _adapt_handler(fn, path: str, converters: dict | None = None):
         )
 
     is_async = inspect.iscoroutinefunction(fn)
+    has_request_param = bool(request_param_names)
 
     @wraps(fn)
     async def _wrapper(scope, receive, send):
+        # One Request per call when the signature asks for it; its body()
+        # cache is the single drain point shared with the body branches.
+        req = _Request(scope, receive) if has_request_param else None
         kwargs: dict = {}
         for name in params:
             ann = annotations.get(name, inspect.Parameter.empty)
             if name == 'scope':
                 kwargs[name] = scope
             elif name == 'body':
-                raw = await _read_body(receive)
+                raw = await req.body() if req is not None else await _read_body(receive)
                 if _is_body_dataclass_annotation(ann):
                     kwargs[name] = _decode_json_body(ann, raw, fn.__name__)
                 else:
                     kwargs[name] = raw
+            elif name in request_param_names:
+                kwargs[name] = req
             elif _is_body_dataclass_annotation(ann) and name not in path_param_names:
-                raw = await _read_body(receive)
+                raw = await req.body() if req is not None else await _read_body(receive)
                 kwargs[name] = _decode_json_body(ann, raw, fn.__name__)
             else:
                 raw = scope.get('path_params', {}).get(name, '')
@@ -665,25 +698,8 @@ def _to_tuple(value: Any) -> tuple:
     return (value,)
 
 
-class BaseRouter:
-    def __setitem__(self, key, value):
-        raise NotImplementedError()
-
-    def __getitem__(self, key):
-        raise NotImplementedError()
-
-    def __contains__(self, item):
-        raise NotImplementedError()
-
-    def route(self, methods: str | HTTPMethod | Iterable[str | HTTPMethod] = [HTTPMethod.GET],
-              path: str | re.Pattern = '/', scheme: Scheme | Iterable[Scheme] = Scheme.http,
-              functions: list = []):
-        raise NotImplementedError()
-
-
-
 # http://taichino.com/programming/1538
-class Router(BaseRouter):
+class Router:
     """
     String paths live in the routing trie (sole store, including
     ``{param}`` segments); raw ``re.Pattern`` routes live in
@@ -991,11 +1007,12 @@ class Router(BaseRouter):
         at match time.
         """
         if isinstance(path, re.Pattern):
-            template, param_specs = path.pattern, {}
+            template, param_specs, explicit_param_specs = path.pattern, {}, frozenset()
         else:
             template = path
-            param_specs = {m.group(1): (m.group(2) or 'str')
-                           for m in self._param_pattern.finditer(path)}
+            matches = list(self._param_pattern.finditer(path))
+            param_specs = {m.group(1): (m.group(2) or 'str') for m in matches}
+            explicit_param_specs = frozenset(m.group(1) for m in matches if m.group(2))
         if name is not None:
             if name in self._named_routes:
                 raise ValueError(f"Duplicate route name {name!r}")
@@ -1007,6 +1024,7 @@ class Router(BaseRouter):
             methods=methods,
             scheme=scheme,
             name=name,
+            explicit_param_specs=explicit_param_specs,
         ))
 
     def url_path_for(self, name: str, /, **params) -> str:
@@ -1090,6 +1108,16 @@ class Router(BaseRouter):
                     hints = {}
                 annotation = hints.get(param_name, inspect.Parameter.empty)
                 if annotation is inspect.Parameter.empty:
+                    continue
+
+                # A bare {param} (no explicit :converter) defaults to a
+                # 'str' router-level spec, but _adapt_handler re-coerces
+                # the captured string to the handler's own annotation at
+                # call time — so a 'str' spec next to an `int` annotation
+                # here is the documented pattern (docs/getting-started/
+                # first-app.md), not a bug. Only an *explicit* {param:type}
+                # promises the router itself will produce that type.
+                if param_name not in info.explicit_param_specs:
                     continue
 
                 _regex_str, converter_fn = _CONVERTERS[spec]
