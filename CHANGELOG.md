@@ -31,6 +31,52 @@ so the editable install's metadata catches up.
 
 ## [Unreleased]
 
+## [0.50.0] — 2026-07-11
+
+Sprint 65 — a first-class, opt-in `Request` context object for HTTP
+handlers, matching the convention gRPC (`GrpcContext`) and non-ASGI
+protocol handlers (`ProtocolContext`) already follow. Perf-neutral
+(EC2 HttpArena A/B, same instance, full 20 profiles: mean +0.13%
+across 36 cells; gate cells baseline/512 −0.57%, baseline/4096
++0.59%, json/4096 +1.29%).
+
+### Added
+
+- **`Request` context object for simplified handlers** (`from blackbull
+  import Request`). Declare `request: Request` under any parameter name —
+  or the bare name `request` unannotated — and the router injects a
+  per-request object exposing `method`, `path`, `headers`, `cookies`,
+  `client`, `scheme`, and the awaitables `body()` / `json()` / `text()`.
+  Phase 1 is the read surface, wrapping `scope` + `receive` over the
+  existing `blackbull/request.py` free functions.
+  - Detected by signature at registration time in `_adapt_handler` —
+    no per-request reflection; handlers that don't declare it pay nothing.
+  - `body()`/`json()`/`text()` cache a single drain of `receive`, shared
+    with a coexisting `body: bytes` parameter — never double-drains.
+  - New guide page, and `examples/request_object.py`.
+
+### Fixed
+
+- **`Router.validate()` no longer rejects the documented bare-`{param}`
+  pattern.** A route like `{task_id}` with a typed handler annotation
+  (`task_id: int`) is captured as `str` by the router and re-coerced to
+  the annotation at call time by `_adapt_handler` — the tutorial pattern
+  in `docs/getting-started/first-app.md` — but boot-time validation
+  raised `ConfigurationError` on the spec/annotation mismatch under
+  `app.run()`/`app.serve()`. The converter/annotation type-match check
+  now applies only to explicit `{param:converter}` segments, where the
+  router itself promises the converted type; those still fail fast at
+  boot on a mismatch.
+- **`blackbull.fault_injection` API reference link** — a docstring
+  pointed at a git-ignored `.claude/` path and broke on the published
+  API reference; it now points at the shipped docs.
+
+### Removed (internal, no public API impact)
+
+- **`BaseRouter`** (CodeQL alert #426) — an HTTP-shaped abstract stub
+  with no consumer beyond `Router`'s inheritance clause and its own
+  tests; MQTT's router shipped without it. `Router` stands alone.
+
 ## [0.49.4] — 2026-07-10
 
 Sprint 64 — event-emission consolidation and dead-code purge. Perf-neutral
