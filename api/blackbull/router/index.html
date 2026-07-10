@@ -3613,6 +3613,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#blackbull.router.ErrorRouter.__init__" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        __init__
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -4864,6 +4875,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#blackbull.router.ErrorRouter.__init__" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        __init__
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -5145,7 +5167,8 @@ import; this module re-exports it lazily through <code>__getattr__</code>.</p>
 <li>HTTPStatus key: exact match only.</li>
 <li>Exception class: walks the MRO so a handler registered for a base class
   (e.g. Exception) catches all unhandled subclasses.</li>
-<li>Returns None when no handler is found (caller decides the fallback).</li>
+<li>On a miss, returns the <em>default</em> handler passed at construction
+  (<code>None</code> when no default was given — caller decides the fallback).</li>
 </ul>
 </details>        <p>Usage::</p>
 <pre><code>errors = ErrorRouter()
@@ -5224,6 +5247,27 @@ handler = errors[KeyError]               # same, accepting the class directly
 <li>exception instance   → MRO walk on type(key)</li>
 </ul>
 </details>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.router.ErrorRouter.__init__" class="doc doc-heading">
+            <code class="highlight language-python"><span class="fm">__init__</span><span class="p">(</span><span class="n">default</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
+
+<a href="#blackbull.router.ErrorRouter.__init__" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p><em>default</em> is returned on any lookup miss (error statuses and
+unmatched exceptions) instead of <code>None</code>.  Only explicitly
+registered handlers appear in the two registries, so "which statuses
+have custom handlers" stays inspectable.</p>
+
 
     </div>
 
@@ -5480,13 +5524,13 @@ human-readable message surfaced in development-mode error pages.</p>
 
     <div class="doc doc-contents ">
             <p class="doc doc-class-bases">
-              Bases: <code><span title="collections.UserDict">UserDict</span></code>, <code><span title="blackbull.router.BaseRouter">BaseRouter</span></code></p>
+              Bases: <code><span title="blackbull.router.BaseRouter">BaseRouter</span></code></p>
 
 
 
-        <p>This class has 2 dictionaries: self.data and self.regex_.
-key: str or re.Pattern
-value: (function, methods, scheme)</p>
+        <p>String paths live in the routing trie (sole store, including
+<code>{param}</code> segments); raw <code>re.Pattern</code> routes live in
+<code>self._raw_regex</code> and are scanned only on a trie miss.</p>
 
 
 
@@ -5521,7 +5565,8 @@ value: (function, methods, scheme)</p>
     <div class="doc doc-contents ">
 
         <p>Accept either a plain str (path only) or a (path, method, scheme) tuple.
-Search both self.data and self.regex_.</p>
+True when the path was registered verbatim as a string route, or when
+any raw re.Pattern route matches it.</p>
 
 
     </div>
@@ -5563,11 +5608,11 @@ the trie traversal entirely after the first hit.</p>
     <div class="doc doc-contents ">
 
         <p>If key[0] is a str:
-    - Store it in self.data under the normalised (path, methods, scheme) key.
-    - Also compile a regex from {param} / {param:converter} placeholders and
-      store it in self.regex_ together with per-param converter functions.</p>
+    - Insert it into the routing trie under the normalised
+      (path, methods, scheme) key.  <code>{param}</code> / <code>{param:converter}</code>
+      placeholders become parameter segments with converter functions.</p>
 <p>If key[0] is a re.Pattern:
-    - Store it in self.regex_ only.</p>
+    - Store it in self._raw_regex (scanned on trie miss).</p>
 <p>When scheme is omitted it is stored as _ANY_SCHEME,
 which matches any scheme at lookup time.</p>
 

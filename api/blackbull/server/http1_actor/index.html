@@ -5046,13 +5046,12 @@ response code from :class:<code>BadRequestError</code>'s 400).</p>
 
 
         <p>Owns one HTTP/1.1 request lifetime.</p>
-<p>Spawned by HTTP1Actor, awaited to completion.  Calls the ASGI app and
-emits before_handler / after_handler / request_completed / error via
-EventAggregator.</p>
-<p>When no Level B event listeners are registered, the entire aggregator
-indirection is skipped and the app is called directly — matching the
-pre-Sprint-53 hot path and avoiding ~4 async function-call frames
-per request.</p>
+<p>Spawned by HTTP1Actor, awaited to completion.  Calls the ASGI app.</p>
+<p>The request-lifecycle Level B events (request_received / before_handler /
+after_handler / request_completed) are emitted by <code>BlackBull._dispatch</code>
+— the single cross-transport emission point (Sprint 64) — not here.  The
+actor layer emits only the Level B <code>error</code> event, for exceptions that
+escape the app call (e.g. a raising global middleware).</p>
 
 
 

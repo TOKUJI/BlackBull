@@ -4862,7 +4862,11 @@ overflow policy.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Enqueue <em>msg</em> to this Actor's inbox (non-blocking).</p>
+        <p>Enqueue <em>msg</em> to this Actor's inbox.</p>
+<p>Returns immediately for an unbounded inbox (the default).  When the
+Actor was constructed with <code>inbox_maxsize &gt; 0</code> and the inbox is
+full, this awaits until a slot frees up — backpressure on the
+producer, per the bounded-inbox overflow policy.</p>
 
 
     </div>

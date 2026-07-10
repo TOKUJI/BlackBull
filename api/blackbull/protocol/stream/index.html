@@ -3545,28 +3545,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#blackbull.protocol.stream.Stream.update_event" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        update_event
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.protocol.stream.Stream.update_scope" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        update_scope
-      
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -4794,28 +4772,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#blackbull.protocol.stream.Stream.update_event" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        update_event
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.protocol.stream.Stream.update_scope" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        update_scope
-      
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -4873,9 +4829,9 @@
     <div class="doc doc-contents first">
 
         <p>HTTP/2 stream state and the priority tree (RFC 7540 §5).</p>
-<p>Each <code>Stream</code> node owns the ASGI <code>scope</code> and <code>event</code> for one in-flight
-request as well as its position in the dependency tree (parent + weight) used
-by the priority machinery.  <code>StreamState</code> enumerates the lifecycle states
+<p>Each <code>Stream</code> node owns the ASGI <code>scope</code> for one in-flight request as
+well as its position in the dependency tree (parent + weight) used by the
+priority machinery.  <code>StreamState</code> enumerates the lifecycle states
 defined in RFC 7540 §5.1; <code>on_headers_received</code> / <code>on_data_received</code>
 perform the corresponding transitions.</p>
 <p>Stream identifier <code>0</code> is reserved for connection-level frames and is the
@@ -4916,8 +4872,8 @@ root of every priority tree.</p>
 
 
         <p>One node in the HTTP/2 stream-priority tree (RFC 7540 §5.1, §5.3).</p>
-<p>A <code>Stream</code> carries the ASGI <code>scope</code> and <code>event</code> for one in-flight
-request, plus its position in the priority tree (parent + weight).</p>
+<p>A <code>Stream</code> carries the ASGI <code>scope</code> for one in-flight request,
+plus its position in the priority tree (parent + weight).</p>
 <p><code>identifier == 0</code> is the connection-level pseudo-stream
 (RFC 7540 §5.1.1) and acts as the root of the tree; SETTINGS, PING,
 GOAWAY, and connection-level WINDOW_UPDATE frames target it.
@@ -5046,42 +5002,6 @@ state-machine validation.</p>
 RST_STREAM (vs END_STREAM).  The state is retained so later
 frames arriving on the same identifier can be detected and the
 right error type returned.</p>
-
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-function">
-
-
-<h4 id="blackbull.protocol.stream.Stream.update_event" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">update_event</span><span class="p">(</span><span class="n">data</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
-
-<a href="#blackbull.protocol.stream.Stream.update_event" class="headerlink" title="Permanent link">&para;</a></h4>
-
-
-    <div class="doc doc-contents ">
-
-        <p>Make or update the event by the data frame.</p>
-
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-function">
-
-
-<h4 id="blackbull.protocol.stream.Stream.update_scope" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">update_scope</span><span class="p">(</span><span class="n">headers</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
-
-<a href="#blackbull.protocol.stream.Stream.update_scope" class="headerlink" title="Permanent link">&para;</a></h4>
-
-
-    <div class="doc doc-contents ">
-
-        <p>Make or update the scope by the headers.</p>
 
 
     </div>

@@ -5162,21 +5162,21 @@ you want the consistency of writing every hook as
 </tr>
 <tr>
 <td><code>request_received</code></td>
-<td>HTTP request headers parsed, before routing</td>
+<td>HTTP request entered the app, before routing</td>
 <td><code>scope</code>, <code>client_ip</code>, <code>method</code>, <code>path</code>, <code>http_version</code>, <code>headers</code></td>
 <td><code>@app.on</code> and <code>@app.intercept</code>; raise to abort</td>
 </tr>
 <tr>
 <td><code>before_handler</code></td>
-<td>Route matched, before handler dispatch</td>
-<td><code>scope</code>, <code>client_ip</code>, <code>method</code>, <code>path</code>, <code>http_version</code>, <code>headers</code></td>
+<td>Route matched, before handler dispatch (not for 404/405)</td>
+<td><code>scope</code>, <code>client_ip</code>, <code>method</code>, <code>path</code>, <code>handler</code></td>
 <td><code>@app.on</code> and <code>@app.intercept</code>; raise to abort</td>
 </tr>
 <tr>
 <td><code>after_handler</code></td>
-<td>Handler returned normally</td>
-<td><code>scope</code>, <code>client_ip</code>, <code>method</code>, <code>path</code>, <code>http_version</code></td>
-<td>Observation only</td>
+<td>Handler returned or raised</td>
+<td><code>scope</code>, <code>client_ip</code>, <code>method</code>, <code>path</code>, <code>handler</code>, <code>exception</code></td>
+<td>Observation only; <code>exception</code> is <code>None</code> on success</td>
 </tr>
 <tr>
 <td><code>request_completed</code></td>
@@ -5225,9 +5225,12 @@ you want the consistency of writing every hook as
 WebSocket and gRPC, which do not fire the HTTP-specific events
 above) — it always fires last, exactly once.</p>
 <h3 id="request_received-earliest-gate"><code>request_received</code> — earliest gate<a class="headerlink" href="#request_received-earliest-gate" title="Permanent link">&para;</a></h3>
-<p>Fires after the request line and headers are parsed but before
-routing or handler dispatch.  Fires for both HTTP/1.1 and HTTP/2
-(once per stream).  WebSocket connections never fire this event.</p>
+<p>Fires when the request enters the application, before routing or
+handler dispatch.  Fires for both HTTP/1.1 and HTTP/2 (once per
+stream), and — like every request-lifecycle event — fires exactly
+once per request whether BlackBull serves the request itself or
+runs as an ASGI app under an external server (uvicorn, hypercorn,
+<code>TestClient</code>).  WebSocket connections never fire this event.</p>
 <div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">intercept</span><span class="p">(</span><span class="s1">&#39;request_received&#39;</span><span class="p">)</span>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">require_api_key</span><span class="p">(</span><span class="n">event</span><span class="p">):</span>
     <span class="n">headers</span> <span class="o">=</span> <span class="n">event</span><span class="o">.</span><span class="n">detail</span><span class="p">[</span><span class="s1">&#39;scope&#39;</span><span class="p">][</span><span class="s1">&#39;headers&#39;</span><span class="p">]</span>
@@ -5244,8 +5247,11 @@ observation.</p>
 <h3 id="request_completed-access-log-shaped"><code>request_completed</code> — access-log-shaped<a class="headerlink" href="#request_completed-access-log-shaped" title="Permanent link">&para;</a></h3>
 <p>Fires once per HTTP request after the response has been sent (or
 after the request has otherwise concluded — for example, after a
-404 or after an unhandled exception in the handler).  Fires from
-the same site as the <code>blackbull.access</code> log record.</p>
+404 or after an unhandled exception in the handler).  The wire
+fields (<code>status</code>, <code>response_bytes</code>, <code>duration_ms</code>) are taken from
+the same record that feeds the <code>blackbull.access</code> log; under an
+external ASGI server (uvicorn, <code>TestClient</code>) that record does not
+exist and those keys carry placeholders (<code>'-'</code> / <code>0</code> / <code>0.0</code>).</p>
 <table>
 <thead>
 <tr>
@@ -5314,10 +5320,10 @@ entry point (the one place every scope passes through), so it fires
 under BlackBull's own server <em>and</em> under external ASGI servers
 (uvicorn, <code>httpx.ASGITransport</code>).</p>
 <p>This is the distinction from <code>request_completed</code>: that event is
-<em>server-level</em> telemetry (HTTP-only, carries wire data like status
-and byte counts, fires only under BlackBull's server).
-<code>scope_completed</code> is <em>application-level</em> — cross-protocol, fires
-wherever the app runs, and is meant for <strong>resource cleanup</strong>.</p>
+HTTP-only telemetry whose wire data (status and byte counts) is
+meaningful under BlackBull's own server.  <code>scope_completed</code> is
+<em>application-level</em> — cross-protocol, fires for WebSocket scopes
+too, and is meant for <strong>resource cleanup</strong>.</p>
 <table>
 <thead>
 <tr>

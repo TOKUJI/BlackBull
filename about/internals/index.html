@@ -5067,10 +5067,14 @@ plain <code>asyncio</code> server that owns the listening socket and
 spawns a <code>ConnectionActor</code> task per accepted connection.
 Everything below it is an <code>Actor</code> subclass.</p>
 <p>A separate <code>EventAggregator</code> translates the low-level
-inter-actor messages into the user-facing events documented in
-<a href="../../guide/events/">Events</a> — <code>request_received</code>,
-<code>before_handler</code>, <code>request_completed</code>, <code>websocket_message</code>,
-etc.</p>
+inter-actor messages into the wire-level user-facing events
+documented in <a href="../../guide/events/">Events</a> —
+<code>request_disconnected</code>, <code>error</code>, <code>websocket_message</code>,
+<code>connection_accepted</code>, etc.  The request-lifecycle events
+(<code>request_received</code>, <code>before_handler</code>, <code>after_handler</code>,
+<code>request_completed</code>) are emitted by the application layer
+(<code>BlackBull._dispatch</code>) instead, so they fire identically under
+BlackBull's own server and under external ASGI hosts.</p>
 <h2 id="responsibilities">Responsibilities<a class="headerlink" href="#responsibilities" title="Permanent link">&para;</a></h2>
 <h3 id="asgiserver"><code>ASGIServer</code><a class="headerlink" href="#asgiserver" title="Permanent link">&para;</a></h3>
 <ul>
@@ -5118,8 +5122,9 @@ etc.</p>
 <li>Receives the parsed headers and body from <code>HTTP1Actor</code>.</li>
 <li>Calls the ASGI app, collects the response, writes it back
   via the connection's writer.</li>
-<li>Drives the <code>before_handler</code>, <code>after_handler</code>,
-  <code>request_completed</code>, and (on failure) error events.</li>
+<li>Fires the <code>error</code> event when the app call raises.  (The
+  request-lifecycle events are emitted by the application
+  layer, not here.)</li>
 </ul>
 <h3 id="http2actor"><code>HTTP2Actor</code><a class="headerlink" href="#http2actor" title="Permanent link">&para;</a></h3>
 <ul>
