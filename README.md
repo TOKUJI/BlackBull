@@ -88,6 +88,16 @@ async def get_task(task_id: int):
     return {"id": task_id, "title": "..."}
 ```
 
+Need more than the URL? Declare a `Request` parameter — headers,
+cookies, client, and `body()`/`json()`/`text()`, injected only for
+handlers that ask for it:
+
+```python
+@app.route(path='/notes/{note_id:int}', methods=[HTTPMethod.POST])
+async def create_note(note_id: int, request: Request):
+    return {"id": note_id, "note": await request.json()}
+```
+
 Drop down to full ASGI `(scope, receive, send)` whenever you need it
 — routes accept either shape.
 
@@ -258,6 +268,7 @@ for the full tutorial.
 | [`examples/typed_routes_ok.py`](examples/typed_routes_ok.py) | `{param:converter}` syntax, `url_path_for` |
 | [`examples/scenario_h1_fault_injection.py`](examples/scenario_h1_fault_injection.py) | HTTP/1.1 fault scenarios driven against stdlib `http.server` |
 | [`examples/scenario_h2_fault_injection.py`](examples/scenario_h2_fault_injection.py) | HTTP/2 fault scenarios served against httpx |
+| [`examples/request_object.py`](examples/request_object.py) | Opt-in `Request` context object — headers, cookies, client, `body()`/`json()`/`text()` |
 
 ## Documentation
 

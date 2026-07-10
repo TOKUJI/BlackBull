@@ -226,6 +226,14 @@ class _RouteInfo:
     methods: tuple = ()            # tuple of HTTPMethod values
     scheme: Any = None             # Scheme | tuple[Scheme, ...] | _AnyScheme | None
     name: str | None = None
+    # {param_name} written with an explicit ``:converter`` in the template
+    # (e.g. {task_id:int}), as opposed to defaulted to 'str'. validate()'s
+    # converter/annotation type-match check only applies to these: a bare
+    # {task_id} is matched as 'str' by the router but re-coerced to the
+    # handler's own annotation at call time by _adapt_handler, so the
+    # router-level 'str' spec and the handler annotation are expected to
+    # differ and that's not an error.
+    explicit_param_specs: frozenset = field(default_factory=frozenset)
 
 
 class RouteInfo(NamedTuple):
@@ -999,11 +1007,12 @@ class Router:
         at match time.
         """
         if isinstance(path, re.Pattern):
-            template, param_specs = path.pattern, {}
+            template, param_specs, explicit_param_specs = path.pattern, {}, frozenset()
         else:
             template = path
-            param_specs = {m.group(1): (m.group(2) or 'str')
-                           for m in self._param_pattern.finditer(path)}
+            matches = list(self._param_pattern.finditer(path))
+            param_specs = {m.group(1): (m.group(2) or 'str') for m in matches}
+            explicit_param_specs = frozenset(m.group(1) for m in matches if m.group(2))
         if name is not None:
             if name in self._named_routes:
                 raise ValueError(f"Duplicate route name {name!r}")
@@ -1015,6 +1024,7 @@ class Router:
             methods=methods,
             scheme=scheme,
             name=name,
+            explicit_param_specs=explicit_param_specs,
         ))
 
     def url_path_for(self, name: str, /, **params) -> str:
@@ -1098,6 +1108,16 @@ class Router:
                     hints = {}
                 annotation = hints.get(param_name, inspect.Parameter.empty)
                 if annotation is inspect.Parameter.empty:
+                    continue
+
+                # A bare {param} (no explicit :converter) defaults to a
+                # 'str' router-level spec, but _adapt_handler re-coerces
+                # the captured string to the handler's own annotation at
+                # call time — so a 'str' spec next to an `int` annotation
+                # here is the documented pattern (docs/getting-started/
+                # first-app.md), not a bug. Only an *explicit* {param:type}
+                # promises the router itself will produce that type.
+                if param_name not in info.explicit_param_specs:
                     continue
 
                 _regex_str, converter_fn = _CONVERTERS[spec]

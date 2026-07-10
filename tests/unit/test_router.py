@@ -1420,6 +1420,19 @@ class TestStartupValidation:
         with pytest.raises(ConfigurationError, match="id"):
             router.validate()
 
+    def test_bare_param_with_annotation_passes(self):
+        # {id} (no explicit :converter) defaults to a 'str' router spec, but
+        # _adapt_handler re-coerces the captured string to the handler's own
+        # annotation at call time (docs/getting-started/first-app.md's
+        # "str captured, int() applied" pattern) — not a converter/annotation
+        # mismatch, unlike the explicit {id:int} case above.
+        router = Router()
+
+        @router.route(path='/items/{id}', methods=HTTPMethod.GET)
+        async def handler(id: int): return ''
+
+        router.validate()  # must not raise
+
     def test_validate_idempotent_after_error(self):
         router = Router()
 

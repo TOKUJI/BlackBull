@@ -47,7 +47,7 @@ at registration time and wraps the function automatically:
 async def hello():
     return "Hello, world!"         # str → Response
 
-@app.route(path='/tasks/{task_id}')
+@app.route(path='/tasks/{task_id:int}')
 async def get_task(task_id: int):  # path param coerced to int
     return {"id": task_id}         # dict → JSONResponse
 
