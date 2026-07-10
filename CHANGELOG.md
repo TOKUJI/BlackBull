@@ -31,6 +31,46 @@ so the editable install's metadata catches up.
 
 ## [Unreleased]
 
+## [0.49.4] — 2026-07-10
+
+Sprint 64 — event-emission consolidation and dead-code purge. Perf-neutral
+(EC2 HttpArena A/B, same instance: mean +1.0%, dispatch-path lanes
++3–4.6%). No new public API surface.
+
+### Fixed
+
+- **Request-lifecycle events fire exactly once per request**, under any
+  transport (BlackBull's own HTTP/1.1 + HTTP/2 actors, uvicorn/hypercorn,
+  `TestClient`). `request_received`, `before_handler`, `after_handler`, and
+  `request_completed` are now emitted from a single choke point,
+  `BlackBull._dispatch`, replacing per-actor emitters that double-fired
+  `before_handler` on the production-server path and never fired
+  `request_received` under `TestClient`. `test_extension_event_handler_is_fired`
+  (a strict xfail since Sprint 40) now passes.
+- **HTTP/2 `request_completed` details carry real wire fields.** HTTP/2 now
+  publishes its access-log record the same way HTTP/1.1 does, so `status` /
+  `response_bytes` / `duration_ms` are no longer `'-'`/`0` on that path.
+- **`@app.route(path=re.compile(...))`** — the documented custom-regex form —
+  no longer crashes at registration; route paths now accept `str | re.Pattern`.
+- **A raising `app_shutdown` hook** now emits `lifespan.shutdown.failed`
+  (previously only startup failures were reported).
+- **gRPC integration tests migrated off `httpx.ASGITransport`**, which has no
+  `http.response.trailers` support and can't observe gRPC's trailer-carried
+  `grpc-status` (every gRPC response has reported status in trailing headers
+  since Sprint 58). Tests now drive a real h2c socket via BlackBull's own
+  `HTTP2Client`, exercising the full `__call__ → _dispatch → serve_grpc` path.
+
+### Removed (internal, no public API impact)
+
+Net −614 lines. Removed dead code flagged by the 2026-07-07 comprehensive
+audit: the orphaned `EventEmitter` utility, ~40 pre-registered identical
+`ErrorRouter` fallback entries (replaced by a single `default=` miss
+handler), the racy TOCTOU `check_port` connect-probe, `parse_post_data`,
+and several other unused helpers and orphaned tests. The router now stores
+only string paths in its trie; a route registered with a regex-*source
+string* (as opposed to a compiled `re.Pattern`) is rejected at registration
+with a pointed `ValueError` instead of silently mis-routing.
+
 ## [0.49.3] — 2026-07-09
 
 ### Security
