@@ -121,7 +121,14 @@ jobs:
   autobahn:
     name: Autobahn (RFC 6455 WebSocket)
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # 25, not 15: the suite normally executes in 10.5–11.5 min, of which
+    # ~97% is permessage-deflate groups 12+13 — pure CPU on both ends, so
+    # shared-runner contention can stretch it well past a 15-min cap
+    # (cancelled runs on 2026-07-05, 2026-07-08, 2026-07-10).  Profiled
+    # 2026-07-11: BlackBull matches the `websockets` reference within 5%
+    # under wstest, so the duration is inherent to the suite, not a
+    # server-side regression to chase.
+    timeout-minutes: 25
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0   # v7.0.0
