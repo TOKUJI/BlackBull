@@ -1,0 +1,24 @@
+// Fixture service for the protobuf-layer interop tests
+// (test_grpc_protobuf_interop.py).  Regenerate the committed gencode with:
+//
+//   python -m grpc_tools.protoc -Itests/conformance/grpc/protos \
+//       --python_out=tests/conformance/grpc bbinterop.proto
+syntax = "proto3";
+
+package bbinterop;
+
+message HelloRequest {
+  string name = 1;
+}
+
+message HelloReply {
+  string message = 1;
+}
+
+service Greeter {
+  rpc SayHello(HelloRequest) returns (HelloReply);
+  rpc LotsOfReplies(HelloRequest) returns (stream HelloReply);
+  // Always fails INVALID_ARGUMENT with a google.rpc.BadRequest detail in
+  // grpc-status-details-bin (the rich error model).
+  rpc AlwaysInvalid(HelloRequest) returns (HelloReply);
+}

@@ -267,10 +267,23 @@ jobs:
           python-version: '3.12'
 
       - name: Install BlackBull (with testing + grpcio interop client)
-        # grpc-interop pulls in grpcio — the spec-strict third-party client.
-        # Without it the interop module skips (pytest.importorskip), so the
-        # gate would silently pass on nothing; install it explicitly here.
+        # grpc-interop pulls in grpcio — the spec-strict third-party client —
+        # plus the grpcio-reflection/health/status client packages for the
+        # protobuf-layer suite.  Without them the interop modules skip
+        # (pytest.importorskip), so the gate would silently pass on nothing;
+        # install them explicitly here.
         run: pip install -e '.[testing,grpc-interop]'
+
+      # ── Sprint 66 / flip after blackbull-protobuf 0.1.0 is on PyPI ──
+      # The protobuf-layer interop suite (test_grpc_protobuf_interop.py)
+      # needs the separate blackbull-protobuf package on the *server* side.
+      # Until its first publish the suite self-skips; uncomment both lines
+      # below once it is published to make the gate strict (--no-deps avoids
+      # pip fighting the editable checkout over the blackbull version floor;
+      # every real dependency already arrives via grpc-interop above).
+      #
+      # - name: Install blackbull-protobuf (protobuf interop layer)
+      #   run: pip install --no-deps blackbull-protobuf
 
       - name: Run real-client gRPC interop conformance
         # Docker-free interop gate: a real grpcio client drives BlackBull's
@@ -288,6 +301,12 @@ jobs:
         #     concurrency gate fails with FLOW_CONTROL_ERROR if per-stream
         #     window copies come back.
         # Runs on every push/PR, not just the weekly full tier.
+        # The protobuf-layer suite (reflection / health / rich errors against
+        # the official grpcio client packages) runs alongside; it self-skips
+        # until blackbull-protobuf is installed (see the step above).  Set
+        # BB_GRPC_INTEROP_REQUIRE_PROTOBUF=1 here at the same time as that
+        # flip so a missing package then fails loudly instead of skipping.
         run: |
-          timeout 90 python -m pytest --timeout=60 -v \
-              tests/conformance/grpc/test_grpc_real_client_h2c.py
+          timeout 120 python -m pytest --timeout=60 -v \
+              tests/conformance/grpc/test_grpc_real_client_h2c.py \
+              tests/conformance/grpc/test_grpc_protobuf_interop.py

@@ -71,13 +71,6 @@ try:
 except ValueError:
     _COMPRESS_MIN_BYTES = 1024
 
-# If pulling the next message took longer than this, the producer awaited
-# between messages (a slow/interactive stream) rather than yielding a
-# synchronous burst — flush the partial batch now so its output isn't withheld
-# until the batch fills.  Comfortably above a synchronous __anext__'s cost
-# (sub-microsecond) and well below any human-perceptible streaming interval.
-_STREAM_FLUSH_IDLE_S = 0.0005
-
 # grpc-timeout unit → seconds (gRPC HTTP/2 protocol §"Timeout").
 _TIMEOUT_UNITS: dict[bytes, float] = {
     b'H': 3600.0, b'M': 60.0, b'S': 1.0,
@@ -258,6 +251,13 @@ class GrpcContext:
     def set_trailing_metadata(self, metadata) -> None:
         self._trailing = [(k, v) for k, v in metadata]
 
+    def trailing_metadata(self) -> list[tuple[bytes, bytes]]:
+        """The trailing metadata set so far (a copy) — lets helpers compose
+        with, rather than clobber, what the handler already set (e.g.
+        blackbull-protobuf's ``abort_with_details`` appending
+        ``grpc-status-details-bin``)."""
+        return list(self._trailing)
+
     async def send_initial_metadata(self, metadata) -> None:
         """Send response leading metadata now (the initial HTTP/2 HEADERS),
         before the first response message — grpcio's
@@ -311,7 +311,9 @@ def _status_trailers(status: GrpcStatus, details: str,
 
 
 async def _send_trailers_only(send, status: GrpcStatus, details: str,
-                              content_type: bytes = _GRPC_CONTENT_TYPE) -> None:
+                              content_type: bytes = _GRPC_CONTENT_TYPE,
+                              trailing: list[tuple[bytes, bytes]] | None = None
+                              ) -> None:
     """Emit a gRPC error response: HTTP 200, no message, ``grpc-status`` in
     a *trailing* HEADERS frame.
 
@@ -327,13 +329,17 @@ async def _send_trailers_only(send, status: GrpcStatus, details: str,
     Routing through ``http.response.start(trailers=True)`` + ``…trailers`` emits
     Response-Headers followed by a trailing HEADERS frame (END_STREAM) with the
     status — the same trailers machinery the success path uses, minus the DATA
-    frame — which every conformant gRPC client accepts."""
+    frame — which every conformant gRPC client accepts.
+
+    *trailing* is handler-set trailing metadata (``set_trailing_metadata``);
+    grpcio delivers it on non-OK calls too — the rich-error model's
+    ``grpc-status-details-bin`` rides it through ``abort``."""
     await send({'type': 'http.response.start', 'status': 200,
                 'headers': [(b'content-type', content_type),
                             (b'grpc-accept-encoding', _GRPC_ACCEPT_ENCODING)],
                 'trailers': True})
     await send({'type': 'http.response.trailers',
-                'headers': _status_trailers(status, details)})
+                'headers': _status_trailers(status, details, trailing)})
 
 
 async def _read_unary_request(receive, encoding: bytes) -> bytes:
@@ -479,11 +485,11 @@ async def _serve_unary(handler, request, context, send, content_type,
         response = _validate_response_message(response)
     except GrpcError as exc:
         await _finish_stream_error(
-            send, context._started, exc.status, exc.details, content_type)
+            send, context, exc.status, exc.details, content_type)
         return
     except asyncio.TimeoutError:
         await _finish_stream_error(
-            send, context._started, GrpcStatus.DEADLINE_EXCEEDED,
+            send, context, GrpcStatus.DEADLINE_EXCEEDED,
             'deadline exceeded', content_type)
         return
     except Exception as exc:  # noqa: BLE001 — handler isolation
@@ -493,7 +499,7 @@ async def _serve_unary(handler, request, context, send, content_type,
         # interpreter shutdown must never be turned into a gRPC status.
         logger.exception('gRPC unary handler raised')
         await _finish_stream_error(
-            send, context._started, GrpcStatus.INTERNAL, str(exc), content_type)
+            send, context, GrpcStatus.INTERNAL, str(exc), content_type)
         return
 
     await context._start_response()
@@ -525,38 +531,72 @@ async def _serve_server_streaming(handler, request, context, send, content_type,
     # buffer can be sent verbatim; flushed when it reaches _STREAM_BATCH_BYTES
     # and, unconditionally, at stream end / before any trailing status.
     buf = bytearray()
+    # Serialises concurrent flushes (the idle flusher below vs the drive
+    # loop's batch flush): each flush snapshots-and-clears under the lock, so
+    # message order on the wire matches yield order.
+    flush_lock = asyncio.Lock()
 
     async def _flush() -> None:
-        if not buf:
-            return
-        await context._start_response()
-        await send({'type': 'http.response.body',
-                    'body': bytes(buf), 'more_body': True})
-        buf.clear()
+        async with flush_lock:
+            if not buf:
+                return
+            data = bytes(buf)
+            buf.clear()
+            await context._start_response()
+            await send({'type': 'http.response.body',
+                        'body': data, 'more_body': True})
 
-    loop = asyncio.get_event_loop()
+    # Loop-idle flushing: the drive loop marks the buffer dirty after each
+    # message; this task only gets to run once the producer *suspends* (a
+    # synchronous burst never yields the loop between messages, so the burst
+    # keeps batching into one DATA frame).  The moment the producer genuinely
+    # waits — a health Watch parked on a status change, a chat stream parked
+    # on input — the loop runs this task and everything already yielded goes
+    # out.  Without it, a partial batch was withheld until the *next* message
+    # completed, which for an indefinitely-parked producer meant never
+    # (Sprint 66: grpc.health Watch clients never received their initial
+    # status).
+    flush_wanted = asyncio.Event()
+    finished = False
+
+    async def _idle_flusher() -> None:
+        while not finished:
+            await flush_wanted.wait()
+            flush_wanted.clear()
+            await _flush()
+
+    idle_flusher = asyncio.create_task(_idle_flusher())
+
+    async def _stop_idle_flusher() -> None:
+        # Graceful stop so an in-flight flush completes rather than being
+        # cancelled mid-send; the drive/error paths flush any tail themselves.
+        nonlocal finished
+        finished = True
+        flush_wanted.set()
+        try:
+            await idle_flusher
+        except Exception:  # noqa: BLE001 — send failures already surfaced
+            logger.exception('gRPC stream idle flusher raised')
 
     async def _drive() -> None:
         # Coalesce consecutive messages into one DATA frame.  A *synchronous*
         # burst (the bulk case — thousands of tiny messages yielded without
         # awaiting) buffers into ``buf`` and flushes only at ~one max-frame
-        # worth, turning thousands of per-message sends+drains into a handful.
-        # A producer that *awaits* between messages is detected by timing the
-        # pull: when it exceeds _STREAM_FLUSH_IDLE_S the partial batch is flushed
-        # so a slow/interactive stream isn't withheld.  The tail is flushed at
-        # stream end / before any trailing status.
+        # worth, turning thousands of per-message sends+drains into a handful;
+        # the idle flusher above covers producers that suspend.  The tail is
+        # flushed at stream end / before any trailing status.
         it = agen.__aiter__()
         while True:
-            t0 = loop.time()
             try:
                 msg = await it.__anext__()
             except StopAsyncIteration:
                 return
-            paused = (loop.time() - t0) > _STREAM_FLUSH_IDLE_S
             buf.extend(_frame_response(_validate_response_message(msg),
                                        response_encoding is not None))
-            if len(buf) >= _STREAM_BATCH_BYTES or (paused and buf):
+            if len(buf) >= _STREAM_BATCH_BYTES:
                 await _flush()
+            elif buf:
+                flush_wanted.set()
 
     try:
         if deadline is not None:
@@ -568,12 +608,12 @@ async def _serve_server_streaming(handler, request, context, send, content_type,
         # Deliver messages already committed by the generator, then the status.
         await _flush()
         await _finish_stream_error(
-            send, context._started, exc.status, exc.details, content_type)
+            send, context, exc.status, exc.details, content_type)
         return
     except (asyncio.TimeoutError, TimeoutError):
         await _flush()
         await _finish_stream_error(
-            send, context._started, GrpcStatus.DEADLINE_EXCEEDED,
+            send, context, GrpcStatus.DEADLINE_EXCEEDED,
             'deadline exceeded', content_type)
         return
     except Exception as exc:  # noqa: BLE001 — handler isolation
@@ -587,12 +627,17 @@ async def _serve_server_streaming(handler, request, context, send, content_type,
         await _flush()
         logger.exception('gRPC server-streaming handler raised')
         await _finish_stream_error(
-            send, context._started, GrpcStatus.INTERNAL, str(exc), content_type)
+            send, context, GrpcStatus.INTERNAL, str(exc), content_type)
         return
     finally:
-        # Finalise the generator so its cleanup runs on every exit path
-        # (normal completion, error, or client cancellation).  Best-effort:
-        # a raising aclose() must not mask the status we already reported.
+        # Stop the idle flusher first (gracefully — an in-flight flush is
+        # allowed to complete rather than be cancelled mid-send; by now any
+        # error trailers went out with the buffer already drained, so it can
+        # only no-op or finish delivering committed messages).  Then finalise
+        # the generator so its cleanup runs on every exit path (normal
+        # completion, error, or client cancellation).  Both are best-effort:
+        # neither may mask the status we already reported.
+        await _stop_idle_flusher()
         try:
             await agen.aclose()
         except Exception:  # noqa: BLE001
@@ -608,15 +653,21 @@ async def _serve_server_streaming(handler, request, context, send, content_type,
                                             context._trailing)})
 
 
-async def _finish_stream_error(send, started: bool, status: GrpcStatus,
+async def _finish_stream_error(send, context: GrpcContext, status: GrpcStatus,
                                details: str, content_type: bytes) -> None:
-    """Report a streaming error: in trailers if Response-Headers already went
-    out, otherwise as a Trailers-Only response."""
-    if started:
+    """Report a handler error: in trailers if Response-Headers already went
+    out (``context._started``), otherwise as a Trailers-Only response.
+
+    Either way the context's trailing metadata is delivered with the status —
+    grpcio's contract for ``set_trailing_metadata`` on an aborted call, and
+    the transport leg of the rich-error model (``grpc-status-details-bin``)."""
+    if context._started:
         await send({'type': 'http.response.trailers',
-                    'headers': _status_trailers(status, details)})
+                    'headers': _status_trailers(status, details,
+                                                context._trailing)})
     else:
-        await _send_trailers_only(send, status, details, content_type)
+        await _send_trailers_only(send, status, details, content_type,
+                                  context._trailing)
 
 
 async def serve_grpc(registry: GrpcServiceRegistry, scope, receive, send) -> None:
