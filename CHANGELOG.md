@@ -31,6 +31,8 @@ so the editable install's metadata catches up.
 
 ## [Unreleased]
 
+## [0.51.0] — 2026-07-12
+
 Sprint 66 — the protobuf side of the gRPC story, shipped as the new
 optional [`blackbull-protobuf`](https://github.com/TOKUJI/blackbull-protobuf)
 package (`pip install 'blackbull[protobuf]'`) plus the core hooks it plugs
