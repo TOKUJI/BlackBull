@@ -2523,6 +2523,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#blackbull.grpc.GrpcContext.trailing_metadata" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        trailing_metadata
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -4921,6 +4932,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#blackbull.grpc.GrpcContext.trailing_metadata" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        trailing_metadata
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -5309,6 +5331,27 @@ out (grpcio's "initial metadata no longer allowed").</p>
 when the client set no <code>grpc-timeout</code> — grpcio's
 <code>ServicerContext.time_remaining</code>.  Lets a handler shed work it cannot
 finish in time.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.grpc.GrpcContext.trailing_metadata" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">trailing_metadata</span><span class="p">()</span></code>
+
+<a href="#blackbull.grpc.GrpcContext.trailing_metadata" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>The trailing metadata set so far (a copy) — lets helpers compose
+with, rather than clobber, what the handler already set (e.g.
+blackbull-protobuf's <code>abort_with_details</code> appending
+<code>grpc-status-details-bin</code>).</p>
 
 
     </div>

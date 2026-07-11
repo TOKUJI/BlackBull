@@ -843,6 +843,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#protobuf-integration-blackbull-protobuf" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Protobuf integration: blackbull-protobuf
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#scope-and-limits" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4732,6 +4743,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#protobuf-integration-blackbull-protobuf" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Protobuf integration: blackbull-protobuf
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#scope-and-limits" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4912,6 +4934,60 @@ as <code>context.abort</code>. Any other unexpected exception becomes
 </code></pre></div>
 <p>Paths are the standard gRPC <code>/package.Service/Method</code> form (a leading slash is
 optional). Unknown methods return <code>GrpcStatus.UNIMPLEMENTED</code>.</p>
+<h2 id="protobuf-integration-blackbull-protobuf">Protobuf integration: <code>blackbull-protobuf</code><a class="headerlink" href="#protobuf-integration-blackbull-protobuf" title="Permanent link">&para;</a></h2>
+<p>Everything above exchanges raw bytes. The optional
+<a href="https://github.com/TOKUJI/blackbull-protobuf"><code>blackbull-protobuf</code></a> package
+adds the protobuf side of the story while the framework core stays
+dependency-free:</p>
+<div class="highlight"><pre><span></span><code>pip install &#39;blackbull[protobuf]&#39;
+</code></pre></div>
+<p><strong>Object-typed handlers</strong> — write servicers against your generated <code>*_pb2</code>
+messages; the adapter does <code>FromString</code>/<code>SerializeToString</code> at the boundary
+and maps each method's streaming shape automatically:</p>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">helloworld_pb2</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">blackbull_protobuf</span><span class="w"> </span><span class="kn">import</span> <span class="n">add_servicer</span>
+
+<span class="k">class</span><span class="w"> </span><span class="nc">Greeter</span><span class="p">:</span>
+    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">SayHello</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">request</span><span class="p">,</span> <span class="n">context</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">helloworld_pb2</span><span class="o">.</span><span class="n">HelloReply</span><span class="p">(</span><span class="n">message</span><span class="o">=</span><span class="sa">f</span><span class="s1">&#39;Hello, </span><span class="si">{</span><span class="n">request</span><span class="o">.</span><span class="n">name</span><span class="si">}</span><span class="s1">!&#39;</span><span class="p">)</span>
+
+<span class="n">add_servicer</span><span class="p">(</span><span class="n">grpc</span><span class="p">,</span> <span class="n">Greeter</span><span class="p">(),</span> <span class="n">helloworld_pb2</span><span class="p">)</span>
+</code></pre></div>
+<p><strong>Server reflection</strong> — <code>grpcurl</code>, <code>grpc_cli</code>, and Postman can list, describe,
+and invoke your services with no local <code>.proto</code> files:</p>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">blackbull_protobuf</span><span class="w"> </span><span class="kn">import</span> <span class="n">enable_reflection</span>
+<span class="n">enable_reflection</span><span class="p">(</span><span class="n">grpc</span><span class="p">)</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><span class="gp">$ </span>grpcurl<span class="w"> </span>-insecure<span class="w"> </span>localhost:8443<span class="w"> </span>list
+<span class="go">helloworld.Greeter</span>
+<span class="go">grpc.health.v1.Health</span>
+<span class="go">grpc.reflection.v1alpha.ServerReflection</span>
+<span class="gp">$ </span>grpcurl<span class="w"> </span>-insecure<span class="w"> </span>-d<span class="w"> </span><span class="s1">&#39;{&quot;name&quot;: &quot;world&quot;}&#39;</span><span class="w"> </span>localhost:8443<span class="w"> </span>helloworld.Greeter/SayHello
+</code></pre></div>
+<p><strong>Health checking</strong> — the standard <code>grpc.health.v1.Health</code> service
+(<code>Check</code> + <code>Watch</code>) behind a settable status map, for Kubernetes and
+load-balancer probes:</p>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">blackbull_protobuf</span><span class="w"> </span><span class="kn">import</span> <span class="n">enable_health</span><span class="p">,</span> <span class="n">HealthService</span>
+
+<span class="n">health</span> <span class="o">=</span> <span class="n">enable_health</span><span class="p">(</span><span class="n">grpc</span><span class="p">)</span>
+<span class="n">health</span><span class="o">.</span><span class="n">set</span><span class="p">(</span><span class="s1">&#39;helloworld.Greeter&#39;</span><span class="p">,</span> <span class="n">HealthService</span><span class="o">.</span><span class="n">SERVING</span><span class="p">)</span>
+<span class="c1"># during drain:</span>
+<span class="n">health</span><span class="o">.</span><span class="n">set</span><span class="p">(</span><span class="s1">&#39;helloworld.Greeter&#39;</span><span class="p">,</span> <span class="n">HealthService</span><span class="o">.</span><span class="n">NOT_SERVING</span><span class="p">)</span>   <span class="c1"># Watch streams see it</span>
+</code></pre></div>
+<p><strong>Rich error details</strong> — attach structured <code>google.rpc</code> details
+(<code>BadRequest</code>, <code>ErrorInfo</code>, <code>RetryInfo</code>, …) that ride the
+<code>grpc-status-details-bin</code> trailer and decode on the client with grpcio's
+<code>rpc_status</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">google.rpc</span><span class="w"> </span><span class="kn">import</span> <span class="n">error_details_pb2</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">blackbull_protobuf</span><span class="w"> </span><span class="kn">import</span> <span class="n">abort_with_details</span>
+
+<span class="n">bad</span> <span class="o">=</span> <span class="n">error_details_pb2</span><span class="o">.</span><span class="n">BadRequest</span><span class="p">()</span>
+<span class="n">bad</span><span class="o">.</span><span class="n">field_violations</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">field</span><span class="o">=</span><span class="s1">&#39;name&#39;</span><span class="p">,</span> <span class="n">description</span><span class="o">=</span><span class="s1">&#39;must not be empty&#39;</span><span class="p">)</span>
+<span class="n">abort_with_details</span><span class="p">(</span><span class="n">context</span><span class="p">,</span> <span class="n">GrpcStatus</span><span class="o">.</span><span class="n">INVALID_ARGUMENT</span><span class="p">,</span>
+                   <span class="s1">&#39;name is required&#39;</span><span class="p">,</span> <span class="p">[</span><span class="n">bad</span><span class="p">])</span>
+</code></pre></div>
+<p>The raw-bytes registry path is untouched — both styles coexist on one
+registry, and <code>blackbull.grpc</code> works fully without the package installed.</p>
 <h2 id="scope-and-limits">Scope and limits<a class="headerlink" href="#scope-and-limits" title="Permanent link">&para;</a></h2>
 <ul>
 <li><strong>All four RPC shapes are served</strong>: unary, server-streaming,
