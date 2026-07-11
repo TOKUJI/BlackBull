@@ -31,6 +31,22 @@ so the editable install's metadata catches up.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Send-path size gate — `writelines` regression** (inter-sprint, releases with
+  Sprint 67).  `BaseSender._write_many` now joins parts totalling ≤ 32 KiB and
+  sends them via a single `write()`; only larger payloads use vectored
+  `transport.writelines`.  Root cause of the v0.33.1 → v0.51.0 HttpArena
+  regression (echo-ws −8~−20 %, plaintext HTTP/1.1 −4~−8 %): on CPython's
+  selector transport, `writelines` costs more than the small memcpy it avoids
+  (per-part `memoryview` allocations + `sendmsg` setup), and under backpressure
+  it attempts a send and re-registers the writer on **every** call.  The
+  transport strategy now lives in one place (`BaseSender`); protocol senders
+  keep expressing *what* they have via `_write_many((head, body))`.  Breakeven
+  measured at 16–64 KiB (join wins below, vectored wins above); local A/B
+  recovers the full HTTP/1.1 baseline regression (−10 % CPU/request vs
+  v0.51.0).  See `.claude/planning/recommendations/protocol-layer-audit-2026-07-12.md`.
+
 ## [0.51.0] — 2026-07-12
 
 Sprint 66 — the protobuf side of the gRPC story, shipped as the new
