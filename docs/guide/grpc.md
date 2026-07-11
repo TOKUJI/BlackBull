@@ -143,6 +143,79 @@ grpc.add_service('helloworld.Greeter', {'SayHello': say_hello})
 Paths are the standard gRPC `/package.Service/Method` form (a leading slash is
 optional). Unknown methods return `GrpcStatus.UNIMPLEMENTED`.
 
+## Protobuf integration: `blackbull-protobuf`
+
+Everything above exchanges raw bytes. The optional
+[`blackbull-protobuf`](https://github.com/TOKUJI/blackbull-protobuf) package
+adds the protobuf side of the story while the framework core stays
+dependency-free:
+
+```
+pip install 'blackbull[protobuf]'
+```
+
+**Object-typed handlers** — write servicers against your generated `*_pb2`
+messages; the adapter does `FromString`/`SerializeToString` at the boundary
+and maps each method's streaming shape automatically:
+
+```python
+import helloworld_pb2
+from blackbull_protobuf import add_servicer
+
+class Greeter:
+    async def SayHello(self, request, context):
+        return helloworld_pb2.HelloReply(message=f'Hello, {request.name}!')
+
+add_servicer(grpc, Greeter(), helloworld_pb2)
+```
+
+**Server reflection** — `grpcurl`, `grpc_cli`, and Postman can list, describe,
+and invoke your services with no local `.proto` files:
+
+```python
+from blackbull_protobuf import enable_reflection
+enable_reflection(grpc)
+```
+
+```console
+$ grpcurl -insecure localhost:8443 list
+helloworld.Greeter
+grpc.health.v1.Health
+grpc.reflection.v1alpha.ServerReflection
+$ grpcurl -insecure -d '{"name": "world"}' localhost:8443 helloworld.Greeter/SayHello
+```
+
+**Health checking** — the standard `grpc.health.v1.Health` service
+(`Check` + `Watch`) behind a settable status map, for Kubernetes and
+load-balancer probes:
+
+```python
+from blackbull_protobuf import enable_health, HealthService
+
+health = enable_health(grpc)
+health.set('helloworld.Greeter', HealthService.SERVING)
+# during drain:
+health.set('helloworld.Greeter', HealthService.NOT_SERVING)   # Watch streams see it
+```
+
+**Rich error details** — attach structured `google.rpc` details
+(`BadRequest`, `ErrorInfo`, `RetryInfo`, …) that ride the
+`grpc-status-details-bin` trailer and decode on the client with grpcio's
+`rpc_status`:
+
+```python
+from google.rpc import error_details_pb2
+from blackbull_protobuf import abort_with_details
+
+bad = error_details_pb2.BadRequest()
+bad.field_violations.add(field='name', description='must not be empty')
+abort_with_details(context, GrpcStatus.INVALID_ARGUMENT,
+                   'name is required', [bad])
+```
+
+The raw-bytes registry path is untouched — both styles coexist on one
+registry, and `blackbull.grpc` works fully without the package installed.
+
 ## Scope and limits
 
 - **All four RPC shapes are served**: unary, server-streaming,

@@ -31,6 +31,59 @@ so the editable install's metadata catches up.
 
 ## [Unreleased]
 
+Sprint 66 — the protobuf side of the gRPC story, shipped as the new
+optional [`blackbull-protobuf`](https://github.com/TOKUJI/blackbull-protobuf)
+package (`pip install 'blackbull[protobuf]'`) plus the core hooks it plugs
+into. Core `blackbull.grpc` stays protobuf-free; the raw-bytes handler path
+is untouched.
+
+### Added
+
+- **`blackbull[protobuf]` extra** → the new `blackbull-protobuf` 0.1.0
+  package: `add_servicer` (object-typed handlers from generated `*_pb2`
+  modules, all four RPC shapes), `enable_reflection`
+  (`grpc.reflection.v1alpha` — grpcurl/Postman work with no local
+  `.proto`), `enable_health` (`grpc.health.v1` `Check` + `Watch` behind a
+  settable status map), and `abort_with_details` (`google.rpc.Status`
+  details in the `grpc-status-details-bin` trailer).
+- **`GrpcContext.trailing_metadata()`** — public getter for the trailing
+  metadata set so far, so helper packages compose with (rather than
+  clobber) what the handler already set.
+- **Protobuf-layer interop conformance**
+  (`tests/conformance/grpc/test_grpc_protobuf_interop.py`): real grpcio
+  client packages — `ProtoReflectionDescriptorDatabase` (reflection-only
+  dynamic invocation), the official health gencode stub, and
+  `grpc_status.rpc_status.from_call` — drive BlackBull over a real h2c
+  socket in the `grpc-interop` CI job.
+
+### Fixed
+
+- **gRPC error paths now deliver `set_trailing_metadata`.** Previously the
+  error writers emitted only `grpc-status`/`grpc-message` and dropped the
+  context's trailing metadata on every non-OK shape (Trailers-Only,
+  after-HEADERS, mid-stream, unhandled exception, deadline). grpcio
+  delivers it regardless of outcome — and the rich error model's
+  `grpc-status-details-bin` trailer depends on that.
+- **Interactive server-streaming no longer withholds messages.** The
+  write-coalescing batcher (v0.49.x streaming-collapse fix) flushed a
+  buffered message only when the *next* message completed, so a producer
+  parked indefinitely between yields — a `grpc.health.v1` `Watch`, a chat
+  stream — never delivered its first message (caught by the new
+  health-Watch interop test). The pull-timing heuristic is replaced by a
+  loop-idle flusher task that runs exactly when the producer suspends;
+  synchronous bursts keep batching into single DATA frames (pinned:
+  ≤5 DATA events for a 1000-message burst), and flushes are
+  lock-serialised so wire order matches yield order.
+
+### Docs
+
+- gRPC guide: new "Protobuf integration: `blackbull-protobuf`" section
+  (servicers, grpcurl reflection flow, health map, rich errors).
+- `KNOWN_LIMITATIONS.md`: "no protobuf codegen toolchain" resolved;
+  remaining gap narrowed to reflection `v1alpha`-only + server-side-only.
+- `SECURITY.md`: `blackbull/grpc/` and `blackbull/mqtt/` explicitly listed
+  in scope; `blackbull-protobuf` reports accepted through either repo.
+
 ## [0.50.0] — 2026-07-11
 
 Sprint 65 — a first-class, opt-in `Request` context object for HTTP

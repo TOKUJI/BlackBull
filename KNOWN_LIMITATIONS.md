@@ -239,18 +239,20 @@ opt-in knob is sketched in the roadmap but not built.
 
 Out of scope.  Revisit if a real user need appears.
 
-### gRPC: no protobuf codegen toolchain
+### gRPC: core handlers exchange raw bytes; reflection is v1alpha-only
 
 All four gRPC RPC shapes — unary, server-streaming, client-streaming, and
 bidirectional — ship in `blackbull.grpc` (`app.enable_grpc`), with `gzip`
 message compression (`grpc-accept-encoding: identity,gzip`).
 `application/grpc` requests multiplex onto the same HTTP/2 port as REST and
 WebSocket, with `grpc-status` reported in trailers (a trailing HEADERS
-frame). What's still missing: a protobuf codegen toolchain — handlers
-exchange raw message bytes, so descriptor/message classes are the
-application's choice. A `blackbull-protobuf` package (codegen adapter,
-`grpc.health.v1`, reflection, rich errors) is planned as a separate,
-optional install — see
+frame). Core handlers exchange raw message bytes by design; object-typed
+servicers, server reflection, `grpc.health.v1`, and rich error details ship
+in the optional [`blackbull-protobuf`](https://github.com/TOKUJI/blackbull-protobuf)
+package (`pip install 'blackbull[protobuf]'`). Remaining gaps: reflection
+serves `grpc.reflection.v1alpha` only (`v1` is a planned fast-follow;
+grpcurl and most clients fall back to v1alpha automatically), and BlackBull
+is server-side only — use `grpcio` for a client. See
 [`docs/guide/grpc.md`](https://github.com/TOKUJI/BlackBull/blob/master/docs/guide/grpc.md).
 
 ### CLI `--bind` host is advisory

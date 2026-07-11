@@ -74,7 +74,8 @@ pip install 'blackbull[speed]'            # add uvloop event loop
 pip install 'blackbull[reload]'           # add watchfiles for --reload
 pip install 'blackbull[fault-injection]'  # add cryptography + httpx for the toolkit
 pip install 'blackbull[mqtt]'             # MQTT 5 broker extension
-pip install 'blackbull[grpc]'             # unary gRPC over HTTP/2
+pip install 'blackbull[grpc]'             # gRPC over HTTP/2 (all four RPC shapes)
+pip install 'blackbull[protobuf]'         # + protobuf servicers, reflection, health, rich errors
 ```
 
 ## Simplified handlers

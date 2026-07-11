@@ -93,6 +93,16 @@ mqtt = []
 # `protoc`-generated message classes.  Install with `pip install 'blackbull[grpc]'`.
 grpc = []
 
+# The protobuf layer of the gRPC story (Sprint 66) — object-typed handlers
+# from generated *_pb2 modules, server reflection (grpcurl/Postman
+# discoverability), the grpc.health.v1 service, and rich error details.
+# Lives in the separate `blackbull-protobuf` package so the protobuf runtime
+# never enters this wheel's dependency metadata and can version
+# independently.  Install with `pip install 'blackbull[protobuf]'`.
+protobuf = [
+    "blackbull-protobuf",
+]
+
 # Real-client gRPC interop testing.  ``grpcio`` is a spec-strict, third-party
 # gRPC client used by tests/conformance/grpc/test_grpc_real_client_h2c.py to
 # drive BlackBull over a real h2c socket — the only test that puts an external
@@ -101,6 +111,16 @@ grpc = []
 # job installs it).  Install with `pip install 'blackbull[grpc-interop]'`.
 grpc-interop = [
     "grpcio",
+    # Client-side packages for the protobuf-layer interop suite
+    # (tests/conformance/grpc/test_grpc_protobuf_interop.py): the official
+    # reflection descriptor database, health gencode + stub, and the
+    # rpc_status decoder — each an independent, spec-strict peer for one
+    # blackbull-protobuf deliverable.  The server side additionally needs
+    # `blackbull-protobuf` itself (the suite skips without it; the CI job
+    # installs it explicitly so the gate cannot silently pass on nothing).
+    "grpcio-reflection",
+    "grpcio-health-checking",
+    "grpcio-status",
 ]
 
 testing = [

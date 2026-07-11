@@ -12,9 +12,9 @@ critical vulnerabilities.
 
 | Version | Supported          |
 |---------|--------------------|
+| 0.51.x  | :white_check_mark: |
 | 0.50.x  | :white_check_mark: |
-| 0.49.x  | :white_check_mark: |
-| < 0.49  | :x:                |
+| < 0.50  | :x:                |
 
 This table updates with each minor release.
 
@@ -68,6 +68,13 @@ The following are in scope for security reports:
 - The `blackbull` CLI and module-level boot path (`blackbull.app.serve`).
 - The async HTTP client under `blackbull/client/` (experimental,
   but in-scope).
+- The gRPC layer under `blackbull/grpc/` (message framing,
+  compression negotiation and decompression limits, deadline
+  enforcement) and the MQTT 5 broker under `blackbull/mqtt/` —
+  both parse untrusted network input.  The optional
+  `blackbull-protobuf` package is maintained in
+  [its own repository](https://github.com/TOKUJI/blackbull-protobuf);
+  reports for it are accepted through either channel.
 - The safety locks on `blackbull/fault_injection/` — the
   `BB_PRODUCTION` refuse-check and the localhost-only bind guard on
   `H2FaultServer`.  The deliberate-misbehaviour code paths *behind*
