@@ -300,7 +300,7 @@ class Server:
         the connection skips HTTP detection and is handed straight to the
         binding's raw handler.
         """
-        import uuid  # noqa: PLC0415
+        from .conn_id import new_connection_id  # noqa: PLC0415
         from .connection_actor import ConnectionActor  # noqa: PLC0415
         from .sender import AsyncioWriter  # noqa: PLC0415
         from .recipient import AsyncioReader  # noqa: PLC0415
@@ -403,7 +403,7 @@ class Server:
                 ws_queue_depth=self._ws_queue_depth,
                 registry=self._protocol_registry,
                 bound_binding=bound_binding,
-                connection_id=uuid.uuid4().hex,
+                connection_id=new_connection_id(),
             )
             await actor.run()
         finally:

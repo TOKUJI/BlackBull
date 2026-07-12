@@ -118,16 +118,8 @@ class ConnectionActor(Actor):
             ws_queue_depth=self._ws_queue_depth,
         )
 
-    def _detection_order(self) -> 'list[ProtocolBinding]':
-        """Bindings consulted during cleartext detection, in priority order:
-        registered raw detectors first (shared-port protocols such as MQTT),
-        then the ordered cleartext chain (``http2`` preface, ``http1`` fallback).
-        """
-        return (list(self._registry.raw_bindings.values())
-                + self._registry.cleartext_bindings)
-
     def _select(self, prefix: bytes, at_eof: bool,
-                order: 'list[ProtocolBinding]') -> 'ProtocolBinding | None':
+                order: 'tuple[ProtocolBinding, ...]') -> 'ProtocolBinding | None':
         """First binding (in priority order) to claim *prefix*, or ``None`` if a
         higher-priority binding still needs more bytes to decide.
 
@@ -144,7 +136,7 @@ class ConnectionActor(Actor):
         return None
 
     async def _peek_and_select(
-        self, order: 'list[ProtocolBinding]',
+        self, order: 'tuple[ProtocolBinding, ...]',
     ) -> 'tuple[bytes, ProtocolBinding | None]':
         """Peek the smallest discriminating prefix and return ``(prefix, binding)``.
 
@@ -221,7 +213,8 @@ class ConnectionActor(Actor):
                 binding = alpn_binding
             else:
                 prefix, binding = await self._guarded(
-                    dl, deadline, self._peek_and_select(self._detection_order()))
+                    dl, deadline,
+                    self._peek_and_select(self._registry.detection_order))
         except (asyncio.TimeoutError, TimeoutError):
             # Slowloris at detection: hand the "peer was too slow" decision to
             # the binding that would have served it — ALPN's committed binding,
