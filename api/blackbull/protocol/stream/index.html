@@ -3502,17 +3502,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#blackbull.protocol.stream.Stream.mark_locally_closed" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        mark_locally_closed
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#blackbull.protocol.stream.Stream.on_data_received" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4757,17 +4746,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#blackbull.protocol.stream.Stream.mark_locally_closed" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        mark_locally_closed
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#blackbull.protocol.stream.Stream.on_data_received" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4960,27 +4938,6 @@ only when the priority tree actually has depth.</p>
 <div class="doc doc-object doc-function">
 
 
-<h4 id="blackbull.protocol.stream.Stream.mark_locally_closed" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">mark_locally_closed</span><span class="p">()</span></code>
-
-<a href="#blackbull.protocol.stream.Stream.mark_locally_closed" class="headerlink" title="Permanent link">&para;</a></h4>
-
-
-    <div class="doc doc-contents ">
-
-        <p>Mark this stream CLOSED after the server-side response is done.</p>
-<p>Called from the stream task's done-callback so that late frames
-from the peer on this identifier hit the CLOSED branch of the
-state-machine validation.</p>
-
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-function">
-
-
 <h4 id="blackbull.protocol.stream.Stream.on_data_received" class="doc doc-heading">
             <code class="highlight language-python"><span class="n">on_data_received</span><span class="p">(</span><span class="n">end_stream</span><span class="p">)</span></code>
 
@@ -4989,7 +4946,12 @@ state-machine validation.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Transition state on DATA frame (RFC 7540 §5.1).</p>
+        <p>Transition state on DATA frame (RFC 9113 §5.1).</p>
+<p>The peer's END_STREAM closes only <em>their</em> half: the stream becomes
+half-closed (remote), from which WINDOW_UPDATE / PRIORITY /
+RST_STREAM remain legal.  Full CLOSED is reached when the server
+side finishes too (stream-task done-callback prunes the node) or
+via RST_STREAM.</p>
 
 
     </div>
