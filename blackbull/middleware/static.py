@@ -3,6 +3,7 @@ import mimetypes
 import os
 import time
 from collections import OrderedDict
+from email.utils import formatdate, parsedate_to_datetime
 from pathlib import Path
 from urllib.parse import unquote
 from http import HTTPStatus
@@ -37,6 +38,85 @@ for _ext, _mime in (
 del _ext, _mime
 
 
+def _parse_byte_range(range_hdr: str, size: int) -> tuple[int, int] | None:
+    """Parse a single ``bytes=`` Range header into an inclusive ``(start, end)``.
+
+    Returns ``None`` for anything we do not answer with a partial response —
+    a non-``bytes`` unit, a multi-range set (we don't emit
+    ``multipart/byteranges``), or a syntactically malformed range.  Per
+    RFC 9110 §14.2 an unparseable/ignored Range is served as a normal 200,
+    so the caller treats ``None`` as "serve the whole file".  Never raises:
+    the pre-Sprint-69 code ran bare ``int()`` here and 500'd on
+    ``Range: bytes=abc-def`` (bug 1.21c).  *Satisfiability* against ``size``
+    is still checked by the caller (so an out-of-range spec stays a 416).
+    """
+    if not range_hdr.startswith('bytes='):
+        return None
+    spec = range_hdr[6:].strip()
+    if not spec or ',' in spec:
+        return None
+    start_s, sep, end_s = spec.partition('-')
+    if not sep:
+        return None
+    start_s, end_s = start_s.strip(), end_s.strip()
+    try:
+        if start_s == '':
+            # Suffix range: bytes=-N → the last N bytes.
+            if end_s == '':
+                return None
+            n = int(end_s)
+            return (max(0, size - n), size - 1)
+        start = int(start_s)
+        end = int(end_s) if end_s else size - 1
+    except ValueError:
+        return None
+    return (start, end)
+
+
+def _not_modified(headers, etag: bytes, mtime_ns: int) -> bool:
+    """Evaluate the conditional-GET preconditions (RFC 9110 §13).
+
+    ``If-None-Match`` takes precedence over ``If-Modified-Since``; when the
+    former is present the latter is ignored.  Returns ``True`` when the
+    client's cached copy is still fresh and the caller should answer 304.
+    """
+    inm = None
+    ims = None
+    for k, v in headers:
+        kl = k.lower()
+        if kl == b'if-none-match':
+            inm = v
+        elif kl == b'if-modified-since':
+            ims = v
+    if inm is not None:
+        candidate = inm.strip()
+        if candidate == b'*':
+            return True
+        target = etag[2:] if etag.startswith(b'W/') else etag
+        for tag in candidate.split(b','):
+            t = tag.strip()
+            if t.startswith(b'W/'):
+                t = t[2:]
+            if t == target:
+                return True
+        # If-None-Match present but no match → not fresh; ignore IMS.
+        return False
+    if ims is not None:
+        try:
+            ims_dt = parsedate_to_datetime(ims.decode('latin-1'))
+        except (ValueError, TypeError):
+            return False
+        if ims_dt is None:
+            return False
+        try:
+            ims_ts = ims_dt.timestamp()
+        except (ValueError, OverflowError, OSError):
+            return False
+        # HTTP dates carry 1-second granularity; compare at whole seconds.
+        return mtime_ns // 1_000_000_000 <= int(ims_ts)
+    return False
+
+
 class StaticFiles:
     # Files at or below this size are read once and held in memory.
     # Static assets in the wild (CSS/JS/manifest/small images) cluster
@@ -64,7 +144,8 @@ class StaticFiles:
 
     def __init__(self, directory: str | None = None, *,
                  url_prefix: str = '', root_dir: str | Path | None = None,
-                 cache: bool = False, index: str | None = None):
+                 cache: bool = False, index: str | None = None,
+                 conditional: bool = True):
         """Serve files from ``directory`` (or ``root_dir``).
 
         ``index`` (default ``None`` — off): when set to a filename (e.g.
@@ -86,6 +167,11 @@ class StaticFiles:
         caching").  Set ``cache=True`` only for standalone deployments
         where BlackBull terminates static traffic directly (i.e. no
         nginx / CDN in front).
+
+        ``conditional`` (default ``True``): emit ``ETag`` + ``Last-Modified``
+        validators and honour ``If-None-Match`` / ``If-Modified-Since`` with a
+        304.  Set ``False`` to suppress validators (e.g. the ``blackbull
+        serve --no-etag`` path).
         """
         resolved = directory or root_dir
         if resolved is None:
@@ -102,6 +188,7 @@ class StaticFiles:
         self._url_prefix = url_prefix.rstrip('/')
         self._cache_enabled: bool = cache
         self._index: str | None = index
+        self._conditional: bool = conditional
         # cache key = the actual filesystem path served (original or
         # sibling), held as a ``str`` so the hash is cheap and the
         # key matches the value returned by ``os.path.realpath``.
@@ -276,7 +363,7 @@ class StaticFiles:
         if (cached_entry is not None
                 and self._STAT_TTL_S > 0
                 and now - cached_entry[5] < self._STAT_TTL_S):
-            _, size, body, mime, _, _ = cached_entry
+            mtime_ns, size, body, mime, _, _ = cached_entry
             self._cache.move_to_end(served_path)
         else:
             # Cache miss, stale TTL, or caching disabled — re-stat to
@@ -341,24 +428,39 @@ class StaticFiles:
         status = HTTPStatus.OK
         extra_headers: list[tuple[bytes, bytes]] = []
 
-        if range_hdr and range_hdr.startswith('bytes='):
-            spec = range_hdr[6:]
-            start_s, _, end_s = spec.partition('-')
-            if start_s == '':
-                n = int(end_s)
-                start, end = max(0, size - n), size - 1
-            else:
-                start = int(start_s)
-                end = int(end_s) if end_s else size - 1
+        if self._conditional:
+            # Validators: a strong ETag over (mtime, size) plus Last-Modified,
+            # so ``If-None-Match`` / ``If-Modified-Since`` can produce a 304
+            # instead of a full re-transfer (bug 1.21d).  Cheap; emitted on
+            # every response, including the streaming path.
+            etag = f'"{mtime_ns:x}-{size:x}"'.encode()
+            last_modified = formatdate(mtime_ns / 1_000_000_000, usegmt=True).encode()
 
-            if start >= size or end >= size or start > end:
-                await self._respond(send, HTTPStatus.REQUESTED_RANGE_NOT_SATISFIABLE,
-                    [(b'content-range', f'bytes */{size}'.encode())])
+            # Conditional GET — answer 304 before touching the body (avoids the
+            # large-file read/stream entirely on a cache revalidation).
+            if _not_modified(scope.get('headers', []), etag, mtime_ns):
+                cond_headers: list[tuple[bytes, bytes]] = [
+                    (b'etag', etag), (b'last-modified', last_modified)]
+                if content_encoding:
+                    cond_headers.append((b'vary', b'Accept-Encoding'))
+                await self._respond(send, HTTPStatus.NOT_MODIFIED, cond_headers)
                 return
 
-            status = HTTPStatus.PARTIAL_CONTENT
-            extra_headers.append(
-                (b'content-range', f'bytes {start}-{end}/{size}'.encode()))
+            extra_headers.append((b'etag', etag))
+            extra_headers.append((b'last-modified', last_modified))
+
+        if range_hdr:
+            parsed = _parse_byte_range(range_hdr, size)
+            # ``None`` → unparseable/multi-range → ignore and serve full 200.
+            if parsed is not None:
+                start, end = parsed
+                if start >= size or end >= size or start > end:
+                    await self._respond(send, HTTPStatus.REQUESTED_RANGE_NOT_SATISFIABLE,
+                        [(b'content-range', f'bytes */{size}'.encode())])
+                    return
+                status = HTTPStatus.PARTIAL_CONTENT
+                extra_headers.append(
+                    (b'content-range', f'bytes {start}-{end}/{size}'.encode()))
 
         body_len = end - start + 1
 

@@ -429,3 +429,83 @@ class TestHeaderHelpers:
 
     def test_etag_no_match(self):
         assert not _etag_matches(b'"abc"', b'"def"')
+
+
+# ---------------------------------------------------------------------------
+# 1.21b — Vary-aware caching (variant correctness)
+# ---------------------------------------------------------------------------
+
+def _vary_handler(vary_value: bytes = b'Accept-Encoding'):
+    """Handler that varies its body by Accept-Encoding and advertises Vary."""
+    counter = {'n': 0}
+
+    async def call_next(scope, receive, send):
+        counter['n'] += 1
+        ae = b''
+        for k, v in scope.get('headers', []):
+            if k.lower() == b'accept-encoding':
+                ae = v
+        body = b'ENC:' + ae
+        await send({'type': 'http.response.start', 'status': 200, 'headers': [
+            (b'content-type', b'text/plain'),
+            (b'vary', vary_value),
+        ]})
+        await send({'type': 'http.response.body', 'body': body})
+
+    return call_next, counter
+
+
+@pytest.mark.asyncio
+class TestVaryAwareCaching:
+    async def test_different_accept_encoding_not_cross_served(self):
+        """A brotli variant must never be replayed to an identity client (1.21b)."""
+        mw = Cache()
+        cn, counter = _vary_handler()
+        _, _, body_br = _split_response(
+            await _run(mw, _scope(headers=[(b'accept-encoding', b'br')]), cn))
+        _, _, body_id = _split_response(
+            await _run(mw, _scope(headers=[(b'accept-encoding', b'identity')]), cn))
+        assert body_br == b'ENC:br'
+        assert body_id == b'ENC:identity'
+        assert counter['n'] == 2, 'each variant must be produced by the handler'
+
+    async def test_same_variant_served_from_cache(self):
+        mw = Cache()
+        cn, counter = _vary_handler()
+        await _run(mw, _scope(headers=[(b'accept-encoding', b'br')]), cn)
+        _, _, body2 = _split_response(
+            await _run(mw, _scope(headers=[(b'accept-encoding', b'br')]), cn))
+        assert body2 == b'ENC:br'
+        assert counter['n'] == 1, 'identical variant must hit the cache'
+
+    async def test_vary_star_never_stored(self):
+        mw = Cache()
+        cn, counter = _vary_handler(vary_value=b'*')
+        await _run(mw, _scope(headers=[(b'accept-encoding', b'br')]), cn)
+        await _run(mw, _scope(headers=[(b'accept-encoding', b'br')]), cn)
+        assert counter['n'] == 2, 'Vary: * responses must not be stored'
+
+
+class TestVaryHelpers:
+    def test_response_vary_absent(self):
+        from blackbull.middleware.cache import _response_vary
+        assert _response_vary([(b'content-type', b'text/plain')]) == ()
+
+    def test_response_vary_fields_sorted_lowercased(self):
+        from blackbull.middleware.cache import _response_vary
+        assert _response_vary(
+            [(b'vary', b'Accept-Encoding, Accept-Language')]
+        ) == (b'accept-encoding', b'accept-language')
+
+    def test_response_vary_star_is_none(self):
+        from blackbull.middleware.cache import _response_vary
+        assert _response_vary([(b'vary', b'*')]) is None
+
+    def test_vary_key_pulls_request_values(self):
+        from blackbull.middleware.cache import _vary_key
+        req = {b'accept-encoding': b'br'}
+        assert _vary_key((b'accept-encoding',), req) == ((b'accept-encoding', b'br'),)
+
+    def test_vary_key_missing_header_is_empty(self):
+        from blackbull.middleware.cache import _vary_key
+        assert _vary_key((b'accept-encoding',), {}) == ((b'accept-encoding', b''),)

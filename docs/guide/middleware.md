@@ -175,6 +175,10 @@ pip install 'blackbull[compression]'
 The default `min_size` is 100 bytes — responses smaller than that
 pass through uncompressed.
 
+Every compressed response carries `Vary: Accept-Encoding` (folded into
+any existing `Vary`) so a shared cache never replays an encoded body to
+a client that sent `identity` / no `Accept-Encoding` (RFC 9110 §12.5.5).
+
 ### `Session`
 
 Signed-cookie sessions — session data lives entirely in a cookie
@@ -284,6 +288,13 @@ carrying `no-store`, `private`, or `no-cache` pass through
 unstored.  Requests with `Cache-Control: no-store` bypass the
 cache too.
 
+The cache is **variant-aware**: when a stored response carries a
+`Vary` header (e.g. `Vary: Accept-Encoding` behind the `Compression`
+middleware), the varied request-header values are folded into the
+cache key, so a brotli variant is never replayed to an `identity`
+client.  A response with `Vary: *` is passed through unstored
+(RFC 9110 §12.5.5).
+
 Constructor arguments:
 
 | Argument               | Default                | Notes                                                                  |
@@ -300,8 +311,6 @@ Limitations:
 - **Per-worker.**  Multi-worker deployments hold a separate cache
   in each process.
 - **No cross-restart persistence.**  In-memory only.
-- **No `Vary` matching.**  Requests differing only by
-  `Accept-Encoding` or `Accept-Language` share the same cache slot.
 - **No explicit invalidation API.**  Wait for TTL or restart the
   worker.
 - **Streaming responses** (any `more_body=True` chunk) are

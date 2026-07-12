@@ -88,6 +88,28 @@ def _is_compressible_content_type(headers: Headers) -> bool:
     return not any(ct_str.startswith(prefix) for prefix in _SKIP_CONTENT_TYPES)
 
 
+def _merge_vary(headers: list[tuple[bytes, bytes]],
+                field: bytes = b'Accept-Encoding') -> None:
+    """Ensure the response ``Vary`` header lists *field* (RFC 9110 §12.5.5).
+
+    A compressed response's body depends on the request ``Accept-Encoding``;
+    without ``Vary: Accept-Encoding`` a shared cache may replay the encoded
+    body to a client that sent ``identity``/no ``Accept-Encoding`` (bug 1.21a).
+    Folds *field* into an existing ``Vary`` (no duplicate token; a pre-existing
+    ``Vary: *`` already covers everything and is left untouched); otherwise
+    appends ``Vary: Accept-Encoding``.  Mutates *headers* in place.
+    """
+    field_l = field.lower()
+    for i, (k, v) in enumerate(headers):
+        if k.lower() == b'vary':
+            tokens = [t.strip().lower() for t in v.split(b',')]
+            if b'*' in tokens or field_l in tokens:
+                return
+            headers[i] = (k, v + b', ' + field)
+            return
+    headers.append((b'vary', field))
+
+
 # ---------------------------------------------------------------------------
 # Middleware
 # ---------------------------------------------------------------------------
@@ -307,6 +329,8 @@ class Compression:
                     if k.lower() != b'content-length']
         existing.append((b'content-encoding', codec_name.encode()))
         existing.append((b'content-length', str(len(compressed)).encode()))
+        # Shared caches must key this response on Accept-Encoding.
+        _merge_vary(existing)
         await send({**start_event, 'headers': existing})
         await send({'type': ASGIEvent.HTTP_RESPONSE_BODY, 'body': compressed, 'more_body': False})
 

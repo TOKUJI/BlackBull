@@ -31,6 +31,42 @@ so the editable install's metadata catches up.
 
 ## [Unreleased]
 
+### Added
+
+- **`StaticFiles` conditional requests.** `StaticFiles` now emits a strong
+  `ETag` (from the file's mtime + size) and a `Last-Modified` header on every
+  response, and honours `If-None-Match` / `If-Modified-Since` with a
+  `304 Not Modified` — answered before the body is read, so revalidating a
+  large asset costs no disk I/O. `If-None-Match` takes precedence over
+  `If-Modified-Since` (RFC 9110 §13). A new `conditional=` argument on
+  `app.static(...)` / `StaticFiles(...)` (default `True`) disables it; the
+  `blackbull serve --no-etag` flag now drives that argument directly and no
+  longer needs the `Cache` middleware to provide validators (bug 1.21d).
+
+### Fixed
+
+- **`Compression` now emits `Vary: Accept-Encoding` on compressed responses**
+  (RFC 9110 §12.5.5, bug 1.21a). Without it a shared cache could replay a
+  brotli/gzip body to a client that sent `identity` / no `Accept-Encoding`.
+  Folds into any existing `Vary`; a pre-existing `Vary: *` is left untouched.
+- **`Cache` is now variant-aware** (bug 1.21b). The response `Vary` fields are
+  folded into the cache key so a negotiated variant (e.g. an encoding behind
+  `Compression`) is no longer served to a client that asked for a different
+  one; a `Vary: *` response is passed through unstored.
+- **`StaticFiles` no longer returns `500` on a malformed `Range` header**
+  (bug 1.21c). A bad byte spec (`bytes=abc-def`), a non-`bytes` unit, or a
+  multi-range set is ignored and the full file served `200` (RFC 9110 §14.2);
+  a well-formed but unsatisfiable range still returns `416`.
+- **`TrustedProxy` parses multi-element RFC 7239 `Forwarded` headers
+  correctly** (bug 1.21e). Elements are split on `,` first (leftmost element
+  honoured); previously a chained `for=a, for=b` folded the second element's
+  `for=` into `scope['client']`.
+
+### Docs
+
+- Static-files and middleware guides document the new conditional-request
+  support, the malformed-`Range` handling, and the now variant-aware `Cache`.
+
 ## [0.53.0] — 2026-07-13
 
 Sprint 68 — ASGI path-decoding conformance (percent-decoding + RFC 3986

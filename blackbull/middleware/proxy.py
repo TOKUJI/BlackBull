@@ -4,12 +4,22 @@ from ..headers import Headers
 
 
 def _parse_forwarded(value: str) -> dict[str, str]:
-    """Parse the first directive of an RFC 7239 Forwarded header value.
+    """Parse the leftmost element of an RFC 7239 Forwarded header value.
 
-    e.g. 'for=203.0.113.1;proto=https;by=10.0.0.1' → {'for': '203.0.113.1', ...}
+    RFC 7239 §4 separates forwarded *elements* with ``,`` and the
+    parameters within one element with ``;``.  A chained-proxy header
+    such as ``for=203.0.113.1;proto=https, for=198.51.100.17`` therefore
+    carries two elements; we honour the leftmost (the hop closest to the
+    client) and return its parameters, e.g.
+    ``{'for': '203.0.113.1', 'proto': 'https'}``.
+
+    Splitting on ``;`` alone (the pre-Sprint-69 behaviour) folded the
+    second element's ``for=`` into the first value, poisoning
+    ``scope['client']``.
     """
+    first_element = value.split(',', 1)[0]
     result = {}
-    for part in value.split(';'):
+    for part in first_element.split(';'):
         part = part.strip()
         if '=' in part:
             k, v = part.split('=', 1)
