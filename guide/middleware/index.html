@@ -5168,6 +5168,9 @@ to skip everything below it.</p>
 </code></pre></div>
 <p>The default <code>min_size</code> is 100 bytes — responses smaller than that
 pass through uncompressed.</p>
+<p>Every compressed response carries <code>Vary: Accept-Encoding</code> (folded into
+any existing <code>Vary</code>) so a shared cache never replays an encoded body to
+a client that sent <code>identity</code> / no <code>Accept-Encoding</code> (RFC 9110 §12.5.5).</p>
 <h3 id="session"><code>Session</code><a class="headerlink" href="#session" title="Permanent link">&para;</a></h3>
 <p>Signed-cookie sessions — session data lives entirely in a cookie
 HMAC-signed by the server.  No server-side store, no database.
@@ -5292,6 +5295,12 @@ body.</p>
 carrying <code>no-store</code>, <code>private</code>, or <code>no-cache</code> pass through
 unstored.  Requests with <code>Cache-Control: no-store</code> bypass the
 cache too.</p>
+<p>The cache is <strong>variant-aware</strong>: when a stored response carries a
+<code>Vary</code> header (e.g. <code>Vary: Accept-Encoding</code> behind the <code>Compression</code>
+middleware), the varied request-header values are folded into the
+cache key, so a brotli variant is never replayed to an <code>identity</code>
+client.  A response with <code>Vary: *</code> is passed through unstored
+(RFC 9110 §12.5.5).</p>
 <p>Constructor arguments:</p>
 <table>
 <thead>
@@ -5339,8 +5348,6 @@ cache too.</p>
 <li><strong>Per-worker.</strong>  Multi-worker deployments hold a separate cache
   in each process.</li>
 <li><strong>No cross-restart persistence.</strong>  In-memory only.</li>
-<li><strong>No <code>Vary</code> matching.</strong>  Requests differing only by
-  <code>Accept-Encoding</code> or <code>Accept-Language</code> share the same cache slot.</li>
 <li><strong>No explicit invalidation API.</strong>  Wait for TTL or restart the
   worker.</li>
 <li><strong>Streaming responses</strong> (any <code>more_body=True</code> chunk) are

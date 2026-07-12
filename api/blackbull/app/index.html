@@ -6172,7 +6172,7 @@ app.run(unix_path='/run/blackbull.sock')
 
 
 <h4 id="blackbull.app.BlackBull.static" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">static</span><span class="p">(</span><span class="n">url_prefix</span><span class="p">,</span> <span class="n">root_dir</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">cache</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">index</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
+            <code class="highlight language-python"><span class="n">static</span><span class="p">(</span><span class="n">url_prefix</span><span class="p">,</span> <span class="n">root_dir</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">cache</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">index</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">conditional</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span></code>
 
 <a href="#blackbull.app.BlackBull.static" class="headerlink" title="Permanent link">&para;</a></h4>
 
@@ -6190,6 +6190,9 @@ that majority.  See <code>docs/guide/static-files.md</code> for the
 full discussion.</p>
 <p><code>index</code> (default <code>None</code> — off): a filename (e.g.
 <code>'index.html'</code>) served when a request resolves to a directory.</p>
+<p><code>conditional</code> (default <code>True</code>): emit <code>ETag</code> / <code>Last-Modified</code>
+validators and answer <code>If-None-Match</code> / <code>If-Modified-Since</code> with
+a 304.  Set <code>False</code> to disable conditional responses.</p>
 
 
     </div>

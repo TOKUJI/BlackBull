@@ -4732,17 +4732,20 @@ running the handler.  Supports:</p>
   responses are NOT stored (RFC 9111 §3.5).  Override with
   <code>cache_authenticated=True</code>.</li>
 </ul>
+<p>Variant-aware: the response <code>Vary</code> header is honoured (RFC 9110
+§12.5.5).  When a stored response carries e.g. <code>Vary: Accept-Encoding</code>,
+the varied request-header values are folded into the cache key so a
+brotli variant is never replayed to an <code>identity</code> client.  A response
+with <code>Vary: *</code> is passed through and not stored.</p>
 <p>What it doesn't do (yet):</p>
 <ul>
-<li>No <code>Vary</code> header support beyond identity matching.  A request that
-  differs only by <code>Accept-Encoding</code> or <code>Accept-Language</code> will get
-  the first variant cached.</li>
 <li>No server-side invalidation API.  Restart the worker (or wait for
   TTL) to clear.</li>
 <li>No cross-worker sharing.  The cache is per-process — each worker has
   its own.  Documented limitation.</li>
 </ul>
-<p>The cache key is <code>(method, path, query_string)</code>.</p>
+<p>The base cache key is <code>(method, path, query_string)</code>, extended with
+the <code>(field, request-value)</code> pairs named by the response <code>Vary</code>.</p>
 <p>Usage::</p>
 <pre><code>from blackbull.middleware import Cache
 

@@ -993,6 +993,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#conditional-requests-etag-last-modified" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Conditional requests (ETag / Last-Modified)
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -4864,6 +4875,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#conditional-requests-etag-last-modified" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Conditional requests (ETag / Last-Modified)
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -4976,9 +4998,11 @@ upgrade over <code>python -m http.server</code> — use the <code>serve</code> s
 <div class="highlight"><pre><span></span><code>blackbull<span class="w"> </span>serve<span class="w"> </span>./public<span class="w"> </span>--bind<span class="w"> </span>:8080
 blackbull<span class="w"> </span>serve<span class="w"> </span>./public<span class="w"> </span>--certfile<span class="w"> </span>cert.pem<span class="w"> </span>--keyfile<span class="w"> </span>key.pem<span class="w">  </span><span class="c1"># HTTPS + HTTP/2</span>
 </code></pre></div>
-<p>It wires <code>StaticFiles</code> with <code>index='index.html'</code> plus the
-<a href="../middleware/"><code>Cache</code></a> middleware for ETag / <code>304</code> conditional
-responses.  See <a href="../configuration/#serving-static-files-with-blackbull-serve">Configuration → blackbull serve</a>
+<p>It wires <code>StaticFiles</code> with <code>index='index.html'</code>; ETag / <code>304</code>
+conditional responses are served natively by <code>StaticFiles</code> (see
+<a href="#conditional-requests-etag--last-modified">Conditional requests</a> below)
+and can be turned off with <code>--no-etag</code>.  See
+<a href="../configuration/#serving-static-files-with-blackbull-serve">Configuration → blackbull serve</a>
 for the full flag list.</p>
 <h2 id="environment-gate">Environment gate<a class="headerlink" href="#environment-gate" title="Permanent link">&para;</a></h2>
 <p>The <code>BLACKBULL_ENV</code> environment variable controls serving
@@ -5091,7 +5115,28 @@ Range: bytes=0-1023
 Content-Range: bytes 0-1023/4096000
 Content-Length: 1024
 </code></pre></div>
-<p>Unsatisfiable ranges return <code>416 Range Not Satisfiable</code>.</p>
+<p>A syntactically <strong>unsatisfiable</strong> range (start past the end of the
+file) returns <code>416 Range Not Satisfiable</code>.  A <strong>malformed</strong> or
+unsupported <code>Range</code> header — a bad byte spec (<code>bytes=abc-def</code>), a
+non-<code>bytes</code> unit, or a multi-range set — is ignored and the full file
+is served with <code>200 OK</code> (RFC 9110 §14.2); it never fails the request.</p>
+<h3 id="conditional-requests-etag-last-modified">Conditional requests (ETag / Last-Modified)<a class="headerlink" href="#conditional-requests-etag-last-modified" title="Permanent link">&para;</a></h3>
+<p><code>StaticFiles</code> emits a strong <code>ETag</code> (derived from the file's
+modification time and size) and a <code>Last-Modified</code> header on every
+response.  A revalidating client can then avoid re-downloading an
+unchanged asset:</p>
+<div class="highlight"><pre><span></span><code>GET /assets/app.css HTTP/1.1
+If-None-Match: &quot;18f3a-1c2&quot;
+</code></pre></div>
+<div class="highlight"><pre><span></span><code>HTTP/1.1 304 Not Modified
+ETag: &quot;18f3a-1c2&quot;
+Last-Modified: Sun, 13 Jul 2026 00:00:00 GMT
+</code></pre></div>
+<p><code>If-None-Match</code> takes precedence over <code>If-Modified-Since</code> (RFC 9110
+§13); the <code>304</code> is answered before the file body is read, so a
+revalidation of a large asset costs no disk I/O.  Pass
+<code>conditional=False</code> to <code>app.static(...)</code> (or <code>blackbull serve
+--no-etag</code>) to suppress the validators and always serve the full body.</p>
 <h2 id="security">Security<a class="headerlink" href="#security" title="Permanent link">&para;</a></h2>
 <ul>
 <li><strong>Path traversal</strong>: URL-encoded paths are decoded with

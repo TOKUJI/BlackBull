@@ -5324,7 +5324,7 @@ path:
 
 
 <h4 id="blackbull.middleware.StaticFiles.__init__" class="doc doc-heading">
-            <code class="highlight language-python"><span class="fm">__init__</span><span class="p">(</span><span class="n">directory</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">url_prefix</span><span class="o">=</span><span class="s1">&#39;&#39;</span><span class="p">,</span> <span class="n">root_dir</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">cache</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">index</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
+            <code class="highlight language-python"><span class="fm">__init__</span><span class="p">(</span><span class="n">directory</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">url_prefix</span><span class="o">=</span><span class="s1">&#39;&#39;</span><span class="p">,</span> <span class="n">root_dir</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">cache</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">index</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">conditional</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span></code>
 
 <a href="#blackbull.middleware.StaticFiles.__init__" class="headerlink" title="Permanent link">&para;</a></h4>
 
@@ -5350,6 +5350,10 @@ profiles ("read files from disk on every request, no in-memory
 caching").  Set <code>cache=True</code> only for standalone deployments
 where BlackBull terminates static traffic directly (i.e. no
 nginx / CDN in front).</p>
+<p><code>conditional</code> (default <code>True</code>): emit <code>ETag</code> + <code>Last-Modified</code>
+validators and honour <code>If-None-Match</code> / <code>If-Modified-Since</code> with a
+304.  Set <code>False</code> to suppress validators (e.g. the <code>blackbull
+serve --no-etag</code> path).</p>
 
 
     </div>
