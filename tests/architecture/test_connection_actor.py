@@ -191,3 +191,60 @@ async def test_connection_dispatches_http2_fragmented_preface(
     await actor.run()  # must not raise ValueError
 
     aggregator.on_connection_accepted.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Connection-id unification (limited-conn analysis follow-up, 2026-07-12):
+# the accept-time connection id must be the ONE id for the whole connection —
+# the cap-hit counter must not mint its own.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_cap_counter_inherits_actor_connection_id(fake_writer) -> None:
+    """The ambient CapHitCounter materialises with the ConnectionActor's
+    connection id, so cap-hit records correlate with lifecycle events and
+    ProtocolContext instead of carrying a second, unrelated id."""
+    from blackbull.server import cap_log
+    from blackbull.server.protocol_registry import ProtocolBinding
+
+    captured: list[str] = []
+
+    class _CaptureBinding(ProtocolBinding):
+        name = 'capture'
+
+        async def serve(self, conn) -> None:
+            holder = cap_log._current_counter.get()
+            captured.append(holder.ensure().connection_id)
+
+    actor = ConnectionActor(
+        _FakeReader(b''), fake_writer, AsyncMock(), None,
+        bound_binding=_CaptureBinding(), connection_id='cid-42',
+    )
+    await actor.run()
+
+    assert captured == ['cid-42']
+
+
+@pytest.mark.asyncio
+async def test_cap_counter_generates_id_when_actor_has_none(fake_writer) -> None:
+    """Without an accept-time id (direct construction, tests), the counter
+    falls back to generating one — never the empty string."""
+    from blackbull.server import cap_log
+    from blackbull.server.protocol_registry import ProtocolBinding
+
+    captured: list[str] = []
+
+    class _CaptureBinding(ProtocolBinding):
+        name = 'capture'
+
+        async def serve(self, conn) -> None:
+            holder = cap_log._current_counter.get()
+            captured.append(holder.ensure().connection_id)
+
+    actor = ConnectionActor(
+        _FakeReader(b''), fake_writer, AsyncMock(), None,
+        bound_binding=_CaptureBinding(),
+    )
+    await actor.run()
+
+    assert len(captured) == 1 and captured[0] != ''

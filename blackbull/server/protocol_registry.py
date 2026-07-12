@@ -220,6 +220,7 @@ class Http2Binding(ProtocolBinding):
             conn.reader, conn.writer, conn.app, conn.aggregator,
             peername=conn.peername, sockname=conn.sockname, ssl=conn.ssl,
             stream_queue_depth=conn.stream_queue_depth,
+            connection_id=conn.connection_id,
         )
         await actor.run()
 
@@ -245,6 +246,7 @@ class Http1Binding(ProtocolBinding):
             peername=conn.peername, sockname=conn.sockname, ssl=conn.ssl,
             ws_queue_depth=conn.ws_queue_depth,
             deadline=conn.deadline,
+            connection_id=conn.connection_id,
         )
         await actor.run()
 

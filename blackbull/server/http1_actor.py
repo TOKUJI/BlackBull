@@ -343,6 +343,7 @@ class HTTP1Actor(Actor):
         ssl: bool = False,
         ws_queue_depth: int = _WS_EVENT_QUEUE_DEPTH,
         deadline: ConnectionDeadline | None = None,
+        connection_id: str = '',
     ) -> None:
         super().__init__()
         self._reader = reader
@@ -354,6 +355,12 @@ class HTTP1Actor(Actor):
         self._sockname = sockname
         self._ssl = ssl
         self._ws_queue_depth = ws_queue_depth
+        # Accept-time connection id (ConnectionActor's) — the one id for the
+        # whole connection.  The WS upgrade path reuses it in the scope
+        # instead of minting a second one; empty when the actor is
+        # constructed directly (tests), in which case the upgrade path
+        # falls back to generating a fresh id.
+        self._connection_id = connection_id
         # When the actor is constructed without a deadline (test
         # fixtures that drive the actor directly), one is lazily
         # created on entry to ``run()`` so the production hot path and
@@ -910,7 +917,7 @@ class HTTP1Actor(Actor):
 
     async def _handle_upgrade(self, scope: dict) -> None:
         """Handle WebSocket upgrade."""
-        from uuid import uuid4  # noqa: PLC0415
+        from .conn_id import new_connection_id  # noqa: PLC0415
         from .websocket_actor import WebSocketActor  # noqa: PLC0415
         aggregator = self._aggregator
         if aggregator is None:
@@ -925,7 +932,9 @@ class HTTP1Actor(Actor):
 
         if not await self._do_ws_handshake(scope):
             return  # version check failed; 400 already sent
-        scope['_connection_id'] = str(uuid4())
+        # One id per TCP connection: reuse the accept-time id; mint one only
+        # when the actor was constructed without it (direct test drives).
+        scope['_connection_id'] = self._connection_id or new_connection_id()
         ws_actor = WebSocketActor(
             self._reader, self._writer, scope, self._app, aggregator,
             peername=self._peername, sockname=self._sockname, ssl=self._ssl,

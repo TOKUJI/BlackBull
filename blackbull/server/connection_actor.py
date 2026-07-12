@@ -80,7 +80,13 @@ class ConnectionActor(Actor):
         # is built only if a cap actually fires.  On the keep-alive path this is
         # a strict no-op; on connection-churn profiles it removes a getrandom(2)
         # syscall + an allocation + a flush from every accepted connection.
-        counter = _LazyCapHitCounter()
+        # Hand the accept-time connection id to the (lazy) cap counter so a
+        # cap-hit record correlates with lifecycle events and ProtocolContext
+        # — one id per connection.  Only when the actor was constructed
+        # without an id (direct test drives) does the counter fall back to
+        # generating its own.
+        counter = (_LazyCapHitCounter(connection_id=self._connection_id)
+                   if self._connection_id else _LazyCapHitCounter())
         start = time.monotonic()
         with counter.bind():
             if self._aggregator is not None:

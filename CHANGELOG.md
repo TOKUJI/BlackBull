@@ -45,6 +45,17 @@ so the editable install's metadata catches up.
   `cap_log`, whose birthday-bound collision odds were real at churn scale
   (~1.2 % at 10 k concurrent connections).  Ids remain opaque hex strings;
   width changes from 32/8 to 20 characters.
+- **One connection id per connection.**  Previously the same TCP connection
+  could carry up to three unrelated ids: the accept-time id
+  (`ProtocolContext`), a second minted by the cap-hit counter, and a third
+  uuid4 minted at WebSocket upgrade — cap-hit records could not be
+  correlated with lifecycle events.  The accept-time id now flows into the
+  cap-hit counter (`ConnectionActor`) and into `scope['_connection_id']` on
+  both the HTTP/1.1 upgrade and RFC 8441 paths, so `websocket_connected` /
+  `websocket_disconnected`, cap-hit records, and `ProtocolContext` all
+  report the same id.  WS event `connection_id` format changes from uuid4
+  to the 20-hex unified form (docs updated; it was always documented as
+  opaque/correlation-only).
 
 ### Fixed
 
