@@ -31,6 +31,26 @@ so the editable install's metadata catches up.
 
 ## [Unreleased]
 
+### Fixed
+
+- **ASGI conformance: `scope['path']` is now percent-decoded; `raw_path`
+  no longer includes the query string** (Sprint 68 W1). Neither transport
+  decoded percent-escapes, so `/a/%6A/b` routed and echoed as `/a/%6A/b`
+  instead of `/a/j/b`, and RFC 3986 §2.3-equivalent URIs (`%41` vs `A`)
+  were treated as distinct routes. `scope['path']` is now decoded once at
+  scope construction on every transport (HTTP/1.1, HTTP/2, WebSocket
+  upgrade, RFC 8441 extended CONNECT, and HTTP/2 push scopes), gated on a
+  `%` scan so escape-free targets keep the previous fast path. Decode
+  semantics match uvicorn: UTF-8 `unquote` with `errors='replace'`, `+`
+  stays literal, malformed escapes (`%ZZ`) pass through unchanged.
+  **Migration**: an encoded `%2F` now decodes to a real `/` before
+  routing, so it participates in path segmentation (uvicorn/Starlette
+  behaviour) — applications that must distinguish `a%2Fb` from `a/b`, or
+  that match encoded paths literally, should read `scope['raw_path']`.
+  On HTTP/1.1, `raw_path` is now the undecoded **path component only**
+  (query string excluded, per the ASGI spec) — previously it carried the
+  full request target including `?query`.
+
 ## [0.52.0] — 2026-07-12
 
 Sprint 67 — gRPC bidi correctness closeout plus an inter-sprint perf fix

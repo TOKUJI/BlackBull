@@ -11,6 +11,7 @@ from collections.abc import Awaitable, Callable
 from hashlib import sha1
 from http import HTTPStatus
 from typing import Any
+from urllib.parse import unquote
 
 from ..actor import Actor, Message
 from ..event import Event
@@ -776,7 +777,7 @@ class HTTP1Actor(Actor):
             raise BadRequestError(f'invalid request-target {path!r}')
 
         if asterisk_form:
-            _scope_path_b, _query_string = b'*', b''
+            _scope_path_b, _raw_path_b, _query_string = b'*', b'*', b''
         else:
             # Sprint 25 Phase A — replicate urllib.parse.urlparse() semantics
             # on the bytes request-target with three C-level partition calls:
@@ -784,8 +785,20 @@ class HTTP1Actor(Actor):
             # than urlparse (pyperf microbench).  Output is byte-for-byte
             # equivalent for the .path + .query attributes we use.
             _no_frag, _, _ = path.partition(b'#')
-            _path_and_params, _, _query_string = _no_frag.partition(b'?')
-            _scope_path_b, _, _ = _path_and_params.partition(b';')
+            _raw_path_b, _, _query_string = _no_frag.partition(b'?')
+            _scope_path_b, _, _ = _raw_path_b.partition(b';')
+
+        # Sprint 68 W1 — ASGI: scope['path'] is the percent-decoded (UTF-8)
+        # path component.  The b'%' guard keeps the no-escape common case on
+        # the plain-decode fast path; the target was already rejected above
+        # if it contains bytes >= 0x80, so .decode('ascii') cannot fail.
+        # unquote semantics match uvicorn: '+' stays literal, malformed
+        # escapes pass through, errors='replace' can never raise.
+        if b'%' in _scope_path_b:
+            _scope_path = unquote(_scope_path_b.decode('ascii'),
+                                  encoding='utf-8', errors='replace')
+        else:
+            _scope_path = _scope_path_b.decode('utf-8')
 
         raw: list[tuple[bytes, bytes]] = []
         for line in lines[idx + 1:]:
@@ -866,8 +879,10 @@ class HTTP1Actor(Actor):
             'http_version': version[5:].decode('utf-8'),
             'method': method.decode('utf-8'),
             'scheme': 'http',
-            'path': _scope_path_b.decode('utf-8'),
-            'raw_path': path,
+            'path': _scope_path,
+            # ASGI: raw_path is the undecoded path component only — the
+            # query string is carried in query_string, never here.
+            'raw_path': _raw_path_b,
             'query_string': _query_string,
             # RFC-safe default.  ``root_path`` (mount prefix) is NOT taken
             # from the client-controlled ``X-Forwarded-Prefix`` here (bug

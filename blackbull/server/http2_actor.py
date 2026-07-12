@@ -1416,10 +1416,11 @@ class HTTP2Actor(Actor):
         cacheable, and have no request body (§8.4.1); ``:method`` is always
         ``GET``.  The PUSH_PROMISE frame itself is §6.6.  RFC 9113 §8.3.1:
         the ``:path`` pseudo-header carries both path and query string; we
-        split them at urlparse so the synthetic ASGI scope gets separate
-        ``path`` and ``query_string`` keys.
+        split them with the same ``_split_h2_path`` as request HEADERS so
+        the synthetic ASGI scope gets the same decoded ``path`` /
+        ``raw_path`` / ``query_string`` contract.
         """
-        from urllib.parse import urlparse as _urlparse  # noqa: PLC0415
+        from .parser import _split_h2_path  # noqa: PLC0415
 
         push_stream_id = self._allocate_push_stream_id()
         path = event.get('path', '/')
@@ -1453,15 +1454,15 @@ class HTTP2Actor(Actor):
         # ASGI: scope['path'] is the decoded path component (no query),
         # scope['query_string'] is the raw query as bytes.  RFC 9113
         # §8.3.1 puts both into the ``:path`` pseudo-header; split here.
-        _parsed_pushed = _urlparse(path)
+        _pushed_path, _pushed_raw_path, _pushed_query = _split_h2_path(path)
         pushed_scope: dict = {
             'type': 'http',
             'http_version': '2',
             'method': 'GET',
-            'path': _parsed_pushed.path,
-            'raw_path': _parsed_pushed.path.encode('utf-8'),
+            'path': _pushed_path,
+            'raw_path': _pushed_raw_path,
             'scheme': parent_scope.get('scheme', 'https'),
-            'query_string': _parsed_pushed.query.encode('utf-8'),
+            'query_string': _pushed_query,
             'root_path': '',
             'client': parent_scope.get('client'),
             'headers': Headers([(k.encode() if isinstance(k, str) else k,
