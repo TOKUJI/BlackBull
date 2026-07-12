@@ -209,7 +209,7 @@ def test_lookup_cache_cleared_on_route_registration():
 
 
 def test_lookup_cache_lru_evicts_least_recently_used():
-    """Cache stays at _LOOKUP_CACHE_MAX; least-recently-used entry is evicted, not the hottest."""
+    """Cache stays at cache_max; least-recently-used entry is evicted, not the hottest."""
     router = Router()
 
     @router.route(path='/items/{item_id}', methods=[HTTPMethod.GET])
@@ -217,7 +217,7 @@ def test_lookup_cache_lru_evicts_least_recently_used():
         pass
 
     # Shrink the cap to a testable size
-    router._LOOKUP_CACHE_MAX = 3
+    router.cache_max = 3
 
     k1 = ('/items/1', HTTPMethod.GET, Scheme.http)
     k2 = ('/items/2', HTTPMethod.GET, Scheme.http)
@@ -238,6 +238,43 @@ def test_lookup_cache_lru_evicts_least_recently_used():
     assert k2 not in router._lookup_cache, 'LRU entry (k2) must be evicted'
     assert k1 in router._lookup_cache, 'recently-accessed k1 must be retained'
     assert k4 in router._lookup_cache
+
+
+def test_cache_max_zero_disables_caching():
+    """cache_max=0 → the resolve result is never stored; every lookup misses
+    the cache but still resolves correctly."""
+    router = Router(cache_max=0)
+
+    @router.route(path='/ping', methods=[HTTPMethod.GET])
+    async def ping(scope, receive, send):
+        pass
+
+    key = ('/ping', HTTPMethod.GET, Scheme.http)
+    assert router[key] is not None            # resolves
+    assert router[key] is not None            # resolves again
+    assert len(router._lookup_cache) == 0     # nothing cached
+
+
+def test_cache_get_set_pair_round_trips():
+    """The extracted _cache_get / _cache_set pair is the cache's contract."""
+    router = Router()
+
+    @router.route(path='/ping', methods=[HTTPMethod.GET])
+    async def ping(scope, receive, send):
+        pass
+
+    key = ('/ping', HTTPMethod.GET, Scheme.http)
+    hit, _ = router._cache_get(key)
+    assert hit is False                       # cold
+
+    sentinel = object()
+    router._cache_set(key, sentinel)
+    hit, result = router._cache_get(key)
+    assert hit is True and result is sentinel
+
+
+def test_default_cache_max_is_2048():
+    assert Router().cache_max == 2048
 
 
 @pytest.mark.asyncio
