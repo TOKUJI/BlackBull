@@ -31,6 +31,44 @@ so the editable install's metadata catches up.
 
 ## [Unreleased]
 
+### Fixed
+
+- **ASGI conformance: `scope['path']` is now percent-decoded; `raw_path`
+  no longer includes the query string** (Sprint 68 W1). Neither transport
+  decoded percent-escapes, so `/a/%6A/b` routed and echoed as `/a/%6A/b`
+  instead of `/a/j/b`, and RFC 3986 §2.3-equivalent URIs (`%41` vs `A`)
+  were treated as distinct routes. `scope['path']` is now decoded once at
+  scope construction on every transport (HTTP/1.1, HTTP/2, WebSocket
+  upgrade, RFC 8441 extended CONNECT, and HTTP/2 push scopes), gated on a
+  `%` scan so escape-free targets keep the previous fast path. Decode
+  semantics match uvicorn: UTF-8 `unquote` with `errors='replace'`, `+`
+  stays literal, malformed escapes (`%ZZ`) pass through unchanged.
+  **Migration**: an encoded `%2F` now decodes to a real `/` before
+  routing, so it participates in path segmentation (uvicorn/Starlette
+  behaviour) — applications that must distinguish `a%2Fb` from `a/b`, or
+  that match encoded paths literally, should read `scope['raw_path']`.
+  On HTTP/1.1, `raw_path` is now the undecoded **path component only**
+  (query string excluded, per the ASGI spec) — previously it carried the
+  full request target including `?query`.
+- **ASGI conformance: an RFC 3986 `;` path sub-delimiter is now preserved
+  in `path` and `raw_path` on both transports** (Sprint 68). The obsolete
+  RFC 2396 `;params` grammar was being split off — on HTTP/1.1 from `path`
+  only, and on HTTP/2 from *both* `path` and `raw_path` (`urlparse` strips
+  `;params` from a scheme-less path; `raw_path` was derived from it). So
+  `/cart;sid=abc` arrived as `path='/cart'` on both, and H2 `raw_path`
+  wrongly lost the sub-delimiter too — leaving `path` and `raw_path`
+  describing different resources. Both now keep it (`path='/cart;sid=abc'`,
+  `raw_path=b'/cart;sid=abc'`), matching uvicorn and RFC 3986, which treats
+  `;` as an ordinary path character. **Migration**: applications that
+  relied on the old `;params` stripping for path-segment delimiting must
+  split on `;` themselves. (H2 now uses `urlsplit` instead of `urlparse`;
+  both changes are also a small speed-up.)
+- **WebSocket test client (`WebSocketTestSession`) now decodes `scope['path']`
+  and encodes `raw_path` as UTF-8** (Sprint 68), matching what the real
+  server produces — previously the test client left `path` percent-encoded
+  and encoded `raw_path` as latin-1, so tests could pass against scope
+  values the server would never emit.
+
 ## [0.52.0] — 2026-07-12
 
 Sprint 67 — gRPC bidi correctness closeout plus an inter-sprint perf fix
