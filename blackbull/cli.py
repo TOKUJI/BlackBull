@@ -367,13 +367,11 @@ def _build_static_app(directory: str, *, etag: bool, cache: bool,
     from . import BlackBull  # noqa: PLC0415
 
     app = BlackBull()
-    if etag:
-        # Cache is the outermost middleware (registered first) so a matching
-        # If-None-Match short-circuits to 304 before StaticFiles touches the
-        # disk; it also injects the generated ETag on the storing pass.
-        from .middleware.cache import Cache  # noqa: PLC0415
-        app.use(Cache())
-    app.static('/', directory, cache=cache, index=index or None)
+    # StaticFiles emits ETag / Last-Modified and honours If-None-Match /
+    # If-Modified-Since natively (Sprint 69, bug 1.21d); ``--no-etag``
+    # (``etag=False``) turns that off.
+    app.static('/', directory, cache=cache, index=index or None,
+               conditional=etag)
     return app
 
 

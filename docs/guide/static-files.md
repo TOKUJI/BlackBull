@@ -60,9 +60,11 @@ blackbull serve ./public --bind :8080
 blackbull serve ./public --certfile cert.pem --keyfile key.pem  # HTTPS + HTTP/2
 ```
 
-It wires `StaticFiles` with `index='index.html'` plus the
-[`Cache`](middleware.md) middleware for ETag / `304` conditional
-responses.  See [Configuration → blackbull serve](configuration.md#serving-static-files-with-blackbull-serve)
+It wires `StaticFiles` with `index='index.html'`; ETag / `304`
+conditional responses are served natively by `StaticFiles` (see
+[Conditional requests](#conditional-requests-etag--last-modified) below)
+and can be turned off with `--no-etag`.  See
+[Configuration → blackbull serve](configuration.md#serving-static-files-with-blackbull-serve)
 for the full flag list.
 
 ## Environment gate
@@ -188,7 +190,35 @@ Content-Range: bytes 0-1023/4096000
 Content-Length: 1024
 ```
 
-Unsatisfiable ranges return `416 Range Not Satisfiable`.
+A syntactically **unsatisfiable** range (start past the end of the
+file) returns `416 Range Not Satisfiable`.  A **malformed** or
+unsupported `Range` header — a bad byte spec (`bytes=abc-def`), a
+non-`bytes` unit, or a multi-range set — is ignored and the full file
+is served with `200 OK` (RFC 9110 §14.2); it never fails the request.
+
+### Conditional requests (ETag / Last-Modified)
+
+`StaticFiles` emits a strong `ETag` (derived from the file's
+modification time and size) and a `Last-Modified` header on every
+response.  A revalidating client can then avoid re-downloading an
+unchanged asset:
+
+```
+GET /assets/app.css HTTP/1.1
+If-None-Match: "18f3a-1c2"
+```
+
+```
+HTTP/1.1 304 Not Modified
+ETag: "18f3a-1c2"
+Last-Modified: Sun, 13 Jul 2026 00:00:00 GMT
+```
+
+`If-None-Match` takes precedence over `If-Modified-Since` (RFC 9110
+§13); the `304` is answered before the file body is read, so a
+revalidation of a large asset costs no disk I/O.  Pass
+`conditional=False` to `app.static(...)` (or `blackbull serve
+--no-etag`) to suppress the validators and always serve the full body.
 
 ## Security
 

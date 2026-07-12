@@ -19,17 +19,21 @@ running the handler.  Supports:
   responses are NOT stored (RFC 9111 §3.5).  Override with
   ``cache_authenticated=True``.
 
+Variant-aware: the response ``Vary`` header is honoured (RFC 9110
+§12.5.5).  When a stored response carries e.g. ``Vary: Accept-Encoding``,
+the varied request-header values are folded into the cache key so a
+brotli variant is never replayed to an ``identity`` client.  A response
+with ``Vary: *`` is passed through and not stored.
+
 What it doesn't do (yet):
 
-* No ``Vary`` header support beyond identity matching.  A request that
-  differs only by ``Accept-Encoding`` or ``Accept-Language`` will get
-  the first variant cached.
 * No server-side invalidation API.  Restart the worker (or wait for
   TTL) to clear.
 * No cross-worker sharing.  The cache is per-process — each worker has
   its own.  Documented limitation.
 
-The cache key is ``(method, path, query_string)``.
+The base cache key is ``(method, path, query_string)``, extended with
+the ``(field, request-value)`` pairs named by the response ``Vary``.
 
 Usage::
 
@@ -108,6 +112,11 @@ class Cache:
         # OrderedDict gives us O(1) move-to-end on access + popitem(last=False)
         # for LRU eviction — same pattern as :func:`functools.lru_cache`.
         self._store: OrderedDict[tuple, _Entry] = OrderedDict()
+        # Per base-key record of the response ``Vary`` field names last seen,
+        # so a lookup (which happens before the handler runs, hence before we
+        # know the response's Vary) can reconstruct the variant key from the
+        # incoming request headers.  Bounded alongside the store.
+        self._vary_registry: OrderedDict[tuple, tuple[bytes, ...]] = OrderedDict()
 
     # ---- ASGI surface ----------------------------------------------------
 
@@ -131,7 +140,11 @@ class Cache:
             await call_next(scope, receive, send)
             return
 
-        key = (method, scope.get('path', ''), scope.get('query_string', b''))
+        base_key = (method, scope.get('path', ''), scope.get('query_string', b''))
+        # Reconstruct the variant key from whatever Vary fields we last
+        # recorded for this base key (empty tuple ⇒ key == base_key).
+        vary_fields = self._vary_registry.get(base_key, ())
+        key = base_key + _vary_key(vary_fields, req_headers)
 
         # --- cache hit? ---
         entry = self._store.get(key)
@@ -190,6 +203,7 @@ class Cache:
                 # Final body chunk arrived; decide cacheability + ETag now.
                 captured.append(event)
                 if self._should_cache(status, response_headers):
+                    vary_fields = _response_vary(response_headers)
                     body = b''.join(body_chunks)
                     etag = _read_etag(response_headers) or (
                         self._make_etag(body) if self._generate_etag else None)
@@ -201,9 +215,18 @@ class Cache:
                         new_hdrs = list(start.get('headers', []))
                         new_hdrs.append((b'etag', etag))
                         start['headers'] = new_hdrs
-                    if etag is not None:
+                    # ``vary_fields is None`` ⇒ ``Vary: *`` ⇒ uncacheable.
+                    if etag is not None and vary_fields is not None:
+                        # Record the Vary fields so future lookups build the
+                        # matching variant key, then store under it.
+                        if vary_fields:
+                            self._vary_registry[base_key] = vary_fields
+                            self._vary_registry.move_to_end(base_key)
+                            while len(self._vary_registry) > self._max_entries:
+                                self._vary_registry.popitem(last=False)
+                        store_key = base_key + _vary_key(vary_fields, req_headers)
                         ttl = _response_max_age(response_headers) or self._max_age
-                        self._store[key] = _Entry(
+                        self._store[store_key] = _Entry(
                             events=[dict(e) for e in captured],
                             etag=etag,
                             expires_at=time.monotonic() + ttl,
@@ -314,6 +337,33 @@ def _response_max_age(headers: list[tuple[bytes, bytes]]) -> int | None:
                 except ValueError:
                     pass  # malformed max-age → ignore this directive.
     return s_max if s_max is not None else max_age
+
+
+def _response_vary(headers: list[tuple[bytes, bytes]]) -> tuple[bytes, ...] | None:
+    """Return the response's ``Vary`` field names, lowercased and sorted.
+
+    ``None`` signals ``Vary: *`` (RFC 9110 §12.5.5 — response is
+    unstorable by a shared cache).  An absent ``Vary`` yields the empty
+    tuple (store under the bare base key).
+    """
+    fields: set[bytes] = set()
+    for name, value in headers:
+        if name.lower() != b'vary':
+            continue
+        for piece in value.split(b','):
+            t = piece.strip().lower()
+            if t == b'*':
+                return None
+            if t:
+                fields.add(t)
+    return tuple(sorted(fields))
+
+
+def _vary_key(vary_fields: tuple[bytes, ...],
+              req_headers: dict[bytes, bytes]) -> tuple:
+    """Build the variant portion of the cache key from the request headers
+    named by *vary_fields*.  A missing request header contributes ``b''``."""
+    return tuple((f, req_headers.get(f, b'')) for f in vary_fields)
 
 
 def _read_etag(headers: list[tuple[bytes, bytes]]) -> bytes | None:

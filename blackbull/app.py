@@ -822,7 +822,8 @@ class BlackBull:
         self._chain = None  # invalidate cached chain
 
     def static(self, url_prefix: str, root_dir: str | Path, *,
-               cache: bool = False, index: str | None = None) -> None:
+               cache: bool = False, index: str | None = None,
+               conditional: bool = True) -> None:
         """Serve static files from *root_dir* under *url_prefix* via global middleware.
 
         ``cache`` (default ``False``): when ``True``, file bodies are
@@ -836,12 +837,17 @@ class BlackBull:
 
         ``index`` (default ``None`` — off): a filename (e.g.
         ``'index.html'``) served when a request resolves to a directory.
+
+        ``conditional`` (default ``True``): emit ``ETag`` / ``Last-Modified``
+        validators and answer ``If-None-Match`` / ``If-Modified-Since`` with
+        a 304.  Set ``False`` to disable conditional responses.
         """
         from blackbull.middleware.static import StaticFiles
         root = Path(root_dir).resolve()
         self._static_roots.append((url_prefix, root))
         self._global_middlewares.append(
-            StaticFiles(url_prefix=url_prefix, root_dir=root, cache=cache, index=index))
+            StaticFiles(url_prefix=url_prefix, root_dir=root, cache=cache,
+                        index=index, conditional=conditional))
         self._chain = None  # invalidate cached chain
 
     def on_error(self, key):

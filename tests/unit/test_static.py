@@ -601,3 +601,166 @@ class TestStaticFilesPathsend:
         body = b''.join(e.get('body', b'') for e in events
                         if e.get('type') == 'http.response.body')
         assert body == b'Hello, static world!'
+
+
+# ---------------------------------------------------------------------------
+# 1.21c — malformed / unsupported Range must never 500
+# ---------------------------------------------------------------------------
+
+def _headers_of(start: dict) -> dict[bytes, bytes]:
+    return {k.lower(): v for k, v in start.get('headers', [])}
+
+
+@pytest.mark.asyncio
+class TestStaticFilesMalformedRange:
+    """A crafted Range header must be ignored (200) or answered 416 — never 500.
+
+    Bug 1.21c: bare ``int()`` on the range bounds raised ``ValueError`` out
+    of ``_serve`` on inputs like ``bytes=abc-def``.
+    """
+
+    FILE = b'Hello, static world!'  # 20 bytes, matches static_dir fixture
+
+    @pytest.mark.parametrize('bad_range', [
+        'bytes=abc-def',
+        'bytes=1-2-3',
+        'bytes=xyz',
+        'bytes=',
+        'items=0-3',          # non-bytes unit
+        'bytes=0-1,5-9',      # multi-range (we don't emit multipart/byteranges)
+    ])
+    async def test_malformed_range_serves_full_200(self, static_dir, bad_range):
+        from blackbull.middleware.static import StaticFiles
+        app = StaticFiles(directory=str(static_dir))
+        start, body = await _collect(
+            app, _scope(path='/hello.txt', headers={'Range': bad_range})
+        )
+        assert start['status'] == 200, (
+            f'{bad_range!r} must be ignored → 200; got {start["status"]}'
+        )
+        assert body == self.FILE
+
+    @pytest.mark.parametrize('bad_range', [
+        'bytes=--5',          # int('-5') suffix → unsatisfiable
+        'bytes=-',
+        'bytes= - ',
+        'bytes=9999999999999999999999-',
+        'bytes=0x10-0x20',
+        'bytes=\x00-\x01',
+    ])
+    async def test_odd_range_never_500(self, static_dir, bad_range):
+        """The RFC contract is ignore→200 *or* 416, never a crash."""
+        from blackbull.middleware.static import StaticFiles
+        app = StaticFiles(directory=str(static_dir))
+        start, _ = await _collect(
+            app, _scope(path='/hello.txt', headers={'Range': bad_range})
+        )
+        assert start['status'] in (200, 416), (
+            f'{bad_range!r} must not 500; got {start["status"]}'
+        )
+
+    async def test_unsatisfiable_range_still_416(self, static_dir):
+        """A well-formed but out-of-bounds range stays a 416 (not 200/500)."""
+        from blackbull.middleware.static import StaticFiles
+        app = StaticFiles(directory=str(static_dir))
+        start, _ = await _collect(
+            app, _scope(path='/hello.txt', headers={'Range': 'bytes=100-200'})
+        )
+        assert start['status'] == 416
+
+
+# ---------------------------------------------------------------------------
+# 1.21d — validators (ETag / Last-Modified) + conditional GET
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+class TestStaticFilesConditional:
+    FILE = b'Hello, static world!'
+
+    async def test_emits_etag_and_last_modified(self, static_dir):
+        from blackbull.middleware.static import StaticFiles
+        app = StaticFiles(directory=str(static_dir))
+        start, _ = await _collect(app, _scope(path='/hello.txt'))
+        h = _headers_of(start)
+        assert b'etag' in h, 'StaticFiles must emit an ETag'
+        assert b'last-modified' in h, 'StaticFiles must emit Last-Modified'
+
+    async def test_if_none_match_returns_304(self, static_dir):
+        from blackbull.middleware.static import StaticFiles
+        app = StaticFiles(directory=str(static_dir))
+        start, _ = await _collect(app, _scope(path='/hello.txt'))
+        etag = _headers_of(start)[b'etag']
+
+        start2, body2 = await _collect(
+            app, _scope(path='/hello.txt',
+                        headers={'If-None-Match': etag.decode()})
+        )
+        assert start2['status'] == 304
+        assert body2 == b''
+
+    async def test_if_none_match_star_returns_304(self, static_dir):
+        from blackbull.middleware.static import StaticFiles
+        app = StaticFiles(directory=str(static_dir))
+        start, body = await _collect(
+            app, _scope(path='/hello.txt', headers={'If-None-Match': '*'})
+        )
+        assert start['status'] == 304
+        assert body == b''
+
+    async def test_if_none_match_mismatch_serves_200(self, static_dir):
+        from blackbull.middleware.static import StaticFiles
+        app = StaticFiles(directory=str(static_dir))
+        start, body = await _collect(
+            app, _scope(path='/hello.txt',
+                        headers={'If-None-Match': '"stale-tag"'})
+        )
+        assert start['status'] == 200
+        assert body == self.FILE
+
+    async def test_if_modified_since_returns_304(self, static_dir):
+        from email.utils import formatdate
+        from blackbull.middleware.static import StaticFiles
+        app = StaticFiles(directory=str(static_dir))
+        start, _ = await _collect(app, _scope(path='/hello.txt'))
+        last_mod = _headers_of(start)[b'last-modified'].decode()
+
+        start2, body2 = await _collect(
+            app, _scope(path='/hello.txt',
+                        headers={'If-Modified-Since': last_mod})
+        )
+        assert start2['status'] == 304
+        assert body2 == b''
+
+    async def test_if_modified_since_old_date_serves_200(self, static_dir):
+        from blackbull.middleware.static import StaticFiles
+        app = StaticFiles(directory=str(static_dir))
+        start, body = await _collect(
+            app, _scope(path='/hello.txt',
+                        headers={'If-Modified-Since':
+                                 'Thu, 01 Jan 1970 00:00:00 GMT'})
+        )
+        assert start['status'] == 200
+        assert body == self.FILE
+
+    async def test_malformed_if_modified_since_serves_200(self, static_dir):
+        from blackbull.middleware.static import StaticFiles
+        app = StaticFiles(directory=str(static_dir))
+        start, body = await _collect(
+            app, _scope(path='/hello.txt',
+                        headers={'If-Modified-Since': 'not-a-date'})
+        )
+        assert start['status'] == 200
+        assert body == self.FILE
+
+    async def test_304_carries_validators(self, static_dir):
+        from blackbull.middleware.static import StaticFiles
+        app = StaticFiles(directory=str(static_dir))
+        start, _ = await _collect(app, _scope(path='/hello.txt'))
+        etag = _headers_of(start)[b'etag']
+        start2, _ = await _collect(
+            app, _scope(path='/hello.txt',
+                        headers={'If-None-Match': etag.decode()})
+        )
+        h = _headers_of(start2)
+        assert h.get(b'etag') == etag
+        assert b'last-modified' in h

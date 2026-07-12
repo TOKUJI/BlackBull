@@ -121,6 +121,34 @@ async def test_forwarded_header_for_only():
     assert scope['scheme'] == 'http'   # unchanged — no proto directive
 
 
+@pytest.mark.asyncio
+async def test_forwarded_multi_element_uses_leftmost():
+    """RFC 7239 §4 — elements are comma-separated; parse the leftmost only.
+
+    Bug 1.21e: splitting on ';' alone folded the second element's ``for=``
+    into the first value, poisoning ``scope['client']``.
+    """
+    mw = TrustedProxy('127.0.0.1')
+    scope = _make_scope('127.0.0.1', {
+        b'forwarded': b'for=203.0.113.1;proto=https, for=198.51.100.17',
+    })
+    scope, _ = await _call(mw, scope)
+    assert scope['client'] == ['203.0.113.1', 0]
+    assert scope['scheme'] == 'https'
+
+
+@pytest.mark.asyncio
+async def test_forwarded_multi_element_no_proto_leak():
+    """A trailing element must not leak its params into the leftmost."""
+    mw = TrustedProxy('127.0.0.1')
+    scope = _make_scope('127.0.0.1', {
+        b'forwarded': b'for=203.0.113.1, for=198.51.100.17;proto=https',
+    })
+    scope, _ = await _call(mw, scope)
+    assert scope['client'] == ['203.0.113.1', 0]
+    assert scope['scheme'] == 'http'   # proto belongs to the 2nd element → ignored
+
+
 # ---------------------------------------------------------------------------
 # WebSocket and non-HTTP scopes
 # ---------------------------------------------------------------------------
