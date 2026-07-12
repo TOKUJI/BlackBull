@@ -1,4 +1,4 @@
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlsplit
 
 from ..protocol.frame_types import PseudoHeaders
 import logging
@@ -27,19 +27,34 @@ def _make_scope():
     }
 
 
-def _split_h2_path(raw):
+def _split_h2_path(raw: str):
     """Split an HTTP/2 ``:path`` pseudo into ASGI (path, raw_path, query_string).
 
-    RFC 9113 §8.3.1: ``:path`` carries the absolute-form request target
+    RFC 9113 §8.3.1: ``:path`` carries the origin-form request target
     (path + optional query) joined by ``?``.  ASGI requires
-    ``scope['path']`` to be the decoded path component (str) and
-    ``scope['query_string']`` to be the raw query as ``bytes``.
+    ``scope['path']`` to be the percent-decoded (UTF-8) path component
+    (str), ``scope['raw_path']`` the undecoded path-component bytes, and
+    ``scope['query_string']`` the raw query as ``bytes``.
+
+    ``raw`` is always ``str`` — pseudo-header values are normalised to
+    ``str`` when the HEADERS frame is parsed (``frame_types`` decodes them),
+    and the server-push caller passes the ASGI event's ``str`` path.
+
+    Sprint 68 — ``urlsplit`` (not ``urlparse``) so an RFC 3986 ``;`` path
+    sub-delimiter is kept in the path component rather than split off as
+    obsolete RFC 2396 ``;params`` (``urlparse`` would strip it from both
+    ``path`` and ``raw_path``).  The ``'%' in path`` guard keeps escape-free
+    targets on the plain fast path; unquote semantics match uvicorn ('+'
+    stays literal, malformed escapes pass through, ``errors='replace'`` can
+    never raise).
     """
-    if isinstance(raw, bytes):
-        raw = raw.decode('utf-8')
-    parsed = urlparse(raw)
+    parsed = urlsplit(raw)
     path = parsed.path
-    return path, path.encode('utf-8'), parsed.query.encode('utf-8')
+    if '%' in path:
+        decoded = unquote(path, encoding='utf-8', errors='replace')
+    else:
+        decoded = path
+    return decoded, path.encode('utf-8'), parsed.query.encode('utf-8')
 
 
 def parse_headers(frame) -> dict:

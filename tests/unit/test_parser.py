@@ -145,32 +145,35 @@ class TestParse:
         assert _get_scope(_http_request(path='/tasks'))['query_string'] == b''
 
     # ------------------------------------------------------------------
-    # Sprint 25 Phase A — _parse URL splitter boundary cases.
+    # Sprint 25 Phase A / Sprint 68 — _parse URL splitter boundary cases.
     #
-    # Replaced urllib.parse.urlparse with bytes.partition chain in
-    # http1_actor._parse.  The replacement preserves urlparse semantics
-    # for the .path + .query attributes used by the scope dict:
-    # strip #fragment, separate ?query, drop ;params from the path.
-    # These tests pin the observable behaviour so future refactors
-    # cannot silently drift.
+    # http1_actor._parse splits the byte request-target with a partition
+    # chain: strip #fragment, separate ?query.  Sprint 68 stopped dropping
+    # ;params — RFC 3986 treats ';' as an ordinary path sub-delimiter (the
+    # ;params grammar is obsolete RFC 2396), so both `path` and `raw_path`
+    # now preserve it (uvicorn parity; the two fields must be the same
+    # component at different decode stages).  These tests pin the observable
+    # behaviour so future refactors cannot silently drift.
     # ------------------------------------------------------------------
 
     def test_path_strips_fragment(self):
         """RFC 7230 §5.3 — fragment must not appear in request-target;
-        urlparse silently strips it.  Pre-Sprint-25 behaviour preserved."""
+        it is silently stripped.  Pre-Sprint-25 behaviour preserved."""
         scope = _get_scope(_http_request(path='/api#frag'))
         assert scope['path'] == '/api'
         assert scope['query_string'] == b''
 
-    def test_path_strips_semicolon_params(self):
-        """urllib's URL grammar separates ;params from the path."""
+    def test_path_keeps_semicolon_params(self):
+        """Sprint 68 — ';' is an RFC 3986 path sub-delimiter, not a params
+        separator; it stays in the path (and in raw_path)."""
         scope = _get_scope(_http_request(path='/cart;sid=abc'))
-        assert scope['path'] == '/cart'
+        assert scope['path'] == '/cart;sid=abc'
+        assert scope['raw_path'] == b'/cart;sid=abc'
         assert scope['query_string'] == b''
 
-    def test_path_strips_params_keeps_query(self):
+    def test_path_keeps_params_keeps_query(self):
         scope = _get_scope(_http_request(path='/cart;sid=abc?x=1'))
-        assert scope['path'] == '/cart'
+        assert scope['path'] == '/cart;sid=abc'
         assert scope['query_string'] == b'x=1'
 
     def test_path_strips_fragment_after_query(self):
@@ -178,9 +181,9 @@ class TestParse:
         assert scope['path'] == '/api'
         assert scope['query_string'] == b'x=1'
 
-    def test_path_strips_all_three(self):
+    def test_path_keeps_params_strips_fragment_keeps_query(self):
         scope = _get_scope(_http_request(path='/cart;sid=abc?x=1#frag'))
-        assert scope['path'] == '/cart'
+        assert scope['path'] == '/cart;sid=abc'
         assert scope['query_string'] == b'x=1'
 
     def test_multiple_question_marks_kept_in_query(self):
@@ -201,11 +204,12 @@ class TestParse:
         assert scope['path'] == '/empty'
         assert scope['query_string'] == b''
 
-    def test_raw_path_unchanged_by_splitter(self):
-        """raw_path must be the original bytes — splitter changes
-        only `path` + `query_string`."""
+    def test_raw_path_is_undecoded_path_component(self):
+        """ASGI: raw_path is the path component only — undecoded bytes,
+        query string excluded, ;params kept (spec change, Sprint 68 W1;
+        previously the full request target including the query)."""
         scope = _get_scope(_http_request(path='/cart;sid=abc?x=1'))
-        assert scope['raw_path'] == b'/cart;sid=abc?x=1'
+        assert scope['raw_path'] == b'/cart;sid=abc'
 
     def test_http_version_10(self):
         assert _get_scope(_http_request(version='HTTP/1.0'))['http_version'] == '1.0'
@@ -299,7 +303,8 @@ class TestParse:
         assert (b'x-h', good_value) in kv
 
 
-def _make_h2_headers_frame_dispatch(extra_headers: list | None = None) -> object:
+def _make_h2_headers_frame_dispatch(extra_headers: list | None = None,
+                                    path: str = '/') -> object:
     from hpack import Encoder
     from blackbull.protocol.frame import FrameFactory
     from blackbull.protocol.frame_types import FrameTypes, HeaderFrameFlags
@@ -307,7 +312,7 @@ def _make_h2_headers_frame_dispatch(extra_headers: list | None = None) -> object
     encoder = Encoder()
     header_list = [
         (b':method', b'GET'),
-        (b':path',   b'/'),
+        (b':path',   path.encode('utf-8')),
         (b':scheme', b'https'),
     ]
     if extra_headers:
@@ -343,6 +348,144 @@ class TestHTTP2ScopeFields:
         )
         scope = _parse_headers(frame)
         assert scope.get('root_path') == ''
+
+
+class TestPathPercentDecodingH1:
+    """Sprint 68 W1 — ASGI conformance: ``scope['path']`` carries the
+    percent-decoded (UTF-8) path component; ``scope['raw_path']`` carries
+    the undecoded path-component bytes (query excluded); the query string
+    stays raw on the wire encoding.
+
+    Decode semantics deliberately match uvicorn (``urllib.parse.unquote``
+    with ``errors='replace'``): ``+`` is not special in paths, malformed
+    escapes pass through literally, a truncated multi-byte sequence
+    becomes U+FFFD rather than a 4xx/5xx.
+    """
+
+    def test_percent_encoded_unreserved_decodes(self):
+        # RFC 3986 §2.3 — %41 and A are the same URI.
+        assert _get_scope(_http_request(path='/a/%41/b'))['path'] == '/a/A/b'
+
+    def test_multibyte_utf8_decodes(self):
+        assert _get_scope(_http_request(path='/caf%C3%A9'))['path'] == '/café'
+
+    def test_encoded_slash_becomes_real_slash(self):
+        # Documented consequence (uvicorn/Starlette parity): %2F merges
+        # into path segmentation; raw_path keeps the distinction.
+        scope = _get_scope(_http_request(path='/p/a%2Fb'))
+        assert scope['path'] == '/p/a/b'
+        assert scope['raw_path'] == b'/p/a%2Fb'
+
+    def test_malformed_escape_passes_through_literally(self):
+        assert _get_scope(_http_request(path='/x/%ZZ'))['path'] == '/x/%ZZ'
+
+    def test_truncated_multibyte_becomes_replacement_char(self):
+        assert _get_scope(_http_request(path='/x/%C3'))['path'] == '/x/�'
+
+    def test_plus_is_not_decoded_in_path(self):
+        assert _get_scope(_http_request(path='/a+b'))['path'] == '/a+b'
+
+    def test_no_percent_path_unchanged(self):
+        # Fast path: no '%' anywhere → byte-identical decode.
+        assert _get_scope(_http_request(path='/plain/path'))['path'] == '/plain/path'
+
+    def test_query_string_stays_raw(self):
+        scope = _get_scope(_http_request(path='/a%41?x=%41'))
+        assert scope['path'] == '/aA'
+        assert scope['query_string'] == b'x=%41'
+
+    def test_raw_path_keeps_percent_encoding(self):
+        assert _get_scope(_http_request(path='/a%41b'))['raw_path'] == b'/a%41b'
+
+    def test_raw_path_excludes_query_string(self):
+        assert _get_scope(_http_request(path='/a%41b?x=1'))['raw_path'] == b'/a%41b'
+
+    def test_websocket_upgrade_path_decodes(self):
+        scope = _get_scope(_ws_request_dispatch(path='/chat/%41'))
+        assert scope['type'] == 'websocket'
+        assert scope['path'] == '/chat/A'
+
+
+class TestPathPercentDecodingH2:
+    """Same W1 contract on the HTTP/2 ``:path`` pseudo-header path."""
+
+    def _scope(self, path: str) -> dict:
+        return _parse_headers(_make_h2_headers_frame_dispatch(path=path))
+
+    def test_percent_encoded_unreserved_decodes(self):
+        assert self._scope('/a/%41/b')['path'] == '/a/A/b'
+
+    def test_multibyte_utf8_decodes(self):
+        assert self._scope('/caf%C3%A9')['path'] == '/café'
+
+    def test_encoded_slash_becomes_real_slash(self):
+        scope = self._scope('/p/a%2Fb')
+        assert scope['path'] == '/p/a/b'
+        assert scope['raw_path'] == b'/p/a%2Fb'
+
+    def test_malformed_escape_passes_through_literally(self):
+        assert self._scope('/x/%ZZ')['path'] == '/x/%ZZ'
+
+    def test_no_percent_path_unchanged(self):
+        assert self._scope('/plain/path')['path'] == '/plain/path'
+
+    def test_query_string_stays_raw(self):
+        scope = self._scope('/a%41?x=%41')
+        assert scope['path'] == '/aA'
+        assert scope['query_string'] == b'x=%41'
+
+    def test_raw_path_keeps_percent_encoding(self):
+        assert self._scope('/a%41b?x=1')['raw_path'] == b'/a%41b'
+
+    def test_semicolon_params_preserved(self):
+        # Sprint 68 — urlsplit (not urlparse) keeps ';params' in the path,
+        # so both path and raw_path carry the sub-delimiter (the latent H2
+        # raw_path-stripping bug is fixed).
+        scope = self._scope('/cart;sid=abc?x=1')
+        assert scope['path'] == '/cart;sid=abc'
+        assert scope['raw_path'] == b'/cart;sid=abc'
+        assert scope['query_string'] == b'x=1'
+
+
+class TestH1H2PathParity:
+    """The same encoded request target must produce identical
+    ``path`` / ``raw_path`` / ``query_string`` on both transports."""
+
+    @pytest.mark.parametrize('target', [
+        '/a%41/caf%C3%A9/p%2Fq?q=%41&y=2',
+        '/plain?x=1',
+        '/x/%ZZ',
+        '/cart;sid=abc/items;v=2?x=1',
+    ])
+    def test_scope_fields_identical(self, target):
+        h1 = _get_scope(_http_request(path=target))
+        h2 = _parse_headers(_make_h2_headers_frame_dispatch(path=target))
+        assert h1['path'] == h2['path']
+        assert h1['raw_path'] == h2['raw_path']
+        assert h1['query_string'] == h2['query_string']
+
+
+class TestEncodedSlashRouting:
+    """Pin the routing consequence of %2F decoding: the decoded slash
+    participates in segmentation, so a param route shaped for one segment
+    does not match — applications needing the distinction read raw_path."""
+
+    def test_decoded_slash_404s_on_segment_shaped_route(self):
+        from http import HTTPMethod
+
+        from blackbull.router import PathNotRegistered, Router
+        from blackbull.utils import Scheme
+
+        router = Router()
+
+        @router.route(path='/p/{x}/q', methods=[HTTPMethod.GET])
+        async def handler(scope, receive, send):
+            pass
+
+        # '/p/a%2Fb/q' decodes to '/p/a/b/q' — 4 segments against the
+        # 3-segment route shape → PathNotRegistered (dispatch → 404).
+        with pytest.raises(PathNotRegistered):
+            router[('/p/a/b/q', HTTPMethod.GET, Scheme.http)]
 
 
 class TestHTTP11DuplicateHeaders:
