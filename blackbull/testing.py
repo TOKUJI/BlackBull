@@ -34,6 +34,7 @@ import asyncio
 import queue
 import threading
 from typing import Any
+from urllib.parse import unquote
 
 import httpx
 
@@ -230,8 +231,13 @@ class WebSocketTestSession:
             'asgi': {'version': '3.0', 'spec_version': '2.4'},
             'http_version': '1.1',
             'scheme': 'ws',
-            'path': raw_path,
-            'raw_path': raw_path.encode('latin-1'),
+            # ASGI parity with the real server (Sprint 68): scope['path'] is
+            # the percent-decoded path component; raw_path is the undecoded
+            # bytes (UTF-8, not latin-1, so a caller-supplied non-ASCII path
+            # round-trips as the server would have received it).
+            'path': (unquote(raw_path, encoding='utf-8', errors='replace')
+                     if '%' in raw_path else raw_path),
+            'raw_path': raw_path.encode('utf-8'),
             'query_string': query.encode('latin-1'),
             'root_path': '',
             'headers': encoded_headers,

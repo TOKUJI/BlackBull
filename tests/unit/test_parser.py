@@ -145,32 +145,35 @@ class TestParse:
         assert _get_scope(_http_request(path='/tasks'))['query_string'] == b''
 
     # ------------------------------------------------------------------
-    # Sprint 25 Phase A — _parse URL splitter boundary cases.
+    # Sprint 25 Phase A / Sprint 68 — _parse URL splitter boundary cases.
     #
-    # Replaced urllib.parse.urlparse with bytes.partition chain in
-    # http1_actor._parse.  The replacement preserves urlparse semantics
-    # for the .path + .query attributes used by the scope dict:
-    # strip #fragment, separate ?query, drop ;params from the path.
-    # These tests pin the observable behaviour so future refactors
-    # cannot silently drift.
+    # http1_actor._parse splits the byte request-target with a partition
+    # chain: strip #fragment, separate ?query.  Sprint 68 stopped dropping
+    # ;params — RFC 3986 treats ';' as an ordinary path sub-delimiter (the
+    # ;params grammar is obsolete RFC 2396), so both `path` and `raw_path`
+    # now preserve it (uvicorn parity; the two fields must be the same
+    # component at different decode stages).  These tests pin the observable
+    # behaviour so future refactors cannot silently drift.
     # ------------------------------------------------------------------
 
     def test_path_strips_fragment(self):
         """RFC 7230 §5.3 — fragment must not appear in request-target;
-        urlparse silently strips it.  Pre-Sprint-25 behaviour preserved."""
+        it is silently stripped.  Pre-Sprint-25 behaviour preserved."""
         scope = _get_scope(_http_request(path='/api#frag'))
         assert scope['path'] == '/api'
         assert scope['query_string'] == b''
 
-    def test_path_strips_semicolon_params(self):
-        """urllib's URL grammar separates ;params from the path."""
+    def test_path_keeps_semicolon_params(self):
+        """Sprint 68 — ';' is an RFC 3986 path sub-delimiter, not a params
+        separator; it stays in the path (and in raw_path)."""
         scope = _get_scope(_http_request(path='/cart;sid=abc'))
-        assert scope['path'] == '/cart'
+        assert scope['path'] == '/cart;sid=abc'
+        assert scope['raw_path'] == b'/cart;sid=abc'
         assert scope['query_string'] == b''
 
-    def test_path_strips_params_keeps_query(self):
+    def test_path_keeps_params_keeps_query(self):
         scope = _get_scope(_http_request(path='/cart;sid=abc?x=1'))
-        assert scope['path'] == '/cart'
+        assert scope['path'] == '/cart;sid=abc'
         assert scope['query_string'] == b'x=1'
 
     def test_path_strips_fragment_after_query(self):
@@ -178,9 +181,9 @@ class TestParse:
         assert scope['path'] == '/api'
         assert scope['query_string'] == b'x=1'
 
-    def test_path_strips_all_three(self):
+    def test_path_keeps_params_strips_fragment_keeps_query(self):
         scope = _get_scope(_http_request(path='/cart;sid=abc?x=1#frag'))
-        assert scope['path'] == '/cart'
+        assert scope['path'] == '/cart;sid=abc'
         assert scope['query_string'] == b'x=1'
 
     def test_multiple_question_marks_kept_in_query(self):
@@ -434,6 +437,15 @@ class TestPathPercentDecodingH2:
     def test_raw_path_keeps_percent_encoding(self):
         assert self._scope('/a%41b?x=1')['raw_path'] == b'/a%41b'
 
+    def test_semicolon_params_preserved(self):
+        # Sprint 68 — urlsplit (not urlparse) keeps ';params' in the path,
+        # so both path and raw_path carry the sub-delimiter (the latent H2
+        # raw_path-stripping bug is fixed).
+        scope = self._scope('/cart;sid=abc?x=1')
+        assert scope['path'] == '/cart;sid=abc'
+        assert scope['raw_path'] == b'/cart;sid=abc'
+        assert scope['query_string'] == b'x=1'
+
 
 class TestH1H2PathParity:
     """The same encoded request target must produce identical
@@ -443,6 +455,7 @@ class TestH1H2PathParity:
         '/a%41/caf%C3%A9/p%2Fq?q=%41&y=2',
         '/plain?x=1',
         '/x/%ZZ',
+        '/cart;sid=abc/items;v=2?x=1',
     ])
     def test_scope_fields_identical(self, target):
         h1 = _get_scope(_http_request(path=target))

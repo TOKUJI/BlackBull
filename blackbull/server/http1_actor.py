@@ -777,16 +777,17 @@ class HTTP1Actor(Actor):
             raise BadRequestError(f'invalid request-target {path!r}')
 
         if asterisk_form:
-            _scope_path_b, _raw_path_b, _query_string = b'*', b'*', b''
+            _raw_path_b, _query_string = b'*', b''
         else:
-            # Sprint 25 Phase A — replicate urllib.parse.urlparse() semantics
-            # on the bytes request-target with three C-level partition calls:
-            # strip #fragment, split ?query, separate ;params.  ~12× faster
-            # than urlparse (pyperf microbench).  Output is byte-for-byte
-            # equivalent for the .path + .query attributes we use.
+            # Sprint 25 Phase A — split the bytes request-target with C-level
+            # partition calls (~12× faster than urlparse): strip #fragment,
+            # then split ?query.  Sprint 68 — ';' is NOT split off: RFC 3986
+            # treats it as an ordinary path sub-delimiter (the ;params grammar
+            # is obsolete RFC 2396), so it stays in the path component.  The
+            # path component (raw_path) and its decoded form (path) are now
+            # the same bytes at two decode stages — uvicorn parity.
             _no_frag, _, _ = path.partition(b'#')
             _raw_path_b, _, _query_string = _no_frag.partition(b'?')
-            _scope_path_b, _, _ = _raw_path_b.partition(b';')
 
         # Sprint 68 W1 — ASGI: scope['path'] is the percent-decoded (UTF-8)
         # path component.  The b'%' guard keeps the no-escape common case on
@@ -794,11 +795,11 @@ class HTTP1Actor(Actor):
         # if it contains bytes >= 0x80, so .decode('ascii') cannot fail.
         # unquote semantics match uvicorn: '+' stays literal, malformed
         # escapes pass through, errors='replace' can never raise.
-        if b'%' in _scope_path_b:
-            _scope_path = unquote(_scope_path_b.decode('ascii'),
+        if b'%' in _raw_path_b:
+            _scope_path = unquote(_raw_path_b.decode('ascii'),
                                   encoding='utf-8', errors='replace')
         else:
-            _scope_path = _scope_path_b.decode('utf-8')
+            _scope_path = _raw_path_b.decode('utf-8')
 
         raw: list[tuple[bytes, bytes]] = []
         for line in lines[idx + 1:]:

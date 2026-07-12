@@ -50,6 +50,24 @@ so the editable install's metadata catches up.
   On HTTP/1.1, `raw_path` is now the undecoded **path component only**
   (query string excluded, per the ASGI spec) — previously it carried the
   full request target including `?query`.
+- **ASGI conformance: an RFC 3986 `;` path sub-delimiter is now preserved
+  in `path` and `raw_path` on both transports** (Sprint 68). The obsolete
+  RFC 2396 `;params` grammar was being split off — on HTTP/1.1 from `path`
+  only, and on HTTP/2 from *both* `path` and `raw_path` (`urlparse` strips
+  `;params` from a scheme-less path; `raw_path` was derived from it). So
+  `/cart;sid=abc` arrived as `path='/cart'` on both, and H2 `raw_path`
+  wrongly lost the sub-delimiter too — leaving `path` and `raw_path`
+  describing different resources. Both now keep it (`path='/cart;sid=abc'`,
+  `raw_path=b'/cart;sid=abc'`), matching uvicorn and RFC 3986, which treats
+  `;` as an ordinary path character. **Migration**: applications that
+  relied on the old `;params` stripping for path-segment delimiting must
+  split on `;` themselves. (H2 now uses `urlsplit` instead of `urlparse`;
+  both changes are also a small speed-up.)
+- **WebSocket test client (`WebSocketTestSession`) now decodes `scope['path']`
+  and encodes `raw_path` as UTF-8** (Sprint 68), matching what the real
+  server produces — previously the test client left `path` percent-encoded
+  and encoded `raw_path` as latin-1, so tests could pass against scope
+  values the server would never emit.
 
 ## [0.52.0] — 2026-07-12
 
