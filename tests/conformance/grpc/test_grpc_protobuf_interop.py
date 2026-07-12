@@ -146,8 +146,44 @@ async def test_reflection_lists_and_invokes_without_proto(grpc_server):
     services, message = await asyncio.to_thread(_reflection_flow, port)
     assert 'bbinterop.Greeter' in services
     assert 'grpc.health.v1.Health' in services
+    # Both reflection package versions are served (Sprint 68): v1alpha for
+    # older clients, v1 for the newer ones that probe it first.
     assert 'grpc.reflection.v1alpha.ServerReflection' in services
+    assert 'grpc.reflection.v1.ServerReflection' in services
     assert message == 'Hello, reflection!'
+
+
+def _reflection_v1_list_services(port: int):
+    """Drive the ``grpc.reflection.v1`` endpoint over a real socket.
+
+    grpcio only ships a ``v1alpha`` reflection client, but v1 and v1alpha
+    are wire-identical (same field numbers; only the descriptor's package
+    name differs), so we reuse the grpcio ``v1alpha`` message types as the
+    serializer/deserializer while calling the ``v1`` method path.  This
+    proves the v1 service is actually wired and answers on the wire, not
+    merely that it appears in the v1alpha service listing."""
+    from grpc_reflection.v1alpha import reflection_pb2
+
+    with grpc.insecure_channel(f'127.0.0.1:{port}') as channel:
+        grpc.channel_ready_future(channel).result(timeout=_CALL_TIMEOUT)
+        call = channel.stream_stream(
+            '/grpc.reflection.v1.ServerReflection/ServerReflectionInfo',
+            request_serializer=lambda m: m.SerializeToString(),
+            response_deserializer=reflection_pb2.ServerReflectionResponse.FromString,
+        )
+        req = reflection_pb2.ServerReflectionRequest(list_services='')
+        responses = list(call(iter([req]), timeout=_CALL_TIMEOUT))
+        names = [s.name for r in responses
+                 for s in r.list_services_response.service]
+        return names
+
+
+@pytest.mark.asyncio
+async def test_reflection_v1_endpoint_answers_on_the_wire(grpc_server):
+    port, _ = grpc_server
+    names = await asyncio.to_thread(_reflection_v1_list_services, port)
+    assert 'bbinterop.Greeter' in names
+    assert 'grpc.reflection.v1.ServerReflection' in names
 
 
 def _describe_service(port: int, symbol: str):
