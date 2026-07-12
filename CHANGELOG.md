@@ -31,6 +31,13 @@ so the editable install's metadata catches up.
 
 ## [Unreleased]
 
+## [0.53.1] — 2026-07-13
+
+Sprint 69 (first half) — the `1.21` middleware-correctness cluster: five
+localised RFC-conformance fixes across the shipped middleware, plus native
+conditional-request support in `StaticFiles`. (The in-tree `Session` removal,
+the sprint's other half, is calendar-gated and lands separately as `v0.54.0`.)
+
 ### Added
 
 - **`StaticFiles` conditional requests.** `StaticFiles` now emits a strong
