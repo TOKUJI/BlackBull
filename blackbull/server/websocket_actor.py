@@ -3,11 +3,11 @@ import asyncio
 import logging
 from collections.abc import Awaitable, Callable
 from typing import Any
-from uuid import uuid4
 
 from ..actor import Actor, Message
 from ..event_aggregator import EventAggregator
 from ..asgi import ASGIEvent
+from .conn_id import new_connection_id
 from .constants import WSCloseCode
 from .permessage_deflate import (
     DeflateParams, InboundDecompressor, OutboundCompressor,
@@ -113,7 +113,9 @@ class WebSocketActor(Actor):
                                or self._scope.pop('_ws_auto_subprotocol', None))
                 await send_101(subprotocol)
             if not self._scope.get('_connection_id'):
-                self._scope['_connection_id'] = str(uuid4())
+                # Normally set by the HTTP actor's upgrade path from the
+                # accept-time id; mint one only for direct test drives.
+                self._scope['_connection_id'] = new_connection_id()
             await self._aggregator.on_websocket_connected(
                 self._scope, event.get('subprotocol'))
         await self._ws_send(event)

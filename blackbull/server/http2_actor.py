@@ -274,6 +274,7 @@ class HTTP2Actor(Actor):
         sockname: tuple[str, int] | None = None,
         ssl: bool = False,
         stream_queue_depth: int = _HTTP2_STREAM_QUEUE_DEPTH,
+        connection_id: str = '',
     ) -> None:
         super().__init__()
         self._reader = reader
@@ -284,6 +285,12 @@ class HTTP2Actor(Actor):
         self._sockname = sockname
         self._ssl = ssl
         self._stream_queue_depth = stream_queue_depth
+        # Accept-time connection id (ConnectionActor's) — the one id for the
+        # whole connection.  The RFC 8441 WS path reuses it in the stream
+        # scope instead of minting a second one; empty when the actor is
+        # constructed directly (tests), in which case that path falls back
+        # to generating a fresh id.
+        self._connection_id = connection_id
 
         self.app = app
         self.reader = reader
@@ -1315,8 +1322,8 @@ class HTTP2Actor(Actor):
         response (and optional sec-websocket-protocol) is sent when the ASGI
         app calls websocket.accept.
         """
-        from uuid import uuid4  # noqa: PLC0415
         from ..env import get_settings as _get_settings  # noqa: PLC0415
+        from .conn_id import new_connection_id  # noqa: PLC0415
         from .websocket_actor import WebSocketActor  # noqa: PLC0415
         from .http2_ws import HTTP2WSReader, HTTP2WSWriter  # noqa: PLC0415
 
@@ -1338,7 +1345,9 @@ class HTTP2Actor(Actor):
 
         scope = stream.scope
         assert scope is not None
-        scope['_connection_id'] = str(uuid4())
+        # One id per TCP connection: reuse the accept-time id; mint one only
+        # when the actor was constructed without it (direct test drives).
+        scope['_connection_id'] = self._connection_id or new_connection_id()
         stream_send = self.make_sender(stream.stream_id)
 
         async def _ws_send_200(subprotocol=None):

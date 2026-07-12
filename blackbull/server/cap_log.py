@@ -50,7 +50,6 @@ Design recap in ``.claude/planning/candidates/cap-hit-logging.md``.
 import asyncio
 import contextvars
 import logging
-import os
 from typing import Any, Optional, Union
 
 # Sub-hierarchy so operators can route / filter independently of the
@@ -64,14 +63,18 @@ __all__ = ('log_cap_hit', 'CapHitCounter')
 
 
 def _gen_connection_id() -> str:
-    """Cheap opaque per-connection id.
+    """Cheap opaque per-connection id (fallback when the accept path did
+    not supply one).
 
-    4 random bytes hex-encoded is 8 hex characters — collision-resistant
-    across the connections a single process holds open at once (~10^9
-    collision probability at 65k concurrent IDs by the birthday bound),
-    which is the only correlation window the cap-hit log needs.
+    Delegates to :func:`~blackbull.server.conn_id.new_connection_id` —
+    process-prefix + monotonic sequence, collision-free within a process.
+    The previous 4-byte ``os.urandom`` form was NOT collision-resistant at
+    churn: 32-bit random ids collide with ~1.2 % probability at 10 k
+    concurrent connections and ~50 % at 65 k by the birthday bound (the
+    old "~10⁻⁹ at 65 k" claim here was wrong by orders of magnitude).
     """
-    return os.urandom(4).hex()
+    from .conn_id import new_connection_id  # noqa: PLC0415
+    return new_connection_id()
 
 
 class CapHitCounter:
@@ -291,8 +294,8 @@ class _LazyCapHitCounter:
 
     The accept path runs once per TCP connection, but a cap is hit only on
     abuse/misconfiguration — so the overwhelming majority of connections build
-    a counter (and draw its ``os.urandom`` connection id, a ``getrandom(2)``
-    syscall) that never records anything.  This holder makes that machinery
+    a counter (and generate its connection id) that never records
+    anything.  This holder makes that machinery
     pay-for-what-you-use: nothing is constructed until the first cap actually
     fires.
 
@@ -395,7 +398,7 @@ def log_cap_hit(
     emits one summary per suppressed cap.
     """
     active = counter if counter is not None else _current_counter.get()
-    # A lazily-bound holder materialises its real counter (and its os.urandom
+    # A lazily-bound holder materialises its real counter (and its
     # connection id) here — the first cap hit is the first moment the id is
     # actually needed.  Healthy connections never reach this branch.
     if type(active) is _LazyCapHitCounter:

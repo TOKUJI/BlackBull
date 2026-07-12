@@ -45,8 +45,9 @@ typically long-lived and stateful.
 - `writer` is an `AbstractWriter`: `await writer.write(data)`,
   `await writer.close()`.
 - `ctx` is a `ProtocolContext` carrying `peername`, `sockname`, `ssl`,
-  `connection_id` (a uuid4 hex for log correlation), `protocol` (the registered
-  name), and `aggregator` (for emitting events — see below).
+  `connection_id` (an opaque hex string, unique per connection, for log
+  correlation), `protocol` (the registered name), and `aggregator` (for
+  emitting events — see below).
 
 When the handler returns, or raises, BlackBull closes the connection. A raised
 exception is reported through the `error` event and otherwise isolated — one bad

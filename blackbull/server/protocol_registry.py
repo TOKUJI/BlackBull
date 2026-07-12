@@ -220,6 +220,7 @@ class Http2Binding(ProtocolBinding):
             conn.reader, conn.writer, conn.app, conn.aggregator,
             peername=conn.peername, sockname=conn.sockname, ssl=conn.ssl,
             stream_queue_depth=conn.stream_queue_depth,
+            connection_id=conn.connection_id,
         )
         await actor.run()
 
@@ -245,6 +246,7 @@ class Http1Binding(ProtocolBinding):
             peername=conn.peername, sockname=conn.sockname, ssl=conn.ssl,
             ws_queue_depth=conn.ws_queue_depth,
             deadline=conn.deadline,
+            connection_id=conn.connection_id,
         )
         await actor.run()
 
@@ -325,6 +327,11 @@ class ProtocolRegistry:
             b.alpn_token: b for b in self._cleartext if b.alpn_token
         }
         self._ports: dict[str, RawBinding] = {}
+        # Cleartext-detection chain, cached: registrations happen at startup,
+        # but ``ConnectionActor`` consults the order on EVERY accepted
+        # connection — rebuilding it there cost a dict copy + two list
+        # allocations per accept (limited-conn churn analysis, 2026-07-12).
+        self._detection_order: tuple[ProtocolBinding, ...] = tuple(self._cleartext)
 
     def register(
         self,
@@ -345,7 +352,19 @@ class ProtocolRegistry:
             raise ValueError(f'Protocol {name!r} already registered')
         binding = RawBinding(name, handler, detector=detector, port=port)
         self._ports[name] = binding
+        self._detection_order = (tuple(self._ports.values())
+                                 + tuple(self._cleartext))
         return binding
+
+    @property
+    def detection_order(self) -> tuple[ProtocolBinding, ...]:
+        """Bindings consulted during cleartext detection, in priority order:
+        registered raw detectors first (shared-port protocols such as MQTT),
+        then the ordered cleartext chain (``http2`` preface, ``http1``
+        fallback).  Cached — rebuilt only by :meth:`register`, so an
+        HTTP-only app pays no per-connection allocation for it.
+        """
+        return self._detection_order
 
     def by_alpn(self, token: str | None) -> ProtocolBinding | None:
         return self._alpn.get(token) if token else None

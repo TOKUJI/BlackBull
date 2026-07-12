@@ -323,9 +323,11 @@ the server sends the `websocket.accept` event.
 `websocket_disconnected` fires when the server detects the close,
 whether the client or the handler closed it.
 
-Both carry a `connection_id` (UUID string) that is stable for the
-lifetime of the connection — correlate `connected` and
-`disconnected` records to compute connection duration.
+Both carry a `connection_id` (an opaque hex string) that is stable for
+the lifetime of the connection — the same id the server assigned at
+accept time, so `connected` / `disconnected` records also correlate
+with cap-hit log records and raw-protocol `ProtocolContext` for that
+connection.
 
 ```python
 @app.on('websocket_connected')
