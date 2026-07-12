@@ -78,9 +78,16 @@ class Stream:
             self.state = StreamState.OPEN
 
     def on_data_received(self, end_stream: bool) -> None:
-        """Transition state on DATA frame (RFC 7540 §5.1)."""
+        """Transition state on DATA frame (RFC 9113 §5.1).
+
+        The peer's END_STREAM closes only *their* half: the stream becomes
+        half-closed (remote), from which WINDOW_UPDATE / PRIORITY /
+        RST_STREAM remain legal.  Full CLOSED is reached when the server
+        side finishes too (stream-task done-callback prunes the node) or
+        via RST_STREAM.
+        """
         if end_stream:
-            self.state = StreamState.CLOSED
+            self.state = StreamState.HALF_CLOSED_REMOTE
 
     def on_rst_received(self) -> None:
         """Transition on incoming RST_STREAM (RFC 9113 §5.1).
@@ -92,15 +99,6 @@ class Stream:
         """
         self.state = StreamState.CLOSED
         self.closed_via_rst = True
-
-    def mark_locally_closed(self) -> None:
-        """Mark this stream CLOSED after the server-side response is done.
-
-        Called from the stream task's done-callback so that late frames
-        from the peer on this identifier hit the CLOSED branch of the
-        state-machine validation.
-        """
-        self.state = StreamState.CLOSED
 
     def add_child(self, stream_id):
         existing = self.find_child(stream_id)

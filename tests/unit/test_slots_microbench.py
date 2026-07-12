@@ -148,7 +148,7 @@ def test_stream_state_transitions_still_work():
     s.on_headers_received(end_stream=False)
     assert s.state is StreamState.OPEN
     s.on_data_received(end_stream=True)
-    assert s.state is StreamState.CLOSED
+    assert s.state is StreamState.HALF_CLOSED_REMOTE
 
 
 def test_stream_rejects_undeclared_attribute():

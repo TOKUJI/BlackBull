@@ -31,6 +31,34 @@ so the editable install's metadata catches up.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Send-path size gate — `writelines` regression** (inter-sprint, releases with
+  Sprint 67).  `BaseSender._write_many` now joins parts totalling ≤ 32 KiB and
+  sends them via a single `write()`; only larger payloads use vectored
+  `transport.writelines`.  Root cause of the v0.33.1 → v0.51.0 HttpArena
+  regression (echo-ws −8~−20 %, plaintext HTTP/1.1 −4~−8 %): on CPython's
+  selector transport, `writelines` costs more than the small memcpy it avoids
+  (per-part `memoryview` allocations + `sendmsg` setup), and under backpressure
+  it attempts a send and re-registers the writer on **every** call.  The
+  transport strategy now lives in one place (`BaseSender`); protocol senders
+  keep expressing *what* they have via `_write_many((head, body))`.  Breakeven
+  measured at 16–64 KiB (join wins below, vectored wins above); local A/B
+  recovers the full HTTP/1.1 baseline regression (−10 % CPU/request vs
+  v0.51.0).  See `.claude/planning/recommendations/protocol-layer-audit-2026-07-12.md`.
+- **HTTP/2 bidi stream state: client END_STREAM now half-closes, not
+  closes** (RFC 9113 §5.1). `Stream.on_data_received(end_stream=True)`
+  transitioned straight to CLOSED, so a legitimate `WINDOW_UPDATE` sent by
+  the client after ending its request body — routine for gRPC bidi
+  streaming, where the client keeps crediting the server's in-flight
+  response DATA — was answered with `RST_STREAM(STREAM_CLOSED)`, tearing
+  down the live stream (the `test_echo_each_message` RST(5) flake). The
+  stream now enters HALF_CLOSED_REMOTE, from which WINDOW_UPDATE /
+  PRIORITY / RST_STREAM remain legal; full CLOSED is still reached when
+  the response completes (done-callback prune) or via RST_STREAM. Also
+  removed the dead `Stream.mark_locally_closed` (never called; its
+  docstring claimed otherwise).
+
 ### Changed
 
 - **Connection-accept path trims** (inter-sprint, releases with Sprint 67;
@@ -56,22 +84,6 @@ so the editable install's metadata catches up.
   report the same id.  WS event `connection_id` format changes from uuid4
   to the 20-hex unified form (docs updated; it was always documented as
   opaque/correlation-only).
-
-### Fixed
-
-- **Send-path size gate — `writelines` regression** (inter-sprint, releases with
-  Sprint 67).  `BaseSender._write_many` now joins parts totalling ≤ 32 KiB and
-  sends them via a single `write()`; only larger payloads use vectored
-  `transport.writelines`.  Root cause of the v0.33.1 → v0.51.0 HttpArena
-  regression (echo-ws −8~−20 %, plaintext HTTP/1.1 −4~−8 %): on CPython's
-  selector transport, `writelines` costs more than the small memcpy it avoids
-  (per-part `memoryview` allocations + `sendmsg` setup), and under backpressure
-  it attempts a send and re-registers the writer on **every** call.  The
-  transport strategy now lives in one place (`BaseSender`); protocol senders
-  keep expressing *what* they have via `_write_many((head, body))`.  Breakeven
-  measured at 16–64 KiB (join wins below, vectored wins above); local A/B
-  recovers the full HTTP/1.1 baseline regression (−10 % CPU/request vs
-  v0.51.0).  See `.claude/planning/recommendations/protocol-layer-audit-2026-07-12.md`.
 
 ## [0.51.0] — 2026-07-12
 
