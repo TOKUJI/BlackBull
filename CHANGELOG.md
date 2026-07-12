@@ -31,6 +31,14 @@ so the editable install's metadata catches up.
 
 ## [Unreleased]
 
+### Added
+
+- **`Router(cache_max=…)`** — the route lookup-cache bound is now a
+  constructor argument (default 2048; `0` disables caching). Internally the
+  cache get/set mechanics moved into a swappable `_cache_get` / `_cache_set`
+  method pair so a future cache strategy can be dropped in without touching
+  `__getitem__` or `_resolve`. No behaviour change at the default.
+
 ### Fixed
 
 - **ASGI conformance: `scope['path']` is now percent-decoded; `raw_path`

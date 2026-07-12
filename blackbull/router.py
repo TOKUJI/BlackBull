@@ -708,17 +708,23 @@ class Router:
     f_string = re.compile(r'\{([a-zA-Z_]\w*?)\}', flags=re.ASCII)
     _param_pattern = re.compile(r'\{([a-zA-Z_]\w*?)(?::([a-zA-Z_]\w*?))?\}', flags=re.ASCII)
 
-    # Per-worker lookup cache: maps (path, method, scheme) → resolved handler.
-    # Bounded at 2048 entries; cleared whenever a route is registered.
-    _LOOKUP_CACHE_MAX: int = 2048
+    # Default bound for the per-worker lookup cache (overridable per instance
+    # via the ``cache_max`` constructor argument).
+    _DEFAULT_CACHE_MAX: int = 2048
 
-    def __init__(self):
+    def __init__(self, cache_max: int = _DEFAULT_CACHE_MAX):
         self._route_info: list[_RouteInfo] = []
         self._named_routes: dict[str, tuple[str, dict[str, str]]] = {}
         self._frozen: bool = False
         self._trie = _RouteTrie()
         self._string_paths: set[str] = set()  # registered string paths (for __contains__/__repr__)
         self._raw_regex: dict = {}  # raw re.Pattern routes (not compiled from string paths)
+        # Per-worker lookup cache: maps (path, method, scheme) → resolved
+        # handler; cleared whenever a route is registered.  ``cache_max`` bounds
+        # it (0 disables caching entirely).  The get/set mechanics live in
+        # ``_cache_get`` / ``_cache_set`` so a future cache strategy can be
+        # swapped in without touching ``__getitem__`` or ``_resolve``.
+        self.cache_max: int = cache_max
         self._lookup_cache: OrderedDict = OrderedDict()
         # type → callable registry for simplified-handler return coercion.
         # Empty by default (falsy) so the common return paths never consult it.
@@ -824,21 +830,40 @@ class Router:
         Uses the routing trie for O(path-depth) lookup of string-path routes,
         then falls back to a linear scan of raw re.Pattern routes.
 
-        Results are cached in ``_lookup_cache`` (up to ``_LOOKUP_CACHE_MAX``
-        entries) so repeated requests to the same (path, method, scheme) skip
-        the trie traversal entirely after the first hit.
+        Results are cached (up to ``cache_max`` entries) so repeated requests
+        to the same (path, method, scheme) skip the trie traversal entirely
+        after the first hit.  The query→miss→resolve→store flow lives here;
+        the cache mechanics are delegated to ``_cache_get`` / ``_cache_set``
+        so the cache strategy can be swapped without touching this method.
         """
-        if key in self._lookup_cache:
-            if len(self._lookup_cache) >= self._LOOKUP_CACHE_MAX:
-                self._lookup_cache.move_to_end(key)  # maintain LRU order only when eviction is imminent
-            return self._lookup_cache[key]
+        hit, result = self._cache_get(key)
+        if hit:
+            return result
 
         result = self._resolve(key)
-
-        if len(self._lookup_cache) >= self._LOOKUP_CACHE_MAX:
-            self._lookup_cache.popitem(last=False)  # evict least-recently-used
-        self._lookup_cache[key] = result
+        self._cache_set(key, result)
         return result
+
+    def _cache_get(self, key: Tuple[str, str | HTTPMethod, Scheme]):
+        """Return ``(hit: bool, result)`` for *key*.  On a hit, refreshes LRU
+        order only when the cache is full (so ordering work is skipped until
+        eviction is actually imminent)."""
+        cache = self._lookup_cache
+        if key in cache:
+            if len(cache) >= self.cache_max:
+                cache.move_to_end(key)
+            return True, cache[key]
+        return False, None
+
+    def _cache_set(self, key: Tuple[str, str | HTTPMethod, Scheme], result) -> None:
+        """Store *result* under *key*, evicting the least-recently-used entry
+        when the cache is full.  A ``cache_max`` of 0 disables caching."""
+        if self.cache_max <= 0:
+            return
+        cache = self._lookup_cache
+        if len(cache) >= self.cache_max:
+            cache.popitem(last=False)  # evict least-recently-used
+        cache[key] = result
 
     def _resolve(
         self,
