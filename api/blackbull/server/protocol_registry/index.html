@@ -3658,6 +3658,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../conn_id/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    conn_id
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../connection_actor/" class="md-nav__link">
         
   
@@ -4181,6 +4209,17 @@
     <span class="md-ellipsis">
       
         cleartext_bindings
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.protocol_registry.ProtocolRegistry.detection_order" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        detection_order
       
     </span>
   </a>
@@ -5056,6 +5095,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.server.protocol_registry.ProtocolRegistry.detection_order" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        detection_order
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.server.protocol_registry.ProtocolRegistry.port_bindings" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5744,6 +5794,32 @@ cleartext-detection order is fixed: <code>http2</code> (preface) before <code>ht
     <div class="doc doc-contents ">
 
         <p>Ordered cleartext-detection chain (<code>http2</code> then <code>http1</code>).</p>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-attribute">
+
+
+
+<h4 id="blackbull.server.protocol_registry.ProtocolRegistry.detection_order" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">detection_order</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-property"><code>property</code></small>
+  </span>
+
+<a href="#blackbull.server.protocol_registry.ProtocolRegistry.detection_order" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Bindings consulted during cleartext detection, in priority order:
+registered raw detectors first (shared-port protocols such as MQTT),
+then the ordered cleartext chain (<code>http2</code> preface, <code>http1</code>
+fallback).  Cached — rebuilt only by :meth:<code>register</code>, so an
+HTTP-only app pays no per-connection allocation for it.</p>
 
     </div>
 

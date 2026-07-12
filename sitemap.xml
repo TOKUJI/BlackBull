@@ -2,502 +2,506 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/about/architecture/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/about/conformance/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/about/grpc-assessment/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/about/internals/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/about/mqtt-actor-design/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/about/rfc9113-implementation/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/api/SUMMARY/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/api/blackbull/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/api/blackbull/actor/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/api/blackbull/app/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/api/blackbull/asgi/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/api/blackbull/cli/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/api/blackbull/client/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/api/blackbull/config/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/api/blackbull/env/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/api/blackbull/event/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/api/blackbull/event_aggregator/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/api/blackbull/extension/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/api/blackbull/fault_injection/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/api/blackbull/grpc/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/api/blackbull/headers/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/api/blackbull/logger/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/api/blackbull/middleware/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/api/blackbull/mqtt/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/api/blackbull/openapi/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/api/blackbull/protocol/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/api/blackbull/request/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/api/blackbull/response/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/api/blackbull/router/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/api/blackbull/server/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/api/blackbull/testing/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/api/blackbull/utils/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/api/blackbull/client/client/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/api/blackbull/client/exceptions/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/api/blackbull/client/http1/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/api/blackbull/client/http2/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/api/blackbull/client/response/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/api/blackbull/client/scenario/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/api/blackbull/client/scenario_oracle/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/api/blackbull/client/websocket/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/api/blackbull/client/websocket_h2/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/api/blackbull/fault_injection/catalogue/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/api/blackbull/fault_injection/h2_server/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/api/blackbull/fault_injection/oracle_h1/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/api/blackbull/fault_injection/scenario_h1/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/api/blackbull/fault_injection/scenario_h2/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/api/blackbull/fault_injection/catalogue/h2/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/api/blackbull/grpc/asgi/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/api/blackbull/grpc/codec/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/api/blackbull/grpc/compression/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/api/blackbull/grpc/registry/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/api/blackbull/grpc/status/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/api/blackbull/middleware/base/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/api/blackbull/middleware/cache/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/api/blackbull/middleware/compression/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/api/blackbull/middleware/cors/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/api/blackbull/middleware/proxy/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/api/blackbull/middleware/session/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/api/blackbull/middleware/static/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/api/blackbull/middleware/utils/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/api/blackbull/middleware/websocket/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/api/blackbull/mqtt/asyncapi/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/api/blackbull/mqtt/broker/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/api/blackbull/mqtt/connection/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/api/blackbull/mqtt/extension/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/api/blackbull/mqtt/messages/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/api/blackbull/mqtt/tap/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/api/blackbull/protocol/frame/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/api/blackbull/protocol/frame_types/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/api/blackbull/protocol/hpack_fastpath/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/api/blackbull/protocol/rsock/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/api/blackbull/protocol/stream/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/api/blackbull/server/access_log/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/api/blackbull/server/cap_log/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
+    </url>
+    <url>
+         <loc>https://TOKUJI.github.io/BlackBull/api/blackbull/server/conn_id/</loc>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/api/blackbull/server/connection_actor/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/api/blackbull/server/constants/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/api/blackbull/server/deadline/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/api/blackbull/server/http1_actor/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/api/blackbull/server/http2_actor/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/api/blackbull/server/http2_messages/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/api/blackbull/server/http2_ws/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/api/blackbull/server/multiworker/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/api/blackbull/server/parser/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/api/blackbull/server/permessage_deflate/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/api/blackbull/server/protocol_registry/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/api/blackbull/server/recipient/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/api/blackbull/server/reload/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/api/blackbull/server/response/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/api/blackbull/server/sender/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/api/blackbull/server/server/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/api/blackbull/server/warmup/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/api/blackbull/server/websocket_actor/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/api/blackbull/server/worker/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/api/blackbull/server/ws_codec/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/deployment/behind-nginx/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/deployment/hot-reload/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/deployment/running/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/deployment/tls/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/deployment/unix-and-fd/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/deployment/workers/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/getting-started/first-app/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/getting-started/hello-world/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/getting-started/installation/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/getting-started/why-blackbull/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/guide/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/guide/configuration/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/guide/error-handling/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/guide/events/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/guide/extensions/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/guide/fault_injection/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/guide/grpc/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/guide/http2/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/guide/logging/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/guide/middleware/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/guide/mqtt/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/guide/openapi/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/guide/raw-protocols/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/guide/requests-and-responses/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/guide/routing/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/guide/static-files/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/guide/streaming/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/guide/testing/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/guide/websockets/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
     <url>
          <loc>https://TOKUJI.github.io/BlackBull/reference/env-vars/</loc>
-         <lastmod>2026-07-11</lastmod>
+         <lastmod>2026-07-12</lastmod>
     </url>
 </urlset>

@@ -3765,6 +3765,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../api/blackbull/server/conn_id/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    conn_id
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../api/blackbull/server/connection_actor/" class="md-nav__link">
         
   
@@ -4779,8 +4807,9 @@ typically long-lived and stateful.</p>
 <li><code>writer</code> is an <code>AbstractWriter</code>: <code>await writer.write(data)</code>,
   <code>await writer.close()</code>.</li>
 <li><code>ctx</code> is a <code>ProtocolContext</code> carrying <code>peername</code>, <code>sockname</code>, <code>ssl</code>,
-  <code>connection_id</code> (a uuid4 hex for log correlation), <code>protocol</code> (the registered
-  name), and <code>aggregator</code> (for emitting events — see below).</li>
+  <code>connection_id</code> (an opaque hex string, unique per connection, for log
+  correlation), <code>protocol</code> (the registered name), and <code>aggregator</code> (for
+  emitting events — see below).</li>
 </ul>
 <p>When the handler returns, or raises, BlackBull closes the connection. A raised
 exception is reported through the <code>error</code> event and otherwise isolated — one bad

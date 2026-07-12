@@ -3887,6 +3887,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../api/blackbull/server/conn_id/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    conn_id
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../api/blackbull/server/connection_actor/" class="md-nav__link">
         
   
@@ -5413,9 +5441,11 @@ event fires, so interceptors cannot suppress delivery — use
 the server sends the <code>websocket.accept</code> event.
 <code>websocket_disconnected</code> fires when the server detects the close,
 whether the client or the handler closed it.</p>
-<p>Both carry a <code>connection_id</code> (UUID string) that is stable for the
-lifetime of the connection — correlate <code>connected</code> and
-<code>disconnected</code> records to compute connection duration.</p>
+<p>Both carry a <code>connection_id</code> (an opaque hex string) that is stable for
+the lifetime of the connection — the same id the server assigned at
+accept time, so <code>connected</code> / <code>disconnected</code> records also correlate
+with cap-hit log records and raw-protocol <code>ProtocolContext</code> for that
+connection.</p>
 <div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">on</span><span class="p">(</span><span class="s1">&#39;websocket_connected&#39;</span><span class="p">)</span>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">on_connected</span><span class="p">(</span><span class="n">event</span><span class="p">):</span>
     <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;WS connected id=</span><span class="si">%s</span><span class="s1"> path=</span><span class="si">%s</span><span class="s1">&#39;</span><span class="p">,</span>

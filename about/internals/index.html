@@ -3650,6 +3650,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../api/blackbull/server/conn_id/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    conn_id
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../api/blackbull/server/connection_actor/" class="md-nav__link">
         
   
@@ -5334,6 +5362,22 @@ the protocol stack:</p>
   <code>blackbull/server/recipient.py</code>.  Buffer responses on the way
   out, parse incoming frames on the way in.  Cache headers
   (Date, common content-types) for hot-path savings.</li>
+<li><strong>Send-path size gate</strong> — protocol senders hand multi-fragment
+  responses (<code>(head, body)</code>, <code>(frame_header, payload)</code>) to
+  <code>BaseSender._write_many</code>, which owns the join-vs-vectored
+  decision: fragments totalling at most 32 KiB are joined and
+  sent as one <code>write()</code>; larger payloads use vectored
+  <code>transport.writelines</code> to skip the full-body copy.  The gate
+  exists because CPython's selector transport makes <code>writelines</code>
+  a net loss for small payloads — per-fragment <code>memoryview</code>
+  allocations plus <code>sendmsg</code> setup outweigh the avoided memcpy,
+  and when the kernel send buffer is full, <code>writelines</code> attempts
+  a send and re-registers the writer on every call where
+  <code>write()</code> merely appends to the transport buffer.  Measured
+  crossover on a drained socketpair: joining wins up to 16 KiB,
+  vectored I/O wins from 64 KiB.  Protocol senders express
+  <em>what</em> they have, never <em>how</em> to send it — the transport
+  strategy lives in exactly one method.</li>
 </ul>
 <p>For the wire-level behaviour of each layer, the
 <a href="../conformance/">RFC conformance suites</a> are the up-to-date
