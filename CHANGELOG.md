@@ -31,6 +31,12 @@ so the editable install's metadata catches up.
 
 ## [Unreleased]
 
+## [0.53.0] — 2026-07-13
+
+Sprint 68 — ASGI path-decoding conformance (percent-decoding + RFC 3986
+`;` sub-delimiter preservation), a router lookup-cache refactor, and gRPC
+server-reflection `v1` (shipped in the sibling `blackbull-protobuf 0.2.0`).
+
 ### Added
 
 - **`Router(cache_max=…)`** — the route lookup-cache bound is now a
