@@ -5613,9 +5613,11 @@ any raw re.Pattern route matches it.</p>
         <p>key: (path: str, method: str | HTTPMethod, scheme: Scheme)</p>
 <p>Uses the routing trie for O(path-depth) lookup of string-path routes,
 then falls back to a linear scan of raw re.Pattern routes.</p>
-<p>Results are cached in <code>_lookup_cache</code> (up to <code>_LOOKUP_CACHE_MAX</code>
-entries) so repeated requests to the same (path, method, scheme) skip
-the trie traversal entirely after the first hit.</p>
+<p>Results are cached (up to <code>cache_max</code> entries) so repeated requests
+to the same (path, method, scheme) skip the trie traversal entirely
+after the first hit.  The query→miss→resolve→store flow lives here;
+the cache mechanics are delegated to <code>_cache_get</code> / <code>_cache_set</code>
+so the cache strategy can be swapped without touching this method.</p>
 
 
     </div>
