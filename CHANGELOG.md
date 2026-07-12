@@ -31,6 +31,11 @@ so the editable install's metadata catches up.
 
 ## [Unreleased]
 
+## [0.52.0] — 2026-07-12
+
+Sprint 67 — gRPC bidi correctness closeout plus an inter-sprint perf fix
+that resolves the long-standing v0.33.1 → v0.51.0 HttpArena regression.
+
 ### Fixed
 
 - **Send-path size gate — `writelines` regression** (inter-sprint, releases with
