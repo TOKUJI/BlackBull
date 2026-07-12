@@ -785,13 +785,62 @@ class TestHTTP2StreamStateMachine:
         stream.on_headers_received(end_stream=True)
         assert stream.state == StreamState.HALF_CLOSED_REMOTE
 
-    async def test_data_end_stream_closes_stream(self):
+    async def test_data_end_stream_half_closes_remote(self):
+        """RFC 9113 §5.1 — the peer's END_STREAM closes only *their* half.
+
+        The stream is fully CLOSED only once the server side also ends
+        (response done-callback) or an RST_STREAM is exchanged.
+        """
         StreamState = self._import_state()
         from blackbull.protocol.stream import Stream
         stream = Stream(stream_id=1, parent=None)
         stream.on_headers_received(end_stream=False)
         stream.on_data_received(end_stream=True)
-        assert stream.state == StreamState.CLOSED
+        assert stream.state == StreamState.HALF_CLOSED_REMOTE
+
+    async def test_window_update_after_client_half_close_is_accepted(self):
+        """RFC 9113 §5.1 — half-closed (remote) permits WINDOW_UPDATE.
+
+        A client that has sent END_STREAM may still credit the server's
+        in-flight response DATA.  Answering that WINDOW_UPDATE with
+        RST_STREAM tears down a live bidi stream mid-response (the gRPC
+        ``test_echo_each_message`` RST(5) flake).
+        """
+        h_frame = _make_headers_frame(stream_id=1, method=b'POST')
+        d_frame = _make_h2_frame(
+            FrameTypes.DATA, DataFrameFlags.END_STREAM, 1, b'hi')
+        wu_frame = _make_h2_frame(
+            FrameTypes.WINDOW_UPDATE, 0, 1, (1024).to_bytes(4, 'big'))
+
+        release = asyncio.Event()
+
+        async def app(scope, receive, send):
+            # Keep the handler in flight so the stream node is still live
+            # (not yet pruned) when the WINDOW_UPDATE arrives.
+            await release.wait()
+
+        handler, _ = _make_h2_actor(app=app)
+        frames = [h_frame, d_frame, wu_frame]
+
+        async def receive():
+            if frames:
+                return frames.pop(0)
+            release.set()
+            return None
+
+        handler.receive = receive
+        await handler.run()
+
+        bad_calls = [
+            call for call in handler.send_frame.call_args_list
+            if hasattr(call.args[0], 'FrameType')
+            and call.args[0].FrameType() in (FrameTypes.RST_STREAM,
+                                             FrameTypes.GOAWAY)
+        ]
+        assert not bad_calls, (
+            'WINDOW_UPDATE on a half-closed (remote) stream must be '
+            f'accepted, not answered with RST/GOAWAY; got {bad_calls}'
+        )
 
     async def test_data_on_closed_stream_triggers_rst_stream(self):
         """Receiving DATA on a closed stream must cause RST_STREAM(STREAM_CLOSED)."""

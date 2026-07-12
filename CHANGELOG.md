@@ -31,6 +31,21 @@ so the editable install's metadata catches up.
 
 ## [Unreleased]
 
+### Fixed
+
+- **HTTP/2 bidi stream state: client END_STREAM now half-closes, not
+  closes** (RFC 9113 §5.1). `Stream.on_data_received(end_stream=True)`
+  transitioned straight to CLOSED, so a legitimate `WINDOW_UPDATE` sent by
+  the client after ending its request body — routine for gRPC bidi
+  streaming, where the client keeps crediting the server's in-flight
+  response DATA — was answered with `RST_STREAM(STREAM_CLOSED)`, tearing
+  down the live stream (the `test_echo_each_message` RST(5) flake). The
+  stream now enters HALF_CLOSED_REMOTE, from which WINDOW_UPDATE /
+  PRIORITY / RST_STREAM remain legal; full CLOSED is still reached when
+  the response completes (done-callback prune) or via RST_STREAM. Also
+  removed the dead `Stream.mark_locally_closed` (never called; its
+  docstring claimed otherwise).
+
 ## [0.51.0] — 2026-07-12
 
 Sprint 66 — the protobuf side of the gRPC story, shipped as the new
