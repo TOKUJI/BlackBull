@@ -269,6 +269,22 @@ the protocol stack:
   `blackbull/server/recipient.py`.  Buffer responses on the way
   out, parse incoming frames on the way in.  Cache headers
   (Date, common content-types) for hot-path savings.
+- **Send-path size gate** — protocol senders hand multi-fragment
+  responses (`(head, body)`, `(frame_header, payload)`) to
+  `BaseSender._write_many`, which owns the join-vs-vectored
+  decision: fragments totalling at most 32 KiB are joined and
+  sent as one `write()`; larger payloads use vectored
+  `transport.writelines` to skip the full-body copy.  The gate
+  exists because CPython's selector transport makes `writelines`
+  a net loss for small payloads — per-fragment `memoryview`
+  allocations plus `sendmsg` setup outweigh the avoided memcpy,
+  and when the kernel send buffer is full, `writelines` attempts
+  a send and re-registers the writer on every call where
+  `write()` merely appends to the transport buffer.  Measured
+  crossover on a drained socketpair: joining wins up to 16 KiB,
+  vectored I/O wins from 64 KiB.  Protocol senders express
+  *what* they have, never *how* to send it — the transport
+  strategy lives in exactly one method.
 
 For the wire-level behaviour of each layer, the
 [RFC conformance suites](conformance.md) are the up-to-date

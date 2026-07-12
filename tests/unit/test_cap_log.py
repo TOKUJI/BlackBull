@@ -140,7 +140,10 @@ def test_counter_auto_generates_unique_connection_ids():
     b = CapHitCounter()
     assert a.connection_id != b.connection_id
     assert isinstance(a.connection_id, str)
-    assert len(a.connection_id) == 8     # _gen_connection_id is 4-byte hex
+    # _gen_connection_id delegates to conn_id.new_connection_id:
+    # 12-hex process prefix + 8-hex sequence (collision-free in-process;
+    # the old 4-byte urandom form collided at churn scale).
+    assert len(a.connection_id) == 20
     assert all(c in '0123456789abcdef' for c in a.connection_id)
 
 

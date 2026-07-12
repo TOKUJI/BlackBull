@@ -26,6 +26,15 @@ _CRLF = b'\r\n'
 # memory-peak guarantees stay consistent across paths.
 _PATHSEND_FALLBACK_CHUNK = 64 * 1024
 
+# ``BaseSender._write_many`` size gate: parts totalling at most this many
+# bytes are joined and sent via ``write()``; larger payloads use vectored
+# ``writelines``.  Breakeven measured on a drained socketpair (selector
+# transport, 2026-07-12 protocol-layer audit): join wins ≤ 16 KiB, vectored
+# wins ≥ 64 KiB — and HttpArena's 17 KiB static lanes regressed under
+# ``writelines``, so the crossover sits at 32 KiB.  Deliberately NOT a
+# Settings knob (audit: no configuration surface without deployment data).
+_VECTORED_JOIN_THRESHOLD = 32 * 1024
+
 
 # RFC 7231 Date header is whole-second resolution, so re-formatting it
 # per response is wasted work — email.utils.formatdate shows ~2.6% of
@@ -469,13 +478,27 @@ class BaseSender(ABC):
         await self._guarded_write(self._writer.write, data)
 
     async def _write_many(self, parts) -> None:
-        """Vectored variant of :meth:`_write` — avoids joining the parts.
+        """Write *parts* (peer-close tolerant), choosing join vs vectored I/O.
 
-        Used by the HTTP/1.1 ``_flush`` for the headers+body cache-hit
-        path: the body bytes already live in the static-file cache, and
-        ``head + body`` would allocate a full-body copy on every hit.
+        Protocol senders call this to express *what* they have — a response
+        that naturally exists as separate fragments (``(head, body)``,
+        ``(frame_header, payload)``) — and this method owns *how* to send it:
+
+        * total ≤ :data:`_VECTORED_JOIN_THRESHOLD` — join and ``write()``.
+          On CPython's selector transport ``writelines`` costs more than the
+          small memcpy it avoids (per-part ``memoryview`` allocations and
+          ``sendmsg`` setup; under backpressure it also attempts a send and
+          re-registers the writer on every call, where ``write()`` merely
+          appends).  This was the v0.33.1 → v0.51.0 HttpArena regression
+          (echo-ws −8~−20 %, HTTP/1.1 −4~−8 %); see the 2026-07-12
+          protocol-layer audit.
+        * total > threshold — vectored ``writelines``: skipping the
+          full-body memcpy wins on the static-file cache-hit path.
         """
-        await self._guarded_write(self._writer.writelines, parts)
+        if sum(map(len, parts)) <= _VECTORED_JOIN_THRESHOLD:
+            await self._guarded_write(self._writer.write, b''.join(parts))
+        else:
+            await self._guarded_write(self._writer.writelines, parts)
 
 
 class HTTP1Sender(BaseSender):

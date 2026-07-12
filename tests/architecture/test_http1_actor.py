@@ -590,3 +590,53 @@ class TestAccessLogging:
         access_records = [r for r in caplog.records if r.name == 'blackbull.access']
         assert access_records, 'Expected one access log entry for HTTP/2 stream'
         assert '/h2' in access_records[0].message
+
+
+# ---------------------------------------------------------------------------
+# Connection-id unification (limited-conn analysis follow-up, 2026-07-12):
+# the WS upgrade path must reuse the accept-time connection id instead of
+# minting a second uuid4 for the same TCP connection.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_ws_upgrade_reuses_actor_connection_id():
+    seen_scopes = []
+
+    async def ws_app(scope, receive, send):
+        seen_scopes.append(scope)
+        event = await receive()
+        assert event['type'] == 'websocket.connect'
+        await send({'type': 'websocket.accept'})
+
+    writer = _FakeWriter()
+    raw = _ws_request()
+    first_line, rest = raw.split(b'\r\n', 1)
+    actor = HTTP1Actor(
+        _FakeReader(rest), writer, ws_app, None,
+        request=first_line + b'\r\n',
+        peername=('127.0.0.1', 54321), sockname=('0.0.0.0', 8000),
+        connection_id='cid-ws-7',
+    )
+    await actor.run()
+
+    assert len(seen_scopes) == 1
+    assert seen_scopes[0]['_connection_id'] == 'cid-ws-7'
+
+
+@pytest.mark.asyncio
+async def test_ws_upgrade_without_accept_id_generates_unified_format():
+    """Fallback (no accept-time id) mints via conn_id.new_connection_id —
+    same 20-hex format as every other connection id."""
+    seen_scopes = []
+
+    async def ws_app(scope, receive, send):
+        seen_scopes.append(scope)
+        event = await receive()
+        assert event['type'] == 'websocket.connect'
+        await send({'type': 'websocket.accept'})
+
+    actor, _writer = _make_actor(_ws_request(), app=ws_app)
+    await actor.run()
+
+    cid = seen_scopes[0]['_connection_id']
+    assert len(cid) == 20 and set(cid) <= set('0123456789abcdef')
