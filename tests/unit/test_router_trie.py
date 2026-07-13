@@ -8,7 +8,7 @@ from http import HTTPMethod
 
 from blackbull.utils import Scheme
 from blackbull.router import (
-    Router, _RouteTrie, PathNotRegistered, MethodNotApplicable,
+    Router, _RouteTrie, _LookupCache, PathNotRegistered, MethodNotApplicable,
 )
 
 
@@ -158,7 +158,7 @@ async def test_router_trie_hit_bypasses_regex_scan():
 # ---------------------------------------------------------------------------
 
 def test_lookup_cache_populated_after_hit():
-    """A successful lookup must add the result to _lookup_cache."""
+    """A successful lookup must add the result to the lookup cache."""
     router = Router()
 
     @router.route(path='/ping', methods=[HTTPMethod.GET])
@@ -166,11 +166,11 @@ def test_lookup_cache_populated_after_hit():
         pass
 
     key = ('/ping', HTTPMethod.GET, Scheme.http)
-    assert key not in router._lookup_cache
+    assert key not in router._cache
 
     router[key]
 
-    assert key in router._lookup_cache
+    assert key in router._cache
 
 
 def test_lookup_cache_returns_same_object():
@@ -198,14 +198,14 @@ def test_lookup_cache_cleared_on_route_registration():
 
     key = ('/ping', HTTPMethod.GET, Scheme.http)
     router[key]
-    assert key in router._lookup_cache
+    assert key in router._cache
 
     # Adding a second route must clear the cache
     @router.route(path='/pong', methods=[HTTPMethod.GET])
     async def pong(scope, receive, send):
         pass
 
-    assert router._lookup_cache == {}
+    assert len(router._cache) == 0
 
 
 def test_lookup_cache_lru_evicts_least_recently_used():
@@ -227,17 +227,17 @@ def test_lookup_cache_lru_evicts_least_recently_used():
     router[k1]
     router[k2]
     router[k3]
-    assert len(router._lookup_cache) == 3
+    assert len(router._cache) == 3
 
     # Re-access k1 — it becomes the most recently used, so k2 is now the LRU
     router[k1]
 
     # Adding k4 must evict k2 (LRU), not k1 (recently accessed)
     router[k4]
-    assert len(router._lookup_cache) == 3
-    assert k2 not in router._lookup_cache, 'LRU entry (k2) must be evicted'
-    assert k1 in router._lookup_cache, 'recently-accessed k1 must be retained'
-    assert k4 in router._lookup_cache
+    assert len(router._cache) == 3
+    assert k2 not in router._cache, 'LRU entry (k2) must be evicted'
+    assert k1 in router._cache, 'recently-accessed k1 must be retained'
+    assert k4 in router._cache
 
 
 def test_cache_max_zero_disables_caching():
@@ -252,7 +252,7 @@ def test_cache_max_zero_disables_caching():
     key = ('/ping', HTTPMethod.GET, Scheme.http)
     assert router[key] is not None            # resolves
     assert router[key] is not None            # resolves again
-    assert len(router._lookup_cache) == 0     # nothing cached
+    assert len(router._cache) == 0     # nothing cached
 
 
 def test_cache_get_set_pair_round_trips():
@@ -290,7 +290,7 @@ async def test_lookup_cache_parametrized_route_injects_correct_params():
 
     # Populate cache
     fn = router[key]
-    assert key in router._lookup_cache
+    assert key in router._cache
 
     # Cached closure injects params correctly
     scope: dict = {}
@@ -303,3 +303,56 @@ async def test_lookup_cache_parametrized_route_injects_correct_params():
     scope2: dict = {}
     await fn2(scope2, None, None)
     assert scope2.get('path_params') == {'task_id': '99'}
+
+
+# ---------------------------------------------------------------------------
+# _LookupCache — swappable cache-strategy extraction (Sprint 68 follow-up)
+# ---------------------------------------------------------------------------
+
+def test_router_uses_lookupcache_instance():
+    assert isinstance(Router()._cache, _LookupCache)
+
+
+def test_lookupcache_get_set_clear_contract():
+    cache = _LookupCache(cache_max=8)
+    key = ('/x', HTTPMethod.GET, Scheme.http)
+    assert cache.get(key) == (False, None)
+    sentinel = object()
+    cache.set(key, sentinel)
+    assert key in cache and len(cache) == 1
+    assert cache.get(key) == (True, sentinel)
+    cache.clear()
+    assert key not in cache and len(cache) == 0
+
+
+def test_lookupcache_zero_disables():
+    cache = _LookupCache(cache_max=0)
+    cache.set(('/x', HTTPMethod.GET, Scheme.http), object())
+    assert len(cache) == 0
+
+
+def test_lookupcache_lru_eviction():
+    cache = _LookupCache(cache_max=2)
+    for p in ('/a', '/b'):
+        cache.set((p, HTTPMethod.GET, Scheme.http), p)
+    assert len(cache) == 2
+    cache.set(('/c', HTTPMethod.GET, Scheme.http), '/c')  # evicts LRU '/a'
+    assert len(cache) == 2
+    assert ('/a', HTTPMethod.GET, Scheme.http) not in cache
+    assert ('/c', HTTPMethod.GET, Scheme.http) in cache
+
+
+def test_router_cache_strategy_is_swappable():
+    """The point of the extraction: replace Router._cache with another
+    same-interface instance and lookups honour it — no __getitem__ change."""
+    router = Router()
+
+    @router.route(path='/ping', methods=[HTTPMethod.GET])
+    async def ping(scope, receive, send):
+        pass
+
+    # Swap in a caching-disabled strategy; lookups must stop being stored.
+    router._cache = _LookupCache(cache_max=0)
+    key = ('/ping', HTTPMethod.GET, Scheme.http)
+    assert router[key] is not None
+    assert len(router._cache) == 0

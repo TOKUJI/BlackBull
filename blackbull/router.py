@@ -698,6 +698,53 @@ def _to_tuple(value: Any) -> tuple:
     return (value,)
 
 
+class _LookupCache:
+    """Bounded LRU for resolved route lookups.
+
+    Encapsulates the ``OrderedDict`` store, the ``cache_max`` bound, the
+    refresh-LRU-order-only-when-full optimisation, and ``popitem`` eviction —
+    the whole caching *strategy* — behind ``get`` / ``set`` / ``clear``.  A
+    replacement strategy (e.g. a trie-backed or unbounded cache) is a drop-in:
+    swap ``Router._cache`` for a different instance with the same three-method
+    interface; ``__getitem__`` and the ``_cache_get`` / ``_cache_set``
+    delegates never change.  A ``cache_max`` of 0 (or less) disables caching.
+    """
+    __slots__ = ('cache_max', '_store')
+
+    def __init__(self, cache_max: int) -> None:
+        self.cache_max: int = cache_max
+        self._store: OrderedDict = OrderedDict()
+
+    def get(self, key):
+        """Return ``(hit: bool, result)``.  Refreshes LRU order only when the
+        cache is full, so ordering work is skipped until eviction is imminent."""
+        store = self._store
+        if key in store:
+            if len(store) >= self.cache_max:
+                store.move_to_end(key)
+            return True, store[key]
+        return False, None
+
+    def set(self, key, result) -> None:
+        """Store *result* under *key*, evicting the least-recently-used entry
+        when the cache is full.  A ``cache_max`` of 0 disables caching."""
+        if self.cache_max <= 0:
+            return
+        store = self._store
+        if len(store) >= self.cache_max:
+            store.popitem(last=False)  # evict least-recently-used
+        store[key] = result
+
+    def clear(self) -> None:
+        self._store.clear()
+
+    def __contains__(self, key) -> bool:
+        return key in self._store
+
+    def __len__(self) -> int:
+        return len(self._store)
+
+
 # http://taichino.com/programming/1538
 class Router:
     """
@@ -720,17 +767,27 @@ class Router:
         self._string_paths: set[str] = set()  # registered string paths (for __contains__/__repr__)
         self._raw_regex: dict = {}  # raw re.Pattern routes (not compiled from string paths)
         # Per-worker lookup cache: maps (path, method, scheme) → resolved
-        # handler; cleared whenever a route is registered.  ``cache_max`` bounds
-        # it (0 disables caching entirely).  The get/set mechanics live in
-        # ``_cache_get`` / ``_cache_set`` so a future cache strategy can be
-        # swapped in without touching ``__getitem__`` or ``_resolve``.
-        self.cache_max: int = cache_max
-        self._lookup_cache: OrderedDict = OrderedDict()
+        # handler; cleared whenever a route is registered.  The whole caching
+        # strategy — bound, eviction, LRU order — lives in ``_LookupCache`` so
+        # it can be swapped by replacing this one instance, without touching
+        # ``__getitem__`` / ``_cache_get`` / ``_cache_set`` / ``_resolve``.
+        self._cache: _LookupCache = _LookupCache(cache_max)
         # type → callable registry for simplified-handler return coercion.
         # Empty by default (falsy) so the common return paths never consult it.
         # Shared by reference with every adapted handler, so a converter
         # registered after a route is still honoured.
         self._converters: dict[type, Callable] = {}
+
+    @property
+    def cache_max(self) -> int:
+        """The lookup cache's entry bound (0 disables caching).  Kept as a
+        property delegating to :class:`_LookupCache` so the constructor knob
+        and ``router.cache_max = N`` retuning both flow to the one store."""
+        return self._cache.cache_max
+
+    @cache_max.setter
+    def cache_max(self, value: int) -> None:
+        self._cache.cache_max = value
 
     def register_converter(self, type_: type, converter: Callable) -> None:
         """Register *converter* to turn a handler that returns *type_* into a
@@ -760,7 +817,7 @@ class Router:
             raise RuntimeError(
                 "Router is frozen — routes cannot be added after startup validation")
 
-        self._lookup_cache.clear()
+        self._cache.clear()
 
         # Unpack key
         if len(key) == 3:
@@ -845,25 +902,13 @@ class Router:
         return result
 
     def _cache_get(self, key: Tuple[str, str | HTTPMethod, Scheme]):
-        """Return ``(hit: bool, result)`` for *key*.  On a hit, refreshes LRU
-        order only when the cache is full (so ordering work is skipped until
-        eviction is actually imminent)."""
-        cache = self._lookup_cache
-        if key in cache:
-            if len(cache) >= self.cache_max:
-                cache.move_to_end(key)
-            return True, cache[key]
-        return False, None
+        """Return ``(hit: bool, result)`` for *key* — delegates to the
+        swappable :class:`_LookupCache` strategy."""
+        return self._cache.get(key)
 
     def _cache_set(self, key: Tuple[str, str | HTTPMethod, Scheme], result) -> None:
-        """Store *result* under *key*, evicting the least-recently-used entry
-        when the cache is full.  A ``cache_max`` of 0 disables caching."""
-        if self.cache_max <= 0:
-            return
-        cache = self._lookup_cache
-        if len(cache) >= self.cache_max:
-            cache.popitem(last=False)  # evict least-recently-used
-        cache[key] = result
+        """Store *result* under *key* — delegates to :class:`_LookupCache`."""
+        self._cache.set(key, result)
 
     def _resolve(
         self,

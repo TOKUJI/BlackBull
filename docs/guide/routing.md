@@ -212,6 +212,29 @@ apply.  See [WebSockets](websockets.md) for the handshake,
 subprotocol negotiation, fragmented messages, `permessage-deflate`,
 and the RFC 8441 (HTTP/2) transport.
 
+## Lookup cache
+
+Route resolution is backed by a per-worker LRU cache keyed on
+`(path, method, scheme)`, so repeated requests to the same target skip
+the trie traversal after the first hit.  The cache is cleared
+automatically whenever a route is registered, so it never serves a stale
+result during startup.
+
+The bound is a constructor argument on the router:
+
+```python
+from blackbull import BlackBull
+
+app = BlackBull(cache_max=4096)   # larger cache for high path cardinality
+app = BlackBull(cache_max=0)      # disable the lookup cache entirely
+```
+
+The default is `2048` entries.  Raising it helps when the application
+serves a very large number of distinct paths (the cache is a hit only
+when the exact `(path, method, scheme)` recurs); `0` disables caching so
+every request re-resolves through the trie.  Most applications never need
+to touch this.
+
 ## Next
 
 - [Middleware](middleware.md) — attaching per-route middleware,

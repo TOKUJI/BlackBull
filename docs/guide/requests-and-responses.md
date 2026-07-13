@@ -28,7 +28,7 @@ Read-side surface:
 
 | member | value |
 |---|---|
-| `request.method` / `request.path` / `request.scheme` | `str` |
+| `request.method` / `request.path` / `request.scheme` | `str` (`path` is **percent-decoded** — see below) |
 | `request.client` | `(host, port)` tuple, or `None` |
 | `request.headers` | case-insensitive [`Headers`](#reading-request-headers) view |
 | `request.cookies` | `dict[str, str]`, parsed once (all protocols) |
@@ -44,6 +44,18 @@ cached bytes — the body is never read twice.  Handlers that don't
 declare a `Request` pay nothing: injection is decided when the route
 is registered, and the raw `(scope, receive, send)` form is
 unaffected.
+
+!!! note "`path` is percent-decoded (since v0.53.0)"
+    `request.path` (and the underlying `scope['path']`) is the
+    **percent-decoded** request target with the query string removed —
+    `/files/a%2Fb` arrives as `/files/a/b`, matching the ASGI spec and
+    uvicorn.  The **un**decoded bytes are available as
+    `scope['raw_path']` (`bytes`, query excluded) for the rare consumer
+    — reverse proxies, WAFs, cache-key / signature verification — that
+    must reproduce the exact received byte sequence.  RFC 3986 `;`
+    parameters are preserved in both (`/cart;sid=abc` stays intact).
+    Before v0.53.0 `path` was not decoded; code that re-decoded it
+    itself should drop that step.
 
 The sections below cover the same reads on the raw ASGI surface —
 useful inside middleware (which always uses the full form) and for

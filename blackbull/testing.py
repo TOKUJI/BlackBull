@@ -238,7 +238,10 @@ class WebSocketTestSession:
             'path': (unquote(raw_path, encoding='utf-8', errors='replace')
                      if '%' in raw_path else raw_path),
             'raw_path': raw_path.encode('utf-8'),
-            'query_string': query.encode('latin-1'),
+            # UTF-8 for parity with raw_path above and the real server —
+            # latin-1 would raise UnicodeEncodeError on a non-ASCII query
+            # (e.g. '/x?q=café') that the utf-8 path accepts.
+            'query_string': query.encode('utf-8'),
             'root_path': '',
             'headers': encoded_headers,
             'client': ('testclient', 50000),
