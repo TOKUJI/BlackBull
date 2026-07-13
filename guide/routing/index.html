@@ -658,6 +658,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#lookup-cache" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Lookup cache
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#next" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4827,6 +4838,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#lookup-cache" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Lookup cache
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#next" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5044,6 +5066,23 @@ middlewares:</p>
 apply.  See <a href="../websockets/">WebSockets</a> for the handshake,
 subprotocol negotiation, fragmented messages, <code>permessage-deflate</code>,
 and the RFC 8441 (HTTP/2) transport.</p>
+<h2 id="lookup-cache">Lookup cache<a class="headerlink" href="#lookup-cache" title="Permanent link">&para;</a></h2>
+<p>Route resolution is backed by a per-worker LRU cache keyed on
+<code>(path, method, scheme)</code>, so repeated requests to the same target skip
+the trie traversal after the first hit.  The cache is cleared
+automatically whenever a route is registered, so it never serves a stale
+result during startup.</p>
+<p>The bound is a constructor argument on the router:</p>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">blackbull</span><span class="w"> </span><span class="kn">import</span> <span class="n">BlackBull</span>
+
+<span class="n">app</span> <span class="o">=</span> <span class="n">BlackBull</span><span class="p">(</span><span class="n">cache_max</span><span class="o">=</span><span class="mi">4096</span><span class="p">)</span>   <span class="c1"># larger cache for high path cardinality</span>
+<span class="n">app</span> <span class="o">=</span> <span class="n">BlackBull</span><span class="p">(</span><span class="n">cache_max</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>      <span class="c1"># disable the lookup cache entirely</span>
+</code></pre></div>
+<p>The default is <code>2048</code> entries.  Raising it helps when the application
+serves a very large number of distinct paths (the cache is a hit only
+when the exact <code>(path, method, scheme)</code> recurs); <code>0</code> disables caching so
+every request re-resolves through the trie.  Most applications never need
+to touch this.</p>
 <h2 id="next">Next<a class="headerlink" href="#next" title="Permanent link">&para;</a></h2>
 <ul>
 <li><a href="../middleware/">Middleware</a> — attaching per-route middleware,

@@ -5198,7 +5198,7 @@ one, the same way it injects path params and <code>body</code>:</p>
 <tbody>
 <tr>
 <td><code>request.method</code> / <code>request.path</code> / <code>request.scheme</code></td>
-<td><code>str</code></td>
+<td><code>str</code> (<code>path</code> is <strong>percent-decoded</strong> — see below)</td>
 </tr>
 <tr>
 <td><code>request.client</code></td>
@@ -5237,6 +5237,19 @@ cached bytes — the body is never read twice.  Handlers that don't
 declare a <code>Request</code> pay nothing: injection is decided when the route
 is registered, and the raw <code>(scope, receive, send)</code> form is
 unaffected.</p>
+<div class="admonition note">
+<p class="admonition-title"><code>path</code> is percent-decoded (since v0.53.0)</p>
+<p><code>request.path</code> (and the underlying <code>scope['path']</code>) is the
+<strong>percent-decoded</strong> request target with the query string removed —
+<code>/files/a%2Fb</code> arrives as <code>/files/a/b</code>, matching the ASGI spec and
+uvicorn.  The <strong>un</strong>decoded bytes are available as
+<code>scope['raw_path']</code> (<code>bytes</code>, query excluded) for the rare consumer
+— reverse proxies, WAFs, cache-key / signature verification — that
+must reproduce the exact received byte sequence.  RFC 3986 <code>;</code>
+parameters are preserved in both (<code>/cart;sid=abc</code> stays intact).
+Before v0.53.0 <code>path</code> was not decoded; code that re-decoded it
+itself should drop that step.</p>
+</div>
 <p>The sections below cover the same reads on the raw ASGI surface —
 useful inside middleware (which always uses the full form) and for
 streaming bodies chunk by chunk.</p>
