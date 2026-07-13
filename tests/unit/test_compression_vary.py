@@ -88,6 +88,68 @@ async def test_vary_not_duplicated_when_already_present():
     assert tokens.count(b'accept-encoding') == 1
 
 
+def _has_vary_accept_encoding(headers) -> bool:
+    return any(k.lower() == b'vary' and b'accept-encoding' in v.lower()
+               for k, v in headers)
+
+
+class TestVaryOnCompressibleButUncompressedPaths:
+    """1.21f — a *compressible* response must carry ``Vary: Accept-Encoding``
+    even on the exit paths that do not actually compress, so a downstream
+    shared cache never stores an un-varied entry it then replays to a client
+    that does accept an encoding."""
+
+    @pytest.mark.asyncio
+    async def test_no_matching_codec_still_varies(self):
+        # Client accepts nothing we offer → we forward verbatim (Branch 1).
+        mw = Compression()
+        res = await _run(mw, _BODY, [(b'content-type', b'text/plain')], accept=b'')
+        assert dict(res['headers']).get(b'content-encoding') is None
+        assert _has_vary_accept_encoding(res['headers'])
+
+    @pytest.mark.asyncio
+    async def test_small_body_still_varies(self):
+        # Body under _MIN_SIZE → not compressed, but still compressible (2c).
+        mw = Compression()
+        res = await _run(mw, b'tiny', [(b'content-type', b'text/plain')], accept=b'gzip')
+        assert dict(res['headers']).get(b'content-encoding') is None
+        assert _has_vary_accept_encoding(res['headers'])
+
+    @pytest.mark.asyncio
+    async def test_executor_at_cap_still_varies(self):
+        # Executor-offload cap hit → served uncompressed but must vary (2d).
+        mw = Compression(executor_max_inflight=1, executor_threshold=1)
+        mw._executor_inflight = 1
+        res = await _run(mw, _BODY, [(b'content-type', b'text/plain')], accept=b'gzip')
+        assert dict(res['headers']).get(b'content-encoding') is None
+        assert _has_vary_accept_encoding(res['headers'])
+
+    @pytest.mark.asyncio
+    async def test_uncompressible_content_type_does_not_vary(self):
+        # An already-compressed Content-Type must NOT gain a spurious Vary (2a).
+        mw = Compression()
+        res = await _run(mw, _BODY, [(b'content-type', b'image/png')], accept=b'gzip')
+        assert not _has_vary_accept_encoding(res['headers'])
+
+    @pytest.mark.asyncio
+    async def test_precompressed_response_does_not_vary(self):
+        # A pre-existing Content-Encoding means we don't touch the body — and
+        # must not add our own Vary (2b).
+        mw = Compression()
+        res = await _run(mw, _BODY, [
+            (b'content-type', b'text/plain'),
+            (b'content-encoding', b'br'),
+        ], accept=b'gzip')
+        assert not _has_vary_accept_encoding(res['headers'])
+
+    @pytest.mark.asyncio
+    async def test_no_codec_path_leaves_uncompressible_alone(self):
+        # Branch 1 + uncompressible type → no compression, no Vary.
+        mw = Compression()
+        res = await _run(mw, _BODY, [(b'content-type', b'video/mp4')], accept=b'')
+        assert not _has_vary_accept_encoding(res['headers'])
+
+
 class TestMergeVaryHelper:
     def test_appends_when_absent(self):
         hdrs = [(b'content-type', b'text/plain')]

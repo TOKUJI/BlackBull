@@ -32,8 +32,12 @@ What it doesn't do (yet):
 * No cross-worker sharing.  The cache is per-process — each worker has
   its own.  Documented limitation.
 
-The base cache key is ``(method, path, query_string)``, extended with
-the ``(field, request-value)`` pairs named by the response ``Vary``.
+The store is keyed by ``(method, path, query_string)`` → a per-URL bucket
+that holds the response's ``Vary`` field names alongside its variant entries
+(one per distinct set of ``(field, request-value)`` pairs named by ``Vary``).
+Keeping the vary fields inside the bucket means they can never be evicted
+independently of the entries they key (which the earlier two-LRU design
+allowed — orphaning the entries).
 
 Usage::
 
@@ -85,6 +89,32 @@ class _Entry:
         return (now if now is not None else time.monotonic()) >= self.expires_at
 
 
+# Safety cap on the number of stored variants for a single base key, so a
+# hostile peer varying an Accept-* header cannot grow one bucket without bound.
+# Far above any real Accept-Encoding × Accept-Language cross-product.
+_MAX_VARIANTS_PER_KEY = 16
+
+
+class _Bucket:
+    """All cached variants for one base key ``(method, path, query_string)``.
+
+    The response ``Vary`` field names live *inside* the bucket, beside the
+    per-variant entries — not in a separate LRU.  That is the fix for 1.21g:
+    with two independent LRUs (the old ``_store`` + ``_vary_registry``) the vary
+    record could be evicted before its entries, orphaning them (future lookups
+    rebuilt the variant key with empty vary fields and never matched). Here the
+    vary fields cannot outlive their entries, so no orphan is possible.
+
+    ``entries`` is a per-variant LRU keyed by the variant tuple from
+    :func:`_vary_key` (``()`` for a non-varying response).
+    """
+    __slots__ = ('vary_fields', 'entries')
+
+    def __init__(self, vary_fields: tuple[bytes, ...] = ()):
+        self.vary_fields = vary_fields
+        self.entries: OrderedDict[tuple, _Entry] = OrderedDict()
+
+
 @as_middleware
 class Cache:
     """Per-worker in-memory response cache."""
@@ -109,14 +139,11 @@ class Cache:
         self._cacheable_statuses = frozenset(cacheable_statuses)
         self._cache_authenticated = cache_authenticated
         self._generate_etag = generate_etag
-        # OrderedDict gives us O(1) move-to-end on access + popitem(last=False)
-        # for LRU eviction — same pattern as :func:`functools.lru_cache`.
-        self._store: OrderedDict[tuple, _Entry] = OrderedDict()
-        # Per base-key record of the response ``Vary`` field names last seen,
-        # so a lookup (which happens before the handler runs, hence before we
-        # know the response's Vary) can reconstruct the variant key from the
-        # incoming request headers.  Bounded alongside the store.
-        self._vary_registry: OrderedDict[tuple, tuple[bytes, ...]] = OrderedDict()
+        # base_key → _Bucket.  OrderedDict gives O(1) move-to-end on access +
+        # popitem(last=False) for LRU eviction — same pattern as
+        # :func:`functools.lru_cache`.  ``_max_entries`` bounds the number of
+        # distinct URLs (base keys); each bucket LRU-bounds its own variants.
+        self._store: OrderedDict[tuple, _Bucket] = OrderedDict()
 
     # ---- ASGI surface ----------------------------------------------------
 
@@ -141,15 +168,17 @@ class Cache:
             return
 
         base_key = (method, scope.get('path', ''), scope.get('query_string', b''))
-        # Reconstruct the variant key from whatever Vary fields we last
-        # recorded for this base key (empty tuple ⇒ key == base_key).
-        vary_fields = self._vary_registry.get(base_key, ())
-        key = base_key + _vary_key(vary_fields, req_headers)
+        # Look up the bucket for this URL, then the specific variant inside it
+        # using the Vary fields recorded on the bucket (empty tuple ⇒ the single
+        # non-varying entry keyed by ``()``).
+        bucket = self._store.get(base_key)
+        variant_key = _vary_key(bucket.vary_fields, req_headers) if bucket else ()
+        entry = bucket.entries.get(variant_key) if bucket else None
 
         # --- cache hit? ---
-        entry = self._store.get(key)
         if entry is not None and not entry.expired():
-            self._store.move_to_end(key)  # touched → most-recently-used
+            self._store.move_to_end(base_key)      # URL touched → MRU
+            bucket.entries.move_to_end(variant_key)  # variant touched → MRU
             inm = req_headers.get(b'if-none-match')
             if inm is not None and _etag_matches(inm, entry.etag):
                 await send({'type': ASGIEvent.HTTP_RESPONSE_START, 'status': 304,
@@ -217,21 +246,28 @@ class Cache:
                         start['headers'] = new_hdrs
                     # ``vary_fields is None`` ⇒ ``Vary: *`` ⇒ uncacheable.
                     if etag is not None and vary_fields is not None:
-                        # Record the Vary fields so future lookups build the
-                        # matching variant key, then store under it.
-                        if vary_fields:
-                            self._vary_registry[base_key] = vary_fields
-                            self._vary_registry.move_to_end(base_key)
-                            while len(self._vary_registry) > self._max_entries:
-                                self._vary_registry.popitem(last=False)
-                        store_key = base_key + _vary_key(vary_fields, req_headers)
                         ttl = _response_max_age(response_headers) or self._max_age
-                        self._store[store_key] = _Entry(
+                        bucket = self._store.get(base_key)
+                        if bucket is None:
+                            bucket = _Bucket(vary_fields)
+                            self._store[base_key] = bucket
+                        elif bucket.vary_fields != vary_fields:
+                            # The response's Vary changed; the old variant keys
+                            # were built from the old fields and can no longer be
+                            # reached — adopt the new fields and drop them.
+                            bucket.vary_fields = vary_fields
+                            bucket.entries.clear()
+                        variant_key = _vary_key(vary_fields, req_headers)
+                        bucket.entries[variant_key] = _Entry(
                             events=[dict(e) for e in captured],
                             etag=etag,
                             expires_at=time.monotonic() + ttl,
                         )
-                        # LRU bound.
+                        bucket.entries.move_to_end(variant_key)
+                        self._store.move_to_end(base_key)
+                        # Per-bucket variant bound, then per-URL bound.
+                        while len(bucket.entries) > _MAX_VARIANTS_PER_KEY:
+                            bucket.entries.popitem(last=False)
                         while len(self._store) > self._max_entries:
                             self._store.popitem(last=False)
                 # Flush to client.

@@ -199,6 +199,25 @@ class Compression:
             cache[accept_header] = result
         return result
 
+    @staticmethod
+    def _vary_ensuring_send(send):
+        """Wrap *send* so a compressible, not-yet-encoded ``ResponseStart`` gains
+        ``Vary: Accept-Encoding`` — used on the no-matching-codec path where the
+        body is forwarded verbatim but must still be cache-keyed on the encoding
+        (bug 1.21f, Branch 1).  Same predicate as the compress path's decision
+        point: compressible Content-Type AND no pre-existing Content-Encoding.
+        """
+        async def vary_send(event: dict) -> None:
+            parsed = parse_response_event(event)
+            if isinstance(parsed, ResponseStart) and \
+                    _is_compressible_content_type(parsed.headers) and \
+                    not parsed.headers.get(b'content-encoding'):
+                hdrs = list(event.get('headers', []))
+                _merge_vary(hdrs)
+                event = {**event, 'headers': hdrs}
+            await send(event)
+        return vary_send
+
     async def __call__(self, scope, receive, send, call_next):
         if scope.get('type') != 'http':
             await call_next(scope, receive, send)
@@ -210,7 +229,12 @@ class Compression:
         accept = headers.get(b'accept-encoding', b'')
         selection = self._select_codec(accept)
         if selection is None:
-            await call_next(scope, receive, send)
+            # No codec the client accepts (e.g. no/identity Accept-Encoding).
+            # We won't compress, but the response may still be *compressible*,
+            # so a downstream shared cache needs Vary: Accept-Encoding — else it
+            # stores this identity variant under the bare key and replays it to a
+            # later client that does accept an encoding (bug 1.21f, Branch 1).
+            await call_next(scope, receive, self._vary_ensuring_send(send))
             return
 
         codec_name, compressor = selection
@@ -243,6 +267,17 @@ class Compression:
                     # Content-Encoding.  Don't double-wrap.
                     elif parsed.headers.get(b'content-encoding'):
                         skip_compression = True
+                    else:
+                        # Compressible + not pre-encoded: this response's body
+                        # varies by Accept-Encoding on *every* exit path
+                        # (compressed, too-small, executor-at-cap), so stamp
+                        # Vary now — at the decision point — instead of only
+                        # after a successful compress (bug 1.21f).  Later paths
+                        # inherit it via start_event; the compress path's own
+                        # _merge_vary then no-ops.
+                        hdrs = list(start_event.get('headers', []))
+                        _merge_vary(hdrs)
+                        start_event['headers'] = hdrs
                     # When skipping, forward the start event immediately
                     # so the downstream sender doesn't sit on a body with
                     # no headers (which would be invalid HTTP).

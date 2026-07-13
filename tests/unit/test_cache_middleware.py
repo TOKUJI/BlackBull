@@ -486,6 +486,114 @@ class TestVaryAwareCaching:
         assert counter['n'] == 2, 'Vary: * responses must not be stored'
 
 
+@pytest.mark.asyncio
+class TestVaryBucketEviction:
+    """1.21g — variant metadata lives in the same bucket as its entries, so it
+    can never be evicted independently and orphan them."""
+
+    async def test_varied_entry_survives_other_url_churn(self):
+        mw = Cache(max_entries=8)
+        cn, counter = _vary_handler()
+        vscope = _scope(path='/v', headers=[(b'accept-encoding', b'br')])
+        await _run(mw, vscope, cn)                     # store /v br-variant
+        for p in ('/a', '/b', '/c'):                   # add other URLs (< cap)
+            h, _ = _make_handler()
+            await _run(mw, _scope(path=p), h)
+        _, _, body = _split_response(await _run(mw, vscope, cn))
+        assert body == b'ENC:br'
+        assert counter['n'] == 1, 'the br variant must still hit the cache'
+
+    async def test_bucket_evicted_as_a_unit(self):
+        """When a URL's bucket is LRU-evicted, its Vary fields and entries go
+        together — the next request is a clean miss + re-store, never a stale
+        lookup against orphaned entries (the old dual-LRU failure mode)."""
+        mw = Cache(max_entries=2)
+        cn, counter = _vary_handler()
+        vscope = _scope(path='/v', headers=[(b'accept-encoding', b'br')])
+        await _run(mw, vscope, cn)                     # counter → 1
+        for p in ('/a', '/b'):                         # evict /v (cap=2)
+            h, _ = _make_handler()
+            await _run(mw, _scope(path=p), h)
+        assert ('GET', '/v', b'') not in mw._store     # bucket gone as a unit
+        _, _, body = _split_response(await _run(mw, vscope, cn))  # clean miss
+        assert body == b'ENC:br'
+        assert counter['n'] == 2, 'handler re-ran; no orphaned stale entry'
+        await _run(mw, vscope, cn)                      # now hits again
+        assert counter['n'] == 2
+
+    async def test_vary_change_drops_stale_variants(self):
+        mw = Cache()
+        cn1, _ = _vary_handler(vary_value=b'Accept-Encoding')
+        await _run(mw, _scope(path='/x', headers=[(b'accept-encoding', b'br')]), cn1)
+        bucket = mw._store[('GET', '/x', b'')]
+        assert bucket.vary_fields == (b'accept-encoding',)
+        assert len(bucket.entries) == 1
+        # Same URL now varies by a different header → adopt it, drop the stale
+        # variant keyed on the old fields.
+        cn2, _ = _vary_handler(vary_value=b'Accept-Language')
+        await _run(mw, _scope(path='/x', headers=[(b'accept-language', b'en')]), cn2)
+        bucket = mw._store[('GET', '/x', b'')]
+        assert bucket.vary_fields == (b'accept-language',)
+        assert len(bucket.entries) == 1
+
+    async def test_per_bucket_variant_cap(self):
+        from blackbull.middleware.cache import _MAX_VARIANTS_PER_KEY
+        mw = Cache()
+        cn, _ = _vary_handler()
+        for i in range(_MAX_VARIANTS_PER_KEY + 5):
+            await _run(mw, _scope(path='/p',
+                                  headers=[(b'accept-encoding', f'enc{i}'.encode())]), cn)
+        bucket = mw._store[('GET', '/p', b'')]
+        assert len(bucket.entries) <= _MAX_VARIANTS_PER_KEY
+
+
+@pytest.mark.asyncio
+class TestCacheBehindCompression:
+    """End-to-end 1.21f + 1.21g: a ``Cache`` in front of ``Compression`` must
+    serve each Accept-Encoding client its own variant, no matter which client
+    arrives first — the first-request poisoning scenario the two fixes close."""
+
+    @staticmethod
+    def _stack():
+        from blackbull.middleware.compression import Compression
+        compression = Compression()
+
+        async def handler(scope, receive, send):
+            body = b'compressible payload ' * 40  # > _MIN_SIZE
+            await send({'type': 'http.response.start', 'status': 200,
+                        'headers': [(b'content-type', b'text/plain')]})
+            await send({'type': 'http.response.body', 'body': body,
+                        'more_body': False})
+
+        async def compression_layer(scope, receive, send):
+            await compression(scope, receive, send, handler)
+
+        return Cache(), compression_layer
+
+    async def _fetch(self, cache, layer, accept: bytes):
+        status, headers, body = _split_response(
+            await _run(cache, _scope(headers=[(b'accept-encoding', accept)]), layer))
+        return dict(headers), body
+
+    async def test_gzip_first_then_identity(self):
+        cache, layer = self._stack()
+        gz_hdrs, _ = await self._fetch(cache, layer, b'gzip')
+        id_hdrs, _ = await self._fetch(cache, layer, b'')
+        assert gz_hdrs.get(b'content-encoding') == b'gzip'
+        # The identity client must NOT be served the gzip variant.
+        assert id_hdrs.get(b'content-encoding') is None
+
+    async def test_identity_first_then_gzip(self):
+        # The dangerous order: the un-encoded response is cached first. Without
+        # 1.21f it would carry no Vary and poison the gzip client.
+        cache, layer = self._stack()
+        id_hdrs, _ = await self._fetch(cache, layer, b'')
+        gz_hdrs, _ = await self._fetch(cache, layer, b'gzip')
+        assert id_hdrs.get(b'content-encoding') is None
+        assert gz_hdrs.get(b'content-encoding') == b'gzip', \
+            'gzip client must get gzip, not the cached identity variant'
+
+
 class TestVaryHelpers:
     def test_response_vary_absent(self):
         from blackbull.middleware.cache import _response_vary
