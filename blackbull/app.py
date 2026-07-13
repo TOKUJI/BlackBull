@@ -203,9 +203,12 @@ class BlackBull:
                  observer_shutdown_timeout: float = 5.0,
                  trusted_proxies: list[str] | str | None = None,
                  config: AppConfig | None = None,
+                 cache_max: int | None = None,
                  ):
         self._config = config
-        self._router = Router()
+        # ``cache_max`` bounds the per-worker route lookup cache (0 disables
+        # it); ``None`` keeps the Router default (2048).  See the routing guide.
+        self._router = Router() if cache_max is None else Router(cache_max=cache_max)
         self._logger = logger
         # Miss-fallback covers every error status and unhandled exception
         # class; only user-registered handlers live in the registries.
