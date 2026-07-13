@@ -4744,8 +4744,12 @@ with <code>Vary: *</code> is passed through and not stored.</p>
 <li>No cross-worker sharing.  The cache is per-process — each worker has
   its own.  Documented limitation.</li>
 </ul>
-<p>The base cache key is <code>(method, path, query_string)</code>, extended with
-the <code>(field, request-value)</code> pairs named by the response <code>Vary</code>.</p>
+<p>The store is keyed by <code>(method, path, query_string)</code> → a per-URL bucket
+that holds the response's <code>Vary</code> field names alongside its variant entries
+(one per distinct set of <code>(field, request-value)</code> pairs named by <code>Vary</code>).
+Keeping the vary fields inside the bucket means they can never be evicted
+independently of the entries they key (which the earlier two-LRU design
+allowed — orphaning the entries).</p>
 <p>Usage::</p>
 <pre><code>from blackbull.middleware import Cache
 
