@@ -31,6 +31,36 @@ so the editable install's metadata catches up.
 
 ## [Unreleased]
 
+## [0.53.2] — 2026-07-14
+
+Sprint 69 follow-on — two caching-correctness bugs found reviewing the v0.53.1
+`1.21` cluster. Both are shared-cache poisoning gaps in the `Compression` +
+`Cache` interaction; localised, no API change.
+
+### Fixed
+
+- **`Compression` now emits `Vary: Accept-Encoding` on compressible responses
+  it does not actually compress** (bug 1.21f). v0.53.1 added the header only on
+  the *successful-compression* path; a first request that hit one of the other
+  exit paths — no codec the client accepts (a `curl`/health-check/bot sending no
+  `Accept-Encoding`), body under `min_size`, or the executor-offload cap — served
+  a compressible body with no `Vary`, which a downstream `Cache` then stored
+  under the bare key and replayed to a later client that *did* accept an
+  encoding. The `Vary` decision is now made once at the `ResponseStart` decision
+  point (compressible Content-Type and no pre-existing `Content-Encoding`), so
+  every exit path carries it; the no-matching-codec path gets the same via a
+  lightweight send wrapper. Uncompressible types and already-encoded responses
+  still get no `Vary`.
+- **`Cache` no longer orphans variant entries after LRU eviction** (bug 1.21g).
+  The variant bookkeeping (a response's `Vary` field names) and the cached
+  entries were two independent `OrderedDict` LRUs; evicting the bookkeeping
+  first left the entries unreachable (lookups rebuilt the key with empty vary
+  fields and never matched), degrading to spurious misses. The store is now a
+  single LRU of per-URL buckets, each holding its `Vary` fields *beside* its
+  per-variant entries — so the fields can never outlive the entries they key.
+  `max_entries` now bounds distinct URLs; each bucket bounds its own variants
+  (16) against a hostile `Accept-*`-varying peer.
+
 ## [0.53.1] — 2026-07-13
 
 Sprint 69 (first half) — the `1.21` middleware-correctness cluster: five
