@@ -89,13 +89,15 @@ conformance matrix:
 | Area | Support |
 |------|---------|
 | Connection | CONNECT / CONNACK, protocol-level check (rejects non-5 with `0x84`), Clean Start, Session Present |
-| Subscriptions | SUBSCRIBE / SUBACK, UNSUBSCRIBE / UNSUBACK, `+` and `#` wildcards, `$`-topic rules, shared subscriptions |
+| Subscriptions | SUBSCRIBE / SUBACK, UNSUBSCRIBE / UNSUBACK, `+` and `#` wildcards, `$`-topic rules; `No Local` and `Retain As Published` options honoured; invalid Topic Filters rejected (`0x8F`). Shared subscriptions (`$share/…`) are **not implemented** and are rejected with `0x9E` rather than silently broadcast |
+| Publish | invalid Topic Names (wildcards / null) rejected (`0x90`), never routed or retained |
 | QoS 0 | fire-and-forget delivery |
 | QoS 1 | PUBACK round-trip |
-| QoS 2 | PUBREC → PUBREL → PUBCOMP four-way handshake |
+| QoS 2 | PUBREC → PUBREL → PUBCOMP four-way handshake; duplicate PUBLISH de-duplicated; unacked messages replayed with `DUP=1` on reconnect |
 | Retained | one retained message per topic; delivered to late subscribers; zero-length payload clears |
 | Will (LWT) | delivered on abnormal disconnect; suppressed on a normal `DISCONNECT` (`0x00`) |
-| Keep-alive | PINGREQ / PINGRESP |
+| Keep-alive | PINGREQ / PINGRESP; an idle connection is closed (Will fired) at 1.5× the negotiated Keep Alive (§3.1.2.10) |
+| Session takeover | a second CONNECT for a live Client Identifier disconnects the prior connection with `0x8E` (§3.1.4) |
 | Properties | the full MQTT 5 property set (§2.2.2.2) on every packet that carries properties |
 | Sessions | subscriptions and pending QoS state preserved across reconnects with Clean Start = 0 |
 

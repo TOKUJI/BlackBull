@@ -31,6 +31,63 @@ so the editable install's metadata catches up.
 
 ## [Unreleased]
 
+## [0.53.3] — 2026-07-14
+
+Sprint 70 — MQTT 5.0 broker hardening: the `1.19` correctness cluster (eight
+RFC-conformance bugs). All localised to the broker/connection actors on the MQTT
+port; the HTTP request path is untouched. No API change.
+
+### Fixed
+
+- **Keep-alive is now enforced** (§3.1.2.10, bug 1.19a). A connection that
+  sends no packet within 1.5× its negotiated Keep Alive is treated as an
+  abnormal disconnect: its Will fires and the connection closes, so a dead peer
+  (crashed client, half-open NAT) no longer holds its connection, session and
+  Will indefinitely. Keep Alive `0` disables the check.
+- **Session takeover** (§3.1.4, bug 1.19b). A second `CONNECT` for a
+  `client_id` that is already connected now disconnects the previous connection
+  with `DISCONNECT` reason `0x8E` (Session taken over) and closes it, instead of
+  leaving the old connection live with its socket open.
+- **QoS 2 inbound de-duplication** (§4.3.3, bug 1.19c). A retransmitted (`DUP`)
+  `PUBLISH` whose Packet Identifier is already in the PUBREC-sent state is
+  acknowledged with `PUBREC` but no longer re-delivered or re-retained.
+- **Topic validation on `PUBLISH` / `SUBSCRIBE`** (§3.3.2.1 / §4.7, bug 1.19d).
+  A `PUBLISH` with a wildcard/null Topic Name is rejected (`0x90`, or a
+  `DISCONNECT` for QoS 0) and neither routed nor retained; a malformed Topic
+  Filter in `SUBSCRIBE` is rejected per-entry with `0x8F`. (Wires in the
+  previously-dead `validate_topic_name` / `validate_topic_filter`.)
+- **`No Local` and `Retain As Published` subscription options are honoured**
+  (§3.8.3.1 / §3.3.1.3, bug 1.19e). A client's own message is no longer echoed
+  back to it on a `No Local` subscription, and the publisher's `RETAIN` flag is
+  forwarded only when a matching subscription set Retain As Published.
+- **Shared subscriptions are rejected explicitly** (§4.8, part of 1.19e). A
+  `$share/...` filter now gets `0x9E` (Shared Subscriptions not supported)
+  rather than being silently broadcast to every group member (which violated
+  the §4.8.2 load-balancing contract).
+- **QoS 2 outbound + `DUP` replay on reconnect** (§4.4 / §3.3.1.1, bug 1.19f).
+  A session-present reconnect now retransmits unacknowledged outbound QoS 1 and
+  QoS 2 `PUBLISH` frames with `DUP=1`, and re-drives a `PUBREL` still awaiting
+  `PUBCOMP`.
+- **Malformed `CONNECT` no longer drops the connection on `IndexError`**
+  (§1.5.5 / §4.13, bug 1.19g). A `CONNECT` truncated before its fixed header
+  fields — and any packet whose body is inconsistent with its declared
+  Remaining Length — now decodes to `MQTTDecodeError`, which the framer resyncs
+  on, instead of an `IndexError` unwinding the read loop or an `IncompletePacket`
+  stalling it forever.
+- **Packet-identifier allocation skips in-flight ids** (§2.2.1, bug 1.19h).
+  `_alloc_pid` no longer hands out an identifier still awaiting acknowledgement
+  in either QoS>0 outbound bucket.
+
+### Changed
+
+- MQTT QoS-2 flow state is now modelled with named constants and helpers
+  (`_qos2_accept_inbound`, `_replay_pending`); outbound QoS-2 entries keep the
+  `PUBLISH` packet (not just a state string) so §4.4 replay can retransmit it
+  (refactor 2.9).
+- `docs/guide/mqtt.md` capability table updated for the above (shared
+  subscriptions now listed as rejected; keep-alive/session-takeover/QoS-2
+  behaviours documented).
+
 ## [0.53.2] — 2026-07-14
 
 Sprint 69 follow-on — two caching-correctness bugs found reviewing the v0.53.1

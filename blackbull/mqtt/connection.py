@@ -99,6 +99,11 @@ class MQTT5Actor(Actor):
         self._inline_taps = compile_taps(app_handlers) if tap is None else []
         self._done = False
         self.graceful = False
+        # §3.1.2.10 — negotiated Keep Alive (seconds; 0 disables the check),
+        # learned from the client's CONNECT.  ``_last_rx`` is the monotonic time
+        # of the last received packet, used to enforce the 1.5× idle deadline.
+        self._keep_alive = 0
+        self._last_rx = 0.0
 
     # -- inbox drain (the only writer) --------------------------------------
 
@@ -122,22 +127,50 @@ class MQTT5Actor(Actor):
         (``at_eof()``), a DISCONNECT (sets ``_done``), or task cancellation.
         """
         framer = PacketFramer()
+        loop = asyncio.get_running_loop()
+        self._last_rx = loop.time()
         while not self._done:
             for message in framer:
                 await self._forward(message)
                 if self._done:
                     return
-            data = await reader.read(_READ_CHUNK)
+            data = await self._read_with_keepalive(reader)
             if data:
+                self._last_rx = loop.time()
                 framer.feed(data)
             elif reader.at_eof():
                 break  # peer closed the connection (EOF)
+            elif self._keep_alive and (loop.time() - self._last_rx) > self._keep_alive * 1.5:
+                # §3.1.2.10 — no packet within 1.5× the negotiated Keep Alive.
+                # Treat it as an abnormal disconnect: fire the Will and close so
+                # a dead peer (crashed client, half-open NAT) stops holding its
+                # connection, session and Will indefinitely.
+                logger.debug('MQTT keep-alive timeout (%.1fs idle); closing',
+                             loop.time() - self._last_rx)
+                self.graceful = False
+                await self._broker.send(Detach(graceful=False, sender=self))
+                self._done = True
             else:
                 await asyncio.sleep(_IDLE_SLEEP)
+
+    async def _read_with_keepalive(self, reader: AbstractReader) -> bytes:
+        """Read a chunk, but wake at the keep-alive deadline so a silent peer on
+        a blocking socket cannot hold the connection open forever.  With Keep
+        Alive disabled (0) this is a plain blocking read; otherwise a read that
+        stalls past 1.5× the interval returns ``b''`` and the loop enforces the
+        idle deadline (§3.1.2.10)."""
+        if not self._keep_alive:
+            return await reader.read(_READ_CHUNK)
+        try:
+            return await asyncio.wait_for(
+                reader.read(_READ_CHUNK), self._keep_alive * 1.5)
+        except asyncio.TimeoutError:
+            return b''
 
     async def _forward(self, message: MQTTMessage) -> None:
         broker = self._broker
         if isinstance(message, MQTTConnect):
+            self._keep_alive = message.keep_alive
             await broker.send(Attach(connect=message, sender=self))
         elif isinstance(message, MQTTPublish):
             await broker.send(ClientPublish(publish=message, sender=self))
