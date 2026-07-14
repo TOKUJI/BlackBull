@@ -12,8 +12,9 @@ Communication method ↔ HTTP version mapping:
 The example uses the framework's middleware pipeline so the protocol code stays
 focused on the protocol itself:
 
-  - :class:`blackbull.middleware.Session` — signed-cookie sessions; handlers
-    read / write ``scope['session']`` and the middleware re-emits Set-Cookie
+  - :class:`blackbull_session.SessionExtension` (the ``blackbull-session``
+    package) — signed-cookie sessions; handlers read / write
+    ``scope['session']`` and the extension re-emits Set-Cookie
   - :class:`blackbull.middleware.Compression` — gzips JSON / HTML responses
     when the client accepts them; streaming responses (SSE) pass through
   - ``auth_mw``      — resolves the cookie's opaque session id to the rich

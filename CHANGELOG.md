@@ -31,6 +31,17 @@ so the editable install's metadata catches up.
 
 ## [Unreleased]
 
+### Removed
+
+- **The deprecated in-tree `Session` middleware** (`blackbull.middleware.Session`
+  and its `SessionMiddleware` alias). Deprecated since 0.38; both removal
+  floors (release count ≥ v0.41.0, calendar ≥ 2026-07-14) have passed.
+  **Migration**: install
+  [`blackbull-session`](https://github.com/TOKUJI/blackbull-session) and swap
+  `app.use(Session(...))` for `SessionExtension(app, ...)` — handlers keep
+  reading and writing `scope['session']` unchanged, and `BB_SESSION_SECRET`
+  is still honoured by the replacement package.
+
 ## [0.53.4] — 2026-07-15
 
 ### Fixed
