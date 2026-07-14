@@ -247,7 +247,14 @@ class ReasonCode(IntEnum):
     """
     SUCCESS = 0x00
     DISCONNECT_WITH_WILL = 0x04
+    MALFORMED_PACKET = 0x81
+    PROTOCOL_ERROR = 0x82
     UNSUPPORTED_PROTOCOL_VERSION = 0x84
+    KEEP_ALIVE_TIMEOUT = 0x8D
+    SESSION_TAKEN_OVER = 0x8E
+    TOPIC_FILTER_INVALID = 0x8F
+    TOPIC_NAME_INVALID = 0x90
+    SHARED_SUBSCRIPTIONS_NOT_SUPPORTED = 0x9E
 
 
 # Guard against the typed subset and the name registry drifting apart: every
@@ -855,6 +862,14 @@ def encode_packet(message: MQTTMessage) -> bytes:
 def _decode_connect(body: bytes, flags: int) -> MQTTConnect:
     pos = 0
     _proto_name, pos = _decode_utf8(body, pos)
+    # §3.1.2 — Protocol Level (1), Connect Flags (1) and Keep Alive (2) are a
+    # fixed 4-byte block after the protocol name.  A CONNECT whose declared
+    # Remaining Length stops short of them must be rejected as a Malformed
+    # Packet (§1.5.5, §4.13) — a raw ``body[pos]`` here would raise IndexError,
+    # which the framer's ``except`` does not catch, unwinding ``read_loop``
+    # and dropping the connection instead of resyncing (audit 1.19g).
+    if pos + 4 > len(body):
+        raise MQTTDecodeError('CONNECT truncated before the fixed header fields')
     proto_level = body[pos]
     pos += 1
     cflags = body[pos]
@@ -1065,7 +1080,19 @@ def decode_packet(data: bytes) -> MQTTMessage:
     decoder = _DECODERS.get(packet_type)
     if decoder is None:  # pragma: no cover - MQTTPacketType is exhaustive above
         raise MQTTDecodeError(f'Unhandled packet type {packet_type!r}')
-    msg = decoder(body, flags)
+    # ``body`` is exactly Remaining Length bytes (validated above), so we hold
+    # the whole declared packet.  An inner decoder that still claims "need more"
+    # (IncompletePacket) or indexes past the body (IndexError) means the packet's
+    # contents are inconsistent with its declared length — a Malformed Packet
+    # (§1.5.5, §4.13), not a short read.  Both must surface as MQTTDecodeError so
+    # the framer resyncs (drops a byte) instead of stalling forever on a body
+    # that will never grow, or unwinding read_loop on an uncaught IndexError.
+    try:
+        msg = decoder(body, flags)
+    except IncompletePacket as exc:
+        raise MQTTDecodeError('Packet body inconsistent with Remaining Length') from exc
+    except IndexError as exc:
+        raise MQTTDecodeError('Packet body indexed past its Remaining Length') from exc
 
     msg._set_consumed(total)
     return msg

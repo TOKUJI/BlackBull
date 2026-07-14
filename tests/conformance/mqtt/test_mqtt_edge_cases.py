@@ -370,14 +370,16 @@ class TestSessionStateDetails:
                 201: 'PUBREC_SENT',
             },
             'pending_qos2_out': {
-                300: 'PUBLISH_SENT',  # PUBLISH sent, waiting for PUBREC
-                301: 'PUBREL_SENT',   # PUBREL sent, waiting for PUBCOMP
+                # Outbound entries keep the PUBLISH for §4.4 DUP replay while
+                # still awaiting PUBREC; a PUBREL-stage entry is state-only.
+                300: {'state': 'PUBLISH_SENT', 'packet': None},
+                301: {'state': 'PUBREL_SENT'},
             },
         }
         session = mqtt.sessions.get('qos2-client')
         assert session['pending_qos2_in'][200] == 'PUBREC_SENT'
-        assert session['pending_qos2_out'][300] == 'PUBLISH_SENT'
-        assert session['pending_qos2_out'][301] == 'PUBREL_SENT'
+        assert session['pending_qos2_out'][300]['state'] == 'PUBLISH_SENT'
+        assert session['pending_qos2_out'][301]['state'] == 'PUBREL_SENT'
 
 
 # ============================================================================
