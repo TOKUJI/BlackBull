@@ -94,10 +94,12 @@ async def auth(event):               # every handler receives the Event
         raise PermissionError('denied')
 ```
 
-The four request-lifecycle events (`request_received`, `before_handler`,
-`after_handler`, `request_completed`) are emitted from `BlackBull._dispatch`
-only (Sprint 64) — exactly once per request under any transport (own server,
-uvicorn, TestClient).
+The four request-lifecycle events fire exactly once per request under any
+transport (own server, uvicorn, TestClient): `request_received`,
+`before_handler`, and `after_handler` are emitted from `BlackBull._dispatch`
+(Sprint 64); `request_completed` from `BlackBull.__call__` after the global
+middleware chain returns, so its wire fields reflect what a buffering
+`app.use` middleware (e.g. `Compression`) actually sent (issue #145).
 
 ## Logging
 

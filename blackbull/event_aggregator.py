@@ -42,11 +42,12 @@ class EventAggregator:
     # ------------------------------------------------------------------
     # Request lifecycle
     # ------------------------------------------------------------------
-    # The request-lifecycle events (request_received / before_handler /
-    # after_handler / request_completed) are emitted by BlackBull._dispatch —
-    # the single cross-transport emission point (Sprint 64) — so they fire
-    # under external ASGI hosts (uvicorn, TestClient) too, exactly once per
-    # request.  Only wire-level events remain here.
+    # The request-lifecycle events are emitted by the application layer —
+    # request_received / before_handler / after_handler by BlackBull._dispatch
+    # (Sprint 64), request_completed by BlackBull.__call__ after the global
+    # middleware chain returns (issue #145) — so they fire under external
+    # ASGI hosts (uvicorn, TestClient) too, exactly once per request.  Only
+    # wire-level events remain here.
 
     async def on_request_disconnected(self, scope: dict[str, Any]) -> None:
         """Fire Level B ``request_disconnected``."""

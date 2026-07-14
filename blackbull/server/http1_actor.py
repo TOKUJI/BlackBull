@@ -278,9 +278,9 @@ class RequestActor(Actor):
 
     Spawned by HTTP1Actor, awaited to completion.  Calls the ASGI app.
 
-    The request-lifecycle Level B events (request_received / before_handler /
-    after_handler / request_completed) are emitted by ``BlackBull._dispatch``
-    — the single cross-transport emission point (Sprint 64) — not here.  The
+    The request-lifecycle Level B events are emitted by the application
+    layer (``BlackBull._dispatch`` / ``__call__``, Sprint 64 + issue #145) —
+    the cross-transport emission points — not here.  The
     actor layer emits only the Level B ``error`` event, for exceptions that
     escape the app call (e.g. a raising global middleware).
     """

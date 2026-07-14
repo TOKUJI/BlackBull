@@ -61,8 +61,9 @@ class _FakeReader(AbstractReader):
 
 
 def _raw_request(method: str = 'GET', path: str = '/',
-                 version: str = 'HTTP/1.1', host: str = 'localhost:8000') -> bytes:
-    lines = [f'{method} {path} {version}', f'Host: {host}', '', '']
+                 version: str = 'HTTP/1.1', host: str = 'localhost:8000',
+                 extra_headers: list[str] = []) -> bytes:
+    lines = [f'{method} {path} {version}', f'Host: {host}', *extra_headers, '', '']
     return '\r\n'.join(lines).encode()
 
 
@@ -272,6 +273,48 @@ async def test_duration_is_nonnegative_float():
     d = captured[0].detail
     assert isinstance(d['duration_ms'], float)
     assert d['duration_ms'] >= 0.0
+
+
+@pytest.mark.asyncio
+async def test_wire_fields_populated_with_global_buffering_middleware():
+    """Wire fields survive a global middleware that buffers the response.
+
+    Issue #145: ``app.use(Compression())`` wraps *outside* ``_dispatch``, and
+    Compression holds the whole body back until ``call_next`` returns.  The
+    event must still report the real status and the (compressed) byte count —
+    not the AccessLogRecord '-'/0 placeholders it reported when the emission
+    happened before the buffered response was sent.
+    """
+    from blackbull.middleware import Compression
+
+    body = b'<html><body>' + b'hello world ' * 50 + b'</body></html>'
+    app = BlackBull()
+    app.use(Compression())
+    captured: list[Event] = []
+    seen = asyncio.Event()
+
+    @app.on('request_completed')
+    async def observer(event: Event):
+        captured.append(event)
+        seen.set()
+
+    @app.route(path='/gz')
+    async def handler(scope, receive, send):
+        await send({'type': 'http.response.start', 'status': 200,
+                    'headers': [(b'content-type', b'text/html')]})
+        await send({'type': 'http.response.body', 'body': body,
+                    'more_body': False})
+
+    await _run_request(app, _raw_request(
+        path='/gz', extra_headers=['Accept-Encoding: gzip']))
+    await asyncio.wait_for(seen.wait(), timeout=2.0)
+    await asyncio.sleep(0.2)
+    assert len(captured) == 1
+
+    d = captured[0].detail
+    assert d['status'] == 200
+    # The compressed body actually sent — smaller than the original, never 0.
+    assert 0 < d['response_bytes'] < len(body)
 
 
 # ---------------------------------------------------------------------------
