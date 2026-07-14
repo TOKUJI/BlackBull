@@ -5075,9 +5075,9 @@ response code from :class:<code>BadRequestError</code>'s 400).</p>
 
         <p>Owns one HTTP/1.1 request lifetime.</p>
 <p>Spawned by HTTP1Actor, awaited to completion.  Calls the ASGI app.</p>
-<p>The request-lifecycle Level B events (request_received / before_handler /
-after_handler / request_completed) are emitted by <code>BlackBull._dispatch</code>
-— the single cross-transport emission point (Sprint 64) — not here.  The
+<p>The request-lifecycle Level B events are emitted by the application
+layer (<code>BlackBull._dispatch</code> / <code>__call__</code>, Sprint 64 + issue #145) —
+the cross-transport emission points — not here.  The
 actor layer emits only the Level B <code>error</code> event, for exceptions that
 escape the app call (e.g. a raising global middleware).</p>
 

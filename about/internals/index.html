@@ -5101,8 +5101,11 @@ documented in <a href="../../guide/events/">Events</a> —
 <code>connection_accepted</code>, etc.  The request-lifecycle events
 (<code>request_received</code>, <code>before_handler</code>, <code>after_handler</code>,
 <code>request_completed</code>) are emitted by the application layer
-(<code>BlackBull._dispatch</code>) instead, so they fire identically under
-BlackBull's own server and under external ASGI hosts.</p>
+instead (<code>BlackBull._dispatch</code>, except <code>request_completed</code>,
+which fires after the global middleware chain returns so a
+buffering middleware such as <code>Compression</code> has finished
+sending), so they fire identically under BlackBull's own
+server and under external ASGI hosts.</p>
 <h2 id="responsibilities">Responsibilities<a class="headerlink" href="#responsibilities" title="Permanent link">&para;</a></h2>
 <h3 id="asgiserver"><code>ASGIServer</code><a class="headerlink" href="#asgiserver" title="Permanent link">&para;</a></h3>
 <ul>
