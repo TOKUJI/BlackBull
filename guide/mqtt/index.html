@@ -4828,7 +4828,11 @@ conformance matrix:</p>
 </tr>
 <tr>
 <td>Subscriptions</td>
-<td>SUBSCRIBE / SUBACK, UNSUBSCRIBE / UNSUBACK, <code>+</code> and <code>#</code> wildcards, <code>$</code>-topic rules, shared subscriptions</td>
+<td>SUBSCRIBE / SUBACK, UNSUBSCRIBE / UNSUBACK, <code>+</code> and <code>#</code> wildcards, <code>$</code>-topic rules; <code>No Local</code> and <code>Retain As Published</code> options honoured; invalid Topic Filters rejected (<code>0x8F</code>). Shared subscriptions (<code>$share/…</code>) are <strong>not implemented</strong> and are rejected with <code>0x9E</code> rather than silently broadcast</td>
+</tr>
+<tr>
+<td>Publish</td>
+<td>invalid Topic Names (wildcards / null) rejected (<code>0x90</code>), never routed or retained</td>
 </tr>
 <tr>
 <td>QoS 0</td>
@@ -4840,7 +4844,7 @@ conformance matrix:</p>
 </tr>
 <tr>
 <td>QoS 2</td>
-<td>PUBREC → PUBREL → PUBCOMP four-way handshake</td>
+<td>PUBREC → PUBREL → PUBCOMP four-way handshake; duplicate PUBLISH de-duplicated; unacked messages replayed with <code>DUP=1</code> on reconnect</td>
 </tr>
 <tr>
 <td>Retained</td>
@@ -4852,7 +4856,11 @@ conformance matrix:</p>
 </tr>
 <tr>
 <td>Keep-alive</td>
-<td>PINGREQ / PINGRESP</td>
+<td>PINGREQ / PINGRESP; an idle connection is closed (Will fired) at 1.5× the negotiated Keep Alive (§3.1.2.10)</td>
+</tr>
+<tr>
+<td>Session takeover</td>
+<td>a second CONNECT for a live Client Identifier disconnects the prior connection with <code>0x8E</code> (§3.1.4)</td>
 </tr>
 <tr>
 <td>Properties</td>
