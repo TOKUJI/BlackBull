@@ -531,14 +531,19 @@ class BlackBull:
     async def _dispatch(self, scope, receive, send):
         """Route and dispatch a single non-lifespan request.
 
-        Single emission point for the request-lifecycle Level B events
-        (``request_received`` / ``before_handler`` / ``after_handler`` /
-        ``request_completed``) — Sprint 64 consolidated them here, the one
-        choke point every transport passes (BlackBull's own HTTP/1.1 and
-        HTTP/2 actors, uvicorn/hypercorn, TestClient), so each fires exactly
-        once per request regardless of how the app is served.  The protocol
-        actors emit only wire-level events (``request_disconnected``,
-        ``error``, websocket/connection lifecycle).
+        Single emission point for the in-request Level B lifecycle events
+        (``request_received`` / ``before_handler`` / ``after_handler``) —
+        Sprint 64 consolidated them here, the one choke point every
+        transport passes (BlackBull's own HTTP/1.1 and HTTP/2 actors,
+        uvicorn/hypercorn, TestClient), so each fires exactly once per
+        request regardless of how the app is served.  ``request_completed``
+        is emitted from ``__call__`` instead: a *global* middleware
+        (``app.use``) wraps outside ``_dispatch`` and may buffer the whole
+        response (e.g. ``Compression``), so its wire fields (status /
+        response_bytes) are only final after the full chain returns
+        (issue #145).  The protocol actors emit only wire-level events
+        (``request_disconnected``, ``error``, websocket/connection
+        lifecycle).
 
         Each emission is guarded by ``has_listeners`` so a request with no
         registered handlers pays only a dict lookup, not an ``Event`` +
@@ -573,29 +578,7 @@ class BlackBull:
                 'http_version': scope.get('http_version', '-'),
                 'headers':      scope.get('headers', []),
             }))
-        try:
-            await self._dispatch_http(scope, receive, send, scheme)
-        finally:
-            # Fires for every completed HTTP exchange — including 404/405 and
-            # handler errors answered by the error router — but not when the
-            # client disconnected mid-request.  Wire fields come from the
-            # AccessLogRecord BlackBull's own server publishes in
-            # scope['state']['access_log']; under external ASGI hosts they
-            # fall back to placeholders ('-'/0).
-            if (dispatcher.has_listeners('request_completed')
-                    and not scope.get('_disconnected')):
-                log = scope.get('state', {}).get('access_log')
-                client = scope.get('client') or ('-',)
-                await dispatcher.emit(Event('request_completed', detail={
-                    'scope':          scope,
-                    'client_ip':      str(client[0]),
-                    'method':         scope.get('method', '-'),
-                    'path':           scope.get('path', '-'),
-                    'http_version':   scope.get('http_version', '-'),
-                    'status':         log.status if log else '-',
-                    'response_bytes': log.response_bytes if log else 0,
-                    'duration_ms':    log.duration_ms() if log else 0.0,
-                }))
+        await self._dispatch_http(scope, receive, send, scheme)
 
     async def _dispatch_http(self, scope, receive, send, scheme):
         """Route and run one HTTP request (the non-WebSocket half of _dispatch)."""
@@ -733,16 +716,29 @@ class BlackBull:
         if raw_headers is not None and not isinstance(raw_headers, Headers):
             scope['headers'] = Headers(raw_headers)
 
-        # ``scope_completed`` — the guaranteed, cross-protocol terminal event.
-        # Emitted here, at the one point every scope (HTTP request, WebSocket
-        # connection, gRPC call) passes through exactly once, under *any* server
-        # (BlackBull's own actors, uvicorn, TestClient).  It is the application-
-        # level completion event (fires wherever the app runs), as distinct from
-        # the server-level telemetry events (``request_completed`` et al., which
-        # need wire data and fire only under BlackBull's server).  Register
-        # cleanup with ``@app.on('scope_completed', blocking=True)``.  Guarded so
-        # a request with no such listener pays only one dict lookup.
-        if not self._dispatcher.has_listeners('scope_completed'):
+        # Terminal events, emitted here — after the *global* middleware chain —
+        # because an ``app.use`` middleware wraps outside ``_dispatch`` and may
+        # buffer/transform the response (e.g. ``Compression``), so the wire
+        # data is only final once the full chain returns (issue #145):
+        #
+        # - ``request_completed`` — every finished HTTP exchange (including
+        #   404/405, error-router responses, and responses short-circuited by
+        #   a global middleware) unless the client disconnected mid-request.
+        #   Wire fields come from the AccessLogRecord BlackBull's own server
+        #   publishes in scope['state']['access_log']; under external ASGI
+        #   hosts they fall back to placeholders ('-'/0).
+        # - ``scope_completed`` — the guaranteed, cross-protocol terminal event
+        #   for every scope (HTTP request, WebSocket connection, gRPC call),
+        #   under *any* server (BlackBull's own actors, uvicorn, TestClient).
+        #   Register cleanup with ``@app.on('scope_completed', blocking=True)``.
+        #
+        # Both are guarded by ``has_listeners`` so a request with no such
+        # listener pays only a dict lookup.
+        dispatcher = self._dispatcher
+        want_request_completed = (scope.get('type') == 'http'
+                                  and dispatcher.has_listeners('request_completed'))
+        if not (want_request_completed
+                or dispatcher.has_listeners('scope_completed')):
             await self._chain(scope, receive, send)
             return
         exc: BaseException | None = None
@@ -752,19 +748,34 @@ class BlackBull:
             exc = e
             raise
         finally:
-            # ``exception`` reflects whether the scope encountered an error:
-            # either one that propagated out of the chain (exc), or a handler
-            # error that ``_dispatch`` already turned into a 500 and recorded in
-            # ``scope['state']['error_exception']``.  ``None`` for a clean
-            # request (including a 404, which is not an exception).
-            err = exc or scope.get('state', {}).get('error_exception')
-            await self._dispatcher.emit(Event('scope_completed', {
-                'scope':     scope,
-                'type':      scope.get('type', '-'),
-                'client_ip': str((scope.get('client') or ['-'])[0]),
-                'path':      scope.get('path', '-'),
-                'exception': err,
-            }))
+            if want_request_completed and not scope.get('_disconnected'):
+                log = scope.get('state', {}).get('access_log')
+                client = scope.get('client') or ('-',)
+                await dispatcher.emit(Event('request_completed', detail={
+                    'scope':          scope,
+                    'client_ip':      str(client[0]),
+                    'method':         scope.get('method', '-'),
+                    'path':           scope.get('path', '-'),
+                    'http_version':   scope.get('http_version', '-'),
+                    'status':         log.status if log else '-',
+                    'response_bytes': log.response_bytes if log else 0,
+                    'duration_ms':    log.duration_ms() if log else 0.0,
+                }))
+            if dispatcher.has_listeners('scope_completed'):
+                # ``exception`` reflects whether the scope encountered an
+                # error: either one that propagated out of the chain (exc), or
+                # a handler error that ``_dispatch`` already turned into a 500
+                # and recorded in ``scope['state']['error_exception']``.
+                # ``None`` for a clean request (including a 404, which is not
+                # an exception).
+                err = exc or scope.get('state', {}).get('error_exception')
+                await dispatcher.emit(Event('scope_completed', {
+                    'scope':     scope,
+                    'type':      scope.get('type', '-'),
+                    'client_ip': str((scope.get('client') or ['-'])[0]),
+                    'path':      scope.get('path', '-'),
+                    'exception': err,
+                }))
 
     def route(self, methods: str | HTTPMethod | Iterable[str | HTTPMethod] = [HTTPMethod.GET],
               path: str | re.Pattern = '/', scheme: Scheme | Iterable[Scheme] = Scheme.http,

@@ -68,8 +68,11 @@ documented in [Events](../guide/events.md) —
 `connection_accepted`, etc.  The request-lifecycle events
 (`request_received`, `before_handler`, `after_handler`,
 `request_completed`) are emitted by the application layer
-(`BlackBull._dispatch`) instead, so they fire identically under
-BlackBull's own server and under external ASGI hosts.
+instead (`BlackBull._dispatch`, except `request_completed`,
+which fires after the global middleware chain returns so a
+buffering middleware such as `Compression` has finished
+sending), so they fire identically under BlackBull's own
+server and under external ASGI hosts.
 
 ## Responsibilities
 

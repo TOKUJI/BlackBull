@@ -31,7 +31,23 @@ so the editable install's metadata catches up.
 
 ## [Unreleased]
 
-## [0.53.3] — 2026-07-14
+### Fixed
+
+- **`request_completed` now reports the real status / byte count when a
+  global middleware buffers the response** (issue #145). The event was
+  emitted from `BlackBull._dispatch`, but an `app.use` middleware wraps
+  *outside* `_dispatch` — so when `Compression` buffered the body and only
+  sent the response after `call_next` returned, the event fired first and
+  carried the `AccessLogRecord` placeholders (`status='-'` → `0`,
+  `response_bytes=0`). Any request whose `Accept-Encoding` selected an
+  installed codec (e.g. every browser visit, via `gzip`) was affected;
+  this was present in every release with global-middleware support, not a
+  0.53.3 regression. Emission moved to `BlackBull.__call__`, after the
+  global middleware chain returns (still exactly once per request, still
+  before `scope_completed`). A consequence: responses short-circuited by a
+  global middleware (e.g. a cache hit answered without calling
+  `call_next`) now fire `request_completed` too — previously they were
+  invisible to it.
 
 Sprint 70 — MQTT 5.0 broker hardening: the `1.19` correctness cluster (eight
 RFC-conformance bugs). All localised to the broker/connection actors on the MQTT
