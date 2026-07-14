@@ -31,6 +31,8 @@ so the editable install's metadata catches up.
 
 ## [Unreleased]
 
+## [0.53.4] — 2026-07-15
+
 ### Fixed
 
 - **`request_completed` now reports the real status / byte count when a
@@ -48,6 +50,8 @@ so the editable install's metadata catches up.
   global middleware (e.g. a cache hit answered without calling
   `call_next`) now fire `request_completed` too — previously they were
   invisible to it.
+
+## [0.53.3] — 2026-07-14
 
 Sprint 70 — MQTT 5.0 broker hardening: the `1.19` correctness cluster (eight
 RFC-conformance bugs). All localised to the broker/connection actors on the MQTT
