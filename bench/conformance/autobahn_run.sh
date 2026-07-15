@@ -10,6 +10,13 @@
 # Usage:
 #   bash bench/conformance/autobahn_run.sh            # full fuzzingclient
 #   CASES='1.*' bash bench/conformance/autobahn_run.sh  # subset
+#   CASES='1.*,2.*,6.*,7.*' bash bench/conformance/autobahn_run.sh  # PR lane
+#
+# CASES is a comma-separated list of Autobahn case patterns (default '*').
+# The static autobahn_fuzzingclient.json is a template: a per-run copy with
+# "cases" substituted is rendered into the results dir and mounted instead
+# (P.2, Sprint 72 — previously CASES was documented but ignored and subset
+# runs silently ran all 517 cases).
 #
 # Reports land in bench/conformance/results/autobahn_<timestamp>/.
 
@@ -47,13 +54,30 @@ fi
 
 CONFIG_DIR="$(cd "$(dirname "$0")" && pwd)"
 
+# Render the per-run config: the checked-in JSON is the template, only
+# "cases" is replaced.  With CASES unset the rendered "cases" is ["*"] —
+# identical to the template — so the CI job (which sets no CASES) keeps
+# running the full suite.
+CASES="${CASES:-*}" python3 - "$CONFIG_DIR/autobahn_fuzzingclient.json" \
+    "$OUT/fuzzingclient.json" <<'PYEOF'
+import json, os, sys
+src, dst = sys.argv[1], sys.argv[2]
+with open(src) as f:
+    cfg = json.load(f)
+cases = [c.strip() for c in os.environ['CASES'].split(',') if c.strip()]
+cfg['cases'] = cases or ['*']
+with open(dst, 'w') as f:
+    json.dump(cfg, f, indent=3)
+PYEOF
+
 echo "Autobahn|Testsuite vs ws://localhost:$PORT"
+echo "Cases:   ${CASES:-*}"
 echo "Results: $OUT"
 echo ""
 
 docker run --rm \
     --add-host=host.docker.internal:host-gateway \
-    -v "$CONFIG_DIR/autobahn_fuzzingclient.json:/config/fuzzingclient.json:ro" \
+    -v "$(realpath "$OUT/fuzzingclient.json"):/config/fuzzingclient.json:ro" \
     -v "$(realpath "$OUT"):/results" \
     crossbario/autobahn-testsuite \
     wstest -m fuzzingclient -s /config/fuzzingclient.json
