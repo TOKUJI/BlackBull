@@ -69,6 +69,10 @@ class WebSocketSession:
         self._recipient._connect_sent = True
         self.subprotocol = subprotocol
         self._closed = False
+        # True once a 'websocket.disconnect' has been surfaced via
+        # ``receive`` — close() then skips its drain loop (the closing
+        # handshake already completed from our side's point of view).
+        self._disconnect_seen = False
 
     # ---- public API ------------------------------------------------------
 
@@ -93,9 +97,22 @@ class WebSocketSession:
         ``WebSocketRecipient`` (with masking, since this session is the
         client).  Server PONG frames are silently dropped.
         """
-        return await self._recipient()
+        event = await self._recipient()
+        if event.get('type') == 'websocket.disconnect':
+            self._disconnect_seen = True
+        return event
 
-    async def close(self, code: int = _CLOSE_CODE_NORMAL) -> None:
+    async def close(self, code: int = _CLOSE_CODE_NORMAL, *,
+                    drain_timeout: float = 5.0) -> None:
+        """Send a CLOSE frame, await the peer's echoed CLOSE (bounded by
+        *drain_timeout*), and stop the background reader task.
+
+        Sprint 72 (audit 1.20c) — RFC 6455 §7.1.2: the closing handshake
+        is complete once both endpoints have sent and received a Close
+        frame.  A silent peer cannot hang ``close()``: after
+        *drain_timeout* the reader is shut down regardless.  Data frames
+        still in flight during the drain are discarded.  Idempotent.
+        """
         if self._closed:
             return
         self._closed = True
@@ -104,6 +121,19 @@ class WebSocketSession:
             await self._send_frame(payload, WSOpcode.CLOSE)
         except Exception:
             pass  # best-effort close frame; the socket may already be gone.
+        try:
+            if not self._disconnect_seen:
+                async with asyncio.timeout(drain_timeout):
+                    while True:
+                        event = await self._recipient()
+                        if event.get('type') == 'websocket.disconnect':
+                            break
+        except Exception:
+            # TimeoutError (silent peer) or a recipient-raised protocol
+            # error — either way the drain is over; shut the reader down.
+            pass
+        finally:
+            await self._recipient.shutdown()
 
     # ---- internal --------------------------------------------------------
 

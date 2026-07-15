@@ -866,7 +866,8 @@ class HTTP2Sender(BaseSender):
 
     def __init__(self, writer: AbstractWriter, factory, stream_id: int,
                  push_callback=None, coalescer: 'ConnCoalescer | None' = None,
-                 conn_window: 'ConnectionWindow | None' = None):
+                 conn_window: 'ConnectionWindow | None' = None,
+                 initial_window: int | None = None):
         super().__init__(writer)
         self._factory = factory
         self._stream_id = stream_id
@@ -884,8 +885,13 @@ class HTTP2Sender(BaseSender):
         # Per-stream send window.  Refactor 2.5 — a plain int (this was a
         # dict-of-one keyed on the sender's own stream id, which obscured that
         # it is scalar and invited readers to hunt for multi-stream semantics
-        # that never existed).
-        self.stream_window_size = DEFAULT_INITIAL_WINDOW_SIZE
+        # that never existed).  Seeded at construction from the peer's
+        # SETTINGS_INITIAL_WINDOW_SIZE when known (bugs 1.20a + 2.11): both
+        # server and client pass ``initial_window`` so a sender created after
+        # the SETTINGS exchange starts at the peer's announced window, not
+        # the RFC 9113 §6.9.2 default.
+        self.stream_window_size = (DEFAULT_INITIAL_WINDOW_SIZE
+                                   if initial_window is None else initial_window)
         self.max_frame_size = DEFAULT_MAX_FRAME_SIZE
         self._window_open: asyncio.Event | None = None
         self._end_stream_sent: bool = False
@@ -1308,10 +1314,12 @@ class SenderFactory:
     @staticmethod
     def http2(stream_writer, factory, stream_id: int,
               push_callback=None, coalescer: 'ConnCoalescer | None' = None,
-              conn_window: 'ConnectionWindow | None' = None) -> HTTP2Sender:
+              conn_window: 'ConnectionWindow | None' = None,
+              initial_window: int | None = None) -> HTTP2Sender:
         return HTTP2Sender(SenderFactory._ensure_writer(stream_writer),
                            factory, stream_id, push_callback, coalescer,
-                           conn_window=conn_window)
+                           conn_window=conn_window,
+                           initial_window=initial_window)
 
     @staticmethod
     def websocket(stream_writer, *, compressor=None) -> WebSocketSender:
