@@ -31,6 +31,12 @@ so the editable install's metadata catches up.
 
 ## [Unreleased]
 
+## [0.54.0] — 2026-07-15
+
+Sprint 71 — removal of the deprecated in-tree `Session` middleware, the
+project's longest-running deprecation (since 0.38). The only breaking change;
+`blackbull-session` is the drop-in replacement.
+
 ### Removed
 
 - **The deprecated in-tree `Session` middleware** (`blackbull.middleware.Session`
