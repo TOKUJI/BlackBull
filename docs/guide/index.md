@@ -14,7 +14,7 @@ first — it covers installation and the shape of a minimal app.
   registration.
 - [**Middleware**](middleware.md) — writing middleware,
   `@as_middleware`, attaching to routes, built-in middleware
-  (`websocket`, `Compression`, `Session`, `Cache`, `CORS`,
+  (`websocket`, `Compression`, `Cache`, `CORS`,
   `StaticFiles`), common recipes.
 - [**Error handling**](error-handling.md) — `@app.on_error`,
   the DEV-mode traceback page, PROD-mode terse responses.

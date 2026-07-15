@@ -31,6 +31,42 @@ so the editable install's metadata catches up.
 
 ## [Unreleased]
 
+### Fixed
+
+- **HTTP/2 `:authority` is now validated and surfaced as the `host` header**
+  (#150, Sprint 72; RFC 9113 §8.3.1). Previously the pseudo-header was parsed
+  but never checked nor mapped into the ASGI scope, so
+  `request.headers.get(b'host')` returned `None` for virtually every HTTP/2
+  client (grpcio, browsers, and `curl --http2` send `:authority` without a
+  literal `Host`), and the server-push path silently synthesised
+  `:authority = localhost`. Now: an `http(s)` request carrying neither
+  `:authority` nor `Host` is rejected as malformed (`RST_STREAM
+  PROTOCOL_ERROR`), as are authorities containing userinfo, RFC 3986 §3.2
+  delimiters, or whitespace, and multiple `Host` fields — the same grammar
+  HTTP/1.1 has enforced since 0.49.3. A valid `:authority` replaces any
+  literal `Host` in `scope['headers']` (mirroring H1's
+  absolute-form-overrides-Host semantics) on both the request path and the
+  RFC 8441 WebSocket path, so the same handler sees the same headers under
+  either transport. Plain CONNECT is untouched (§8.5 tunnel semantics).
+- **Experimental H2 client: send windows now honour the server's
+  `SETTINGS_INITIAL_WINDOW_SIZE` for late streams** (#151, audit 1.20a).
+  A sender created after the SETTINGS exchange started at the RFC-default
+  65535 and could stall or overrun under a non-default window; both server
+  and client now seed the per-stream window at `HTTP2Sender` construction
+  (the shared helper audit item 2.11 called for).
+- **Experimental WS-over-H2 client: third divergent frame parser deleted**
+  (#151, audit 1.20b/F.2). `WebSocketH2Session` now reuses the same
+  `WebSocketRecipient`/`FragmentAssembler` stack as the server and the H1
+  client, gaining fragmentation reassembly, transparent PING→PONG (masked,
+  as a client's must be), UTF-8 validation, FIN/RSV/MASK enforcement, and
+  the frame-size cap. The `(opcode, payload)` `receive()` API is unchanged.
+- **Experimental WS clients: `close()` completes the closing handshake**
+  (#151, audit 1.20c). Both `WebSocketSession.close()` and
+  `WebSocketH2Session.close()` now drain the peer's echoed CLOSE (bounded
+  by a new `drain_timeout` parameter, default 5 s — a silent peer cannot
+  hang `close()`) and cancel the background reader via the new public
+  `WebSocketRecipient.shutdown()`, so no task outlives the session.
+
 ### Removed
 
 - **The deprecated in-tree `Session` middleware** (`blackbull.middleware.Session`
@@ -41,6 +77,19 @@ so the editable install's metadata catches up.
   `app.use(Session(...))` for `SessionExtension(app, ...)` — handlers keep
   reading and writing `scope['session']` unchanged, and `BB_SESSION_SECRET`
   is still honoured by the replacement package.
+
+### Internal
+
+- `bench/conformance/autobahn_run.sh` — `CASES='1.*'` (comma-separated
+  patterns accepted) now actually subsets the Autobahn run instead of being
+  silently ignored; a per-run config is rendered with only `"cases"`
+  substituted, so the unset-`CASES` CI job still runs the full 517-case
+  suite (#152, audit P.2).
+
+### Docs
+
+- `docs/about/rfc9113-implementation.md` §8.3 — documents the new
+  `:authority` validation and ASGI `host` mapping.
 
 ## [0.53.4] — 2026-07-15
 
