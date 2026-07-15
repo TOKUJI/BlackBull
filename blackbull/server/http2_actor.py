@@ -1428,8 +1428,10 @@ class HTTP2Actor(Actor):
         parent_stream = self.root_stream.find_child(parent_stream_id)
         parent_scope = (parent_stream.scope
                         if (parent_stream and parent_stream.scope is not None) else {})
+        # F.1b maps ``:authority`` into the scope's ``host`` header, so any
+        # dispatched parent stream carries one; ``localhost`` only covers a
+        # scope-less parent.
         raw_authority = (
-            parent_scope.get('headers', Headers([])).get(b':authority') or
             parent_scope.get('headers', Headers([])).get(b'host') or
             b'localhost')
         authority = raw_authority.decode() if isinstance(raw_authority, bytes) else raw_authority

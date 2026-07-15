@@ -30,7 +30,7 @@ def _make_h2_frame(type_byte, flags, stream_id: int, payload: bytes) -> bytes:
 
 def _make_get(stream_id: int, path: bytes, encoder: Encoder) -> bytes:
     block = encoder.encode([(b':method', b'GET'), (b':path', path),
-                            (b':scheme', b'https')])
+                            (b':scheme', b'https'), (b':authority', b'example.com')])
     flags: FrameFlags = HeaderFrameFlags.END_HEADERS | HeaderFrameFlags.END_STREAM
     return _make_h2_frame(FrameTypes.HEADERS, flags, stream_id, block)
 

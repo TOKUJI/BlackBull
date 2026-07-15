@@ -94,7 +94,7 @@ class TestHeaderNameNormalization:
         block = encoder.encode([(b'content-type', b'text/plain'),
                                  (b':method', b'GET'),
                                  (b':path', b'/'),
-                                 (b':scheme', b'https')])
+                                 (b':scheme', b'https'), (b':authority', b'example.com')])
         raw = _make_h2_frame(FrameTypes.HEADERS, HeaderFrameFlags.END_HEADERS, 1, block)
         frame = factory.load(raw)
         names = [k for k, _ in frame.headers]
@@ -165,7 +165,7 @@ class TestDataFrameHandling:
         encoder = Encoder()
         block = encoder.encode([(b':method', b'POST'),
                                  (b':path', b'/upload'),
-                                 (b':scheme', b'https')])
+                                 (b':scheme', b'https'), (b':authority', b'example.com')])
         flags: FrameFlags = HeaderFrameFlags.END_HEADERS
         if end_stream:
             flags |= HeaderFrameFlags.END_STREAM
@@ -280,7 +280,7 @@ class TestGoAwayHandling:
         """After GOAWAY, no further frames should be dispatched to the app."""
         encoder = Encoder()
         block = encoder.encode([(b':method', b'GET'), (b':path', b'/'),
-                                 (b':scheme', b'https')])
+                                 (b':scheme', b'https'), (b':authority', b'example.com')])
         h_frame = _make_h2_frame(FrameTypes.HEADERS,
                                  HeaderFrameFlags.END_HEADERS | HeaderFrameFlags.END_STREAM, 1, block)
         goaway = self._make_goaway_frame(last_stream_id=0, error_code=0x0)

@@ -33,7 +33,7 @@ def _make_headers_frame(stream_id: int = 1, end_stream: bool = True,
     encoder = Encoder()
     block = encoder.encode([(b':method', method),
                              (b':path', path),
-                             (b':scheme', b'https')])
+                             (b':scheme', b'https'), (b':authority', b'example.com')])
     flags = HeaderFrameFlags.END_HEADERS
     if end_stream:
         flags |= HeaderFrameFlags.END_STREAM
