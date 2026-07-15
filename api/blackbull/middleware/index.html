@@ -2758,34 +2758,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#blackbull.middleware.Session" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Session
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Session">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.middleware.Session--parameters" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Parameters
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#blackbull.middleware.StaticFiles" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2976,34 +2948,6 @@
     
   
     proxy
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="session/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    session
   
 
     
@@ -4795,34 +4739,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#blackbull.middleware.Session" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Session
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Session">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.middleware.Session--parameters" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Parameters
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#blackbull.middleware.StaticFiles" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5185,75 +5101,6 @@ falls back gracefully to gzip or no compression.</p>
 @app.route(path='/', middlewares=[Compression()])
 async def handler(scope, receive, send): ...
 </code></pre>
-
-
-
-
-
-
-
-
-
-
-
-<div class="doc doc-children">
-
-
-
-
-
-
-
-
-
-
-
-
-  </div>
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-class">
-
-
-
-<h3 id="blackbull.middleware.Session" class="doc doc-heading">
-            <code>Session</code>
-
-
-<a href="#blackbull.middleware.Session" class="headerlink" title="Permanent link">&para;</a></h3>
-
-
-    <div class="doc doc-contents ">
-
-
-
-        <p>ASGI middleware that maintains a signed-cookie session.</p>
-<h5 id="blackbull.middleware.Session--parameters">Parameters<a class="headerlink" href="#blackbull.middleware.Session--parameters" title="Permanent link">&para;</a></h5>
-<p>secret:
-    The HMAC key.  Bytes or str.  When omitted, <code>BB_SESSION_SECRET</code>
-    is read from the environment.  A missing / empty secret raises at
-    construction — no insecure default.
-cookie_name:
-    Name of the cookie carrying the session payload.  Default
-    <code>'session'</code>.
-max_age:
-    Cookie <code>Max-Age</code> in seconds.  When set, the cookie is signed
-    with a server-side timestamp; values older than <code>max_age</code>
-    seconds are treated as expired (empty session).  <code>None</code> means
-    a session cookie that lives only as long as the browser is open.
-secure:
-    Set the <code>Secure</code> attribute so the cookie is only sent over
-    HTTPS.  Default <code>True</code>; set <code>False</code> for local-only dev.
-httponly:
-    Set the <code>HttpOnly</code> attribute (JavaScript can't read the
-    cookie).  Default <code>True</code>.
-samesite:
-    <code>Strict</code> / <code>Lax</code> / <code>None</code>.  Default <code>'Lax'</code>.
-path:
-    Cookie <code>Path</code>.  Default <code>/</code>.</p>
 
 
 

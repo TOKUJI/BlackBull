@@ -2938,34 +2938,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../middleware/session/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    session
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../middleware/static/" class="md-nav__link">
         
   
@@ -5011,7 +4983,7 @@ BB_COMPRESSION_EXECUTOR_THRESHOLD
 BB_COMPRESSION_MAX_INFLIGHT
     Maximum number of compression offloads allowed to be running
     concurrently in the asyncio default thread pool.  When at or above
-    this cap, additional eligible responses are served </strong>uncompressed<em><em>
+    this cap, additional eligible responses are served </strong>uncompressed**
     rather than queued — bounded fall-back rather than unbounded queue
     growth.  Tied to executor size: setting this above Python's default
     <code>ThreadPoolExecutor</code> <code>max_workers</code> provides no benefit.  That
@@ -5046,12 +5018,7 @@ BB_DEADLINE_TICK_MS
     that enforces connection timeouts (<code>BB_HEADER_TIMEOUT</code>,
     <code>BB_BODY_TIMEOUT</code>, <code>BB_WRITE_TIMEOUT</code>, <code>BB_KEEP_ALIVE_TIMEOUT</code>).
     Smaller = tighter timeout granularity at a small CPU cost; larger =
-    more slack but cheaper.  Default: <code>300</code>.
-BB_SESSION_SECRET
-    HMAC secret used by the :class:<code>~blackbull.middleware.session.Session</code>
-    middleware to sign cookies.  Pass <code>secret=</code> to the constructor or
-    set this env var; if neither is set, <code>Session()</code> construction
-    raises (no insecure default).  Default: </em>(unset)</em>.</p>
+    more slack but cheaper.  Default: <code>300</code>.</p>
 
 
 

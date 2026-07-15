@@ -664,10 +664,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#session" class="md-nav__link">
+  <a href="#sessions-moved-to-blackbull-session" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Session
+        Sessions — moved to blackbull-session
       
     </span>
   </a>
@@ -3061,34 +3061,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/middleware/session/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    session
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../../api/blackbull/middleware/static/" class="md-nav__link">
         
   
@@ -4893,10 +4865,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#session" class="md-nav__link">
+  <a href="#sessions-moved-to-blackbull-session" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Session
+        Sessions — moved to blackbull-session
       
     </span>
   </a>
@@ -5171,105 +5143,26 @@ pass through uncompressed.</p>
 <p>Every compressed response carries <code>Vary: Accept-Encoding</code> (folded into
 any existing <code>Vary</code>) so a shared cache never replays an encoded body to
 a client that sent <code>identity</code> / no <code>Accept-Encoding</code> (RFC 9110 §12.5.5).</p>
-<h3 id="session"><code>Session</code><a class="headerlink" href="#session" title="Permanent link">&para;</a></h3>
-<p>Signed-cookie sessions — session data lives entirely in a cookie
-HMAC-signed by the server.  No server-side store, no database.
-Trade-off: cookies are capped at ~4 KiB by browsers and you can't
-revoke a session early without rotating the secret.</p>
-<div class="admonition warning">
-<p class="admonition-title">Moved to a separate package</p>
-<p>Starting with BlackBull 0.38 the session layer lives in the
-standalone <a href="https://github.com/TOKUJI/blackbull-session"><code>blackbull-session</code></a>
-package, following the <a href="../extensions/"><code>init_app(app)</code></a>
-extension convention.  The in-tree
-<code>blackbull.middleware.Session</code> emits a <code>DeprecationWarning</code> and
-will be removed no earlier than BlackBull v0.41 (and not before
-2026-07-14).</p>
-</div>
+<h3 id="sessions-moved-to-blackbull-session">Sessions — moved to <code>blackbull-session</code><a class="headerlink" href="#sessions-moved-to-blackbull-session" title="Permanent link">&para;</a></h3>
+<p>Signed-cookie sessions live in the standalone
+<a href="https://github.com/TOKUJI/blackbull-session"><code>blackbull-session</code></a>
+package, following the <a href="../extensions/"><code>init_app(app)</code></a> extension
+convention.  The in-tree <code>blackbull.middleware.Session</code> was
+deprecated in 0.38 and <strong>removed in 0.54.0</strong>.</p>
+<p>Migration is a one-line swap:</p>
 <div class="highlight"><pre><span></span><code><span class="c1"># pip install blackbull-session</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">blackbull_session</span><span class="w"> </span><span class="kn">import</span> <span class="n">SessionExtension</span>
 
-<span class="c1"># Operator sets BB_SESSION_SECRET=&lt;32-byte random&gt; in the deployment env</span>
-<span class="n">SessionExtension</span><span class="p">(</span><span class="n">app</span><span class="p">)</span>
-
-<span class="c1"># Or pass the secret explicitly (handy for tests):</span>
-<span class="n">SessionExtension</span><span class="p">(</span><span class="n">app</span><span class="p">,</span> <span class="n">secret</span><span class="o">=</span><span class="sa">b</span><span class="s1">&#39;&lt;long-random-bytes&gt;&#39;</span><span class="p">)</span>
-
-<span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">&#39;/&#39;</span><span class="p">)</span>
-<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">index</span><span class="p">(</span><span class="n">scope</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
-    <span class="n">scope</span><span class="p">[</span><span class="s1">&#39;session&#39;</span><span class="p">][</span><span class="s1">&#39;user&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="s1">&#39;alice&#39;</span>           <span class="c1"># any JSON-serializable value</span>
-    <span class="k">await</span> <span class="n">send</span><span class="p">(</span><span class="n">Response</span><span class="p">(</span><span class="s1">&#39;signed in&#39;</span><span class="p">))</span>
+<span class="n">SessionExtension</span><span class="p">(</span><span class="n">app</span><span class="p">)</span>                        <span class="c1"># reads BB_SESSION_SECRET</span>
+<span class="n">SessionExtension</span><span class="p">(</span><span class="n">app</span><span class="p">,</span> <span class="n">secret</span><span class="o">=</span><span class="sa">b</span><span class="s1">&#39;&lt;long-random-bytes&gt;&#39;</span><span class="p">)</span>   <span class="c1"># explicit secret</span>
 
 <span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">&#39;/whoami&#39;</span><span class="p">)</span>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">whoami</span><span class="p">(</span><span class="n">scope</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
     <span class="k">await</span> <span class="n">send</span><span class="p">(</span><span class="n">Response</span><span class="p">(</span><span class="n">scope</span><span class="p">[</span><span class="s1">&#39;session&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;user&#39;</span><span class="p">,</span> <span class="s1">&#39;anonymous&#39;</span><span class="p">)))</span>
 </code></pre></div>
-<p>After construction the live extension is reachable at
-<code>app.extensions['session']</code>.</p>
-<p><code>scope['session']</code> is a <code>dict</code> subclass that tracks whether you
-mutated it.  The middleware only emits <code>Set-Cookie</code> when a request
-handler changed the session — read-only handlers leave the response
-cache-friendly.</p>
-<p>Secret resolution:</p>
-<ul>
-<li>The constructor accepts <code>secret=</code> directly.</li>
-<li>When <code>secret</code> is <code>None</code>, the middleware reads <code>BB_SESSION_SECRET</code>
-  from the environment.</li>
-<li>If neither is set, construction raises — there is no insecure
-  default.  Generate one with:
-  <div class="highlight"><pre><span></span><code>python<span class="w"> </span>-c<span class="w"> </span><span class="s2">&quot;import secrets; print(secrets.token_urlsafe(32))&quot;</span>
-</code></pre></div></li>
-</ul>
-<p>Cookie attributes (all keyword arguments, with sensible defaults):</p>
-<table>
-<thead>
-<tr>
-<th>Argument</th>
-<th>Default</th>
-<th>Notes</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>cookie_name</code></td>
-<td><code>'session'</code></td>
-<td>Name of the cookie carrying the payload.</td>
-</tr>
-<tr>
-<td><code>max_age</code></td>
-<td><code>None</code></td>
-<td>Seconds the cookie is valid.  <code>None</code> ⇒ session cookie (until browser closes).</td>
-</tr>
-<tr>
-<td><code>secure</code></td>
-<td><code>True</code></td>
-<td>Send the <code>Secure</code> attribute (cookie only over HTTPS).</td>
-</tr>
-<tr>
-<td><code>httponly</code></td>
-<td><code>True</code></td>
-<td>Send the <code>HttpOnly</code> attribute (JS can't read the cookie).</td>
-</tr>
-<tr>
-<td><code>samesite</code></td>
-<td><code>'Lax'</code></td>
-<td><code>'Strict'</code>, <code>'Lax'</code>, <code>'None'</code>, or <code>None</code> (omit).</td>
-</tr>
-<tr>
-<td><code>path</code></td>
-<td><code>'/'</code></td>
-<td>Cookie <code>Path</code>.</td>
-</tr>
-</tbody>
-</table>
-<p>Clearing the session emits a tombstone cookie with <code>Max-Age=0</code>:</p>
-<div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">&#39;/logout&#39;</span><span class="p">)</span>
-<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">logout</span><span class="p">(</span><span class="n">scope</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
-    <span class="n">scope</span><span class="p">[</span><span class="s1">&#39;session&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">clear</span><span class="p">()</span>
-    <span class="k">await</span> <span class="n">send</span><span class="p">(</span><span class="n">Response</span><span class="p">(</span><span class="s1">&#39;signed out&#39;</span><span class="p">))</span>
-</code></pre></div>
-<p>A cookie whose signature fails to verify (tampering, wrong secret)
-is silently dropped — the handler sees an empty session.</p>
+<p>Handlers keep reading and writing <code>scope['session']</code> exactly as
+before; see the <code>blackbull-session</code> README for cookie attributes,
+secret resolution, and session-clearing semantics.</p>
 <h3 id="cache"><code>Cache</code><a class="headerlink" href="#cache" title="Permanent link">&para;</a></h3>
 <p>Per-worker in-memory response cache for <code>GET</code> and <code>HEAD</code>.
 Captures the handler's response on the first hit, stores it under

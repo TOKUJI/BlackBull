@@ -1426,17 +1426,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#sessions" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Sessions
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#diagnostic-timing" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2974,34 +2963,6 @@
     
   
     proxy
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../api/blackbull/middleware/session/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    session
   
 
     
@@ -4836,17 +4797,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#sessions" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Sessions
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#diagnostic-timing" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5223,23 +5173,6 @@ or drop to <code>INFO</code> to surface the rate-limit summary records.</p>
 <td><code>BB_BROTLI_QUALITY</code></td>
 <td><code>4</code></td>
 <td>Brotli quality level (0–11) for dynamic-response compression.  4 matches Google/Cloudflare's recommendation for dynamic content; 5 matches Apache <code>mod_brotli</code>; 6 matches nginx <code>ngx_brotli</code>.  11 is appropriate only for build-time / static pre-compression — far too expensive on the request path.</td>
-</tr>
-</tbody>
-</table>
-<h2 id="sessions">Sessions<a class="headerlink" href="#sessions" title="Permanent link">&para;</a></h2>
-<table>
-<thead>
-<tr>
-<th>Variable</th>
-<th>Default</th>
-<th>Controls</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>BB_SESSION_SECRET</code></td>
-<td><em>(unset)</em></td>
-<td>HMAC secret used by the <code>Session</code> middleware to sign cookies.  Either pass <code>secret=</code> to the constructor or set this env var; if neither is set, construction raises (no insecure default).</td>
 </tr>
 </tbody>
 </table>

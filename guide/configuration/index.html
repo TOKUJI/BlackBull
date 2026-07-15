@@ -2984,34 +2984,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/middleware/session/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    session
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../../api/blackbull/middleware/static/" class="md-nav__link">
         
   
@@ -4907,8 +4879,6 @@ variables</a>.  Highlights:</p>
   <code>os.cpu_count()</code>).</li>
 <li><code>BB_ACCESS_LOG</code> — toggle the access log (<code>1</code> on, <code>0</code> off).</li>
 <li><code>BB_UVLOOP</code> — install <code>uvloop</code>'s asyncio policy.</li>
-<li><code>BB_SESSION_SECRET</code> — HMAC secret for the <code>Session</code>
-  middleware (no insecure default — must be set explicitly).</li>
 </ul>
 <h2 id="toml-config-file">TOML config file<a class="headerlink" href="#toml-config-file" title="Permanent link">&para;</a></h2>
 <p>For larger deployments, write a TOML file and point the CLI at it:</p>
@@ -5115,11 +5085,6 @@ the knobs most worth a second look:</p>
 <td><code>BB_MAX_CONNECTIONS</code></td>
 <td><code>500</code></td>
 <td>Tune for the worker's memory budget; set <code>0</code> only if some upstream caps connection counts.</td>
-</tr>
-<tr>
-<td><code>BB_SESSION_SECRET</code></td>
-<td>unset</td>
-<td>Must be set (or pass <code>secret=</code> to <code>Session</code>).  Generate with <code>python -c "import secrets; print(secrets.token_urlsafe(32))"</code>.</td>
 </tr>
 <tr>
 <td><code>BB_UVLOOP</code></td>

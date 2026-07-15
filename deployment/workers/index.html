@@ -2984,34 +2984,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/middleware/session/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    session
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../../api/blackbull/middleware/static/" class="md-nav__link">
         
   
@@ -4909,8 +4881,9 @@ cache, no shared lock.  Anything that needs cross-worker
 coordination (session storage, response cache, rate-limit
 counters) belongs in an external store: Redis, Postgres, or a
 sticky-session reverse proxy.</p>
-<p>The built-in <code>Cache</code> and <code>Session</code> middleware explicitly state
-their per-worker limits — see <a href="../../guide/middleware/">Middleware</a>.</p>
+<p>The built-in <code>Cache</code> middleware (and the <code>blackbull-session</code>
+extension package) explicitly state their per-worker limits — see
+<a href="../../guide/middleware/">Middleware</a>.</p>
 <h3 id="which-setting">Which setting<a class="headerlink" href="#which-setting" title="Permanent link">&para;</a></h3>
 <table>
 <thead>
