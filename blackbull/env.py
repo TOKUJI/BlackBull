@@ -250,11 +250,6 @@ BB_DEADLINE_TICK_MS
     ``BB_BODY_TIMEOUT``, ``BB_WRITE_TIMEOUT``, ``BB_KEEP_ALIVE_TIMEOUT``).
     Smaller = tighter timeout granularity at a small CPU cost; larger =
     more slack but cheaper.  Default: ``300``.
-BB_SESSION_SECRET
-    HMAC secret used by the :class:`~blackbull.middleware.session.Session`
-    middleware to sign cookies.  Pass ``secret=`` to the constructor or
-    set this env var; if neither is set, ``Session()`` construction
-    raises (no insecure default).  Default: *(unset)*.
 """
 import dataclasses
 import functools as _functools

@@ -37,8 +37,9 @@ coordination (session storage, response cache, rate-limit
 counters) belongs in an external store: Redis, Postgres, or a
 sticky-session reverse proxy.
 
-The built-in `Cache` and `Session` middleware explicitly state
-their per-worker limits — see [Middleware](../guide/middleware.md).
+The built-in `Cache` middleware (and the `blackbull-session`
+extension package) explicitly state their per-worker limits — see
+[Middleware](../guide/middleware.md).
 
 ### Which setting
 

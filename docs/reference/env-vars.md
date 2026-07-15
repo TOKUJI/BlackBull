@@ -107,12 +107,6 @@ or drop to `INFO` to surface the rate-limit summary records.
 | `BB_COMPRESSION_MAX_INFLIGHT` | `os.cpu_count() * 2` | Maximum concurrent compression offloads to the asyncio default thread pool.  When at or above this cap, additional eligible responses are served **uncompressed** rather than queued — bounded fall-back rather than unbounded queue growth.  `0` disables the cap (unbounded queue, pre-0.29 behaviour). |
 | `BB_BROTLI_QUALITY` | `4` | Brotli quality level (0–11) for dynamic-response compression.  4 matches Google/Cloudflare's recommendation for dynamic content; 5 matches Apache `mod_brotli`; 6 matches nginx `ngx_brotli`.  11 is appropriate only for build-time / static pre-compression — far too expensive on the request path. |
 
-## Sessions
-
-| Variable | Default | Controls |
-|---|---|---|
-| `BB_SESSION_SECRET` | *(unset)* | HMAC secret used by the `Session` middleware to sign cookies.  Either pass `secret=` to the constructor or set this env var; if neither is set, construction raises (no insecure default). |
-
 ## Diagnostic timing
 
 | Variable | Default | Controls |

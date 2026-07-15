@@ -14,7 +14,6 @@ from .cache import Cache
 from .compression import Compression, _make_default_compress
 from .cors import CORS
 from .proxy import TrustedProxy
-from .session import Session
 from .static import StaticFiles
 from .utils import as_middleware
 from .websocket import websocket
@@ -23,7 +22,6 @@ __all__ = [
     'Cache',
     'CORS',
     'Compression',
-    'Session',
     'StaticFiles',
     'TrustedProxy',
     'as_middleware',
@@ -39,7 +37,6 @@ import warnings as _warnings  # noqa: E402
 
 _DEPRECATED: dict[str, tuple[str, object]] = {
     'CacheMiddleware':         ('Cache',         Cache),
-    'SessionMiddleware':       ('Session',       Session),
     'CompressionMiddleware':   ('Compression',   Compression),
     'TrustedProxyMiddleware':  ('TrustedProxy',  TrustedProxy),
 }

@@ -179,83 +179,31 @@ Every compressed response carries `Vary: Accept-Encoding` (folded into
 any existing `Vary`) so a shared cache never replays an encoded body to
 a client that sent `identity` / no `Accept-Encoding` (RFC 9110 §12.5.5).
 
-### `Session`
+### Sessions — moved to `blackbull-session`
 
-Signed-cookie sessions — session data lives entirely in a cookie
-HMAC-signed by the server.  No server-side store, no database.
-Trade-off: cookies are capped at ~4 KiB by browsers and you can't
-revoke a session early without rotating the secret.
+Signed-cookie sessions live in the standalone
+[`blackbull-session`](https://github.com/TOKUJI/blackbull-session)
+package, following the [`init_app(app)`](extensions.md) extension
+convention.  The in-tree `blackbull.middleware.Session` was
+deprecated in 0.38 and **removed in 0.54.0**.
 
-!!! warning "Moved to a separate package"
-    Starting with BlackBull 0.38 the session layer lives in the
-    standalone [`blackbull-session`](https://github.com/TOKUJI/blackbull-session)
-    package, following the [`init_app(app)`](extensions.md)
-    extension convention.  The in-tree
-    `blackbull.middleware.Session` emits a `DeprecationWarning` and
-    will be removed no earlier than BlackBull v0.41 (and not before
-    2026-07-14).
+Migration is a one-line swap:
 
 ```python
 # pip install blackbull-session
 from blackbull_session import SessionExtension
 
-# Operator sets BB_SESSION_SECRET=<32-byte random> in the deployment env
-SessionExtension(app)
-
-# Or pass the secret explicitly (handy for tests):
-SessionExtension(app, secret=b'<long-random-bytes>')
-
-@app.route(path='/')
-async def index(scope, receive, send):
-    scope['session']['user'] = 'alice'           # any JSON-serializable value
-    await send(Response('signed in'))
+SessionExtension(app)                        # reads BB_SESSION_SECRET
+SessionExtension(app, secret=b'<long-random-bytes>')   # explicit secret
 
 @app.route(path='/whoami')
 async def whoami(scope, receive, send):
     await send(Response(scope['session'].get('user', 'anonymous')))
 ```
 
-After construction the live extension is reachable at
-`app.extensions['session']`.
-
-`scope['session']` is a `dict` subclass that tracks whether you
-mutated it.  The middleware only emits `Set-Cookie` when a request
-handler changed the session — read-only handlers leave the response
-cache-friendly.
-
-Secret resolution:
-
-- The constructor accepts `secret=` directly.
-- When `secret` is `None`, the middleware reads `BB_SESSION_SECRET`
-  from the environment.
-- If neither is set, construction raises — there is no insecure
-  default.  Generate one with:
-  ```bash
-  python -c "import secrets; print(secrets.token_urlsafe(32))"
-  ```
-
-Cookie attributes (all keyword arguments, with sensible defaults):
-
-| Argument        | Default     | Notes                                                                  |
-|-----------------|-------------|------------------------------------------------------------------------|
-| `cookie_name`   | `'session'` | Name of the cookie carrying the payload.                              |
-| `max_age`       | `None`      | Seconds the cookie is valid.  `None` ⇒ session cookie (until browser closes). |
-| `secure`        | `True`      | Send the `Secure` attribute (cookie only over HTTPS).                  |
-| `httponly`      | `True`      | Send the `HttpOnly` attribute (JS can't read the cookie).              |
-| `samesite`      | `'Lax'`     | `'Strict'`, `'Lax'`, `'None'`, or `None` (omit).                       |
-| `path`          | `'/'`       | Cookie `Path`.                                                         |
-
-Clearing the session emits a tombstone cookie with `Max-Age=0`:
-
-```python
-@app.route(path='/logout')
-async def logout(scope, receive, send):
-    scope['session'].clear()
-    await send(Response('signed out'))
-```
-
-A cookie whose signature fails to verify (tampering, wrong secret)
-is silently dropped — the handler sees an empty session.
+Handlers keep reading and writing `scope['session']` exactly as
+before; see the `blackbull-session` README for cookie attributes,
+secret resolution, and session-clearing semantics.
 
 ### `Cache`
 

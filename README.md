@@ -200,7 +200,6 @@ Compose via `app.use(...)` or per-route `middlewares=[...]`:
 | `Compression`    | Negotiates `br` / `zstd` / `gzip` from `Accept-Encoding` |
 | `StaticFiles`    | Serves files from a directory under a URL prefix |
 | `Cache`          | Per-worker LRU + ETag / `Cache-Control` honouring |
-| `Session`        | Signed-cookie sessions (HMAC-SHA256) |
 | `CORS`           | Preflight + actual-request header injection |
 | `TrustedProxy`   | Rewrites `scope['client']` / `scope['scheme']` from proxy headers |
 | `websocket`      | Auto-accepts the WebSocket handshake and emits `websocket.close` after the handler returns |
@@ -264,7 +263,7 @@ for the full tutorial.
 | Example | Demonstrates |
 |---|---|
 | [`examples/SimpleTaskManager/`](examples/SimpleTaskManager/) | REST API + HTML UI, middleware pipeline, route groups, SQLite, Bearer token auth |
-| [`examples/ChatServer/`](examples/ChatServer/) | WebSocket, SSE, long polling side by side; Session + Compression + custom auth |
+| [`examples/ChatServer/`](examples/ChatServer/) | WebSocket, SSE, long polling side by side; `blackbull-session` + Compression + custom auth |
 | [`examples/mqtt_broker.py`](examples/mqtt_broker.py) | MQTT 5 broker beside HTTP; `on_message` taps with `{capture}` topic params |
 | [`examples/typed_routes_ok.py`](examples/typed_routes_ok.py) | `{param:converter}` syntax, `url_path_for` |
 | [`examples/scenario_h1_fault_injection.py`](examples/scenario_h1_fault_injection.py) | HTTP/1.1 fault scenarios driven against stdlib `http.server` |

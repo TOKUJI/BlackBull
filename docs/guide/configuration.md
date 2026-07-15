@@ -32,8 +32,6 @@ variables](../reference/env-vars.md).  Highlights:
   `os.cpu_count()`).
 - `BB_ACCESS_LOG` — toggle the access log (`1` on, `0` off).
 - `BB_UVLOOP` — install `uvloop`'s asyncio policy.
-- `BB_SESSION_SECRET` — HMAC secret for the `Session`
-  middleware (no insecure default — must be set explicitly).
 
 ## TOML config file
 
@@ -262,7 +260,6 @@ the knobs most worth a second look:
 | `BB_WORKERS` | `1` | Set to `0` (= `cpu_count()`) or a fixed integer matching your CPU budget. |
 | `BB_REQUEST_TIMEOUT` | `0` (off) | Set to a positive value (e.g. `30`) so stalled handlers get evicted. |
 | `BB_MAX_CONNECTIONS` | `500` | Tune for the worker's memory budget; set `0` only if some upstream caps connection counts. |
-| `BB_SESSION_SECRET` | unset | Must be set (or pass `secret=` to `Session`).  Generate with `python -c "import secrets; print(secrets.token_urlsafe(32))"`. |
 | `BB_UVLOOP` | `0` | Set to `1` for a typical 1.5-2× throughput improvement on HTTP/2 hot paths. |
 
 ## Next
