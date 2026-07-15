@@ -40,13 +40,15 @@ import asyncio
 import logging
 import ssl as _ssl
 import struct
-import time
 
 from ..asgi import ASGIEvent
 from ..protocol.frame import FrameFactory
 from ..protocol.frame_types import (
     DataFrameFlags, FrameTypes, HeaderFrameFlags, PseudoHeaders,
 )
+from ..server.http2_ws import HTTP2WSWriter
+from ..server.recipient import (AbstractReader, IncompleteReadError,
+                                WebSocketRecipient)
 from ..server.ws_codec import WSOpcode, encode_frame
 from .client import Client
 from .exceptions import HandshakeError
@@ -64,39 +66,67 @@ _CLOSE_CODE_NORMAL = 1000
 _WINDOW_UPDATE_THRESHOLD = 32768
 
 
-def _parse_ws_frame(data: bytes) -> tuple[int, bytes, int] | None:
-    """Parse one unmasked WebSocket frame from *data*.
+class _H2QueueReader(AbstractReader):
+    """``AbstractReader`` over a raw-stream DATA-frame queue.
 
-    Returns ``(opcode, payload, consumed)`` or ``None`` if the buffer
-    is incomplete.  Server → client frames are unmasked per RFC 6455
-    §5.1, so no mask bytes are expected.
+    Sprint 72 (audit 1.20b / F.2) — lets the H2 client session reuse the
+    shared ``ws_codec`` + ``WebSocketRecipient`` stack (whose read path
+    calls only ``readexactly``) instead of a third, private WS frame
+    parser.  DATA payloads are buffered as a byte stream; flow-control
+    credit is returned through *credit_cb* the moment a frame is consumed
+    off the queue — the same timing the old parser used.  END_STREAM or
+    RST_STREAM marks EOF, which the recipient's read loop surfaces as an
+    abnormal-closure ``websocket.disconnect`` (1006).
     """
-    if len(data) < 2:
-        return None
-    opcode = data[0] & 0x0F
-    length = data[1] & 0x7F
-    offset = 2
-    if length == 126:
-        if len(data) < offset + 2:
-            return None
-        length = struct.unpack('>H', data[offset:offset + 2])[0]
-        offset += 2
-    elif length == 127:
-        if len(data) < offset + 8:
-            return None
-        length = struct.unpack('>Q', data[offset:offset + 8])[0]
-        offset += 8
-    if len(data) < offset + length:
-        return None
-    return opcode, data[offset:offset + length], offset + length
+
+    def __init__(self, queue: asyncio.Queue, credit_cb) -> None:
+        self._queue = queue
+        self._credit_cb = credit_cb
+        self._buf = bytearray()
+        self._eof = False
+
+    async def _fill(self, n: int) -> None:
+        while len(self._buf) < n and not self._eof:
+            frame = await self._queue.get()
+            ftype = frame.FrameType()
+            if ftype == FrameTypes.DATA:
+                if frame.payload:
+                    self._buf.extend(frame.payload)
+                    await self._credit_cb(len(frame.payload))
+                if frame.end_stream:
+                    self._eof = True
+            elif ftype == FrameTypes.RST_STREAM:
+                self._eof = True
+            # Other frame types (WINDOW_UPDATE etc.) are connection-level
+            # bookkeeping handled by the client's receive loop; ignore.
+
+    async def readexactly(self, n: int) -> bytes:
+        await self._fill(n)
+        if len(self._buf) < n:
+            raise IncompleteReadError()
+        chunk = bytes(self._buf[:n])
+        del self._buf[:n]
+        return chunk
+
+    async def read(self, n: int) -> bytes:
+        await self._fill(1)
+        chunk = bytes(self._buf[:n])
+        del self._buf[:n]
+        return chunk
+
+    async def readuntil(self, sep: bytes) -> bytes:
+        raise NotImplementedError('_H2QueueReader does not support readuntil')
 
 
 class WebSocketH2Session:
     """Frame-level WebSocket session over one HTTP/2 stream.
 
     Outgoing frames are masked (RFC 6455 §5.1) and wrapped in H2 DATA
-    frames.  Incoming H2 DATA frame payloads are reassembled into
-    WebSocket frames in an internal buffer.
+    frames.  Incoming DATA payloads feed the shared
+    ``WebSocketRecipient`` stack through :class:`_H2QueueReader`
+    (Sprint 72, audit 1.20b) — fragmentation reassembly, FIN/RSV/mask
+    validation, UTF-8 checks, and auto-PONG all come from the same
+    codec the server and the H1 client use.
     """
 
     def __init__(self, http2_client: HTTP2Client, factory: FrameFactory,
@@ -105,8 +135,8 @@ class WebSocketH2Session:
         self._factory = factory
         self._stream_id = stream_id
         self._queue = frame_queue
-        self._buf: bytes = b''
         self._closed = False
+        self._disconnect_seen = False
         # Per-stream HTTP2Sender so outgoing WS payloads larger than
         # ``max_frame_size`` are split into multiple DATA frames and
         # respect the peer's send window — same machinery the server
@@ -116,6 +146,19 @@ class WebSocketH2Session:
         # Tracked at both stream and connection levels per RFC 9113 §5.2.
         self._unacked_stream: int = 0
         self._unacked_conn: int = 0
+        # Shared WS decode stack: DATA-frame queue → byte stream →
+        # WebSocketRecipient.  ``require_masked=False`` because server
+        # frames are unmasked — which also makes recipient-generated
+        # PONG / echo-CLOSE frames masked, as a client's must be.
+        # Recipient writes ride the per-stream sender via HTTP2WSWriter,
+        # inheriting H2 flow control.
+        self._recipient = WebSocketRecipient(
+            _H2QueueReader(frame_queue, self._credit_returned),
+            HTTP2WSWriter(self._sender),
+            require_masked=False)
+        # Skip the synthetic 'websocket.connect' first-call event — the
+        # Extended CONNECT handshake already established the session.
+        self._recipient._connect_sent = True
 
     async def send_text(self, text: str) -> None:
         await self._send_ws(text.encode('utf-8'), WSOpcode.TEXT)
@@ -125,36 +168,40 @@ class WebSocketH2Session:
 
     async def receive(self, timeout: float = 5.0) -> tuple[int, bytes]:
         """Return ``(opcode, payload)`` for the next complete WebSocket
-        frame on this stream.
+        **message** on this stream (fragmented messages are reassembled;
+        PING is answered transparently).
 
-        Raises :class:`TimeoutError` if no frame arrives within *timeout*.
-        Returned opcodes match :class:`blackbull.server.ws_codec.WSOpcode`.
+        Raises :class:`TimeoutError` if no message arrives within
+        *timeout*.  Returned opcodes match
+        :class:`blackbull.server.ws_codec.WSOpcode`; a peer CLOSE (or
+        stream end) is surfaced as ``(WSOpcode.CLOSE, 2-byte code)``.
         """
-        deadline = time.monotonic() + timeout
-        while True:
-            parsed = _parse_ws_frame(self._buf)
-            if parsed is not None:
-                opcode, payload, consumed = parsed
-                self._buf = self._buf[consumed:]
-                return opcode, payload
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                raise TimeoutError(
-                    f'no WebSocket frame within {timeout}s on stream '
-                    f'{self._stream_id}')
-            try:
-                frame = await asyncio.wait_for(self._queue.get(), remaining)
-            except asyncio.TimeoutError as e:
-                raise TimeoutError(
-                    f'no WebSocket frame within {timeout}s on stream '
-                    f'{self._stream_id}') from e
-            if frame.FrameType() == FrameTypes.DATA:
-                self._buf += frame.payload
-                await self._credit_returned(len(frame.payload))
+        try:
+            event = await asyncio.wait_for(self._recipient(), timeout)
+        except asyncio.TimeoutError as e:
+            raise TimeoutError(
+                f'no WebSocket frame within {timeout}s on stream '
+                f'{self._stream_id}') from e
+        if event.get('type') == ASGIEvent.WS_RECEIVE:
+            text = event.get('text')
+            if text is not None:
+                return WSOpcode.TEXT, text.encode('utf-8')
+            return WSOpcode.BINARY, event.get('bytes') or b''
+        # websocket.disconnect — peer CLOSE (echoed by the recipient) or
+        # abnormal stream end (1006).
+        self._disconnect_seen = True
+        code = event.get('code', 1006)
+        return WSOpcode.CLOSE, struct.pack('>H', code)
 
-    async def close(self, code: int = _CLOSE_CODE_NORMAL) -> None:
-        """Send a WebSocket close frame with the requested code and
-        END_STREAM on the carrying H2 DATA frame.  Idempotent."""
+    async def close(self, code: int = _CLOSE_CODE_NORMAL, *,
+                    drain_timeout: float = 5.0) -> None:
+        """Send a WebSocket close frame (END_STREAM on the carrying DATA
+        frame), await the peer's echoed CLOSE bounded by *drain_timeout*,
+        and stop the recipient's reader task.  Idempotent.
+
+        Sprint 72 (audit 1.20c) — same close discipline as the H1
+        client's :meth:`WebSocketSession.close`.
+        """
         if self._closed:
             return
         self._closed = True
@@ -164,8 +211,24 @@ class WebSocketH2Session:
             FrameTypes.DATA, DataFrameFlags.END_STREAM,
             self._stream_id, data=ws_bytes,
         )
-        await self._client.send_raw_frame(d_frame)
-        self._client.unregister_raw_stream(self._stream_id)
+        try:
+            await self._client.send_raw_frame(d_frame)
+        except Exception:
+            pass  # best-effort close frame; the connection may be gone.
+        try:
+            if not self._disconnect_seen:
+                async with asyncio.timeout(drain_timeout):
+                    while True:
+                        event = await self._recipient()
+                        if event.get('type') == ASGIEvent.WS_DISCONNECT:
+                            break
+        except Exception:
+            # TimeoutError (silent peer) or a recipient-raised protocol
+            # error — either way the drain is over.
+            pass
+        finally:
+            await self._recipient.shutdown()
+            self._client.unregister_raw_stream(self._stream_id)
 
     async def _send_ws(self, payload: bytes, opcode: int) -> None:
         if self._closed:

@@ -296,8 +296,15 @@ class HTTP2Client:
     def _make_sender(self, stream_id: int) -> HTTP2Sender:
         if stream_id not in self._senders:
             assert self._writer is not None
+            # Bug 1.20a — seed the per-stream send window from the server's
+            # announced SETTINGS_INITIAL_WINDOW_SIZE: a sender created after
+            # the SETTINGS exchange must not start at the RFC default
+            # (``_on_initial_window_size`` only delta-adjusts *existing*
+            # senders).  Same construction-time seeding as the server's
+            # ``make_sender`` (refactor 2.11).
             self._senders[stream_id] = HTTP2Sender(
-                self._writer, self._factory, stream_id)
+                self._writer, self._factory, stream_id,
+                initial_window=self.initial_window_size)
         return self._senders[stream_id]
 
     async def _send_raw_frame(self, frame: FrameBase) -> None:

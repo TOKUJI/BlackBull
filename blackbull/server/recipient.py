@@ -1150,6 +1150,24 @@ class WebSocketRecipient(BaseRecipient):
             self._event_queue = asyncio.Queue(maxsize=self._ws_queue_depth)
             self._reader_task = asyncio.create_task(self._read_loop())
 
+    async def shutdown(self) -> None:
+        """Cancel and await the background read-loop task.
+
+        Sprint 72 (audit 1.20c) — client sessions call this from
+        ``close()`` so no reader task outlives the session (a leaked task
+        warns at event-loop shutdown and keeps reading a dead transport).
+        Idempotent, and safe to call before the first ``__call__`` ever
+        started the loop.
+        """
+        task = self._reader_task
+        self._reader_task = None
+        if task is not None and not task.done():
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
     async def __call__(self) -> dict:
         if not self._connect_sent:
             self._connect_sent = True

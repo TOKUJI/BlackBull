@@ -358,6 +358,26 @@ class TestWebSocketClient:
         # No exception raised — close() drained gracefully.
 
     @pytest.mark.asyncio
+    async def test_close_drains_peer_close_and_stops_reader(self, server_port):
+        # Sprint 72 (1.20c) — close() completes the RFC 6455 §7.1.2 closing
+        # handshake and cancels the background reader task, so nothing
+        # outlives the session (no pending-task warning at loop shutdown).
+        async with WebSocketClient('127.0.0.1', server_port) as c:
+            ws = await c.connect('/ws')
+            await ws.send_text('one')
+            await ws.receive()
+            await asyncio.wait_for(ws.close(), 5)
+            task = ws._recipient._reader_task
+            assert task is None or task.done()
+
+    @pytest.mark.asyncio
+    async def test_close_is_idempotent(self, server_port):
+        async with WebSocketClient('127.0.0.1', server_port) as c:
+            ws = await c.connect('/ws')
+            await asyncio.wait_for(ws.close(), 5)
+            await asyncio.wait_for(ws.close(), 5)  # returns immediately
+
+    @pytest.mark.asyncio
     async def test_subprotocol_negotiation(self, server_port):
         # Set the available subprotocols on the running app via attribute.
         # The server reads ``getattr(self.app, 'available_ws_protocols', [])``

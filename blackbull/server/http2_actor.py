@@ -444,12 +444,12 @@ class HTTP2Actor(Actor):
                 push_callback=self._handle_push,
                 coalescer=self._coalescer,
                 conn_window=self._conn_window,  # shared stream-0 budget (bug 1.2)
+                # Seed the per-stream window from what the peer has currently
+                # granted us, rather than the RFC default, which may already
+                # have been changed by SETTINGS frames received before this
+                # stream opened.  The connection window is shared, not copied.
+                initial_window=self._peer_initial_window_size,
             )
-            # Initialise the per-stream window from what the peer has currently
-            # granted us, rather than the RFC default, which may already have
-            # been exceeded by SETTINGS / WINDOW_UPDATE frames received before
-            # this stream opened.  The connection window is shared, not copied.
-            sender.stream_window_size = self._peer_initial_window_size
             self._senders[stream_id] = sender
         return self._senders[stream_id]
 
