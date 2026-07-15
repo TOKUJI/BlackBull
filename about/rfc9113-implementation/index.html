@@ -5285,6 +5285,20 @@ a correctness requirement.</p>
 Pseudo-headers are parsed and validated before dispatch.  <strong>§8.3.1 Request
 Pseudo-Headers</strong> — <code>:method</code>, <code>:scheme</code>, <code>:path</code>, <code>:authority</code>; the <code>:path</code>
 split for pushed requests lives in <code>HTTP2Actor._handle_push()</code>.
+<code>:authority</code> is validated and surfaced by <code>_request_headers_with_host() in
+parser.py</code> (v0.54.0): an <code>http(s)</code> request carrying neither <code>:authority</code> nor
+<code>Host</code> is malformed, as is an authority containing userinfo, RFC 3986 §3.2
+delimiters, or whitespace (the same grammar HTTP/1.1 enforces on <code>Host</code>);
+multiple <code>Host</code> fields without <code>:authority</code> are likewise rejected.  A valid
+<code>:authority</code> is mapped into <code>scope['headers']</code> as the <code>host</code> header,
+replacing any literal <code>Host</code> — the ASGI host mapping, mirroring H1's
+absolute-form-overrides-Host semantics — on both the request path and the
+RFC 8441 Extended CONNECT path, so <code>HTTP2Actor._handle_push()</code> synthesises
+pushed <code>:authority</code> from the parent scope's <code>host</code>.  Plain CONNECT is
+excluded (its <code>:authority</code> carries §8.5 tunnel semantics).  <em>Because</em> a
+request without a host authority has no target and the userinfo prohibition
+is an explicit §8.3.1 MUST; surfacing it as <code>host</code> keeps the same handler
+seeing the same headers under either transport.
 <strong>§8.3.2 Response Pseudo-Headers</strong> — <code>:status</code> is synthesised on the response
 path.  For the seven most common status codes (200, 204, 206, 304, 400, 404,
 500) the wire bytes are precomputed in <code>hpack_fastpath.py</code> via HPACK
