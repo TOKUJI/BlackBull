@@ -43,7 +43,7 @@ def _make_headers_frame(stream_id: int = 1, end_stream: bool = False,
                         fields: list[tuple[bytes, bytes]] | None = None) -> bytes:
     encoder = Encoder()
     if fields is None:
-        fields = [(b':method', b'GET'), (b':path', b'/'), (b':scheme', b'https')]
+        fields = [(b':method', b'GET'), (b':path', b'/'), (b':scheme', b'https'), (b':authority', b'example.com')]
     block = encoder.encode(fields)
     flags = HeaderFrameFlags.END_HEADERS if end_headers else 0
     if end_stream:
@@ -181,7 +181,7 @@ class TestG2HalfClosedRemoteReceivesData:
         h2 = _make_headers_frame(1, end_stream=True, end_headers=True,
                                  fields=[(b':method', b'GET'),
                                          (b':path', b'/2'),
-                                         (b':scheme', b'https')])
+                                         (b':scheme', b'https'), (b':authority', b'example.com')])
         handler.receive = AsyncMock(side_effect=[
             self._settings(), h1, h2, None])
         await handler.run()
@@ -321,6 +321,7 @@ class TestG5ConnectionSpecificHeadersForbidden:
             (b':method', b'GET'),
             (b':path', b'/'),
             (b':scheme', b'https'),
+            (b':authority', b'example.com'),
             (bad_header, b'whatever'),
         ]
         h = _make_headers_frame(1, end_stream=True, fields=fields)
@@ -343,6 +344,7 @@ class TestG5ConnectionSpecificHeadersForbidden:
         handler, app = _make_h2_actor()
         fields = [
             (b':method', b'GET'), (b':path', b'/'), (b':scheme', b'https'),
+            (b':authority', b'example.com'),
             (b'te', b'gzip, deflate'),
         ]
         h = _make_headers_frame(1, end_stream=True, fields=fields)
@@ -371,11 +373,11 @@ class TestG6MissingMandatoryPseudoHeaders:
 
     @pytest.mark.asyncio
     async def test_missing_method_is_malformed(self):
-        await self._check_malformed([(b':path', b'/'), (b':scheme', b'https')])
+        await self._check_malformed([(b':path', b'/'), (b':scheme', b'https'), (b':authority', b'example.com')])
 
     @pytest.mark.asyncio
     async def test_missing_path_is_malformed(self):
-        await self._check_malformed([(b':method', b'GET'), (b':scheme', b'https')])
+        await self._check_malformed([(b':method', b'GET'), (b':scheme', b'https'), (b':authority', b'example.com')])
 
     @pytest.mark.asyncio
     async def test_missing_scheme_is_malformed(self):
@@ -387,6 +389,7 @@ class TestG6MissingMandatoryPseudoHeaders:
         await self._check_malformed([
             (b':method', b'GET'), (b':method', b'POST'),
             (b':path', b'/'), (b':scheme', b'https'),
+            (b':authority', b'example.com'),
         ])
 
     @pytest.mark.asyncio
@@ -394,6 +397,7 @@ class TestG6MissingMandatoryPseudoHeaders:
         """§8.3.1: :path MUST NOT be empty for http/https URIs."""
         await self._check_malformed([
             (b':method', b'GET'), (b':path', b''), (b':scheme', b'https'),
+            (b':authority', b'example.com'),
         ])
 
     @staticmethod
@@ -564,6 +568,7 @@ class TestG13FieldCharacterValidation:
         handler, app = _make_h2_actor()
         fields = [
             (b':method', b'GET'), (b':path', b'/'), (b':scheme', b'https'),
+            (b':authority', b'example.com'),
             bad_field,
         ]
         h = _make_headers_frame(1, end_stream=True, fields=fields)
@@ -618,7 +623,7 @@ class TestG14PseudoHeaderOrdering:
         # CONTINUATION with pseudo-headers — still malformed
         encoder = Encoder()
         block = encoder.encode([(b':method', b'GET'), (b':path', b'/'),
-                                (b':scheme', b'https')])
+                                (b':scheme', b'https'), (b':authority', b'example.com')])
         cont = _make_h2_frame(FrameTypes.CONTINUATION,
                               HeaderFrameFlags.END_HEADERS,
                               stream_id=1, payload=block)

@@ -185,6 +185,7 @@ class TestContinuationHandling:
             (b':method', b'GET'),
             (b':path', b'/'),
             (b':scheme', b'https'),
+            (b':authority', b'example.com'),
         ])
         h_frame = _make_h2_frame(FrameTypes.HEADERS,
                                  HeaderFrameFlags.END_HEADERS | HeaderFrameFlags.END_STREAM, 1, block)
@@ -210,6 +211,7 @@ class TestContinuationHandling:
             (b':method', b'GET'),
             (b':path', b'/api/resource'),
             (b':scheme', b'https'),
+            (b':authority', b'example.com'),
         ])
         # Split at an arbitrary byte boundary — the concatenated block is still valid HPACK
         split = len(full_block) // 2 + 1
@@ -240,6 +242,7 @@ class TestContinuationHandling:
             (b':method', b'POST'),
             (b':path', b'/submit'),
             (b':scheme', b'https'),
+            (b':authority', b'example.com'),
         ])
         split = len(full_block) // 2 + 1
         part1, part2 = full_block[:split], full_block[split:]
@@ -281,6 +284,7 @@ class TestContinuationHandling:
             (b':method', b'PUT'),
             (b':path', b'/data'),
             (b':scheme', b'https'),
+            (b':authority', b'example.com'),
         ])
         n = len(full_block)
         # Three roughly equal parts
@@ -313,11 +317,13 @@ class TestContinuationHandling:
             (b':method', b'GET'),
             (b':path', b'/first'),
             (b':scheme', b'https'),
+            (b':authority', b'example.com'),
         ])
         block2 = encoder.encode([
             (b':method', b'POST'),
             (b':path', b'/second'),
             (b':scheme', b'https'),
+            (b':authority', b'example.com'),
         ])
 
         mid1 = len(block1) // 2 + 1
@@ -377,6 +383,7 @@ class TestContinuationFloodGuard:
             (b':method', b'GET'),
             (b':path', b'/'),
             (b':scheme', b'https'),
+            (b':authority', b'example.com'),
         ])
         h_frame = _make_h2_frame(
             FrameTypes.HEADERS, SettingFrameFlags.INIT, 1, seed_block)
@@ -420,6 +427,7 @@ class TestContinuationFloodGuard:
             (b':method', b'GET'),
             (b':path', b'/legit'),
             (b':scheme', b'https'),
+            (b':authority', b'example.com'),
         ])
         # Split the small valid block in half across HEADERS + CONTINUATION.
         mid = len(block) // 2 + 1

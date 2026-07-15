@@ -3,6 +3,7 @@ from urllib.parse import unquote, urlsplit
 from ..protocol.frame_types import PseudoHeaders
 import logging
 from ..headers import Headers
+from .http1_actor import _HOST_FORBIDDEN_BYTES
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +56,58 @@ def _split_h2_path(raw: str):
     else:
         decoded = path
     return decoded, path.encode('utf-8'), parsed.query.encode('utf-8')
+
+
+def _request_headers_with_host(frame, *, require_present: bool) -> list | None:
+    """Validate the request's host authority and map ``:authority`` → ``host``.
+
+    RFC 9113 §8.3.1 — ``:authority`` MUST NOT include userinfo; an
+    ``http``/``https`` request without ``:authority`` must carry a valid
+    ``Host`` field (*require_present*).  The grammar is H1's
+    ``_validate_host`` (RFC 3986 §3.2 delimiters, same forbidden set);
+    a present ``:authority`` replaces any literal ``Host`` in the header
+    list handed to the application, mirroring H1's absolute-form
+    override (RFC 9112 §3.2.2) so handlers see one ``host`` under
+    either transport (ASGI host mapping).
+
+    Returns the header list for ``Headers(...)``, or ``None`` after
+    marking the frame malformed (the actor then answers RST_STREAM
+    PROTOCOL_ERROR, the §8.3.1 stream error).
+    """
+    authority = frame.pseudo_headers.get(PseudoHeaders.AUTHORITY)
+    if authority is not None:
+        value = authority.encode('utf-8')
+        if not value:
+            frame._mark_malformed('empty :authority')
+            return None
+        if any(b in _HOST_FORBIDDEN_BYTES for b in value):
+            frame._mark_malformed(
+                f'invalid :authority {authority!r}: contains userinfo, '
+                f'delimiter, or whitespace forbidden by RFC 3986 §3.2')
+            return None
+        return ([(k, v) for (k, v) in frame.headers if k != b'host']
+                + [(b'host', value)])
+
+    hosts = [v for (k, v) in frame.headers if k == b'host']
+    if len(hosts) > 1:
+        frame._mark_malformed(
+            f'multiple Host headers ({len(hosts)} — smuggling vector)')
+        return None
+    if not hosts:
+        if require_present:
+            frame._mark_malformed('missing :authority and Host')
+            return None
+        return frame.headers
+    value = hosts[0].strip(b' \t')
+    if not value:
+        frame._mark_malformed('empty Host header value')
+        return None
+    if any(b in _HOST_FORBIDDEN_BYTES for b in value):
+        frame._mark_malformed(
+            f'invalid Host authority {value!r}: contains delimiter / '
+            f'whitespace forbidden by RFC 3986 §3.2')
+        return None
+    return frame.headers
 
 
 def parse_headers(frame) -> dict:
@@ -113,7 +166,13 @@ def parse_headers(frame) -> dict:
         if path := frame.pseudo_headers.get(PseudoHeaders.PATH):
             scope['path'], scope['raw_path'], scope['query_string'] = \
                 _split_h2_path(path)
-        scope['headers'] = Headers(frame.headers)
+        # RFC 8441 requests carry ``:authority`` too — same grammar check
+        # and ``host`` mapping as plain requests, but presence is not
+        # enforced (the Extended CONNECT handshake already succeeded).
+        raw_headers = _request_headers_with_host(frame, require_present=False)
+        if raw_headers is None:
+            return scope
+        scope['headers'] = Headers(raw_headers)
         # Bug 1.16 — root_path is NOT taken from the client-controlled
         # X-Forwarded-Prefix; only TrustedProxy sets it after verifying the
         # peer.  Default to the RFC-safe empty mount.
@@ -134,7 +193,18 @@ def parse_headers(frame) -> dict:
     if scheme := frame.pseudo_headers.get(PseudoHeaders.SCHEME):
         scope['scheme'] = scheme
 
-    scope['headers'] = Headers(frame.headers)
+    # RFC 9113 §8.3.1 — validate the host authority and surface
+    # ``:authority`` as the ``host`` header (ASGI).  Plain CONNECT is
+    # excluded: §8.5 gives its ``:authority`` tunnel semantics, and the
+    # presence rule only binds http/https requests.
+    if method == 'CONNECT':
+        scope['headers'] = Headers(frame.headers)
+    else:
+        raw_headers = _request_headers_with_host(
+            frame, require_present=scope['scheme'] in ('http', 'https'))
+        if raw_headers is None:
+            return scope
+        scope['headers'] = Headers(raw_headers)
 
     # Bug 1.16 — root_path is NOT taken from the client-controlled
     # X-Forwarded-Prefix; only TrustedProxy sets it after verifying the peer.

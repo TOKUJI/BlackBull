@@ -39,7 +39,7 @@ def _make_headers_frame(stream_id: int = 1, end_stream: bool = False,
     encoder = Encoder()
     block = encoder.encode([(b':method', method),
                              (b':path', path),
-                             (b':scheme', b'https')])
+                             (b':scheme', b'https'), (b':authority', b'example.com')])
     flags: FrameFlags = HeaderFrameFlags.END_HEADERS
     if end_stream:
         flags |= HeaderFrameFlags.END_STREAM
@@ -488,7 +488,7 @@ class TestHTTP2MaxConcurrentStreams:
         encoder = Encoder()
         block = encoder.encode([(b':method', b'GET'),
                                 (b':path', b'/'),
-                                (b':scheme', b'https')])
+                                (b':scheme', b'https'), (b':authority', b'example.com')])
         mid = len(block) // 2
         h1 = _make_headers_frame(stream_id=1, end_stream=True)
         h3 = _make_h2_frame(FrameTypes.HEADERS, 0, 3, block[:mid])
@@ -637,7 +637,7 @@ class TestHTTP2ServerPush:
                 'type': 'http.response.push',
                 'path': '/style.css',
                 'headers': [(b':method', b'GET'), (b':path', b'/style.css'),
-                            (b':scheme', b'https')],
+                            (b':scheme', b'https'), (b':authority', b'example.com')],
             })
             await send({'type': 'http.response.start', 'status': 200, 'headers': []})
             await send({'type': 'http.response.body', 'body': b''})
@@ -664,7 +664,7 @@ class TestHTTP2ServerPush:
                 'type': 'http.response.push',
                 'path': '/favicon.ico',
                 'headers': [(b':method', b'GET'), (b':path', b'/favicon.ico'),
-                            (b':scheme', b'https')],
+                            (b':scheme', b'https'), (b':authority', b'example.com')],
             })
             await send({'type': 'http.response.start', 'status': 200, 'headers': []})
             await send({'type': 'http.response.body', 'body': b''})
@@ -971,6 +971,7 @@ class TestHTTP2PriorityScope:
             (b':method', b'GET'),
             (b':path', b'/'),
             (b':scheme', b'https'),
+            (b':authority', b'example.com'),
             (b'priority', b'u=6'),
         ])
         flags = HeaderFrameFlags.END_HEADERS | HeaderFrameFlags.END_STREAM
@@ -1010,6 +1011,7 @@ class TestHTTP2ScopeHeaders:
             (b':method', method),
             (b':path', path),
             (b':scheme', b'https'),
+            (b':authority', b'example.com'),
             (b'cookie', cookie),
         ])
         flags: FrameFlags = HeaderFrameFlags.END_HEADERS
@@ -1078,6 +1080,7 @@ class TestHTTP2PerStreamRecipient:
             (b':method', b'POST'),
             (b':path', path),
             (b':scheme', b'https'),
+            (b':authority', b'example.com'),
         ])
         return _make_h2_frame(FrameTypes.HEADERS,
                               HeaderFrameFlags.END_HEADERS,

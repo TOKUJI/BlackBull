@@ -271,7 +271,7 @@ async def test_trailers_do_not_respawn_request():
         FrameTypes.HEADERS,
         HeaderFrameFlags.END_HEADERS,  # open, no END_STREAM (body/trailers follow)
         1,
-        enc.encode([(b':method', b'POST'), (b':path', b'/x'), (b':scheme', b'https')]))
+        enc.encode([(b':method', b'POST'), (b':path', b'/x'), (b':scheme', b'https'), (b':authority', b'example.com')]))
     body = _make_h2_frame(FrameTypes.DATA, 0, 1, b'hello')
     trailers = _make_h2_frame(
         FrameTypes.HEADERS,
@@ -424,7 +424,7 @@ async def test_over_queue_depth_burst_within_window_is_not_rst():
         _make_h2_frame(FrameTypes.SETTINGS, 0, 0, b''),
         _make_h2_frame(FrameTypes.HEADERS, HeaderFrameFlags.END_HEADERS, 1,
                        enc.encode([(b':method', b'POST'), (b':path', b'/up'),
-                                   (b':scheme', b'https')])),
+                                   (b':scheme', b'https'), (b':authority', b'example.com')])),
     ]
     frames += [_make_h2_frame(FrameTypes.DATA, 0, 1, b'x' * 100)
                for _ in range(64)]
@@ -468,7 +468,7 @@ async def test_unread_body_balance_flushes_to_connection_window():
     headers = _make_h2_frame(
         FrameTypes.HEADERS, HeaderFrameFlags.END_HEADERS, 1,
         enc.encode([(b':method', b'POST'), (b':path', b'/up'),
-                    (b':scheme', b'https')]))
+                    (b':scheme', b'https'), (b':authority', b'example.com')]))
     data1 = _make_h2_frame(FrameTypes.DATA, 0, 1, b'aaa')
     data2 = _make_h2_frame(
         FrameTypes.DATA, int(DataFrameFlags.END_STREAM), 1, b'bbbb')
@@ -503,7 +503,7 @@ async def test_window_overrun_is_rst_enhance_your_calm():
         _make_h2_frame(FrameTypes.SETTINGS, 0, 0, b''),
         _make_h2_frame(FrameTypes.HEADERS, HeaderFrameFlags.END_HEADERS, 1,
                        enc.encode([(b':method', b'POST'), (b':path', b'/up'),
-                                   (b':scheme', b'https')])),
+                                   (b':scheme', b'https'), (b':authority', b'example.com')])),
     ]
     # 5 × 16 KiB = 81920 bytes — crosses the 65535-byte budget at frame 4.
     frames += [_make_h2_frame(FrameTypes.DATA, 0, 1, b'x' * 16384)
