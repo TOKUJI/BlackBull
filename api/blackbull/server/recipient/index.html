@@ -4312,6 +4312,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="WebSocketRecipient">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.recipient.WebSocketRecipient.shutdown" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        shutdown
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
         
       </ul>
@@ -5173,6 +5190,23 @@
       
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="WebSocketRecipient">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.recipient.WebSocketRecipient.shutdown" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        shutdown
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
         
@@ -6057,6 +6091,33 @@ writer is stored alongside the reader.</p>
 
 
 
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.server.recipient.WebSocketRecipient.shutdown" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">shutdown</span><span class="p">()</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-async"><code>async</code></small>
+  </span>
+
+<a href="#blackbull.server.recipient.WebSocketRecipient.shutdown" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Cancel and await the background read-loop task.</p>
+<p>Sprint 72 (audit 1.20c) — client sessions call this from
+<code>close()</code> so no reader task outlives the session (a leaked task
+warns at event-loop shutdown and keeps reading a dead transport).
+Idempotent, and safe to call before the first <code>__call__</code> ever
+started the loop.</p>
+
+
+    </div>
+
+</div>
 
 
 

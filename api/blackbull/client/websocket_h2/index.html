@@ -4988,8 +4988,11 @@ or :class:<code>TimeoutError</code> if no response arrives within
 
         <p>Frame-level WebSocket session over one HTTP/2 stream.</p>
 <p>Outgoing frames are masked (RFC 6455 §5.1) and wrapped in H2 DATA
-frames.  Incoming H2 DATA frame payloads are reassembled into
-WebSocket frames in an internal buffer.</p>
+frames.  Incoming DATA payloads feed the shared
+<code>WebSocketRecipient</code> stack through :class:<code>_H2QueueReader</code>
+(Sprint 72, audit 1.20b) — fragmentation reassembly, FIN/RSV/mask
+validation, UTF-8 checks, and auto-PONG all come from the same
+codec the server and the H1 client use.</p>
 
 
 
@@ -5016,7 +5019,7 @@ WebSocket frames in an internal buffer.</p>
 
 
 <h4 id="blackbull.client.websocket_h2.WebSocketH2Session.close" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">close</span><span class="p">(</span><span class="n">code</span><span class="o">=</span><span class="n">_CLOSE_CODE_NORMAL</span><span class="p">)</span></code>
+            <code class="highlight language-python"><span class="n">close</span><span class="p">(</span><span class="n">code</span><span class="o">=</span><span class="n">_CLOSE_CODE_NORMAL</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">drain_timeout</span><span class="o">=</span><span class="mf">5.0</span><span class="p">)</span></code>
 
   <span class="doc doc-labels">
       <small class="doc doc-label doc-label-async"><code>async</code></small>
@@ -5027,8 +5030,11 @@ WebSocket frames in an internal buffer.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Send a WebSocket close frame with the requested code and
-END_STREAM on the carrying H2 DATA frame.  Idempotent.</p>
+        <p>Send a WebSocket close frame (END_STREAM on the carrying DATA
+frame), await the peer's echoed CLOSE bounded by <em>drain_timeout</em>,
+and stop the recipient's reader task.  Idempotent.</p>
+<p>Sprint 72 (audit 1.20c) — same close discipline as the H1
+client's :meth:<code>WebSocketSession.close</code>.</p>
 
 
     </div>
@@ -5051,9 +5057,12 @@ END_STREAM on the carrying H2 DATA frame.  Idempotent.</p>
     <div class="doc doc-contents ">
 
         <p>Return <code>(opcode, payload)</code> for the next complete WebSocket
-frame on this stream.</p>
-<p>Raises :class:<code>TimeoutError</code> if no frame arrives within <em>timeout</em>.
-Returned opcodes match :class:<code>blackbull.server.ws_codec.WSOpcode</code>.</p>
+<strong>message</strong> on this stream (fragmented messages are reassembled;
+PING is answered transparently).</p>
+<p>Raises :class:<code>TimeoutError</code> if no message arrives within
+<em>timeout</em>.  Returned opcodes match
+:class:<code>blackbull.server.ws_codec.WSOpcode</code>; a peer CLOSE (or
+stream end) is surfaced as <code>(WSOpcode.CLOSE, 2-byte code)</code>.</p>
 
 
     </div>
