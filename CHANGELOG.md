@@ -31,6 +31,8 @@ so the editable install's metadata catches up.
 
 ## [Unreleased]
 
+## [0.54.0] — 2026-07-16
+
 ### Fixed
 
 - **HTTP/2 `:authority` is now validated and surfaced as the `host` header**
