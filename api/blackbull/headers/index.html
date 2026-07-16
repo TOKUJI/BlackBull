@@ -664,6 +664,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../../guide/structured-fields/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Structured Fields
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../../guide/raw-protocols/" class="md-nav__link">
         
   
@@ -728,6 +756,34 @@
     
   
     gRPC
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../guide/translation-hub/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Protocol translation hub
   
 
     
@@ -2676,6 +2732,39 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.headers.Headers.get_sf_dict" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        get_sf_dict
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.headers.Headers.get_sf_item" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        get_sf_item
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.headers.Headers.get_sf_list" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        get_sf_list
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.headers.Headers.getlist" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3521,6 +3610,34 @@
     
   
     stream
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../protocol/structured_fields/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    structured_fields
   
 
     
@@ -4749,6 +4866,39 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.headers.Headers.get_sf_dict" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        get_sf_dict
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.headers.Headers.get_sf_item" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        get_sf_item
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.headers.Headers.get_sf_list" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        get_sf_list
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.headers.Headers.getlist" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4965,6 +5115,79 @@ One-argument form: <code>append(pairs)</code> — adds every pair in the iterabl
         <p>Return the first value for <em>name</em>, or <em>default</em> if absent.</p>
 <p>Mirrors <code>dict.get(key, default)</code>: single value, optional default.
 For headers that may repeat use <code>getlist(name)</code>.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.headers.Headers.get_sf_dict" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">get_sf_dict</span><span class="p">(</span><span class="n">name</span><span class="p">)</span></code>
+
+<a href="#blackbull.headers.Headers.get_sf_dict" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Parse <em>name</em> as a Structured Field Dictionary (RFC 9651).</p>
+<p>Multiple field lines are combined first.  Returns an ordered
+<code>dict</code> of member name → Item / Inner List, or <code>None</code> if the
+field is absent or fails strict parsing (per RFC 9651 §4.2 the
+whole field is then ignored).</p>
+<p>Example::</p>
+<pre><code>headers.get_sf_dict(b'priority')      # {'u': (2, {}), 'i': (True, {})}
+</code></pre>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.headers.Headers.get_sf_item" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">get_sf_item</span><span class="p">(</span><span class="n">name</span><span class="p">)</span></code>
+
+<a href="#blackbull.headers.Headers.get_sf_item" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Parse <em>name</em> as a Structured Field Item (RFC 9651).</p>
+<p>Returns <code>(bare_item, parameters)</code>, or <code>None</code> if the field is
+absent or fails strict parsing (per RFC 9651 §4.2 the whole field
+is then ignored).</p>
+<p>Example::</p>
+<pre><code>headers.get_sf_item(b'deprecation')   # (Date(1659578233), {})
+</code></pre>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.headers.Headers.get_sf_list" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">get_sf_list</span><span class="p">(</span><span class="n">name</span><span class="p">)</span></code>
+
+<a href="#blackbull.headers.Headers.get_sf_list" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Parse <em>name</em> as a Structured Field List (RFC 9651).</p>
+<p>Multiple field lines are combined first.  Returns a list of Items /
+Inner Lists, or <code>None</code> if the field is absent or fails strict
+parsing (per RFC 9651 §4.2 the whole field is then ignored).</p>
+<p>Example::</p>
+<pre><code>headers.get_sf_list(b'accept-query')  # [('a', {}), ('b', {})]
+</code></pre>
 
 
     </div>

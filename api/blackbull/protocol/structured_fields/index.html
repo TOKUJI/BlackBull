@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://TOKUJI.github.io/BlackBull/api/blackbull/server/deadline/">
+        <link rel="canonical" href="https://TOKUJI.github.io/BlackBull/api/blackbull/protocol/structured_fields/">
       
       
-        <link rel="prev" href="../constants/">
+        <link rel="prev" href="../stream/">
       
       
-        <link rel="next" href="../http1_actor/">
+        <link rel="next" href="../../request/">
       
       
         
@@ -27,7 +27,7 @@
     
     
       
-        <title>deadline - BlackBull</title>
+        <title>structured_fields - BlackBull</title>
       
     
     
@@ -72,7 +72,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#blackbullserverdeadline" class="md-skip">
+        <a href="#blackbullprotocolstructured_fields" class="md-skip">
           Skip to content
         </a>
       
@@ -108,7 +108,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              deadline
+              structured_fields
             
           </span>
         </div>
@@ -3243,18 +3243,20 @@
                 
   
   
+    
   
   
+  
     
     
     
     
     
-    <li class="md-nav__item md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2_1_19" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2_1_19" checked>
         
           
           <label class="md-nav__link" for="__nav_5_2_1_19" id="__nav_5_2_1_19_label" tabindex="0">
@@ -3275,7 +3277,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="4" aria-labelledby="__nav_5_2_1_19_label" aria-expanded="false">
+        <nav class="md-nav" data-md-level="4" aria-labelledby="__nav_5_2_1_19_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_5_2_1_19">
             <span class="md-nav__icon md-icon"></span>
             
@@ -3293,7 +3295,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../protocol/" class="md-nav__link">
+      <a href="../" class="md-nav__link">
         
   
   
@@ -3321,7 +3323,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../protocol/frame/" class="md-nav__link">
+      <a href="../frame/" class="md-nav__link">
         
   
   
@@ -3349,7 +3351,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../protocol/frame_types/" class="md-nav__link">
+      <a href="../frame_types/" class="md-nav__link">
         
   
   
@@ -3377,7 +3379,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../protocol/hpack_fastpath/" class="md-nav__link">
+      <a href="../hpack_fastpath/" class="md-nav__link">
         
   
   
@@ -3405,7 +3407,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../protocol/rsock/" class="md-nav__link">
+      <a href="../rsock/" class="md-nav__link">
         
   
   
@@ -3433,7 +3435,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../protocol/stream/" class="md-nav__link">
+      <a href="../stream/" class="md-nav__link">
         
   
   
@@ -3458,10 +3460,37 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../../protocol/structured_fields/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    structured_fields
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -3477,6 +3506,170 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#blackbull.protocol.structured_fields" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        structured_fields
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="structured_fields">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.protocol.structured_fields.Date" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Date
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Date">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.protocol.structured_fields.Date.from_datetime" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        from_datetime
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.protocol.structured_fields.Date.to_datetime" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        to_datetime
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.protocol.structured_fields.DisplayString" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        DisplayString
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.protocol.structured_fields.Token" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Token
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.protocol.structured_fields.parse_dictionary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        parse_dictionary
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.protocol.structured_fields.parse_item" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        parse_item
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.protocol.structured_fields.parse_list" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        parse_list
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.protocol.structured_fields.serialize_dictionary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        serialize_dictionary
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.protocol.structured_fields.serialize_item" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        serialize_item
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.protocol.structured_fields.serialize_list" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        serialize_list
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -3578,20 +3771,18 @@
                 
   
   
-    
   
   
-  
     
     
     
     
     
-    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2_1_23" checked>
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2_1_23" >
         
           
           <label class="md-nav__link" for="__nav_5_2_1_23" id="__nav_5_2_1_23_label" tabindex="0">
@@ -3612,7 +3803,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="4" aria-labelledby="__nav_5_2_1_23_label" aria-expanded="true">
+        <nav class="md-nav" data-md-level="4" aria-labelledby="__nav_5_2_1_23_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_5_2_1_23">
             <span class="md-nav__icon md-icon"></span>
             
@@ -3630,7 +3821,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../" class="md-nav__link">
+      <a href="../../server/" class="md-nav__link">
         
   
   
@@ -3658,7 +3849,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../access_log/" class="md-nav__link">
+      <a href="../../server/access_log/" class="md-nav__link">
         
   
   
@@ -3686,7 +3877,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../cap_log/" class="md-nav__link">
+      <a href="../../server/cap_log/" class="md-nav__link">
         
   
   
@@ -3714,7 +3905,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../conn_id/" class="md-nav__link">
+      <a href="../../server/conn_id/" class="md-nav__link">
         
   
   
@@ -3742,7 +3933,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../connection_actor/" class="md-nav__link">
+      <a href="../../server/connection_actor/" class="md-nav__link">
         
   
   
@@ -3770,7 +3961,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../constants/" class="md-nav__link">
+      <a href="../../server/constants/" class="md-nav__link">
         
   
   
@@ -3795,37 +3986,10 @@
                 
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    deadline
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../../server/deadline/" class="md-nav__link">
         
   
   
@@ -3841,93 +4005,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#blackbull.server.deadline" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        deadline
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="deadline">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.deadline.ConnectionDeadline" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        ConnectionDeadline
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="ConnectionDeadline">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.deadline.ConnectionDeadline.arm" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        arm
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.deadline.ConnectionDeadline.disarm" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        disarm
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.deadline.ConnectionDeadline.guard" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        guard
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -3940,7 +4017,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../http1_actor/" class="md-nav__link">
+      <a href="../../server/http1_actor/" class="md-nav__link">
         
   
   
@@ -3968,7 +4045,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../http2_actor/" class="md-nav__link">
+      <a href="../../server/http2_actor/" class="md-nav__link">
         
   
   
@@ -3996,7 +4073,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../http2_messages/" class="md-nav__link">
+      <a href="../../server/http2_messages/" class="md-nav__link">
         
   
   
@@ -4024,7 +4101,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../http2_ws/" class="md-nav__link">
+      <a href="../../server/http2_ws/" class="md-nav__link">
         
   
   
@@ -4052,7 +4129,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../multiworker/" class="md-nav__link">
+      <a href="../../server/multiworker/" class="md-nav__link">
         
   
   
@@ -4080,7 +4157,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../parser/" class="md-nav__link">
+      <a href="../../server/parser/" class="md-nav__link">
         
   
   
@@ -4108,7 +4185,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../permessage_deflate/" class="md-nav__link">
+      <a href="../../server/permessage_deflate/" class="md-nav__link">
         
   
   
@@ -4136,7 +4213,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../protocol_registry/" class="md-nav__link">
+      <a href="../../server/protocol_registry/" class="md-nav__link">
         
   
   
@@ -4164,7 +4241,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../recipient/" class="md-nav__link">
+      <a href="../../server/recipient/" class="md-nav__link">
         
   
   
@@ -4192,7 +4269,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../reload/" class="md-nav__link">
+      <a href="../../server/reload/" class="md-nav__link">
         
   
   
@@ -4220,7 +4297,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../response/" class="md-nav__link">
+      <a href="../../server/response/" class="md-nav__link">
         
   
   
@@ -4248,7 +4325,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../sender/" class="md-nav__link">
+      <a href="../../server/sender/" class="md-nav__link">
         
   
   
@@ -4276,7 +4353,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../server/" class="md-nav__link">
+      <a href="../../server/server/" class="md-nav__link">
         
   
   
@@ -4304,7 +4381,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../warmup/" class="md-nav__link">
+      <a href="../../server/warmup/" class="md-nav__link">
         
   
   
@@ -4332,7 +4409,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../websocket_actor/" class="md-nav__link">
+      <a href="../../server/websocket_actor/" class="md-nav__link">
         
   
   
@@ -4360,7 +4437,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../worker/" class="md-nav__link">
+      <a href="../../server/worker/" class="md-nav__link">
         
   
   
@@ -4388,7 +4465,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../ws_codec/" class="md-nav__link">
+      <a href="../../server/ws_codec/" class="md-nav__link">
         
   
   
@@ -4745,34 +4822,34 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#blackbull.server.deadline" class="md-nav__link">
+  <a href="#blackbull.protocol.structured_fields" class="md-nav__link">
     <span class="md-ellipsis">
       
-        deadline
+        structured_fields
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="deadline">
+    <nav class="md-nav" aria-label="structured_fields">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#blackbull.server.deadline.ConnectionDeadline" class="md-nav__link">
+  <a href="#blackbull.protocol.structured_fields.Date" class="md-nav__link">
     <span class="md-ellipsis">
       
-        ConnectionDeadline
+        Date
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="ConnectionDeadline">
+    <nav class="md-nav" aria-label="Date">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#blackbull.server.deadline.ConnectionDeadline.arm" class="md-nav__link">
+  <a href="#blackbull.protocol.structured_fields.Date.from_datetime" class="md-nav__link">
     <span class="md-ellipsis">
       
-        arm
+        from_datetime
       
     </span>
   </a>
@@ -4780,21 +4857,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#blackbull.server.deadline.ConnectionDeadline.disarm" class="md-nav__link">
+  <a href="#blackbull.protocol.structured_fields.Date.to_datetime" class="md-nav__link">
     <span class="md-ellipsis">
       
-        disarm
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.deadline.ConnectionDeadline.guard" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        guard
+        to_datetime
       
     </span>
   </a>
@@ -4803,6 +4869,94 @@
         
       </ul>
     </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.protocol.structured_fields.DisplayString" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        DisplayString
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.protocol.structured_fields.Token" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Token
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.protocol.structured_fields.parse_dictionary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        parse_dictionary
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.protocol.structured_fields.parse_item" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        parse_item
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.protocol.structured_fields.parse_list" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        parse_list
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.protocol.structured_fields.serialize_dictionary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        serialize_dictionary
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.protocol.structured_fields.serialize_item" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        serialize_item
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.protocol.structured_fields.serialize_list" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        serialize_list
+      
+    </span>
+  </a>
   
 </li>
         
@@ -4831,41 +4985,83 @@
   
 
 
-<h1 id="blackbullserverdeadline"><code>blackbull.server.deadline</code><a class="headerlink" href="#blackbullserverdeadline" title="Permanent link">&para;</a></h1>
+<h1 id="blackbullprotocolstructured_fields"><code>blackbull.protocol.structured_fields</code><a class="headerlink" href="#blackbullprotocolstructured_fields" title="Permanent link">&para;</a></h1>
 
 
 <div class="doc doc-object doc-module">
 
 
 
-<h2 id="blackbull.server.deadline" class="doc doc-heading">
-            <code>blackbull.server.deadline</code>
+<h2 id="blackbull.protocol.structured_fields" class="doc doc-heading">
+            <code>blackbull.protocol.structured_fields</code>
 
 
-<a href="#blackbull.server.deadline" class="headerlink" title="Permanent link">&para;</a></h2>
+<a href="#blackbull.protocol.structured_fields" class="headerlink" title="Permanent link">&para;</a></h2>
 
     <div class="doc doc-contents first">
 
-        <p>Per-connection rescheduled deadline (Sprint 26 Phase B — scanner form).</p>
-<p>Replaces <code>async with asyncio.timeout(...)</code> on the per-request hot
-path.  Sprint 23 used one <code>loop.call_later</code> <code>TimerHandle</code> per
-connection, cancelled and rescheduled at every phase transition.
-Sprint 26 Phase B replaces the per-arm <code>call_later</code> with a
-per-process tick scanner: one singleton <code>TimerHandle</code> re-arms itself
-every :data:<code>_TICK_S</code> and walks the registry of armed
-:class:<code>ConnectionDeadline</code> instances for expirations.  Per-arm cost
-drops from ~1.7 µs to ~0.34 µs (WSL2 microbench, Sprint 26 Phase B
-spike).</p>
-<p>Trade-off: a fired deadline lands within <code>[now, now + _TICK_S]</code>
-rather than at the exact requested instant.  At the default
-<code>_TICK_S = 0.3 s</code> this is ~3 % slop on the tightest configurable
-deadline (<code>BB_HEADER_TIMEOUT</code> default 10 s) and ~1 % on the
-<code>body_timeout</code> default 30 s.  Tune via <code>BB_DEADLINE_TICK_MS</code>
-(milliseconds, default 300, floor 10).</p>
-<p>The scanner is loop-scoped and lazily started on the first <code>arm</code>;
-it quiesces (cancels its own handle) when the registry empties and
-auto-resurrects on the next <code>arm</code>.  Each worker process has its
-own scanner.</p>
+        <p>RFC 9651 — Structured Field Values for HTTP.</p>
+<p>Strict parser and serialiser for the three top-level Structured Field
+types (Item, List, Dictionary), implementing the normative algorithms of
+RFC 9651 §4 (obsoletes RFC 8941; adds the Date and Display String types).</p>
+<p>Python type mapping (bare items):</p>
+<table>
+<thead>
+<tr>
+<th>SF type</th>
+<th>Python type</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Integer</td>
+<td><code>int</code></td>
+</tr>
+<tr>
+<td>Decimal</td>
+<td><code>float</code></td>
+</tr>
+<tr>
+<td>String</td>
+<td><code>str</code></td>
+</tr>
+<tr>
+<td>Token</td>
+<td><code>Token</code> (str subclass)</td>
+</tr>
+<tr>
+<td>Byte Sequence</td>
+<td><code>bytes</code></td>
+</tr>
+<tr>
+<td>Boolean</td>
+<td><code>bool</code></td>
+</tr>
+<tr>
+<td>Date</td>
+<td><code>Date</code></td>
+</tr>
+<tr>
+<td>Display String</td>
+<td><code>DisplayString</code> (str subclass)</td>
+</tr>
+</tbody>
+</table>
+<p>Structures:</p>
+<ul>
+<li><strong>Item</strong> — <code>(bare_item, parameters)</code> tuple; parameters are a
+  <code>dict[str, bare_item]</code> preserving order.</li>
+<li><strong>Inner List</strong> — <code>(list_of_items, parameters)</code> tuple.</li>
+<li><strong>List</strong> — <code>list</code> of Items / Inner Lists.</li>
+<li><strong>Dictionary</strong> — <code>dict[str, Item | InnerList]</code> preserving order.</li>
+</ul>
+<p>Parsing is strict per RFC 9651 §1.1: any violation raises <code>ValueError</code>
+and the caller is expected to ignore the entire field value (see
+<code>Headers.get_sf_item</code> / <code>get_sf_list</code> / <code>get_sf_dict</code>, which return
+<code>None</code> in that case).  Serialisation likewise raises <code>ValueError</code> on
+out-of-range or mistyped input.</p>
+<p>An empty List / Dictionary serialises to <code>b''</code>; per RFC 9651 §3.1 the
+field should then be omitted entirely, which is the caller's job.</p>
 
 
 
@@ -4890,32 +5086,21 @@ own scanner.</p>
 
 
 
-<h3 id="blackbull.server.deadline.ConnectionDeadline" class="doc doc-heading">
-            <code>ConnectionDeadline</code>
+<h3 id="blackbull.protocol.structured_fields.Date" class="doc doc-heading">
+            <code>Date</code>
 
 
-<a href="#blackbull.server.deadline.ConnectionDeadline" class="headerlink" title="Permanent link">&para;</a></h3>
+<a href="#blackbull.protocol.structured_fields.Date" class="headerlink" title="Permanent link">&para;</a></h3>
 
 
     <div class="doc doc-contents ">
 
 
 
-        <p>One reusable deadline per connection.</p>
-<p>The instance binds to the task that constructed it (in practice, the
-connection actor's task).  When the per-process scanner observes
-that the deadline's monotonic <code>_deadline_at</code> has passed, the bound
-task is cancelled — the cancellation propagates into whichever
-<code>reader.readuntil</code> / <code>read</code> / <code>readexactly</code> is currently
-awaiting.  Call sites translate the cancellation into
-<code>TimeoutError</code> via :meth:<code>guard</code> (the common case) or manually
-by checking :attr:<code>fired</code>.</p>
-<p>Why a scanner instead of one <code>call_later</code> per arm?  At
-saturation the per-arm path costs ~1.7 µs (TimerHandle + heap
-push + cancel).  The scanner replaces that with one
-<code>loop.time()</code> call + one comparison + one set membership check
-on the registry (~0.34 µs).  Sprint 26 Phase B microbench: 80 %
-per-call reduction; cascade-multiplied estimate ~15–25 % B1.</p>
+        <p>RFC 9651 Date — an integer number of Unix seconds (may pre-date 1970).</p>
+<p>Deliberately not a <code>datetime</code>: the SF Date range (±10¹⁵−1 seconds)
+exceeds what <code>datetime</code> can represent.  Use <code>to_datetime</code> for values
+in the representable range.</p>
 
 
 
@@ -4941,17 +5126,19 @@ per-call reduction; cascade-multiplied estimate ~15–25 % B1.</p>
 <div class="doc doc-object doc-function">
 
 
-<h4 id="blackbull.server.deadline.ConnectionDeadline.arm" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">arm</span><span class="p">(</span><span class="n">seconds</span><span class="p">)</span></code>
+<h4 id="blackbull.protocol.structured_fields.Date.from_datetime" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">from_datetime</span><span class="p">(</span><span class="n">dt</span><span class="p">)</span></code>
 
-<a href="#blackbull.server.deadline.ConnectionDeadline.arm" class="headerlink" title="Permanent link">&para;</a></h4>
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-classmethod"><code>classmethod</code></small>
+  </span>
+
+<a href="#blackbull.protocol.structured_fields.Date.from_datetime" class="headerlink" title="Permanent link">&para;</a></h4>
 
 
     <div class="doc doc-contents ">
 
-        <p>(Re-)set the deadline; <code>seconds &lt;= 0</code> disables it.</p>
-<p>Safe to call repeatedly.  Resets :attr:<code>fired</code> so a recovered
-deadline can be reused across phases on the same connection.</p>
+        <p>Build a <code>Date</code> from a <code>datetime</code> (naive values are taken as UTC).</p>
 
 
     </div>
@@ -4961,45 +5148,15 @@ deadline can be reused across phases on the same connection.</p>
 <div class="doc doc-object doc-function">
 
 
-<h4 id="blackbull.server.deadline.ConnectionDeadline.disarm" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">disarm</span><span class="p">()</span></code>
+<h4 id="blackbull.protocol.structured_fields.Date.to_datetime" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">to_datetime</span><span class="p">()</span></code>
 
-<a href="#blackbull.server.deadline.ConnectionDeadline.disarm" class="headerlink" title="Permanent link">&para;</a></h4>
-
-
-    <div class="doc doc-contents ">
-
-        <p>Drop the deadline.  Idempotent.</p>
-
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-function">
-
-
-<h4 id="blackbull.server.deadline.ConnectionDeadline.guard" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">guard</span><span class="p">(</span><span class="n">seconds</span><span class="p">)</span></code>
-
-<a href="#blackbull.server.deadline.ConnectionDeadline.guard" class="headerlink" title="Permanent link">&para;</a></h4>
+<a href="#blackbull.protocol.structured_fields.Date.to_datetime" class="headerlink" title="Permanent link">&para;</a></h4>
 
 
     <div class="doc doc-contents ">
 
-        <p>Arm the deadline and return <code>self</code> as a context manager.</p>
-<p>Caller pattern::</p>
-<pre><code>with dl.guard(cfg.header_timeout):
-    await reader.readuntil(...)
-</code></pre>
-<p>Matches the observable behaviour of <code>async with asyncio.timeout(d):</code>
-— a fired deadline manifests as <code>TimeoutError</code>.  The
-same-loop-iteration race where the underlying read completes
-<em>and</em> the deadline fires in the same tick is treated as a
-timeout (same convention as <code>asyncio.timeout</code>).</p>
-<p>Returns <code>self</code> rather than allocating a wrapper object.  Safe
-because each connection owns its own <code>ConnectionDeadline</code>
-and uses it sequentially from a single task.</p>
+        <p>Return the date as an aware UTC <code>datetime</code>.</p>
 
 
     </div>
@@ -5014,6 +5171,226 @@ and uses it sequentially from a single task.</p>
 
 </div>
 
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="blackbull.protocol.structured_fields.DisplayString" class="doc doc-heading">
+            <code>DisplayString</code>
+
+
+<a href="#blackbull.protocol.structured_fields.DisplayString" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="str">str</span></code></p>
+
+
+
+        <p>RFC 9651 Display String — Unicode text, percent-encoded on the wire.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="blackbull.protocol.structured_fields.Token" class="doc doc-heading">
+            <code>Token</code>
+
+
+<a href="#blackbull.protocol.structured_fields.Token" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="str">str</span></code></p>
+
+
+
+        <p>RFC 9651 Token — a short textual identifier (str subclass).</p>
+<p>Kept distinct from <code>str</code> (SF String) because the two serialise
+differently and RFC 9651 requires the distinction to be preserved.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="blackbull.protocol.structured_fields.parse_dictionary" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">parse_dictionary</span><span class="p">(</span><span class="n">value</span><span class="p">)</span></code>
+
+<a href="#blackbull.protocol.structured_fields.parse_dictionary" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Parse a Structured Field Dictionary (RFC 9651 §4.2.2).</p>
+<p>Multiple field lines must be combined (joined with <code>b', '</code>) before
+calling.  Returns an ordered <code>dict</code> of member name → Item / Inner
+List; raises <code>ValueError</code> on any violation of the RFC grammar.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="blackbull.protocol.structured_fields.parse_item" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">parse_item</span><span class="p">(</span><span class="n">value</span><span class="p">)</span></code>
+
+<a href="#blackbull.protocol.structured_fields.parse_item" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Parse a Structured Field Item (RFC 9651 §4.2.3).</p>
+<p>Returns <code>(bare_item, parameters)</code>.  Raises <code>ValueError</code> on any
+violation of the RFC grammar.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="blackbull.protocol.structured_fields.parse_list" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">parse_list</span><span class="p">(</span><span class="n">value</span><span class="p">)</span></code>
+
+<a href="#blackbull.protocol.structured_fields.parse_list" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Parse a Structured Field List (RFC 9651 §4.2.1).</p>
+<p>Multiple field lines must be combined (joined with <code>b', '</code>) before
+calling.  Returns a list of Items / Inner Lists; raises <code>ValueError</code>
+on any violation of the RFC grammar.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="blackbull.protocol.structured_fields.serialize_dictionary" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">serialize_dictionary</span><span class="p">(</span><span class="n">members</span><span class="p">)</span></code>
+
+<a href="#blackbull.protocol.structured_fields.serialize_dictionary" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Serialise a Structured Field Dictionary (RFC 9651 §4.1.2) to ASCII bytes.</p>
+<p>An empty dictionary yields <code>b''</code> — per RFC 9651 §3.1 the field should
+then not be emitted at all.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="blackbull.protocol.structured_fields.serialize_item" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">serialize_item</span><span class="p">(</span><span class="n">bare_item</span><span class="p">,</span> <span class="n">params</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
+
+<a href="#blackbull.protocol.structured_fields.serialize_item" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Serialise a Structured Field Item (RFC 9651 §4.1.3) to ASCII bytes.</p>
+<p>Raises <code>ValueError</code> for out-of-range values (e.g. an integer beyond
+±(10¹⁵−1)) or types with no SF mapping.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="blackbull.protocol.structured_fields.serialize_list" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">serialize_list</span><span class="p">(</span><span class="n">members</span><span class="p">)</span></code>
+
+<a href="#blackbull.protocol.structured_fields.serialize_list" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Serialise a Structured Field List (RFC 9651 §4.1.1) to ASCII bytes.</p>
+<p>An empty list yields <code>b''</code> — per RFC 9651 §3.1 the field should then
+not be emitted at all.</p>
+
+
+    </div>
+
+</div>
 
 
 

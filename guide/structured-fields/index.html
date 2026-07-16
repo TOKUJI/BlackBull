@@ -10,28 +10,28 @@
       
       
       
-        <link rel="canonical" href="https://TOKUJI.github.io/BlackBull/api/blackbull/server/deadline/">
+        <link rel="canonical" href="https://TOKUJI.github.io/BlackBull/guide/structured-fields/">
       
       
-        <link rel="prev" href="../constants/">
+        <link rel="prev" href="../http2/">
       
       
-        <link rel="next" href="../http1_actor/">
+        <link rel="next" href="../raw-protocols/">
       
       
         
       
       
-      <link rel="icon" href="../../../../assets/images/favicon.png">
+      <link rel="icon" href="../../assets/images/favicon.png">
       <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
     
     
       
-        <title>deadline - BlackBull</title>
+        <title>Structured Fields - BlackBull</title>
       
     
     
-      <link rel="stylesheet" href="../../../../assets/stylesheets/main.484c7ddc.min.css">
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
       
       
 
@@ -50,11 +50,11 @@
       
     
     
-      <link rel="stylesheet" href="../../../../assets/_mkdocstrings.css">
+      <link rel="stylesheet" href="../../assets/_mkdocstrings.css">
     
-      <link rel="stylesheet" href="../../../../stylesheets/extra.css">
+      <link rel="stylesheet" href="../../stylesheets/extra.css">
     
-    <script>__md_scope=new URL("../../../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
     
       
 
@@ -72,7 +72,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#blackbullserverdeadline" class="md-skip">
+        <a href="#structured-fields-rfc-9651" class="md-skip">
           Skip to content
         </a>
       
@@ -88,7 +88,7 @@
 
 <header class="md-header md-header--shadow" data-md-component="header">
   <nav class="md-header__inner md-grid" aria-label="Header">
-    <a href="../../../.." title="BlackBull" class="md-header__button md-logo" aria-label="BlackBull" data-md-component="logo">
+    <a href="../.." title="BlackBull" class="md-header__button md-logo" aria-label="BlackBull" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
@@ -108,7 +108,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              deadline
+              Structured Fields
             
           </span>
         </div>
@@ -198,7 +198,7 @@
 
 <nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
   <label class="md-nav__title" for="__drawer">
-    <a href="../../../.." title="BlackBull" class="md-nav__button md-logo" aria-label="BlackBull" data-md-component="logo">
+    <a href="../.." title="BlackBull" class="md-nav__button md-logo" aria-label="BlackBull" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
@@ -228,7 +228,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../.." class="md-nav__link">
+      <a href="../.." class="md-nav__link">
         
   
   
@@ -302,7 +302,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../getting-started/why-blackbull/" class="md-nav__link">
+      <a href="../../getting-started/why-blackbull/" class="md-nav__link">
         
   
   
@@ -330,7 +330,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../getting-started/installation/" class="md-nav__link">
+      <a href="../../getting-started/installation/" class="md-nav__link">
         
   
   
@@ -358,7 +358,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../getting-started/hello-world/" class="md-nav__link">
+      <a href="../../getting-started/hello-world/" class="md-nav__link">
         
   
   
@@ -386,7 +386,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../getting-started/first-app/" class="md-nav__link">
+      <a href="../../getting-started/first-app/" class="md-nav__link">
         
   
   
@@ -418,18 +418,20 @@
       
   
   
+    
   
   
+  
     
     
     
     
     
-    <li class="md-nav__item md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
         
           
           <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
@@ -450,7 +452,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_3">
             <span class="md-nav__icon md-icon"></span>
             
@@ -468,7 +470,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../guide/" class="md-nav__link">
+      <a href="../" class="md-nav__link">
         
   
   
@@ -496,7 +498,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../guide/routing/" class="md-nav__link">
+      <a href="../routing/" class="md-nav__link">
         
   
   
@@ -524,7 +526,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../guide/middleware/" class="md-nav__link">
+      <a href="../middleware/" class="md-nav__link">
         
   
   
@@ -552,7 +554,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../guide/error-handling/" class="md-nav__link">
+      <a href="../error-handling/" class="md-nav__link">
         
   
   
@@ -580,7 +582,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../guide/requests-and-responses/" class="md-nav__link">
+      <a href="../requests-and-responses/" class="md-nav__link">
         
   
   
@@ -608,7 +610,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../guide/websockets/" class="md-nav__link">
+      <a href="../websockets/" class="md-nav__link">
         
   
   
@@ -636,7 +638,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../guide/http2/" class="md-nav__link">
+      <a href="../http2/" class="md-nav__link">
         
   
   
@@ -661,10 +663,37 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../../../../guide/structured-fields/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Structured Fields
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -680,6 +709,70 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#reading-structured-headers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reading structured headers
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-type-mapping" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The type mapping
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#producing-structured-headers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Producing structured headers
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#where-the-framework-itself-uses-it" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Where the framework itself uses it
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -692,7 +785,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../guide/raw-protocols/" class="md-nav__link">
+      <a href="../raw-protocols/" class="md-nav__link">
         
   
   
@@ -720,7 +813,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../guide/mqtt/" class="md-nav__link">
+      <a href="../mqtt/" class="md-nav__link">
         
   
   
@@ -748,7 +841,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../guide/grpc/" class="md-nav__link">
+      <a href="../grpc/" class="md-nav__link">
         
   
   
@@ -776,7 +869,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../guide/translation-hub/" class="md-nav__link">
+      <a href="../translation-hub/" class="md-nav__link">
         
   
   
@@ -804,7 +897,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../guide/streaming/" class="md-nav__link">
+      <a href="../streaming/" class="md-nav__link">
         
   
   
@@ -832,7 +925,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../guide/events/" class="md-nav__link">
+      <a href="../events/" class="md-nav__link">
         
   
   
@@ -860,7 +953,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../guide/logging/" class="md-nav__link">
+      <a href="../logging/" class="md-nav__link">
         
   
   
@@ -888,7 +981,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../guide/static-files/" class="md-nav__link">
+      <a href="../static-files/" class="md-nav__link">
         
   
   
@@ -916,7 +1009,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../guide/configuration/" class="md-nav__link">
+      <a href="../configuration/" class="md-nav__link">
         
   
   
@@ -944,7 +1037,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../guide/extensions/" class="md-nav__link">
+      <a href="../extensions/" class="md-nav__link">
         
   
   
@@ -972,7 +1065,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../guide/openapi/" class="md-nav__link">
+      <a href="../openapi/" class="md-nav__link">
         
   
   
@@ -1000,7 +1093,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../guide/testing/" class="md-nav__link">
+      <a href="../testing/" class="md-nav__link">
         
   
   
@@ -1028,7 +1121,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../guide/fault_injection/" class="md-nav__link">
+      <a href="../fault_injection/" class="md-nav__link">
         
   
   
@@ -1110,7 +1203,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../deployment/running/" class="md-nav__link">
+      <a href="../../deployment/running/" class="md-nav__link">
         
   
   
@@ -1138,7 +1231,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../deployment/workers/" class="md-nav__link">
+      <a href="../../deployment/workers/" class="md-nav__link">
         
   
   
@@ -1166,7 +1259,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../deployment/tls/" class="md-nav__link">
+      <a href="../../deployment/tls/" class="md-nav__link">
         
   
   
@@ -1194,7 +1287,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../deployment/behind-nginx/" class="md-nav__link">
+      <a href="../../deployment/behind-nginx/" class="md-nav__link">
         
   
   
@@ -1222,7 +1315,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../deployment/unix-and-fd/" class="md-nav__link">
+      <a href="../../deployment/unix-and-fd/" class="md-nav__link">
         
   
   
@@ -1250,7 +1343,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../deployment/hot-reload/" class="md-nav__link">
+      <a href="../../deployment/hot-reload/" class="md-nav__link">
         
   
   
@@ -1282,20 +1375,18 @@
       
   
   
-    
   
   
-  
     
     
     
     
     
-    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" checked>
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
         
           
           <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
@@ -1316,7 +1407,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="true">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_5">
             <span class="md-nav__icon md-icon"></span>
             
@@ -1334,7 +1425,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../reference/env-vars/" class="md-nav__link">
+      <a href="../../reference/env-vars/" class="md-nav__link">
         
   
   
@@ -1359,20 +1450,18 @@
                 
   
   
-    
   
   
-  
     
     
     
     
     
-    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2" checked>
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2" >
         
           
           <label class="md-nav__link" for="__nav_5_2" id="__nav_5_2_label" tabindex="0">
@@ -1393,7 +1482,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_5_2_label" aria-expanded="true">
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_5_2_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_5_2">
             <span class="md-nav__icon md-icon"></span>
             
@@ -1408,20 +1497,18 @@
                 
   
   
-    
   
   
-  
     
     
     
     
     
-    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2_1" checked>
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2_1" >
         
           
           <label class="md-nav__link" for="__nav_5_2_1" id="__nav_5_2_1_label" tabindex="0">
@@ -1442,7 +1529,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_5_2_1_label" aria-expanded="true">
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_5_2_1_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_5_2_1">
             <span class="md-nav__icon md-icon"></span>
             
@@ -1460,7 +1547,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../" class="md-nav__link">
+      <a href="../../api/blackbull/" class="md-nav__link">
         
   
   
@@ -1488,7 +1575,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../actor/" class="md-nav__link">
+      <a href="../../api/blackbull/actor/" class="md-nav__link">
         
   
   
@@ -1516,7 +1603,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../app/" class="md-nav__link">
+      <a href="../../api/blackbull/app/" class="md-nav__link">
         
   
   
@@ -1544,7 +1631,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../asgi/" class="md-nav__link">
+      <a href="../../api/blackbull/asgi/" class="md-nav__link">
         
   
   
@@ -1572,7 +1659,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../cli/" class="md-nav__link">
+      <a href="../../api/blackbull/cli/" class="md-nav__link">
         
   
   
@@ -1647,7 +1734,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../client/" class="md-nav__link">
+      <a href="../../api/blackbull/client/" class="md-nav__link">
         
   
   
@@ -1675,7 +1762,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../client/client/" class="md-nav__link">
+      <a href="../../api/blackbull/client/client/" class="md-nav__link">
         
   
   
@@ -1703,7 +1790,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../client/exceptions/" class="md-nav__link">
+      <a href="../../api/blackbull/client/exceptions/" class="md-nav__link">
         
   
   
@@ -1731,7 +1818,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../client/http1/" class="md-nav__link">
+      <a href="../../api/blackbull/client/http1/" class="md-nav__link">
         
   
   
@@ -1759,7 +1846,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../client/http2/" class="md-nav__link">
+      <a href="../../api/blackbull/client/http2/" class="md-nav__link">
         
   
   
@@ -1787,7 +1874,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../client/response/" class="md-nav__link">
+      <a href="../../api/blackbull/client/response/" class="md-nav__link">
         
   
   
@@ -1815,7 +1902,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../client/scenario/" class="md-nav__link">
+      <a href="../../api/blackbull/client/scenario/" class="md-nav__link">
         
   
   
@@ -1843,7 +1930,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../client/scenario_oracle/" class="md-nav__link">
+      <a href="../../api/blackbull/client/scenario_oracle/" class="md-nav__link">
         
   
   
@@ -1871,7 +1958,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../client/websocket/" class="md-nav__link">
+      <a href="../../api/blackbull/client/websocket/" class="md-nav__link">
         
   
   
@@ -1899,7 +1986,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../client/websocket_h2/" class="md-nav__link">
+      <a href="../../api/blackbull/client/websocket_h2/" class="md-nav__link">
         
   
   
@@ -1935,7 +2022,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../config/" class="md-nav__link">
+      <a href="../../api/blackbull/config/" class="md-nav__link">
         
   
   
@@ -1963,7 +2050,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../env/" class="md-nav__link">
+      <a href="../../api/blackbull/env/" class="md-nav__link">
         
   
   
@@ -1991,7 +2078,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../event/" class="md-nav__link">
+      <a href="../../api/blackbull/event/" class="md-nav__link">
         
   
   
@@ -2019,7 +2106,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../event_aggregator/" class="md-nav__link">
+      <a href="../../api/blackbull/event_aggregator/" class="md-nav__link">
         
   
   
@@ -2047,7 +2134,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../extension/" class="md-nav__link">
+      <a href="../../api/blackbull/extension/" class="md-nav__link">
         
   
   
@@ -2122,7 +2209,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../fault_injection/" class="md-nav__link">
+      <a href="../../api/blackbull/fault_injection/" class="md-nav__link">
         
   
   
@@ -2197,7 +2284,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../fault_injection/catalogue/" class="md-nav__link">
+      <a href="../../api/blackbull/fault_injection/catalogue/" class="md-nav__link">
         
   
   
@@ -2225,7 +2312,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../fault_injection/catalogue/h2/" class="md-nav__link">
+      <a href="../../api/blackbull/fault_injection/catalogue/h2/" class="md-nav__link">
         
   
   
@@ -2261,7 +2348,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../fault_injection/h2_server/" class="md-nav__link">
+      <a href="../../api/blackbull/fault_injection/h2_server/" class="md-nav__link">
         
   
   
@@ -2289,7 +2376,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../fault_injection/oracle_h1/" class="md-nav__link">
+      <a href="../../api/blackbull/fault_injection/oracle_h1/" class="md-nav__link">
         
   
   
@@ -2317,7 +2404,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../fault_injection/scenario_h1/" class="md-nav__link">
+      <a href="../../api/blackbull/fault_injection/scenario_h1/" class="md-nav__link">
         
   
   
@@ -2345,7 +2432,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../fault_injection/scenario_h2/" class="md-nav__link">
+      <a href="../../api/blackbull/fault_injection/scenario_h2/" class="md-nav__link">
         
   
   
@@ -2428,7 +2515,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../grpc/" class="md-nav__link">
+      <a href="../../api/blackbull/grpc/" class="md-nav__link">
         
   
   
@@ -2456,7 +2543,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../grpc/asgi/" class="md-nav__link">
+      <a href="../../api/blackbull/grpc/asgi/" class="md-nav__link">
         
   
   
@@ -2484,7 +2571,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../grpc/codec/" class="md-nav__link">
+      <a href="../../api/blackbull/grpc/codec/" class="md-nav__link">
         
   
   
@@ -2512,7 +2599,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../grpc/compression/" class="md-nav__link">
+      <a href="../../api/blackbull/grpc/compression/" class="md-nav__link">
         
   
   
@@ -2540,7 +2627,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../grpc/registry/" class="md-nav__link">
+      <a href="../../api/blackbull/grpc/registry/" class="md-nav__link">
         
   
   
@@ -2568,7 +2655,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../grpc/status/" class="md-nav__link">
+      <a href="../../api/blackbull/grpc/status/" class="md-nav__link">
         
   
   
@@ -2604,7 +2691,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../headers/" class="md-nav__link">
+      <a href="../../api/blackbull/headers/" class="md-nav__link">
         
   
   
@@ -2632,7 +2719,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../logger/" class="md-nav__link">
+      <a href="../../api/blackbull/logger/" class="md-nav__link">
         
   
   
@@ -2707,7 +2794,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/" class="md-nav__link">
+      <a href="../../api/blackbull/middleware/" class="md-nav__link">
         
   
   
@@ -2735,7 +2822,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/base/" class="md-nav__link">
+      <a href="../../api/blackbull/middleware/base/" class="md-nav__link">
         
   
   
@@ -2763,7 +2850,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/cache/" class="md-nav__link">
+      <a href="../../api/blackbull/middleware/cache/" class="md-nav__link">
         
   
   
@@ -2791,7 +2878,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/compression/" class="md-nav__link">
+      <a href="../../api/blackbull/middleware/compression/" class="md-nav__link">
         
   
   
@@ -2819,7 +2906,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/cors/" class="md-nav__link">
+      <a href="../../api/blackbull/middleware/cors/" class="md-nav__link">
         
   
   
@@ -2847,7 +2934,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/proxy/" class="md-nav__link">
+      <a href="../../api/blackbull/middleware/proxy/" class="md-nav__link">
         
   
   
@@ -2875,7 +2962,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/static/" class="md-nav__link">
+      <a href="../../api/blackbull/middleware/static/" class="md-nav__link">
         
   
   
@@ -2903,7 +2990,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/utils/" class="md-nav__link">
+      <a href="../../api/blackbull/middleware/utils/" class="md-nav__link">
         
   
   
@@ -2931,7 +3018,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/websocket/" class="md-nav__link">
+      <a href="../../api/blackbull/middleware/websocket/" class="md-nav__link">
         
   
   
@@ -3014,7 +3101,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../mqtt/" class="md-nav__link">
+      <a href="../../api/blackbull/mqtt/" class="md-nav__link">
         
   
   
@@ -3042,7 +3129,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../mqtt/asyncapi/" class="md-nav__link">
+      <a href="../../api/blackbull/mqtt/asyncapi/" class="md-nav__link">
         
   
   
@@ -3070,7 +3157,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../mqtt/broker/" class="md-nav__link">
+      <a href="../../api/blackbull/mqtt/broker/" class="md-nav__link">
         
   
   
@@ -3098,7 +3185,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../mqtt/connection/" class="md-nav__link">
+      <a href="../../api/blackbull/mqtt/connection/" class="md-nav__link">
         
   
   
@@ -3126,7 +3213,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../mqtt/extension/" class="md-nav__link">
+      <a href="../../api/blackbull/mqtt/extension/" class="md-nav__link">
         
   
   
@@ -3154,7 +3241,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../mqtt/messages/" class="md-nav__link">
+      <a href="../../api/blackbull/mqtt/messages/" class="md-nav__link">
         
   
   
@@ -3182,7 +3269,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../mqtt/tap/" class="md-nav__link">
+      <a href="../../api/blackbull/mqtt/tap/" class="md-nav__link">
         
   
   
@@ -3218,7 +3305,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../openapi/" class="md-nav__link">
+      <a href="../../api/blackbull/openapi/" class="md-nav__link">
         
   
   
@@ -3293,7 +3380,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../protocol/" class="md-nav__link">
+      <a href="../../api/blackbull/protocol/" class="md-nav__link">
         
   
   
@@ -3321,7 +3408,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../protocol/frame/" class="md-nav__link">
+      <a href="../../api/blackbull/protocol/frame/" class="md-nav__link">
         
   
   
@@ -3349,7 +3436,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../protocol/frame_types/" class="md-nav__link">
+      <a href="../../api/blackbull/protocol/frame_types/" class="md-nav__link">
         
   
   
@@ -3377,7 +3464,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../protocol/hpack_fastpath/" class="md-nav__link">
+      <a href="../../api/blackbull/protocol/hpack_fastpath/" class="md-nav__link">
         
   
   
@@ -3405,7 +3492,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../protocol/rsock/" class="md-nav__link">
+      <a href="../../api/blackbull/protocol/rsock/" class="md-nav__link">
         
   
   
@@ -3433,7 +3520,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../protocol/stream/" class="md-nav__link">
+      <a href="../../api/blackbull/protocol/stream/" class="md-nav__link">
         
   
   
@@ -3461,7 +3548,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../protocol/structured_fields/" class="md-nav__link">
+      <a href="../../api/blackbull/protocol/structured_fields/" class="md-nav__link">
         
   
   
@@ -3497,7 +3584,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../request/" class="md-nav__link">
+      <a href="../../api/blackbull/request/" class="md-nav__link">
         
   
   
@@ -3525,7 +3612,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../response/" class="md-nav__link">
+      <a href="../../api/blackbull/response/" class="md-nav__link">
         
   
   
@@ -3553,7 +3640,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../router/" class="md-nav__link">
+      <a href="../../api/blackbull/router/" class="md-nav__link">
         
   
   
@@ -3578,20 +3665,18 @@
                 
   
   
-    
   
   
-  
     
     
     
     
     
-    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2_1_23" checked>
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2_1_23" >
         
           
           <label class="md-nav__link" for="__nav_5_2_1_23" id="__nav_5_2_1_23_label" tabindex="0">
@@ -3612,7 +3697,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="4" aria-labelledby="__nav_5_2_1_23_label" aria-expanded="true">
+        <nav class="md-nav" data-md-level="4" aria-labelledby="__nav_5_2_1_23_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_5_2_1_23">
             <span class="md-nav__icon md-icon"></span>
             
@@ -3630,7 +3715,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../" class="md-nav__link">
+      <a href="../../api/blackbull/server/" class="md-nav__link">
         
   
   
@@ -3658,7 +3743,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../access_log/" class="md-nav__link">
+      <a href="../../api/blackbull/server/access_log/" class="md-nav__link">
         
   
   
@@ -3686,7 +3771,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../cap_log/" class="md-nav__link">
+      <a href="../../api/blackbull/server/cap_log/" class="md-nav__link">
         
   
   
@@ -3714,7 +3799,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../conn_id/" class="md-nav__link">
+      <a href="../../api/blackbull/server/conn_id/" class="md-nav__link">
         
   
   
@@ -3742,7 +3827,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../connection_actor/" class="md-nav__link">
+      <a href="../../api/blackbull/server/connection_actor/" class="md-nav__link">
         
   
   
@@ -3770,7 +3855,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../constants/" class="md-nav__link">
+      <a href="../../api/blackbull/server/constants/" class="md-nav__link">
         
   
   
@@ -3795,37 +3880,10 @@
                 
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    deadline
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/server/deadline/" class="md-nav__link">
         
   
   
@@ -3841,93 +3899,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#blackbull.server.deadline" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        deadline
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="deadline">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.deadline.ConnectionDeadline" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        ConnectionDeadline
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="ConnectionDeadline">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.deadline.ConnectionDeadline.arm" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        arm
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.deadline.ConnectionDeadline.disarm" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        disarm
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.deadline.ConnectionDeadline.guard" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        guard
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -3940,7 +3911,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../http1_actor/" class="md-nav__link">
+      <a href="../../api/blackbull/server/http1_actor/" class="md-nav__link">
         
   
   
@@ -3968,7 +3939,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../http2_actor/" class="md-nav__link">
+      <a href="../../api/blackbull/server/http2_actor/" class="md-nav__link">
         
   
   
@@ -3996,7 +3967,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../http2_messages/" class="md-nav__link">
+      <a href="../../api/blackbull/server/http2_messages/" class="md-nav__link">
         
   
   
@@ -4024,7 +3995,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../http2_ws/" class="md-nav__link">
+      <a href="../../api/blackbull/server/http2_ws/" class="md-nav__link">
         
   
   
@@ -4052,7 +4023,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../multiworker/" class="md-nav__link">
+      <a href="../../api/blackbull/server/multiworker/" class="md-nav__link">
         
   
   
@@ -4080,7 +4051,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../parser/" class="md-nav__link">
+      <a href="../../api/blackbull/server/parser/" class="md-nav__link">
         
   
   
@@ -4108,7 +4079,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../permessage_deflate/" class="md-nav__link">
+      <a href="../../api/blackbull/server/permessage_deflate/" class="md-nav__link">
         
   
   
@@ -4136,7 +4107,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../protocol_registry/" class="md-nav__link">
+      <a href="../../api/blackbull/server/protocol_registry/" class="md-nav__link">
         
   
   
@@ -4164,7 +4135,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../recipient/" class="md-nav__link">
+      <a href="../../api/blackbull/server/recipient/" class="md-nav__link">
         
   
   
@@ -4192,7 +4163,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../reload/" class="md-nav__link">
+      <a href="../../api/blackbull/server/reload/" class="md-nav__link">
         
   
   
@@ -4220,7 +4191,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../response/" class="md-nav__link">
+      <a href="../../api/blackbull/server/response/" class="md-nav__link">
         
   
   
@@ -4248,7 +4219,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../sender/" class="md-nav__link">
+      <a href="../../api/blackbull/server/sender/" class="md-nav__link">
         
   
   
@@ -4276,7 +4247,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../server/" class="md-nav__link">
+      <a href="../../api/blackbull/server/server/" class="md-nav__link">
         
   
   
@@ -4304,7 +4275,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../warmup/" class="md-nav__link">
+      <a href="../../api/blackbull/server/warmup/" class="md-nav__link">
         
   
   
@@ -4332,7 +4303,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../websocket_actor/" class="md-nav__link">
+      <a href="../../api/blackbull/server/websocket_actor/" class="md-nav__link">
         
   
   
@@ -4360,7 +4331,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../worker/" class="md-nav__link">
+      <a href="../../api/blackbull/server/worker/" class="md-nav__link">
         
   
   
@@ -4388,7 +4359,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../ws_codec/" class="md-nav__link">
+      <a href="../../api/blackbull/server/ws_codec/" class="md-nav__link">
         
   
   
@@ -4424,7 +4395,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../testing/" class="md-nav__link">
+      <a href="../../api/blackbull/testing/" class="md-nav__link">
         
   
   
@@ -4452,7 +4423,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../utils/" class="md-nav__link">
+      <a href="../../api/blackbull/utils/" class="md-nav__link">
         
   
   
@@ -4550,7 +4521,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../about/architecture/" class="md-nav__link">
+      <a href="../../about/architecture/" class="md-nav__link">
         
   
   
@@ -4578,7 +4549,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../about/conformance/" class="md-nav__link">
+      <a href="../../about/conformance/" class="md-nav__link">
         
   
   
@@ -4606,7 +4577,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../about/internals/" class="md-nav__link">
+      <a href="../../about/internals/" class="md-nav__link">
         
   
   
@@ -4634,7 +4605,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../about/mqtt-actor-design/" class="md-nav__link">
+      <a href="../../about/mqtt-actor-design/" class="md-nav__link">
         
   
   
@@ -4662,7 +4633,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../about/rfc9113-implementation/" class="md-nav__link">
+      <a href="../../about/rfc9113-implementation/" class="md-nav__link">
         
   
   
@@ -4690,7 +4661,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../about/grpc-assessment/" class="md-nav__link">
+      <a href="../../about/grpc-assessment/" class="md-nav__link">
         
   
   
@@ -4745,69 +4716,46 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#blackbull.server.deadline" class="md-nav__link">
+  <a href="#reading-structured-headers" class="md-nav__link">
     <span class="md-ellipsis">
       
-        deadline
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="deadline">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.deadline.ConnectionDeadline" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        ConnectionDeadline
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="ConnectionDeadline">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.deadline.ConnectionDeadline.arm" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        arm
+        Reading structured headers
       
     </span>
   </a>
   
 </li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.deadline.ConnectionDeadline.disarm" class="md-nav__link">
+      
+        <li class="md-nav__item">
+  <a href="#the-type-mapping" class="md-nav__link">
     <span class="md-ellipsis">
       
-        disarm
+        The type mapping
       
     </span>
   </a>
   
 </li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.deadline.ConnectionDeadline.guard" class="md-nav__link">
+      
+        <li class="md-nav__item">
+  <a href="#producing-structured-headers" class="md-nav__link">
     <span class="md-ellipsis">
       
-        guard
+        Producing structured headers
       
     </span>
   </a>
   
 </li>
-        
-      </ul>
-    </nav>
-  
-</li>
-        
-      </ul>
-    </nav>
+      
+        <li class="md-nav__item">
+  <a href="#where-the-framework-itself-uses-it" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Where the framework itself uses it
+      
+    </span>
+  </a>
   
 </li>
       
@@ -4831,197 +4779,128 @@
   
 
 
-<h1 id="blackbullserverdeadline"><code>blackbull.server.deadline</code><a class="headerlink" href="#blackbullserverdeadline" title="Permanent link">&para;</a></h1>
-
-
-<div class="doc doc-object doc-module">
-
-
-
-<h2 id="blackbull.server.deadline" class="doc doc-heading">
-            <code>blackbull.server.deadline</code>
-
-
-<a href="#blackbull.server.deadline" class="headerlink" title="Permanent link">&para;</a></h2>
-
-    <div class="doc doc-contents first">
-
-        <p>Per-connection rescheduled deadline (Sprint 26 Phase B — scanner form).</p>
-<p>Replaces <code>async with asyncio.timeout(...)</code> on the per-request hot
-path.  Sprint 23 used one <code>loop.call_later</code> <code>TimerHandle</code> per
-connection, cancelled and rescheduled at every phase transition.
-Sprint 26 Phase B replaces the per-arm <code>call_later</code> with a
-per-process tick scanner: one singleton <code>TimerHandle</code> re-arms itself
-every :data:<code>_TICK_S</code> and walks the registry of armed
-:class:<code>ConnectionDeadline</code> instances for expirations.  Per-arm cost
-drops from ~1.7 µs to ~0.34 µs (WSL2 microbench, Sprint 26 Phase B
-spike).</p>
-<p>Trade-off: a fired deadline lands within <code>[now, now + _TICK_S]</code>
-rather than at the exact requested instant.  At the default
-<code>_TICK_S = 0.3 s</code> this is ~3 % slop on the tightest configurable
-deadline (<code>BB_HEADER_TIMEOUT</code> default 10 s) and ~1 % on the
-<code>body_timeout</code> default 30 s.  Tune via <code>BB_DEADLINE_TICK_MS</code>
-(milliseconds, default 300, floor 10).</p>
-<p>The scanner is loop-scoped and lazily started on the first <code>arm</code>;
-it quiesces (cancels its own handle) when the registry empties and
-auto-resurrects on the next <code>arm</code>.  Each worker process has its
-own scanner.</p>
-
-
-
-
-
-
-
-
-
-
-<div class="doc doc-children">
-
-
-
-
-
-
-
-
-
-<div class="doc doc-object doc-class">
-
-
-
-<h3 id="blackbull.server.deadline.ConnectionDeadline" class="doc doc-heading">
-            <code>ConnectionDeadline</code>
-
-
-<a href="#blackbull.server.deadline.ConnectionDeadline" class="headerlink" title="Permanent link">&para;</a></h3>
-
-
-    <div class="doc doc-contents ">
-
-
-
-        <p>One reusable deadline per connection.</p>
-<p>The instance binds to the task that constructed it (in practice, the
-connection actor's task).  When the per-process scanner observes
-that the deadline's monotonic <code>_deadline_at</code> has passed, the bound
-task is cancelled — the cancellation propagates into whichever
-<code>reader.readuntil</code> / <code>read</code> / <code>readexactly</code> is currently
-awaiting.  Call sites translate the cancellation into
-<code>TimeoutError</code> via :meth:<code>guard</code> (the common case) or manually
-by checking :attr:<code>fired</code>.</p>
-<p>Why a scanner instead of one <code>call_later</code> per arm?  At
-saturation the per-arm path costs ~1.7 µs (TimerHandle + heap
-push + cancel).  The scanner replaces that with one
-<code>loop.time()</code> call + one comparison + one set membership check
-on the registry (~0.34 µs).  Sprint 26 Phase B microbench: 80 %
-per-call reduction; cascade-multiplied estimate ~15–25 % B1.</p>
-
-
-
-
-
-
-
-
-
-
-
-<div class="doc doc-children">
-
-
-
-
-
-
-
-
-
-
-<div class="doc doc-object doc-function">
-
-
-<h4 id="blackbull.server.deadline.ConnectionDeadline.arm" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">arm</span><span class="p">(</span><span class="n">seconds</span><span class="p">)</span></code>
-
-<a href="#blackbull.server.deadline.ConnectionDeadline.arm" class="headerlink" title="Permanent link">&para;</a></h4>
-
-
-    <div class="doc doc-contents ">
-
-        <p>(Re-)set the deadline; <code>seconds &lt;= 0</code> disables it.</p>
-<p>Safe to call repeatedly.  Resets :attr:<code>fired</code> so a recovered
-deadline can be reused across phases on the same connection.</p>
-
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-function">
-
-
-<h4 id="blackbull.server.deadline.ConnectionDeadline.disarm" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">disarm</span><span class="p">()</span></code>
-
-<a href="#blackbull.server.deadline.ConnectionDeadline.disarm" class="headerlink" title="Permanent link">&para;</a></h4>
-
-
-    <div class="doc doc-contents ">
-
-        <p>Drop the deadline.  Idempotent.</p>
-
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-function">
-
-
-<h4 id="blackbull.server.deadline.ConnectionDeadline.guard" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">guard</span><span class="p">(</span><span class="n">seconds</span><span class="p">)</span></code>
-
-<a href="#blackbull.server.deadline.ConnectionDeadline.guard" class="headerlink" title="Permanent link">&para;</a></h4>
-
-
-    <div class="doc doc-contents ">
-
-        <p>Arm the deadline and return <code>self</code> as a context manager.</p>
-<p>Caller pattern::</p>
-<pre><code>with dl.guard(cfg.header_timeout):
-    await reader.readuntil(...)
-</code></pre>
-<p>Matches the observable behaviour of <code>async with asyncio.timeout(d):</code>
-— a fired deadline manifests as <code>TimeoutError</code>.  The
-same-loop-iteration race where the underlying read completes
-<em>and</em> the deadline fires in the same tick is treated as a
-timeout (same convention as <code>asyncio.timeout</code>).</p>
-<p>Returns <code>self</code> rather than allocating a wrapper object.  Safe
-because each connection owns its own <code>ConnectionDeadline</code>
-and uses it sequentially from a single task.</p>
-
-
-    </div>
-
-</div>
-
-
-
-  </div>
-
-    </div>
-
-</div>
-
-
-
-
-  </div>
-
-    </div>
-
-</div>
+<h1 id="structured-fields-rfc-9651">Structured Fields (RFC 9651)<a class="headerlink" href="#structured-fields-rfc-9651" title="Permanent link">&para;</a></h1>
+<p>Every HTTP header defined by the IETF since ~2021 — <code>Priority</code>,
+<code>Deprecation</code>, <code>Accept-Query</code>, rate-limit signalling, Client Hints —
+uses <strong>Structured Field Values</strong> (RFC 9651) instead of a bespoke
+grammar.  BlackBull ships a strict parser and serialiser for all of
+it in <code>blackbull.protocol.structured_fields</code>, verified against the
+HTTP Working Group's
+<a href="https://github.com/httpwg/structured-field-tests">conformance suite</a>
+(2,135 cases).</p>
+<h2 id="reading-structured-headers">Reading structured headers<a class="headerlink" href="#reading-structured-headers" title="Permanent link">&para;</a></h2>
+<p><code>Headers</code> exposes one accessor per top-level SF type.  Each returns
+<code>None</code> when the field is absent <strong>or</strong> fails strict parsing — RFC 9651
+requires a malformed field to be ignored in its entirety:</p>
+<div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">&#39;/&#39;</span><span class="p">,</span> <span class="n">methods</span><span class="o">=</span><span class="p">[</span><span class="n">HTTPMethod</span><span class="o">.</span><span class="n">GET</span><span class="p">])</span>
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">handler</span><span class="p">(</span><span class="n">request</span><span class="p">:</span> <span class="n">Request</span><span class="p">):</span>
+    <span class="c1"># Dictionary-typed field, e.g. Priority: u=2, i</span>
+    <span class="n">priority</span> <span class="o">=</span> <span class="n">request</span><span class="o">.</span><span class="n">headers</span><span class="o">.</span><span class="n">get_sf_dict</span><span class="p">(</span><span class="sa">b</span><span class="s1">&#39;priority&#39;</span><span class="p">)</span>
+    <span class="c1"># → {&#39;u&#39;: (2, {}), &#39;i&#39;: (True, {})}   or None</span>
+
+    <span class="c1"># Item-typed field, e.g. Deprecation: @1659578233</span>
+    <span class="n">deprecation</span> <span class="o">=</span> <span class="n">request</span><span class="o">.</span><span class="n">headers</span><span class="o">.</span><span class="n">get_sf_item</span><span class="p">(</span><span class="sa">b</span><span class="s1">&#39;deprecation&#39;</span><span class="p">)</span>
+    <span class="c1"># → (Date(1659578233), {})            or None</span>
+
+    <span class="c1"># List-typed field, e.g. Example: sugar, tea;kind=green</span>
+    <span class="n">example</span> <span class="o">=</span> <span class="n">request</span><span class="o">.</span><span class="n">headers</span><span class="o">.</span><span class="n">get_sf_list</span><span class="p">(</span><span class="sa">b</span><span class="s1">&#39;example&#39;</span><span class="p">)</span>
+    <span class="c1"># → [(Token(&#39;sugar&#39;), {}), (Token(&#39;tea&#39;), {&#39;kind&#39;: Token(&#39;green&#39;)})]</span>
+</code></pre></div>
+<p>Multiple field lines of the same name are combined with <code>", "</code> before
+parsing, exactly as §4.2 of the RFC specifies.</p>
+<h2 id="the-type-mapping">The type mapping<a class="headerlink" href="#the-type-mapping" title="Permanent link">&para;</a></h2>
+<p>Every member comes back as a <code>(value, parameters)</code> tuple, where
+<code>parameters</code> is an ordered <code>dict[str, bare item]</code>.  An Inner List is a
+<code>(list_of_items, parameters)</code> tuple.  Bare items map to Python as:</p>
+<table>
+<thead>
+<tr>
+<th>SF type</th>
+<th>Python type</th>
+<th>Wire example</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Integer</td>
+<td><code>int</code></td>
+<td><code>42</code></td>
+</tr>
+<tr>
+<td>Decimal</td>
+<td><code>float</code></td>
+<td><code>4.5</code></td>
+</tr>
+<tr>
+<td>String</td>
+<td><code>str</code></td>
+<td><code>"hello"</code></td>
+</tr>
+<tr>
+<td>Token</td>
+<td><code>Token</code> (str subclass)</td>
+<td><code>text/html</code></td>
+</tr>
+<tr>
+<td>Byte Sequence</td>
+<td><code>bytes</code></td>
+<td><code>:cHJl...:</code></td>
+</tr>
+<tr>
+<td>Boolean</td>
+<td><code>bool</code></td>
+<td><code>?1</code></td>
+</tr>
+<tr>
+<td>Date</td>
+<td><code>Date</code></td>
+<td><code>@1659578233</code></td>
+</tr>
+<tr>
+<td>Display String</td>
+<td><code>DisplayString</code> (str subclass)</td>
+<td><code>%"f%c3%bc"</code></td>
+</tr>
+</tbody>
+</table>
+<p><code>Token</code> and <code>DisplayString</code> compare equal to plain <code>str</code> but keep
+their identity so re-serialisation stays faithful (<code>foo</code> vs <code>"foo"</code> vs
+<code>%"foo"</code> are three different wire forms of the same Python string).</p>
+<p><code>Date</code> wraps an integer of Unix seconds rather than subclassing
+<code>datetime</code> — the RFC's range (±10¹⁵−1 seconds) exceeds what <code>datetime</code>
+can hold.  Use <code>Date.to_datetime()</code> / <code>Date.from_datetime()</code> for
+values in the representable range.</p>
+<h2 id="producing-structured-headers">Producing structured headers<a class="headerlink" href="#producing-structured-headers" title="Permanent link">&para;</a></h2>
+<p>The serialisers return ASCII bytes ready to drop into a response
+header list:</p>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">blackbull.protocol.structured_fields</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+    <span class="n">Date</span><span class="p">,</span> <span class="n">Token</span><span class="p">,</span> <span class="n">serialize_dictionary</span><span class="p">,</span> <span class="n">serialize_item</span><span class="p">,</span> <span class="n">serialize_list</span><span class="p">,</span>
+<span class="p">)</span>
+
+<span class="n">serialize_list</span><span class="p">([(</span><span class="n">Token</span><span class="p">(</span><span class="s1">&#39;gzip&#39;</span><span class="p">),</span> <span class="p">{}),</span> <span class="p">(</span><span class="n">Token</span><span class="p">(</span><span class="s1">&#39;br&#39;</span><span class="p">),</span> <span class="p">{</span><span class="s1">&#39;q&#39;</span><span class="p">:</span> <span class="mf">0.9</span><span class="p">})])</span>
+<span class="c1"># b&#39;gzip, br;q=0.9&#39;</span>
+
+<span class="n">serialize_dictionary</span><span class="p">({</span><span class="s1">&#39;u&#39;</span><span class="p">:</span> <span class="p">(</span><span class="mi">2</span><span class="p">,</span> <span class="p">{}),</span> <span class="s1">&#39;i&#39;</span><span class="p">:</span> <span class="p">(</span><span class="kc">True</span><span class="p">,</span> <span class="p">{})})</span>
+<span class="c1"># b&#39;u=2, i&#39;</span>
+
+<span class="n">serialize_item</span><span class="p">(</span><span class="n">Date</span><span class="p">(</span><span class="mi">1659578233</span><span class="p">))</span>
+<span class="c1"># b&#39;@1659578233&#39;</span>
+</code></pre></div>
+<p>Serialisation validates its input — an integer beyond ±(10¹⁵−1), an
+invalid Token, or a non-ASCII String raises <code>ValueError</code> instead of
+emitting a malformed field.  An empty List or Dictionary serialises to
+<code>b''</code>; per RFC 9651 §3.1 you should then omit the field entirely.</p>
+<p>Parsing functions (<code>parse_item</code>, <code>parse_list</code>, <code>parse_dictionary</code>) are
+also available directly when you have a raw value in hand; they raise
+<code>ValueError</code> on any grammar violation.</p>
+<h2 id="where-the-framework-itself-uses-it">Where the framework itself uses it<a class="headerlink" href="#where-the-framework-itself-uses-it" title="Permanent link">&para;</a></h2>
+<p>The RFC 9218 priority surfaces are parsed with this module: the
+<code>Priority</code> request header and the HTTP/2 <code>PRIORITY_UPDATE</code> frame
+payload both flow through <code>parse_priority_field</code>, and the result lands
+on the scope as described in <a href="../http2/#priority-hints">HTTP/2 → Priority hints</a>.
+Out-of-range or mistyped members (<code>u=9</code>, <code>i=1</code>) are ignored per
+RFC 9218 §4, and a field value that fails SF parsing falls back to the
+defaults (<code>urgency=3</code>, <code>incremental=False</code>).</p>
 
 
 
@@ -5071,10 +4950,10 @@ and uses it sequentially from a single task.</p>
     
       
       
-      <script id="__config" type="application/json">{"annotate": null, "base": "../../../..", "features": [], "search": "../../../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": [], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
     
     
-      <script src="../../../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
       
     
   </body>
