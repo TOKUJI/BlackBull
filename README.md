@@ -47,6 +47,12 @@ Hello, world!
   `gunicorn` class path.
 - **Readable stack.** Every byte on the wire passes through Python
   you can step through with `pdb`.  No C extensions to debug.
+- **Declare, don't plumb.** Handlers name what they need — path
+  params, query params, the body, a `Request` view, or a
+  `Depends(get_db)` resource with teardown after the response — and
+  the router resolves it all when the route is *registered*.  A
+  handler that uses none of it compiles to the same bare wrapper:
+  zero per-request cost for features you didn't ask for.
 - **Break things on purpose.** The same protocol code that serves
   real traffic can drive a programmable misbehaving client or
   server.  Test your own HTTP/2 client against half-closed streams,
