@@ -12,7 +12,7 @@ from io import BytesIO
 from itertools import chain
 from hpack import Encoder
 
-from . import hpack_fastpath
+from . import hpack_fastpath, structured_fields
 
 import logging
 from ..logger import log
@@ -681,23 +681,29 @@ class Continuation(FrameBase):
 
 
 def parse_priority_field(s: str) -> dict[str, int | bool]:
-    """Parse an RFC 9218 Priority field value string.
+    """Parse an RFC 9218 Priority field value (a Structured Fields Dictionary).
 
     ``"u=5, i"`` → ``{'urgency': 5, 'incremental': True}``
 
-    Defaults per RFC 9218 §4.1: urgency=3, incremental=False.
+    Defaults per RFC 9218 §4.1: urgency=3, incremental=False.  A value that
+    fails strict RFC 9651 parsing is ignored entirely (RFC 9218 §5), and
+    out-of-range or mistyped members are ignored individually (RFC 9218 §4)
+    — either way the defaults apply.
     """
     urgency: int = 3
     incremental: bool = False
-    for part in s.split(','):
-        part = part.strip()
-        if part.startswith('u='):
-            try:
-                urgency = max(0, min(7, int(part[2:])))
-            except ValueError:
-                pass  # malformed u= urgency → ignore this part.
-        elif part == 'i':
-            incremental = True
+    try:
+        members = structured_fields.parse_dictionary(s)
+    except ValueError:
+        return {'urgency': urgency, 'incremental': incremental}
+    member = members.get('u')
+    # `type(...) is int` — an SF Boolean (Python bool) is an unexpected type
+    # for `u` despite being an int subclass.
+    if member is not None and type(member[0]) is int and 0 <= member[0] <= 7:
+        urgency = member[0]
+    member = members.get('i')
+    if member is not None and type(member[0]) is bool:
+        incremental = member[0]
     return {'urgency': urgency, 'incremental': incremental}
 
 

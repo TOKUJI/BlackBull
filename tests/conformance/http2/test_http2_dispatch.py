@@ -933,6 +933,36 @@ class TestHTTP2PriorityScope:
         from blackbull.protocol.frame_types import parse_priority_field
         assert parse_priority_field('u=2, i') == {'urgency': 2, 'incremental': True}
 
+    async def test_parse_priority_field_explicit_incremental_boolean(self):
+        # RFC 9651 valueless `i` and explicit `i=?1` / `i=?0` are all valid.
+        from blackbull.protocol.frame_types import parse_priority_field
+        assert parse_priority_field('i=?1') == {'urgency': 3, 'incremental': True}
+        assert parse_priority_field('u=2, i=?0') == {'urgency': 2, 'incremental': False}
+
+    async def test_parse_priority_field_out_of_range_urgency_ignored(self):
+        # RFC 9218 §4 — out-of-range values MUST be ignored (not clamped):
+        # the default urgency 3 applies.
+        from blackbull.protocol.frame_types import parse_priority_field
+        assert parse_priority_field('u=9') == {'urgency': 3, 'incremental': False}
+        assert parse_priority_field('u=-1') == {'urgency': 3, 'incremental': False}
+
+    async def test_parse_priority_field_mistyped_members_ignored(self):
+        # RFC 9218 §4 — values of unexpected types MUST be ignored.
+        from blackbull.protocol.frame_types import parse_priority_field
+        assert parse_priority_field('u=abc, i=1') == {'urgency': 3, 'incremental': False}
+        assert parse_priority_field('u=?1') == {'urgency': 3, 'incremental': False}
+
+    async def test_parse_priority_field_unknown_members_ignored(self):
+        from blackbull.protocol.frame_types import parse_priority_field
+        assert parse_priority_field('x=5, u=1') == {'urgency': 1, 'incremental': False}
+
+    async def test_parse_priority_field_malformed_falls_back_to_defaults(self):
+        # A Priority field that fails strict RFC 9651 parsing is ignored
+        # entirely (RFC 9218 §5) — defaults apply.
+        from blackbull.protocol.frame_types import parse_priority_field
+        assert parse_priority_field('???') == {'urgency': 3, 'incremental': False}
+        assert parse_priority_field('u=2, ???') == {'urgency': 3, 'incremental': False}
+
     async def test_scope_has_default_http2_priority(self):
         h_frame = _make_headers_frame(stream_id=1, end_stream=True)
 
