@@ -493,3 +493,80 @@ def test_extension_emits_spec_that_validates(_spec_validator):
     OpenAPIExtension(app, title='Validator', version='1.0.0')
     spec = generate_spec(app, title='Validator', version='1.0.0')
     _spec_validator(spec)
+
+
+class TestQueryParamEmission:
+    """Sprint 74: query params of simplified handlers appear in the minimal
+    tier — ``in: query``, schema from the annotation, ``required`` from
+    default-presence.  ``Depends`` params are not request inputs and are
+    excluded."""
+
+    def _spec_for(self, app):
+        return generate_spec(app, title='Q', version='1.0.0')
+
+    def test_query_params_emitted_with_schema_and_required(self):
+        app = BlackBull()
+
+        @app.route(methods=HTTPMethod.GET, path='/search')
+        async def search(q: str, page: int = 1):  # noqa: ARG001
+            return {}
+
+        params = self._spec_for(app)['paths']['/search']['get']['parameters']
+        by_name = {p['name']: p for p in params}
+        assert by_name['q'] == {
+            'name': 'q', 'in': 'query', 'required': True,
+            'schema': {'type': 'string'},
+        }
+        assert by_name['page'] == {
+            'name': 'page', 'in': 'query', 'required': False,
+            'schema': {'type': 'integer'},
+        }
+
+    def test_query_params_alongside_path_params(self):
+        app = BlackBull()
+
+        @app.route(methods=HTTPMethod.GET, path='/items/{item_id:int}')
+        async def get_item(item_id: int, verbose: bool = False):  # noqa: ARG001
+            return {}
+
+        params = self._spec_for(app)['paths']['/items/{item_id}']['get']['parameters']
+        by_name = {p['name']: p for p in params}
+        assert by_name['item_id']['in'] == 'path'
+        assert by_name['verbose'] == {
+            'name': 'verbose', 'in': 'query', 'required': False,
+            'schema': {'type': 'boolean'},
+        }
+
+    def test_depends_params_excluded(self):
+        from blackbull import Depends
+
+        def provider():
+            return 'db'
+
+        app = BlackBull()
+
+        @app.route(methods=HTTPMethod.GET, path='/users')
+        async def users(q: str, db=Depends(provider)):  # noqa: ARG001
+            return {}
+
+        params = self._spec_for(app)['paths']['/users']['get']['parameters']
+        assert [p['name'] for p in params] == ['q']
+
+    def test_full_asgi_handler_emits_no_query_params(self):
+        app = BlackBull()
+
+        @app.route(methods=HTTPMethod.GET, path='/raw')
+        async def raw(scope, receive, send):  # noqa: ARG001
+            pass
+
+        op = self._spec_for(app)['paths']['/raw']['get']
+        assert 'parameters' not in op
+
+    def test_spec_with_query_params_validates(self, _spec_validator):
+        app = BlackBull()
+
+        @app.route(methods=HTTPMethod.GET, path='/search')
+        async def search(q: str, limit: int = 10):  # noqa: ARG001
+            return {}
+
+        _spec_validator(self._spec_for(app))

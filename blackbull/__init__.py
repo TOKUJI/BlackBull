@@ -12,6 +12,7 @@ Public API exports:
 - `RouteInfo`: immutable ``(method, path, name)`` snapshot returned by ``app.get_routes()``.
 - `Headers`: case-insensitive, ordered, multi-valued HTTP header store.
 - `Request`: opt-in context object for HTTP handlers (headers/cookies/client/``body()``/``json()``), injected by signature.
+- `Depends`: per-request provider injection for simplified handlers (async-generator providers get teardown after the response is sent).
 - `cookie_header`: builds a ``Set-Cookie`` header tuple.
 - `read_body`: reads and buffers the full request body from the ASGI receive channel.
 - `read_json`: reads the body and parses it as JSON (``None`` on empty/invalid).
@@ -43,6 +44,7 @@ except PackageNotFoundError:
     __version__ = '0.0.0+unknown'
 
 from .app import BlackBull, serve
+from .di import Depends
 from .router import RouteInfo, HTTPException
 from .config import AppConfig
 from .headers import Headers

@@ -197,6 +197,43 @@ to know how the client delivered the cookies.
 
 ## Query parameters
 
+Declare them as handler parameters (since v0.56.0).  Any simplified-handler
+parameter that is not a path param, `body`, `scope`, `Request`, a dataclass
+body, or [`Depends`](dependency-injection.md) resolves from the query
+string, coerced to its annotation:
+
+```python
+@app.route(path='/search')
+async def search(q: str, page: int = 1, exact: bool = False):
+    ...   # /search?q=bull&page=2 → q='bull', page=2, exact=False
+```
+
+- **Types**: `str` (default for unannotated params), `int`, `float`, and
+  `bool` (`1/true/yes/on` and `0/false/no/off`, case-insensitive).
+  `T | None` of a supported scalar also works.  Anything else — containers,
+  models — is a registration-time `TypeError`; drop to `Request` or the raw
+  scope for those.
+- **Required vs optional**: a parameter with a default is optional; without
+  one, a request missing the key is answered with **400**.  A value that
+  fails coercion (`?page=abc` for `page: int`) is also a 400 — client
+  errors never surface as 500s.
+- **Repeated keys** (`?tag=a&tag=b`): the last occurrence wins.  For
+  list-valued keys, parse the raw query string as shown below.
+- **Precedence**: a parameter that matches a `{placeholder}` in the path is
+  always a path param — the path value shadows any same-named query key
+  (declaring a default on a path param draws a registration-time warning,
+  since that usually means a query param was intended).
+- **OpenAPI**: query params appear in the generated spec (`in: query`,
+  schema from the annotation, `required` from default-presence) — see
+  [OpenAPI](openapi.md).
+
+Coercion and required-ness are resolved when the route is registered, not
+per request — handlers that declare no query params keep the exact adapted
+form they had before.
+
+### Raw query strings
+
+For repeated keys, unusual encodings, or full control,
 `scope['query_string']` contains the raw query string as bytes.
 Parse it with the standard library:
 

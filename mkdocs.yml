@@ -47,6 +47,7 @@ nav:
     - Middleware: guide/middleware.md
     - Error handling: guide/error-handling.md
     - Requests and responses: guide/requests-and-responses.md
+    - Dependency injection: guide/dependency-injection.md
     - WebSockets: guide/websockets.md
     - HTTP/2: guide/http2.md
     - Structured Fields: guide/structured-fields.md

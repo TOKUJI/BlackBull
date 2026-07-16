@@ -100,6 +100,36 @@ def _path_parameters(param_specs: dict[str, str]) -> list[dict]:
     return out
 
 
+def _query_parameters(handler, param_specs: dict[str, str]) -> list[dict]:
+    """Build ``in: query`` parameter entries for a simplified handler.
+
+    Minimal tier (Sprint 74): name, schema from the annotation's scalar type,
+    ``required`` from default-presence.  Reuses the router's registration-time
+    classifier so this walk can never disagree with what the wrapper actually
+    resolves; ``Depends`` params are not request inputs and carry no entry.
+    Full-ASGI handlers (and anything the classifier rejects) emit nothing.
+    """
+    from .router import _handler_param_plan, _is_simplified_handler
+
+    if not _is_simplified_handler(handler):
+        return []
+    try:
+        _, _, categories = _handler_param_plan(handler, set(param_specs))
+    except (TypeError, ValueError):
+        return []
+    out = []
+    for name, (kind, payload) in categories.items():
+        if kind != 'query':
+            continue
+        out.append({
+            'name': name,
+            'in': 'query',
+            'required': payload.required,
+            'schema': _type_to_schema(payload.type),
+        })
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Type → JSON-schema synthesis (v2)
 #
@@ -238,11 +268,16 @@ def _find_body_type(handler, param_specs: dict[str, str]) -> Any:
         sig = inspect.signature(handler)
     except (TypeError, ValueError):
         return None
+    from .di import Depends
+
     hints = _resolved_hints(handler)
     for name, param in sig.parameters.items():
         if name in param_specs:
             continue
         if name in ('scope', 'receive', 'send', 'call_next', 'inner', 'self'):
+            continue
+        if isinstance(param.default, Depends):
+            # DI-provided value, not a request body — never a schema source.
             continue
         ann = hints.get(name, param.annotation)
         if ann is inspect.Parameter.empty:
@@ -287,7 +322,7 @@ def _operation(handler, param_specs: dict[str, str],
     if description:
         op['description'] = description
 
-    params = _path_parameters(param_specs)
+    params = _path_parameters(param_specs) + _query_parameters(handler, param_specs)
     if params:
         op['parameters'] = params
 

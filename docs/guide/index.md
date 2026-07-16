@@ -22,6 +22,9 @@ first — it covers installation and the shape of a minimal app.
   reading the body and headers, cookies, query parameters,
   forms; `Response` / `JSONResponse` / `StreamingResponse`;
   detecting client disconnection.
+- [**Dependency injection**](dependency-injection.md) —
+  `Depends` providers for simplified handlers: per-request
+  resources with teardown after the response is sent.
 - [**WebSockets**](websockets.md) — the WebSocket route, the
   `websocket` middleware, `permessage-deflate`, RFC 8441
   (WebSocket over HTTP/2), subprotocols, fragmented messages.

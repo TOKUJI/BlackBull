@@ -38,6 +38,7 @@ and the docs page.
 | Handler docstring — first line | Operation `summary` |
 | Handler docstring — rest | Operation `description` |
 | HTTP-only (no `scheme=Scheme.websocket`) | Included.  WebSocket routes are skipped. |
+| Simplified-handler [query params](requests-and-responses.md#query-parameters) (`q: str, page: int = 1`) | `in: query` parameter entries — schema from the annotation, `required` from default-presence.  `Depends` params are not request inputs and are excluded. |
 | `POST` / `PUT` / `PATCH` route | A placeholder `requestBody: {type: object}` — replaced by a real schema when the handler is annotated with a dataclass (below) |
 
 ## `app.enable_openapi(...)` parameters
@@ -238,11 +239,6 @@ responses if the default 500 isn't what you want.
 
 ## What's not yet automated
 
-- **Query parameters.**  The simplified handler signature
-  resolves parameters from the URL path, the request body, or
-  the raw scope — there is no annotation source for query
-  parameters yet, so none are emitted in the spec.  Read them
-  manually from `scope['query_string']` inside the handler.
 - **Security schemes.**  Auth is application-defined, so no
   global `securitySchemes` are emitted.  Add them post-hoc by
   editing the spec returned by `generate_spec()` and serving

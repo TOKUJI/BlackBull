@@ -37,6 +37,15 @@ For 404 / 405 / other client-error statuses without an exception,
 the body is just the status code + phrase (with the `Allow` header
 on 405).
 
+**4xx `HTTPException`s carry their detail, not a traceback** (since
+v0.56.0): when the framework itself diagnoses a client fault — a
+missing required query parameter, a malformed JSON body — the dev
+page shows the status and the human-readable detail line
+(`missing required query parameter 'q' for handler 'search'`) and
+omits the Python traceback.  The frames would only show framework
+internals; the detail line is the actionable part.  5xx
+`HTTPException`s and unexpected exceptions keep the full traceback.
+
 ### `production`
 
 ```bash

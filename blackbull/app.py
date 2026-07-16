@@ -129,8 +129,11 @@ async def _default_error_handler(scope, receive, send):  # noqa: ARG001
 
     * ``development`` — include the full Python traceback when an exception
       is present, so users debugging locally see the failure inline.
-      ``Accept: text/html`` returns a styled HTML page; everything else
-      gets text/plain.
+      Exception: a **4xx** :class:`HTTPException` is a *diagnosed client
+      fault* (missing query param, malformed body, …) — the page keeps the
+      status + detail line but drops the traceback, mirroring the quiet-log
+      rule the dispatcher applies to the same errors.  ``Accept: text/html``
+      returns a styled HTML page; everything else gets text/plain.
     * ``production`` — terse: status code + phrase only.  No exception
       class or message is leaked.  Browsers get a minimal HTML page;
       curl-style clients get text/plain.
@@ -152,8 +155,13 @@ async def _default_error_handler(scope, receive, send):  # noqa: ARG001
 
     tb_text = None
     if is_dev and exc is not None:
-        tb_text = ''.join(
-            traceback.format_exception(type(exc), exc, exc.__traceback__))
+        # 4xx HTTPExceptions are client faults the framework already
+        # diagnosed — the detail line below is the actionable part, and the
+        # server-side frames are noise.  5xx and unexpected exceptions keep
+        # the full traceback.
+        if not (isinstance(exc, HTTPException) and exc.status.is_client_error):
+            tb_text = ''.join(
+                traceback.format_exception(type(exc), exc, exc.__traceback__))
 
     if html_ok:
         body = _render_error_html(status, exc if is_dev else None,

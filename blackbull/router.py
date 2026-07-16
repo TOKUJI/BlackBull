@@ -12,6 +12,7 @@ import; this module re-exports it lazily through ``__getattr__``.
 """
 from collections import OrderedDict
 from collections.abc import Iterable
+from contextlib import AsyncExitStack
 import dataclasses
 from dataclasses import dataclass, field
 import typing
@@ -22,7 +23,10 @@ import json
 import re
 import inspect
 import types
+from urllib.parse import parse_qsl
 import uuid as _uuid
+import warnings
+from .di import Depends, _resolve_depends
 from .utils import Scheme, do_nothing
 
 # RouteGroup is defined in app.py to avoid a circular import;
@@ -532,6 +536,177 @@ async def _send_converted(value, scope, receive, send) -> None:
         f'bytes, str, dict, list, dataclass, or None; got {type(value).__name__!r}')
 
 
+async def _finish_result(result, scope, receive, send, converters, fn_name: str) -> None:
+    """Send a simplified handler's return value — native shapes first, then
+    the app's converter registry, then the loud ``TypeError``.
+
+    Same tail as the basic wrapper's inline version; kept as a module
+    function so the extended (query/``Depends``) wrapper shares it without
+    the basic wrapper gaining a per-request call.
+    """
+    if await _send_native(result, scope, receive, send):
+        return
+    if converters and (conv := _lookup_converter(converters, type(result))) is not None:
+        await _send_converted(conv(result), scope, receive, send)
+        return
+    raise TypeError(
+        f"Simplified handler {fn_name!r} returned unsupported type "
+        f"{type(result).__name__!r}.  Return a Response, str, bytes, "
+        f"dict, list, or None, or register a converter with "
+        f"app.register_converter({type(result).__name__}, ...)."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Simplified-handler parameter classification (Sprint 74)
+# ---------------------------------------------------------------------------
+
+# RFC-agnostic textual boolean forms accepted for ``param: bool`` query params.
+_QUERY_BOOL_STRINGS: dict[str, bool] = {
+    '1': True, 'true': True, 'yes': True, 'on': True,
+    '0': False, 'false': False, 'no': False, 'off': False,
+}
+
+
+def _coerce_query_bool(raw: str) -> bool:
+    try:
+        return _QUERY_BOOL_STRINGS[raw.lower()]
+    except KeyError:
+        raise ValueError(f'not a boolean: {raw!r}') from None
+
+
+def _identity_str(raw: str) -> str:
+    return raw
+
+
+# Scalar annotation → coercer for query params.  Mirrors the path-param
+# converter idea (annotation drives the coercion) with ``bool`` added —
+# ``bool('false')`` would be truthy, so it needs the textual-form table.
+_QUERY_COERCERS: dict[type, Callable[[str], Any]] = {
+    str: _identity_str,
+    int: int,
+    float: float,
+    bool: _coerce_query_bool,
+}
+
+
+def _unwrap_optional(ann: Any) -> Any:
+    """``T | None`` / ``Optional[T]`` → ``T``; anything else unchanged."""
+    origin = get_origin(ann)
+    if origin is Union or origin is types.UnionType:
+        non_none = [a for a in get_args(ann) if a is not type(None)]
+        if len(non_none) == 1:
+            return non_none[0]
+    return ann
+
+
+class _QuerySpec(NamedTuple):
+    """Registration-time plan for one query parameter."""
+    name: str
+    type: type
+    coercer: Callable[[str], Any]
+    required: bool
+    default: Any
+
+
+# Sentinel distinguishing "key absent from the query string" from any value.
+_QUERY_MISSING = object()
+
+
+def _handler_param_plan(fn, path_param_names: set) -> tuple:
+    """Classify every parameter of simplified handler *fn* — once, at
+    registration time.
+
+    Returns ``(params, annotations, categories)`` where *categories* maps
+    parameter name → ``(kind, payload)`` with kind one of ``'path'``,
+    ``'scope'``, ``'body'``, ``'request'``, ``'dataclass'``, ``'depends'``
+    (payload: the :class:`~blackbull.di.Depends` instance), or ``'query'``
+    (payload: :class:`_QuerySpec`).  Precedence: path params first, then the
+    reserved names ``body``/``scope``, then a ``Depends`` default, then
+    ``Request`` recognition, then a dataclass body annotation; anything left
+    is a query param — the fallback category.
+
+    Raises ``TypeError`` (fail fast, at registration) for a ``Depends``
+    default on a reserved/path name, a second body-consuming parameter, or a
+    leftover parameter whose annotation is not a supported query scalar.
+    """
+    from .request import Request as _Request
+
+    params = inspect.signature(fn).parameters
+    annotations = {n: p.annotation for n, p in params.items()}
+
+    # Resolve PEP 563 / string-form annotations once, here, so the wrappers
+    # below can rely on real types in their isinstance / get_origin calls.
+    try:
+        resolved_hints = typing.get_type_hints(fn)
+        for n in annotations:
+            if n in resolved_hints:
+                annotations[n] = resolved_hints[n]
+    except Exception:
+        pass  # unresolved forward refs / bad annotations → keep the raw annotations.
+
+    categories: dict[str, tuple] = {}
+    for name, p in params.items():
+        ann = annotations.get(name, inspect.Parameter.empty)
+        default = p.default
+        is_dep = isinstance(default, Depends)
+
+        if name in path_param_names:
+            if is_dep:
+                raise TypeError(
+                    f"Simplified handler {fn.__name__!r}: parameter {name!r} "
+                    f"is a path param of {sorted(path_param_names)!r} and "
+                    f"cannot carry a Depends default.")
+            categories[name] = ('path', None)
+        elif name in ('body', 'scope'):
+            if is_dep:
+                raise TypeError(
+                    f"Simplified handler {fn.__name__!r}: parameter {name!r} "
+                    f"is reserved for the request {name} and cannot carry a "
+                    f"Depends default — rename the parameter.")
+            categories[name] = (name, None)
+        elif is_dep:
+            categories[name] = ('depends', default)
+        elif ann is _Request or (name == 'request' and ann is inspect.Parameter.empty):
+            categories[name] = ('request', None)
+        elif _is_body_dataclass_annotation(ann):
+            categories[name] = ('dataclass', None)
+        else:
+            # Fallback category: resolve from the query string.
+            target = str if ann is inspect.Parameter.empty else _unwrap_optional(ann)
+            coercer = _QUERY_COERCERS.get(target) if isinstance(target, type) else None
+            if coercer is None:
+                raise TypeError(
+                    f"Simplified handler {fn.__name__!r}: cannot resolve "
+                    f"parameter {name!r}. Expected a path param of "
+                    f"{sorted(path_param_names)!r}, 'body', 'scope', a "
+                    f"parameter annotated with Request (or named 'request'), "
+                    f"a dataclass body param, a Depends(...) default, or a "
+                    f"query param annotated str/int/float/bool "
+                    f"(optionally `| None`)."
+                )
+            required = default is inspect.Parameter.empty
+            categories[name] = ('query', _QuerySpec(
+                name=name, type=target, coercer=coercer, required=required,
+                default=None if required else default))
+
+    # A handler may have **at most one** body parameter — either a literal
+    # name ``body`` or a dataclass-typed parameter (or both, if they're the
+    # same parameter).  Trying to consume the body twice would hang the
+    # second ``read_body`` call indefinitely.  A ``Request`` param does not
+    # count: it drains lazily through the same cache the wrappers use.
+    body_param_count = sum(
+        1 for kind, _ in categories.values() if kind in ('body', 'dataclass'))
+    if body_param_count > 1:
+        raise TypeError(
+            f"Simplified handler {fn.__name__!r}: more than one parameter would "
+            f"consume the request body.  Pick one of 'body' or a dataclass-typed "
+            f"parameter, not both."
+        )
+
+    return params, annotations, categories
+
+
 def _adapt_handler(fn, path: str, converters: dict | None = None):
     """Wrap a simplified handler in an ASGI (scope, receive, send) coroutine.
 
@@ -540,7 +715,7 @@ def _adapt_handler(fn, path: str, converters: dict | None = None):
     When a handler returns a value that is none of the natively supported
     shapes, a matching converter — if any — maps it to a sendable.
 
-    Parameter resolution:
+    Parameter resolution (classified once, by :func:`_handler_param_plan`):
     - Name matches a {param} in the path pattern → scope['path_params'][name],
       coerced to the annotated type if one is given.
     - Annotation is a Python ``@dataclass`` → request body parsed as JSON and
@@ -552,7 +727,16 @@ def _adapt_handler(fn, path: str, converters: dict | None = None):
       annotation → a per-request ``Request(scope, receive)`` context object.
       Its ``body()`` cache is the drain point for 'body' / dataclass params
       too, so the body is read at most once per request.
-    - Anything else → TypeError raised at registration time (fail fast).
+    - Default value is ``Depends(provider)`` → the provider's value, with
+      ``AsyncExitStack``-backed teardown after the response is sent.
+    - Anything else → a **query param**: resolved from scope['query_string'],
+      coerced to the annotation (str/int/float/bool, optionally ``| None``).
+      A default makes it optional; missing-required or failed coercion is a
+      400 via :class:`HTTPException`.  An unsupported annotation is a
+      TypeError at registration time (fail fast).
+
+    Handlers using neither query params nor ``Depends`` compile to the same
+    basic wrapper as before Sprint 74 — the zero-overhead pin.
 
     Return values: Response → send(result); bytes → send(Response(result));
     str → send(Response(result.encode())); dict → send(JSONResponse(result));
@@ -561,62 +745,23 @@ def _adapt_handler(fn, path: str, converters: dict | None = None):
     from .request import Request as _Request, read_body as _read_body
 
     path_param_names: set[str] = {m.group(1) for m in Router._param_pattern.finditer(path)}
-    params = inspect.signature(fn).parameters
-    annotations = {n: p.annotation for n, p in params.items()}
+    params, annotations, categories = _handler_param_plan(fn, path_param_names)
 
-    # Resolve PEP 563 / string-form annotations once, here, so the wrapper
-    # below can rely on real types in its isinstance / get_origin calls.
-    try:
-        resolved_hints = typing.get_type_hints(fn)
-        for n in annotations:
-            if n in resolved_hints:
-                annotations[n] = resolved_hints[n]
-    except Exception:
-        pass  # unresolved forward refs / bad annotations → keep the raw annotations.
-
-    # Request-param recognition happens here, at registration time, so the
-    # wrapper below never reflects per request.  Path params keep precedence;
-    # a dataclass annotation on a param named 'request' stays a body param.
     request_param_names: frozenset[str] = frozenset(
-        n for n, ann in annotations.items()
-        if n not in path_param_names and n not in ('body', 'scope') and (
-            ann is _Request
-            or (n == 'request' and ann is inspect.Parameter.empty)
-        )
-    )
+        n for n, (kind, _) in categories.items() if kind == 'request')
 
-    # A handler may have **at most one** body parameter — either a literal
-    # name ``body`` or a dataclass-typed parameter (or both, if they're the
-    # same parameter).  Trying to consume the body twice would hang the
-    # second ``read_body`` call indefinitely.  A ``Request`` param does not
-    # count: it drains lazily through the same cache the branches below use.
-    body_param_count = sum(
-        1 for n, p in params.items()
-        if n not in path_param_names and n != 'scope' and (
-            n == 'body' or _is_body_dataclass_annotation(annotations.get(n))
-        )
-    )
-
-    for name in params:
-        if name in path_param_names or name in ('body', 'scope'):
-            continue
-        if name in request_param_names:
-            continue
-        if _is_body_dataclass_annotation(annotations.get(name)):
-            continue
-        raise TypeError(
-            f"Simplified handler {fn.__name__!r}: cannot resolve parameter {name!r}. "
-            f"Expected path params {sorted(path_param_names)!r}, 'body', "
-            f"'scope', a parameter annotated with Request (or named "
-            f"'request'), or a parameter annotated with a dataclass."
-        )
-
-    if body_param_count > 1:
-        raise TypeError(
-            f"Simplified handler {fn.__name__!r}: more than one parameter would "
-            f"consume the request body.  Pick one of 'body' or a dataclass-typed "
-            f"parameter, not both."
-        )
+    # A path param always resolves from the path, so a declared default can
+    # never apply — and any same-named query-string key is shadowed.  The
+    # default is the one registration-time signal that the author may have
+    # meant a query param, so say so now rather than 404-by-surprise later.
+    for name, p in params.items():
+        if categories[name][0] == 'path' and p.default is not inspect.Parameter.empty:
+            warnings.warn(
+                f"Simplified handler {fn.__name__!r}: parameter {name!r} matches "
+                f"a path placeholder in {path!r}; its default is never used and "
+                f"the path value shadows any '?{name}=' query key. Rename the "
+                f"parameter (or the placeholder) if you meant a query param.",
+                UserWarning, stacklevel=3)
 
     is_async = inspect.iscoroutinefunction(fn)
     has_request_param = bool(request_param_names)
@@ -672,7 +817,93 @@ def _adapt_handler(fn, path: str, converters: dict | None = None):
             f"app.register_converter({type(result).__name__}, ...)."
         )
 
-    return _wrapper
+    has_query = any(kind == 'query' for kind, _ in categories.values())
+    depends_plan = tuple(
+        (n, payload) for n, (kind, payload) in categories.items() if kind == 'depends')
+
+    if not has_query and not depends_plan:
+        # Zero-overhead pin: neither new parameter category is in play, so
+        # this handler gets the exact wrapper it got before Sprint 74.
+        return _wrapper
+
+    # Extended wrapper — query params and/or Depends.  The plan below was
+    # fully computed at registration; the per-request work is only what the
+    # declared parameters require.
+    plan = tuple((n, kind, payload) for n, (kind, payload) in categories.items()
+                 if kind != 'depends')
+    fn_name = fn.__name__
+
+    @wraps(fn)
+    async def _extended_wrapper(scope, receive, send):
+        req = _Request(scope, receive) if has_request_param else None
+        kwargs: dict = {}
+        if has_query:
+            raw_qs = scope.get('query_string') or b''
+            query_values = (
+                dict(parse_qsl(raw_qs.decode('latin-1'), keep_blank_values=True))
+                if raw_qs else {})
+        for name, kind, payload in plan:
+            if kind == 'query':
+                raw = query_values.get(name, _QUERY_MISSING)
+                if raw is _QUERY_MISSING:
+                    if payload.required:
+                        raise HTTPException(
+                            HTTPStatus.BAD_REQUEST,
+                            f'missing required query parameter {name!r} '
+                            f'for handler {fn_name!r}')
+                    kwargs[name] = payload.default
+                else:
+                    try:
+                        kwargs[name] = payload.coercer(raw)
+                    except (ValueError, TypeError) as exc:
+                        raise HTTPException(
+                            HTTPStatus.BAD_REQUEST,
+                            f'query parameter {name!r}: cannot coerce {raw!r} '
+                            f'to {payload.type.__name__}',
+                        ) from exc
+            elif kind == 'scope':
+                kwargs[name] = scope
+            elif kind == 'body':
+                raw = await req.body() if req is not None else await _read_body(receive)
+                ann = annotations.get(name, inspect.Parameter.empty)
+                if _is_body_dataclass_annotation(ann):
+                    kwargs[name] = _decode_json_body(ann, raw, fn_name)
+                else:
+                    kwargs[name] = raw
+            elif kind == 'request':
+                kwargs[name] = req
+            elif kind == 'dataclass':
+                raw = await req.body() if req is not None else await _read_body(receive)
+                kwargs[name] = _decode_json_body(annotations[name], raw, fn_name)
+            else:  # 'path'
+                raw = scope.get('path_params', {}).get(name, '')
+                ann = annotations.get(name, inspect.Parameter.empty)
+                if (ann is not inspect.Parameter.empty and isinstance(ann, type)
+                        and not isinstance(raw, ann)):
+                    try:
+                        kwargs[name] = ann(raw)
+                    except (ValueError, TypeError) as exc:
+                        raise TypeError(
+                            f"Path param {name!r}: cannot coerce {raw!r} to {ann.__name__}"
+                        ) from exc
+                else:
+                    kwargs[name] = raw
+
+        if not depends_plan:
+            result = (await fn(**kwargs)) if is_async else fn(**kwargs)
+            await _finish_result(result, scope, receive, send, converters, fn_name)
+            return
+
+        async with AsyncExitStack() as stack:
+            cache: dict = {}
+            for name, dep in depends_plan:
+                kwargs[name] = await _resolve_depends(dep, stack, cache)
+            result = (await fn(**kwargs)) if is_async else fn(**kwargs)
+            # Send inside the stack's scope so provider teardown runs after
+            # the client has the response (LIFO on the stack).
+            await _finish_result(result, scope, receive, send, converters, fn_name)
+
+    return _extended_wrapper
 
 
 # RFC 9110 §5.6.2: token = 1*tchar (visible US-ASCII, no separators)

@@ -276,6 +276,92 @@ class TestDevErrorPageTraceback:
             reset_settings_cache()
 
 
+class TestDevClientErrorPage:
+    """DEV mode, 4xx HTTPException: the framework already diagnosed the
+    client's mistake, so the page carries the status + detail line but no
+    Python traceback (Sprint 74).  Tracebacks are for *unexpected* server
+    faults — 5xx and non-HTTPException — which keep the full frames."""
+
+    @staticmethod
+    def _client_error():
+        from blackbull.router import HTTPException
+        try:
+            raise HTTPException(
+                HTTPStatus.BAD_REQUEST,
+                "missing required query parameter 'q' for handler 'search'")
+        except HTTPException as e:
+            return e
+
+    @pytest.mark.asyncio
+    async def test_dev_4xx_shows_detail_but_no_traceback(self):
+        from blackbull.env import reset_settings_cache
+        import os
+        os.environ['BLACKBULL_ENV'] = 'development'
+        reset_settings_cache()
+        try:
+            exc = self._client_error()
+            scope = _make_scope()
+            scope['state']['error_status'] = HTTPStatus.BAD_REQUEST
+            scope['state']['error_exception'] = exc
+            send = _CaptureSend()
+            await _default_error_handler(scope, None, send)
+            assert send.status == 400
+            # The actionable diagnosis stays…
+            assert b'Bad Request' in send.body
+            assert b"missing required query parameter 'q'" in send.body
+            # …the server-internals noise goes.
+            assert b'Traceback' not in send.body
+            assert b'File "' not in send.body
+        finally:
+            os.environ.pop('BLACKBULL_ENV', None)
+            reset_settings_cache()
+
+    @pytest.mark.asyncio
+    async def test_dev_4xx_html_shows_detail_but_no_traceback(self):
+        from blackbull.env import reset_settings_cache
+        import os
+        os.environ['BLACKBULL_ENV'] = 'development'
+        reset_settings_cache()
+        try:
+            exc = self._client_error()
+            scope = _make_scope()
+            scope['headers'] = [(b'accept', b'text/html,application/xhtml+xml')]
+            scope['state']['error_status'] = HTTPStatus.BAD_REQUEST
+            scope['state']['error_exception'] = exc
+            send = _CaptureSend()
+            await _default_error_handler(scope, None, send)
+            assert b"missing required query parameter" in send.body
+            assert b'<pre>' not in send.body       # the traceback block
+            assert b'Traceback' not in send.body
+        finally:
+            os.environ.pop('BLACKBULL_ENV', None)
+            reset_settings_cache()
+
+    @pytest.mark.asyncio
+    async def test_dev_5xx_httpexception_keeps_traceback(self):
+        from blackbull.env import reset_settings_cache
+        from blackbull.router import HTTPException
+        import os
+        os.environ['BLACKBULL_ENV'] = 'development'
+        reset_settings_cache()
+        try:
+            try:
+                raise HTTPException(HTTPStatus.BAD_GATEWAY, 'upstream died')
+            except HTTPException as e:
+                exc = e
+            scope = _make_scope()
+            scope['state']['error_status'] = HTTPStatus.BAD_GATEWAY
+            scope['state']['error_exception'] = exc
+            send = _CaptureSend()
+            await _default_error_handler(scope, None, send)
+            assert send.status == 502
+            assert b'Traceback' in send.body
+            assert b'upstream died' in send.body
+        finally:
+            os.environ.pop('BLACKBULL_ENV', None)
+            reset_settings_cache()
+
+
 class TestProductionErrorPage:
     """Production mode keeps the response terse — no exception class or
     message is leaked to the network."""
