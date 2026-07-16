@@ -265,6 +265,8 @@ for the full tutorial.
 | [`examples/SimpleTaskManager/`](examples/SimpleTaskManager/) | REST API + HTML UI, middleware pipeline, route groups, SQLite, Bearer token auth |
 | [`examples/ChatServer/`](examples/ChatServer/) | WebSocket, SSE, long polling side by side; `blackbull-session` + Compression + custom auth |
 | [`examples/mqtt_broker.py`](examples/mqtt_broker.py) | MQTT 5 broker beside HTTP; `on_message` taps with `{capture}` topic params |
+| [`examples/translation_hub.py`](examples/translation_hub.py) | Protocol translation hub — MQTT → WebSocket, MQTT → SSE, REST → gRPC in one process |
+| [`examples/grpc_greeter.py`](examples/grpc_greeter.py) | Canonical gRPC Greeter speaking real protobuf — works with stock `grpcurl` / `grpcio` clients unmodified |
 | [`examples/typed_routes_ok.py`](examples/typed_routes_ok.py) | `{param:converter}` syntax, `url_path_for` |
 | [`examples/scenario_h1_fault_injection.py`](examples/scenario_h1_fault_injection.py) | HTTP/1.1 fault scenarios driven against stdlib `http.server` |
 | [`examples/scenario_h2_fault_injection.py`](examples/scenario_h2_fault_injection.py) | HTTP/2 fault scenarios served against httpx |

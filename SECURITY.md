@@ -12,9 +12,9 @@ critical vulnerabilities.
 
 | Version | Supported          |
 |---------|--------------------|
+| 0.55.x  | :white_check_mark: |
 | 0.54.x  | :white_check_mark: |
-| 0.53.x  | :white_check_mark: |
-| < 0.53  | :x:                |
+| < 0.54  | :x:                |
 
 This table updates with each minor release.
 
