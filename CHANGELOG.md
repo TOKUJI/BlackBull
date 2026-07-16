@@ -31,6 +31,44 @@ so the editable install's metadata catches up.
 
 ## [Unreleased]
 
+### Added
+
+- **Query params in the simplified handler model** (Sprint 74). A handler
+  parameter that is neither a path param, `body`, `scope`, `Request`, a
+  dataclass body, nor `Depends(...)` now resolves from the query string,
+  coerced to its annotation (`str`/`int`/`float`/`bool`, optionally
+  `| None`; unannotated → `str`): `async def search(q: str, page: int = 1)`
+  handles `/search?q=bull&page=2` directly. A default makes the param
+  optional; a missing required key or a failed coercion is answered with
+  **400**, never a 500. Repeated keys: last occurrence wins. Classification
+  happens once at registration — handlers that declare no query params keep
+  the exact wrapper they had before. Query params are emitted in the
+  generated OpenAPI spec (`in: query`, schema from the annotation,
+  `required` from default-presence). Deferred since Sprint 41.
+- **`Depends` — per-request provider injection** (Sprint 74). New module
+  `blackbull.di`; `db=Depends(get_db)` as a parameter default injects the
+  provider's value per request. Async-generator providers yield the value
+  and tear down **after the response is sent** (`AsyncExitStack`-backed,
+  LIFO across providers, exception-safe); plain async/sync callables
+  inject a value with no cleanup. `use_cache=True` (default) shares one
+  instance per request across parameters naming the same provider. v1
+  fences: providers take no parameters, nested `Depends` is a
+  registration-time `TypeError`, simplified handlers only. The
+  anti-FastAPI design point: everything resolves at registration time, so
+  handlers without `Depends` gain zero per-request cost (FastAPI runs
+  `solve_dependencies()` + two `AsyncExitStack`s per request even with no
+  dependencies declared). New guide page *Dependency injection*.
+
+### Changed
+
+- **Simplified-handler registration contract** (Sprint 74). A scalar
+  parameter that matches no other category is now a query param instead of
+  a registration-time `TypeError`; the fail-fast `TypeError` remains for
+  unsupported annotations (containers, arbitrary classes). A path param
+  declaring a default now draws a registration-time `UserWarning` (the
+  path value always wins; the default suggests a query param was
+  intended).
+
 ## [0.55.0] — 2026-07-16
 
 ### Added

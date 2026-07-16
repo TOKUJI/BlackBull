@@ -99,6 +99,25 @@ async def create_note(note_id: int, request: Request):
     return {"id": note_id, "note": await request.json()}
 ```
 
+Query params and per-request resources are declared the same way —
+everything is resolved when the route is registered, so handlers that
+don't use a feature pay nothing for it at request time:
+
+```python
+from blackbull import Depends
+
+async def get_db():
+    conn = await pool.acquire()
+    try:
+        yield conn                 # injected value
+    finally:
+        await pool.release(conn)  # runs after the response is sent
+
+@app.route(path='/search')
+async def search(q: str, page: int = 1, db=Depends(get_db)):
+    return await db.find(q, page=page)   # /search?q=bull&page=2
+```
+
 Drop down to full ASGI `(scope, receive, send)` whenever you need it
 — routes accept either shape.
 

@@ -59,14 +59,24 @@ async def echo(body: bytes):       # full body buffered automatically
 async def inspect(request: Request):   # opt-in context object
     return {'ua': request.headers.get(b'user-agent').decode(),
             'data': await request.json()}
+
+@app.route(path='/search')
+async def search(q: str, page: int = 1, db=Depends(get_db)):
+    ...   # q/page from the query string; db from the provider, torn down after send
 ```
 
 Supported parameters: named path params (coerced to annotation type), `body: bytes`,
-`scope`, and `Request` (annotation `Request` under any name, or the bare name
+`scope`, `Request` (annotation `Request` under any name, or the bare name
 `request` unannotated) — `request.body()`/`json()`/`text()` cache one drain of
-`receive`, shared with a coexisting `body` param. Return `str`, `bytes`, `dict`,
-`Response`, or `None`. Middleware functions and WebSocket handlers always use the
-full `(scope, receive, send)` form.
+`receive`, shared with a coexisting `body` param — `Depends(provider)` as a
+default value (per-request provider injection, Sprint 74), and **query params**
+as the fallback category: any leftover scalar param (`str`/`int`/`float`/`bool`,
+optionally `| None`; unannotated → `str`) resolves from the query string, with
+defaults → optional and missing-required/failed-coercion → 400. Classification
+happens once at registration (`_handler_param_plan`, router.py); handlers using
+neither new feature keep the pre-Sprint-74 wrapper (zero-overhead pin). Return
+`str`, `bytes`, `dict`, `Response`, or `None`. Middleware functions and
+WebSocket handlers always use the full `(scope, receive, send)` form.
 
 ## Middleware convention
 

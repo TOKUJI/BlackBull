@@ -573,15 +573,18 @@ class TestSimplifiedHandlerDetection:
 
 
 class TestSimplifiedHandlerFailFast:
-    def test_unknown_param_raises_at_registration(self):
-        async def fn(x): pass
+    # Spec change (Sprint 74): a scalar param that matches no path
+    # placeholder is now a *query param*, not a registration error — the
+    # fail-fast contract holds only for annotations no category can resolve.
+    def test_unresolvable_annotation_raises_at_registration(self):
+        async def fn(x: dict): pass
         with pytest.raises(TypeError, match="cannot resolve parameter 'x'"):
             _adapt_handler(fn, '/items/{id}')
 
-    def test_unknown_param_raises_when_not_a_path_param(self):
-        async def fn(name): pass
+    def test_container_annotation_raises_at_registration(self):
+        async def fn(name: list[str]): pass
         with pytest.raises(TypeError, match="cannot resolve parameter 'name'"):
-            # path has {id}, not {name}
+            # path has {id}, not {name} — and list[str] is not a query scalar
             _adapt_handler(fn, '/items/{id}')
 
 
@@ -758,8 +761,12 @@ class TestSimplifiedHandlerRequestInjection:
         assert captured['raw'] == b'{"name": "spanner"}'
         assert len(calls) == 1
 
-    def test_request_name_with_foreign_annotation_raises(self):
-        async def fn(request: int): pass
+    def test_request_name_with_foreign_annotation_is_not_request_injected(self):
+        # Spec change (Sprint 74): 'request' with a scalar annotation used to
+        # be a registration TypeError; it is now an ordinary query param
+        # (asserted in test_query_params.py).  An unresolvable annotation on
+        # the name still fails fast — proving no Request fallback kicks in.
+        async def fn(request: dict): pass
         with pytest.raises(TypeError, match="cannot resolve parameter 'request'"):
             _adapt_handler(fn, '/')
 
