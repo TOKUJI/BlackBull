@@ -61,6 +61,14 @@ so the editable install's metadata catches up.
 
 ### Changed
 
+- **Dev-mode error page: no traceback for 4xx `HTTPException`s**
+  (Sprint 74). A client fault the framework itself diagnosed — missing
+  required query parameter, malformed JSON body — now renders as status +
+  detail line in development mode, without the Python traceback (the
+  frames only showed framework internals; the detail line is the
+  actionable part). 5xx `HTTPException`s and unexpected exceptions keep
+  the full traceback. Mirrors the dispatcher's existing quiet-log rule
+  for the same errors.
 - **Simplified-handler registration contract** (Sprint 74). A scalar
   parameter that matches no other category is now a query param instead of
   a registration-time `TypeError`; the fail-fast `TypeError` remains for
