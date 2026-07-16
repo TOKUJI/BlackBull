@@ -45,7 +45,7 @@ provider).  Sync generator providers are rejected; use an async generator.
 |---|---|
 | per-request | `Depends(provider)` — fresh value each request |
 | per-parameter | `Depends(provider, use_cache=False)` |
-| per-app | `@app.on('startup')` / `AppConfig`; a provider closes over it |
+| per-app | `@app.on_startup` / `AppConfig`; a provider closes over it |
 
 By default (`use_cache=True`), two parameters of one handler naming the
 *same* provider share a single instance for that request:
@@ -61,8 +61,8 @@ object you create at startup and *capture* in a provider —
 ```python
 engine: Engine | None = None
 
-@app.on('startup')
-async def boot(event):
+@app.on_startup
+async def boot():
     global engine
     engine = await create_engine(dsn)
 
@@ -70,6 +70,10 @@ async def get_conn():
     async with engine.connect() as conn:   # engine: app-scoped, conn: per-request
         yield conn
 ```
+
+A runnable version of this pattern — fake pool with visible
+acquire/release accounting — ships as
+[`examples/dependency_injection.py`](https://github.com/TOKUJI/BlackBull/blob/master/examples/dependency_injection.py).
 
 ## Ordering and errors
 
