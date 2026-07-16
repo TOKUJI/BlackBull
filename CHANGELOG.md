@@ -31,6 +31,8 @@ so the editable install's metadata catches up.
 
 ## [Unreleased]
 
+## [0.55.0] — 2026-07-16
+
 ### Added
 
 - **RFC 9651 Structured Field Values** (Sprint 73). New module
