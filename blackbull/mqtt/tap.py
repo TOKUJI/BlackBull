@@ -154,7 +154,14 @@ class TapActor(Actor):
 
     def __init__(self, handlers, *, queue_size: int = _DEFAULT_TAP_QUEUE) -> None:
         super().__init__(inbox_maxsize=queue_size)
-        self._taps = compile_taps(handlers)
+        # *handlers* is held by reference, not compiled once: MQTTExtension
+        # constructs this actor in __init__ and ``@mqtt.on_message``
+        # registrations append to the same list afterwards.  Compilation is
+        # re-done in _current_taps whenever the list has grown, matching the
+        # at-call-time semantics documented on iter_subscriptions.
+        self._handlers = handlers if handlers is not None else []
+        self._taps: list[Tap] = []
+        self._compiled_count = -1
         self._dropped = 0
 
     def offer(self, message: Message) -> None:
@@ -178,8 +185,14 @@ class TapActor(Actor):
         """Number of messages dropped on overflow so far (best-effort metric)."""
         return self._dropped
 
+    def _current_taps(self) -> list[Tap]:
+        if len(self._handlers) != self._compiled_count:
+            self._taps = compile_taps(self._handlers)
+            self._compiled_count = len(self._handlers)
+        return self._taps
+
     async def _handle(self, msg: ActorMessage) -> None:
         if isinstance(msg, TapDeliver):
-            await run_taps(self._taps, msg.message)
+            await run_taps(self._current_taps(), msg.message)
         else:  # pragma: no cover - only TapDeliver is sent
             logger.debug('TapActor ignoring %s', type(msg).__name__)
