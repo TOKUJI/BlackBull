@@ -11,8 +11,14 @@ module owns:
     split across workers so ``workers × per_worker`` stays under the Postgres
     sidecar's ``max_connections=256`` (HttpArena's own formula:
     ``floor(min(DATABASE_MAX_CONN, 240) / workers)``);
+  * the ``Depends`` providers the routes inject (BlackBull ≥0.56.0):
+    :func:`get_db_conn` — a per-request pooled connection, released after
+    the response is sent — for the four always-query routes, and
+    :func:`get_pool` — the pool itself, plain value injection — for the
+    cache-first get-by-id route, whose Redis hits must not check out a
+    connection at all;
   * the four queries the two profiles need (price-range select, paginated
-    list, get-by-id, upsert/update);
+    list, get-by-id, upsert/update), each taking the injected handle;
   * an optional Redis cache for ``GET /crud/items/{id}`` (invalidated on
     update), used only when ``REDIS_URL`` is set.
 
@@ -125,6 +131,33 @@ async def _get_redis():
     return _redis
 
 
+# ---------------------------------------------------------------------------
+# Depends providers (BlackBull ≥0.56.0)
+# ---------------------------------------------------------------------------
+
+async def get_db_conn():
+    """Per-request pooled connection, for ``conn=Depends(get_db_conn)``.
+
+    Yields ``None`` in DB-less mode (no database configured/reachable, or an
+    acquire failure) so the query helpers below keep the profiles' graceful
+    degradation.  The checked-out connection returns to the pool *after* the
+    response has been sent.
+    """
+    pool = await get_pool()
+    if pool is None:
+        yield None
+        return
+    try:
+        conn = await pool.acquire()
+    except Exception:  # noqa: BLE001 - acquire failure → DB-less mode
+        yield None
+        return
+    try:
+        yield conn
+    finally:
+        await pool.release(conn)
+
+
 def _row_to_item(row) -> dict:
     """Map an ``items`` row to the wire shape: nest the rating columns and
     decode the ``tags`` column.
@@ -151,21 +184,20 @@ def _row_to_item(row) -> dict:
 # async-db profile
 # ---------------------------------------------------------------------------
 
-async def async_db(min_price: int, max_price: int, limit: int) -> list[dict]:
+async def async_db(conn, min_price: int, max_price: int, limit: int) -> list[dict]:
     """``SELECT ... FROM items WHERE price BETWEEN $1 AND $2 LIMIT $3``.
 
+    *conn* is the ``Depends``-injected connection (``None`` in DB-less mode).
     Returns ``[]`` when no rows match or the database is unavailable.
     """
-    pool = await get_pool()
-    if pool is None:
+    if conn is None:
         return []
     try:
-        async with pool.acquire() as conn:
-            rows = await conn.fetch(
-                'SELECT id, name, category, price, quantity, active, tags, '
-                'rating_score, rating_count FROM items '
-                'WHERE price BETWEEN $1 AND $2 LIMIT $3',
-                min_price, max_price, limit)
+        rows = await conn.fetch(
+            'SELECT id, name, category, price, quantity, active, tags, '
+            'rating_score, rating_count FROM items '
+            'WHERE price BETWEEN $1 AND $2 LIMIT $3',
+            min_price, max_price, limit)
     except Exception:  # noqa: BLE001 - contract: empty result, never an error
         return []
     return [_row_to_item(r) for r in rows]
@@ -175,31 +207,35 @@ async def async_db(min_price: int, max_price: int, limit: int) -> list[dict]:
 # crud profile
 # ---------------------------------------------------------------------------
 
-async def crud_list(category: str | None, page: int, limit: int) -> list[dict]:
+async def crud_list(conn, category: str | None, page: int, limit: int) -> list[dict]:
     """Paginated item list, optionally filtered by ``category``."""
-    pool = await get_pool()
-    if pool is None:
+    if conn is None:
         return []
     offset = (max(page, 1) - 1) * limit
     try:
-        async with pool.acquire() as conn:
-            if category:
-                rows = await conn.fetch(
-                    'SELECT id, name, category, price, quantity, active, tags, '
-                    'rating_score, rating_count FROM items WHERE category = $1 '
-                    'ORDER BY id LIMIT $2 OFFSET $3', category, limit, offset)
-            else:
-                rows = await conn.fetch(
-                    'SELECT id, name, category, price, quantity, active, tags, '
-                    'rating_score, rating_count FROM items '
-                    'ORDER BY id LIMIT $1 OFFSET $2', limit, offset)
+        if category:
+            rows = await conn.fetch(
+                'SELECT id, name, category, price, quantity, active, tags, '
+                'rating_score, rating_count FROM items WHERE category = $1 '
+                'ORDER BY id LIMIT $2 OFFSET $3', category, limit, offset)
+        else:
+            rows = await conn.fetch(
+                'SELECT id, name, category, price, quantity, active, tags, '
+                'rating_score, rating_count FROM items '
+                'ORDER BY id LIMIT $1 OFFSET $2', limit, offset)
     except Exception:  # noqa: BLE001
         return []
     return [_row_to_item(r) for r in rows]
 
 
-async def crud_get(item_id: int) -> dict | None:
-    """Get a single item by id, served from the Redis cache when available."""
+async def crud_get(pool, item_id: int) -> dict | None:
+    """Get a single item by id, served from the Redis cache when available.
+
+    *pool* is injected via ``Depends(get_pool)`` — the plain-async provider
+    form, deliberately **not** a per-request connection: a Redis cache hit
+    must answer without checking a connection out of the pool at all, so the
+    acquire stays lazy behind the cache miss.
+    """
     import json  # noqa: PLC0415 - local to keep the import graph minimal
     rds = await _get_redis()
     key = b'item:%d' % item_id
@@ -210,7 +246,6 @@ async def crud_get(item_id: int) -> dict | None:
                 return json.loads(cached)
         except Exception:  # noqa: BLE001 - cache miss on any Redis error
             pass
-    pool = await get_pool()
     if pool is None:
         return None
     try:
@@ -231,38 +266,34 @@ async def crud_get(item_id: int) -> dict | None:
     return item
 
 
-async def crud_create(data: dict) -> bool:
+async def crud_create(conn, data: dict) -> bool:
     """Insert (or upsert on id conflict) an item.  Returns success."""
-    pool = await get_pool()
-    if pool is None:
+    if conn is None:
         return False
     try:
-        async with pool.acquire() as conn:
-            await conn.execute(
-                'INSERT INTO items (id, name, category, price, quantity) '
-                'VALUES ($1, $2, $3, $4, $5) '
-                'ON CONFLICT (id) DO UPDATE SET '
-                'name = EXCLUDED.name, category = EXCLUDED.category, '
-                'price = EXCLUDED.price, quantity = EXCLUDED.quantity',
-                int(data['id']), data['name'], data['category'],
-                int(data['price']), int(data['quantity']))
+        await conn.execute(
+            'INSERT INTO items (id, name, category, price, quantity) '
+            'VALUES ($1, $2, $3, $4, $5) '
+            'ON CONFLICT (id) DO UPDATE SET '
+            'name = EXCLUDED.name, category = EXCLUDED.category, '
+            'price = EXCLUDED.price, quantity = EXCLUDED.quantity',
+            int(data['id']), data['name'], data['category'],
+            int(data['price']), int(data['quantity']))
     except Exception:  # noqa: BLE001
         return False
     await _invalidate(int(data['id']))
     return True
 
 
-async def crud_update(item_id: int, data: dict) -> bool:
+async def crud_update(conn, item_id: int, data: dict) -> bool:
     """Update name/price/quantity for an item and invalidate its cache."""
-    pool = await get_pool()
-    if pool is None:
+    if conn is None:
         return False
     try:
-        async with pool.acquire() as conn:
-            result = await conn.execute(
-                'UPDATE items SET name = $2, price = $3, quantity = $4 '
-                'WHERE id = $1', item_id, data['name'],
-                int(data['price']), int(data['quantity']))
+        result = await conn.execute(
+            'UPDATE items SET name = $2, price = $3, quantity = $4 '
+            'WHERE id = $1', item_id, data['name'],
+            int(data['price']), int(data['quantity']))
     except Exception:  # noqa: BLE001
         return False
     await _invalidate(item_id)

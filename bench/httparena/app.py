@@ -57,7 +57,7 @@ _repo_root = os.environ.get('BLACKBULL_SRC', '/src/BlackBull')
 if os.path.isdir(_repo_root) and _repo_root not in sys.path:
     sys.path.insert(0, _repo_root)
 
-from blackbull import BlackBull, JSONResponse, Response, read_body
+from blackbull import BlackBull, Depends, JSONResponse, Response, read_body
 from blackbull.middleware.compression import Compression
 
 import db
@@ -250,11 +250,11 @@ def _int_qs(scope, name, default):
 
 
 @app.route(path='/async-db', methods=[HTTPMethod.GET])
-async def async_db_endpoint(scope):
+async def async_db_endpoint(scope, conn=Depends(db.get_db_conn)):
     min_price = _int_qs(scope, 'min', 10)
     max_price = _int_qs(scope, 'max', 50)
     limit = max(1, min(_int_qs(scope, 'limit', 50), 50))
-    items = await db.async_db(min_price, max_price, limit)
+    items = await db.async_db(conn, min_price, max_price, limit)
     return JSONResponse({'items': items, 'count': len(items)})
 
 
@@ -263,44 +263,46 @@ async def async_db_endpoint(scope):
 # ---------------------------------------------------------------------------
 
 @app.route(path='/crud/items', methods=[HTTPMethod.GET])
-async def crud_items_list(scope):
+async def crud_items_list(scope, conn=Depends(db.get_db_conn)):
     qs = _qs(scope)
     category = qs.get('category', [None])[0]
     page = _int_qs(scope, 'page', 1)
     limit = max(1, min(_int_qs(scope, 'limit', 10), 50))
-    items = await db.crud_list(category, page, limit)
+    items = await db.crud_list(conn, category, page, limit)
     # Load-more semantics: total == items in this response (per the contract).
     return JSONResponse({'items': items, 'total': len(items),
                          'page': page, 'limit': limit})
 
 
 @app.route(path='/crud/items', methods=[HTTPMethod.POST])
-async def crud_items_create(body: bytes):
+async def crud_items_create(body: bytes, conn=Depends(db.get_db_conn)):
     try:
         data = json.loads(body)
     except ValueError:
         return Response(b'invalid JSON', status=400, content_type=_PLAIN)
-    ok = await db.crud_create(data)
+    ok = await db.crud_create(conn, data)
     if not ok:
         return Response(b'unavailable', status=503, content_type=_PLAIN)
     return JSONResponse({'id': data.get('id')}, status=201)
 
 
+# get-by-id is cache-first: inject the *pool* (plain-async provider), not a
+# per-request connection — a Redis hit must not check a connection out.
 @app.route(path='/crud/items/{item_id:int}', methods=[HTTPMethod.GET])
-async def crud_items_get(item_id: int):
-    item = await db.crud_get(item_id)
+async def crud_items_get(item_id: int, pool=Depends(db.get_pool)):
+    item = await db.crud_get(pool, item_id)
     if item is None:
         return Response(b'not found', status=404, content_type=_PLAIN)
     return JSONResponse(item)
 
 
 @app.route(path='/crud/items/{item_id:int}', methods=[HTTPMethod.PUT])
-async def crud_items_update(item_id: int, body: bytes):
+async def crud_items_update(item_id: int, body: bytes, conn=Depends(db.get_db_conn)):
     try:
         data = json.loads(body)
     except ValueError:
         return Response(b'invalid JSON', status=400, content_type=_PLAIN)
-    ok = await db.crud_update(item_id, data)
+    ok = await db.crud_update(conn, item_id, data)
     if not ok:
         return Response(b'not found', status=404, content_type=_PLAIN)
     return JSONResponse({'id': item_id})

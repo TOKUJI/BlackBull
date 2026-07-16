@@ -296,6 +296,7 @@ for the full tutorial.
 | [`examples/scenario_h1_fault_injection.py`](examples/scenario_h1_fault_injection.py) | HTTP/1.1 fault scenarios driven against stdlib `http.server` |
 | [`examples/scenario_h2_fault_injection.py`](examples/scenario_h2_fault_injection.py) | HTTP/2 fault scenarios served against httpx |
 | [`examples/request_object.py`](examples/request_object.py) | Opt-in `Request` context object — headers, cookies, client, `body()`/`json()`/`text()` |
+| [`examples/dependency_injection.py`](examples/dependency_injection.py) | `Depends` on a pseudo DB pool — per-request acquire/release with teardown after the response, query params, `use_cache` sharing |
 
 ## Documentation
 
