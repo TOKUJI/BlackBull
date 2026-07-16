@@ -220,12 +220,18 @@ echo "    instance: $SERVER_PUBLIC_IP"
 
 # ---------------------------------------------------------------------------
 # Step 2 — install Docker + HttpArena load-generator tooling (gcannon,
-# wrk, h2load).  Sprint 28 Task 4: the Task 3 first pass skipped these
+# wrk, h2load, ghz).  Sprint 28 Task 4: the Task 3 first pass skipped these
 # and HttpArena's benchmark.sh reported 0 req/s for every run.
 #
 # liburing 2.9 + gcannon build from source (HttpArena's docs as of
 # 2026-05-31 — no pre-built gcannon binary distribution).  wrk and
-# h2load come from apt (nghttp2-client provides h2load on Ubuntu).
+# h2load come from apt (nghttp2-client provides h2load on Ubuntu).  ghz
+# (real gRPC load generator) is required by HttpArena's gRPC/stream
+# profiles AND — since upstream added the `_wait_grpc` readiness probe —
+# by *every* grpc profile's server-readiness check; a missing ghz makes
+# `_wait_grpc` fail and framework.sh fall through to an unbound-var abort
+# (`probe_url: unbound variable`), silently producing no gRPC numbers.
+# Installed from the upstream prebuilt release binary (no Go toolchain).
 # Kernel 6.1+ with io_uring is a gcannon precondition; the c7i.xlarge
 # Ubuntu 24.04 AMI ships kernel 6.8+, so the precondition is met.
 #
@@ -235,7 +241,7 @@ echo "    instance: $SERVER_PUBLIC_IP"
 # local echo markers bracketing each phase are the heartbeat.
 # ---------------------------------------------------------------------------
 echo ">>> installing Docker + HttpArena load tooling on the instance ..."
-echo "    [1/4] apt-get update + install packages ..."
+echo "    [1/5] apt-get update + install packages ..."
 ssh "${SSH_OPTS[@]}" "$SERVER_REMOTE" '
     set -euo pipefail
     sudo apt-get update -qq
@@ -247,9 +253,9 @@ ssh "${SSH_OPTS[@]}" "$SERVER_REMOTE" '
     sudo usermod -aG docker ubuntu
     echo "    apt-get done."
 '
-echo "    [1/4] packages installed."
+echo "    [1/5] packages installed."
 
-echo "    [2/4] liburing 2.9 (source build) ..."
+echo "    [2/5] liburing 2.9 (source build) ..."
 ssh "${SSH_OPTS[@]}" "$SERVER_REMOTE" '
     set -euo pipefail
     if pkg-config --atleast-version=2.9 liburing 2>/dev/null; then
@@ -267,9 +273,9 @@ ssh "${SSH_OPTS[@]}" "$SERVER_REMOTE" '
     sudo ldconfig
     echo "    liburing 2.9 built."
 '
-echo "    [2/4] liburing done."
+echo "    [2/5] liburing done."
 
-echo "    [3/4] gcannon (source build, io_uring loadgen) ..."
+echo "    [3/5] gcannon (source build, io_uring loadgen) ..."
 ssh "${SSH_OPTS[@]}" "$SERVER_REMOTE" '
     set -euo pipefail
     if command -v gcannon >/dev/null; then
@@ -284,17 +290,39 @@ ssh "${SSH_OPTS[@]}" "$SERVER_REMOTE" '
     sudo cp gcannon /usr/local/bin/
     echo "    gcannon built."
 '
-echo "    [3/4] gcannon done."
+echo "    [3/5] gcannon done."
 
-echo "    [4/4] verify load tools ..."
+echo "    [4/5] ghz (prebuilt gRPC load generator) ..."
+ssh "${SSH_OPTS[@]}" "$SERVER_REMOTE" '
+    set -euo pipefail
+    if command -v ghz >/dev/null; then
+        echo "    ghz already installed, skipping."
+        exit 0
+    fi
+    # Upstream prebuilt release binary — no Go toolchain needed.  The
+    # linux x86_64 tarball ships a static ghz binary + config + LICENSE.
+    GHZ_VER=0.120.0
+    cd /tmp
+    rm -rf ghz-dist ghz.tar.gz
+    curl -fsSL -o ghz.tar.gz \
+        "https://github.com/bojand/ghz/releases/download/v${GHZ_VER}/ghz-linux-x86_64.tar.gz"
+    mkdir -p ghz-dist
+    tar -xzf ghz.tar.gz -C ghz-dist
+    sudo install -m 0755 ghz-dist/ghz /usr/local/bin/ghz
+    echo "    ghz ${GHZ_VER} installed."
+'
+echo "    [4/5] ghz done."
+
+echo "    [5/5] verify load tools ..."
 ssh "${SSH_OPTS[@]}" "$SERVER_REMOTE" '
     set -euo pipefail
     command -v gcannon >/dev/null || { echo "FATAL: gcannon not on PATH" >&2; exit 1; }
     command -v wrk     >/dev/null || { echo "FATAL: wrk not on PATH" >&2; exit 1; }
     command -v h2load  >/dev/null || { echo "FATAL: h2load not on PATH" >&2; exit 1; }
+    command -v ghz     >/dev/null || { echo "FATAL: ghz not on PATH" >&2; exit 1; }
     echo "    all load tools verified."
 '
-echo "    [4/4] toolchain ready."
+echo "    [5/5] toolchain ready."
 
 # ---------------------------------------------------------------------------
 # Step 3 — clone HttpArena fresh on the instance.
@@ -326,9 +354,10 @@ ssh "${SSH_OPTS[@]}" "$SERVER_REMOTE" 'mkdir -p HttpArena/frameworks/blackbull'
 
 # Upload framework files.  In LOCAL_BB_WHEEL=1 mode the wheel is also
 # uploaded so the Dockerfile can COPY+install it from the build context.
-# When BB_ACCESS_LOG=1, logging_access.ini is also uploaded: app.py loads it
-# via logging.config.fileConfig() to configure the blackbull.access logger
-# declaratively (standard Python logging config, not inline handler setup).
+# Access logging (BB_ACCESS_LOG=1) is configured via env, not a config file:
+# the shim injects BB_LOG_FILE and app.py sets the access logger level, so the
+# framework's async setup_async_logging (worker.py) builds the file sink.  The
+# legacy logging_access.ini is no longer uploaded or loaded.
 _BB_RSYNC_FILES=(
     "$REPO_ROOT/bench/httparena/app.py"
     "$REPO_ROOT/bench/httparena/launcher.py"
@@ -336,9 +365,6 @@ _BB_RSYNC_FILES=(
     "$REPO_ROOT/bench/httparena/db.py"
     "$REPO_ROOT/bench/httparena/grpc_bench.py"
 )
-if [ "${BB_ACCESS_LOG:-0}" != "0" ]; then
-    _BB_RSYNC_FILES+=("$REPO_ROOT/bench/httparena/logging_access.ini")
-fi
 rsync -e "ssh ${SSH_OPTS[*]}" -az --delete \
     "${_BB_RSYNC_FILES[@]}" \
     "$SERVER_REMOTE:HttpArena/frameworks/blackbull/"
@@ -361,12 +387,9 @@ if [ "$LOCAL_BB_WHEEL" = "1" ]; then
         "$SERVER_REMOTE:HttpArena/frameworks/blackbull/"
 fi
 
-# Build the COPY line for logging_access.ini if BB_ACCESS_LOG=1.
-# When present, app.py loads it via logging.config.fileConfig() at startup.
+# Access logging is now configured via env vars (BB_LOG_FILE from the shim +
+# BB_ACCESS_LOG), so no logging config file is COPYed into the image.
 _LOGGING_INI_COPY=''
-if [ "${BB_ACCESS_LOG:-0}" != "0" ]; then
-    _LOGGING_INI_COPY='COPY logging_access.ini /app/'
-fi
 
 # Generate the Dockerfile on the remote instance.
 if [ "$LOCAL_BB_WHEEL" = "1" ]; then
@@ -475,7 +498,7 @@ scp "${SSH_OPTS[@]}" \
 
 # Execute it with tuning values as arguments.
 ssh "${SSH_OPTS[@]}" "$SERVER_REMOTE" \
-    "bash ~/install_docker_shim.sh '${WEB_WORKERS}' '${WEB_NOFILE}' '${WRK_CPUS}' '${WRK_NOFILE}' '${BB_ACCESS_LOG}' '${BB_PHASE_TRACE}'"
+    "bash ~/install_docker_shim.sh '${WEB_WORKERS}' '${WEB_NOFILE}' '${WRK_CPUS}' '${WRK_NOFILE}' '${BB_ACCESS_LOG}' '${BB_PHASE_TRACE}' '${BB_LOG_BATCH_SIZE:-}' '${BB_LOG_BATCH_TIMEOUT_MS:-}'"
 echo "    shim installed."
 
 # ---------------------------------------------------------------------------
@@ -587,6 +610,12 @@ cat > "$LOCAL_DEST/provenance.md" <<EOF
 | WRK_NOFILE  | $WRK_NOFILE |
 EOF
 
+# Emit a simple per-profile framework comparison table (COMPARISON.md) from the
+# result JSONs pulled above.  Best-effort: a failure here never fails the run.
+echo ">>> generating comparison table ..."
+python3 "$REPO_ROOT/bench/httparena/compare_table.py" "$LOCAL_DEST" \
+    || echo "    (comparison table skipped — see stderr above)"
+
 echo
 echo "=== complete ==="
 echo "Artefacts at: $LOCAL_DEST"
@@ -595,6 +624,7 @@ echo "  Benchmark logs: $LOCAL_DEST/logs/benchmark-*-*.log"
 echo "  wrk logs:       $LOCAL_DEST/logs/wrk-*-*.log"
 [ "${BB_ACCESS_LOG:-0}" != "0" ] && \
     echo "  Access logs:    $LOCAL_DEST/logs/bb-access-*-*.log"
+echo "  Comparison:     $LOCAL_DEST/COMPARISON.md"
 echo "  Provenance:     $LOCAL_DEST/provenance.md"
 echo
 echo "Instance will be torn down by the EXIT trap."

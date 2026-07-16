@@ -89,7 +89,6 @@ _pool_ready = False
 _redis = None
 _redis_ready = False
 
-
 async def get_pool():
     """Return the asyncpg pool, or ``None`` if no DB is configured/reachable."""
     global _pool, _pool_ready

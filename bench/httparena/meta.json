@@ -4,7 +4,7 @@
   "type": "emerging",
   "mode": "standard",
   "engine": "blackbull",
-  "description": "BlackBull — pure-Python async ASGI 3.0 framework supporting HTTP/1.1, HTTP/2, WebSocket, and unary gRPC. ALPN negotiates HTTP/2 on the same listener that serves HTTP/1.1.",
+  "description": "BlackBull — pure-Python async ASGI 3.0 framework supporting HTTP/1.1, HTTP/2, WebSocket, and gRPC (unary + server-streaming). ALPN negotiates HTTP/2 on the same listener that serves HTTP/1.1.",
   "repo": "https://github.com/TOKUJI/BlackBull",
   "enabled": true,
   "tests": [
@@ -14,6 +14,8 @@
     "echo-ws-pipeline",
     "unary-grpc",
     "unary-grpc-tls",
+    "stream-grpc",
+    "stream-grpc-tls",
     "crud",
     "async-db",
     "api-4",
@@ -27,5 +29,7 @@
     "upload",
     "static"
   ],
-  "maintainers": []
+  "maintainers": [
+    "TOKUJI"
+  ]
 }
