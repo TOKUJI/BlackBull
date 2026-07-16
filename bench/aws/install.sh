@@ -152,12 +152,20 @@ echo "=== Loadgen TCP tuning (Lane E support) ==="
 # cost-per-connection-setup rather than the kernel's port-recycle rate.
 # In TOPO=single this host plays both roles; tuning runs unconditionally.
 sudo tee /etc/sysctl.d/99-blackbull-bench.conf >/dev/null <<'SYSCTL'
-# BlackBull benchmark loadgen tuning — installed by bench/aws/install.sh.
-# Required for Lane E (Connection: close per request) to measure stack
-# cost rather than kernel ephemeral-port-pool ceiling.  See
-# bench/CHARACTERIZATION.md "Lane E methodology" for rationale.
+# BlackBull benchmark tuning — installed by bench/aws/install.sh.
+# tcp_tw_reuse + wide port range: Lane E (Connection: close per request)
+# measures stack cost rather than the kernel ephemeral-port-pool ceiling.
+# See bench/CHARACTERIZATION.md "Lane E methodology" for rationale.
 net.ipv4.tcp_tw_reuse = 1
 net.ipv4.ip_local_port_range = 1024 65535
+# somaxconn + tcp_max_syn_backlog: raise the kernel ceiling so the server's
+# deep listen() backlog (BB_SOCKET_BACKLOG=4096) is honoured.  Without this
+# the accept queue is capped at the traditional 128 and a cold-start
+# connection burst (gRPC streaming: 64 conns + ghz reconnect storm) overflows
+# into ECONNREFUSED before freshly-spawned workers warm up — the run-1
+# streaming collapse.  Host-networked container, so the host value applies.
+net.core.somaxconn = 4096
+net.ipv4.tcp_max_syn_backlog = 4096
 SYSCTL
 sudo sysctl --quiet -p /etc/sysctl.d/99-blackbull-bench.conf
 
@@ -306,12 +314,20 @@ echo "=== Loadgen TCP tuning (Lane E support) ==="
 # See server-side block for rationale.  This host is the loadgen in
 # TOPO=split, so the tuning is what actually matters for Lane E.
 sudo tee /etc/sysctl.d/99-blackbull-bench.conf >/dev/null <<'SYSCTL'
-# BlackBull benchmark loadgen tuning — installed by bench/aws/install.sh.
-# Required for Lane E (Connection: close per request) to measure stack
-# cost rather than kernel ephemeral-port-pool ceiling.  See
-# bench/CHARACTERIZATION.md "Lane E methodology" for rationale.
+# BlackBull benchmark tuning — installed by bench/aws/install.sh.
+# tcp_tw_reuse + wide port range: Lane E (Connection: close per request)
+# measures stack cost rather than the kernel ephemeral-port-pool ceiling.
+# See bench/CHARACTERIZATION.md "Lane E methodology" for rationale.
 net.ipv4.tcp_tw_reuse = 1
 net.ipv4.ip_local_port_range = 1024 65535
+# somaxconn + tcp_max_syn_backlog: raise the kernel ceiling so the server's
+# deep listen() backlog (BB_SOCKET_BACKLOG=4096) is honoured.  Without this
+# the accept queue is capped at the traditional 128 and a cold-start
+# connection burst (gRPC streaming: 64 conns + ghz reconnect storm) overflows
+# into ECONNREFUSED before freshly-spawned workers warm up — the run-1
+# streaming collapse.  Host-networked container, so the host value applies.
+net.core.somaxconn = 4096
+net.ipv4.tcp_max_syn_backlog = 4096
 SYSCTL
 sudo sysctl --quiet -p /etc/sysctl.d/99-blackbull-bench.conf
 

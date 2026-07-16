@@ -140,3 +140,49 @@ async def test_tap_actor_drops_newest_on_overflow_and_counts():
         tap.offer(_msg(f'sensors/{i}'))
     assert tap._inbox.qsize() == 2   # first two accepted
     assert tap.dropped == 3          # remaining three dropped (newest)
+
+
+@asyncio_test
+async def test_extension_tap_registered_after_construction_fires():
+    """Regression (Sprint 73): MQTTExtension builds its TapActor in
+    __init__, but ``@mqtt.on_message`` registrations happen afterwards —
+    the actor must pick them up, not act on a snapshot of the (empty)
+    handler list taken at construction time."""
+    from blackbull.mqtt import MQTTExtension
+
+    ext = MQTTExtension(port=0)
+    seen = []
+
+    @ext.on_message(topic='sensors/{room}/temperature')
+    async def on_temp(msg, room):
+        seen.append((room, msg.payload))
+
+    async with _running(ext._tap) as tap:
+        tap.offer(_msg('sensors/kitchen/temperature', b'21.5'))
+        for _ in range(20):
+            await asyncio.sleep(0)
+            if seen:
+                break
+    assert seen == [('kitchen', b'21.5')]
+
+
+@asyncio_test
+async def test_extension_tap_registered_while_running_fires():
+    """iter_subscriptions documents at-call-time semantics; delivery must
+    match: a tap registered after the actor started draining still fires."""
+    from blackbull.mqtt import MQTTExtension
+
+    ext = MQTTExtension(port=0)
+    seen = []
+
+    async with _running(ext._tap) as tap:
+        @ext.on_message(topic='#')
+        async def late(msg):
+            seen.append(msg.topic)
+
+        tap.offer(_msg('a/b'))
+        for _ in range(20):
+            await asyncio.sleep(0)
+            if seen:
+                break
+    assert seen == ['a/b']

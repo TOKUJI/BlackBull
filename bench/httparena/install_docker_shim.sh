@@ -6,6 +6,7 @@
 # Called by bench/aws/httparena_compare.sh via scp + exec.
 #
 # Args: WEB_WORKERS WEB_NOFILE WRK_CPUS WRK_NOFILE [BB_ACCESS_LOG] [BB_PHASE_TRACE]
+#       [BB_LOG_BATCH_SIZE] [BB_LOG_BATCH_TIMEOUT_MS]
 # All args are optional (empty = no-op for that knob).
 
 set -euo pipefail
@@ -16,6 +17,8 @@ _WRK_CPUS="${3:-}"
 _WRK_NOFILE="${4:-}"
 _BB_ACCESS_LOG="${5:-}"
 _BB_PHASE_TRACE="${6:-}"
+_BB_LOG_BATCH_SIZE="${7:-}"
+_BB_LOG_BATCH_TIMEOUT_MS="${8:-}"
 
 # Locate the docker binary currently on PATH (not yet shimmed).
 DOCKER_ON_PATH="$(command -v docker)"
@@ -42,6 +45,8 @@ WRK_CPUS="__WRK_CPUS__"
 WRK_NOFILE="__WRK_NOFILE__"
 BB_ACCESS_LOG="__BB_ACCESS_LOG__"
 BB_PHASE_TRACE="__BB_PHASE_TRACE__"
+BB_LOG_BATCH_SIZE="__BB_LOG_BATCH_SIZE__"
+BB_LOG_BATCH_TIMEOUT_MS="__BB_LOG_BATCH_TIMEOUT_MS__"
 
 # Pass non-run subcommands (build, pull, inspect, ps, …) straight through.
 if [ "${1:-}" != "run" ]; then
@@ -100,7 +105,16 @@ else
         )
     fi
     [ -n "$BB_ACCESS_LOG" ] && extra+=(-e "BB_ACCESS_LOG=${BB_ACCESS_LOG}")
+    # When access logging is ON, route it through BlackBull's PRODUCTION async
+    # path: the deferred-format QueueHandler enqueues on the event loop and the
+    # listener thread writes to BB_LOG_FILE (approach 2, on the mounted
+    # /results volume).  This measures the shipped per-request loop cost (a
+    # queue put) rather than a synchronous FileHandler.  Batching (O2) composes
+    # via BB_LOG_BATCH_SIZE below.  See bench/httparena/app.py.
+    [ "${BB_ACCESS_LOG:-0}" != "0" ] && extra+=(-e "BB_LOG_FILE=/results/blackbull-access.log")
     [ -n "$BB_PHASE_TRACE" ] && extra+=(-e "BB_PHASE_TRACE=${BB_PHASE_TRACE}")
+    [ -n "$BB_LOG_BATCH_SIZE" ] && extra+=(-e "BB_LOG_BATCH_SIZE=${BB_LOG_BATCH_SIZE}")
+    [ -n "$BB_LOG_BATCH_TIMEOUT_MS" ] && extra+=(-e "BB_LOG_BATCH_TIMEOUT_MS=${BB_LOG_BATCH_TIMEOUT_MS}")
     exec "$REAL_DOCKER" run "${extra[@]}" "$@"
 fi
 SHIM_INNER
@@ -114,6 +128,8 @@ sed -i \
     -e "s|__WRK_NOFILE__|${_WRK_NOFILE}|g" \
     -e "s|__BB_ACCESS_LOG__|${_BB_ACCESS_LOG}|g" \
     -e "s|__BB_PHASE_TRACE__|${_BB_PHASE_TRACE}|g" \
+    -e "s|__BB_LOG_BATCH_SIZE__|${_BB_LOG_BATCH_SIZE}|g" \
+    -e "s|__BB_LOG_BATCH_TIMEOUT_MS__|${_BB_LOG_BATCH_TIMEOUT_MS}|g" \
     "$SHIM_STAGING"
 
 chmod +x "$SHIM_STAGING"

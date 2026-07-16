@@ -142,7 +142,7 @@ bench/httparena/blackbull-*.whl
 # Kept on disk for future development; not committed until the socket-state
 # contamination is solved cleanly.
 bench/peers/compare.sh
-
+bench/peers/bench/results/*
 # peer benchmark harness — private development notes
 *.private.md
 
@@ -157,9 +157,7 @@ bench/peers/compare.sh
 bench/sprint-logs/
 
 # RFC conformance test output (kept directory, ignore data files)
-bench/conformance/results/*.txt
-bench/conformance/results/*.xml
-bench/conformance/results/*.json
+bench/conformance/results/*
 
 # Http11Probe run output (kept directory, ignore data files)
 bench/http11probe/results/*.json

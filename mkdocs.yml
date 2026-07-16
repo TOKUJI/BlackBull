@@ -49,9 +49,11 @@ nav:
     - Requests and responses: guide/requests-and-responses.md
     - WebSockets: guide/websockets.md
     - HTTP/2: guide/http2.md
+    - Structured Fields: guide/structured-fields.md
     - Non-ASGI protocols: guide/raw-protocols.md
     - MQTT broker: guide/mqtt.md
     - gRPC: guide/grpc.md
+    - Protocol translation hub: guide/translation-hub.md
     - Streaming: guide/streaming.md
     - Events: guide/events.md
     - Logging: guide/logging.md

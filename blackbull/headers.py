@@ -9,6 +9,8 @@ Provides:
 from collections.abc import Iterable
 from typing import TypeAlias
 
+from .protocol import structured_fields as sf
+
 HeaderList: TypeAlias = Iterable[tuple[bytes, bytes]]
 
 
@@ -99,3 +101,76 @@ class Headers:
     def __add__(self, other: 'Headers') -> 'Headers':
         """Return a new Headers containing all pairs from *self* then *other*."""
         return Headers(list(self._list) + list(other._list))
+
+    # ---- Structured Fields accessors (RFC 9651) --------------------------
+
+    def _sf_value(self, name: bytes) -> bytes | None:
+        """Combined field value for *name* (RFC 9651 §4.2 step 1), or ``None``.
+
+        Multiple field lines are joined with ``b', '`` before parsing, as
+        the RFC requires for List- and Dictionary-typed fields.
+        """
+        pairs = self._index.get(name.lower())
+        if not pairs:
+            return None
+        if len(pairs) == 1:
+            return pairs[0][1]
+        return b', '.join(value for _, value in pairs)
+
+    def get_sf_item(self, name: bytes) -> sf.Item | None:
+        """Parse *name* as a Structured Field Item (RFC 9651).
+
+        Returns ``(bare_item, parameters)``, or ``None`` if the field is
+        absent or fails strict parsing (per RFC 9651 §4.2 the whole field
+        is then ignored).
+
+        Example::
+
+            headers.get_sf_item(b'deprecation')   # (Date(1659578233), {})
+        """
+        value = self._sf_value(name)
+        if value is None:
+            return None
+        try:
+            return sf.parse_item(value)
+        except ValueError:
+            return None
+
+    def get_sf_list(self, name: bytes) -> sf.SFList | None:
+        """Parse *name* as a Structured Field List (RFC 9651).
+
+        Multiple field lines are combined first.  Returns a list of Items /
+        Inner Lists, or ``None`` if the field is absent or fails strict
+        parsing (per RFC 9651 §4.2 the whole field is then ignored).
+
+        Example::
+
+            headers.get_sf_list(b'accept-query')  # [('a', {}), ('b', {})]
+        """
+        value = self._sf_value(name)
+        if value is None:
+            return None
+        try:
+            return sf.parse_list(value)
+        except ValueError:
+            return None
+
+    def get_sf_dict(self, name: bytes) -> sf.SFDictionary | None:
+        """Parse *name* as a Structured Field Dictionary (RFC 9651).
+
+        Multiple field lines are combined first.  Returns an ordered
+        ``dict`` of member name → Item / Inner List, or ``None`` if the
+        field is absent or fails strict parsing (per RFC 9651 §4.2 the
+        whole field is then ignored).
+
+        Example::
+
+            headers.get_sf_dict(b'priority')      # {'u': (2, {}), 'i': (True, {})}
+        """
+        value = self._sf_value(name)
+        if value is None:
+            return None
+        try:
+            return sf.parse_dictionary(value)
+        except ValueError:
+            return None

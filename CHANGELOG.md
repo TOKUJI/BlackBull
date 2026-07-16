@@ -31,6 +31,52 @@ so the editable install's metadata catches up.
 
 ## [Unreleased]
 
+### Added
+
+- **RFC 9651 Structured Field Values** (Sprint 73). New module
+  `blackbull.protocol.structured_fields` implements the full RFC 9651 §4
+  parse/serialise algorithms — Items, Lists, Dictionaries, Inner Lists,
+  Parameters, and all eight bare-item types (Integer, Decimal, String,
+  Token, Byte Sequence, Boolean, Date, Display String) — with zero new
+  dependencies, verified against all 2,135 cases of the
+  [httpwg/structured-field-tests](https://github.com/httpwg/structured-field-tests)
+  conformance suite (vendored under `tests/conformance/structured_fields/`).
+  New wrapper types `Token`, `DisplayString`, and `Date` preserve wire-form
+  distinctions RFC 9651 requires.
+- **`Headers.get_sf_item` / `get_sf_list` / `get_sf_dict`** — parse a header
+  as a Structured Field of the given type, combining multiple field lines
+  per RFC 9651 §4.2 and returning `None` for absent or malformed fields
+  (strict parsing: a malformed field is ignored in its entirety).
+  Documented in the new guide page *Structured Fields*.
+
+- **Protocol translation hub showcase** (Sprint 73, C4). New example
+  `examples/translation_hub.py` and guide page *Protocol translation hub*:
+  MQTT → WebSocket, MQTT → SSE, and REST → gRPC translation in a single
+  BlackBull process — devices publish over MQTT :1883, browsers watch the
+  same feed over WS and SSE on :8000, and one gRPC service answers both
+  native gRPC clients and a REST route that maps `GrpcStatus` to HTTP
+  statuses in-process. No gateway, no sidecar, no config file.
+
+### Fixed
+
+- **MQTT `@mqtt.on_message` taps were dead in actor mode** (the default).
+  `MQTTExtension` builds its `TapActor` at construction, but the actor
+  compiled the tap table immediately — before any `@mqtt.on_message`
+  decorator had run — so in `tap_mode='actor'` every tap registered
+  afterwards (i.e. all of them, in normal usage) silently never fired.
+  `TapActor` now tracks the live handler list and recompiles when it
+  grows, matching the at-call-time semantics `iter_subscriptions`
+  documents. Found while verifying the translation-hub showcase
+  end-to-end; regression tests cover both registered-before-start and
+  registered-while-running taps.
+- **RFC 9218 priority parsing is now spec-strict** (`parse_priority_field`,
+  used for both the `Priority` request header and the HTTP/2
+  `PRIORITY_UPDATE` frame payload, which was previously handled by an
+  ad-hoc splitter). Out-of-range or mistyped members are ignored per
+  RFC 9218 §4 — `u=9` now falls back to the default urgency 3 instead of
+  being clamped to 7 — explicit `i=?1` / `i=?0` booleans are honoured, and
+  a field value that fails RFC 9651 parsing yields the defaults.
+
 ## [0.54.0] — 2026-07-16
 
 ### Fixed

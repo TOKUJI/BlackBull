@@ -5,11 +5,17 @@ it onto the same port as your REST routes.  Handlers exchange raw message
 bytes, so this example echoes bytes rather than pulling in protobuf — wire your
 own ``MyRequest.FromString`` / ``response.SerializeToString`` in real code.
 
-Run (gRPC needs HTTP/2, so TLS + ALPN):
+Run it — no TLS needed to try it (BlackBull accepts cleartext HTTP/2 / h2c):
+
+    python examples/grpc_server.py --port 50051
+
+or with TLS + ALPN for a production-like setup:
 
     python examples/grpc_server.py --port 8443 --cert cert.pem --key key.pem
 
-Then call ``/echo.Echo/Echo`` with any gRPC client pointed at the service.
+Then call ``/echo.Echo/Echo`` with any gRPC client pointed at the service
+(plaintext mode for the h2c form: ``grpcurl -plaintext``, ``ghz --insecure``,
+a ``grpcio`` ``insecure_channel``).
 """
 import argparse
 
