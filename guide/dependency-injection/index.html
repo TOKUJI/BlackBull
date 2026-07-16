@@ -4908,7 +4908,7 @@ provider).  Sync generator providers are rejected; use an async generator.</p>
 </tr>
 <tr>
 <td>per-app</td>
-<td><code>@app.on('startup')</code> / <code>AppConfig</code>; a provider closes over it</td>
+<td><code>@app.on_startup</code> / <code>AppConfig</code>; a provider closes over it</td>
 </tr>
 </tbody>
 </table>
@@ -4921,8 +4921,8 @@ provider).  Sync generator providers are rejected; use an async generator.</p>
 object you create at startup and <em>capture</em> in a provider —</p>
 <div class="highlight"><pre><span></span><code><span class="n">engine</span><span class="p">:</span> <span class="n">Engine</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span>
 
-<span class="nd">@app</span><span class="o">.</span><span class="n">on</span><span class="p">(</span><span class="s1">&#39;startup&#39;</span><span class="p">)</span>
-<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">boot</span><span class="p">(</span><span class="n">event</span><span class="p">):</span>
+<span class="nd">@app</span><span class="o">.</span><span class="n">on_startup</span>
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">boot</span><span class="p">():</span>
     <span class="k">global</span> <span class="n">engine</span>
     <span class="n">engine</span> <span class="o">=</span> <span class="k">await</span> <span class="n">create_engine</span><span class="p">(</span><span class="n">dsn</span><span class="p">)</span>
 
@@ -4930,6 +4930,9 @@ object you create at startup and <em>capture</em> in a provider —</p>
     <span class="k">async</span> <span class="k">with</span> <span class="n">engine</span><span class="o">.</span><span class="n">connect</span><span class="p">()</span> <span class="k">as</span> <span class="n">conn</span><span class="p">:</span>   <span class="c1"># engine: app-scoped, conn: per-request</span>
         <span class="k">yield</span> <span class="n">conn</span>
 </code></pre></div>
+<p>A runnable version of this pattern — fake pool with visible
+acquire/release accounting — ships as
+<a href="https://github.com/TOKUJI/BlackBull/blob/master/examples/dependency_injection.py"><code>examples/dependency_injection.py</code></a>.</p>
 <h2 id="ordering-and-errors">Ordering and errors<a class="headerlink" href="#ordering-and-errors" title="Permanent link">&para;</a></h2>
 <ul>
 <li>Providers resolve in signature order; cleanup runs LIFO (last provider
