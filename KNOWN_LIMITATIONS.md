@@ -228,6 +228,20 @@ BlackBull is a protocol-layer framework.  There is no built-in
 ORM, no connection pool, no migration tool.  Apps should bring
 their own (`asyncpg`, `databases`, `tortoise-orm`, etc.).
 
+### `Depends` is deliberately minimal; query params are scalars only
+
+The v0.56.0 dependency-injection surface is fenced by design
+(see [`docs/guide/dependency-injection.md`](docs/guide/dependency-injection.md)):
+providers take **no parameters**, and a provider that itself declares
+`Depends` (nesting, common in FastAPI code) is a registration-time
+`TypeError` — compose inside the provider body instead.  No interface
+binding, no interception (the event API covers cross-cutting concerns).
+Query params resolve scalars only (`str`/`int`/`float`/`bool`,
+optionally `| None`); repeated-key aggregation (`?tag=a&tag=b` →
+`list[str]`) and query-model objects are not supported — parse
+`scope['query_string']` yourself for those.  Fences are lifted on
+demonstrated demand, not speculatively.
+
 ### Optional `[speed-h1]` C parser stub not implemented
 
 `pyproject.toml` lists no `[speed-h1]` extra today.  The

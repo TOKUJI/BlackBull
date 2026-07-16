@@ -31,6 +31,8 @@ so the editable install's metadata catches up.
 
 ## [Unreleased]
 
+## [0.56.0] — 2026-07-16
+
 ### Added
 
 - **Query params in the simplified handler model** (Sprint 74). A handler
