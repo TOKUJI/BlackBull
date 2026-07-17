@@ -31,6 +31,8 @@ so the editable install's metadata catches up.
 
 ## [Unreleased]
 
+## [0.57.0] — 2026-07-17
+
 ### Added
 
 - **MQTT 5 shared subscriptions** (§4.8.2, Sprint 75). Subscribers naming the
