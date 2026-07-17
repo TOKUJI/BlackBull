@@ -104,7 +104,7 @@ appears.
 
 ## Deployment notes
 
-### Raw protocol handlers: single-owner, HTTP still scales, cleartext-only
+### Raw protocol handlers: single-owner, HTTP still scales, cleartext by default
 
 When a non-ASGI protocol handler is registered via `app.raw_handler()` or
 `app.register_protocol_handler()`, BlackBull applies these constraints:
@@ -128,19 +128,22 @@ queue (best load distribution); without it the workers share the master's
 listening socket.  The protocol port is always bound without `SO_REUSEPORT`
 — a single owner is the point.
 
-**Cleartext only** — raw protocol sockets are bound without TLS regardless
-of whether a TLS certificate is configured.  Adding TLS support for raw
-protocols requires `ssl_context` plumbing through `RawBinding` → `Server`.
-For MQTT-over-TLS or similar, put a TLS-terminating proxy in front of the
-raw socket.
+**Cleartext by default; TLS is opt-in per binding (Sprint 75)** — a raw
+protocol socket is bound without TLS unless the binding is registered with
+`tls=True` (`app.raw_handler(name, port=…, tls=True)` /
+`MQTTExtension(port=8883, tls=True)`), in which case it is served through
+the same TLS machinery as the HTTPS listener (certificate from
+`certfile`/`keyfile` or `ssl_context`; startup fails fast when `tls=True`
+has no certificate to use).  A TLS-terminating proxy in front of the raw
+socket remains a fine alternative.
 
 ### MQTT broker: best-effort taps, in-memory single-process state
 
 The MQTT 5 broker (`blackbull.mqtt`, opt-in via `blackbull[mqtt]`) rides
 the raw-protocol bridge above, so it inherits its constraints —
 **single-owner** (the broker runs on worker 0; HTTP still scales across all
-workers) and **cleartext only** (front a TLS terminator for
-MQTT-over-TLS).  Beyond those:
+workers) and **cleartext unless registered with `tls=True`**
+(`MQTTExtension(port=8883, tls=True)` for `mqtts://`).  Beyond those:
 
 **Why a single broker owner is a protocol requirement, not an
 implementation limitation.**  The MQTT 5.0 specification (OASIS Committee Specification

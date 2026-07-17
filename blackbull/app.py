@@ -983,6 +983,7 @@ class BlackBull:
         *,
         detector: object | None = None,
         port: int | None = None,
+        tls: bool = False,
     ) -> None:
         """Register a handler for a non-ASGI (raw) protocol (Sprint 50).
 
@@ -997,15 +998,18 @@ class BlackBull:
             detector: Reserved for first-byte sniffing on shared ports
                 (Sprint 51); unused today.
             port: Dedicated listening port for this protocol.
+            tls: Serve this port through the server's TLS machinery (e.g.
+                ``mqtts://``).  Requires the server to be configured with a
+                certificate; startup fails fast otherwise (Sprint 75).
         """
         if self._protocol_registry is None:
             from .server.protocol_registry import ProtocolRegistry  # noqa: PLC0415
             self._protocol_registry = ProtocolRegistry()
         self._protocol_registry.register(name, handler,
-                                         detector=detector, port=port)
+                                         detector=detector, port=port, tls=tls)
 
     def raw_handler(self, name: str, *, port: int | None = None,
-                    detector: object | None = None):
+                    detector: object | None = None, tls: bool = False):
         """Decorator form of :meth:`register_protocol_handler`.
 
         ::
@@ -1017,7 +1021,8 @@ class BlackBull:
         """
         def decorator(handler):
             self.register_protocol_handler(name, handler,
-                                           detector=detector, port=port)
+                                           detector=detector, port=port,
+                                           tls=tls)
             return handler
         return decorator
 

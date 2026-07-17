@@ -274,11 +274,15 @@ class RawBinding(ProtocolBinding):
         *,
         detector: ProtocolDetector | None = None,
         port: int | None = None,
+        tls: bool = False,
     ) -> None:
         self.name = name
         self.handler = handler
         self.detector = detector
         self.port = port
+        # Sprint 75 — serve this binding's port through the server's TLS
+        # machinery (mqtts:// and friends).  Cleartext remains the default.
+        self.tls = tls
 
     @property
     def detect_prefix_len(self) -> int:
@@ -340,17 +344,20 @@ class ProtocolRegistry:
         *,
         detector: ProtocolDetector | None = None,
         port: int | None = None,
+        tls: bool = False,
     ) -> RawBinding:
         """Register a non-ASGI protocol handler.  Raises on duplicate name.
 
         A ``detector`` enables shared-port sniffing (see
         :class:`ProtocolDetector`).  When several registered detectors could
         match the same first bytes, dispatch picks the **first registered**
-        one — ``raw_bindings`` preserves insertion order.
+        one — ``raw_bindings`` preserves insertion order.  ``tls=True`` serves
+        the binding's own port through the server's TLS machinery (Sprint 75).
         """
         if name in self._ports or name in {b.name for b in self._cleartext}:
             raise ValueError(f'Protocol {name!r} already registered')
-        binding = RawBinding(name, handler, detector=detector, port=port)
+        binding = RawBinding(name, handler, detector=detector, port=port,
+                             tls=tls)
         self._ports[name] = binding
         self._detection_order = (tuple(self._ports.values())
                                  + tuple(self._cleartext))

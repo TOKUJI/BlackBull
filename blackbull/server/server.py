@@ -293,6 +293,25 @@ class Server:
             await self._serve_connection(reader, writer, bound_binding=binding)
         return _cb
 
+    def _raw_tls_context(self):
+        """TLS context for ``tls=True`` raw bindings (Sprint 75).
+
+        When cert/key paths are available a dedicated context is built without
+        the HTTP listener's ``h2``/``http/1.1`` ALPN list — a raw-protocol
+        client offering its own ALPN token (e.g. ``mqtt``) must not fail the
+        handshake on no-overlap.  A caller-supplied ``ssl_context`` is reused
+        as-is (there is nothing to rebuild it from).
+        """
+        if not (self.certfile and self.keyfile):
+            return self.ssl_context
+        context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+        context.load_cert_chain(certfile=self.certfile, keyfile=self.keyfile)
+        context.minimum_version = ssl.TLSVersion.TLSv1_2
+        context.options |= ssl.OP_NO_COMPRESSION
+        if hasattr(ssl, 'SESS_CACHE_SERVER'):
+            context.set_session_cache_mode(ssl.SESS_CACHE_SERVER)  # type: ignore[attr-defined]
+        return context
+
     async def _serve_connection(self, reader, writer, *, bound_binding=None):
         """Wrap the transport and run one :class:`ConnectionActor`.
 
@@ -517,10 +536,17 @@ class Server:
 
         Each :class:`RawBinding` registered with a ``port`` gets its own
         dual-stack socket set.  ``port=0`` lets the OS pick a free port (used by
-        tests); the bound port is recorded in :attr:`protocol_ports`.  Cleartext
-        only — TLS for raw protocols is out of scope for the PoC.
+        tests); the bound port is recorded in :attr:`protocol_ports`.  Sockets
+        are bound bare here; :meth:`run` layers TLS onto the listeners whose
+        binding set ``tls=True`` (Sprint 75), cleartext otherwise.
         """
-        for port, binding in self._protocol_registry.port_bindings.items():
+        # Iterate the bindings themselves, not the port-keyed view — several
+        # bindings may all ask for port=0 (OS-assigned, common in tests), and
+        # keying by port would silently collapse them to one listener.
+        for binding in self._protocol_registry.raw_bindings.values():
+            if binding.port is None:
+                continue
+            port = binding.port
             socks = create_dual_stack_sockets(
                 port,
                 backlog=_cfg.socket_backlog,
@@ -567,17 +593,33 @@ class Server:
         # SocketManager wraps each socket in asyncio.start_server and closes all
         # servers on exit.  The shared HTTP listener uses client_connected_cb;
         # each port-bound non-ASGI protocol uses its own raw callback.  Raw
-        # sockets are cleartext (no TLS) for the Sprint 50 PoC.
+        # sockets are cleartext unless the binding was registered with
+        # ``tls=True`` (Sprint 75), which serves them through the same TLS
+        # machinery as the HTTPS listener.
         # LifespanManager drives the ASGI lifespan protocol; nesting it inside
         # SocketManager guarantees: startup completes before serve_forever() is
         # called, and shutdown completes before sockets are closed.
         pairs = [(s, self.client_connected_cb) for s in self.raw_sockets]
+        raw_clear = [(s, self._raw_connected_cb(binding))
+                     for socks, binding in self._protocol_sockets
+                     if not binding.tls for s in socks]
+        raw_tls = [(s, self._raw_connected_cb(binding))
+                   for socks, binding in self._protocol_sockets
+                   if binding.tls for s in socks]
+        if raw_tls and self.ssl_context is None:
+            names = ', '.join(binding.name
+                              for _socks, binding in self._protocol_sockets
+                              if binding.tls)
+            raise RuntimeError(
+                f'Raw protocol binding(s) [{names}] require TLS (tls=True) '
+                f'but the server has no certificate configured — pass '
+                f'certfile/keyfile or an ssl_context.')
         async with SocketManager(pairs, self.ssl_context) as servers, \
-                SocketManager(
-                    [(s, self._raw_connected_cb(binding))
-                     for socks, binding in self._protocol_sockets for s in socks],
-                    None) as raw_servers:
-            servers = servers + raw_servers
+                SocketManager(raw_clear, None) as raw_servers, \
+                SocketManager(raw_tls,
+                              self._raw_tls_context() if raw_tls else None
+                              ) as raw_tls_servers:
+            servers = servers + raw_servers + raw_tls_servers
             async with LifespanManager(self.app):
                 logger.info(f'Server(s) created: {servers}')
                 try:

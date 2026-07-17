@@ -89,7 +89,8 @@ conformance matrix:
 | Area | Support |
 |------|---------|
 | Connection | CONNECT / CONNACK, protocol-level check (rejects non-5 with `0x84`), Clean Start, Session Present |
-| Subscriptions | SUBSCRIBE / SUBACK, UNSUBSCRIBE / UNSUBACK, `+` and `#` wildcards, `$`-topic rules; `No Local` and `Retain As Published` options honoured; invalid Topic Filters rejected (`0x8F`). Shared subscriptions (`$share/…`) are **not implemented** and are rejected with `0x9E` rather than silently broadcast |
+| Subscriptions | SUBSCRIBE / SUBACK, UNSUBSCRIBE / UNSUBACK, `+` and `#` wildcards, `$`-topic rules; `No Local`, `Retain As Published`, and `Retain Handling` (0/1/2, §3.3.1.3) options honoured; invalid Topic Filters rejected (`0x8F`) |
+| Shared subscriptions | `$share/{ShareName}/{filter}` groups (§4.8.2): each matching message goes to exactly **one** connected group member, round-robin — see below |
 | Publish | invalid Topic Names (wildcards / null) rejected (`0x90`), never routed or retained |
 | QoS 0 | fire-and-forget delivery |
 | QoS 1 | PUBACK round-trip |
@@ -113,6 +114,43 @@ wires the two; `blackbull.mqtt.tap` holds the `TapActor` and the `Message`
 read-model; and `blackbull.mqtt.extension` holds `MQTTExtension` and
 `MQTTProtocolDetector`, which recognises the MQTT CONNECT first byte (`0x10`) for
 shared-port sniffing.
+
+## Shared subscriptions
+
+Subscribers that name the same `$share/{ShareName}/{filter}` pair form a
+*share group* (MQTT 5 §4.8.2). Each application message matching the filter is
+delivered to exactly **one** member of the group — round-robin across the
+members currently connected — instead of every matching subscriber. This is
+the standard MQTT pattern for load-balancing a work queue across a pool of
+consumers:
+
+```bash
+# terminals 1 and 2 — two workers in the same share group
+mosquitto_sub -t '$share/pool/jobs/#' -p 1883 -V 5
+mosquitto_sub -t '$share/pool/jobs/#' -p 1883 -V 5
+
+# terminal 3 — publishes alternate between the two workers
+mosquitto_pub -t 'jobs/import' -m 'job-1' -p 1883 -V 5
+mosquitto_pub -t 'jobs/import' -m 'job-2' -p 1883 -V 5
+```
+
+Semantics worth knowing:
+
+- **Non-shared subscriptions are unaffected** — a client subscribed to a plain
+  `jobs/#` still receives every message, alongside whichever group member the
+  rotation picks. Shared and non-shared subscriptions held by the same client
+  are independent delivery channels.
+- **Delivery QoS** is the chosen member's granted QoS (capped by the publish
+  QoS, as usual).
+- **Disconnected members are skipped** while any member is connected
+  (§4.8.2.3). If *no* member is connected, the message is not queued for the
+  group — the same no-offline-queue behaviour the broker applies to non-shared
+  subscriptions.
+- **Retained messages are never delivered to a shared subscription** (§4.8.2).
+- **`No Local` cannot be combined with a shared subscription** — MQTT 5 makes
+  it a Protocol Error (§3.8.3.1), and the broker disconnects with `0x82`.
+- Malformed forms (`$share/g`, an empty ShareName, a wildcard in the ShareName,
+  or an empty filter portion) are rejected per-entry with `0x8F`.
 
 ## Trying it with Mosquitto
 
@@ -175,10 +213,18 @@ Three honest caveats — also stated in the document's `info.description`:
 - **Payloads are opaque bytes** (`application/octet-stream`) until a future
   opt-in `schema=` on `on_message` lands.
 
+## TLS (`mqtts://`)
+
+`MQTTExtension(port=8883, tls=True)` serves the broker port over TLS using the
+same certificate the HTTPS listener uses — pass `certfile`/`keyfile` (or an
+`ssl_context`) to `app.run()` as usual. The server refuses to start if
+`tls=True` is set with no certificate configured. Cleartext remains the
+default (`tls=False`), so existing deployments are unchanged.
+
 ## Limitations
 
-- **Cleartext only.** TLS / MQTT-over-WebSocket transport is not yet wired up,
-  matching the bridge's current limits.
+- **No MQTT-over-WebSocket transport.** TLS is supported via
+  `MQTTExtension(tls=True)`; the WebSocket binding is not yet wired up.
 - **Single owner (HTTP still scales).** The broker runs on **worker 0** only —
   its state (subscriptions, sessions, retained messages) lives in that one
   process and is neither shared across workers nor persisted across restarts.

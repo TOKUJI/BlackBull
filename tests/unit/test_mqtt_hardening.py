@@ -260,7 +260,7 @@ class TestSessionTakeover:
 
 
 # ===========================================================================
-# 1.19e — No Local, Retain As Published, and $share rejection
+# 1.19e — No Local and Retain As Published subscription options
 # ===========================================================================
 
 class TestSubscriptionOptions:
@@ -311,14 +311,19 @@ class TestSubscriptionOptions:
         delivered = [p for p in sub.packets() if isinstance(p, MQTTPublish)][0]
         assert delivered.retain is False
 
-    async def test_shared_subscription_rejected(self):
+    async def test_shared_subscription_granted(self):
+        """Spec change (Sprint 75): §4.8.2 shared subscriptions are now
+        implemented — a well-formed ``$share`` filter is granted, never 0x9E.
+        Full behaviour matrix: ``test_mqtt_shared_subscriptions.py``."""
         broker, conn = BrokerActor(), RecordingConn()
         await _attach(broker, conn)
         await _subscribe(broker, conn, 1, [('$share/g/t', 0)])
         suback = [p for p in conn.packets() if isinstance(p, MQTTSuback)][0]
-        assert suback.reason_codes == [
-            ReasonCode.SHARED_SUBSCRIPTIONS_NOT_SUPPORTED]
-        assert broker._sessions['c1']['subscriptions'] == []
+        assert suback.reason_codes == [0]
+        assert ReasonCode.SHARED_SUBSCRIPTIONS_NOT_SUPPORTED not in \
+            suback.reason_codes
+        assert [s[0] for s in broker._sessions['c1']['subscriptions']] == \
+            ['$share/g/t']
 
 
 # ===========================================================================
