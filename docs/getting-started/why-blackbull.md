@@ -15,6 +15,15 @@ gRPC — all from a single `python app.py` on a small box. Most Python stacks
 need a reverse proxy plus a separate MQTT broker; BlackBull serves all of it
 in one runtime, on one process.
 
+### Streaming inference from an edge box
+
+You're serving a local model from a Raspberry-Pi-class device: browsers
+want tokens streamed as they're generated (SSE, multiplexed over HTTP/2),
+devices report telemetry and drop jobs over MQTT, and the box has no room
+for a proxy + broker + ASGI-server stack. One BlackBull process covers the
+whole surface — [Edge inference serving](../guide/edge-inference.md) walks
+it end to end.
+
 ### You want to see what your HTTP server is doing
 
 Every frame, every stream-state transition, every HPACK encoding is visible

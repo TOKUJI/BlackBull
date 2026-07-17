@@ -31,6 +31,19 @@ so the editable install's metadata catches up.
 
 ## [Unreleased]
 
+### Added
+
+- **Edge inference API server positioning (Sprint 76).** New guide page
+  [Edge inference serving](docs/guide/edge-inference.md): the one-process
+  edge serving shape — SSE token streaming with HTTP/2 multiplexing for
+  interactive clients beside MQTT device ingest and `$share/…` work queues
+  for devices — including how to run a real (CPU-bound) model off-thread,
+  and an explicit when-this-fits / when-it-doesn't section. Ships with the
+  runnable, dependency-free `examples/edge_inference.py` (fake token model,
+  browser `EventSource` demo, tap-fed `/devices` + `/status`). README,
+  `docs/index.md`, the guide overview, and *Why BlackBull?* carry the
+  positioning hooks.
+
 ## [0.57.0] — 2026-07-17
 
 ### Added

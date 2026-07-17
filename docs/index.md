@@ -35,6 +35,10 @@ the standard library, one `pip install`, one deployable.
   (all four RPC shapes, `gzip` compression) over the same HTTP/2 port;
   `app.add_extension(MQTTExtension(...))` runs a pure-Python MQTT 5
   broker on its own port, in the same process.
+- **An edge inference serving shape** — SSE token streaming with
+  HTTP/2 multiplexing beside MQTT device ingest and `$share/…`
+  work queues, in one process that `pip install`s on ARM with no
+  C toolchain.  See [Edge inference serving](guide/edge-inference.md).
 - **Standards conformance** — RFC 9112 (HTTP/1.1), RFC 9113
   (HTTP/2 — h2spec passes), RFC 6455 (WebSocket — Autobahn passes),
   RFC 8441 (Extended CONNECT for WebSocket over HTTP/2).
@@ -90,6 +94,9 @@ ASGI-triplet form.
 - New to BlackBull? Start with [Installation](getting-started/installation.md).
 - Building something? The [Guide](guide/index.md) covers routing,
   middleware, WebSockets, error handling, HTTP/2, and configuration.
+- Serving a local model from a small box?
+  [Edge inference serving](guide/edge-inference.md) walks the
+  one-process shape end to end, with a runnable example.
 - Deploying? See [Deployment](deployment/running.md) for multi-worker,
   TLS, AF_UNIX, systemd activation, and behind-nginx topologies.
 - Curious about the design? [Architecture](about/architecture.md) covers
