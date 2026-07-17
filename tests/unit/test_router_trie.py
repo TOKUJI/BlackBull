@@ -112,6 +112,79 @@ def test_trie_multiple_params():
 
 
 # ---------------------------------------------------------------------------
+# Backtracking pins (Sprint 77) — behaviours the lookup fast path must keep
+# ---------------------------------------------------------------------------
+
+def test_trie_backtracks_to_param_when_static_dead_ends_deeper():
+    """A static branch that dead-ends below must fall back to a param branch
+    taken at an earlier level."""
+    static_h, param_h = object(), object()
+    trie = _RouteTrie()
+    trie.insert('/x/static/other', (HTTPMethod.GET,), Scheme.http, static_h)
+    trie.insert('/x/{a}/target', (HTTPMethod.GET,), Scheme.http, param_h)
+
+    h, params, _ = trie.lookup('/x/static/target', HTTPMethod.GET, Scheme.http)
+    assert h is param_h
+    assert params == {'a': 'static'}
+
+
+def test_trie_backtracks_on_method_mismatch_in_static_branch():
+    """Static-first priority is per-entry-match, not per-path: a method miss
+    on the static entry still lets a param sibling serve the request."""
+    get_h, post_h = object(), object()
+    trie = _RouteTrie()
+    trie.insert('/x/fixed', (HTTPMethod.GET,), Scheme.http, get_h)
+    trie.insert('/x/{a}', (HTTPMethod.POST,), Scheme.http, post_h)
+
+    h, params, _ = trie.lookup('/x/fixed', HTTPMethod.POST, Scheme.http)
+    assert h is post_h
+    assert params == {'a': 'fixed'}
+
+
+def test_trie_405_aggregates_allowed_methods_across_branches():
+    trie = _RouteTrie()
+    trie.insert('/x/fixed', (HTTPMethod.GET,), Scheme.http, object())
+    trie.insert('/x/{a}', (HTTPMethod.POST,), Scheme.http, object())
+
+    h, _, allowed = trie.lookup('/x/fixed', HTTPMethod.DELETE, Scheme.http)
+    assert h is None
+    assert HTTPMethod.GET in allowed and HTTPMethod.POST in allowed
+
+
+def test_trie_backtracks_to_wildcard_when_param_dead_ends():
+    param_h, wild_h = object(), object()
+    trie = _RouteTrie()
+    trie.insert('/f/{a}/b', (HTTPMethod.GET,), Scheme.http, param_h)
+    trie.insert('/f/{rest:path}', (HTTPMethod.GET,), Scheme.http, wild_h)
+
+    h, params, _ = trie.lookup('/f/q/z', HTTPMethod.GET, Scheme.http)
+    assert h is wild_h
+    assert params == {'rest': 'q/z'}
+
+
+def test_trie_converter_rejection_falls_back_to_wildcard_sibling():
+    int_h, wild_h = object(), object()
+    trie = _RouteTrie()
+    trie.insert('/i/{n:int}', (HTTPMethod.GET,), Scheme.http, int_h)
+    trie.insert('/i/{rest:path}', (HTTPMethod.GET,), Scheme.http, wild_h)
+
+    h, params, _ = trie.lookup('/i/abc', HTTPMethod.GET, Scheme.http)
+    assert h is wild_h
+    assert params == {'rest': 'abc'}
+
+
+def test_trie_slash_normalization_matches_static_route():
+    """Empty segments are dropped: trailing and duplicate slashes match the
+    canonical registered path."""
+    trie = _RouteTrie()
+    trie.insert('/api/x', (HTTPMethod.GET,), Scheme.http, _handler)
+    for variant in ('/api/x/', '//api//x', '/api/x//'):
+        h, params, _ = trie.lookup(variant, HTTPMethod.GET, Scheme.http)
+        assert h is _handler, variant
+        assert params == {}
+
+
+# ---------------------------------------------------------------------------
 # Router integration: trie is created and used
 # ---------------------------------------------------------------------------
 
