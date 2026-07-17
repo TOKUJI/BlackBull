@@ -31,6 +31,38 @@ so the editable install's metadata catches up.
 
 ## [Unreleased]
 
+### Added
+
+- **MQTT 5 shared subscriptions** (§4.8.2, Sprint 75). Subscribers naming the
+  same `$share/{ShareName}/{filter}` pair form a share group; each matching
+  message is delivered to exactly **one** connected member, round-robin per
+  group, at that member's granted QoS. Non-shared subscriptions keep broadcast
+  semantics; disconnected members are skipped while any member is connected
+  (§4.8.2.3); shared subscriptions never receive retained messages; `No Local`
+  on a shared subscription is a Protocol Error (DISCONNECT `0x82`, §3.8.3.1).
+  This also resolves the standing CONNACK wrinkle: the
+  `shared_subscription_available` property (0x2A) stays absent, which per
+  MQTT 5 means *supported* — now true.
+- **Retain Handling 1** (§3.3.1.3, Sprint 75). `retain_handling=1` now delivers
+  retained messages on SUBSCRIBE only when the subscription did not previously
+  exist (it previously behaved like 0).
+- **TLS for raw protocol bindings** (Sprint 75).
+  `app.raw_handler(name, port=…, tls=True)` /
+  `MQTTExtension(port=8883, tls=True)` serve the binding's port through the
+  server's TLS machinery (`mqtts://` without a fronting proxy). Cleartext
+  remains the default; `tls=True` with no certificate configured fails fast at
+  startup.
+
+### Changed
+
+- **Spec change**: a well-formed `$share/…` SUBSCRIBE is now granted instead of
+  rejected with `0x9E SHARED_SUBSCRIPTIONS_NOT_SUPPORTED` (the deliberate
+  Sprint 70 fence). Malformed `$share` forms (missing/empty ShareName or filter
+  portion, wildcard ShareName) are rejected per-entry with `0x8F`;
+  `validate_topic_filter` now rejects an empty filter portion (`$share/g/`).
+- Several raw bindings registered with `port=0` (OS-assigned) each now get
+  their own listener; previously the port-keyed view collapsed them to one.
+
 ## [0.56.0] — 2026-07-16
 
 ### Added
