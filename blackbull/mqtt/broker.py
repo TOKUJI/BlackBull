@@ -112,6 +112,21 @@ def _valid_filter(topic_filter: str) -> bool:
         return False
 
 
+def _parse_share(topic_filter: str) -> tuple[str, str] | None:
+    """§4.8.2 — split ``$share/{ShareName}/{filter}`` into ``(share, filter)``.
+
+    Returns ``None`` for a non-shared filter or one too malformed to carry a
+    filter portion at all (validation proper is :func:`validate_topic_filter`;
+    this only extracts the group key).
+    """
+    if not topic_filter.startswith('$share/'):
+        return None
+    parts = topic_filter.split('/', 2)
+    if len(parts) < 3:
+        return None
+    return parts[1], parts[2]
+
+
 def _new_broker_session() -> dict[str, Any]:
     """Per-client session state owned by the broker (§3.1.2.11)."""
     return {
@@ -147,6 +162,11 @@ class BrokerActor(Actor):
         self._retained = {}         # topic -> MQTTPublish
         self._wills = {}            # client_id -> MQTTPublish (Will template)
         self._auto_seq = 0          # for server-assigned client ids
+        # §4.8.2 — round-robin cursor per share group.  Membership itself is
+        # derived from session subscriptions at routing time (correctness
+        # first: no registry to keep in sync across SUBSCRIBE / UNSUBSCRIBE /
+        # session expiry); only the rotation position is stored.
+        self._share_rotation: dict[tuple[str, str], int] = {}
 
     # -- dispatch -----------------------------------------------------------
 
@@ -307,27 +327,37 @@ class BrokerActor(Actor):
         reason_codes = []
         options = subscribe.subscription_options or []
         for index, (topic_filter, qos) in enumerate(subscribe.subscriptions):
-            # §4.8 — Shared Subscriptions are not implemented.  Reject them
-            # explicitly (0x9E) rather than silently broadcasting to every group
-            # member, which would violate the §4.8.2 load-balancing contract.
-            if topic_filter.startswith('$share/'):
-                reason_codes.append(ReasonCode.SHARED_SUBSCRIPTIONS_NOT_SUPPORTED)
-                continue
-            # §3.8.3 / §4.7 — a syntactically invalid Topic Filter is rejected
-            # per-entry with 0x8F; the SUBACK still carries one reason code per
+            # §3.8.3 / §4.7 / §4.8.2 — a syntactically invalid Topic Filter
+            # (including a malformed ``$share`` form) is rejected per-entry
+            # with 0x8F; the SUBACK still carries one reason code per
             # requested filter, so ordering with the remaining entries is kept.
             if not _valid_filter(topic_filter):
                 reason_codes.append(ReasonCode.TOPIC_FILTER_INVALID)
                 continue
             opts = dict(options[index]) if index < len(options) else {}
+            share = _parse_share(topic_filter)
+            # §3.8.3.1 [MQTT-3.8.3-4] — No Local on a Shared Subscription is a
+            # Protocol Error: per §4.13 the server sends DISCONNECT 0x82 and
+            # closes the connection (no SUBACK).
+            if share is not None and opts.get('no_local'):
+                await conn.send(Send(packet=MQTTDisconnect(
+                    reason_code=ReasonCode.PROTOCOL_ERROR)))
+                await conn.send(Close(reason_code=ReasonCode.PROTOCOL_ERROR))
+                return
             opts['qos'] = qos
             # §3.8.4 — a SUBSCRIBE for an existing Topic Filter replaces its
             # prior subscription (and its options) rather than adding a second.
+            existed = any(s[0] == topic_filter for s in session['subscriptions'])
             subs = [s for s in session['subscriptions'] if s[0] != topic_filter]
             subs.append((topic_filter, qos, opts))
             session['subscriptions'] = subs
             reason_codes.append(qos)  # granted QoS == requested QoS
-            if int(opts.get('retain_handling', 0)) != 2:
+            # §3.3.1.3 Retain Handling — 0: send retained on every SUBSCRIBE;
+            # 1: only when the subscription did not already exist; 2: never.
+            # Shared subscriptions never receive retained messages (§4.8.2).
+            retain_handling = int(opts.get('retain_handling', 0))
+            if share is None and retain_handling != 2 \
+                    and not (retain_handling == 1 and existed):
                 await self._deliver_retained(conn, session, topic_filter, qos)
         await conn.send(Send(packet=MQTTSuback(
             packet_id=subscribe.packet_id, reason_codes=reason_codes)))
@@ -337,6 +367,20 @@ class BrokerActor(Actor):
             if topic_matches_filter(topic, topic_filter):
                 await self._deliver(conn, session, retained, qos, retain=True)
 
+    def _prune_share_rotation(self, removed_filters) -> None:
+        """§4.8.2 — drop rotation cursors for share groups that no session
+        subscribes to any more, so the cursor dict cannot grow without bound
+        as groups come and go."""
+        stale = {share for f in removed_filters
+                 if (share := _parse_share(f)) is not None}
+        if not stale:
+            return
+        for session in self._sessions.values():
+            for topic_filter, _qos, _opts in session['subscriptions']:
+                stale.discard(_parse_share(topic_filter))
+        for share in stale:
+            self._share_rotation.pop(share, None)
+
     async def _on_unsubscribe(self, conn, unsubscribe) -> None:
         session = self._session_for(conn)
         if session is None:
@@ -345,6 +389,7 @@ class BrokerActor(Actor):
         session['subscriptions'] = [
             s for s in session['subscriptions'] if s[0] not in topics
         ]
+        self._prune_share_rotation(topics)
         await conn.send(Send(packet=MQTTUnsuback(
             packet_id=unsubscribe.packet_id,
             reason_codes=[ReasonCode.SUCCESS] * len(unsubscribe.topics))))
@@ -406,7 +451,17 @@ class BrokerActor(Actor):
 
         *source_conn* is the connection that published (``None`` for a Will),
         used to honour the No Local subscription option (§3.8.3.1).
+
+        Non-shared subscriptions broadcast (one merged copy per client).
+        Shared subscriptions (§4.8.2) are grouped by ``(ShareName, filter)``;
+        each group receives exactly one copy per message, round-robin across
+        its *connected* members — a member with a live session but no
+        connection is skipped while any other member is connected (§4.8.2.3).
+        When no member is connected the message is not queued, matching the
+        broker's existing no-offline-queue behaviour for non-shared
+        subscriptions.
         """
+        share_groups: dict[tuple[str, str], list] = {}
         for client_id, conn in list(self._clients.items()):
             session = self._sessions.get(client_id)
             if session is None:
@@ -415,6 +470,13 @@ class BrokerActor(Actor):
             rap = False
             for topic_filter, qos, opts in session['subscriptions']:
                 if not topic_matches_filter(publish.topic, topic_filter):
+                    continue
+                share = _parse_share(topic_filter)
+                if share is not None:
+                    # §4.8.2 — an independent delivery channel: collect the
+                    # connected members; exactly-one delivery happens below.
+                    share_groups.setdefault(share, []).append(
+                        (conn, session, qos, opts))
                     continue
                 # §3.8.3.1 No Local — do not echo a client's own message back to
                 # it on a subscription that set the No Local option.
@@ -428,6 +490,17 @@ class BrokerActor(Actor):
             # only when a matching subscription requested it; otherwise a routed
             # (non-retained-replay) message always carries RETAIN=0.
             await self._deliver(conn, session, publish, granted,
+                                retain=(rap and publish.retain))
+        # §4.8.2 — exactly one copy per share group, rotating across the
+        # members that are connected right now.  The cursor is normalised
+        # against the current member count, so membership churn between
+        # messages cannot index out of range.
+        for share, members in share_groups.items():
+            cursor = self._share_rotation.get(share, 0) % len(members)
+            self._share_rotation[share] = cursor + 1
+            conn, session, qos, opts = members[cursor]
+            rap = bool(opts.get('retain_as_published'))
+            await self._deliver(conn, session, publish, qos,
                                 retain=(rap and publish.retain))
 
     async def _deliver(self, conn, session, publish, granted_qos, *, retain=False) -> None:
@@ -483,3 +556,5 @@ class BrokerActor(Actor):
         session = self._sessions.get(client_id)
         if session is not None and session.get('_expiry', 0) <= 0:
             self._sessions.pop(client_id, None)
+            self._prune_share_rotation(
+                [s[0] for s in session['subscriptions']])

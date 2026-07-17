@@ -1177,6 +1177,9 @@ def validate_topic_filter(filter_str: str) -> bool:
         if '+' in share_name or '#' in share_name:
             raise ValueError(
                 'Shared subscription share name must not contain wildcards (+ or #)')
+        if parts[2] == '':
+            raise ValueError(
+                'Shared subscription filter portion must not be empty')
         work = parts[2]
 
     if work.count('#') > 1:
