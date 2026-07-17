@@ -42,7 +42,17 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 
 SERVER_SRC = '''
-import os
+import logging, os
+# Configure logging BEFORE importing blackbull: the @log decorators capture
+# their module logger's level at import time, so the level must be set first
+# to see protocol/deadline events.  Level from BB_SLOWLORIS_LOG_LEVEL
+# (default INFO — captures the access log, warnings, and any traceback
+# without the DEBUG firehose under load).
+logging.basicConfig(
+    level=getattr(logging, os.environ.get("BB_SLOWLORIS_LOG_LEVEL", "INFO")),
+    format="%(asctime)s %(levelname)s %(name)s %(message)s",
+    stream=__import__("sys").stderr,
+)
 from blackbull import BlackBull
 app = BlackBull()
 
@@ -204,14 +214,43 @@ def main() -> None:
     env['BB_PORT'] = str(args.port)
     env['BB_HEADER_TIMEOUT'] = str(args.header_timeout)
     env['BB_ACCESS_LOG'] = '0'
+    # Server subprocess logs at INFO by default (see SERVER_SRC); override
+    # with BB_SLOWLORIS_LOG_LEVEL=DEBUG to capture deadline-reaper firing.
+    env.setdefault('BB_SLOWLORIS_LOG_LEVEL', 'INFO')
+
+    # The subprocess server's stdout+stderr go to a real file, never
+    # /dev/null — a boot failure or mid-run crash must leave a fetchable
+    # trace.  Lands in --out when given (alongside the CSV), else next to
+    # this script under a timestamped name that is printed up front.
+    if args.out:
+        Path(args.out).mkdir(parents=True, exist_ok=True)
+        server_log = Path(args.out) / 'server.log'
+    else:
+        server_log = (REPO / 'bench' / 'hostile_repro' /
+                      f'_slowloris_server_{time.strftime("%Y%m%d-%H%M%S")}.log')
+
+    def _tail(path: Path, n: int = 40) -> str:
+        try:
+            return ''.join(path.read_text(errors='replace').splitlines(keepends=True)[-n:])
+        except OSError as exc:
+            return f'(could not read {path}: {exc})'
 
     print(f'=== Slowloris characterisation (BB_HEADER_TIMEOUT='
           f'{args.header_timeout}s, port={args.port}) ===')
+    print(f'server log: {server_log}')
+    log_fh = server_log.open('w')
     proc = subprocess.Popen([sys.executable, str(srv_path)], env=env,
-                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                            stdout=log_fh, stderr=subprocess.STDOUT)
     try:
         if not _wait_healthy(args.port):
-            print('FATAL: server did not become healthy', file=sys.stderr)
+            # Distinguish "crashed" from "hung" and dump the captured log so
+            # the failure is diagnosable without re-running.
+            rc = proc.poll()
+            why = (f'exited early rc={rc}' if rc is not None
+                   else 'still running but never answered /healthz')
+            print(f'FATAL: server did not become healthy ({why}). '
+                  f'Full log at {server_log}; tail:', file=sys.stderr)
+            print(_tail(server_log), file=sys.stderr)
             proc.terminate()
             sys.exit(1)
         rows = asyncio.run(_main_async(args, args.port))
@@ -221,7 +260,14 @@ def main() -> None:
             proc.wait(timeout=5)
         except subprocess.TimeoutExpired:
             proc.kill()
+        log_fh.close()
         srv_path.unlink(missing_ok=True)
+        # A server that died mid-sweep is a result, not a silent failure —
+        # flag it so a partial curve isn't read as a clean one.
+        if proc.returncode not in (0, -15, None):  # not clean / not SIGTERM
+            print(f'WARNING: server process exited rc={proc.returncode} '
+                  f'during the run — see {server_log}:', file=sys.stderr)
+            print(_tail(server_log), file=sys.stderr)
 
     if args.out:
         out = Path(args.out)
