@@ -28,7 +28,7 @@ import traceback
 import logging
 from .event import Event, EventDispatcher, EventHandler
 from .headers import Headers
-from .utils import Scheme
+from .utils import Scheme, is_client_error, is_server_error
 from .router import Router, RouteInfo, ErrorRouter, MethodNotApplicable, PathNotRegistered, ConfigurationError, HTTPException, has_middleware_param
 from .request import ClientDisconnected
 from .config import AppConfig
@@ -159,7 +159,7 @@ async def _default_error_handler(scope, receive, send):  # noqa: ARG001
         # diagnosed — the detail line below is the actionable part, and the
         # server-side frames are noise.  5xx and unexpected exceptions keep
         # the full traceback.
-        if not (isinstance(exc, HTTPException) and exc.status.is_client_error):
+        if not (isinstance(exc, HTTPException) and is_client_error(exc.status)):
             tb_text = ''.join(
                 traceback.format_exception(type(exc), exc, exc.__traceback__))
 
@@ -666,7 +666,7 @@ class BlackBull:
             # 4xx are client faults: log quietly, no traceback.  5xx still
             # get the full traceback below.
             exc_caught = e
-            if e.status.is_server_error:
+            if is_server_error(e.status):
                 self._logger.error(traceback.format_exc())
             else:
                 self._logger.info('%s on %s %s: %s', int(e.status),
