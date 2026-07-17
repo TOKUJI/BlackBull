@@ -27,7 +27,7 @@ from urllib.parse import parse_qsl
 import uuid as _uuid
 import warnings
 from .di import Depends, _resolve_depends
-from .utils import Scheme, do_nothing
+from .utils import Scheme, do_nothing, is_client_error, is_server_error
 
 # RouteGroup is defined in app.py to avoid a circular import;
 # re-export here so tests can import it from either location.
@@ -1649,7 +1649,7 @@ class ErrorRouter:
 
     def __setitem__(self, key: HTTPStatus | Type[BaseException], fn: Callable):
         if isinstance(key, HTTPStatus):
-            if not key.is_client_error and not key.is_server_error:
+            if not is_client_error(key) and not is_server_error(key):
                 raise ValueError(f"{key} is not an error status (4xx/5xx).")
             self._status_handlers[key] = fn
         elif isinstance(key, type) and issubclass(key, BaseException):
