@@ -77,11 +77,14 @@ class MQTTExtension(Extension):
 
     extension_key = 'mqtt'
 
-    def __init__(self, *, port: int = 1883, tap_mode: str = 'actor',
-                 tap_queue_size: int = 1024) -> None:
+    def __init__(self, *, port: int = 1883, tls: bool = False,
+                 tap_mode: str = 'actor', tap_queue_size: int = 1024) -> None:
         if tap_mode not in ('actor', 'inline'):
             raise ValueError(f"tap_mode must be 'actor' or 'inline', got {tap_mode!r}")
         self.port = port
+        # Sprint 75 — serve the broker port over TLS (mqtts://, conventionally
+        # port 8883).  Requires the server to have a certificate configured.
+        self.tls = tls
         self.tap_mode = tap_mode
         self.tap_queue_size = tap_queue_size
         self._handlers: list[Any] = []   # compiled Tap objects
@@ -124,7 +127,8 @@ class MQTTExtension(Extension):
                                    app_handlers=inline, tap=tap)
 
         app.register_protocol_handler(
-            'mqtt', _serve, detector=MQTTProtocolDetector(), port=self.port)
+            'mqtt', _serve, detector=MQTTProtocolDetector(), port=self.port,
+            tls=self.tls)
         self._register(app)
 
     async def startup(self, app: Any) -> None:
