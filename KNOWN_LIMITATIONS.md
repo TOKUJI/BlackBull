@@ -173,13 +173,14 @@ across a restart.  A restart, or a worker-0 respawn after a crash, clears
 all session and retained state.  Sessions are also kept for the process
 lifetime rather than expired on a timer.
 
-**Subscription options are persisted but not fully enforced.**  No Local
-and Retain As Published are parsed and stored in the session (and survive
-a Clean Start = 0 reconnect, §3.1.2.11) but are **not yet applied during
-delivery**.  Retain Handling is honoured only coarsely: `2` (don't send)
-suppresses the retained delivery on subscribe, while `0` and `1` both
-send it — the §3.8.3.1 "only on a *new* subscription" nuance of `1` is
-not yet distinguished.
+**New messages are not queued for offline sessions.**  A disconnected
+client with a live session (`Session Expiry Interval > 0`) gets §4.4
+replay of its *unacknowledged in-flight* QoS 1/2 messages on reconnect,
+but messages **newly published while it was offline are not queued** and
+will never be delivered to it.  The same applies to a shared-subscription
+group with no connected member (see
+[`docs/guide/mqtt.md`](docs/guide/mqtt.md)).  If you need store-and-forward
+for offline consumers, use a broker with persistent offline queues.
 
 ### Multi-worker scaling tops out at physical core count
 
