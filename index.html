@@ -921,6 +921,34 @@
   
   
     <li class="md-nav__item">
+      <a href="guide/edge-inference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Edge inference serving
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="guide/streaming/" class="md-nav__link">
         
   
@@ -4859,6 +4887,10 @@ test coverage behind the standards-compliance claims.</p>
   (all four RPC shapes, <code>gzip</code> compression) over the same HTTP/2 port;
   <code>app.add_extension(MQTTExtension(...))</code> runs a pure-Python MQTT 5
   broker on its own port, in the same process.</li>
+<li><strong>An edge inference serving shape</strong> — SSE token streaming with
+  HTTP/2 multiplexing beside MQTT device ingest and <code>$share/…</code>
+  work queues, in one process that <code>pip install</code>s on ARM with no
+  C toolchain.  See <a href="guide/edge-inference/">Edge inference serving</a>.</li>
 <li><strong>Standards conformance</strong> — RFC 9112 (HTTP/1.1), RFC 9113
   (HTTP/2 — h2spec passes), RFC 6455 (WebSocket — Autobahn passes),
   RFC 8441 (Extended CONNECT for WebSocket over HTTP/2).</li>
@@ -4905,6 +4937,9 @@ ASGI-triplet form.</p>
 <li>New to BlackBull? Start with <a href="getting-started/installation/">Installation</a>.</li>
 <li>Building something? The <a href="guide/">Guide</a> covers routing,
   middleware, WebSockets, error handling, HTTP/2, and configuration.</li>
+<li>Serving a local model from a small box?
+  <a href="guide/edge-inference/">Edge inference serving</a> walks the
+  one-process shape end to end, with a runnable example.</li>
 <li>Deploying? See <a href="deployment/running/">Deployment</a> for multi-worker,
   TLS, AF_UNIX, systemd activation, and behind-nginx topologies.</li>
 <li>Curious about the design? <a href="about/architecture/">Architecture</a> covers

@@ -387,6 +387,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#streaming-inference-from-an-edge-box" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Streaming inference from an edge box
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#you-want-to-see-what-your-http-server-is-doing" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1005,6 +1016,34 @@
     
   
     Protocol translation hub
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/edge-inference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Edge inference serving
   
 
     
@@ -4895,6 +4934,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#streaming-inference-from-an-edge-box" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Streaming inference from an edge box
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#you-want-to-see-what-your-http-server-is-doing" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5047,6 +5097,13 @@ WebSocket dashboard, exposes a REST API, and talks to backend services over
 gRPC — all from a single <code>python app.py</code> on a small box. Most Python stacks
 need a reverse proxy plus a separate MQTT broker; BlackBull serves all of it
 in one runtime, on one process.</p>
+<h3 id="streaming-inference-from-an-edge-box">Streaming inference from an edge box<a class="headerlink" href="#streaming-inference-from-an-edge-box" title="Permanent link">&para;</a></h3>
+<p>You're serving a local model from a Raspberry-Pi-class device: browsers
+want tokens streamed as they're generated (SSE, multiplexed over HTTP/2),
+devices report telemetry and drop jobs over MQTT, and the box has no room
+for a proxy + broker + ASGI-server stack. One BlackBull process covers the
+whole surface — <a href="../../guide/edge-inference/">Edge inference serving</a> walks
+it end to end.</p>
 <h3 id="you-want-to-see-what-your-http-server-is-doing">You want to see what your HTTP server is doing<a class="headerlink" href="#you-want-to-see-what-your-http-server-is-doing" title="Permanent link">&para;</a></h3>
 <p>Every frame, every stream-state transition, every HPACK encoding is visible
 in your debugger. The protocol implementations are pure Python — no C
