@@ -832,6 +832,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#shared-subscriptions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Shared subscriptions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#trying-it-with-mosquitto" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -847,6 +858,17 @@
     <span class="md-ellipsis">
       
         Documenting the taps with AsyncAPI
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tls-mqtts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        TLS (mqtts://)
       
     </span>
   </a>
@@ -4805,6 +4827,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#shared-subscriptions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Shared subscriptions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#trying-it-with-mosquitto" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4820,6 +4853,17 @@
     <span class="md-ellipsis">
       
         Documenting the taps with AsyncAPI
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tls-mqtts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        TLS (mqtts://)
       
     </span>
   </a>
@@ -4940,7 +4984,11 @@ conformance matrix:</p>
 </tr>
 <tr>
 <td>Subscriptions</td>
-<td>SUBSCRIBE / SUBACK, UNSUBSCRIBE / UNSUBACK, <code>+</code> and <code>#</code> wildcards, <code>$</code>-topic rules; <code>No Local</code> and <code>Retain As Published</code> options honoured; invalid Topic Filters rejected (<code>0x8F</code>). Shared subscriptions (<code>$share/…</code>) are <strong>not implemented</strong> and are rejected with <code>0x9E</code> rather than silently broadcast</td>
+<td>SUBSCRIBE / SUBACK, UNSUBSCRIBE / UNSUBACK, <code>+</code> and <code>#</code> wildcards, <code>$</code>-topic rules; <code>No Local</code>, <code>Retain As Published</code>, and <code>Retain Handling</code> (0/1/2, §3.3.1.3) options honoured; invalid Topic Filters rejected (<code>0x8F</code>)</td>
+</tr>
+<tr>
+<td>Shared subscriptions</td>
+<td><code>$share/{ShareName}/{filter}</code> groups (§4.8.2): each matching message goes to exactly <strong>one</strong> connected group member, round-robin — see below</td>
 </tr>
 <tr>
 <td>Publish</td>
@@ -4996,6 +5044,39 @@ wires the two; <code>blackbull.mqtt.tap</code> holds the <code>TapActor</code> a
 read-model; and <code>blackbull.mqtt.extension</code> holds <code>MQTTExtension</code> and
 <code>MQTTProtocolDetector</code>, which recognises the MQTT CONNECT first byte (<code>0x10</code>) for
 shared-port sniffing.</p>
+<h2 id="shared-subscriptions">Shared subscriptions<a class="headerlink" href="#shared-subscriptions" title="Permanent link">&para;</a></h2>
+<p>Subscribers that name the same <code>$share/{ShareName}/{filter}</code> pair form a
+<em>share group</em> (MQTT 5 §4.8.2). Each application message matching the filter is
+delivered to exactly <strong>one</strong> member of the group — round-robin across the
+members currently connected — instead of every matching subscriber. This is
+the standard MQTT pattern for load-balancing a work queue across a pool of
+consumers:</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># terminals 1 and 2 — two workers in the same share group</span>
+mosquitto_sub<span class="w"> </span>-t<span class="w"> </span><span class="s1">&#39;$share/pool/jobs/#&#39;</span><span class="w"> </span>-p<span class="w"> </span><span class="m">1883</span><span class="w"> </span>-V<span class="w"> </span><span class="m">5</span>
+mosquitto_sub<span class="w"> </span>-t<span class="w"> </span><span class="s1">&#39;$share/pool/jobs/#&#39;</span><span class="w"> </span>-p<span class="w"> </span><span class="m">1883</span><span class="w"> </span>-V<span class="w"> </span><span class="m">5</span>
+
+<span class="c1"># terminal 3 — publishes alternate between the two workers</span>
+mosquitto_pub<span class="w"> </span>-t<span class="w"> </span><span class="s1">&#39;jobs/import&#39;</span><span class="w"> </span>-m<span class="w"> </span><span class="s1">&#39;job-1&#39;</span><span class="w"> </span>-p<span class="w"> </span><span class="m">1883</span><span class="w"> </span>-V<span class="w"> </span><span class="m">5</span>
+mosquitto_pub<span class="w"> </span>-t<span class="w"> </span><span class="s1">&#39;jobs/import&#39;</span><span class="w"> </span>-m<span class="w"> </span><span class="s1">&#39;job-2&#39;</span><span class="w"> </span>-p<span class="w"> </span><span class="m">1883</span><span class="w"> </span>-V<span class="w"> </span><span class="m">5</span>
+</code></pre></div>
+<p>Semantics worth knowing:</p>
+<ul>
+<li><strong>Non-shared subscriptions are unaffected</strong> — a client subscribed to a plain
+  <code>jobs/#</code> still receives every message, alongside whichever group member the
+  rotation picks. Shared and non-shared subscriptions held by the same client
+  are independent delivery channels.</li>
+<li><strong>Delivery QoS</strong> is the chosen member's granted QoS (capped by the publish
+  QoS, as usual).</li>
+<li><strong>Disconnected members are skipped</strong> while any member is connected
+  (§4.8.2.3). If <em>no</em> member is connected, the message is not queued for the
+  group — the same no-offline-queue behaviour the broker applies to non-shared
+  subscriptions.</li>
+<li><strong>Retained messages are never delivered to a shared subscription</strong> (§4.8.2).</li>
+<li><strong><code>No Local</code> cannot be combined with a shared subscription</strong> — MQTT 5 makes
+  it a Protocol Error (§3.8.3.1), and the broker disconnects with <code>0x82</code>.</li>
+<li>Malformed forms (<code>$share/g</code>, an empty ShareName, a wildcard in the ShareName,
+  or an empty filter portion) are rejected per-entry with <code>0x8F</code>.</li>
+</ul>
 <h2 id="trying-it-with-mosquitto">Trying it with Mosquitto<a class="headerlink" href="#trying-it-with-mosquitto" title="Permanent link">&para;</a></h2>
 <p>The broker speaks standard MQTT 5, so the Eclipse Mosquitto CLI works against it
 (<code>apt install mosquitto-clients</code>):</p>
@@ -5046,10 +5127,16 @@ must be present when the spec route is hit, or the request raises
 <li><strong>Payloads are opaque bytes</strong> (<code>application/octet-stream</code>) until a future
   opt-in <code>schema=</code> on <code>on_message</code> lands.</li>
 </ul>
+<h2 id="tls-mqtts">TLS (<code>mqtts://</code>)<a class="headerlink" href="#tls-mqtts" title="Permanent link">&para;</a></h2>
+<p><code>MQTTExtension(port=8883, tls=True)</code> serves the broker port over TLS using the
+same certificate the HTTPS listener uses — pass <code>certfile</code>/<code>keyfile</code> (or an
+<code>ssl_context</code>) to <code>app.run()</code> as usual. The server refuses to start if
+<code>tls=True</code> is set with no certificate configured. Cleartext remains the
+default (<code>tls=False</code>), so existing deployments are unchanged.</p>
 <h2 id="limitations">Limitations<a class="headerlink" href="#limitations" title="Permanent link">&para;</a></h2>
 <ul>
-<li><strong>Cleartext only.</strong> TLS / MQTT-over-WebSocket transport is not yet wired up,
-  matching the bridge's current limits.</li>
+<li><strong>No MQTT-over-WebSocket transport.</strong> TLS is supported via
+  <code>MQTTExtension(tls=True)</code>; the WebSocket binding is not yet wired up.</li>
 <li><strong>Single owner (HTTP still scales).</strong> The broker runs on <strong>worker 0</strong> only —
   its state (subscriptions, sessions, retained messages) lives in that one
   process and is neither shared across workers nor persisted across restarts.
