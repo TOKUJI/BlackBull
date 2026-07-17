@@ -161,8 +161,10 @@ One process, more than one protocol. Extensions attach non-HTTP
 protocols through a single seam — `app.add_extension(...)` — while the
 HTTP core stays protocol-agnostic. The flagship is a **pure-Python
 MQTT 5 broker**: CONNECT / SUBSCRIBE / PUBLISH at QoS 0–2, retained
-messages, and Last-Will on the standard `:1883` port, beside your HTTP
-routes — no Mosquitto sidecar, no C extension.
+messages, Last-Will, and shared subscriptions (`$share/…` work queues)
+on the standard `:1883` port — or over TLS with
+`MQTTExtension(port=8883, tls=True)` — beside your HTTP routes, no
+Mosquitto sidecar, no C extension.
 
 ```python
 from blackbull import BlackBull
