@@ -30,6 +30,10 @@ first — it covers installation and the shape of a minimal app.
   (WebSocket over HTTP/2), subprotocols, fragmented messages.
 - [**HTTP/2**](http2.md) — ALPN, priority hints,
   `http.response.push`, flow control, h2c.
+- [**Edge inference serving**](edge-inference.md) — the
+  one-process shape for serving a local model: SSE token
+  streaming over HTTP/2 beside MQTT device ingest and a
+  `$share` work queue.
 - [**Events**](events.md) — `@app.on` (observation) and
   `@app.intercept` (interception) for lifecycle hooks.
 - [**Logging**](logging.md) — access log, framework log,

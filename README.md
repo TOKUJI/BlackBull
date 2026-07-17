@@ -60,7 +60,11 @@ Hello, world!
 - **Multi-protocol, one process.** A pure-Python MQTT 5 broker and
   gRPC ride beside HTTP/2 and WebSocket on the same runtime;
   extensions add new protocols without touching the core — still no
-  C extension.
+  C extension.  That combination is an
+  [edge inference API server](https://TOKUJI.github.io/BlackBull/guide/edge-inference/)
+  in one `python app.py`: SSE token streaming with HTTP/2
+  multiplexing for clients, MQTT ingest and `$share/…` work queues
+  for devices — on any box CPython runs on, ARM included.
 - **Actor-model internals.** Connection-level isolation without a
   single shared lock: a `ConnectionActor` spawns a per-connection
   protocol actor whose inbox loop owns its own state.  The same
@@ -293,6 +297,7 @@ for the full tutorial.
 | [`examples/ChatServer/`](examples/ChatServer/) | WebSocket, SSE, long polling side by side; `blackbull-session` + Compression + custom auth |
 | [`examples/mqtt_broker.py`](examples/mqtt_broker.py) | MQTT 5 broker beside HTTP; `on_message` taps with `{capture}` topic params |
 | [`examples/translation_hub.py`](examples/translation_hub.py) | Protocol translation hub — MQTT → WebSocket, MQTT → SSE, REST → gRPC in one process |
+| [`examples/edge_inference.py`](examples/edge_inference.py) | Edge inference API server — SSE token streaming (browser demo included) + MQTT telemetry + `$share` work queue, dependency-free fake model |
 | [`examples/grpc_greeter.py`](examples/grpc_greeter.py) | Canonical gRPC Greeter speaking real protobuf — works with stock `grpcurl` / `grpcio` clients unmodified |
 | [`examples/typed_routes_ok.py`](examples/typed_routes_ok.py) | `{param:converter}` syntax, `url_path_for` |
 | [`examples/scenario_h1_fault_injection.py`](examples/scenario_h1_fault_injection.py) | HTTP/1.1 fault scenarios driven against stdlib `http.server` |

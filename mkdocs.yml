@@ -55,6 +55,7 @@ nav:
     - MQTT broker: guide/mqtt.md
     - gRPC: guide/grpc.md
     - Protocol translation hub: guide/translation-hub.md
+    - Edge inference serving: guide/edge-inference.md
     - Streaming: guide/streaming.md
     - Events: guide/events.md
     - Logging: guide/logging.md
