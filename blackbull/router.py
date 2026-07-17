@@ -66,6 +66,10 @@ _SAMPLE_INPUTS: dict[str, str] = {
 # literal paths ('/openapi.json') and harmless.
 _REGEX_METACHARS = frozenset('^$*+?()[]|\\')
 
+# Shared empty allowed-methods set returned on trie-lookup hits — hits never
+# read it, so one immutable instance avoids a per-hit set() allocation.
+_NO_METHODS: frozenset = frozenset()
+
 
 # ---------------------------------------------------------------------------
 # Module-level route-matching helpers (reused by Router and _RouteTrie)
@@ -85,7 +89,7 @@ def _route_method_matches(key_method, registered_methods: tuple) -> bool:
 # Routing trie — O(path-depth) lookup for string-path routes
 # ---------------------------------------------------------------------------
 
-@dataclass
+@dataclass(slots=True)
 class _TrieNode:
     children: dict[str, '_TrieNode'] = field(default_factory=dict)
     param_child: Optional['_TrieNode'] = None   # matches any single segment
@@ -100,6 +104,12 @@ class _RouteTrie:
 
     def __init__(self) -> None:
         self.root = _TrieNode()
+        # Fully-static registered paths → terminal node, keyed on both the
+        # raw registered path and its normalized ('/'-joined segments) form.
+        # Lets a canonical request path resolve with one dict probe instead
+        # of a segment walk; non-canonical forms (dup/trailing slashes) fall
+        # through to the walk, which drops empty segments.
+        self._static_full: dict[str, _TrieNode] = {}
 
     def insert(self, path: str, methods: tuple, scheme_key: Any, handler: Any) -> None:
         segments = [s for s in path.split('/') if s]
@@ -141,6 +151,9 @@ class _RouteTrie:
                 node = node.children[seg]
 
         node.entries.append((methods, scheme_key, handler, tuple(param_specs)))
+        if not param_specs:
+            self._static_full[path] = node
+            self._static_full['/' + '/'.join(segments)] = node
 
     def lookup(self, path: str, method: Any, scheme: Any) -> tuple:
         """Return (handler, params, allowed_methods).
@@ -148,8 +161,106 @@ class _RouteTrie:
         handler is None on miss; allowed_methods is non-empty when the path
         matched but the method was not registered (enables MethodNotApplicable).
         """
-        segments = [s for s in path.split('/') if s]
-        return self._lookup(self.root, segments, 0, [], method, scheme)
+        # Fast path 0: fully-static route + canonical request path — one dict
+        # probe replaces the whole segment walk.  A probe hit whose entries
+        # don't match (method/scheme) still falls through: a param branch may
+        # serve the same path with a different method.
+        node = self._static_full.get(path)
+        if node is not None:
+            hit = self._match_entries(node.entries, (), method, scheme)
+            if hit is not None:
+                return (hit[0], hit[1], _NO_METHODS)
+
+        # Canonical paths ('/a/b': leading slash, no duplicate or trailing
+        # slashes — the overwhelmingly common case) skip the filtering
+        # listcomp: split()'s only empty segment is the leading one, stepped
+        # over via *start*.  Non-canonical forms take the filtered build.
+        if not path or path.endswith('/') or '//' in path:
+            segments = [s for s in path.split('/') if s]
+            start = 0
+        else:
+            segments = path.split('/')
+            start = 1 if path[0] == '/' else 0
+        n = len(segments)
+
+        # Fast path 1: iterative depth-first walk for the hit case.  Same
+        # priority order as _lookup (static > param > wildcard at every node,
+        # with cross-level backtracking via an explicit stack) but with no
+        # recursion frames and no per-level set allocations.  The stack is
+        # created lazily — an unambiguous walk allocates nothing.  A miss
+        # falls through to the recursive walk, whose remaining job is
+        # collecting the allowed-methods set for MethodNotApplicable.
+        node = self.root
+        idx = start
+        caps: tuple = ()
+        stack = None
+        match_entries = self._match_entries
+        while True:
+            if idx == n:
+                hit = match_entries(node.entries, caps, method, scheme)
+                if hit is not None:
+                    return (hit[0], hit[1], _NO_METHODS)
+            else:
+                seg = segments[idx]
+                child = node.children.get(seg)
+                pc = node.param_child
+                wc = node.wildcard_child
+                if child is not None:
+                    # Record the lower-priority alternatives before
+                    # descending, so a dead end below can backtrack to them.
+                    if wc is not None:
+                        if stack is None:
+                            stack = []
+                        stack.append((wc, n, caps + ('/'.join(segments[idx:]),)))
+                    if pc is not None:
+                        if stack is None:
+                            stack = []
+                        stack.append((pc, idx + 1, caps + (seg,)))
+                    node = child
+                    idx += 1
+                    continue
+                if pc is not None:
+                    if wc is not None:
+                        if stack is None:
+                            stack = []
+                        stack.append((wc, n, caps + ('/'.join(segments[idx:]),)))
+                    node = pc
+                    idx += 1
+                    caps = caps + (seg,)
+                    continue
+                if wc is not None:
+                    caps = caps + ('/'.join(segments[idx:]),)
+                    node = wc
+                    idx = n
+                    continue
+            if not stack:
+                break
+            node, idx, caps = stack.pop()
+
+        return self._lookup(self.root, segments, start, [], method, scheme)
+
+    @staticmethod
+    def _match_entries(entries: list, caps: tuple, method: Any, scheme: Any):
+        """First entry whose method, scheme, and converters all accept →
+        (handler, params); None when nothing at this terminal matches."""
+        for ms, ss, handler, param_specs in entries:
+            if method not in ms:
+                continue
+            if not (isinstance(ss, _AnyScheme) or scheme in ss):
+                continue
+            try:
+                if not param_specs:
+                    params = {}
+                elif len(param_specs) == 1:
+                    name, conv, _ = param_specs[0]
+                    params = {name: conv(caps[0])}
+                else:
+                    params = {name: conv(caps[j])
+                              for j, (name, conv, _) in enumerate(param_specs)}
+            except (ValueError, TypeError):
+                continue
+            return (handler, params)
+        return None
 
     def _lookup(self, node: _TrieNode, segments: list, idx: int,
                 raw_caps: list, method: Any, scheme: Any) -> tuple:
@@ -1145,14 +1256,17 @@ class Router:
         self,
         key: Tuple[str, str | HTTPMethod, Scheme],
     ):
-        """Core route lookup — trie first, regex fallback.  Raises on miss."""
+        """Core route lookup — trie first, regex fallback.  Raises on miss.
+
+        No logging on the hit path: even a disabled ``logger.debug`` costs
+        ~100 ns/call, a measurable slice of the <1000 ns ``_resolve`` budget
+        (Sprint 77).  Miss-path logging is retained below.
+        """
         key_path, key_method, key_scheme = key
-        logger.debug("getitem key=%r", key)
 
         # --- 1. Trie lookup (all string-path routes) ----------------------
         h, params, trie_allowed = self._trie.lookup(key_path, key_method, key_scheme)
         if h is not None:
-            logger.debug("trie hit: handler=%r params=%r", h, params)
             if params:
                 _fn, _params = h, params
                 async def _inject(scope, receive, send,
@@ -1163,6 +1277,13 @@ class Router:
             return h
 
         # --- 2. Regex scan (fallback: raw re.Pattern routes only) ----------
+        # Skipped entirely when no re.Pattern routes are registered (the
+        # common case) — a miss then raises straight from the trie result.
+        if not self._raw_regex:
+            if trie_allowed:
+                raise MethodNotApplicable(trie_allowed)
+            raise PathNotRegistered(key_path)
+
         allowed_methods: set = set(trie_allowed)
         for (pattern, ms, ss), fn in self._raw_regex.items():
             m = pattern.match(key_path)
