@@ -25,7 +25,13 @@ echo "=== Building wrk2 (Gil Tene's CO-corrected fork) ==="
 # against 0, which on fast servers (sub-ms first sample) yields +Inf and a
 # garbage uint64 that aborts the HDR histogram with
 # `bucket_index < h->bucket_count`. Patch the divisor guard before build.
-if [ ! -x "$HOME/.local/bin/wrk2" ]; then
+if [ "$(uname -m)" != "x86_64" ]; then
+    # wrk2 bundles LuaJIT, whose build errors "No support for this
+    # architecture" on aarch64 (Graviton).  wrk2 backs only the constant-rate
+    # Lane B2r; skip it on non-x86 so the rest of the toolchain (apt wrk,
+    # h2load, nginx) still installs.  Lane B2r is unavailable on this arch.
+    echo "wrk2 skipped on $(uname -m) (LuaJIT unsupported; Lane B2r x86-only)"
+elif [ ! -x "$HOME/.local/bin/wrk2" ]; then
     mkdir -p "$HOME/.local/src" "$HOME/.local/bin"
     cd "$HOME/.local/src"
     [ -d wrk2 ] || git clone --depth=1 https://github.com/giltene/wrk2.git
