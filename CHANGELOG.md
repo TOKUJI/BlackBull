@@ -31,6 +31,8 @@ so the editable install's metadata catches up.
 
 ## [Unreleased]
 
+## [0.58.0] — 2026-07-19
+
 ### Added
 
 - **Edge inference API server positioning (Sprint 76).** New guide page
