@@ -142,7 +142,7 @@ echo "=== Versions ==="
 h2load --version | head -1
 wrk --version 2>&1 | head -1 || true
 oha --version 2>/dev/null || echo "oha: not installed"
-k6 version
+k6 version 2>/dev/null || echo "k6: not installed"
 python3 -c "import uvicorn;  print('uvicorn   ', uvicorn.__version__)"
 python3 -c "import hypercorn; print('hypercorn ', getattr(hypercorn, '__version__', '(no __version__)'))"
 python3 -c "import granian;   print('granian   ', granian.__version__)"
