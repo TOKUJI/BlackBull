@@ -506,23 +506,6 @@ class Settings:
     #: Maximum concurrent HTTP/2 streams per connection (SETTINGS_MAX_CONCURRENT_STREAMS).
     h2_max_concurrent_streams: int = 100
 
-    #: Connection-level outbound frame coalescing hold time, in microseconds.
-    #: When >0, per-stream response frames on one HTTP/2 connection are batched
-    #: so that N streams completing within the window flush as a single TCP
-    #: segment instead of N — eliminating the per-response delayed-ACK stall
-    #: that dominates at low connection counts / high multiplexing (e.g. a
-    #: gRPC fan-out of many RPCs over one connection).  The first frame of an
-    #: idle window is written immediately (no added latency for an isolated
-    #: response); only frames that arrive while a window is open are held.
-    #: Control frames (SETTINGS/PING/WINDOW_UPDATE/GOAWAY/RST_STREAM, stream 0)
-    #: always bypass the buffer so flow control and liveness stay timely.
-    #: Default ``0`` = disabled (a transparent pass-through, identical to a
-    #: direct write): the single-segment shape can *regress* at higher
-    #: connection counts, so this is opt-in.  40000 (40 ms, matching Linux's
-    #: delayed-ACK timer) is a sensible starting value; gRPC workloads may
-    #: prefer ~5000.  See docs/reference/env-vars.md.
-    h2_conn_buffer_us: int = 0
-
     #: Advertise SETTINGS_ENABLE_CONNECT_PROTOCOL=1 (RFC 8441 §3) so peers may
     #: bootstrap WebSocket over HTTP/2 via Extended CONNECT.  Off by default —
     #: this path has fewer conformance tests than the HTTP/1.1 upgrade path,
@@ -656,7 +639,6 @@ def get_settings() -> Settings:
         # values commonly used on tuned production deployments.
         h2_initial_window_size=_int_env('BB_H2_INITIAL_WINDOW_SIZE', 65535),
         h2_connection_window_size=_int_env('BB_H2_CONNECTION_WINDOW_SIZE', 65535),
-        h2_conn_buffer_us=_int_env('BB_H2_CONN_BUFFER_US', 0),
         h2_max_concurrent_streams=_int_env('BB_H2_MAX_CONCURRENT_STREAMS', 100),
         h2_enable_websocket=_bool_env('BB_H2_ENABLE_WEBSOCKET', False),
         h2_ws_max_streams_per_connection=_int_env_nonneg(
