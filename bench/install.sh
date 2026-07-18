@@ -84,29 +84,26 @@ echo ""
 echo "=== Installing oha (Rust HTTP load tool, granian-style) ==="
 if ! command -v oha >/dev/null 2>&1; then
     # Prefer apt (Debian ≥13, some PPAs); fall back to the upstream GitHub
-    # release binary (single static x86_64 ELF, works on Ubuntu 22.04/24.04);
-    # last resort cargo if a Rust toolchain is around.
+    # release binary (static ELF for amd64 or arm64); last resort cargo.
+    # oha is an OPTIONAL load tool (Lane B-oha) — never fatal, so an ARM box
+    # without it still completes install for the wrk / h2load lanes.
+    case "$(uname -m)" in x86_64) _oha_arch=amd64;; aarch64) _oha_arch=arm64;; *) _oha_arch="";; esac
     if apt-cache show oha >/dev/null 2>&1; then
-        sudo apt-get install -y oha
-    elif [ "$(uname -s)-$(uname -m)" = "Linux-x86_64" ] && command -v curl >/dev/null 2>&1; then
-        echo "  apt has no 'oha' package; downloading static binary from GitHub releases ..."
+        sudo apt-get install -y oha || echo "  oha apt install failed (optional; skipping)"
+    elif [ -n "$_oha_arch" ] && command -v curl >/dev/null 2>&1; then
+        echo "  downloading oha-linux-$_oha_arch from GitHub releases ..."
         tmp_oha=$(mktemp)
         if curl -fsSL -o "$tmp_oha" \
-                "https://github.com/hatoo/oha/releases/latest/download/oha-linux-amd64"; then
+                "https://github.com/hatoo/oha/releases/latest/download/oha-linux-$_oha_arch"; then
             sudo install -m 0755 "$tmp_oha" /usr/local/bin/oha
-            rm -f "$tmp_oha"
         else
-            rm -f "$tmp_oha"
-            echo "  failed to download oha from GitHub releases" >&2
-            exit 1
+            echo "  oha download failed (optional; skipping)" >&2
         fi
+        rm -f "$tmp_oha"
     elif command -v cargo >/dev/null 2>&1; then
-        cargo install oha
+        cargo install oha || echo "  oha cargo build failed (optional; skipping)"
     else
-        echo "  oha not packaged, no x86_64 release binary path, and cargo not installed." >&2
-        echo "  Install Rust (curl https://sh.rustup.rs | sh) or fetch manually from" >&2
-        echo "    https://github.com/hatoo/oha/releases" >&2
-        exit 1
+        echo "  oha unavailable on $(uname -m) (optional; skipping — Lane B-oha disabled)" >&2
     fi
 else
     echo "oha already installed, skipping."
@@ -114,15 +111,19 @@ fi
 
 echo ""
 echo "=== Installing k6 ==="
+# k6 is an OPTIONAL load tool (Lanes C/D) — non-fatal, so a box where the
+# k6 repo has no build for the arch still completes install.
 if ! command -v k6 >/dev/null 2>&1; then
-  sudo apt-get install -y gnupg curl
-  curl -fsSL https://dl.k6.io/key.gpg \
-    | sudo gpg --batch --yes --dearmor \
-        -o /usr/share/keyrings/k6-archive-keyring.gpg
-  echo "deb [signed-by=/usr/share/keyrings/k6-archive-keyring.gpg] https://dl.k6.io/deb stable main" \
-    | sudo tee /etc/apt/sources.list.d/k6.list
-  sudo apt-get update -qq
-  sudo apt-get install -y k6
+  {
+    sudo apt-get install -y gnupg curl
+    curl -fsSL https://dl.k6.io/key.gpg \
+      | sudo gpg --batch --yes --dearmor \
+          -o /usr/share/keyrings/k6-archive-keyring.gpg
+    echo "deb [signed-by=/usr/share/keyrings/k6-archive-keyring.gpg] https://dl.k6.io/deb stable main" \
+      | sudo tee /etc/apt/sources.list.d/k6.list
+    sudo apt-get update -qq
+    sudo apt-get install -y k6
+  } || echo "  k6 install failed (optional; skipping — Lanes C/D disabled)"
 else
   echo "k6 already installed, skipping."
 fi
