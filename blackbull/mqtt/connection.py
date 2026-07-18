@@ -161,9 +161,16 @@ class MQTT5Actor(Actor):
         idle deadline (§3.1.2.10)."""
         if not self._keep_alive:
             return await reader.read(_READ_CHUNK)
+        # NB: ``asyncio.timeout``, not ``asyncio.wait_for``.  On Python 3.11 the
+        # latter can *swallow* an external ``CancelledError`` when the wrapped
+        # read completes in the same loop iteration the cancel arrives — the
+        # read-loop then never observes the cancellation and spins forever (the
+        # connection task wedges in the ``cancelling`` state).  ``asyncio.timeout``
+        # distinguishes its own deadline from an outer cancel and re-raises the
+        # latter, so ``serve_connection`` can be torn down deterministically.
         try:
-            return await asyncio.wait_for(
-                reader.read(_READ_CHUNK), self._keep_alive * 1.5)
+            async with asyncio.timeout(self._keep_alive * 1.5):
+                return await reader.read(_READ_CHUNK)
         except asyncio.TimeoutError:
             return b''
 
