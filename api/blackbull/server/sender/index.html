@@ -4401,34 +4401,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#blackbull.server.sender.ConnCoalescer" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        ConnCoalescer
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="ConnCoalescer">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.sender.ConnCoalescer.flush" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        flush
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#blackbull.server.sender.ConnectionWindow" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5196,34 +5168,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#blackbull.server.sender.ConnCoalescer" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        ConnCoalescer
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="ConnCoalescer">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.sender.ConnCoalescer.flush" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        flush
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#blackbull.server.sender.ConnectionWindow" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5752,101 +5696,6 @@ logic is decoupled from asyncio internals.</p>
 
 
 
-
-
-
-  </div>
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-class">
-
-
-
-<h3 id="blackbull.server.sender.ConnCoalescer" class="doc doc-heading">
-            <code>ConnCoalescer</code>
-
-
-<a href="#blackbull.server.sender.ConnCoalescer" class="headerlink" title="Permanent link">&para;</a></h3>
-
-
-    <div class="doc doc-contents ">
-
-
-
-        <p>Connection-level outbound frame batcher for TCP segment coalescing.</p>
-<p>Owned by <code>HTTP2Actor</code> and shared by every per-stream <code>HTTP2Sender</code> on
-that connection.  Batches stream-frame writes so that N streams completing
-within a short window flush as a <strong>single</strong> TCP segment instead of N —
-eliminating the per-response delayed-ACK stall that dominates at low
-connection counts / high multiplexing (e.g. a gRPC fan-out of many RPCs
-over one connection).</p>
-<p><strong>Correctness invariants</strong></p>
-<ul>
-<li><em>Wire order (FIFO).</em>  All stream frames — including HEADERS and trailing
-  HEADERS — flow through one FIFO buffer and flush in enqueue order.  Since
-  header blocks are HPACK-encoded (into the connection's shared encoder)
-  immediately before <code>write()</code> is called, FIFO flush order preserves the
-  encoder/decoder synchronisation the HPACK dynamic table requires, and a
-  stream's DATA can never precede its own HEADERS.</li>
-<li><em>Control frames bypass.</em>  SETTINGS/PING/WINDOW_UPDATE/GOAWAY/RST_STREAM
-  go through the control sender (stream 0), which is <strong>not</strong> given a
-  coalescer, so flow-control credit and liveness stay timely.  They carry
-  no HPACK state, so writing them ahead of buffered HEADERS is safe.</li>
-</ul>
-<p><strong>Latency</strong></p>
-<p>The first frame of an idle window is written immediately, so an isolated
-response pays no added latency; only frames arriving while a window is
-already open are held (up to <code>hold_us</code>).  <code>hold_us &lt;= 0</code> makes this a
-transparent pass-through — byte-for-byte identical to a direct write.</p>
-<p>Peer-close tolerant: mirrors <code>BaseSender</code>'s guard at connection scope —
-once the transport is gone, further writes are dropped silently.</p>
-
-
-
-
-
-
-
-
-
-
-
-<div class="doc doc-children">
-
-
-
-
-
-
-
-
-
-
-<div class="doc doc-object doc-function">
-
-
-<h4 id="blackbull.server.sender.ConnCoalescer.flush" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">flush</span><span class="p">()</span></code>
-
-  <span class="doc doc-labels">
-      <small class="doc doc-label doc-label-async"><code>async</code></small>
-  </span>
-
-<a href="#blackbull.server.sender.ConnCoalescer.flush" class="headerlink" title="Permanent link">&para;</a></h4>
-
-
-    <div class="doc doc-contents ">
-
-        <p>Flush any pending buffered bytes now — called before the connection
-writes a GOAWAY or tears down, so a trailing batch is never lost.</p>
-
-
-    </div>
-
-</div>
 
 
 

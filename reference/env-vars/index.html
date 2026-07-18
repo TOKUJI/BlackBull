@@ -5278,11 +5278,6 @@ or drop to <code>INFO</code> to surface the rate-limit summary records.</p>
 <td><code>8</code></td>
 <td>Number of stream tasks spawned per connection before the frame loop inserts <code>await asyncio.sleep(0)</code>.  Caps the maximum synchronous run between yields under burst traffic.  <code>0</code> disables the cooperative yield (legacy behaviour).</td>
 </tr>
-<tr>
-<td><code>BB_H2_CONN_BUFFER_US</code></td>
-<td><code>0</code> (disabled)</td>
-<td>Connection-level outbound frame <strong>segment coalescing</strong> hold time, in microseconds.  When <code>&gt;0</code>, response frames from streams that complete within the window on one connection are flushed as a <em>single</em> TCP segment instead of one per stream — removing the per-response delayed-ACK stall that dominates at low connection counts / high multiplexing (e.g. a gRPC fan-out of many RPCs over one connection).  The first frame of an idle window is written immediately (no added latency for an isolated response); only frames arriving while a window is open are held.  Control frames (<code>SETTINGS</code>/<code>PING</code>/<code>WINDOW_UPDATE</code>/<code>GOAWAY</code>/<code>RST_STREAM</code>) always bypass the buffer, so flow control stays timely.  <strong>Opt-in</strong> — the single-segment shape can <em>regress</em> at higher connection counts, so the default is off (a transparent pass-through).  <code>40000</code> (40 ms, matching Linux's delayed-ACK timer) is a sensible starting value; gRPC workloads may prefer <code>~5000</code>.</td>
-</tr>
 </tbody>
 </table>
 <h2 id="websocket">WebSocket<a class="headerlink" href="#websocket" title="Permanent link">&para;</a></h2>
