@@ -30,7 +30,6 @@ import asyncio
 import json
 import os
 import sys
-import tracemalloc
 from http import HTTPStatus
 
 # Allow running as `python bench/app.py` from the repo root
@@ -49,6 +48,12 @@ from bench.lag_monitor import LoopLagMonitor
 # instrumentation; production users keep tracemalloc off by default.
 _BB_TRACEMALLOC = os.environ.get('BB_TRACEMALLOC', '0') == '1'
 if _BB_TRACEMALLOC:
+    # Imported lazily, only when the soak hook is on: ``tracemalloc`` needs
+    # the ``_tracemalloc`` C module, which PyPy does not ship — an
+    # unconditional import at module top breaks ``bench/app.py`` under PyPy
+    # (the PyPy vs CPython+uvloop bench arm).  The /tracemalloc endpoint
+    # below is likewise guarded on ``_BB_TRACEMALLOC``.
+    import tracemalloc
     tracemalloc.start(int(os.environ.get('BB_TRACEMALLOC_FRAMES', '10')))
 
 # ---------------------------------------------------------------------------
