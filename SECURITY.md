@@ -11,10 +11,10 @@ preceding one.  Older minor versions receive fixes only for
 critical vulnerabilities.
 
 | Version | Supported          |
-|---------|--------------------|
+| ------- | ------------------ |
+| 0.58.x  | :white_check_mark: |
 | 0.57.x  | :white_check_mark: |
-| 0.56.x  | :white_check_mark: |
-| < 0.56  | :x:                |
+| < 0.57  | :x:                |
 
 This table updates with each minor release.
 

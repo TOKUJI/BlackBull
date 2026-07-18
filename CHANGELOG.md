@@ -44,6 +44,41 @@ so the editable install's metadata catches up.
   `docs/index.md`, the guide overview, and *Why BlackBull?* carry the
   positioning hooks.
 
+### Changed
+
+- **Router trie fast path (Sprint 77).** A static-path map short-circuits
+  literal routes, method matching is a `frozenset` membership test, and the
+  trie walk is iterative with the regex-fallback skipped when a route has no
+  regex segments. Parameterised `_resolve` dropped ~1555→959 ns and static
+  routes ~1244→232 ns, with no throughput regression on any profile (EC2).
+
+### Removed
+
+- **`ConnCoalescer` / `BB_H2_CONN_BUFFER_US` (Sprint 77).** The opt-in
+  connection-level TCP-segment coalescer (shipped default-off in v0.48.0) is
+  removed. Given its designed killer case — gRPC unary fan-out, one connection
+  × 200 concurrent RPCs, on a real network path — the mechanism fired (~20%
+  fewer TCP segments) but produced no throughput or tail-latency gain (RPS
+  +2.8%, p99 −4%, both inside noise): gRPC/HTTP-2 runs with `TCP_NODELAY`, so
+  there is no delayed-ACK stall to eliminate, and natural HTTP/2+TCP batching
+  already packs most responses per segment. With no effective occasion on any
+  measured workload, it is removed rather than kept as dormant opt-in weight.
+  **Breaking**: setting `BB_H2_CONN_BUFFER_US` now has no effect (it defaulted
+  to off, so no default behaviour changes).
+
+### Fixed
+
+- **Python 3.11 compatibility restored (Sprint 77).** `HTTPStatus.is_client_error`
+  and `.is_server_error` are Python 3.12-only, so importing BlackBull actually
+  raised on 3.11 (regressed in 0.48.1, present through 0.57.0). Replaced with
+  integer-range helpers; added a 3.11 CI lane and a source grep-guard so the
+  floor can't silently break again. PyPy (3.11-compat) is now usable.
+- **MQTT read-loop cancellation hang on Python 3.11 (Sprint 77).** On 3.11,
+  `asyncio.wait_for` can swallow an external `CancelledError` when the wrapped
+  read completes in the same event-loop iteration the cancel arrives, wedging
+  the connection task. Switched the keep-alive-bounded read to `asyncio.timeout`,
+  which re-raises the outer cancel. 3.12 was unaffected.
+
 ## [0.57.0] — 2026-07-17
 
 ### Added
