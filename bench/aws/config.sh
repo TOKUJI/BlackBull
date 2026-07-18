@@ -61,8 +61,13 @@ SSH_OPTS=(
 # --- AMI selection --------------------------------------------------------
 # Ubuntu 24.04 LTS (Noble) — owner 099720109477 is Canonical.
 # Filter resolved at runtime in up.sh via aws ec2 describe-images.
+# Architecture-overridable (default x86_64).  Set AMI_ARCH=arm64 for
+# Graviton instances (c8g, c7g, …); the AMI name token and the
+# describe-images architecture filter (up.sh) both follow AMI_ARCH.
 AMI_OWNER="099720109477"
-AMI_NAME_PATTERN="ubuntu/images/hvm-ssd-gp3/ubuntu-noble-24.04-amd64-server-*"
+: "${AMI_ARCH:=x86_64}"
+_ami_arch_name=$([ "$AMI_ARCH" = "arm64" ] && echo arm64 || echo amd64)
+: "${AMI_NAME_PATTERN:=ubuntu/images/hvm-ssd-gp3/ubuntu-noble-24.04-${_ami_arch_name}-server-*}"
 
 # --- aws CLI defaults -----------------------------------------------------
 # Honour AWS_PROFILE if set; otherwise use whatever `aws configure` did.

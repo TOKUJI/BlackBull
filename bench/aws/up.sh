@@ -45,7 +45,7 @@ AMI_ID=$("${AWS_BASE[@]}" ec2 describe-images \
     --filters \
         "Name=name,Values=$AMI_NAME_PATTERN" \
         "Name=state,Values=available" \
-        "Name=architecture,Values=x86_64" \
+        "Name=architecture,Values=${AMI_ARCH:-x86_64}" \
     --query 'sort_by(Images, &CreationDate)[-1].ImageId' \
     --output text)
 if [ -z "$AMI_ID" ] || [ "$AMI_ID" = "None" ]; then
