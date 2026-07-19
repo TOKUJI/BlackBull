@@ -1489,7 +1489,14 @@ class Router:
                  scheme: Scheme | Iterable[Scheme] = Scheme.http,
                  name: str | None = None,
                  accept_query: Iterable[str] | None = None):
+        """Return a decorator that registers the decorated handler.
 
+        ``accept_query`` (RFC 10008) is the list of request **media types** the
+        route accepts — the ``Accept-Query`` header value driving Content-Type
+        enforcement on QUERY requests.  It is **not** a switch for the QUERY
+        *method* (methods are accepted by ``methods``); it installs the route
+        hooks in :func:`_accept_query_hooks`.  See ``BlackBull.route``.
+        """
         logger.debug('Router.route_fn() is called.')
         methods = _to_tuple(methods)
         for m in methods:
@@ -1519,7 +1526,13 @@ class Router:
     def _register_chain(self, functions, path, methods, scheme,
                         name: str | None = None, original_handler=None,
                         accept_query: Iterable[str] | None = None):
-        """Build a middleware chain from *functions* and register it."""
+        """Build a middleware chain from *functions* and register it.
+
+        ``accept_query`` (RFC 10008) — the request **media types** the route
+        accepts (the ``Accept-Query`` header value), attached to the chain as
+        route hooks; **not** a switch for the QUERY *method*.  See
+        ``BlackBull.route``.
+        """
         if not isinstance(functions, Iterable):
             raise TypeError(f'{functions} is not iterable.')
 
@@ -1712,9 +1725,11 @@ class Router:
 
         ``name`` registers the route for use with ``url_path_for()``.
 
-        ``accept_query`` (RFC 10008) declares the request media types a QUERY
-        route accepts.  It drives the ``Accept-Query`` response header and
-        Content-Type enforcement (400 missing / 415 unsupported) — see
+        ``accept_query`` (RFC 10008) declares the request **media types** the
+        route accepts — the value of the ``Accept-Query`` response header, and
+        **not** a switch for the QUERY *method* (methods are accepted by being
+        listed in ``methods``).  It drives that header plus Content-Type
+        enforcement (400 missing / 415 unsupported) on QUERY requests — see
         ``BlackBull.route``.
         """
         logger.debug('Router.route() is called. functions=%r middlewares=%r', functions, middlewares)

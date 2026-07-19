@@ -218,6 +218,14 @@ class RouteGroup:
               path: str | re.Pattern = '/', scheme: Scheme | Iterable[Scheme] = Scheme.http,
               middlewares: list = [], name: str | None = None,
               accept_query: Iterable[str] | None = None):
+        """Register a route on this group, prepending the group middlewares.
+
+        Same parameters as :meth:`BlackBull.route`.  ``accept_query`` is the
+        RFC 10008 list of request **media types** the route accepts (the
+        ``Accept-Query`` response header + Content-Type enforcement) — it is a
+        content-negotiation policy, **not** a switch for the QUERY *method*
+        (a method is accepted purely by listing it in ``methods``).
+        """
         return self._app.route(
             methods=methods,
             path=path,
@@ -853,8 +861,12 @@ class BlackBull:
               accept_query: Iterable[str] | None = None):
         """Register a route handler, optionally wrapping it in middlewares.
 
-        ``accept_query`` (RFC 10008) — a list of request media types the route
-        accepts for the QUERY method.  When set, QUERY-route responses carry an
+        ``accept_query`` (RFC 10008) names the request **media types** the
+        route accepts — it is the value of the ``Accept-Query`` response
+        header, **not** a switch that enables the QUERY method.  (A method is
+        accepted purely by listing it in ``methods``; QUERY is no different
+        from GET there.)  It is meaningful for the QUERY method, which carries
+        a request body.  When set, the route's responses carry an
         ``Accept-Query`` header (an RFC 9651 Structured Field list of those
         media types), and QUERY requests are Content-Type-enforced: a missing
         media type is answered ``400``, an unaccepted one ``415`` (with the
