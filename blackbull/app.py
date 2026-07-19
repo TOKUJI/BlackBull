@@ -77,6 +77,27 @@ def _wrap_send(raw_send):
     return _send
 
 
+def _inject_response_headers(raw_send, extra_headers):
+    """Wrap *raw_send* to append *extra_headers* to the response.
+
+    A route may declare headers (via the ``_bb_response_headers`` hook) that
+    must appear on all of its responses — success and the centrally-rendered
+    error alike.  Installed **below** :func:`_wrap_send`, so it only ever
+    observes plain ASGI dicts: convenience shapes (``Response``, 3-arg) have
+    already been normalised by the time an event reaches here.  The headers
+    are appended to the ``http.response.start`` event; every other event
+    passes straight through.
+    """
+    async def _send(event):
+        if isinstance(event, dict) and event.get('type') == 'http.response.start':
+            headers: list = list(event.get('headers') or [])
+            headers.extend(extra_headers)
+            event = {**event, 'headers': headers}
+        await raw_send(event)
+
+    return _send
+
+
 def _wants_html(scope) -> bool:
     """True when the request's Accept header indicates an HTML preference."""
     for k, v in scope.get('headers', ()):
@@ -195,13 +216,23 @@ class RouteGroup:
 
     def route(self, methods: str | HTTPMethod | Iterable[str | HTTPMethod] = [HTTPMethod.GET],
               path: str | re.Pattern = '/', scheme: Scheme | Iterable[Scheme] = Scheme.http,
-              middlewares: list = [], name: str | None = None):
+              middlewares: list = [], name: str | None = None,
+              accept_query: Iterable[str] | None = None):
+        """Register a route on this group, prepending the group middlewares.
+
+        Same parameters as :meth:`BlackBull.route`.  ``accept_query`` is the
+        RFC 10008 list of request **media types** the route accepts (the
+        ``Accept-Query`` response header + Content-Type enforcement) — it is a
+        content-negotiation policy, **not** a switch for the QUERY *method*
+        (a method is accepted purely by listing it in ``methods``).
+        """
         return self._app.route(
             methods=methods,
             path=path,
             scheme=scheme,
             middlewares=self._group_mw + list(middlewares),
             name=name,
+            accept_query=accept_query,
         )
 
 
@@ -609,13 +640,20 @@ class BlackBull:
         # at the handler boundary, after the WebSocket branch — so middleware
         # (which sees send before _dispatch is entered) always receives plain
         # ASGI dicts.  See _wrap_send for why outward placement is a bug.
+        # ``raw_send`` is retained so an RFC 10008 ``Accept-Query`` route can
+        # re-wrap with the header injector *below* _wrap_send (dict-only).
+        raw_send = send
         send = _wrap_send(send)
 
         try:
             # RFC 9110 §9.1 — methods are case-sensitive tokens.  Prefer the
-            # HTTPMethod enum for IANA-registered methods; for non-IANA methods
-            # (BREW, PROPFIND, WHEN, …) keep the raw str so the router can
-            # still match a registered route and return the correct Allow header.
+            # HTTPMethod enum when it has a member; for methods outside the
+            # enum — whether IANA-registered ones it hasn't caught up with
+            # (QUERY, RFC 10008; no member before 3.16) or extension tokens
+            # (BREW, PROPFIND, WHEN, …) — keep the raw str so the router can
+            # still match a registered route and return the correct Allow
+            # header.  StrEnum equality makes the two forms interchangeable
+            # as router keys.
             method = HTTPMethod(scope['method'])
         except ValueError:
             method = scope['method']
@@ -643,6 +681,37 @@ class BlackBull:
             if handler is not None:
                 await handler(scope, receive, send)
             return
+
+        # Per-route hooks (method-agnostic): a route may declare response
+        # headers to add to every response, and a request guard that rejects
+        # the request before dispatch.  The dispatcher applies both uniformly —
+        # it names no method and no feature.  ``accept_query`` (RFC 10008) is
+        # currently the only producer; its QUERY-specific logic lives inside
+        # the guard, not here.
+        resp_headers = getattr(function, '_bb_response_headers', None)
+        if resp_headers is not None:
+            # Installed below _wrap_send so it sees only ASGI dicts, and around
+            # raw_send so the header also lands on the centrally-rendered error
+            # response (e.g. a guard's 415).
+            send = _wrap_send(_inject_response_headers(raw_send, resp_headers))
+        guard = getattr(function, '_bb_request_guard', None)
+        if guard is not None:
+            try:
+                guard(scope)
+            except HTTPException as e:
+                # Rejected before dispatch — routed like a 404/405: by status
+                # (so an @app.on_error(status) handler is honoured, exactly as
+                # for those), no handler body and no lifecycle events.
+                self._logger.info('%s on %s %s: %s', int(e.status),
+                                  scope.get('method', ''), path, e.detail or e)
+                scope.setdefault('state', {}).update({
+                    'error_status': e.status,
+                    'error_exception': e,
+                })
+                handler = self._error_router[e.status]
+                if handler is not None:
+                    await handler(scope, receive, send)
+                return
 
         self._logger.debug((self, function))
         exc_caught: Exception | None = None
@@ -788,8 +857,24 @@ class BlackBull:
     def route(self, methods: str | HTTPMethod | Iterable[str | HTTPMethod] = [HTTPMethod.GET],
               path: str | re.Pattern = '/', scheme: Scheme | Iterable[Scheme] = Scheme.http,
               functions: list = [], middlewares: list = [],
-              name: str | None = None):
-        """Register a route handler, optionally wrapping it in middlewares."""
+              name: str | None = None,
+              accept_query: Iterable[str] | None = None):
+        """Register a route handler, optionally wrapping it in middlewares.
+
+        ``accept_query`` (RFC 10008) names the request **media types** the
+        route accepts — it is the value of the ``Accept-Query`` response
+        header, **not** a switch that enables the QUERY method.  (A method is
+        accepted purely by listing it in ``methods``; QUERY is no different
+        from GET there.)  It is meaningful for the QUERY method, which carries
+        a request body.  When set, the route's responses carry an
+        ``Accept-Query`` header (an RFC 9651 Structured Field list of those
+        media types), and QUERY requests are Content-Type-enforced: a missing
+        media type is answered ``400``, an unaccepted one ``415`` (with the
+        ``Accept-Query`` header so the client can correct).  A handler may raise
+        :class:`~blackbull.UnprocessableQuery` for ``422`` on a well-formed but
+        unprocessable query.  Enforcement applies only to QUERY requests; other
+        methods on the same route still receive the ``Accept-Query`` header.
+        """
         return self._router.route(
             methods=methods,
             path=path,
@@ -797,6 +882,7 @@ class BlackBull:
             functions=functions,
             middlewares=middlewares,
             name=name,
+            accept_query=accept_query,
             )
 
     def group(self, middlewares=[]) -> 'RouteGroup':

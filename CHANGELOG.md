@@ -31,6 +31,47 @@ so the editable install's metadata catches up.
 
 ## [Unreleased]
 
+### Added
+
+- **QUERY normative response semantics (RFC 10008, Sprint 78 P2).** New
+  `accept_query=[...]` route option declaring the request media types a
+  QUERY route accepts. It drives an **`Accept-Query`** response header (an
+  RFC 9651 Structured Field list, serialized once at registration) on the
+  route's responses, and **Content-Type enforcement** on QUERY requests:
+  **400** when the media type is missing, **415** when unaccepted (the 415
+  carries `Accept-Query` so the client can correct). Media-type matching
+  ignores parameters and is case-insensitive. New `blackbull.UnprocessableQuery`
+  exception (an `HTTPException` subclass) for handlers to raise → **422**.
+  All three statuses flow through the normal error-router path; enforcement
+  targets QUERY only, while other methods on the route still receive the
+  header. Guide section extended; 16 new tests (unit + HTTP/1.1 wire).
+- **HTTP QUERY method support (RFC 10008, Sprint 78 P1).** First-mover
+  support for the first new standard HTTP method since PATCH — safe,
+  idempotent, cacheable, with a request body.  New `blackbull.QUERY`
+  plain-string constant (`http.HTTPMethod` has no member before Python
+  3.16; `StrEnum` equality keeps string-registered routes matching a
+  future enum member with no migration).  Routing, body access
+  (`body: bytes` / `Request.json()`), 405 `Allow` advertisement, and the
+  four request-lifecycle events are pinned by tests over HTTP/1.1,
+  HTTP/2, and `TestClient`; the experimental clients round-trip
+  `request('QUERY', ...)` on both protocols.  New guide section
+  *The QUERY method (RFC 10008)* in [Routing](docs/guide/routing.md).
+  QUERY routes stay out of the generated OpenAPI document — 3.1 has no
+  `query` operation (3.2 does; revisit when the emitter moves) — and are
+  never faked as another operation.
+
+### Fixed
+
+- **HTTP/2: spurious `http.disconnect` on body-less requests.** When
+  HEADERS carried END_STREAM and the connection closed before the
+  handler's first `receive()`, `HTTP2Recipient.put_disconnect()`
+  allocated the event queue and thereby disabled the synthetic
+  empty-body fast path — a body-reading handler (QUERY/POST with an
+  empty body) saw `http.disconnect` instead of the complete empty
+  `http.request`.  The synthetic event is now delivered first; the
+  disconnect follows it.  Invisible for GET handlers, which never read
+  the body.
+
 ## [0.58.0] — 2026-07-19
 
 ### Added

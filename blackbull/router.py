@@ -333,6 +333,21 @@ class HTTPException(Exception):
         self.detail = detail
 
 
+class UnprocessableQuery(HTTPException):
+    """RFC 10008 §2.2 — a well-formed QUERY whose contents cannot be processed.
+
+    Raise this from a QUERY handler when the request media type was accepted
+    (so 400/415 do not apply) but the query itself is semantically invalid —
+    references an unknown field, violates a constraint, etc.  The dispatcher
+    answers ``422 Unprocessable Content`` and, being an :class:`HTTPException`
+    subclass, it flows through the normal error-router path and quiet 4xx
+    logging.
+    """
+
+    def __init__(self, detail: str = ''):
+        super().__init__(HTTPStatus.UNPROCESSABLE_ENTITY, detail)
+
+
 @dataclass
 class _RouteInfo:
     template: str
@@ -1021,6 +1036,25 @@ def _adapt_handler(fn, path: str, converters: dict | None = None):
 _HTTP_TOKEN_RE = re.compile(r"^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$")
 
 
+QUERY: str = 'QUERY'
+"""The HTTP QUERY method (RFC 10008) — safe, idempotent, cacheable, with a
+request body.
+
+``http.HTTPMethod`` has no ``QUERY`` member (RFC 10008 postdates the 3.15
+feature freeze; earliest stdlib arrival is 3.16), so BlackBull exports the
+method as a plain string usable anywhere a method is accepted::
+
+    from blackbull import QUERY
+
+    @app.route(path='/search', methods=[QUERY])
+    async def search(body: bytes): ...
+
+Because ``http.HTTPMethod`` is a ``StrEnum``, this string stays equal- and
+hash-compatible with a future ``HTTPMethod.QUERY`` member — routes
+registered with it need no migration.
+"""
+
+
 def _validate_method_token(method: str) -> None:
     if not _HTTP_TOKEN_RE.match(method):
         raise ValueError(
@@ -1038,6 +1072,92 @@ def _to_tuple(value: Any) -> tuple:
     if isinstance(value, Iterable) and not isinstance(value, str):
         return tuple(value)
     return (value,)
+
+
+# ---------------------------------------------------------------------------
+# Per-route hooks — generic request/response metadata a handler can carry.
+#
+# The dispatcher (``BlackBull._dispatch``) treats every method identically.
+# A route may attach two optional, method-agnostic hooks that the dispatcher
+# applies uniformly — it does not know (or name) any specific method or
+# feature:
+#
+#   ``_bb_response_headers`` — extra headers appended to every response the
+#       route produces (success *and* the centrally-rendered error), e.g. the
+#       RFC 10008 ``Accept-Query`` header.
+#   ``_bb_request_guard`` — a ``(scope) -> None`` callable run before the
+#       handler; it raises :class:`HTTPException` to reject the request
+#       pre-dispatch (routed like a 404/405).
+#
+# ``accept_query`` (below) is currently the only producer of these hooks; the
+# QUERY-specific logic lives entirely inside the guard it builds, never in the
+# dispatcher.  A future feature (e.g. a rate-limit guard, other declared
+# response headers) reuses the same two hooks with no dispatcher change.
+# ---------------------------------------------------------------------------
+
+_ROUTE_HOOK_ATTRS = ('_bb_response_headers', '_bb_request_guard')
+
+
+def _copy_route_hooks(dst: Callable, src: Callable) -> None:
+    """Propagate any route hooks from *src* onto *dst*.
+
+    Used when the router re-wraps a handler (e.g. the path-param ``_inject``
+    closure in :meth:`Router._resolve`) so the hooks survive to the
+    dispatcher.
+    """
+    for attr in _ROUTE_HOOK_ATTRS:
+        value = getattr(src, attr, None)
+        if value is not None:
+            setattr(dst, attr, value)
+
+
+def _accept_query_hooks(media_types: Iterable[str]):
+    """Build the ``(response_headers, request_guard)`` hooks for the RFC 10008
+    ``accept_query`` route option.
+
+    ``response_headers`` carries the ``Accept-Query`` field (an RFC 9651
+    Structured Field list of media-type tokens; serialising through
+    :func:`serialize_list` validates each token at registration, so an invalid
+    entry raises ``ValueError`` up front).  ``request_guard`` enforces the
+    request ``Content-Type`` on QUERY requests only — 400 when absent, 415
+    when unaccepted — while other methods sharing the route still receive the
+    header but are not media-type gated.
+    """
+    from .protocol.structured_fields import Token, serialize_list  # noqa: PLC0415
+
+    types = list(media_types)
+    if not types:
+        raise ValueError('accept_query must list at least one media type')
+    header = serialize_list([(Token(mt), {}) for mt in types])
+    accepted = frozenset(mt.strip().lower() for mt in types)
+    response_headers = ((b'accept-query', header),)
+
+    def guard(scope: dict) -> None:
+        if scope['method'] != 'QUERY':
+            return
+        media = request_media_type(scope)
+        if not media:
+            raise HTTPException(HTTPStatus.BAD_REQUEST,
+                                'QUERY request requires a Content-Type')
+        if media not in accepted:
+            raise HTTPException(HTTPStatus.UNSUPPORTED_MEDIA_TYPE,
+                                f'unsupported query media type {media!r}')
+
+    return response_headers, guard
+
+
+def request_media_type(scope: dict) -> str:
+    """Return the request's media type (``Content-Type`` sans parameters),
+    lowercased; ``''`` when no Content-Type is present.
+
+    ``scope['headers']`` is a :class:`~blackbull.headers.Headers` inside
+    ``_dispatch`` (normalised at the app entry point), so a plain ``.get``
+    suffices.
+    """
+    ct = scope['headers'].get(b'content-type', b'')
+    if not ct:
+        return ''
+    return ct.split(b';', 1)[0].strip().lower().decode('latin-1')
 
 
 class _LookupCache:
@@ -1273,6 +1393,9 @@ class Router:
                                   _fn=_fn, _params=_params):
                     scope.setdefault('path_params', {}).update(_params)
                     return await _fn(scope, receive, send)
+                # Preserve any route hooks across the path-param wrapper so
+                # the dispatcher still finds them.
+                _copy_route_hooks(_inject, _fn)
                 return _inject
             return h
 
@@ -1300,6 +1423,7 @@ class Router:
                                       _fn=_fn, _params=_params):
                         scope.setdefault('path_params', {}).update(_params)
                         return await _fn(scope, receive, send)
+                    _copy_route_hooks(_inject, _fn)
                     return _inject
                 return fn
 
@@ -1363,13 +1487,22 @@ class Router:
                  methods: str | HTTPMethod | Iterable[str | HTTPMethod] = [HTTPMethod.GET],
                  path: str | re.Pattern = '/',
                  scheme: Scheme | Iterable[Scheme] = Scheme.http,
-                 name: str | None = None):
+                 name: str | None = None,
+                 accept_query: Iterable[str] | None = None):
+        """Return a decorator that registers the decorated handler.
 
+        ``accept_query`` (RFC 10008) is the list of request **media types** the
+        route accepts — the ``Accept-Query`` header value driving Content-Type
+        enforcement on QUERY requests.  It is **not** a switch for the QUERY
+        *method* (methods are accepted by ``methods``); it installs the route
+        hooks in :func:`_accept_query_hooks`.  See ``BlackBull.route``.
+        """
         logger.debug('Router.route_fn() is called.')
         methods = _to_tuple(methods)
         for m in methods:
             if isinstance(m, str):
                 _validate_method_token(m)
+        hooks = _accept_query_hooks(accept_query) if accept_query is not None else None
 
         def register(fn):
             logger.debug(f'Router.route_fn.register() is called. {fn}')
@@ -1377,6 +1510,9 @@ class Router:
             original = fn
             if _is_simplified_handler(fn):
                 fn = _adapt_handler(fn, path, self._converters)
+
+            if hooks is not None:
+                fn._bb_response_headers, fn._bb_request_guard = hooks
 
             logger.debug((path, methods, scheme))
             self[(path, methods, scheme)] = fn
@@ -1388,8 +1524,15 @@ class Router:
         return register
 
     def _register_chain(self, functions, path, methods, scheme,
-                        name: str | None = None, original_handler=None):
-        """Build a middleware chain from *functions* and register it."""
+                        name: str | None = None, original_handler=None,
+                        accept_query: Iterable[str] | None = None):
+        """Build a middleware chain from *functions* and register it.
+
+        ``accept_query`` (RFC 10008) — the request **media types** the route
+        accepts (the ``Accept-Query`` header value), attached to the chain as
+        route hooks; **not** a switch for the QUERY *method*.  See
+        ``BlackBull.route``.
+        """
         if not isinstance(functions, Iterable):
             raise TypeError(f'{functions} is not iterable.')
 
@@ -1413,6 +1556,10 @@ class Router:
         _ic = inner_chain
         async def _chain_wrapper(scope, receive, send):
             return await _ic(scope, receive, send)
+
+        if accept_query is not None:
+            _chain_wrapper._bb_response_headers, _chain_wrapper._bb_request_guard = \
+                _accept_query_hooks(accept_query)
 
         self[(path, methods, scheme)] = _chain_wrapper
         self._record_route(path, original_handler or fns[-1], name,
@@ -1564,7 +1711,8 @@ class Router:
     def route(self, methods: str | HTTPMethod | Iterable[str | HTTPMethod] = [HTTPMethod.GET],
               path: str | re.Pattern = '/', scheme: Scheme | Iterable[Scheme] = Scheme.http,
               functions: list = [], middlewares: list = [],
-              name: str | None = None):
+              name: str | None = None,
+              accept_query: Iterable[str] | None = None):
         """Register a function or middleware chain in the routing table.
 
         Three calling conventions:
@@ -1576,6 +1724,13 @@ class Router:
            appended to the middleware list before the chain is registered.
 
         ``name`` registers the route for use with ``url_path_for()``.
+
+        ``accept_query`` (RFC 10008) declares the request **media types** the
+        route accepts — the value of the ``Accept-Query`` response header, and
+        **not** a switch for the QUERY *method* (methods are accepted by being
+        listed in ``methods``).  It drives that header plus Content-Type
+        enforcement (400 missing / 415 unsupported) on QUERY requests — see
+        ``BlackBull.route``.
         """
         logger.debug('Router.route() is called. functions=%r middlewares=%r', functions, middlewares)
 
@@ -1589,18 +1744,21 @@ class Router:
             if _is_simplified_handler(fns[-1]):
                 fns[-1] = _adapt_handler(fns[-1], path, self._converters)
             self._register_chain(fns, path, methods, scheme,
-                                 name=name, original_handler=original)
+                                 name=name, original_handler=original,
+                                 accept_query=accept_query)
             return lambda fn: fn
 
         if middlewares:
             def decorator(fn):
                 adapted = _adapt_handler(fn, path, self._converters) if _is_simplified_handler(fn) else fn
                 self._register_chain(list(middlewares) + [adapted], path, methods, scheme,
-                                     name=name, original_handler=fn)
+                                     name=name, original_handler=fn,
+                                     accept_query=accept_query)
                 return fn
             return decorator
 
-        return self.route_fn(methods, path, scheme, name=name)
+        return self.route_fn(methods, path, scheme, name=name,
+                             accept_query=accept_query)
 
 
 class ErrorRouter:

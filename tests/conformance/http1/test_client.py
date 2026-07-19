@@ -260,6 +260,31 @@ class TestHTTP1Client:
 
 
 # ---------------------------------------------------------------------------
+# QUERY method (RFC 10008) — string-form methods round-trip on both clients
+# ---------------------------------------------------------------------------
+
+class TestQueryMethod:
+    """``request()`` accepts ``str | HTTPMethod``; QUERY (no enum member
+    before Python 3.16) exercises the plain-string path with a body over
+    both protocol clients (Sprint 78 P4 pin — no dedicated sugar, the
+    clients expose no per-verb helpers)."""
+
+    @pytest.mark.asyncio
+    async def test_http1_query_with_body(self, server_port):
+        async with HTTP1Client('127.0.0.1', server_port) as c:
+            res = await c.request('QUERY', '/echo', body=b'select *')
+        assert res.status == HTTPStatus.OK
+        assert res.body == b'select *'
+
+    @pytest.mark.asyncio
+    async def test_http2_query_with_body(self, server_port):
+        async with HTTP2Client('127.0.0.1', server_port) as c:
+            res = await c.request('QUERY', '/echo', body=b'select *')
+        assert res.status == HTTPStatus.OK
+        assert res.body == b'select *'
+
+
+# ---------------------------------------------------------------------------
 # Wire-level unit tests for HTTP1RequestSender — no server needed
 # ---------------------------------------------------------------------------
 

@@ -36,6 +36,7 @@ from __future__ import annotations
 import dataclasses
 import inspect
 import json
+import logging
 import types
 import typing
 from http import HTTPMethod
@@ -43,6 +44,8 @@ from typing import Any
 
 from .extension import Extension
 from .router import _AnyScheme
+
+logger = logging.getLogger(__name__)
 from .utils import Scheme
 
 
@@ -381,6 +384,13 @@ def generate_spec(app, *, title: str = 'BlackBull API',
                 try:
                     method = HTTPMethod(method)
                 except ValueError:
+                    # Methods outside the stdlib enum (QUERY per RFC 10008,
+                    # extension tokens) have no OpenAPI 3.1 operation — 3.2
+                    # adds `query`/`additionalOperations`; revisit when the
+                    # emitter moves.  Never fake them as another operation.
+                    logger.debug(
+                        'OpenAPI: skipping method %r on %r — not an OpenAPI '
+                        '3.1 operation', method, ri.template)
                     continue
             if method not in _OPENAPI_METHODS:
                 continue

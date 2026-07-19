@@ -30,6 +30,81 @@ async def healthz(scope, receive, send):
     await send(Response(b'ok'))
 ```
 
+Any valid method token is accepted, as a string or an `HTTPMethod`
+member — extension methods (`PROPFIND`, vendor tokens) route the same
+way as the standard ones, and appear in the 405 `Allow` header when
+another method hits the path.
+
+### The QUERY method (RFC 10008)
+
+QUERY — the first new standard HTTP method since PATCH — is a **safe,
+idempotent, cacheable** request that carries a **request body**, closing
+the "GET with a body" gap for complex read-only queries.  The stdlib
+`http.HTTPMethod` enum has no `QUERY` member until Python 3.16, so
+BlackBull exports the method as a plain-string constant:
+
+```python
+from blackbull import BlackBull, QUERY
+
+app = BlackBull()
+
+@app.route(path='/search', methods=[QUERY])
+async def search(body: bytes):
+    return run_query(body)          # the whole query rides in the body
+```
+
+Body access works exactly as for POST — `body: bytes`, `Request.json()`,
+or draining `receive` yourself.  By registering a QUERY handler you sign
+up for the method's contract: the handler **must not** have side effects
+the client could regret repeating (safe), and repeating the same request
+must give the same result (idempotent) — caches and retrying clients
+rely on it.
+
+#### Declaring accepted media types
+
+RFC 10008 lets a QUERY route advertise the request media types it
+understands and enforce them.  Pass `accept_query=[...]` to `route()`:
+
+```python
+from blackbull import BlackBull, QUERY, UnprocessableQuery
+
+@app.route(path='/search', methods=[QUERY],
+           accept_query=['application/sql', 'text/plain'])
+async def search(body: bytes):
+    try:
+        plan = compile_query(body)
+    except UnknownField as e:
+        raise UnprocessableQuery(str(e))   # → 422
+    return run(plan)
+```
+
+With `accept_query` set, BlackBull:
+
+- emits an **`Accept-Query`** response header — an
+  [RFC 9651 Structured Field](structured-fields.md) list of those media
+  types (`application/sql, text/plain`) — on the route's responses, so a
+  client can discover what to send;
+- **enforces the request `Content-Type`** on QUERY requests: a missing
+  media type is answered **400**, an unaccepted one **415** (the 415 also
+  carries `Accept-Query` so the client can correct).  The media-type
+  match ignores parameters (`; charset=…`) and is case-insensitive.
+
+Raise **`UnprocessableQuery`** from the handler for **422** when the media
+type was accepted but the query itself is semantically invalid (an unknown
+field, a violated constraint). All three statuses flow through the normal
+[error-handling](error-handling.md) path, so custom error handlers apply.
+Enforcement targets the QUERY method; other methods registered on the same
+route still receive the `Accept-Query` header but are not Content-Type-gated.
+
+Two more RFC 10008 notes:
+
+- The response-cache rules (the cache key must incorporate the request
+  content) bind *caches*, not origin servers — BlackBull ships no
+  response cache, so nothing to configure.
+- OpenAPI 3.1 has no `query` operation, so QUERY routes are not emitted
+  in the [generated spec](openapi.md) (they are never faked as another
+  operation).
+
 ## Path parameters
 
 Use `{name}` segments in the path string.  Captured values are
