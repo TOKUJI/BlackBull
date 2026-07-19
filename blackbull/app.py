@@ -613,9 +613,13 @@ class BlackBull:
 
         try:
             # RFC 9110 §9.1 — methods are case-sensitive tokens.  Prefer the
-            # HTTPMethod enum for IANA-registered methods; for non-IANA methods
-            # (BREW, PROPFIND, WHEN, …) keep the raw str so the router can
-            # still match a registered route and return the correct Allow header.
+            # HTTPMethod enum when it has a member; for methods outside the
+            # enum — whether IANA-registered ones it hasn't caught up with
+            # (QUERY, RFC 10008; no member before 3.16) or extension tokens
+            # (BREW, PROPFIND, WHEN, …) — keep the raw str so the router can
+            # still match a registered route and return the correct Allow
+            # header.  StrEnum equality makes the two forms interchangeable
+            # as router keys.
             method = HTTPMethod(scope['method'])
         except ValueError:
             method = scope['method']

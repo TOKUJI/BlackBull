@@ -11,6 +11,9 @@ differences come from the framework, not the handler:
 * ``GET /``        — replies "ok" (text)
 * ``POST /echo``   — replies with the request body verbatim
 * ``GET /chunked`` — returns a streaming response (triggers chunked TE)
+* ``QUERY /query`` — replies with the request body verbatim (RFC 10008;
+  registered with QUERY only, so any other method on the path draws a 405
+  whose Allow header must advertise QUERY)
 """
 from __future__ import annotations
 
@@ -42,6 +45,13 @@ def _make_app() -> BlackBull:
 
     @app.route(path='/echo', methods=[HTTPMethod.GET, HTTPMethod.POST, HTTPMethod.PUT])
     async def echo(scope, receive, send):
+        body = await read_body(receive)
+        await send({'type': 'http.response.start', 'status': 200,
+                    'headers': [(b'content-type', b'application/octet-stream')]})
+        await send({'type': 'http.response.body', 'body': body})
+
+    @app.route(path='/query', methods=['QUERY'])
+    async def query(scope, receive, send):
         body = await read_body(receive)
         await send({'type': 'http.response.start', 'status': 200,
                     'headers': [(b'content-type', b'application/octet-stream')]})

@@ -836,11 +836,15 @@ class HTTP2Recipient(BaseRecipient):
         return n
 
     async def __call__(self) -> dict:
-        # Fast path: GET with END_STREAM on HEADERS and no body — synthesize the
-        # empty http.request event without allocating a queue.
-        if (self._end_of_stream_on_headers
-                and not self._initial_consumed
-                and self._queue is None):
+        # Fast path: END_STREAM on HEADERS and no body — synthesize the empty
+        # http.request event without allocating a queue.  Checked even when a
+        # queue exists: put_disconnect() may have raced ahead of the app's
+        # first read (connection closed right after the request), and the
+        # stream still ended cleanly at HEADERS — the complete (empty) body
+        # must be delivered before any disconnect event, otherwise a
+        # body-reading handler on a body-less request (QUERY, POST with
+        # END_STREAM on HEADERS) sees a spurious client disconnect.
+        if self._end_of_stream_on_headers and not self._initial_consumed:
             self._initial_consumed = True
             return {'type': ASGIEvent.HTTP_REQUEST, 'body': b'', 'more_body': False}
         event, credit = await self._ensure_queue().get()

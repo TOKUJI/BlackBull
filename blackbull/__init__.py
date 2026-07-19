@@ -10,6 +10,7 @@ Public API exports:
 - `serve`: synchronous entry point that runs any ASGI 3.0 callable (also used by the ``blackbull`` console script).
 - `Response`, `JSONResponse`, `RedirectResponse`, `StreamingResponse`, `EventSourceResponse`, `WebSocketResponse`: response helpers.
 - `RouteInfo`: immutable ``(method, path, name)`` snapshot returned by ``app.get_routes()``.
+- `QUERY`: the HTTP QUERY method (RFC 10008) as a plain string — ``http.HTTPMethod`` lacks the member until Python ≥3.16.
 - `Headers`: case-insensitive, ordered, multi-valued HTTP header store.
 - `Request`: opt-in context object for HTTP handlers (headers/cookies/client/``body()``/``json()``), injected by signature.
 - `Depends`: per-request provider injection for simplified handlers (async-generator providers get teardown after the response is sent).
@@ -45,7 +46,7 @@ except PackageNotFoundError:
 
 from .app import BlackBull, serve
 from .di import Depends
-from .router import RouteInfo, HTTPException
+from .router import RouteInfo, HTTPException, QUERY
 from .config import AppConfig
 from .headers import Headers
 from .request import Request, read_body, read_json, read_text, parse_cookies, ClientDisconnected

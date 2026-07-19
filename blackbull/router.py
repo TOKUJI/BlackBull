@@ -1021,6 +1021,25 @@ def _adapt_handler(fn, path: str, converters: dict | None = None):
 _HTTP_TOKEN_RE = re.compile(r"^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$")
 
 
+QUERY: str = 'QUERY'
+"""The HTTP QUERY method (RFC 10008) — safe, idempotent, cacheable, with a
+request body.
+
+``http.HTTPMethod`` has no ``QUERY`` member (RFC 10008 postdates the 3.15
+feature freeze; earliest stdlib arrival is 3.16), so BlackBull exports the
+method as a plain string usable anywhere a method is accepted::
+
+    from blackbull import QUERY
+
+    @app.route(path='/search', methods=[QUERY])
+    async def search(body: bytes): ...
+
+Because ``http.HTTPMethod`` is a ``StrEnum``, this string stays equal- and
+hash-compatible with a future ``HTTPMethod.QUERY`` member — routes
+registered with it need no migration.
+"""
+
+
 def _validate_method_token(method: str) -> None:
     if not _HTTP_TOKEN_RE.match(method):
         raise ValueError(
