@@ -3709,6 +3709,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#blackbull.router.QUERY" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        QUERY
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.router.ConfigurationError" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3903,6 +3914,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.router.Router.route_fn" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        route_fn
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.router.Router.url_path_for" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3926,6 +3948,28 @@
         
       </ul>
     </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.router.UnprocessableQuery" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        UnprocessableQuery
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.router.request_media_type" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        request_media_type
+      
+    </span>
+  </a>
   
 </li>
         
@@ -5010,6 +5054,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#blackbull.router.QUERY" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        QUERY
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.router.ConfigurationError" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5204,6 +5259,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.router.Router.route_fn" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        route_fn
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.router.Router.url_path_for" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5227,6 +5293,28 @@
         
       </ul>
     </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.router.UnprocessableQuery" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        UnprocessableQuery
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.router.request_media_type" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        request_media_type
+      
+    </span>
+  </a>
   
 </li>
         
@@ -5296,6 +5384,40 @@ import; this module re-exports it lazily through <code>__getattr__</code>.</p>
 
 
 
+
+<div class="doc doc-object doc-attribute">
+
+
+
+<h3 id="blackbull.router.QUERY" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">QUERY</span> <span class="o">=</span> <span class="s1">&#39;QUERY&#39;</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-module-attribute"><code>module-attribute</code></small>
+  </span>
+
+<a href="#blackbull.router.QUERY" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>The HTTP QUERY method (RFC 10008) — safe, idempotent, cacheable, with a
+request body.</p>
+<p><code>http.HTTPMethod</code> has no <code>QUERY</code> member (RFC 10008 postdates the 3.15
+feature freeze; earliest stdlib arrival is 3.16), so BlackBull exports the
+method as a plain string usable anywhere a method is accepted::</p>
+<pre><code>from blackbull import QUERY
+
+@app.route(path='/search', methods=[QUERY])
+async def search(body: bytes): ...
+</code></pre>
+<p>Because <code>http.HTTPMethod</code> is a <code>StrEnum</code>, this string stays equal- and
+hash-compatible with a future <code>HTTPMethod.QUERY</code> member — routes
+registered with it need no migration.</p>
+
+    </div>
+
+</div>
 
 
 
@@ -5882,7 +6004,7 @@ sendable (a Response, str/bytes, or JSON-able).</p>
 
 
 <h4 id="blackbull.router.Router.route" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">route</span><span class="p">(</span><span class="n">methods</span><span class="o">=</span><span class="p">[</span><span class="n">HTTPMethod</span><span class="o">.</span><span class="n">GET</span><span class="p">],</span> <span class="n">path</span><span class="o">=</span><span class="s1">&#39;/&#39;</span><span class="p">,</span> <span class="n">scheme</span><span class="o">=</span><span class="n">Scheme</span><span class="o">.</span><span class="n">http</span><span class="p">,</span> <span class="n">functions</span><span class="o">=</span><span class="p">[],</span> <span class="n">middlewares</span><span class="o">=</span><span class="p">[],</span> <span class="n">name</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
+            <code class="highlight language-python"><span class="n">route</span><span class="p">(</span><span class="n">methods</span><span class="o">=</span><span class="p">[</span><span class="n">HTTPMethod</span><span class="o">.</span><span class="n">GET</span><span class="p">],</span> <span class="n">path</span><span class="o">=</span><span class="s1">&#39;/&#39;</span><span class="p">,</span> <span class="n">scheme</span><span class="o">=</span><span class="n">Scheme</span><span class="o">.</span><span class="n">http</span><span class="p">,</span> <span class="n">functions</span><span class="o">=</span><span class="p">[],</span> <span class="n">middlewares</span><span class="o">=</span><span class="p">[],</span> <span class="n">name</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">accept_query</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
 
 <a href="#blackbull.router.Router.route" class="headerlink" title="Permanent link">&para;</a></h4>
 
@@ -5898,6 +6020,35 @@ sendable (a Response, str/bytes, or JSON-able).</p>
 3. <code>middlewares=[...]</code> — returns a decorator; the decorated handler is
    appended to the middleware list before the chain is registered.</p>
 <p><code>name</code> registers the route for use with <code>url_path_for()</code>.</p>
+<p><code>accept_query</code> (RFC 10008) declares the request <strong>media types</strong> the
+route accepts — the value of the <code>Accept-Query</code> response header, and
+<strong>not</strong> a switch for the QUERY <em>method</em> (methods are accepted by being
+listed in <code>methods</code>).  It drives that header plus Content-Type
+enforcement (400 missing / 415 unsupported) on QUERY requests — see
+<code>BlackBull.route</code>.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.router.Router.route_fn" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">route_fn</span><span class="p">(</span><span class="n">methods</span><span class="o">=</span><span class="p">[</span><span class="n">HTTPMethod</span><span class="o">.</span><span class="n">GET</span><span class="p">],</span> <span class="n">path</span><span class="o">=</span><span class="s1">&#39;/&#39;</span><span class="p">,</span> <span class="n">scheme</span><span class="o">=</span><span class="n">Scheme</span><span class="o">.</span><span class="n">http</span><span class="p">,</span> <span class="n">name</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">accept_query</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
+
+<a href="#blackbull.router.Router.route_fn" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Return a decorator that registers the decorated handler.</p>
+<p><code>accept_query</code> (RFC 10008) is the list of request <strong>media types</strong> the
+route accepts — the <code>Accept-Query</code> header value driving Content-Type
+enforcement on QUERY requests.  It is <strong>not</strong> a switch for the QUERY
+<em>method</em> (methods are accepted by <code>methods</code>); it installs the route
+hooks in :func:<code>_accept_query_hooks</code>.  See <code>BlackBull.route</code>.</p>
 
 
     </div>
@@ -5961,6 +6112,82 @@ surface before the first request is served, not after.</p>
 
 </div>
 
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="blackbull.router.UnprocessableQuery" class="doc doc-heading">
+            <code>UnprocessableQuery</code>
+
+
+<a href="#blackbull.router.UnprocessableQuery" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><a class="autorefs autorefs-internal" title="HTTPException (blackbull.router.HTTPException)" href="#blackbull.router.HTTPException">HTTPException</a></code></p>
+
+
+
+        <p>RFC 10008 §2.2 — a well-formed QUERY whose contents cannot be processed.</p>
+<p>Raise this from a QUERY handler when the request media type was accepted
+(so 400/415 do not apply) but the query itself is semantically invalid —
+references an unknown field, violates a constraint, etc.  The dispatcher
+answers <code>422 Unprocessable Content</code> and, being an :class:<code>HTTPException</code>
+subclass, it flows through the normal error-router path and quiet 4xx
+logging.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="blackbull.router.request_media_type" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">request_media_type</span><span class="p">(</span><span class="n">scope</span><span class="p">)</span></code>
+
+<a href="#blackbull.router.request_media_type" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Return the request's media type (<code>Content-Type</code> sans parameters),
+lowercased; <code>''</code> when no Content-Type is present.</p>
+<p><code>scope['headers']</code> is a :class:<code>~blackbull.headers.Headers</code> inside
+<code>_dispatch</code> (normalised at the app entry point), so a plain <code>.get</code>
+suffices.</p>
+
+
+    </div>
+
+</div>
 
 
 

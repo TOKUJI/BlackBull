@@ -1889,6 +1889,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="RouteGroup">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.app.RouteGroup.route" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        route
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
         
           <li class="md-nav__item">
@@ -5293,6 +5310,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="RouteGroup">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.app.RouteGroup.route" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        route
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
         
           <li class="md-nav__item">
@@ -6264,7 +6298,7 @@ certificate; startup fails fast otherwise (Sprint 75).</p>
 
 
 <h4 id="blackbull.app.BlackBull.route" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">route</span><span class="p">(</span><span class="n">methods</span><span class="o">=</span><span class="p">[</span><span class="n">HTTPMethod</span><span class="o">.</span><span class="n">GET</span><span class="p">],</span> <span class="n">path</span><span class="o">=</span><span class="s1">&#39;/&#39;</span><span class="p">,</span> <span class="n">scheme</span><span class="o">=</span><span class="n">Scheme</span><span class="o">.</span><span class="n">http</span><span class="p">,</span> <span class="n">functions</span><span class="o">=</span><span class="p">[],</span> <span class="n">middlewares</span><span class="o">=</span><span class="p">[],</span> <span class="n">name</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
+            <code class="highlight language-python"><span class="n">route</span><span class="p">(</span><span class="n">methods</span><span class="o">=</span><span class="p">[</span><span class="n">HTTPMethod</span><span class="o">.</span><span class="n">GET</span><span class="p">],</span> <span class="n">path</span><span class="o">=</span><span class="s1">&#39;/&#39;</span><span class="p">,</span> <span class="n">scheme</span><span class="o">=</span><span class="n">Scheme</span><span class="o">.</span><span class="n">http</span><span class="p">,</span> <span class="n">functions</span><span class="o">=</span><span class="p">[],</span> <span class="n">middlewares</span><span class="o">=</span><span class="p">[],</span> <span class="n">name</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">accept_query</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
 
 <a href="#blackbull.app.BlackBull.route" class="headerlink" title="Permanent link">&para;</a></h4>
 
@@ -6272,6 +6306,19 @@ certificate; startup fails fast otherwise (Sprint 75).</p>
     <div class="doc doc-contents ">
 
         <p>Register a route handler, optionally wrapping it in middlewares.</p>
+<p><code>accept_query</code> (RFC 10008) names the request <strong>media types</strong> the
+route accepts — it is the value of the <code>Accept-Query</code> response
+header, <strong>not</strong> a switch that enables the QUERY method.  (A method is
+accepted purely by listing it in <code>methods</code>; QUERY is no different
+from GET there.)  It is meaningful for the QUERY method, which carries
+a request body.  When set, the route's responses carry an
+<code>Accept-Query</code> header (an RFC 9651 Structured Field list of those
+media types), and QUERY requests are Content-Type-enforced: a missing
+media type is answered <code>400</code>, an unaccepted one <code>415</code> (with the
+<code>Accept-Query</code> header so the client can correct).  A handler may raise
+:class:<code>~blackbull.UnprocessableQuery</code> for <code>422</code> on a well-formed but
+unprocessable query.  Enforcement applies only to QUERY requests; other
+methods on the same route still receive the <code>Accept-Query</code> header.</p>
 
 
     </div>
@@ -6441,6 +6488,29 @@ any per-route middlewares.</p>
 
 
 
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.app.RouteGroup.route" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">route</span><span class="p">(</span><span class="n">methods</span><span class="o">=</span><span class="p">[</span><span class="n">HTTPMethod</span><span class="o">.</span><span class="n">GET</span><span class="p">],</span> <span class="n">path</span><span class="o">=</span><span class="s1">&#39;/&#39;</span><span class="p">,</span> <span class="n">scheme</span><span class="o">=</span><span class="n">Scheme</span><span class="o">.</span><span class="n">http</span><span class="p">,</span> <span class="n">middlewares</span><span class="o">=</span><span class="p">[],</span> <span class="n">name</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">accept_query</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
+
+<a href="#blackbull.app.RouteGroup.route" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Register a route on this group, prepending the group middlewares.</p>
+<p>Same parameters as :meth:<code>BlackBull.route</code>.  <code>accept_query</code> is the
+RFC 10008 list of request <strong>media types</strong> the route accepts (the
+<code>Accept-Query</code> response header + Content-Type enforcement) — it is a
+content-negotiation policy, <strong>not</strong> a switch for the QUERY <em>method</em>
+(a method is accepted purely by listing it in <code>methods</code>).</p>
+
+
+    </div>
+
+</div>
 
 
 

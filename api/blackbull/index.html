@@ -4826,6 +4826,8 @@
 <li><code>serve</code>: synchronous entry point that runs any ASGI 3.0 callable (also used by the <code>blackbull</code> console script).</li>
 <li><code>Response</code>, <code>JSONResponse</code>, <code>RedirectResponse</code>, <code>StreamingResponse</code>, <code>EventSourceResponse</code>, <code>WebSocketResponse</code>: response helpers.</li>
 <li><code>RouteInfo</code>: immutable <code>(method, path, name)</code> snapshot returned by <code>app.get_routes()</code>.</li>
+<li><code>QUERY</code>: the HTTP QUERY method (RFC 10008) as a plain string — <code>http.HTTPMethod</code> lacks the member until Python ≥3.16.</li>
+<li><code>UnprocessableQuery</code>: raise from a QUERY handler for <code>422</code> when the (accepted) request media type carries a semantically unprocessable query (RFC 10008).</li>
 <li><code>Headers</code>: case-insensitive, ordered, multi-valued HTTP header store.</li>
 <li><code>Request</code>: opt-in context object for HTTP handlers (headers/cookies/client/<code>body()</code>/<code>json()</code>), injected by signature.</li>
 <li><code>Depends</code>: per-request provider injection for simplified handlers (async-generator providers get teardown after the response is sent).</li>

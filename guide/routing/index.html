@@ -566,6 +566,40 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="HTTP routes">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-query-method-rfc-10008" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The QUERY method (RFC 10008)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="The QUERY method (RFC 10008)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#declaring-accepted-media-types" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Declaring accepted media types
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -4886,6 +4920,40 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="HTTP routes">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-query-method-rfc-10008" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The QUERY method (RFC 10008)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="The QUERY method (RFC 10008)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#declaring-accepted-media-types" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Declaring accepted media types
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -5042,6 +5110,70 @@ multiple methods on the same handler:</p>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">healthz</span><span class="p">(</span><span class="n">scope</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
     <span class="k">await</span> <span class="n">send</span><span class="p">(</span><span class="n">Response</span><span class="p">(</span><span class="sa">b</span><span class="s1">&#39;ok&#39;</span><span class="p">))</span>
 </code></pre></div>
+<p>Any valid method token is accepted, as a string or an <code>HTTPMethod</code>
+member — extension methods (<code>PROPFIND</code>, vendor tokens) route the same
+way as the standard ones, and appear in the 405 <code>Allow</code> header when
+another method hits the path.</p>
+<h3 id="the-query-method-rfc-10008">The QUERY method (RFC 10008)<a class="headerlink" href="#the-query-method-rfc-10008" title="Permanent link">&para;</a></h3>
+<p>QUERY — the first new standard HTTP method since PATCH — is a <strong>safe,
+idempotent, cacheable</strong> request that carries a <strong>request body</strong>, closing
+the "GET with a body" gap for complex read-only queries.  The stdlib
+<code>http.HTTPMethod</code> enum has no <code>QUERY</code> member until Python 3.16, so
+BlackBull exports the method as a plain-string constant:</p>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">blackbull</span><span class="w"> </span><span class="kn">import</span> <span class="n">BlackBull</span><span class="p">,</span> <span class="n">QUERY</span>
+
+<span class="n">app</span> <span class="o">=</span> <span class="n">BlackBull</span><span class="p">()</span>
+
+<span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">&#39;/search&#39;</span><span class="p">,</span> <span class="n">methods</span><span class="o">=</span><span class="p">[</span><span class="n">QUERY</span><span class="p">])</span>
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">search</span><span class="p">(</span><span class="n">body</span><span class="p">:</span> <span class="nb">bytes</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">run_query</span><span class="p">(</span><span class="n">body</span><span class="p">)</span>          <span class="c1"># the whole query rides in the body</span>
+</code></pre></div>
+<p>Body access works exactly as for POST — <code>body: bytes</code>, <code>Request.json()</code>,
+or draining <code>receive</code> yourself.  By registering a QUERY handler you sign
+up for the method's contract: the handler <strong>must not</strong> have side effects
+the client could regret repeating (safe), and repeating the same request
+must give the same result (idempotent) — caches and retrying clients
+rely on it.</p>
+<h4 id="declaring-accepted-media-types">Declaring accepted media types<a class="headerlink" href="#declaring-accepted-media-types" title="Permanent link">&para;</a></h4>
+<p>RFC 10008 lets a QUERY route advertise the request media types it
+understands and enforce them.  Pass <code>accept_query=[...]</code> to <code>route()</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">blackbull</span><span class="w"> </span><span class="kn">import</span> <span class="n">BlackBull</span><span class="p">,</span> <span class="n">QUERY</span><span class="p">,</span> <span class="n">UnprocessableQuery</span>
+
+<span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">&#39;/search&#39;</span><span class="p">,</span> <span class="n">methods</span><span class="o">=</span><span class="p">[</span><span class="n">QUERY</span><span class="p">],</span>
+           <span class="n">accept_query</span><span class="o">=</span><span class="p">[</span><span class="s1">&#39;application/sql&#39;</span><span class="p">,</span> <span class="s1">&#39;text/plain&#39;</span><span class="p">])</span>
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">search</span><span class="p">(</span><span class="n">body</span><span class="p">:</span> <span class="nb">bytes</span><span class="p">):</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">plan</span> <span class="o">=</span> <span class="n">compile_query</span><span class="p">(</span><span class="n">body</span><span class="p">)</span>
+    <span class="k">except</span> <span class="n">UnknownField</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="n">UnprocessableQuery</span><span class="p">(</span><span class="nb">str</span><span class="p">(</span><span class="n">e</span><span class="p">))</span>   <span class="c1"># → 422</span>
+    <span class="k">return</span> <span class="n">run</span><span class="p">(</span><span class="n">plan</span><span class="p">)</span>
+</code></pre></div>
+<p>With <code>accept_query</code> set, BlackBull:</p>
+<ul>
+<li>emits an <strong><code>Accept-Query</code></strong> response header — an
+  <a href="../structured-fields/">RFC 9651 Structured Field</a> list of those media
+  types (<code>application/sql, text/plain</code>) — on the route's responses, so a
+  client can discover what to send;</li>
+<li><strong>enforces the request <code>Content-Type</code></strong> on QUERY requests: a missing
+  media type is answered <strong>400</strong>, an unaccepted one <strong>415</strong> (the 415 also
+  carries <code>Accept-Query</code> so the client can correct).  The media-type
+  match ignores parameters (<code>; charset=…</code>) and is case-insensitive.</li>
+</ul>
+<p>Raise <strong><code>UnprocessableQuery</code></strong> from the handler for <strong>422</strong> when the media
+type was accepted but the query itself is semantically invalid (an unknown
+field, a violated constraint). All three statuses flow through the normal
+<a href="../error-handling/">error-handling</a> path, so custom error handlers apply.
+Enforcement targets the QUERY method; other methods registered on the same
+route still receive the <code>Accept-Query</code> header but are not Content-Type-gated.</p>
+<p>Two more RFC 10008 notes:</p>
+<ul>
+<li>The response-cache rules (the cache key must incorporate the request
+  content) bind <em>caches</em>, not origin servers — BlackBull ships no
+  response cache, so nothing to configure.</li>
+<li>OpenAPI 3.1 has no <code>query</code> operation, so QUERY routes are not emitted
+  in the <a href="../openapi/">generated spec</a> (they are never faked as another
+  operation).</li>
+</ul>
 <h2 id="path-parameters">Path parameters<a class="headerlink" href="#path-parameters" title="Permanent link">&para;</a></h2>
 <p>Use <code>{name}</code> segments in the path string.  Captured values are
 available in <code>scope['path_params']</code> (and, in the simplified form,
