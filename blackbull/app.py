@@ -29,7 +29,7 @@ import logging
 from .event import Event, EventDispatcher, EventHandler
 from .headers import Headers
 from .utils import Scheme, is_client_error, is_server_error
-from .router import Router, RouteInfo, ErrorRouter, MethodNotApplicable, PathNotRegistered, ConfigurationError, HTTPException, has_middleware_param
+from .router import Router, RouteInfo, ErrorRouter, MethodNotApplicable, PathNotRegistered, ConfigurationError, HTTPException, has_middleware_param, request_media_type
 from .request import ClientDisconnected
 from .config import AppConfig
 logger = logging.getLogger(__name__)
@@ -73,6 +73,25 @@ def _wrap_send(raw_send):
             # ASGI dict (the common path) or any other shape — passed through
             # so the underlying sender's type checking decides what to do.
             await raw_send(event)
+
+    return _send
+
+
+def _accept_query_send(raw_send, header_value: bytes):
+    """Wrap *raw_send* to add the RFC 10008 ``Accept-Query`` response header.
+
+    Installed **below** :func:`_wrap_send`, so it only ever observes plain
+    ASGI dicts — convenience shapes (``Response``, 3-arg) have already been
+    normalised by the time an event reaches here.  The header is appended to
+    the ``http.response.start`` event (success and error responses alike);
+    every other event passes straight through.
+    """
+    async def _send(event):
+        if isinstance(event, dict) and event.get('type') == 'http.response.start':
+            headers: list = list(event.get('headers') or [])
+            headers.append((b'accept-query', header_value))
+            event = {**event, 'headers': headers}
+        await raw_send(event)
 
     return _send
 
@@ -195,13 +214,15 @@ class RouteGroup:
 
     def route(self, methods: str | HTTPMethod | Iterable[str | HTTPMethod] = [HTTPMethod.GET],
               path: str | re.Pattern = '/', scheme: Scheme | Iterable[Scheme] = Scheme.http,
-              middlewares: list = [], name: str | None = None):
+              middlewares: list = [], name: str | None = None,
+              accept_query: Iterable[str] | None = None):
         return self._app.route(
             methods=methods,
             path=path,
             scheme=scheme,
             middlewares=self._group_mw + list(middlewares),
             name=name,
+            accept_query=accept_query,
         )
 
 
@@ -609,6 +630,9 @@ class BlackBull:
         # at the handler boundary, after the WebSocket branch — so middleware
         # (which sees send before _dispatch is entered) always receives plain
         # ASGI dicts.  See _wrap_send for why outward placement is a bug.
+        # ``raw_send`` is retained so an RFC 10008 ``Accept-Query`` route can
+        # re-wrap with the header injector *below* _wrap_send (dict-only).
+        raw_send = send
         send = _wrap_send(send)
 
         try:
@@ -647,6 +671,32 @@ class BlackBull:
             if handler is not None:
                 await handler(scope, receive, send)
             return
+
+        # RFC 10008 — a route declared with ``accept_query=[...]`` advertises
+        # the ``Accept-Query`` header on its responses and enforces the QUERY
+        # request Content-Type.  The header injector is installed below
+        # _wrap_send (it sees only ASGI dicts); enforcement short-circuits to
+        # the error router (like 405/404) so 400/415 skip the handler and the
+        # lifecycle events, exactly as an unroutable request does.
+        accept_query = getattr(function, '_bb_accept_query', None)
+        if accept_query is not None:
+            scope.setdefault('state', {})['accept_query'] = accept_query.header
+            send = _wrap_send(_accept_query_send(raw_send, accept_query.header))
+            if scope['method'] == 'QUERY':
+                media = request_media_type(scope)
+                err_status = None
+                if not media:
+                    err_status = HTTPStatus.BAD_REQUEST
+                elif media not in accept_query.accepted:
+                    err_status = HTTPStatus.UNSUPPORTED_MEDIA_TYPE
+                if err_status is not None:
+                    self._logger.info('%s on QUERY %s: content-type %r',
+                                      int(err_status), path, media or None)
+                    scope['state']['error_status'] = err_status
+                    handler = self._error_router[err_status]
+                    if handler is not None:
+                        await handler(scope, receive, send)
+                    return
 
         self._logger.debug((self, function))
         exc_caught: Exception | None = None
@@ -792,8 +842,20 @@ class BlackBull:
     def route(self, methods: str | HTTPMethod | Iterable[str | HTTPMethod] = [HTTPMethod.GET],
               path: str | re.Pattern = '/', scheme: Scheme | Iterable[Scheme] = Scheme.http,
               functions: list = [], middlewares: list = [],
-              name: str | None = None):
-        """Register a route handler, optionally wrapping it in middlewares."""
+              name: str | None = None,
+              accept_query: Iterable[str] | None = None):
+        """Register a route handler, optionally wrapping it in middlewares.
+
+        ``accept_query`` (RFC 10008) — a list of request media types the route
+        accepts for the QUERY method.  When set, QUERY-route responses carry an
+        ``Accept-Query`` header (an RFC 9651 Structured Field list of those
+        media types), and QUERY requests are Content-Type-enforced: a missing
+        media type is answered ``400``, an unaccepted one ``415`` (with the
+        ``Accept-Query`` header so the client can correct).  A handler may raise
+        :class:`~blackbull.UnprocessableQuery` for ``422`` on a well-formed but
+        unprocessable query.  Enforcement applies only to QUERY requests; other
+        methods on the same route still receive the ``Accept-Query`` header.
+        """
         return self._router.route(
             methods=methods,
             path=path,
@@ -801,6 +863,7 @@ class BlackBull:
             functions=functions,
             middlewares=middlewares,
             name=name,
+            accept_query=accept_query,
             )
 
     def group(self, middlewares=[]) -> 'RouteGroup':

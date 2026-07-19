@@ -333,6 +333,21 @@ class HTTPException(Exception):
         self.detail = detail
 
 
+class UnprocessableQuery(HTTPException):
+    """RFC 10008 §2.2 — a well-formed QUERY whose contents cannot be processed.
+
+    Raise this from a QUERY handler when the request media type was accepted
+    (so 400/415 do not apply) but the query itself is semantically invalid —
+    references an unknown field, violates a constraint, etc.  The dispatcher
+    answers ``422 Unprocessable Content`` and, being an :class:`HTTPException`
+    subclass, it flows through the normal error-router path and quiet 4xx
+    logging.
+    """
+
+    def __init__(self, detail: str = ''):
+        super().__init__(HTTPStatus.UNPROCESSABLE_ENTITY, detail)
+
+
 @dataclass
 class _RouteInfo:
     template: str
@@ -1059,6 +1074,49 @@ def _to_tuple(value: Any) -> tuple:
     return (value,)
 
 
+class _AcceptQuery(NamedTuple):
+    """Precomputed RFC 10008 ``accept_query`` plan attached to a handler.
+
+    ``header`` is the serialised ``Accept-Query`` field value (an RFC 9651
+    Structured Field list of media-type tokens, computed once at
+    registration); ``accepted`` is the frozenset of normalised (lowercased)
+    media types used for the O(1) Content-Type membership check.
+    """
+    header: bytes
+    accepted: frozenset
+
+
+def _make_accept_query(media_types: Iterable[str]) -> _AcceptQuery:
+    """Build the :class:`_AcceptQuery` plan from declared media types.
+
+    Serialising through :func:`serialize_list` validates each media type as
+    an RFC 9651 token at registration time — an invalid entry raises
+    ``ValueError`` up front rather than emitting a malformed header later.
+    """
+    from .protocol.structured_fields import Token, serialize_list  # noqa: PLC0415
+
+    types = list(media_types)
+    if not types:
+        raise ValueError('accept_query must list at least one media type')
+    header = serialize_list([(Token(mt), {}) for mt in types])
+    accepted = frozenset(mt.strip().lower() for mt in types)
+    return _AcceptQuery(header=header, accepted=accepted)
+
+
+def request_media_type(scope: dict) -> str:
+    """Return the request's media type (``Content-Type`` sans parameters),
+    lowercased; ``''`` when no Content-Type is present.
+
+    ``scope['headers']`` is a :class:`~blackbull.headers.Headers` inside
+    ``_dispatch`` (normalised at the app entry point), so a plain ``.get``
+    suffices.
+    """
+    ct = scope['headers'].get(b'content-type', b'')
+    if not ct:
+        return ''
+    return ct.split(b';', 1)[0].strip().lower().decode('latin-1')
+
+
 class _LookupCache:
     """Bounded LRU for resolved route lookups.
 
@@ -1292,6 +1350,11 @@ class Router:
                                   _fn=_fn, _params=_params):
                     scope.setdefault('path_params', {}).update(_params)
                     return await _fn(scope, receive, send)
+                # Preserve the RFC 10008 accept_query plan across the
+                # path-param wrapper so _dispatch still finds it.
+                _aq = getattr(_fn, '_bb_accept_query', None)
+                if _aq is not None:
+                    _inject._bb_accept_query = _aq
                 return _inject
             return h
 
@@ -1319,6 +1382,9 @@ class Router:
                                       _fn=_fn, _params=_params):
                         scope.setdefault('path_params', {}).update(_params)
                         return await _fn(scope, receive, send)
+                    _aq = getattr(_fn, '_bb_accept_query', None)
+                    if _aq is not None:
+                        _inject._bb_accept_query = _aq
                     return _inject
                 return fn
 
@@ -1382,13 +1448,15 @@ class Router:
                  methods: str | HTTPMethod | Iterable[str | HTTPMethod] = [HTTPMethod.GET],
                  path: str | re.Pattern = '/',
                  scheme: Scheme | Iterable[Scheme] = Scheme.http,
-                 name: str | None = None):
+                 name: str | None = None,
+                 accept_query: Iterable[str] | None = None):
 
         logger.debug('Router.route_fn() is called.')
         methods = _to_tuple(methods)
         for m in methods:
             if isinstance(m, str):
                 _validate_method_token(m)
+        aq = _make_accept_query(accept_query) if accept_query is not None else None
 
         def register(fn):
             logger.debug(f'Router.route_fn.register() is called. {fn}')
@@ -1396,6 +1464,9 @@ class Router:
             original = fn
             if _is_simplified_handler(fn):
                 fn = _adapt_handler(fn, path, self._converters)
+
+            if aq is not None:
+                fn._bb_accept_query = aq
 
             logger.debug((path, methods, scheme))
             self[(path, methods, scheme)] = fn
@@ -1407,7 +1478,8 @@ class Router:
         return register
 
     def _register_chain(self, functions, path, methods, scheme,
-                        name: str | None = None, original_handler=None):
+                        name: str | None = None, original_handler=None,
+                        accept_query: Iterable[str] | None = None):
         """Build a middleware chain from *functions* and register it."""
         if not isinstance(functions, Iterable):
             raise TypeError(f'{functions} is not iterable.')
@@ -1432,6 +1504,9 @@ class Router:
         _ic = inner_chain
         async def _chain_wrapper(scope, receive, send):
             return await _ic(scope, receive, send)
+
+        if accept_query is not None:
+            _chain_wrapper._bb_accept_query = _make_accept_query(accept_query)
 
         self[(path, methods, scheme)] = _chain_wrapper
         self._record_route(path, original_handler or fns[-1], name,
@@ -1583,7 +1658,8 @@ class Router:
     def route(self, methods: str | HTTPMethod | Iterable[str | HTTPMethod] = [HTTPMethod.GET],
               path: str | re.Pattern = '/', scheme: Scheme | Iterable[Scheme] = Scheme.http,
               functions: list = [], middlewares: list = [],
-              name: str | None = None):
+              name: str | None = None,
+              accept_query: Iterable[str] | None = None):
         """Register a function or middleware chain in the routing table.
 
         Three calling conventions:
@@ -1595,6 +1671,11 @@ class Router:
            appended to the middleware list before the chain is registered.
 
         ``name`` registers the route for use with ``url_path_for()``.
+
+        ``accept_query`` (RFC 10008) declares the request media types a QUERY
+        route accepts.  It drives the ``Accept-Query`` response header and
+        Content-Type enforcement (400 missing / 415 unsupported) — see
+        ``BlackBull.route``.
         """
         logger.debug('Router.route() is called. functions=%r middlewares=%r', functions, middlewares)
 
@@ -1608,18 +1689,21 @@ class Router:
             if _is_simplified_handler(fns[-1]):
                 fns[-1] = _adapt_handler(fns[-1], path, self._converters)
             self._register_chain(fns, path, methods, scheme,
-                                 name=name, original_handler=original)
+                                 name=name, original_handler=original,
+                                 accept_query=accept_query)
             return lambda fn: fn
 
         if middlewares:
             def decorator(fn):
                 adapted = _adapt_handler(fn, path, self._converters) if _is_simplified_handler(fn) else fn
                 self._register_chain(list(middlewares) + [adapted], path, methods, scheme,
-                                     name=name, original_handler=fn)
+                                     name=name, original_handler=fn,
+                                     accept_query=accept_query)
                 return fn
             return decorator
 
-        return self.route_fn(methods, path, scheme, name=name)
+        return self.route_fn(methods, path, scheme, name=name,
+                             accept_query=accept_query)
 
 
 class ErrorRouter:

@@ -60,7 +60,43 @@ the client could regret repeating (safe), and repeating the same request
 must give the same result (idempotent) — caches and retrying clients
 rely on it.
 
-Two RFC 10008 notes:
+#### Declaring accepted media types
+
+RFC 10008 lets a QUERY route advertise the request media types it
+understands and enforce them.  Pass `accept_query=[...]` to `route()`:
+
+```python
+from blackbull import BlackBull, QUERY, UnprocessableQuery
+
+@app.route(path='/search', methods=[QUERY],
+           accept_query=['application/sql', 'text/plain'])
+async def search(body: bytes):
+    try:
+        plan = compile_query(body)
+    except UnknownField as e:
+        raise UnprocessableQuery(str(e))   # → 422
+    return run(plan)
+```
+
+With `accept_query` set, BlackBull:
+
+- emits an **`Accept-Query`** response header — an
+  [RFC 9651 Structured Field](structured-fields.md) list of those media
+  types (`application/sql, text/plain`) — on the route's responses, so a
+  client can discover what to send;
+- **enforces the request `Content-Type`** on QUERY requests: a missing
+  media type is answered **400**, an unaccepted one **415** (the 415 also
+  carries `Accept-Query` so the client can correct).  The media-type
+  match ignores parameters (`; charset=…`) and is case-insensitive.
+
+Raise **`UnprocessableQuery`** from the handler for **422** when the media
+type was accepted but the query itself is semantically invalid (an unknown
+field, a violated constraint). All three statuses flow through the normal
+[error-handling](error-handling.md) path, so custom error handlers apply.
+Enforcement targets the QUERY method; other methods registered on the same
+route still receive the `Accept-Query` header but are not Content-Type-gated.
+
+Two more RFC 10008 notes:
 
 - The response-cache rules (the cache key must incorporate the request
   content) bind *caches*, not origin servers — BlackBull ships no

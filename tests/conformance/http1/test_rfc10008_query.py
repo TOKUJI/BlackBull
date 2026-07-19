@@ -78,3 +78,38 @@ class TestQueryIn405Allow:
         allow = r.header(b'allow') or b''
         tokens = {t.strip() for t in allow.split(b',')}
         assert b'QUERY' not in tokens
+
+
+@pytest.mark.integration
+class TestAcceptQueryOnWire:
+    """RFC 10008 §2.2/§3 — Accept-Query header + Content-Type enforcement
+    on a live QUERY route declared with ``accept_query=[...]``."""
+
+    def test_accept_query_header_on_success(self, h1_app):
+        r = send_raw('127.0.0.1', h1_app.port,
+                     b'QUERY /query-typed HTTP/1.1\r\n'
+                     b'Host: localhost\r\n'
+                     b'Content-Type: application/sql\r\n'
+                     b'Content-Length: 8\r\n\r\n'
+                     b'select *')
+        assert r.status == 200
+        assert r.body == b'select *'
+        assert r.header(b'accept-query') == b'application/sql, text/plain'
+
+    def test_missing_content_type_is_400(self, h1_app):
+        r = send_raw('127.0.0.1', h1_app.port,
+                     b'QUERY /query-typed HTTP/1.1\r\n'
+                     b'Host: localhost\r\n'
+                     b'Content-Length: 2\r\n\r\n'
+                     b'{}')
+        assert r.status == 400
+
+    def test_unsupported_media_type_is_415_with_accept_query(self, h1_app):
+        r = send_raw('127.0.0.1', h1_app.port,
+                     b'QUERY /query-typed HTTP/1.1\r\n'
+                     b'Host: localhost\r\n'
+                     b'Content-Type: application/json\r\n'
+                     b'Content-Length: 2\r\n\r\n'
+                     b'{}')
+        assert r.status == 415
+        assert r.header(b'accept-query') == b'application/sql, text/plain'

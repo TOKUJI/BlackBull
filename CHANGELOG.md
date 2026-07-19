@@ -33,6 +33,18 @@ so the editable install's metadata catches up.
 
 ### Added
 
+- **QUERY normative response semantics (RFC 10008, Sprint 78 P2).** New
+  `accept_query=[...]` route option declaring the request media types a
+  QUERY route accepts. It drives an **`Accept-Query`** response header (an
+  RFC 9651 Structured Field list, serialized once at registration) on the
+  route's responses, and **Content-Type enforcement** on QUERY requests:
+  **400** when the media type is missing, **415** when unaccepted (the 415
+  carries `Accept-Query` so the client can correct). Media-type matching
+  ignores parameters and is case-insensitive. New `blackbull.UnprocessableQuery`
+  exception (an `HTTPException` subclass) for handlers to raise → **422**.
+  All three statuses flow through the normal error-router path; enforcement
+  targets QUERY only, while other methods on the route still receive the
+  header. Guide section extended; 16 new tests (unit + HTTP/1.1 wire).
 - **HTTP QUERY method support (RFC 10008, Sprint 78 P1).** First-mover
   support for the first new standard HTTP method since PATCH — safe,
   idempotent, cacheable, with a request body.  New `blackbull.QUERY`

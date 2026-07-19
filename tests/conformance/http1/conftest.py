@@ -57,6 +57,11 @@ def _make_app() -> BlackBull:
                     'headers': [(b'content-type', b'application/octet-stream')]})
         await send({'type': 'http.response.body', 'body': body})
 
+    @app.route(path='/query-typed', methods=['QUERY'],
+               accept_query=['application/sql', 'text/plain'])
+    async def query_typed(body: bytes):
+        return body
+
     @app.route(path='/chunked')
     async def chunked(scope, receive, send):
         async def events():
