@@ -31,6 +31,8 @@ so the editable install's metadata catches up.
 
 ## [Unreleased]
 
+## [0.59.0] — 2026-07-19
+
 ### Added
 
 - **QUERY normative response semantics (RFC 10008, Sprint 78 P2).** New
@@ -71,6 +73,18 @@ so the editable install's metadata catches up.
   `http.request`.  The synthetic event is now delivered first; the
   disconnect follows it.  Invisible for GET handlers, which never read
   the body.
+
+### Internal
+
+- **Generic per-route hooks replace the QUERY dispatch special-case.**
+  `accept_query` enforcement is now implemented through two
+  method-agnostic handler hooks — `_bb_response_headers` (extra headers
+  injected on every response, success and central error alike) and
+  `_bb_request_guard` (a pre-dispatch callable that may reject with an
+  `HTTPException`) — which `BlackBull._dispatch` applies uniformly. The
+  dispatcher carries no method-specific branch; all QUERY-specific logic
+  lives in the guard built at registration. Reusable by any future
+  per-route response-header or request-guard feature. No behaviour change.
 
 ## [0.58.0] — 2026-07-19
 
