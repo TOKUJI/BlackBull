@@ -81,6 +81,22 @@ the exact "with N slow connections, first new connection
 accepted within M ms" curve — only the qualitative claim "RFC
 9110 §15.5.9 compliant 408 plus the three timeouts work".
 
+### HTTP QUERY (RFC 10008) — two deliberate edges
+
+QUERY routing, `Accept-Query` content negotiation, and Content-Type
+enforcement ship (see the [routing guide](docs/guide/routing.md)), but
+two edges are out of scope for now:
+
+- **OpenAPI**: QUERY routes are excluded from the generated document.
+  OpenAPI 3.1 has no `query` operation; 3.2 adds one — revisit when the
+  emitter moves to 3.2.  QUERY is never faked as another operation.
+- **`Accept-Query` on OPTIONS**: RFC 10008 mentions emitting the header
+  on OPTIONS for a path; BlackBull only auto-handles OPTIONS when a route
+  is registered for it, so the header is emitted on the QUERY route's own
+  responses (including its 415), not synthesised on an unrouted OPTIONS.
+
+No browser implements QUERY; server + client + tests are the whole story.
+
 ---
 
 ## RFC-defensible differential-corpus divergences

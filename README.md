@@ -71,7 +71,10 @@ Hello, world!
   message-passing concurrency runs your HTTP routes, the MQTT broker,
   and the gRPC handlers — one model across every protocol.
 - **RFC-grade correctness.** Passes the same external conformance
-  suites used to validate nginx and Envoy (`h2spec`, Autobahn).
+  suites used to validate nginx and Envoy (`h2spec`, Autobahn).  First
+  Python framework with native **HTTP QUERY** (RFC 10008) support — the
+  new safe, idempotent, cacheable method that carries a request body,
+  with `Accept-Query` content negotiation.
 - **Typed throughout.** Your editor and `mypy` / `pyright` see
   every parameter; PEP 561 typed distribution.
 
