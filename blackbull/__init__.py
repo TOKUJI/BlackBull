@@ -13,7 +13,8 @@ Public API exports:
 - `QUERY`: the HTTP QUERY method (RFC 10008) as a plain string — ``http.HTTPMethod`` lacks the member until Python ≥3.16.
 - `UnprocessableQuery`: raise from a QUERY handler for ``422`` when the (accepted) request media type carries a semantically unprocessable query (RFC 10008).
 - `Headers`: case-insensitive, ordered, multi-valued HTTP header store.
-- `Request`: opt-in context object for HTTP handlers (headers/cookies/client/``body()``/``json()``), injected by signature.
+- `Connection`: the typed internal request representation (Sprint 79); the handler context object exposing ``method``/``path``/``headers``/``cookies``/``body()``/``json()``/``text()``. The ASGI ``scope`` is a derived view (``Connection.as_scope()``).
+- `Request`: opt-in context object for HTTP handlers (headers/cookies/client/``body()``/``json()``), injected by signature. Being superseded by ``Connection``; a deprecation alias lands with the consumer switch (Sprint 79 Phase 5).
 - `Depends`: per-request provider injection for simplified handlers (async-generator providers get teardown after the response is sent).
 - `cookie_header`: builds a ``Set-Cookie`` header tuple.
 - `read_body`: reads and buffers the full request body from the ASGI receive channel.
@@ -51,6 +52,7 @@ from .router import RouteInfo, HTTPException, UnprocessableQuery, QUERY
 from .config import AppConfig
 from .headers import Headers
 from .request import Request, read_body, read_json, read_text, parse_cookies, ClientDisconnected
+from .connection import Connection
 from .response import (
     Response, JSONResponse, RedirectResponse, StreamingResponse,
     EventSourceResponse, WebSocketResponse, cookie_header,
