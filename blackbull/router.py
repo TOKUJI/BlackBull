@@ -1074,24 +1074,54 @@ def _to_tuple(value: Any) -> tuple:
     return (value,)
 
 
-class _AcceptQuery(NamedTuple):
-    """Precomputed RFC 10008 ``accept_query`` plan attached to a handler.
+# ---------------------------------------------------------------------------
+# Per-route hooks — generic request/response metadata a handler can carry.
+#
+# The dispatcher (``BlackBull._dispatch``) treats every method identically.
+# A route may attach two optional, method-agnostic hooks that the dispatcher
+# applies uniformly — it does not know (or name) any specific method or
+# feature:
+#
+#   ``_bb_response_headers`` — extra headers appended to every response the
+#       route produces (success *and* the centrally-rendered error), e.g. the
+#       RFC 10008 ``Accept-Query`` header.
+#   ``_bb_request_guard`` — a ``(scope) -> None`` callable run before the
+#       handler; it raises :class:`HTTPException` to reject the request
+#       pre-dispatch (routed like a 404/405).
+#
+# ``accept_query`` (below) is currently the only producer of these hooks; the
+# QUERY-specific logic lives entirely inside the guard it builds, never in the
+# dispatcher.  A future feature (e.g. a rate-limit guard, other declared
+# response headers) reuses the same two hooks with no dispatcher change.
+# ---------------------------------------------------------------------------
 
-    ``header`` is the serialised ``Accept-Query`` field value (an RFC 9651
-    Structured Field list of media-type tokens, computed once at
-    registration); ``accepted`` is the frozenset of normalised (lowercased)
-    media types used for the O(1) Content-Type membership check.
+_ROUTE_HOOK_ATTRS = ('_bb_response_headers', '_bb_request_guard')
+
+
+def _copy_route_hooks(dst: Callable, src: Callable) -> None:
+    """Propagate any route hooks from *src* onto *dst*.
+
+    Used when the router re-wraps a handler (e.g. the path-param ``_inject``
+    closure in :meth:`Router._resolve`) so the hooks survive to the
+    dispatcher.
     """
-    header: bytes
-    accepted: frozenset
+    for attr in _ROUTE_HOOK_ATTRS:
+        value = getattr(src, attr, None)
+        if value is not None:
+            setattr(dst, attr, value)
 
 
-def _make_accept_query(media_types: Iterable[str]) -> _AcceptQuery:
-    """Build the :class:`_AcceptQuery` plan from declared media types.
+def _accept_query_hooks(media_types: Iterable[str]):
+    """Build the ``(response_headers, request_guard)`` hooks for the RFC 10008
+    ``accept_query`` route option.
 
-    Serialising through :func:`serialize_list` validates each media type as
-    an RFC 9651 token at registration time — an invalid entry raises
-    ``ValueError`` up front rather than emitting a malformed header later.
+    ``response_headers`` carries the ``Accept-Query`` field (an RFC 9651
+    Structured Field list of media-type tokens; serialising through
+    :func:`serialize_list` validates each token at registration, so an invalid
+    entry raises ``ValueError`` up front).  ``request_guard`` enforces the
+    request ``Content-Type`` on QUERY requests only — 400 when absent, 415
+    when unaccepted — while other methods sharing the route still receive the
+    header but are not media-type gated.
     """
     from .protocol.structured_fields import Token, serialize_list  # noqa: PLC0415
 
@@ -1100,7 +1130,20 @@ def _make_accept_query(media_types: Iterable[str]) -> _AcceptQuery:
         raise ValueError('accept_query must list at least one media type')
     header = serialize_list([(Token(mt), {}) for mt in types])
     accepted = frozenset(mt.strip().lower() for mt in types)
-    return _AcceptQuery(header=header, accepted=accepted)
+    response_headers = ((b'accept-query', header),)
+
+    def guard(scope: dict) -> None:
+        if scope['method'] != 'QUERY':
+            return
+        media = request_media_type(scope)
+        if not media:
+            raise HTTPException(HTTPStatus.BAD_REQUEST,
+                                'QUERY request requires a Content-Type')
+        if media not in accepted:
+            raise HTTPException(HTTPStatus.UNSUPPORTED_MEDIA_TYPE,
+                                f'unsupported query media type {media!r}')
+
+    return response_headers, guard
 
 
 def request_media_type(scope: dict) -> str:
@@ -1350,11 +1393,9 @@ class Router:
                                   _fn=_fn, _params=_params):
                     scope.setdefault('path_params', {}).update(_params)
                     return await _fn(scope, receive, send)
-                # Preserve the RFC 10008 accept_query plan across the
-                # path-param wrapper so _dispatch still finds it.
-                _aq = getattr(_fn, '_bb_accept_query', None)
-                if _aq is not None:
-                    _inject._bb_accept_query = _aq
+                # Preserve any route hooks across the path-param wrapper so
+                # the dispatcher still finds them.
+                _copy_route_hooks(_inject, _fn)
                 return _inject
             return h
 
@@ -1382,9 +1423,7 @@ class Router:
                                       _fn=_fn, _params=_params):
                         scope.setdefault('path_params', {}).update(_params)
                         return await _fn(scope, receive, send)
-                    _aq = getattr(_fn, '_bb_accept_query', None)
-                    if _aq is not None:
-                        _inject._bb_accept_query = _aq
+                    _copy_route_hooks(_inject, _fn)
                     return _inject
                 return fn
 
@@ -1456,7 +1495,7 @@ class Router:
         for m in methods:
             if isinstance(m, str):
                 _validate_method_token(m)
-        aq = _make_accept_query(accept_query) if accept_query is not None else None
+        hooks = _accept_query_hooks(accept_query) if accept_query is not None else None
 
         def register(fn):
             logger.debug(f'Router.route_fn.register() is called. {fn}')
@@ -1465,8 +1504,8 @@ class Router:
             if _is_simplified_handler(fn):
                 fn = _adapt_handler(fn, path, self._converters)
 
-            if aq is not None:
-                fn._bb_accept_query = aq
+            if hooks is not None:
+                fn._bb_response_headers, fn._bb_request_guard = hooks
 
             logger.debug((path, methods, scheme))
             self[(path, methods, scheme)] = fn
@@ -1506,7 +1545,8 @@ class Router:
             return await _ic(scope, receive, send)
 
         if accept_query is not None:
-            _chain_wrapper._bb_accept_query = _make_accept_query(accept_query)
+            _chain_wrapper._bb_response_headers, _chain_wrapper._bb_request_guard = \
+                _accept_query_hooks(accept_query)
 
         self[(path, methods, scheme)] = _chain_wrapper
         self._record_route(path, original_handler or fns[-1], name,

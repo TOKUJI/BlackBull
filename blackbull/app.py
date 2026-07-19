@@ -29,7 +29,7 @@ import logging
 from .event import Event, EventDispatcher, EventHandler
 from .headers import Headers
 from .utils import Scheme, is_client_error, is_server_error
-from .router import Router, RouteInfo, ErrorRouter, MethodNotApplicable, PathNotRegistered, ConfigurationError, HTTPException, has_middleware_param, request_media_type
+from .router import Router, RouteInfo, ErrorRouter, MethodNotApplicable, PathNotRegistered, ConfigurationError, HTTPException, has_middleware_param
 from .request import ClientDisconnected
 from .config import AppConfig
 logger = logging.getLogger(__name__)
@@ -77,19 +77,21 @@ def _wrap_send(raw_send):
     return _send
 
 
-def _accept_query_send(raw_send, header_value: bytes):
-    """Wrap *raw_send* to add the RFC 10008 ``Accept-Query`` response header.
+def _inject_response_headers(raw_send, extra_headers):
+    """Wrap *raw_send* to append *extra_headers* to the response.
 
-    Installed **below** :func:`_wrap_send`, so it only ever observes plain
-    ASGI dicts — convenience shapes (``Response``, 3-arg) have already been
-    normalised by the time an event reaches here.  The header is appended to
-    the ``http.response.start`` event (success and error responses alike);
-    every other event passes straight through.
+    A route may declare headers (via the ``_bb_response_headers`` hook) that
+    must appear on all of its responses — success and the centrally-rendered
+    error alike.  Installed **below** :func:`_wrap_send`, so it only ever
+    observes plain ASGI dicts: convenience shapes (``Response``, 3-arg) have
+    already been normalised by the time an event reaches here.  The headers
+    are appended to the ``http.response.start`` event; every other event
+    passes straight through.
     """
     async def _send(event):
         if isinstance(event, dict) and event.get('type') == 'http.response.start':
             headers: list = list(event.get('headers') or [])
-            headers.append((b'accept-query', header_value))
+            headers.extend(extra_headers)
             event = {**event, 'headers': headers}
         await raw_send(event)
 
@@ -672,31 +674,36 @@ class BlackBull:
                 await handler(scope, receive, send)
             return
 
-        # RFC 10008 — a route declared with ``accept_query=[...]`` advertises
-        # the ``Accept-Query`` header on its responses and enforces the QUERY
-        # request Content-Type.  The header injector is installed below
-        # _wrap_send (it sees only ASGI dicts); enforcement short-circuits to
-        # the error router (like 405/404) so 400/415 skip the handler and the
-        # lifecycle events, exactly as an unroutable request does.
-        accept_query = getattr(function, '_bb_accept_query', None)
-        if accept_query is not None:
-            scope.setdefault('state', {})['accept_query'] = accept_query.header
-            send = _wrap_send(_accept_query_send(raw_send, accept_query.header))
-            if scope['method'] == 'QUERY':
-                media = request_media_type(scope)
-                err_status = None
-                if not media:
-                    err_status = HTTPStatus.BAD_REQUEST
-                elif media not in accept_query.accepted:
-                    err_status = HTTPStatus.UNSUPPORTED_MEDIA_TYPE
-                if err_status is not None:
-                    self._logger.info('%s on QUERY %s: content-type %r',
-                                      int(err_status), path, media or None)
-                    scope['state']['error_status'] = err_status
-                    handler = self._error_router[err_status]
-                    if handler is not None:
-                        await handler(scope, receive, send)
-                    return
+        # Per-route hooks (method-agnostic): a route may declare response
+        # headers to add to every response, and a request guard that rejects
+        # the request before dispatch.  The dispatcher applies both uniformly —
+        # it names no method and no feature.  ``accept_query`` (RFC 10008) is
+        # currently the only producer; its QUERY-specific logic lives inside
+        # the guard, not here.
+        resp_headers = getattr(function, '_bb_response_headers', None)
+        if resp_headers is not None:
+            # Installed below _wrap_send so it sees only ASGI dicts, and around
+            # raw_send so the header also lands on the centrally-rendered error
+            # response (e.g. a guard's 415).
+            send = _wrap_send(_inject_response_headers(raw_send, resp_headers))
+        guard = getattr(function, '_bb_request_guard', None)
+        if guard is not None:
+            try:
+                guard(scope)
+            except HTTPException as e:
+                # Rejected before dispatch — routed like a 404/405: by status
+                # (so an @app.on_error(status) handler is honoured, exactly as
+                # for those), no handler body and no lifecycle events.
+                self._logger.info('%s on %s %s: %s', int(e.status),
+                                  scope.get('method', ''), path, e.detail or e)
+                scope.setdefault('state', {}).update({
+                    'error_status': e.status,
+                    'error_exception': e,
+                })
+                handler = self._error_router[e.status]
+                if handler is not None:
+                    await handler(scope, receive, send)
+                return
 
         self._logger.debug((self, function))
         exc_caught: Exception | None = None
