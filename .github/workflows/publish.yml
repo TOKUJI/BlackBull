@@ -84,7 +84,7 @@ jobs:
         # this action fails with ``manifest unknown`` at runtime.
         # Pin to a specific version tag instead — PyPA maintains the
         # tag, and Dependabot still tracks version updates here.
-        uses: pypa/gh-action-pypi-publish@v1.14.0
+        uses: pypa/gh-action-pypi-publish@v1.14.1
         # No ``with: password:`` — Trusted Publishing exchanges the
         # GitHub OIDC token for a short-lived PyPI token automatically.
 
