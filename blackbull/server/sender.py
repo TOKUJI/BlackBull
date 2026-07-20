@@ -835,6 +835,33 @@ class HTTP2Sender(BaseSender):
         if set_end_stream:
             self._end_stream_sent = True
 
+    def _auto_flush_buffered_body(self) -> None:
+        """``call_soon`` callback — if the buffered body hasn't been consumed
+        by a synchronous trailers or second-body event, flush it now.
+
+        ``call_soon`` callbacks fire at the start of the next event-loop
+        iteration, *after* any synchronous ASGI events emitted in the same
+        coroutine.  This gives trailers (or a second body chunk) a chance to
+        coalesce before the auto-flush fires."""
+        if self._buffered_body is None:
+            return
+        asyncio.ensure_future(self._do_auto_flush())
+
+    async def _do_auto_flush(self) -> None:
+        """Flush the buffered body + headers.  Called as a task when the
+        event loop detects the producer has parked (no synchronous trailers
+        or second body arrived within the same event-loop iteration)."""
+        body = self._buffered_body
+        status = self._buffered_status
+        headers = self._buffered_headers
+        expect = self._expect_trailers
+        if body is None or status is None:
+            return
+        self._buffered_body = None
+        self._buffered_status = None
+        self._buffered_headers = None
+        await self._flush_buffered_start(body, False, status, headers, expect)
+
     async def send_response_headers(
         self, status: HTTPStatus, headers: list[tuple[bytes, bytes]],
     ) -> None:
@@ -1019,6 +1046,8 @@ class HTTP2Sender(BaseSender):
                             and len(payload) <= self.stream_window_size
                             and len(payload) <= self._conn_window.size):
                         self._buffered_body = payload
+                        asyncio.get_running_loop().call_soon(
+                            self._auto_flush_buffered_body)
                     else:
                         # A second body chunk (or a multi-frame / terminal one):
                         # flush any deferred first chunk with the HEADERS, then
