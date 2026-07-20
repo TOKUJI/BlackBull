@@ -31,6 +31,22 @@ so the editable install's metadata catches up.
 
 ## [Unreleased]
 
+## [0.59.1] — 2026-07-20
+
+### Fixed
+
+- **gRPC server-streaming Watch flakiness (DEADLINE_EXCEEDED).** The
+  H2 sender's trailers-coalescing optimisation buffered the first DATA
+  frame when `trailers: True` was set on the response start, deferring
+  the write until trailers arrived (the unary-gRPC fast path).  For
+  server-streaming handlers that park after the first yield (health
+  Watch, chat streams), the buffered frame was never flushed, starving
+  the client.  Added a `call_soon` auto-flush: if trailers (or a
+  second body chunk) don't arrive within the same event-loop iteration,
+  the buffered body is flushed immediately.  The unary coalescing path
+  is preserved — synchronous trailers still combine into a single
+  write.  (#TBD)
+
 ## [0.59.0] — 2026-07-19
 
 ### Added
