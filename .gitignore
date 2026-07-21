@@ -142,6 +142,7 @@ bench/httparena/blackbull-*.whl
 # Kept on disk for future development; not committed until the socket-state
 # contamination is solved cleanly.
 bench/peers/compare.sh
+bench/peers/httparena_calibrate.py
 bench/peers/bench/results/*
 # peer benchmark harness — private development notes
 *.private.md
