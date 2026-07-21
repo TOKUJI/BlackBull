@@ -31,6 +31,8 @@ so the editable install's metadata catches up.
 
 ## [Unreleased]
 
+## [0.60.0] — 2026-07-22
+
 ### Changed
 
 - **Native `Connection` interface — the single internal request
