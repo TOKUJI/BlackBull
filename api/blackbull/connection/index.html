@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://TOKUJI.github.io/BlackBull/api/blackbull/protocol/">
+        <link rel="canonical" href="https://TOKUJI.github.io/BlackBull/api/blackbull/connection/">
       
       
-        <link rel="prev" href="../openapi/">
+        <link rel="prev" href="../config/">
       
       
-        <link rel="next" href="frame/">
+        <link rel="next" href="../di/">
       
       
         
@@ -27,7 +27,7 @@
     
     
       
-        <title>blackbull.protocol - BlackBull</title>
+        <title>connection - BlackBull</title>
       
     
     
@@ -72,7 +72,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#blackbullprotocol" class="md-skip">
+        <a href="#blackbullconnection" class="md-skip">
           Skip to content
         </a>
       
@@ -108,7 +108,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              blackbull.protocol
+              connection
             
           </span>
         </div>
@@ -2016,10 +2016,37 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../connection/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    connection
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -2035,6 +2062,159 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#blackbull.connection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        connection
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="connection">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.connection.ClientDisconnected" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ClientDisconnected
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.connection.Connection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Connection
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Connection">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.connection.Connection.cookies" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        cookies
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.connection.Connection.as_scope" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        as_scope
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.connection.Connection.body" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        body
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.connection.Connection.from_scope" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        from_scope
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.connection.Connection.json" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        json
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.connection.Connection.text" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        text
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.connection.Connection.to_dispatch_scope" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        to_dispatch_scope
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.connection.stashed_connection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        stashed_connection
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -3355,20 +3535,18 @@
                 
   
   
-    
   
   
-  
     
     
     
     
     
-    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2_1_21" checked>
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2_1_21" >
         
           
           <label class="md-nav__link" for="__nav_5_2_1_21" id="__nav_5_2_1_21_label" tabindex="0">
@@ -3389,7 +3567,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="4" aria-labelledby="__nav_5_2_1_21_label" aria-expanded="true">
+        <nav class="md-nav" data-md-level="4" aria-labelledby="__nav_5_2_1_21_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_5_2_1_21">
             <span class="md-nav__icon md-icon"></span>
             
@@ -3404,37 +3582,10 @@
                 
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    blackbull.protocol
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../protocol/" class="md-nav__link">
         
   
   
@@ -3450,37 +3601,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#blackbull.protocol" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        protocol
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -3493,7 +3613,7 @@
   
   
     <li class="md-nav__item">
-      <a href="frame/" class="md-nav__link">
+      <a href="../protocol/frame/" class="md-nav__link">
         
   
   
@@ -3521,7 +3641,7 @@
   
   
     <li class="md-nav__item">
-      <a href="frame_types/" class="md-nav__link">
+      <a href="../protocol/frame_types/" class="md-nav__link">
         
   
   
@@ -3549,7 +3669,7 @@
   
   
     <li class="md-nav__item">
-      <a href="hpack_fastpath/" class="md-nav__link">
+      <a href="../protocol/hpack_fastpath/" class="md-nav__link">
         
   
   
@@ -3577,7 +3697,7 @@
   
   
     <li class="md-nav__item">
-      <a href="rsock/" class="md-nav__link">
+      <a href="../protocol/rsock/" class="md-nav__link">
         
   
   
@@ -3605,7 +3725,7 @@
   
   
     <li class="md-nav__item">
-      <a href="stream/" class="md-nav__link">
+      <a href="../protocol/stream/" class="md-nav__link">
         
   
   
@@ -3633,7 +3753,7 @@
   
   
     <li class="md-nav__item">
-      <a href="structured_fields/" class="md-nav__link">
+      <a href="../protocol/structured_fields/" class="md-nav__link">
         
   
   
@@ -4801,13 +4921,135 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#blackbull.protocol" class="md-nav__link">
+  <a href="#blackbull.connection" class="md-nav__link">
     <span class="md-ellipsis">
       
-        protocol
+        connection
       
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="connection">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.connection.ClientDisconnected" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ClientDisconnected
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.connection.Connection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Connection
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Connection">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.connection.Connection.cookies" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        cookies
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.connection.Connection.as_scope" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        as_scope
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.connection.Connection.body" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        body
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.connection.Connection.from_scope" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        from_scope
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.connection.Connection.json" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        json
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.connection.Connection.text" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        text
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.connection.Connection.to_dispatch_scope" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        to_dispatch_scope
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.connection.stashed_connection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        stashed_connection
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -4831,20 +5073,35 @@
   
 
 
-<h1 id="blackbullprotocol"><code>blackbull.protocol</code><a class="headerlink" href="#blackbullprotocol" title="Permanent link">&para;</a></h1>
+<h1 id="blackbullconnection"><code>blackbull.connection</code><a class="headerlink" href="#blackbullconnection" title="Permanent link">&para;</a></h1>
 
 
 <div class="doc doc-object doc-module">
 
 
 
-<h2 id="blackbull.protocol" class="doc doc-heading">
-            <code>blackbull.protocol</code>
+<h2 id="blackbull.connection" class="doc doc-heading">
+            <code>blackbull.connection</code>
 
 
-<a href="#blackbull.protocol" class="headerlink" title="Permanent link">&para;</a></h2>
+<a href="#blackbull.connection" class="headerlink" title="Permanent link">&para;</a></h2>
 
     <div class="doc doc-contents first">
+
+        <p>The native <code>Connection</code> interface — BlackBull's single internal request
+representation (Sprint 79, proposal <code>native-connection-interface.md</code>).</p>
+<p>BlackBull is a multi-protocol server that owns both sides of the wire on its
+self-hosted path; the ASGI <code>scope</code> dict is therefore an <em>internal
+data-format choice</em>, not an interoperability contract — and a poor one
+(untyped, string-keyed, carrying private <code>_</code>-prefixed keys). This module
+makes a typed :class:<code>Connection</code> the internal model; the ASGI scope becomes
+a <strong>derived</strong> view produced by :meth:<code>Connection.as_scope</code> and consumed by
+:meth:<code>Connection.from_scope</code>, used only where external compatibility needs
+it (uvicorn, <code>httpx.ASGITransport</code>/TestClient, third-party ASGI middleware).</p>
+<p>The <code>_CONNECTION_FIELDS</code> registry is the single source of truth from which
+both conversions are generated: adding a field to :class:<code>Connection</code> without
+a registry entry is a test failure (proposal §4.2 / §9.5), which mechanically
+prevents the two representations from drifting apart.</p>
 
 
 
@@ -4865,6 +5122,318 @@
 
 
 
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="blackbull.connection.ClientDisconnected" class="doc doc-heading">
+            <code>ClientDisconnected</code>
+
+
+<a href="#blackbull.connection.ClientDisconnected" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="Exception">Exception</span></code></p>
+
+
+
+        <p>Raised when the client disconnects before the request body is complete.</p>
+<p>ASGI signals a mid-body disconnect with an <code>http.disconnect</code> event that
+carries no <code>body</code>/<code>more_body</code> keys.  Treating it as end-of-message
+would return a <em>truncated</em> upload as if it were whole, so
+:func:<code>read_body</code> raises this instead — the handler must not process a
+partial body as complete.  The <code>partial</code> attribute holds whatever body
+bytes had arrived before the disconnect.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="blackbull.connection.Connection" class="doc doc-heading">
+            <code>Connection</code>
+
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-dataclass"><code>dataclass</code></small>
+  </span>
+
+<a href="#blackbull.connection.Connection" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+
+
+        <p>One HTTP (or WebSocket) request — the single internal representation.</p>
+<p>Built by the protocol actor, consumed by the router, dispatcher,
+middleware, and handlers. The ASGI <code>scope</code> dict is a <em>derived</em> view
+(:meth:<code>as_scope</code>). <code>Request</code> is a deprecated alias of this class.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+<div class="doc doc-object doc-attribute">
+
+
+
+<h4 id="blackbull.connection.Connection.cookies" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">cookies</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-property"><code>property</code></small>
+  </span>
+
+<a href="#blackbull.connection.Connection.cookies" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Cookies from the <code>Cookie</code> header, parsed once and cached.</p>
+
+    </div>
+
+</div>
+
+
+
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.connection.Connection.as_scope" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">as_scope</span><span class="p">()</span></code>
+
+<a href="#blackbull.connection.Connection.as_scope" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Generate a fresh ASGI 3.0 scope dict (the single native→ASGI point).</p>
+<p>Mutations of the returned dict do not affect the Connection, except
+that <code>state</code> and <code>extensions</code> are shared by reference so a
+buffering middleware's writes reach the handler.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.connection.Connection.body" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">body</span><span class="p">()</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-async"><code>async</code></small>
+  </span>
+
+<a href="#blackbull.connection.Connection.body" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Return the complete request body, draining <code>receive</code> at most once.</p>
+<p>Repeated calls (and :meth:<code>json</code> / :meth:<code>text</code>) return the cached
+bytes. A mid-body disconnect raises :class:<code>ClientDisconnected</code>.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.connection.Connection.from_scope" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">from_scope</span><span class="p">(</span><span class="n">scope</span><span class="p">,</span> <span class="n">receive</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-classmethod"><code>classmethod</code></small>
+  </span>
+
+<a href="#blackbull.connection.Connection.from_scope" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Build a Connection from an external ASGI scope (the single
+ASGI→native point). Unknown keys are ignored; missing optional keys
+fall back to the field defaults.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.connection.Connection.json" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">json</span><span class="p">()</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-async"><code>async</code></small>
+  </span>
+
+<a href="#blackbull.connection.Connection.json" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Parse the cached body as JSON (<code>None</code> on empty/invalid input).</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.connection.Connection.text" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">text</span><span class="p">(</span><span class="n">encoding</span><span class="o">=</span><span class="s1">&#39;utf-8&#39;</span><span class="p">)</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-async"><code>async</code></small>
+  </span>
+
+<a href="#blackbull.connection.Connection.text" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Decode the cached body as text (<code>errors='replace'</code>).</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.connection.Connection.to_dispatch_scope" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">to_dispatch_scope</span><span class="p">(</span><span class="o">*</span><span class="p">,</span> <span class="n">force_asgi</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span></code>
+
+<a href="#blackbull.connection.Connection.to_dispatch_scope" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Materialize the ASGI scope the dispatch pipeline consumes, with this
+typed :class:<code>Connection</code> stashed on it for zero-reconversion reads.</p>
+<p>The single canonical <em>Connection → dispatch-ready scope</em> bridge shared
+by the H/1.1 <code>run()</code> and H/2 <code>_conn_to_scope</code> seams (Sprint 79) —
+they used to hand-roll the same five steps:</p>
+<ol>
+<li>derive the ASGI scope via :meth:<code>as_scope</code> (the one native→ASGI point);</li>
+<li>when <code>force_asgi</code> (the §4.3 <code>BB_FORCE_ASGI_SCOPE</code> dual-path lane),
+   round-trip through :meth:<code>from_scope</code> so both the derived scope <em>and</em>
+   the Connection the consumers read are rebuilt from scratch on every
+   request, keeping the compat conversion from bitrotting.  <code>_asterisk_form</code>
+   is Connection-only (not in the scope), so carry it across the rebuild;</li>
+<li>restore <code>scope['headers']</code> to the rich :class:<code>Headers</code> object
+   (<code>as_scope</code> emits the ASGI <code>list[tuple]</code> form; internal <code>.get()</code>
+   callers want the object);</li>
+<li>re-expose the H/1.1 <code>_asterisk_form</code> OPTIONS marker on the envelope;</li>
+<li>stash the Connection under :data:<code>CONNECTION_STASH_KEY</code>.</li>
+</ol>
+<p>Protocol-specific augmentation (the websocket-only <code>subprotocols</code> key)
+is layered on by the caller <em>after</em> this returns — it is not a
+:class:<code>Connection</code> field (proposal §2.1).</p>
+
+
+    </div>
+
+</div>
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="blackbull.connection.stashed_connection" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">stashed_connection</span><span class="p">(</span><span class="n">scope</span><span class="p">,</span> <span class="n">receive</span><span class="p">)</span></code>
+
+<a href="#blackbull.connection.stashed_connection" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Return the typed :class:<code>Connection</code> for this request, plus whether it
+was freshly built.</p>
+<p>The one <em>scope → Connection</em> accessor shared by the dispatcher
+(<code>app._connection_of</code>) and the router (<code>router._conn_of</code>), Sprint 79.
+BlackBull's own protocol actors stash the <code>Connection</code> they parsed on the
+scope envelope under :data:<code>CONNECTION_STASH_KEY</code>, so the self-hosted path
+reads it back with <strong>no</strong> re-conversion. Under an external ASGI server
+(uvicorn, <code>httpx.ASGITransport</code>) there is no stash, so build one via
+:meth:<code>Connection.from_scope</code> — the single ASGI→native point — and stash it
+so later accessors in the same request reuse the one object.</p>
+<p>Returns <code>(conn, built)</code> where <em>built</em> is <code>True</code> only on the external
+path (no prior stash). Callers layer their own post-processing on a freshly
+built conn — the dispatcher links <code>scope['state']</code> to <code>conn.state</code>; the
+router seeds <code>path_params</code> from an input scope key — because those needs
+differ by call site.</p>
+
+
+    </div>
+
+</div>
 
 
 
