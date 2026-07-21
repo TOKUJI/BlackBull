@@ -121,7 +121,7 @@ def test_post_body_round_trip_via_simplified_handler() -> None:
 
 def test_request_object_end_to_end() -> None:
     """A handler taking the opt-in Request sees method/headers/cookies/body."""
-    from blackbull import Request
+    from blackbull import Connection as Request  # Sprint 79 alias
 
     app = BlackBull()
 

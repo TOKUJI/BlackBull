@@ -14,7 +14,7 @@ Public API exports:
 - `UnprocessableQuery`: raise from a QUERY handler for ``422`` when the (accepted) request media type carries a semantically unprocessable query (RFC 10008).
 - `Headers`: case-insensitive, ordered, multi-valued HTTP header store.
 - `Connection`: the typed internal request representation (Sprint 79); the handler context object exposing ``method``/``path``/``headers``/``cookies``/``body()``/``json()``/``text()``. The ASGI ``scope`` is a derived view (``Connection.as_scope()``).
-- `Request`: opt-in context object for HTTP handlers (headers/cookies/client/``body()``/``json()``), injected by signature. Being superseded by ``Connection``; a deprecation alias lands with the consumer switch (Sprint 79 Phase 5).
+- `Request`: **deprecated** alias of ``Connection`` (Sprint 79 Phase 5). Accessing ``blackbull.Request`` emits a ``DeprecationWarning``; replace ``request: Request`` handler params with ``conn: Connection`` (identical API). Removal no earlier than 2027-08-01.
 - `Depends`: per-request provider injection for simplified handlers (async-generator providers get teardown after the response is sent).
 - `cookie_header`: builds a ``Set-Cookie`` header tuple.
 - `read_body`: reads and buffers the full request body from the ASGI receive channel.
@@ -51,7 +51,7 @@ from .di import Depends
 from .router import RouteInfo, HTTPException, UnprocessableQuery, QUERY
 from .config import AppConfig
 from .headers import Headers
-from .request import Request, read_body, read_json, read_text, parse_cookies, ClientDisconnected
+from .request import read_body, read_json, read_text, parse_cookies, ClientDisconnected
 from .connection import Connection
 from .response import (
     Response, JSONResponse, RedirectResponse, StreamingResponse,
@@ -62,3 +62,27 @@ from .asgi import ResponseStart, ResponseBody, parse_response_event
 from .middleware.cors import CORS
 from .middleware.utils import as_middleware
 from .middleware.proxy import TrustedProxy
+
+
+def __getattr__(name):
+    """Lazy, deprecated attribute access — ``blackbull.Request``.
+
+    ``Request`` was the opt-in HTTP context object; Sprint 79 Phase 5 merged
+    it into :class:`Connection` and demoted the name to an alias. Resolving it
+    through the module ``__getattr__`` (PEP 562) means the ``DeprecationWarning``
+    fires only if code actually touches ``Request`` — importing the package
+    stays warning-free — and the alias still evaluates to ``Connection`` so
+    existing ``request: Request`` handler signatures keep working unchanged
+    during the migration window (removal no earlier than 2027-08-01).
+    """
+    if name == 'Request':
+        import warnings
+        warnings.warn(
+            'blackbull.Request is deprecated — use blackbull.Connection instead. '
+            "Replace `request: Request` with `conn: Connection` in handler "
+            'signatures. The API is identical: conn.method, conn.path, '
+            'conn.headers, conn.body(), conn.json(), conn.cookies. '
+            'Request will be removed no earlier than 2027-08-01.',
+            DeprecationWarning, stacklevel=2)
+        return Connection
+    raise AttributeError(f'module {__name__!r} has no attribute {name!r}')

@@ -9,7 +9,7 @@ dependencies declared.
 """
 from dataclasses import dataclass
 
-from blackbull import Depends, Request
+from blackbull import Depends, Connection as Request  # Sprint 79 alias
 from blackbull.router import _adapt_handler
 
 

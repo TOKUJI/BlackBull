@@ -507,14 +507,27 @@ class HTTP1Actor(Actor):
                 # consumers read ``conn`` directly.
                 scope = conn.as_scope()
                 if cfg.force_asgi_scope:
-                    scope = Connection.from_scope(scope).as_scope()
-                # Internal consumers call ``Headers`` methods on
-                # ``scope['headers']``; ``as_scope()`` emits the ASGI
-                # ``list[tuple]`` form, so restore the rich object until Phase 5
-                # switches those reads to ``conn.headers``.
+                    # §4.3 dual-path lane — force the full ASGI round-trip so
+                    # that both the derived scope AND the Connection the Phase-5
+                    # consumers read are rebuilt from scratch on every request,
+                    # keeping the compat conversion from bitrotting.
+                    # ``_asterisk_form`` is Connection-only (not in the scope),
+                    # so carry it across the rebuild explicitly.
+                    rebuilt = Connection.from_scope(scope)
+                    rebuilt._asterisk_form = conn._asterisk_form
+                    conn = rebuilt
+                    scope = conn.as_scope()
+                # Middleware / WS / events read ``scope['headers']`` via the
+                # ``Headers`` API; ``as_scope()`` emits the ASGI ``list[tuple]``
+                # form, so restore the rich object on the envelope.
                 scope['headers'] = conn.headers
                 if conn._asterisk_form:
                     scope['_asterisk_form'] = True
+                # Phase 5 (consumer switch): stash the typed Connection on the
+                # scope envelope so the dispatcher, router, and handlers read
+                # ``conn.*`` with no re-conversion — the hot path is unchanged
+                # from Phase 4 (one ``as_scope`` for the compat envelope).
+                scope['_connection'] = conn
 
                 if scope.get('type') == 'websocket':
                     await self._handle_upgrade(scope)
@@ -557,12 +570,13 @@ class HTTP1Actor(Actor):
                 # the GET response except for the absence of the body.
                 # We synthesise that by dispatching to the GET handler
                 # and stripping body bytes from outgoing events.
-                # ``method`` on the scope is rewritten so the router
-                # (and any handler that inspects scope['method']) sees
-                # ``GET``; the access log records the original ``HEAD``
-                # from the request line.
-                send._head_mode = (scope['method'] == 'HEAD')
+                # ``method`` is rewritten to ``GET`` on both the Connection
+                # (which the router/dispatcher read) and the scope envelope
+                # (which middleware may inspect); the access log records the
+                # original ``HEAD`` from the request line.
+                send._head_mode = (conn.method == 'HEAD')
                 if send._head_mode:
+                    conn.method = 'GET'
                     scope['method'] = 'GET'
                 inner_receive = RecipientFactory.http1(
                     self._reader, scope,

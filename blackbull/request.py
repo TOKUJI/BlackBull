@@ -1,19 +1,22 @@
-"""Request body and cookie helpers, and the opt-in ``Request`` context object.
+"""Request body and cookie helpers.
 
 Provides:
 
-- `Request`: opt-in context object for HTTP handlers — wraps ``(scope, receive)``
-  and exposes the helpers below as cached properties/methods.
 - `read_body`: buffers all ASGI ``http.request`` chunks into a single ``bytes`` object.
 - `read_json`: buffers the body and parses it as JSON (``None`` on empty/invalid).
 - `read_text`: buffers the body and decodes it as text.
 - `parse_cookies`: parses the ``Cookie`` request header into a ``dict[str, str]``.
+
+The opt-in HTTP context object formerly named ``Request`` moved to
+:class:`blackbull.connection.Connection` (Sprint 79 Phase 5); ``Request`` is now
+a deprecated alias of ``Connection`` (see ``blackbull.__getattr__``). This
+module holds only the transport-agnostic free functions, which
+:class:`Connection` builds on.
 """
 import json
 from typing import Any
 
 from .asgi import ASGIEvent
-from .headers import Headers
 
 
 class ClientDisconnected(Exception):
@@ -145,114 +148,3 @@ def parse_cookies(scope) -> dict[str, str]:
         k, _, v = part.strip().partition(b'=')
         result[k.strip().decode(errors='replace')] = v.strip().decode(errors='replace')
     return result
-
-
-_BODY_UNREAD = None  # sentinel: b'' is a valid cached body, so None means "not read yet"
-
-
-class Request:
-    """Opt-in context object for HTTP handlers.
-
-    Wraps an ASGI ``(scope, receive)`` pair and exposes this module's free
-    functions as cached properties and methods — the HTTP counterpart of
-    ``GrpcContext`` and ``ProtocolContext``.  Handlers receive one by
-    declaring a parameter annotated ``Request`` (any name) or a parameter
-    named ``request`` with no annotation; the router injects it at call
-    time with no per-request reflection::
-
-        @app.route(path='/users/{uid}')
-        async def show(uid: int, request: Request):
-            token = request.headers.get(b'authorization')
-            data = await request.json()
-            ...
-
-    ``body()`` buffers the request body exactly once and caches it;
-    ``json()`` and ``text()`` build on that cache.  When a handler also
-    declares ``body: bytes`` (or a dataclass body parameter), the router
-    sources those from the same cache, so ``receive`` is never drained
-    twice.  The raw ``(scope, receive, send)`` handler form is unaffected
-    and never pays for this class.
-    """
-
-    __slots__ = ('_scope', '_receive', '_headers', '_cookies', '_body')
-
-    def __init__(self, scope: dict, receive):
-        self._scope = scope
-        self._receive = receive
-        self._headers: Headers | None = None
-        self._cookies: dict[str, str] | None = None
-        self._body: bytes | None = _BODY_UNREAD
-
-    # ---- scope-backed properties -----------------------------------------
-
-    @property
-    def scope(self) -> dict:
-        """The raw ASGI scope dict (escape hatch)."""
-        return self._scope
-
-    @property
-    def method(self) -> str:
-        """HTTP method, e.g. ``'GET'``."""
-        return self._scope['method']
-
-    @property
-    def path(self) -> str:
-        """Request path, e.g. ``'/users/7'``."""
-        return self._scope['path']
-
-    @property
-    def scheme(self) -> str:
-        """URL scheme, e.g. ``'http'`` / ``'https'``."""
-        return self._scope.get('scheme', 'http')
-
-    @property
-    def client(self) -> tuple | None:
-        """``(host, port)`` of the peer, or ``None`` when unknown."""
-        return self._scope.get('client')
-
-    @property
-    def headers(self) -> Headers:
-        """Request headers as a case-insensitive :class:`~blackbull.headers.Headers` view.
-
-        ``scope['headers']`` may be a plain ASGI pair-list (external servers,
-        ``TestClient``) or already a ``Headers`` instance (BlackBull's own
-        server); both shapes are served through the same view, computed once.
-        """
-        if self._headers is None:
-            raw = self._scope.get('headers', ())
-            self._headers = raw if isinstance(raw, Headers) else Headers(raw)
-        return self._headers
-
-    @property
-    def cookies(self) -> dict[str, str]:
-        """Cookies from the ``Cookie`` request header, parsed once."""
-        if self._cookies is None:
-            self._cookies = parse_cookies(self._scope)
-        return self._cookies
-
-    # ---- body access (single-drain cache) --------------------------------
-
-    async def body(self) -> bytes:
-        """Return the complete request body, buffering it on first use.
-
-        The underlying ``receive`` channel is drained at most once; repeated
-        calls (and ``json()`` / ``text()``) return the cached bytes.  A
-        mid-body disconnect raises :class:`ClientDisconnected` and leaves the
-        cache unset.
-        """
-        if self._body is _BODY_UNREAD:
-            self._body = await read_body(self._receive)
-        return self._body
-
-    async def json(self) -> Any:
-        """Parse the body as JSON — ``None`` on empty or invalid input.
-
-        Same contract as :func:`read_json`; see its note about a literal
-        JSON ``null`` also returning ``None``.
-        """
-        return _json_or_none(await self.body())
-
-    async def text(self, encoding: str = 'utf-8') -> str:
-        """Decode the body as text (``errors='replace'``), same contract as :func:`read_text`."""
-        body = await self.body()
-        return body.decode(encoding, errors='replace')

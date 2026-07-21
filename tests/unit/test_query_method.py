@@ -16,7 +16,7 @@ from http import HTTPMethod
 
 import pytest
 
-from blackbull import BlackBull, Request, QUERY
+from blackbull import BlackBull, Connection as Request, QUERY  # Sprint 79 alias
 from blackbull.router import Router, MethodNotApplicable
 from blackbull.utils import Scheme
 from blackbull.testing import TestClient

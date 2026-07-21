@@ -535,10 +535,14 @@ class HTTP2Actor(Actor):
         """
         scope = conn.as_scope()
         if get_settings().force_asgi_scope:
-            scope = Connection.from_scope(scope).as_scope()
-        # Internal consumers call ``Headers`` methods on ``scope['headers']``;
-        # as_scope() emits the ASGI list[tuple] form, so restore the rich
-        # object until Phase 5 switches those reads to ``conn.headers``.
+            # §4.3 dual-path lane — force the full ASGI round-trip so both the
+            # derived scope AND the Connection the Phase-5 consumers read are
+            # rebuilt from scratch on every request.
+            conn = Connection.from_scope(scope)
+            scope = conn.as_scope()
+        # Middleware / WS / events read ``scope['headers']`` via the ``Headers``
+        # API; as_scope() emits the ASGI list[tuple] form, so restore the rich
+        # object on the envelope.
         scope['headers'] = conn.headers
         if conn.type == 'websocket':
             # ``subprotocols`` is a websocket-only ASGI scope key, not a
@@ -549,6 +553,10 @@ class HTTP2Actor(Actor):
                 [p.strip().decode('utf-8', errors='replace')
                  for p in raw_sp.split(b',')]
                 if raw_sp else [])
+        # Phase 5 (consumer switch): stash the typed Connection on the scope
+        # envelope so the dispatcher, router, and handlers read ``conn.*`` with
+        # no re-conversion.
+        scope['_connection'] = conn
         return scope
 
     @log
@@ -1476,26 +1484,35 @@ class HTTP2Actor(Actor):
         # scope['query_string'] is the raw query as bytes.  RFC 9113
         # §8.3.1 puts both into the ``:path`` pseudo-header; split here.
         _pushed_path, _pushed_raw_path, _pushed_query = _split_h2_path(path)
-        pushed_scope: dict = {
-            'type': 'http',
-            'http_version': '2',
-            'method': 'GET',
-            'path': _pushed_path,
-            'raw_path': _pushed_raw_path,
-            'scheme': parent_scope.get('scheme', 'https'),
-            'query_string': _pushed_query,
-            'root_path': '',
-            'client': parent_scope.get('client'),
-            'headers': Headers([(k.encode() if isinstance(k, str) else k,
-                                  v.encode() if isinstance(v, str) else v)
-                                 for k, v in regular]),
-            'extensions': _build_h2_extensions(
+        # Sprint 79 Phase 5: build the synthetic pushed request as a native
+        # Connection and derive its ASGI scope through as_scope() — the single
+        # native→ASGI conversion point — then stash the Connection so the
+        # dispatcher/router/handler read ``conn.*`` on the pushed stream too.
+        # ``http2_priority`` is an H/2-only deprecation-alias key (not a
+        # Connection field), layered on after, like the request path.
+        _parent_client = parent_scope.get('client')
+        pushed_conn = Connection(
+            method='GET',
+            path=_pushed_path,
+            raw_path=_pushed_raw_path,
+            headers=Headers([(k.encode() if isinstance(k, str) else k,
+                              v.encode() if isinstance(v, str) else v)
+                             for k, v in regular]),
+            query_string=_pushed_query,
+            http_version='2',
+            scheme=parent_scope.get('scheme', 'https'),
+            type='http',
+            client=tuple(_parent_client) if _parent_client else None,
+            extensions=_build_h2_extensions(
                 push_stream_id, _DEFAULT_PRIORITY,
                 self._peer_initial_window_size,
                 self._conn_window.size),
-            # Deprecation alias — see HEADERS path note.
-            'http2_priority': _DEFAULT_PRIORITY,
-        }
+        )
+        pushed_scope: dict = pushed_conn.as_scope()
+        pushed_scope['headers'] = pushed_conn.headers
+        # Deprecation alias — see HEADERS path note.
+        pushed_scope['http2_priority'] = _DEFAULT_PRIORITY
+        pushed_scope['_connection'] = pushed_conn
 
         push_recipient = RecipientFactory.http2(queue_depth=self._stream_queue_depth)
         # Pushed requests have no body — same lazy-queue path as GETs with END_STREAM on HEADERS.

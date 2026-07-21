@@ -21,12 +21,12 @@ import blackbull
 _PKG_ROOT = pathlib.Path(blackbull.__file__).parent
 
 # Files still allowed to construct a raw ``{'type': 'http'|'websocket', ...}``
-# scope dict while the migration is in flight. Trim as each phase moves the
-# site onto Connection. Target at Phase 5 close: empty (minus connection.py).
+# scope dict. At Phase 5 close this is the end state: only ``connection.py``,
+# the single sanctioned native→ASGI conversion point, may build a scope literal.
+# Every other producer (H1/H2 parsers, the H2 push path, TestClient) now goes
+# through ``Connection.as_scope()``.
 _MIGRATION_ALLOWLIST = {
     'connection.py',            # the sanctioned conversion point
-    'server/http2_actor.py',    # H2 push scope build — moves in Phase 5
-    'testing.py',               # TestClient scope build — moved in Phase 5
 }
 
 

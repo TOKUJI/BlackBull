@@ -121,8 +121,11 @@ class Connection:
     scheme: str = 'http'
 
     # -- transport (filled after parse) -----------------------------------
-    client: tuple[str, int] | None = None
-    server: tuple[str, int] | None = None
+    # ASGI 3.0 allows the port to be ``None`` (e.g. a Unix-socket server, or
+    # httpx.ASGITransport which sends ``server: ['testserver', None]``), so the
+    # port element is ``int | None``.
+    client: tuple[str, int | None] | None = None
+    server: tuple[str, int | None] | None = None
 
     # -- mutable per-request state ----------------------------------------
     state: dict[str, Any] = field(default_factory=dict)
@@ -162,6 +165,14 @@ class Connection:
         for spec in _scope_fields():
             if spec.scope_key in scope:
                 kwargs[spec.attr] = spec.from_scope(scope[spec.scope_key])
+        # A conformant ASGI http/websocket scope always carries method, path,
+        # and headers, but default them so ``from_scope`` is total and never
+        # raises on a partial scope (e.g. a hand-built one in a unit test, or a
+        # minimal lifespan-adjacent scope).
+        kwargs.setdefault('method', 'GET')
+        kwargs.setdefault('path', '')
+        if 'headers' not in kwargs:
+            kwargs['headers'] = Headers([])
         # ASGI ``raw_path`` is optional; default it to the encoded path.
         if 'raw_path' not in kwargs:
             kwargs['raw_path'] = kwargs.get('path', '').encode('utf-8')
