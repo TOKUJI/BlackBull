@@ -749,7 +749,7 @@ def _handler_param_plan(fn, path_param_names: set) -> tuple:
     (payload: the :class:`~blackbull.di.Depends` instance), or ``'query'``
     (payload: :class:`_QuerySpec`).  Precedence: path params first, then the
     reserved names ``body``/``scope``, then a ``Depends`` default, then
-    ``Request`` recognition, then a dataclass body annotation; anything left
+    ``Connection`` recognition, then a dataclass body annotation; anything left
     is a query param — the fallback category.
 
     Raises ``TypeError`` (fail fast, at registration) for a ``Depends``
@@ -888,7 +888,7 @@ def _adapt_handler(fn, path: str, converters: dict | None = None):
     shapes, a matching converter — if any — maps it to a sendable.
 
     Parameter resolution (classified once, by :func:`_handler_param_plan`):
-    - Name matches a {param} in the path pattern → scope['path_params'][name],
+    - Name matches a {param} in the path pattern → conn.path_params[name],
       coerced to the annotated type if one is given.
     - Annotation is a Python ``@dataclass`` → request body parsed as JSON and
       instantiated; nested dataclasses, ``list[T]``, and ``T | None`` are
@@ -1596,8 +1596,8 @@ class Router:
             inner_chain = partial(fn, **{param: inner_chain})
 
         # Wrap in a named coroutine so it is recognisable at lookup time.
-        # Path parameters will be injected into scope['path_params'] by
-        # __getitem__ rather than forwarded as kwargs to the outermost
+        # Path parameters will be injected into the Connection's path_params by
+        # _resolve rather than forwarded as kwargs to the outermost
         # middleware (which would raise TypeError for unknown keyword args).
         _ic = inner_chain
         async def _chain_wrapper(scope, receive, send):

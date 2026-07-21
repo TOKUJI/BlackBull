@@ -69,21 +69,26 @@ async def echo(body: bytes):
     return data          # dict → JSONResponse automatically
 ```
 
-## The `Request` object
+## The `Connection` object
 
-Annotate a parameter with `Request` (or just name it `request`) to
-receive a context object bundling the common reads — headers,
+Annotate a parameter with `Connection` (or just name it `conn`/`request`)
+to receive a context object bundling the common reads — headers,
 cookies, client address, and the body helpers:
 
 ```python
-from blackbull import Request
+from blackbull import Connection
 
 @app.route(path='/items/{item_id:int}', methods=[HTTPMethod.POST])
-async def update_item(item_id: int, request: Request):
-    lang = request.headers.get(b'accept-language', b'en').decode()
-    data = await request.json()
+async def update_item(item_id: int, conn: Connection):
+    lang = conn.headers.get(b'accept-language', b'en').decode()
+    data = await conn.json()
     return {"id": item_id, "lang": lang, "data": data}
 ```
+
+!!! note "`Request` is the old name"
+    Before v0.59.2 this object was called `Request`.  `blackbull.Request`
+    still works as a deprecated alias (removal no earlier than
+    2027-08-01); new code should use `Connection`.
 
 See [Requests and responses](../guide/requests-and-responses.md)
 for the full surface.
