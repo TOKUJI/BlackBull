@@ -17,7 +17,7 @@ from ..actor import Actor, Message
 from ..event import Event
 from ..event_aggregator import EventAggregator
 from ..asgi import ASGIEvent
-from ..connection import Connection
+from ..connection import Connection, CONNECTION_STASH_KEY
 from ..headers import Headers
 from .deadline import ConnectionDeadline
 from .recipient import AbstractReader, IncompleteReadError, RecipientFactory, _WS_EVENT_QUEUE_DEPTH
@@ -497,37 +497,18 @@ class HTTP1Actor(Actor):
                     return
                 self._fill_connection_info(conn)
 
-                # Phase 3 (Sprint 79): the parser now yields a native
-                # ``Connection``; the dispatch pipeline below still consumes an
-                # ASGI scope dict, so materialize one here via the single
-                # registry-driven builder.  ``BB_FORCE_ASGI_SCOPE`` additionally
-                # round-trips through ``from_scope`` so the compat conversion is
-                # exercised on every request even self-hosted (§4.3 dual-path
-                # lane).  This whole bridge is removed in Phase 5 when the
-                # consumers read ``conn`` directly.
-                scope = conn.as_scope()
-                if cfg.force_asgi_scope:
-                    # §4.3 dual-path lane — force the full ASGI round-trip so
-                    # that both the derived scope AND the Connection the Phase-5
-                    # consumers read are rebuilt from scratch on every request,
-                    # keeping the compat conversion from bitrotting.
-                    # ``_asterisk_form`` is Connection-only (not in the scope),
-                    # so carry it across the rebuild explicitly.
-                    rebuilt = Connection.from_scope(scope)
-                    rebuilt._asterisk_form = conn._asterisk_form
-                    conn = rebuilt
-                    scope = conn.as_scope()
-                # Middleware / WS / events read ``scope['headers']`` via the
-                # ``Headers`` API; ``as_scope()`` emits the ASGI ``list[tuple]``
-                # form, so restore the rich object on the envelope.
-                scope['headers'] = conn.headers
-                if conn._asterisk_form:
-                    scope['_asterisk_form'] = True
-                # Phase 5 (consumer switch): stash the typed Connection on the
-                # scope envelope so the dispatcher, router, and handlers read
-                # ``conn.*`` with no re-conversion — the hot path is unchanged
-                # from Phase 4 (one ``as_scope`` for the compat envelope).
-                scope['_connection'] = conn
+                # The parser yields a native ``Connection``; the dispatch
+                # pipeline consumes an ASGI scope with the typed Connection
+                # stashed for zero-reconversion reads.  The single canonical
+                # ``Connection → dispatch-ready scope`` bridge (shared with the
+                # H/2 ``_conn_to_scope`` seam) does the ``as_scope`` derivation,
+                # the ``BB_FORCE_ASGI_SCOPE`` dual-path round-trip (§4.3), the
+                # ``Headers`` restore, the ``_asterisk_form`` re-expose, and the
+                # stash.
+                scope = conn.to_dispatch_scope(force_asgi=cfg.force_asgi_scope)
+                # Under the dual-path lane the bridge rebuilds ``conn``; read the
+                # dispatched object back so any later reference is the stashed one.
+                conn = scope[CONNECTION_STASH_KEY]
 
                 if scope.get('type') == 'websocket':
                     await self._handle_upgrade(scope)

@@ -4,6 +4,11 @@ name: pytest
 #
 # Fast tier  — runs on every push/PR; no Docker, beartype enabled.
 #              Catches regressions in unit, architecture, and property tests.
+# Dual-path  — runs on every push/PR; the same Docker-free suites under
+#              BB_FORCE_ASGI_SCOPE=1, forcing Connection.as_scope()+from_scope()
+#              on every request so the ASGI compat conversion can't bitrot
+#              between sprints (native-connection-interface.md §4.3, Sprint 79 —
+#              previously a manual-only lane).
 # Full tier  — runs weekly (Saturday 05:00 UTC, offset from conformance.yml's
 #              Sunday 03:17 UTC) and on demand; adds --run-all (integration +
 #              docker-dependent tests).
@@ -73,6 +78,40 @@ jobs:
         # modules whose top-level `import docker` fails here (no Docker on the
         # fast tier); those run on the full tier and via the dedicated h2spec
         # / Autobahn / user-corpus jobs.
+        run: |
+          python -m pytest tests/unit tests/architecture tests/properties \
+            --timeout=60 -q --beartype-packages=blackbull
+
+  dual-path:
+    name: Dual-path lane (BB_FORCE_ASGI_SCOPE=1)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # §4.3 of native-connection-interface.md: force the ASGI scope round-trip on
+    # every request (even self-hosted) so the Connection↔ASGI compat conversion
+    # is exercised continuously and can't drift.  Protocol-conversion coverage is
+    # Python-version-agnostic, so this runs on 3.12 only.
+    env:
+      BB_FORCE_ASGI_SCOPE: '1'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0   # v7.0.0
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1   # v6.3.0
+        with:
+          python-version: '3.12'
+
+      - name: Install BlackBull (with test-relevant extras)
+        run: pip install -e '.[compression,testing,fault-injection,reload,speed]'
+
+      - name: Generate self-signed TLS material
+        run: |
+          openssl req -x509 -newkey rsa:2048 \
+            -keyout tests/key.pem -out tests/cert.pem \
+            -days 365 -nodes -subj '/CN=localhost' \
+            -addext 'subjectAltName=DNS:localhost,IP:127.0.0.1'
+
+      - name: Run Docker-free suites through the forced ASGI round-trip
         run: |
           python -m pytest tests/unit tests/architecture tests/properties \
             --timeout=60 -q --beartype-packages=blackbull

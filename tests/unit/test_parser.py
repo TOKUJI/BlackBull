@@ -22,8 +22,14 @@ def _parse_headers(frame) -> dict:
     this suite asserts on the derived ASGI scope shape (the H/2 actor bridge
     materializes the same view), so convert via the single ``as_scope()``
     builder (headers therefore appear in the ASGI ``list[tuple]`` form).
+
+    ``parse_headers`` returns ``None`` on malformed input (Sprint 79 — no
+    throwaway Connection on the error path); this wrapper is only fed
+    well-formed frames, so a ``None`` here is a test-setup error.
     """
-    return _real_parse_headers(frame).as_scope()
+    conn = _real_parse_headers(frame)
+    assert conn is not None, 'parse_headers returned None (unexpectedly malformed frame)'
+    return conn.as_scope()
 
 
 def _get_scope(raw_request: bytes) -> dict:

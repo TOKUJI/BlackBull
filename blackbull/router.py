@@ -841,30 +841,27 @@ def _conn_of(scope, receive):
 
     Sprint 79 Phase 5 (consumer switch): the protocol actor builds the
     ``Connection`` in its parser and stashes it on the ASGI scope envelope
-    under ``'_connection'``, so the self-hosted path reuses that object with
+    under :data:`~blackbull.connection.CONNECTION_STASH_KEY`, so the self-hosted
+    path reuses that object with
     **no** re-conversion (the B1/B3 hot path is unchanged). When the app runs
     under an external ASGI server (uvicorn, ``httpx.ASGITransport``) there is
     no stash, so we build one via :meth:`Connection.from_scope` — the single
     ASGI→native conversion point. Either way ``_receive`` is (re)bound to the
     caller's channel so ``conn.body()`` drains the right stream once.
     """
-    from .connection import Connection  # noqa: PLC0415 — avoid an import cycle at module load
-    conn = scope.get('_connection') if isinstance(scope, dict) else None
-    if conn is None:
-        conn = Connection.from_scope(scope, receive)
-        if isinstance(scope, dict):
-            # Stash so later ``_conn_of`` calls in the same request (path-param
-            # injection, then the handler) reuse this one object — the
-            # path params set on it must survive to the handler.
-            scope['_connection'] = conn
-            # Transitional bridge: an *input* ``path_params`` key on a bare
-            # scope (external callers, and the router's own unit tests that
-            # drive a wrapper directly) seeds ``conn.path_params``.  The
-            # framework itself no longer writes path params onto the scope —
-            # ``_set_path_params`` sets them on the Connection (proposal §2.2).
-            seed = scope.get('path_params')
-            if seed:
-                conn.path_params.update(seed)
+    from .connection import stashed_connection  # noqa: PLC0415 — avoid an import cycle at module load
+    conn, built = stashed_connection(scope, receive)
+    if built and isinstance(scope, dict):
+        # Transitional bridge: an *input* ``path_params`` key on a bare scope
+        # (external callers, and the router's own unit tests that drive a
+        # wrapper directly) seeds ``conn.path_params``.  The framework itself no
+        # longer writes path params onto the scope — ``_set_path_params`` sets
+        # them on the Connection (proposal §2.2).
+        seed = scope.get('path_params')
+        if seed:
+            conn.path_params.update(seed)
+    # Rebind ``_receive`` to the caller's channel (even on a stash hit) so
+    # ``conn.body()`` drains the right stream exactly once.
     conn._receive = receive
     return conn
 

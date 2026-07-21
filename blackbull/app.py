@@ -102,19 +102,22 @@ def _connection_of(scope, receive):
     """Return the typed :class:`Connection` for this request (Sprint 79 Phase 5).
 
     BlackBull's own protocol actors stash the ``Connection`` they parsed on the
-    scope envelope under ``'_connection'``, so the self-hosted path reads it back
-    with no re-conversion. Under an external ASGI server (uvicorn,
+    scope envelope under :data:`~blackbull.connection.CONNECTION_STASH_KEY`, so
+    the self-hosted path reads it back with no re-conversion. Under an external
+    ASGI server (uvicorn,
     ``httpx.ASGITransport``) there is no stash, so build one via
     :meth:`Connection.from_scope` — the single ASGI→native conversion point —
     and link ``scope['state']`` to ``conn.state`` so the centrally-rendered
     error handlers and terminal events (which still read ``scope['state']``)
     observe the same grab-bag the dispatcher writes to.
     """
-    conn = scope.get('_connection')
-    if conn is None:
-        from .connection import Connection  # noqa: PLC0415
-        conn = Connection.from_scope(scope, receive)
-        scope['_connection'] = conn
+    from .connection import stashed_connection  # noqa: PLC0415
+    conn, built = stashed_connection(scope, receive)
+    if built:
+        # External ASGI path only: link ``scope['state']`` to ``conn.state`` so
+        # the centrally-rendered error handlers and terminal events (which still
+        # read ``scope['state']``) observe the same grab-bag the dispatcher
+        # writes to.
         scope.setdefault('state', conn.state)
     return conn
 

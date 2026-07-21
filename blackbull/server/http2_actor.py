@@ -19,7 +19,7 @@ from ..protocol.frame_types import (
     DEFAULT_INITIAL_WINDOW_SIZE, DEFAULT_MAX_FRAME_SIZE,
 )
 from ..protocol.stream import Stream, StreamState
-from ..connection import Connection
+from ..connection import Connection, CONNECTION_STASH_KEY
 from ..env import get_settings
 from ..headers import Headers
 from .parser import parse_headers
@@ -525,38 +525,22 @@ class HTTP2Actor(Actor):
     def _conn_to_scope(self, conn: Connection) -> dict:
         """Materialize the ASGI scope dict the H/2 dispatch pipeline consumes.
 
-        Phase 4 (Sprint 79): ``parse_headers`` yields a native ``Connection``;
-        the stream/dispatch machinery below still reads an ASGI scope dict (it
-        flips in Phase 5), so derive one here via the single registry-driven
-        builder.  ``BB_FORCE_ASGI_SCOPE`` additionally round-trips through
-        ``from_scope`` so the compat conversion is exercised on every request
-        even self-hosted (§4.3 dual-path lane).  The H/1.1 actor's ``run()``
-        does the identical bridge.
+        Delegates the common *Connection → dispatch-ready scope* work (the
+        ``as_scope`` derivation, the ``BB_FORCE_ASGI_SCOPE`` dual-path round-trip,
+        the ``Headers`` restore, and the stash) to the single canonical
+        :meth:`Connection.to_dispatch_scope` bridge shared with the H/1.1
+        ``run()`` seam, then layers on the websocket-only ``subprotocols`` key
+        (not a ``Connection`` field — proposal §2.1), derived from the request
+        headers the same way the H/1.1 upgrade handler augments its scope.
         """
-        scope = conn.as_scope()
-        if get_settings().force_asgi_scope:
-            # §4.3 dual-path lane — force the full ASGI round-trip so both the
-            # derived scope AND the Connection the Phase-5 consumers read are
-            # rebuilt from scratch on every request.
-            conn = Connection.from_scope(scope)
-            scope = conn.as_scope()
-        # Middleware / WS / events read ``scope['headers']`` via the ``Headers``
-        # API; as_scope() emits the ASGI list[tuple] form, so restore the rich
-        # object on the envelope.
-        scope['headers'] = conn.headers
-        if conn.type == 'websocket':
-            # ``subprotocols`` is a websocket-only ASGI scope key, not a
-            # Connection field — derive it from the request headers here, the
-            # same way the H/1.1 upgrade handler augments its derived scope.
-            raw_sp = conn.headers.get(b'sec-websocket-protocol', b'')
+        scope = conn.to_dispatch_scope(force_asgi=get_settings().force_asgi_scope)
+        if scope['type'] == 'websocket':
+            stashed = scope[CONNECTION_STASH_KEY]
+            raw_sp = stashed.headers.get(b'sec-websocket-protocol', b'')
             scope['subprotocols'] = (
                 [p.strip().decode('utf-8', errors='replace')
                  for p in raw_sp.split(b',')]
                 if raw_sp else [])
-        # Phase 5 (consumer switch): stash the typed Connection on the scope
-        # envelope so the dispatcher, router, and handlers read ``conn.*`` with
-        # no re-conversion.
-        scope['_connection'] = conn
         return scope
 
     @log
@@ -1122,6 +1106,7 @@ class HTTP2Actor(Actor):
                 self.factory.rst_stream(stream.stream_id, ErrorCodes.PROTOCOL_ERROR))
             return True
 
+        assert conn is not None  # not malformed → parse_headers built a Connection
         self._fill_scope_connection(conn)
         scope = self._conn_to_scope(conn)
         stream.expected_content_length = _extract_content_length(scope)
@@ -1218,6 +1203,7 @@ class HTTP2Actor(Actor):
                 self.factory.rst_stream(stream.stream_id, ErrorCodes.PROTOCOL_ERROR))
             return True
 
+        assert conn is not None  # not malformed → parse_headers built a Connection
         self._fill_scope_connection(conn)
         scope = self._conn_to_scope(conn)
         stream.expected_content_length = _extract_content_length(scope)
@@ -1484,12 +1470,12 @@ class HTTP2Actor(Actor):
         # scope['query_string'] is the raw query as bytes.  RFC 9113
         # §8.3.1 puts both into the ``:path`` pseudo-header; split here.
         _pushed_path, _pushed_raw_path, _pushed_query = _split_h2_path(path)
-        # Sprint 79 Phase 5: build the synthetic pushed request as a native
-        # Connection and derive its ASGI scope through as_scope() — the single
-        # native→ASGI conversion point — then stash the Connection so the
-        # dispatcher/router/handler read ``conn.*`` on the pushed stream too.
-        # ``http2_priority`` is an H/2-only deprecation-alias key (not a
-        # Connection field), layered on after, like the request path.
+        # Sprint 79: build the synthetic pushed request as a native Connection
+        # and derive its dispatch scope through the canonical
+        # ``Connection.to_dispatch_scope`` bridge, so the dispatcher/router/
+        # handler read ``conn.*`` on the pushed stream too.  ``http2_priority``
+        # is an H/2-only deprecation-alias key (not a Connection field), layered
+        # on after, like the request path.
         _parent_client = parent_scope.get('client')
         pushed_conn = Connection(
             method='GET',
@@ -1508,11 +1494,12 @@ class HTTP2Actor(Actor):
                 self._peer_initial_window_size,
                 self._conn_window.size),
         )
-        pushed_scope: dict = pushed_conn.as_scope()
-        pushed_scope['headers'] = pushed_conn.headers
+        # Server-synthesized push request: same canonical bridge as the HEADERS
+        # path (as_scope + Headers restore + stash), minus the dual-path round-
+        # trip (a push scope is generated, never parsed off the wire).
+        pushed_scope: dict = pushed_conn.to_dispatch_scope()
         # Deprecation alias — see HEADERS path note.
         pushed_scope['http2_priority'] = _DEFAULT_PRIORITY
-        pushed_scope['_connection'] = pushed_conn
 
         push_recipient = RecipientFactory.http2(queue_depth=self._stream_queue_depth)
         # Pushed requests have no body — same lazy-queue path as GETs with END_STREAM on HEADERS.

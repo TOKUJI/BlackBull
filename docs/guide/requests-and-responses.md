@@ -48,7 +48,7 @@ declare a `Connection` pay nothing: injection is decided when the route
 is registered, and the raw `(scope, receive, send)` form is
 unaffected.
 
-!!! warning "`Request` is deprecated — use `Connection` (since v0.59.2)"
+!!! warning "`Request` is deprecated — use `Connection` (since v0.60.0)"
     `Connection` replaces the old `Request` context object (Sprint 79).
     `blackbull.Request` is now a **deprecated alias** of `Connection`
     that emits a `DeprecationWarning` on first use and will be removed

@@ -10,13 +10,12 @@ logger = logging.getLogger(__name__)
 
 
 def _default_connection() -> Connection:
-    """Minimal HTTP/2 :class:`Connection` returned on the malformed / early-out
-    paths of :func:`parse_headers`.
+    """The minimal HTTP/2 :class:`Connection` base that :func:`parse_headers`
+    populates on the happy path (the pseudo-headers are filled in in place).
 
-    The actor checks ``frame.malformed`` and answers RST_STREAM before it ever
-    reads this object, so only the defaults matter — it exists to keep the
-    return contract a :class:`Connection` on every path (Sprint 79 Phase 4,
-    the H/2 analogue of :meth:`HTTP1Actor._parse` always yielding a Connection).
+    Malformed / early-out paths no longer build one — they return ``None`` (the
+    actor rejects on ``frame.malformed`` before reading the result), so this is
+    constructed only for a request that will actually be dispatched.
     """
     return Connection(
         method='HEAD', path='', raw_path=b'', headers=Headers([]),
@@ -106,9 +105,9 @@ def _request_headers_with_host(frame, *, require_present: bool) -> list | None:
     return frame.headers
 
 
-def parse_headers(frame) -> Connection:
+def parse_headers(frame) -> Connection | None:
     """Build a native :class:`Connection` (``http`` or ``websocket``) from a
-    HEADERS frame.
+    HEADERS frame, or ``None`` when the request is malformed.
 
     Hot path on every request — kept as a module-level function so that
     callers avoid the dict-lookup + parser allocation that ``ParserFactory``
@@ -123,22 +122,23 @@ def parse_headers(frame) -> Connection:
     same way :meth:`HTTP1Actor._handle_upgrade` augments the derived scope.
 
     Also performs request-level pseudo-header presence checks (RFC 9113
-    §8.3.1).  Field-level checks already happened in ``parse_payload``; if
-    that flagged ``frame.malformed`` we still return a Connection to keep the
-    contract simple but the actor will discard it before dispatch.  If
-    parse_headers itself finds a missing or empty required pseudo, it sets
-    ``frame.malformed`` so the same actor check rejects the request.
+    §8.3.1).  Field-level checks already happened in ``parse_payload``.  On any
+    known-bad input — ``parse_payload`` having flagged ``frame.malformed``, or a
+    missing/empty required pseudo found here (which sets ``frame.malformed``) —
+    we return ``None`` rather than build a throwaway :class:`Connection`: the
+    actor's ``frame.malformed`` check answers RST_STREAM before it would read
+    the result, so no object is constructed on the error path.
     """
     # Short-circuit if the frame parser already flagged this malformed.
     if getattr(frame, 'malformed', False):
-        return _default_connection()
+        return None
 
     # RFC 9113 §8.3.1 — ":status" is a response pseudo-header and MUST NOT
     # appear in a request.  ``parse_payload`` accepted it as a known pseudo-
     # header; we reject it here at the request layer.
     if PseudoHeaders.STATUS in frame.pseudo_headers:
         frame._mark_malformed('response pseudo-header in request: :status')
-        return _default_connection()
+        return None
 
     # RFC 9113 §8.3.1 — required request pseudo-headers.
     # CONNECT (RFC 9113 §8.5) omits :scheme and :path; the WebSocket
@@ -146,18 +146,18 @@ def parse_headers(frame) -> Connection:
     method = frame.pseudo_headers.get(PseudoHeaders.METHOD)
     if method is None:
         frame._mark_malformed('missing :method')
-        return _default_connection()
+        return None
     if method != 'CONNECT':
         if PseudoHeaders.SCHEME not in frame.pseudo_headers:
             frame._mark_malformed('missing :scheme')
-            return _default_connection()
+            return None
         path = frame.pseudo_headers.get(PseudoHeaders.PATH)
         if path is None:
             frame._mark_malformed('missing :path')
-            return _default_connection()
+            return None
         if path == '':
             frame._mark_malformed('empty :path')
-            return _default_connection()
+            return None
 
     conn = _default_connection()
 

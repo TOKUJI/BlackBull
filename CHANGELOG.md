@@ -80,7 +80,7 @@ so the editable install's metadata catches up.
   second body chunk) don't arrive within the same event-loop iteration,
   the buffered body is flushed immediately.  The unary coalescing path
   is preserved — synchronous trailers still combine into a single
-  write.  (#TBD)
+  write.  (#173)
 
 ## [0.59.0] — 2026-07-19
 

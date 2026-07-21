@@ -1,5 +1,6 @@
 import ipaddress
 
+from ..connection import CONNECTION_STASH_KEY
 from ..headers import Headers
 
 
@@ -118,7 +119,7 @@ class TrustedProxy:
         # (already-mutated) scope, so ``from_scope`` picks the rewrites up for
         # free.  ``TrustedProxy`` is the only in-tree scope mutator (§9, risk
         # table), so this is the one place the conn needs re-syncing.
-        conn = scope.get('_connection')
+        conn = scope.get(CONNECTION_STASH_KEY)
         if conn is not None:
             conn.client = tuple(scope['client']) if scope.get('client') else None
             conn.scheme = scope.get('scheme', conn.scheme)

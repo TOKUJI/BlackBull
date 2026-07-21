@@ -23,7 +23,17 @@ from typing import Any, Callable, NamedTuple
 from .headers import Headers
 from .request import read_body, parse_cookies, ClientDisconnected, _json_or_none
 
-__all__ = ['Connection', 'ClientDisconnected']
+__all__ = ['Connection', 'ClientDisconnected', 'CONNECTION_STASH_KEY']
+
+
+#: Envelope key under which a protocol actor stashes the typed :class:`Connection`
+#: it parsed, so the self-hosted dispatch path (dispatcher, router, handlers, and
+#: ``TrustedProxy``) reads it back with **zero** re-conversion (Sprint 79 Phase 5).
+#: A single named constant instead of a bare ``'_connection'`` literal repeated
+#: across the actors, app, router, and proxy: one typo on a write-side would
+#: otherwise silently miss the stash and force a redundant ``from_scope`` on the
+#: hot path, invisible to tests.
+CONNECTION_STASH_KEY = '_connection'
 
 
 # ---------------------------------------------------------------------------
@@ -96,6 +106,34 @@ def _scope_fields() -> list[_FieldSpec]:
     return [s for s in _CONNECTION_FIELDS if s.scope_key is not None]
 
 
+def stashed_connection(scope, receive) -> tuple['Connection', bool]:
+    """Return the typed :class:`Connection` for this request, plus whether it
+    was freshly built.
+
+    The one *scope → Connection* accessor shared by the dispatcher
+    (``app._connection_of``) and the router (``router._conn_of``), Sprint 79.
+    BlackBull's own protocol actors stash the ``Connection`` they parsed on the
+    scope envelope under :data:`CONNECTION_STASH_KEY`, so the self-hosted path
+    reads it back with **no** re-conversion. Under an external ASGI server
+    (uvicorn, ``httpx.ASGITransport``) there is no stash, so build one via
+    :meth:`Connection.from_scope` — the single ASGI→native point — and stash it
+    so later accessors in the same request reuse the one object.
+
+    Returns ``(conn, built)`` where *built* is ``True`` only on the external
+    path (no prior stash). Callers layer their own post-processing on a freshly
+    built conn — the dispatcher links ``scope['state']`` to ``conn.state``; the
+    router seeds ``path_params`` from an input scope key — because those needs
+    differ by call site.
+    """
+    conn = scope.get(CONNECTION_STASH_KEY) if isinstance(scope, dict) else None
+    if conn is not None:
+        return conn, False
+    conn = Connection.from_scope(scope, receive)
+    if isinstance(scope, dict):
+        scope[CONNECTION_STASH_KEY] = conn
+    return conn, True
+
+
 # ---------------------------------------------------------------------------
 # The Connection object
 # ---------------------------------------------------------------------------
@@ -140,7 +178,9 @@ class Connection:
     _body: bytes | None = field(default=None, compare=False, repr=False)
     _body_read: bool = field(default=False, compare=False, repr=False)
     _cookies: dict[str, str] | None = field(default=None, compare=False, repr=False)
-    _receive: Any = field(default=None, compare=False, repr=False)
+    # The ASGI ``receive`` channel, bound by the actor / ``from_scope``; only
+    # ever a receive callable or ``None`` (before body access is wired).
+    _receive: Callable | None = field(default=None, compare=False, repr=False)
 
     # ---- ASGI conversion — generated from _CONNECTION_FIELDS --------------
 
@@ -179,6 +219,43 @@ class Connection:
         conn = cls(**kwargs)
         conn._receive = receive
         return conn
+
+    def to_dispatch_scope(self, *, force_asgi: bool = False) -> dict:
+        """Materialize the ASGI scope the dispatch pipeline consumes, with this
+        typed :class:`Connection` stashed on it for zero-reconversion reads.
+
+        The single canonical *Connection → dispatch-ready scope* bridge shared
+        by the H/1.1 ``run()`` and H/2 ``_conn_to_scope`` seams (Sprint 79) —
+        they used to hand-roll the same five steps:
+
+        1. derive the ASGI scope via :meth:`as_scope` (the one native→ASGI point);
+        2. when ``force_asgi`` (the §4.3 ``BB_FORCE_ASGI_SCOPE`` dual-path lane),
+           round-trip through :meth:`from_scope` so both the derived scope *and*
+           the Connection the consumers read are rebuilt from scratch on every
+           request, keeping the compat conversion from bitrotting.  ``_asterisk_form``
+           is Connection-only (not in the scope), so carry it across the rebuild;
+        3. restore ``scope['headers']`` to the rich :class:`Headers` object
+           (``as_scope`` emits the ASGI ``list[tuple]`` form; internal ``.get()``
+           callers want the object);
+        4. re-expose the H/1.1 ``_asterisk_form`` OPTIONS marker on the envelope;
+        5. stash the Connection under :data:`CONNECTION_STASH_KEY`.
+
+        Protocol-specific augmentation (the websocket-only ``subprotocols`` key)
+        is layered on by the caller *after* this returns — it is not a
+        :class:`Connection` field (proposal §2.1).
+        """
+        scope = self.as_scope()
+        conn = self
+        if force_asgi:
+            rebuilt = Connection.from_scope(scope)
+            rebuilt._asterisk_form = self._asterisk_form
+            conn = rebuilt
+            scope = conn.as_scope()
+        scope['headers'] = conn.headers
+        if conn._asterisk_form:
+            scope['_asterisk_form'] = True
+        scope[CONNECTION_STASH_KEY] = conn
+        return scope
 
     # ---- body access (single-drain cache) --------------------------------
 

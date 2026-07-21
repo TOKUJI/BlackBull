@@ -227,6 +227,93 @@ async def test_http2_sender_auto_emits_date_on_asgi_event_path():
     assert b'date' in names, f'expected auto-emitted date header; got {names!r}'
 
 
+# ---------------------------------------------------------------------------
+# Trailers-coalesced auto-flush (v0.59.1 #173; Sprint 79 single-hop rework).
+# The trailers-coalescing fast path holds the first body chunk so HEADERS +
+# DATA + trailing HEADERS coalesce into one write for a unary RPC.  A
+# server-streaming handler that sets ``trailers: True`` then PARKS after the
+# first chunk must not have it held forever — a deferred auto-flush fires when
+# the loop turns without trailers.  These two tests pin both halves
+# deterministically (the old guard was only the intermittent gRPC health-watch
+# interop test).
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_http2_sender_auto_flushes_buffered_body_when_producer_parks():
+    """Deadlock-fix: a buffered first chunk flushes unprompted when the producer
+    parks (no trailers arrive).  Sprint 79 collapsed the former
+    ``call_soon`` → ``ensure_future`` two-hop to a single ``ensure_future``, so
+    the flush now lands after exactly **one** event-loop turn."""
+    from blackbull.server.sender import HTTP2Sender, AsyncioWriter
+    from blackbull.asgi import ASGIEvent
+
+    written = bytearray()
+    mock_writer = MagicMock()
+    mock_writer.write = MagicMock(side_effect=lambda d: written.extend(d))
+    mock_writer.drain = AsyncMock()
+
+    factory = FrameFactory()
+    sender = HTTP2Sender(AsyncioWriter(mock_writer), factory, stream_id=1)
+
+    await sender({'type': ASGIEvent.HTTP_RESPONSE_START, 'status': 200,
+                  'headers': [], 'trailers': True})
+    # One body chunk that fits the window; trailers pending → held, not written.
+    await sender({'type': ASGIEvent.HTTP_RESPONSE_BODY, 'body': b'chunk',
+                  'more_body': True})
+    assert not written, 'buffered body must not be on the wire before the flush'
+    assert sender._buffered_body == b'chunk'
+
+    # Producer parks: one loop turn runs the single auto-flush task; no trailers.
+    await asyncio.sleep(0)
+
+    assert sender._buffered_body is None, 'auto-flush must clear the buffer'
+    # HEADERS frame present, then exactly one DATA frame carrying b'chunk' with
+    # NO END_STREAM (trailers are still pending).
+    names = [k.lower() if isinstance(k, (bytes, bytearray)) else k.lower().encode()
+             for k, _ in _decode_h2_headers(bytes(written), factory)]
+    assert b':status' in names, f'expected a HEADERS frame; got {names!r}'
+    data_frames = _collect_data_frames(written, factory)
+    assert len(data_frames) == 1, f'expected one DATA frame; got {len(data_frames)}'
+    assert bytes(data_frames[0].payload) == b'chunk'
+    assert not data_frames[0].end_stream, 'END_STREAM must not be set (trailers pending)'
+
+
+@pytest.mark.asyncio
+async def test_http2_sender_unary_trailers_still_coalesce_into_one_write():
+    """Preserved-unary case (guards the coalescing optimisation): START +
+    BODY + TRAILERS sent back-to-back with no intervening loop turn still
+    coalesce into a **single** ``write()`` — the auto-flush must not fire when
+    trailers arrive synchronously in the same event-loop iteration."""
+    from blackbull.server.sender import HTTP2Sender, AsyncioWriter
+    from blackbull.asgi import ASGIEvent
+
+    written = bytearray()
+    mock_writer = MagicMock()
+    mock_writer.write = MagicMock(side_effect=lambda d: written.extend(d))
+    mock_writer.drain = AsyncMock()
+
+    factory = FrameFactory()
+    sender = HTTP2Sender(AsyncioWriter(mock_writer), factory, stream_id=1)
+
+    await sender({'type': ASGIEvent.HTTP_RESPONSE_START, 'status': 200,
+                  'headers': [], 'trailers': True})
+    await sender({'type': ASGIEvent.HTTP_RESPONSE_BODY, 'body': b'chunk',
+                  'more_body': True})
+    # Trailers arrive in the same burst, before any loop turn — they consume the
+    # buffered chunk and emit HEADERS + DATA + trailing HEADERS in one write.
+    await sender({'type': ASGIEvent.HTTP_RESPONSE_TRAILERS,
+                  'headers': [(b'grpc-status', b'0')]})
+
+    assert mock_writer.write.call_count == 1, (
+        f'unary response must coalesce into one write; got '
+        f'{mock_writer.write.call_count}')
+    assert sender._buffered_body is None
+
+    # A now-stale auto-flush task fired for the consumed chunk must be a no-op.
+    await asyncio.sleep(0)
+    assert mock_writer.write.call_count == 1, 'stale auto-flush must not re-write'
+
+
 @pytest.mark.asyncio
 async def test_http2_sender_does_not_duplicate_app_provided_date():
     """If the app already sent a Date header, the auto-emit must not duplicate it.
