@@ -255,7 +255,7 @@ def test_upgrade_h2c_is_ignored_not_fatal():
     scope = actor._parse(request)
     # A non-websocket Upgrade token is ignored: the request stays plain HTTP
     # rather than becoming scope['type']='h2c' and crashing dispatch (bug 1.5).
-    assert scope['type'] == 'http'
+    assert scope.type == 'http'
 
 
 def test_upgrade_websocket_still_switches_scope():
@@ -265,8 +265,8 @@ def test_upgrade_websocket_still_switches_scope():
                b'Connection: Upgrade\r\n'
                b'Upgrade: websocket\r\n\r\n')
     scope = actor._parse(request)
-    assert scope['type'] == 'websocket'
-    assert scope['scheme'] == 'ws'
+    assert scope.type == 'websocket'
+    assert scope.scheme == 'ws'
 
 
 @pytest.mark.asyncio

@@ -483,6 +483,14 @@ class Settings:
     #: typical reverse-proxy defaults.
     header_max_total: int = 65536
 
+    #: Dual-path conformance lane (Sprint 79 §4.3).  When true, every request
+    #: round-trips the native :class:`~blackbull.connection.Connection` through
+    #: ``as_scope()`` + ``from_scope()`` before dispatch, so the ASGI compat
+    #: conversion is exercised on the self-hosted path and cannot silently
+    #: bitrot.  Off by default (the native path skips the extra round-trip);
+    #: turned on in CI via ``BB_FORCE_ASGI_SCOPE=1``.
+    force_asgi_scope: bool = False
+
     #: Chunk size (bytes) for streaming an HTTP/1.1 ``Content-Length`` request
     #: body to the ASGI app.  Instead of one ``readexactly(content_length)``
     #: giant allocation, the body is delivered in fixed-size ``http.request``
@@ -633,6 +641,7 @@ def get_settings() -> Settings:
         write_timeout=_float_env_nonneg('BB_WRITE_TIMEOUT', 30.0),
         header_max_line=_int_env_nonneg('BB_HEADER_MAX_LINE', 8192),
         header_max_total=_int_env_nonneg('BB_HEADER_MAX_TOTAL', 65536),
+        force_asgi_scope=_bool_env('BB_FORCE_ASGI_SCOPE', False),
         body_chunk_size=_int_env('BB_BODY_CHUNK_SIZE', 65536),
         # RFC 9113 §6.9.2 default initial window size.  See
         # docs/reference/env-vars.md "Performance recommendations" for the

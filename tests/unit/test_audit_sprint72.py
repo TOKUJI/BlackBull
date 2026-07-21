@@ -69,13 +69,13 @@ class TestH1H2HostUniformity:
                         (b':scheme', b'http'),
                         (b':authority', b'real.example'),
                         (b'host', b'spoofed.example')])
-        assert h1['headers'].get(b'host') == b'real.example'
-        assert h1['headers'].get(b'host') == h2['headers'].get(b'host')
+        assert h1.headers.get(b'host') == b'real.example'
+        assert h1.headers.get(b'host') == h2['headers'].get(b'host')
 
     def test_h1_h2_host_uniformity_with_port(self):
         h1 = _h1_scope(b'GET / HTTP/1.1\r\nHost: example.com:8443\r\n\r\n')
         h2 = _h2_scope([(b':method', b'GET'), (b':path', b'/'),
                         (b':scheme', b'https'),
                         (b':authority', b'example.com:8443')])
-        assert h1['headers'].get(b'host') == b'example.com:8443'
-        assert h1['headers'].get(b'host') == h2['headers'].get(b'host')
+        assert h1.headers.get(b'host') == b'example.com:8443'
+        assert h1.headers.get(b'host') == h2['headers'].get(b'host')

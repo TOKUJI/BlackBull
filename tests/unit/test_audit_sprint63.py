@@ -196,8 +196,8 @@ class TestSpecialRequestForms:
         actor = _make_actor()
         scope = actor._parse(b'GET http://example.com/echo?x=1 HTTP/1.1\r\n'
                              b'Host: example.com\r\n\r\n')
-        assert scope['path'] == '/echo'
-        assert scope['query_string'] == b'x=1'
+        assert scope.path == '/echo'
+        assert scope.query_string == b'x=1'
 
     def test_absolute_form_authority_overrides_host(self):
         # RFC 9112 §3.2.2 — the origin server MUST ignore the Host header
@@ -206,19 +206,19 @@ class TestSpecialRequestForms:
         actor = _make_actor()
         scope = actor._parse(b'GET http://real.example/ HTTP/1.1\r\n'
                              b'Host: spoofed.example\r\n\r\n')
-        assert scope['headers'].get(b'host') == b'real.example'
+        assert scope.headers.get(b'host') == b'real.example'
 
     def test_absolute_form_bare_authority_gets_root_path(self):
         actor = _make_actor()
         scope = actor._parse(b'GET http://example.com HTTP/1.1\r\n'
                              b'Host: example.com\r\n\r\n')
-        assert scope['path'] == '/'
+        assert scope.path == '/'
 
     def test_asterisk_form_options_flagged_for_server_level_answer(self):
         actor = _make_actor()
         scope = actor._parse(b'OPTIONS * HTTP/1.1\r\n'
                              b'Host: example.com\r\n\r\n')
-        assert scope.get('_asterisk_form') is True
+        assert scope._asterisk_form is True
 
     def test_asterisk_form_non_options_rejected(self):
         # COMP-ASTERISK-WITH-GET — '*' is only valid for OPTIONS (§3.2.4).
@@ -284,7 +284,7 @@ class TestProtocolValidation:
         actor = _make_actor()
         scope = actor._parse(b'POST /echo HTTP/1.1\r\nHost: x\r\n'
                              b'Transfer-Encoding: chunked\r\n\r\n')
-        assert scope['type'] == 'http'
+        assert scope.type == 'http'
 
     def test_duplicate_content_type_rejected(self):
         # COMP-DUPLICATE-CT — Content-Type is a singleton field.
@@ -305,7 +305,7 @@ class TestXForwardedPrefixTrust:
         actor = _make_actor()
         scope = actor._parse(b'GET / HTTP/1.1\r\nHost: x\r\n'
                              b'X-Forwarded-Prefix: /evil\r\n\r\n')
-        assert scope['root_path'] == ''
+        assert scope.root_path == ''
 
     def test_h2_parse_headers_ignores_forwarded_prefix(self):
         # Frame construction mirrors test_parser.py's H2 dispatch harness.
@@ -476,7 +476,7 @@ class TestMissingHostAndVersion:
         # COMP-HTTP10-NO-HOST — HTTP/1.0 predates Host; must stay 200.
         actor = _make_actor()
         scope = actor._parse(b'GET / HTTP/1.0\r\n\r\n')
-        assert scope['http_version'] == '1.0'
+        assert scope.http_version == '1.0'
 
     def test_unsupported_major_version_rejected_505(self):
         # RFC9112-2.3-INVALID-VERSION — HTTP/9.9 → 505, not a happy 200.
@@ -496,7 +496,7 @@ class TestMissingHostAndVersion:
         # should be served, not rejected (RFC 9110 §2.5).
         actor = _make_actor()
         scope = actor._parse(b'GET / HTTP/1.2\r\nHost: x\r\n\r\n')
-        assert scope['http_version'] == '1.2'
+        assert scope.http_version == '1.2'
 
     def test_malformed_version_still_400(self):
         # Grammar violations (not a valid HTTP-version token at all) stay
@@ -513,13 +513,13 @@ class TestContentLengthStrict:
         actor = _make_actor()
         scope = actor._parse(b'POST /echo HTTP/1.1\r\nHost: x\r\n'
                              b'Content-Length: ' + cl + b'\r\n\r\n')
-        assert scope['headers'].get(b'content-length') == cl
+        assert scope.headers.get(b'content-length') == cl
 
     def test_no_space_after_colon_accepted(self):
         actor = _make_actor()
         scope = actor._parse(b'POST /echo HTTP/1.1\r\nHost: x\r\n'
                              b'Content-Length:5\r\n\r\n')
-        assert scope['headers'].get(b'content-length') == b'5'
+        assert scope.headers.get(b'content-length') == b'5'
 
     @pytest.mark.parametrize('raw_value', [
         b' 005',    # SMUG-CL-LEADING-ZEROS
@@ -563,4 +563,4 @@ class TestUnderscoreFramingHeaderNames:
         actor = _make_actor()
         scope = actor._parse(b'GET / HTTP/1.1\r\nHost: x\r\n'
                              b'x_request_id: abc\r\n\r\n')
-        assert scope['headers'].get(b'x_request_id') == b'abc'
+        assert scope.headers.get(b'x_request_id') == b'abc'

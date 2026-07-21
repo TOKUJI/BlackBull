@@ -13,9 +13,15 @@ from blackbull.server.parser import _make_scope as _make_http2_scope, parse_head
 
 
 def _get_scope(raw_request: bytes) -> dict:
-    """Parse raw HTTP/1.1 request bytes and return the resulting scope dict."""
+    """Parse raw HTTP/1.1 request bytes and return the derived ASGI scope.
+
+    Sprint 79 Phase 3 — ``_parse`` now returns a native ``Connection``; this
+    suite asserts on the derived ASGI scope shape, so materialize it via the
+    single ``as_scope()`` builder (headers therefore appear in the ASGI
+    ``list[tuple]`` form, not as a ``Headers`` object).
+    """
     actor = object.__new__(_HTTP1Actor)
-    return actor._parse(raw_request)
+    return actor._parse(raw_request).as_scope()
 
 
 def _http_request(method='GET', path='/', version='HTTP/1.1',
@@ -107,9 +113,9 @@ class TestParse:
         assert scope['path'] == '/chat'
 
     def test_headers_is_iterable_of_pairs(self):
-        from blackbull.headers import Headers
+        # as_scope() emits headers in the ASGI list[tuple] form.
         scope = _get_scope(_http_request())
-        assert isinstance(scope['headers'], Headers)
+        assert isinstance(scope['headers'], list)
         for name, value in scope['headers']:
             assert isinstance(name, bytes)
             assert isinstance(value, bytes)
