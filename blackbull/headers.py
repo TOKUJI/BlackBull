@@ -60,6 +60,20 @@ class Headers:
     def __len__(self) -> int:
         return len(self._list)
 
+    def __eq__(self, other: object) -> bool:
+        """Value equality on the ordered ``(name, value)`` pair list.
+
+        Two ``Headers`` are equal when they carry the same fields in the same
+        order (RFC 7230 §3.2.2 — order is significant for repeated fields).
+        Enables ``Connection`` round-trip equality (Sprint 79)."""
+        if isinstance(other, Headers):
+            return self._list == other._list
+        return NotImplemented
+
+    # Defining __eq__ drops the inherited __hash__; Headers is a mutable
+    # multi-valued store and is never used as a dict key or set member.
+    __hash__ = None
+
     # ---- dict-like lookup (returns list of pairs) -----------------------
 
     def __contains__(self, name: bytes) -> bool:

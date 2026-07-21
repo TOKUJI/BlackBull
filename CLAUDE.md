@@ -151,7 +151,7 @@ duplicate their content here; link, don't copy.
 
 **Skills** (invocable, harness-surfaced): `sprint-close`, `bench-compare`,
 `pre-release-docs`, `update-roadmap`, `create-test`, `type-check`, `add-event`,
-`new-http2-frame`, `protocol-handler`, `httparena-bench`.
+`new-http2-frame`, `protocol-handler`, `httparena-bench`, `run-http11probe`.
 
 ### Doc lifecycle (so docs don't rot)
 

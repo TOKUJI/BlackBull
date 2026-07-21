@@ -739,7 +739,7 @@ class HTTP2Sender(BaseSender):
         '_conn_window', 'stream_window_size',
         'max_frame_size', '_window_open', '_end_stream_sent',
         '_buffered_status', '_buffered_headers', '_expect_trailers',
-        '_buffered_body',
+        '_buffered_body', '_auto_flush_task',
     )
 
     def __init__(self, writer: AbstractWriter, factory, stream_id: int,
@@ -778,6 +778,9 @@ class HTTP2Sender(BaseSender):
         # the trailers event (the unary-gRPC pattern).  Flushed early if a
         # second body chunk arrives (multi-frame body / streaming).
         self._buffered_body: bytes | None = None
+        # The deferred auto-flush task (retained so a non-connection failure
+        # inside it is surfaced, not lost as an un-retrieved task exception).
+        self._auto_flush_task: asyncio.Future | None = None
 
     @property
     def connection_window_size(self) -> int:
@@ -800,13 +803,23 @@ class HTTP2Sender(BaseSender):
         self._buffered_headers = None
         self._expect_trailers = False
         self._buffered_body = None
+        # Drop the slot reference; a still-pending task from the prior request
+        # is harmless — its identity guard (buffered body ``is`` its snapshot)
+        # no-ops now that the buffer is cleared.
+        self._auto_flush_task = None
 
-    async def _flush_buffered_start(
+    async def _write_response_start_and_body(
         self, body: bytes, end_stream: bool,
-        status: HTTPStatus, headers: list[tuple[bytes, bytes]],
+        status: HTTPStatus, headers: list[tuple[bytes, bytes]] | None,
         expect_trailers: bool,
     ) -> None:
-        """Write buffered HEADERS + first DATA body chunk together."""
+        """Write the deferred response HEADERS + first DATA body chunk together.
+
+        Called on every first body event (buffered or not), not only for the
+        auto-flush of a held chunk — hence the ``_write_response_start_and_body``
+        name rather than the former ``_flush_buffered_start``.
+        """
+        headers = headers or []
         # HEADERS never carries END_STREAM here — an empty DATA frame does
         # (mirrors the object path this replaced).
         h_bytes = build_response_headers(
@@ -835,32 +848,57 @@ class HTTP2Sender(BaseSender):
         if set_end_stream:
             self._end_stream_sent = True
 
-    def _auto_flush_buffered_body(self) -> None:
-        """``call_soon`` callback — if the buffered body hasn't been consumed
-        by a synchronous trailers or second-body event, flush it now.
+    def _schedule_auto_flush(self) -> None:
+        """Schedule a deferred flush of the just-buffered first body chunk.
 
-        ``call_soon`` callbacks fire at the start of the next event-loop
-        iteration, *after* any synchronous ASGI events emitted in the same
-        coroutine.  This gives trailers (or a second body chunk) a chance to
-        coalesce before the auto-flush fires."""
-        if self._buffered_body is None:
+        A single ``ensure_future`` hop (not the former ``call_soon`` →
+        ``ensure_future`` two-hop): the task's first step runs at the next
+        event-loop iteration, *after* any synchronous ASGI events emitted in the
+        same coroutine burst — so trailers (or a second body chunk) still get a
+        chance to consume the buffer and coalesce before the task fires.  The
+        buffered tuple is snapshotted here and passed to the task, decoupling the
+        flush from whatever the live ``_buffered_*`` slots hold when it runs
+        (``reset_per_request_state`` sender reuse).  The task is retained in a
+        slot with a done-callback so a non-connection failure inside it is
+        surfaced rather than lost as an un-retrieved task exception at GC."""
+        task = asyncio.ensure_future(self._do_auto_flush(
+            self._buffered_body, self._buffered_status,
+            self._buffered_headers, self._expect_trailers))
+        self._auto_flush_task = task
+        task.add_done_callback(self._on_auto_flush_done)
+
+    def _on_auto_flush_done(self, task: asyncio.Future) -> None:
+        """Clear the slot and surface any non-connection failure.  Connection
+        errors are already swallowed inside ``_guarded_write``, so anything that
+        reaches here (e.g. an HPACK encode error) is a real bug worth logging."""
+        if task is self._auto_flush_task:
+            self._auto_flush_task = None
+        if task.cancelled():
             return
-        asyncio.ensure_future(self._do_auto_flush())
+        exc = task.exception()
+        if exc is not None:
+            logger.error(
+                'HTTP2Sender auto-flush failed on stream %d: %r',
+                self._stream_id, exc, exc_info=exc)
 
-    async def _do_auto_flush(self) -> None:
-        """Flush the buffered body + headers.  Called as a task when the
-        event loop detects the producer has parked (no synchronous trailers
-        or second body arrived within the same event-loop iteration)."""
-        body = self._buffered_body
-        status = self._buffered_status
-        headers = self._buffered_headers
-        expect = self._expect_trailers
-        if body is None or status is None:
+    async def _do_auto_flush(
+        self, body: bytes | None, status: HTTPStatus | None,
+        headers: list[tuple[bytes, bytes]] | None, expect: bool,
+    ) -> None:
+        """Flush the snapshotted buffered body + headers when the producer has
+        parked (no synchronous trailers or second body arrived in the same
+        event-loop iteration).
+
+        Fires only if the *exact* chunk this task was scheduled for is still the
+        pending one (identity guard): a synchronous trailers / second-body event
+        — or a ``reset_per_request_state`` reuse of this sender — replaces or
+        clears ``_buffered_body`` first, in which case this is a no-op."""
+        if self._buffered_body is not body or body is None or status is None:
             return
         self._buffered_body = None
         self._buffered_status = None
         self._buffered_headers = None
-        await self._flush_buffered_start(body, False, status, headers, expect)
+        await self._write_response_start_and_body(body, False, status, headers, expect)
 
     async def send_response_headers(
         self, status: HTTPStatus, headers: list[tuple[bytes, bytes]],
@@ -1046,14 +1084,13 @@ class HTTP2Sender(BaseSender):
                             and len(payload) <= self.stream_window_size
                             and len(payload) <= self._conn_window.size):
                         self._buffered_body = payload
-                        asyncio.get_running_loop().call_soon(
-                            self._auto_flush_buffered_body)
+                        self._schedule_auto_flush()
                     else:
                         # A second body chunk (or a multi-frame / terminal one):
                         # flush any deferred first chunk with the HEADERS, then
                         # write this chunk normally.
                         if self._buffered_body is not None:
-                            await self._flush_buffered_start(
+                            await self._write_response_start_and_body(
                                 self._buffered_body, False, self._buffered_status,
                                 self._buffered_headers, self._expect_trailers)
                             self._buffered_status = None
@@ -1061,7 +1098,7 @@ class HTTP2Sender(BaseSender):
                             self._buffered_body = None
                             await self._write_data(payload, end_stream=end_stream)
                         else:
-                            await self._flush_buffered_start(
+                            await self._write_response_start_and_body(
                                 payload, end_stream, self._buffered_status,
                                 self._buffered_headers, self._expect_trailers)
                             self._buffered_status = None

@@ -749,14 +749,14 @@ def _handler_param_plan(fn, path_param_names: set) -> tuple:
     (payload: the :class:`~blackbull.di.Depends` instance), or ``'query'``
     (payload: :class:`_QuerySpec`).  Precedence: path params first, then the
     reserved names ``body``/``scope``, then a ``Depends`` default, then
-    ``Request`` recognition, then a dataclass body annotation; anything left
+    ``Connection`` recognition, then a dataclass body annotation; anything left
     is a query param — the fallback category.
 
     Raises ``TypeError`` (fail fast, at registration) for a ``Depends``
     default on a reserved/path name, a second body-consuming parameter, or a
     leftover parameter whose annotation is not a supported query scalar.
     """
-    from .request import Request as _Request
+    from .connection import Connection as _Conn  # Sprint 79: Request is now a Connection alias
 
     params = inspect.signature(fn).parameters
     annotations = {n: p.annotation for n, p in params.items()}
@@ -793,7 +793,10 @@ def _handler_param_plan(fn, path_param_names: set) -> tuple:
             categories[name] = (name, None)
         elif is_dep:
             categories[name] = ('depends', default)
-        elif ann is _Request or (name == 'request' and ann is inspect.Parameter.empty):
+        elif ann is _Conn or (name == 'request' and ann is inspect.Parameter.empty):
+            # ``conn: Connection`` (preferred) or the legacy ``request: Request``
+            # (``Request`` is a deprecated alias of ``Connection``, so both
+            # annotations are the same object here), or the bare name ``request``.
             categories[name] = ('request', None)
         elif _is_body_dataclass_annotation(ann):
             categories[name] = ('dataclass', None)
@@ -806,7 +809,7 @@ def _handler_param_plan(fn, path_param_names: set) -> tuple:
                     f"Simplified handler {fn.__name__!r}: cannot resolve "
                     f"parameter {name!r}. Expected a path param of "
                     f"{sorted(path_param_names)!r}, 'body', 'scope', a "
-                    f"parameter annotated with Request (or named 'request'), "
+                    f"parameter annotated with Connection (or named 'request'), "
                     f"a dataclass body param, a Depends(...) default, or a "
                     f"query param annotated str/int/float/bool "
                     f"(optionally `| None`)."
@@ -833,6 +836,46 @@ def _handler_param_plan(fn, path_param_names: set) -> tuple:
     return params, annotations, categories
 
 
+def _conn_of(scope, receive):
+    """Return the :class:`Connection` for this request.
+
+    Sprint 79 Phase 5 (consumer switch): the protocol actor builds the
+    ``Connection`` in its parser and stashes it on the ASGI scope envelope
+    under :data:`~blackbull.connection.CONNECTION_STASH_KEY`, so the self-hosted
+    path reuses that object with
+    **no** re-conversion (the B1/B3 hot path is unchanged). When the app runs
+    under an external ASGI server (uvicorn, ``httpx.ASGITransport``) there is
+    no stash, so we build one via :meth:`Connection.from_scope` — the single
+    ASGI→native conversion point. Either way ``_receive`` is (re)bound to the
+    caller's channel so ``conn.body()`` drains the right stream once.
+    """
+    from .connection import stashed_connection  # noqa: PLC0415 — avoid an import cycle at module load
+    conn, built = stashed_connection(scope, receive)
+    if built and isinstance(scope, dict):
+        # Transitional bridge: an *input* ``path_params`` key on a bare scope
+        # (external callers, and the router's own unit tests that drive a
+        # wrapper directly) seeds ``conn.path_params``.  The framework itself no
+        # longer writes path params onto the scope — ``_set_path_params`` sets
+        # them on the Connection (proposal §2.2).
+        seed = scope.get('path_params')
+        if seed:
+            conn.path_params.update(seed)
+    # Rebind ``_receive`` to the caller's channel (even on a stash hit) so
+    # ``conn.body()`` drains the right stream exactly once.
+    conn._receive = receive
+    return conn
+
+
+def _set_path_params(scope, receive, params: dict) -> None:
+    """Record matched URL path params on the request's :class:`Connection`.
+
+    Sprint 79 Phase 5: replaces the old ``scope.setdefault('path_params', {})``
+    closure. The handler reads them back via ``conn.path_params`` (see
+    :func:`_conn_of`).
+    """
+    _conn_of(scope, receive).path_params.update(params)
+
+
 def _adapt_handler(fn, path: str, converters: dict | None = None):
     """Wrap a simplified handler in an ASGI (scope, receive, send) coroutine.
 
@@ -842,7 +885,7 @@ def _adapt_handler(fn, path: str, converters: dict | None = None):
     shapes, a matching converter — if any — maps it to a sendable.
 
     Parameter resolution (classified once, by :func:`_handler_param_plan`):
-    - Name matches a {param} in the path pattern → scope['path_params'][name],
+    - Name matches a {param} in the path pattern → conn.path_params[name],
       coerced to the annotated type if one is given.
     - Annotation is a Python ``@dataclass`` → request body parsed as JSON and
       instantiated; nested dataclasses, ``list[T]``, and ``T | None`` are
@@ -868,7 +911,7 @@ def _adapt_handler(fn, path: str, converters: dict | None = None):
     str → send(Response(result.encode())); dict → send(JSONResponse(result));
     None → no send; other → TypeError at call time.
     """
-    from .request import Request as _Request, read_body as _read_body
+    from .connection import Connection as _Conn
 
     path_param_names: set[str] = {m.group(1) for m in Router._param_pattern.finditer(path)}
     params, annotations, categories = _handler_param_plan(fn, path_param_names)
@@ -890,31 +933,31 @@ def _adapt_handler(fn, path: str, converters: dict | None = None):
                 UserWarning, stacklevel=3)
 
     is_async = inspect.iscoroutinefunction(fn)
-    has_request_param = bool(request_param_names)
 
     @wraps(fn)
     async def _wrapper(scope, receive, send):
-        # One Request per call when the signature asks for it; its body()
-        # cache is the single drain point shared with the body branches.
-        req = _Request(scope, receive) if has_request_param else None
+        # The typed Connection is the single source for the request object,
+        # the body cache (one drain point shared with the body branches), and
+        # the path params (set by the router's ``_inject`` on ``conn``).
+        conn = _conn_of(scope, receive)
         kwargs: dict = {}
         for name in params:
             ann = annotations.get(name, inspect.Parameter.empty)
             if name == 'scope':
                 kwargs[name] = scope
             elif name == 'body':
-                raw = await req.body() if req is not None else await _read_body(receive)
+                raw = await conn.body()
                 if _is_body_dataclass_annotation(ann):
                     kwargs[name] = _decode_json_body(ann, raw, fn.__name__)
                 else:
                     kwargs[name] = raw
             elif name in request_param_names:
-                kwargs[name] = req
+                kwargs[name] = conn
             elif _is_body_dataclass_annotation(ann) and name not in path_param_names:
-                raw = await req.body() if req is not None else await _read_body(receive)
+                raw = await conn.body()
                 kwargs[name] = _decode_json_body(ann, raw, fn.__name__)
             else:
-                raw = scope.get('path_params', {}).get(name, '')
+                raw = conn.path_params.get(name, '')
                 if (ann is not inspect.Parameter.empty and isinstance(ann, type)
                         and not isinstance(raw, ann)):
                     try:
@@ -961,7 +1004,7 @@ def _adapt_handler(fn, path: str, converters: dict | None = None):
 
     @wraps(fn)
     async def _extended_wrapper(scope, receive, send):
-        req = _Request(scope, receive) if has_request_param else None
+        conn = _conn_of(scope, receive)
         kwargs: dict = {}
         if has_query:
             raw_qs = scope.get('query_string') or b''
@@ -990,19 +1033,19 @@ def _adapt_handler(fn, path: str, converters: dict | None = None):
             elif kind == 'scope':
                 kwargs[name] = scope
             elif kind == 'body':
-                raw = await req.body() if req is not None else await _read_body(receive)
+                raw = await conn.body()
                 ann = annotations.get(name, inspect.Parameter.empty)
                 if _is_body_dataclass_annotation(ann):
                     kwargs[name] = _decode_json_body(ann, raw, fn_name)
                 else:
                     kwargs[name] = raw
             elif kind == 'request':
-                kwargs[name] = req
+                kwargs[name] = conn
             elif kind == 'dataclass':
-                raw = await req.body() if req is not None else await _read_body(receive)
+                raw = await conn.body()
                 kwargs[name] = _decode_json_body(annotations[name], raw, fn_name)
             else:  # 'path'
-                raw = scope.get('path_params', {}).get(name, '')
+                raw = conn.path_params.get(name, '')
                 ann = annotations.get(name, inspect.Parameter.empty)
                 if (ann is not inspect.Parameter.empty and isinstance(ann, type)
                         and not isinstance(raw, ann)):
@@ -1391,7 +1434,7 @@ class Router:
                 _fn, _params = h, params
                 async def _inject(scope, receive, send,
                                   _fn=_fn, _params=_params):
-                    scope.setdefault('path_params', {}).update(_params)
+                    _set_path_params(scope, receive, _params)
                     return await _fn(scope, receive, send)
                 # Preserve any route hooks across the path-param wrapper so
                 # the dispatcher still finds them.
@@ -1421,7 +1464,7 @@ class Router:
                     _fn, _params = fn, gdict
                     async def _inject(scope, receive, send,
                                       _fn=_fn, _params=_params):
-                        scope.setdefault('path_params', {}).update(_params)
+                        _set_path_params(scope, receive, _params)
                         return await _fn(scope, receive, send)
                     _copy_route_hooks(_inject, _fn)
                     return _inject
@@ -1550,8 +1593,8 @@ class Router:
             inner_chain = partial(fn, **{param: inner_chain})
 
         # Wrap in a named coroutine so it is recognisable at lookup time.
-        # Path parameters will be injected into scope['path_params'] by
-        # __getitem__ rather than forwarded as kwargs to the outermost
+        # Path parameters will be injected into the Connection's path_params by
+        # _resolve rather than forwarded as kwargs to the outermost
         # middleware (which would raise TypeError for unknown keyword args).
         _ic = inner_chain
         async def _chain_wrapper(scope, receive, send):

@@ -48,7 +48,7 @@ Hello, world!
 - **Readable stack.** Every byte on the wire passes through Python
   you can step through with `pdb`.  No C extensions to debug.
 - **Declare, don't plumb.** Handlers name what they need — path
-  params, query params, the body, a `Request` view, or a
+  params, query params, the body, a `Connection` view, or a
   `Depends(get_db)` resource with teardown after the response — and
   the router resolves it all when the route is *registered*.  A
   handler that uses none of it compiles to the same bare wrapper:
@@ -102,14 +102,14 @@ async def get_task(task_id: int):
     return {"id": task_id, "title": "..."}
 ```
 
-Need more than the URL? Declare a `Request` parameter — headers,
+Need more than the URL? Declare a `Connection` parameter — headers,
 cookies, client, and `body()`/`json()`/`text()`, injected only for
 handlers that ask for it:
 
 ```python
 @app.route(path='/notes/{note_id:int}', methods=[HTTPMethod.POST])
-async def create_note(note_id: int, request: Request):
-    return {"id": note_id, "note": await request.json()}
+async def create_note(note_id: int, conn: Connection):
+    return {"id": note_id, "note": await conn.json()}
 ```
 
 Query params and per-request resources are declared the same way —
@@ -305,7 +305,7 @@ for the full tutorial.
 | [`examples/typed_routes_ok.py`](examples/typed_routes_ok.py) | `{param:converter}` syntax, `url_path_for` |
 | [`examples/scenario_h1_fault_injection.py`](examples/scenario_h1_fault_injection.py) | HTTP/1.1 fault scenarios driven against stdlib `http.server` |
 | [`examples/scenario_h2_fault_injection.py`](examples/scenario_h2_fault_injection.py) | HTTP/2 fault scenarios served against httpx |
-| [`examples/request_object.py`](examples/request_object.py) | Opt-in `Request` context object — headers, cookies, client, `body()`/`json()`/`text()` |
+| [`examples/connection_object.py`](examples/connection_object.py) | Opt-in `Connection` context object — headers, cookies, client, `body()`/`json()`/`text()` |
 | [`examples/dependency_injection.py`](examples/dependency_injection.py) | `Depends` on a pseudo DB pool — per-request acquire/release with teardown after the response, query params, `use_cache` sharing |
 
 ## Documentation

@@ -46,9 +46,13 @@ sed -i "s/-0,64}/-${REDIS_CPUS}}/" scripts/lib/redis.sh
 sed -i "s/export REDIS_CPUSET=\"0,64\"/export REDIS_CPUSET=\"${REDIS_CPUS}\"/" scripts/benchmark.sh
 # benchmark.sh: CRUD gcannon load-gen cpuset (32-63,96-127 → upper half)
 sed -i "s/export GCANNON_CPUS=\"32-63,96-127\"/export GCANNON_CPUS=\"${LOADGEN_CPUS}\"/" scripts/benchmark.sh
-# profiles.sh: server-streaming server cpuset (0-31,64-95 → lower half; load-gen gets WRK_CPUS=$LOADGEN_CPUS)
-sed -i "/\[stream-grpc\]=/s|0-31,64-95|${SERVER_CPUS}|" scripts/lib/profiles.sh
-sed -i "/\[stream-grpc-tls\]=/s|0-31,64-95|${SERVER_CPUS}|" scripts/lib/profiles.sh
+# profiles.sh: remap the reference server-half cpuset (0-31,64-95 — 32 physical
+# cores × 2 SMT threads on the reference Threadripper PRO) to our server cpuset
+# for ALL profiles.  This covers: baseline, json, json-tls, static, baseline-h2,
+# static-h2, echo-ws, echo-ws-pipeline, pipelined, limited-conn, json-comp,
+# upload, crud, async-db, unary-grpc, unary-grpc-tls, stream-grpc, stream-grpc-tls.
+# api-4 and api-16 have absolute budgets handled separately below.
+sed -i "s|0-31,64-95|${SERVER_CPUS}|g" scripts/lib/profiles.sh
 
 # profiles.sh: api-4 / api-16 are FIXED cpu-BUDGET profiles — the whole point is
 # measuring efficiency under a hard 4- and 16-logical-CPU cap.  Upstream encodes
@@ -59,6 +63,9 @@ sed -i "/\[stream-grpc-tls\]=/s|0-31,64-95|${SERVER_CPUS}|" scripts/lib/profiles
 # These budgets are ABSOLUTE — they must NOT scale with the box — so map each to
 # the same COUNT of contiguous low vCPUs (server 0-3 / 0-15; load-gen 16-31 on
 # c7i.8xlarge).  Needs V >= 16 for api-16's cap plus load-gen headroom.
+if (( V < 8 )); then
+    echo "patch_cpuset.sh: WARN — box has $V vCPUs; api-4 needs >=8 (4 server + load-gen headroom)" >&2
+fi
 if (( V < 16 )); then
     echo "patch_cpuset.sh: WARN — box has $V vCPUs; api-16 needs >=16 for its cap + load-gen headroom" >&2
 fi

@@ -226,29 +226,37 @@ class WebSocketTestSession:
         if cookies:
             cookie_str = '; '.join(f'{k}={v}' for k, v in cookies.items())
             encoded_headers.append((b'cookie', cookie_str.encode('latin-1')))
-        self.scope = {
-            'type': 'websocket',
-            'asgi': {'version': '3.0', 'spec_version': '2.4'},
-            'http_version': '1.1',
-            'scheme': 'ws',
+        # Sprint 79 Phase 5: build the derived scope through Connection.as_scope()
+        # — the single native→ASGI conversion point — so the TestClient's
+        # WebSocket scope is generated exactly the way the real server's is,
+        # never hand-rolled.  ``subprotocols`` is a websocket-only ASGI key (not
+        # a Connection field), so it is layered on after, mirroring how the
+        # H/1.1 upgrade handler and the H/2 bridge augment their derived scope.
+        from .connection import Connection  # noqa: PLC0415
+        from .headers import Headers  # noqa: PLC0415
+        conn = Connection(
+            method='GET',
             # ASGI parity with the real server (Sprint 68): scope['path'] is
             # the percent-decoded path component; raw_path is the undecoded
             # bytes (UTF-8, not latin-1, so a caller-supplied non-ASCII path
             # round-trips as the server would have received it).
-            'path': (unquote(raw_path, encoding='utf-8', errors='replace')
-                     if '%' in raw_path else raw_path),
-            'raw_path': raw_path.encode('utf-8'),
+            path=(unquote(raw_path, encoding='utf-8', errors='replace')
+                  if '%' in raw_path else raw_path),
+            raw_path=raw_path.encode('utf-8'),
+            headers=Headers(encoded_headers),
             # UTF-8 for parity with raw_path above and the real server —
             # latin-1 would raise UnicodeEncodeError on a non-ASCII query
             # (e.g. '/x?q=café') that the utf-8 path accepts.
-            'query_string': query.encode('utf-8'),
-            'root_path': '',
-            'headers': encoded_headers,
-            'client': ('testclient', 50000),
-            'server': ('testserver', 80),
-            'subprotocols': list(subprotocols or []),
-            'state': {},
-        }
+            query_string=query.encode('utf-8'),
+            http_version='1.1',
+            scheme='ws',
+            type='websocket',
+            client=('testclient', 50000),
+            server=('testserver', 80),
+        )
+        self.scope = conn.as_scope()
+        self.scope['headers'] = encoded_headers
+        self.scope['subprotocols'] = list(subprotocols or [])
         self._loop_thread = _LoopThread()
         self._app_task: asyncio.Task | None = None
         self._accepted = False

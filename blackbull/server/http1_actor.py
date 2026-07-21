@@ -17,6 +17,7 @@ from ..actor import Actor, Message
 from ..event import Event
 from ..event_aggregator import EventAggregator
 from ..asgi import ASGIEvent
+from ..connection import Connection, CONNECTION_STASH_KEY
 from ..headers import Headers
 from .deadline import ConnectionDeadline
 from .recipient import AbstractReader, IncompleteReadError, RecipientFactory, _WS_EVENT_QUEUE_DEPTH
@@ -453,7 +454,7 @@ class HTTP1Actor(Actor):
                     return
 
                 try:
-                    scope = self._parse(self._request)
+                    conn = self._parse(self._request)
                 except HeaderTooLargeError as exc:
                     # Per-line limit hit during parse.  Same response as the
                     # total-block check in _read_headers.
@@ -494,7 +495,20 @@ class HTTP1Actor(Actor):
                         send, b'505 HTTP Version Not Supported',
                         HTTPStatus.HTTP_VERSION_NOT_SUPPORTED)
                     return
-                self._fill_connection_info(scope)
+                self._fill_connection_info(conn)
+
+                # The parser yields a native ``Connection``; the dispatch
+                # pipeline consumes an ASGI scope with the typed Connection
+                # stashed for zero-reconversion reads.  The single canonical
+                # ``Connection → dispatch-ready scope`` bridge (shared with the
+                # H/2 ``_conn_to_scope`` seam) does the ``as_scope`` derivation,
+                # the ``BB_FORCE_ASGI_SCOPE`` dual-path round-trip (§4.3), the
+                # ``Headers`` restore, the ``_asterisk_form`` re-expose, and the
+                # stash.
+                scope = conn.to_dispatch_scope(force_asgi=cfg.force_asgi_scope)
+                # Under the dual-path lane the bridge rebuilds ``conn``; read the
+                # dispatched object back so any later reference is the stashed one.
+                conn = scope[CONNECTION_STASH_KEY]
 
                 if scope.get('type') == 'websocket':
                     await self._handle_upgrade(scope)
@@ -537,12 +551,13 @@ class HTTP1Actor(Actor):
                 # the GET response except for the absence of the body.
                 # We synthesise that by dispatching to the GET handler
                 # and stripping body bytes from outgoing events.
-                # ``method`` on the scope is rewritten so the router
-                # (and any handler that inspects scope['method']) sees
-                # ``GET``; the access log records the original ``HEAD``
-                # from the request line.
-                send._head_mode = (scope['method'] == 'HEAD')
+                # ``method`` is rewritten to ``GET`` on both the Connection
+                # (which the router/dispatcher read) and the scope envelope
+                # (which middleware may inspect); the access log records the
+                # original ``HEAD`` from the request line.
+                send._head_mode = (conn.method == 'HEAD')
                 if send._head_mode:
+                    conn.method = 'GET'
                     scope['method'] = 'GET'
                 inner_receive = RecipientFactory.http1(
                     self._reader, scope,
@@ -673,8 +688,12 @@ class HTTP1Actor(Actor):
             [(b'connection', b'close'), (b'content-type', b'text/plain')],
         )
 
-    def _parse(self, data: bytes) -> dict:
-        """Parse raw HTTP/1.1 request bytes into an ASGI scope dict.
+    def _parse(self, data: bytes) -> Connection:
+        """Parse raw HTTP/1.1 request bytes into a native :class:`Connection`.
+
+        (Sprint 79 Phase 3 — the parser now produces the typed native model;
+        the ASGI scope is a derived view obtained via ``conn.as_scope()`` at
+        the dispatch boundary.)
 
         Raises :class:`BadRequestError` on any RFC 9112 framing violation
         the caller should answer with 400.  Validation rules:
@@ -874,62 +893,60 @@ class HTTP1Actor(Actor):
                 f'missing Host header on {version.decode("ascii")} request '
                 f'(RFC 9112 §3.2)')
 
-        scope = {
-            'type': 'http',
-            'asgi': {'version': '3.0', 'spec_version': '2.0'},
-            'http_version': version[5:].decode('utf-8'),
-            'method': method.decode('utf-8'),
-            'scheme': 'http',
-            'path': _scope_path,
+        conn = Connection(
+            type='http',
+            http_version=version[5:].decode('utf-8'),
+            method=method.decode('utf-8'),
+            scheme='http',
+            path=_scope_path,
             # ASGI: raw_path is the undecoded path component only — the
             # query string is carried in query_string, never here.
-            'raw_path': _raw_path_b,
-            'query_string': _query_string,
+            raw_path=_raw_path_b,
+            query_string=_query_string,
             # RFC-safe default.  ``root_path`` (mount prefix) is NOT taken
             # from the client-controlled ``X-Forwarded-Prefix`` here (bug
             # 1.16 — a client could spoof the mount point); only the
             # ``TrustedProxy`` middleware sets it, after verifying the peer.
-            'root_path': '',
-            'headers': headers,
-            'client': None,
-            'server': None,
-            'state': {},
-            'extensions': _H1_PATHSEND_EXTENSIONS if not self._ssl else {},
-        }
+            root_path='',
+            headers=headers,
+            client=None,
+            server=None,
+            extensions=_H1_PATHSEND_EXTENSIONS if not self._ssl else {},
+        )
 
         if asterisk_form:
             # Server-wide OPTIONS (§3.2.4): mark it so the dispatcher answers
             # at the server level (200 with Allow) rather than routing ``*``.
-            scope['_asterisk_form'] = True
+            conn._asterisk_form = True
 
         if headers.getlist(b'host'):
             default_port = _HTTPS_PORT if self._ssl else _HTTP_PORT
             host, port = _parse_host_header(headers.get(b'host'), default_port)
-            scope['server'] = [host, port]
+            conn.server = (host, port)
 
         if headers.getlist(b'upgrade'):
             # RFC 9110 §7.8 — a server MAY ignore an Upgrade it does not
             # support; it MUST NOT fail the request over it.  Only WebSocket
-            # switches the scope type.  Any other token (notably curl's
+            # switches the connection type.  Any other token (notably curl's
             # default ``Upgrade: h2c`` probe on ``--http2``) is ignored and
             # the request is served as ordinary HTTP/1.1 — previously any
             # unknown token became ``scope['type']`` and crashed dispatch,
             # closing the connection with no reply.
             if headers.get(b'upgrade').strip().lower() == b'websocket':
-                scope['type'] = 'websocket'
-                scope['scheme'] = 'ws'
+                conn.type = 'websocket'
+                conn.scheme = 'ws'
 
-        return scope
+        return conn
 
-    def _fill_connection_info(self, scope: dict) -> None:
+    def _fill_connection_info(self, conn: Connection) -> None:
         if self._peername is not None:
-            scope['client'] = list(self._peername)
+            conn.client = tuple(self._peername)
 
-        if scope.get('server') is None and self._sockname is not None:
-            scope['server'] = list(self._sockname)
+        if conn.server is None and self._sockname is not None:
+            conn.server = tuple(self._sockname)
 
         if self._ssl:
-            scope['scheme'] = 'wss' if scope.get('type') == 'websocket' else 'https'
+            conn.scheme = 'wss' if conn.type == 'websocket' else 'https'
 
     async def _handle_upgrade(self, scope: dict) -> None:
         """Handle WebSocket upgrade."""

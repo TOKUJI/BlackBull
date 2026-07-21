@@ -161,6 +161,7 @@ launch_one() {
         --instance-type "$itype" \
         --key-name "$KEY_NAME" \
         --security-group-ids "$SG_ID" \
+        --instance-initiated-shutdown-behavior terminate \
         "${PLACEMENT_ARGS[@]}" \
         --block-device-mappings "[{\"DeviceName\":\"/dev/sda1\",\"Ebs\":{\"VolumeSize\":$VOLUME_SIZE_GB,\"VolumeType\":\"gp3\",\"DeleteOnTermination\":true}}]" \
         --tag-specifications "ResourceType=instance,Tags=[{Key=$TAG_KEY,Value=$TAG_VALUE},{Key=Owner,Value=$USER},{Key=$ROLE_TAG_KEY,Value=$role}]" \

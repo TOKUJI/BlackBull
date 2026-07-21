@@ -3,24 +3,26 @@
 How to read what the client sent, build the response, stream a body
 back, and detect when the client has gone away.
 
-## The `Request` object
+## The `Connection` object
 
-The easiest way to read the request is the opt-in `Request` context
-object.  Declare a parameter annotated `Request` (any name) — or a
-parameter named `request` with no annotation — and the router injects
-one, the same way it injects path params and `body`:
+The easiest way to read the request is the opt-in `Connection` context
+object — BlackBull's single internal request representation (the ASGI
+`scope` is a *derived* view of it).  Declare a parameter annotated
+`Connection` (any name) — or a parameter named `request`/`conn` with no
+annotation — and the router injects one, the same way it injects path
+params and `body`:
 
 ```python
-from blackbull import BlackBull, Request
+from blackbull import BlackBull, Connection
 
 app = BlackBull()
 
 @app.route(path='/users/{uid}', methods=[HTTPMethod.POST])
-async def show(uid: int, request: Request):
-    token = request.headers.get(b'authorization')   # Headers view
-    who   = request.client                          # (host, port) or None
-    lang  = request.cookies.get('lang', 'en')       # dict[str, str]
-    data  = await request.json()                    # parsed once, cached
+async def show(uid: int, conn: Connection):
+    token = conn.headers.get(b'authorization')   # Headers view
+    who   = conn.client                          # (host, port) or None
+    lang  = conn.cookies.get('lang', 'en')       # dict[str, str]
+    data  = await conn.json()                    # parsed once, cached
     return {'uid': uid, 'lang': lang, 'data': data}
 ```
 
@@ -28,25 +30,46 @@ Read-side surface:
 
 | member | value |
 |---|---|
-| `request.method` / `request.path` / `request.scheme` | `str` (`path` is **percent-decoded** — see below) |
-| `request.client` | `(host, port)` tuple, or `None` |
-| `request.headers` | case-insensitive [`Headers`](#reading-request-headers) view |
-| `request.cookies` | `dict[str, str]`, parsed once (all protocols) |
-| `await request.body()` | complete body as `bytes`, buffered once and cached |
-| `await request.json()` | parsed JSON, or `None` on empty/invalid body |
-| `await request.text(encoding='utf-8')` | body decoded as text (`errors='replace'`) |
-| `request.scope` | the raw ASGI scope dict (escape hatch) |
+| `conn.method` / `conn.path` / `conn.scheme` | `str` (`path` is **percent-decoded** — see below) |
+| `conn.client` | `(host, port)` tuple, or `None` |
+| `conn.path_params` | `dict[str, str]` of matched `{placeholder}` values |
+| `conn.headers` | case-insensitive [`Headers`](#reading-request-headers) view |
+| `conn.cookies` | `dict[str, str]`, parsed once (all protocols) |
+| `await conn.body()` | complete body as `bytes`, buffered once and cached |
+| `await conn.json()` | parsed JSON, or `None` on empty/invalid body |
+| `await conn.text(encoding='utf-8')` | body decoded as text (`errors='replace'`) |
+| `conn.as_scope()` | a freshly-derived ASGI scope dict (escape hatch) |
 
 `body()` drains the receive channel at most once; `json()` and
 `text()` share the same cache, and a handler that also declares
 `body: bytes` (or a dataclass body parameter) receives the same
 cached bytes — the body is never read twice.  Handlers that don't
-declare a `Request` pay nothing: injection is decided when the route
+declare a `Connection` pay nothing: injection is decided when the route
 is registered, and the raw `(scope, receive, send)` form is
 unaffected.
 
+!!! warning "`Request` is deprecated — use `Connection` (since v0.60.0)"
+    `Connection` replaces the old `Request` context object (Sprint 79).
+    `blackbull.Request` is now a **deprecated alias** of `Connection`
+    that emits a `DeprecationWarning` on first use and will be removed
+    **no earlier than 2027-08-01**.  Migrate by renaming the import and
+    the annotation — the members are identical:
+
+    ```python
+    # before                          # after
+    from blackbull import Request      from blackbull import Connection
+
+    async def h(request: Request):     async def h(conn: Connection):
+        ...                                ...
+    ```
+
+    One member changed name: the raw-scope escape hatch was
+    `request.scope` (a stored dict) and is now `conn.as_scope()` (a
+    freshly-derived dict) — the scope is no longer the primary
+    representation, so it is generated on demand rather than held.
+
 !!! note "`path` is percent-decoded (since v0.53.0)"
-    `request.path` (and the underlying `scope['path']`) is the
+    `conn.path` (and the underlying `scope['path']`) is the
     **percent-decoded** request target with the query string removed —
     `/files/a%2Fb` arrives as `/files/a/b`, matching the ASGI spec and
     uvicorn.  The **un**decoded bytes are available as
@@ -198,7 +221,7 @@ to know how the client delivered the cookies.
 ## Query parameters
 
 Declare them as handler parameters (since v0.56.0).  Any simplified-handler
-parameter that is not a path param, `body`, `scope`, `Request`, a dataclass
+parameter that is not a path param, `body`, `scope`, `Connection`, a dataclass
 body, or [`Depends`](dependency-injection.md) resolves from the query
 string, coerced to its annotation:
 
@@ -211,7 +234,7 @@ async def search(q: str, page: int = 1, exact: bool = False):
 - **Types**: `str` (default for unannotated params), `int`, `float`, and
   `bool` (`1/true/yes/on` and `0/false/no/off`, case-insensitive).
   `T | None` of a supported scalar also works.  Anything else — containers,
-  models — is a registration-time `TypeError`; drop to `Request` or the raw
+  models — is a registration-time `TypeError`; drop to `Connection` or the raw
   scope for those.
 - **Required vs optional**: a parameter with a default is optional; without
   one, a request missing the key is answered with **400**.  A value that

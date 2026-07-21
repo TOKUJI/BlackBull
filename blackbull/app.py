@@ -98,6 +98,30 @@ def _inject_response_headers(raw_send, extra_headers):
     return _send
 
 
+def _connection_of(scope, receive):
+    """Return the typed :class:`Connection` for this request (Sprint 79 Phase 5).
+
+    BlackBull's own protocol actors stash the ``Connection`` they parsed on the
+    scope envelope under :data:`~blackbull.connection.CONNECTION_STASH_KEY`, so
+    the self-hosted path reads it back with no re-conversion. Under an external
+    ASGI server (uvicorn,
+    ``httpx.ASGITransport``) there is no stash, so build one via
+    :meth:`Connection.from_scope` — the single ASGI→native conversion point —
+    and link ``scope['state']`` to ``conn.state`` so the centrally-rendered
+    error handlers and terminal events (which still read ``scope['state']``)
+    observe the same grab-bag the dispatcher writes to.
+    """
+    from .connection import stashed_connection  # noqa: PLC0415
+    conn, built = stashed_connection(scope, receive)
+    if built:
+        # External ASGI path only: link ``scope['state']`` to ``conn.state`` so
+        # the centrally-rendered error handlers and terminal events (which still
+        # read ``scope['state']``) observe the same grab-bag the dispatcher
+        # writes to.
+        scope.setdefault('state', conn.state)
+    return conn
+
+
 def _wants_html(scope) -> bool:
     """True when the request's Accept header indicates an HTML preference."""
     for k, v in scope.get('headers', ()):
@@ -620,16 +644,21 @@ class BlackBull:
         await self._dispatch_http(scope, receive, send, scheme)
 
     async def _dispatch_http(self, scope, receive, send, scheme):
-        """Route and run one HTTP request (the non-WebSocket half of _dispatch)."""
+        """Route and run one HTTP request (the non-WebSocket half of _dispatch).
+
+        Sprint 79 Phase 5: routing reads come from the typed ``Connection``
+        (``conn.method`` / ``conn.path`` / ``conn.headers``); the ASGI scope
+        stays as the envelope handed to the handler, error handlers, gRPC, and
+        events (the middleware/event compat contract of §5.4).
+        """
+        conn = _connection_of(scope, receive)
         # gRPC — HTTP/2 with ``content-type: application/grpc``.  When a
         # registry is installed, such requests bypass the HTTP router and are
         # served as unary gRPC calls (grpc-status reported in trailers).  The
         # check is a single header read on the HTTP path and is skipped
         # entirely when ``enable_grpc`` was never called.
         if self._grpc_registry is not None and scheme == Scheme.http:
-            headers = scope.get('headers')
-            getter = getattr(headers, 'get', None)
-            content_type = getter(b'content-type', b'') if getter is not None else b''
+            content_type = conn.headers.get(b'content-type', b'')
             if content_type.strip().startswith(b'application/grpc'):
                 from .grpc import serve_grpc  # noqa: PLC0415 — optional subpackage
                 await serve_grpc(self._grpc_registry, scope, receive, send)
@@ -654,11 +683,11 @@ class BlackBull:
             # still match a registered route and return the correct Allow
             # header.  StrEnum equality makes the two forms interchangeable
             # as router keys.
-            method = HTTPMethod(scope['method'])
+            method = HTTPMethod(conn.method)
         except ValueError:
-            method = scope['method']
+            method = conn.method
 
-        path = scope['path']
+        path = conn.path
         self._logger.debug((path, scheme))
 
         try:

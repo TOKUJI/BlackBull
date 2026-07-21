@@ -53,7 +53,7 @@ async def search(body: bytes):
     return run_query(body)          # the whole query rides in the body
 ```
 
-Body access works exactly as for POST — `body: bytes`, `Request.json()`,
+Body access works exactly as for POST — `body: bytes`, `Connection.json()`,
 or draining `receive` yourself.  By registering a QUERY handler you sign
 up for the method's contract: the handler **must not** have side effects
 the client could regret repeating (safe), and repeating the same request

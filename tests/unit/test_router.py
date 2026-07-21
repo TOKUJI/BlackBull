@@ -27,7 +27,7 @@ from blackbull.router import (
     PathNotRegistered, MethodNotApplicable, ConfigurationError, HTTPException,
 )
 from blackbull import BlackBull, Response, JSONResponse
-from blackbull.request import Request
+from blackbull import Connection as Request  # Sprint 79: Request is a deprecated Connection alias
 from blackbull.router import RouteGroup
 
 logger = getLogger(__name__)
@@ -153,7 +153,7 @@ async def test_router_regex_with_group_name1(router):
     f = router[('test/1234', HTTPMethod.GET, scheme)]
     scope = {}
     await f(scope, None, None)
-    assert scope['path_params']['id_'] == '1234'
+    assert scope['_connection'].path_params['id_'] == '1234'
 
 
 def test_router_regex_source_string_rejected(router):
@@ -178,7 +178,7 @@ async def test_router_F_string1(router):
     f = router[(f'test/{id_}', HTTPMethod.GET, scheme)]
     scope = {}
     await f(scope, None, None)
-    assert scope['path_params']['id_'] == id_
+    assert scope['_connection'].path_params['id_'] == id_
 
 
 @pytest.mark.asyncio
@@ -195,8 +195,8 @@ async def test_router_F_string2(router):
     f = router[(f'test/{id_}/{name}', HTTPMethod.GET, scheme)]
     scope = {}
     await f(scope, None, None)
-    assert scope['path_params']['id_'] == id_
-    assert scope['path_params']['name'] == name
+    assert scope['_connection'].path_params['id_'] == id_
+    assert scope['_connection'].path_params['name'] == name
 
 
 @pytest.mark.asyncio
@@ -213,7 +213,7 @@ async def test_router_websocket(router):
     f = router[(f'test/{id_}', HTTPMethod.GET, scheme)]
     scope = {}
     await f(scope, None, None)
-    assert scope['path_params']['id_'] == id_
+    assert scope['_connection'].path_params['id_'] == id_
 
 
 # ---------------------------------------------------------------------------
@@ -508,7 +508,7 @@ async def test_middleware_chain_path_param_injected_into_scope(router):
         return await call_next(scope, receive, send)
 
     async def handler(scope, receive, send):
-        seen.update(scope.get('path_params', {}))
+        seen.update(scope['_connection'].path_params)
         return 'ok'
 
     router.route(methods=[HTTPMethod.GET], path=path, middlewares=[mw])
@@ -530,7 +530,7 @@ async def test_plain_route_path_param_in_scope(router):
     f = router[('plain/hello', HTTPMethod.GET, Scheme.http)]
     scope = {}
     await f(scope, None, None)
-    assert scope['path_params']['value'] == 'hello'
+    assert scope['_connection'].path_params['value'] == 'hello'
 
 
 # ---------------------------------------------------------------------------
@@ -688,7 +688,7 @@ class TestSimplifiedHandlerRequestInjection:
         scope = {'type': 'http', 'method': 'GET', 'path': '/', 'headers': []}
         await wrapper(scope, None, AsyncMock())
         assert isinstance(captured['request'], Request)
-        assert captured['request'].scope is scope
+        assert captured['request'] is scope['_connection']
 
     @pytest.mark.asyncio
     async def test_request_injected_by_bare_name(self):
@@ -739,7 +739,7 @@ class TestSimplifiedHandlerRequestInjection:
         fake_scope = {'type': 'http', 'headers': []}
         await wrapper(fake_scope, None, AsyncMock())
         assert captured['scope'] is fake_scope
-        assert captured['request'].scope is fake_scope
+        assert captured['request'] is fake_scope['_connection']
 
     @pytest.mark.asyncio
     async def test_request_with_dataclass_body_single_drain(self):
@@ -1250,8 +1250,8 @@ class TestConverterRouting:
         scope = {'path_params': {}}
         fn = router[('/items/42', HTTPMethod.GET, Scheme.http)]
         await fn(scope, None, None)
-        assert scope['path_params']['id'] == 42
-        assert isinstance(scope['path_params']['id'], int)
+        assert scope['_connection'].path_params['id'] == 42
+        assert isinstance(scope['_connection'].path_params['id'], int)
 
     @pytest.mark.asyncio
     async def test_uuid_converter_injects_uuid(self):
@@ -1265,7 +1265,7 @@ class TestConverterRouting:
         scope = {'path_params': {}}
         fn = router[(f'/users/{uid}', HTTPMethod.GET, Scheme.http)]
         await fn(scope, None, None)
-        assert scope['path_params']['uid'] == uuid.UUID(uid)
+        assert scope['_connection'].path_params['uid'] == uuid.UUID(uid)
 
     @pytest.mark.asyncio
     async def test_path_converter_matches_slashes(self):
@@ -1278,7 +1278,7 @@ class TestConverterRouting:
         scope = {'path_params': {}}
         fn = router[('/files/a/b/c.txt', HTTPMethod.GET, Scheme.http)]
         await fn(scope, None, None)
-        assert scope['path_params']['rest'] == 'a/b/c.txt'
+        assert scope['_connection'].path_params['rest'] == 'a/b/c.txt'
 
     def test_unknown_converter_raises_at_registration(self):
         router = Router()
@@ -1299,8 +1299,8 @@ class TestConverterRouting:
         scope = {'path_params': {}}
         fn = router[('/things/hello', HTTPMethod.GET, Scheme.http)]
         await fn(scope, None, None)
-        assert scope['path_params']['name'] == 'hello'
-        assert isinstance(scope['path_params']['name'], str)
+        assert scope['_connection'].path_params['name'] == 'hello'
+        assert isinstance(scope['_connection'].path_params['name'], str)
 
 
 class TestConverterSimplifiedHandler:

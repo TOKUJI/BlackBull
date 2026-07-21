@@ -135,6 +135,23 @@ echo "  BB_ACCESS_LOG:  ${BB_ACCESS_LOG:-0}"
 echo
 
 # ---------------------------------------------------------------------------
+# Architecture guard: Intel instances ship with SMT enabled, and Linux x86
+# enumerates sibling threads interleaved (vCPU N and vCPU N+C share physical
+# core C).  HttpArena's half-split cpuset strategy (server 0..V/2-1, load-gen
+# V/2..V-1) therefore places one sibling from each core in each cpuset —
+# server and load-gen contend on every physical core instead of being isolated.
+# Disable SMT at launch (ThreadsPerCore=1) or use AMD (m7a) / Graviton (m7g).
+if [[ "$INSTANCE_TYPE" =~ [0-9]i ]]; then
+    echo "=== WARNING: Intel instance ($INSTANCE_TYPE) — SMT sibling interleaving ==="
+    echo "  The cpuset half-split (0..V/2-1 vs V/2..V-1) places server and"
+    echo "  load-gen on sibling threads of the SAME physical cores — not isolated."
+    echo "  Benchmark throughput and CPU% will be distorted by SMT contention."
+    echo "  Recommended: use AMD m7a/c7a or Graviton m7g/c7g, or set"
+    echo "  ThreadsPerCore=1 to disable SMT on Intel instances."
+    echo
+fi
+
+# ---------------------------------------------------------------------------
 # Step 0 — resolve the BlackBull version / wheel to install on the EC2.
 #
 # Normal path (LOCAL_BB_WHEEL unset / 0):
@@ -217,6 +234,17 @@ _bench_aws_load_state
 
 SERVER_REMOTE="$SSH_USER@$SERVER_PUBLIC_IP"
 echo "    instance: $SERVER_PUBLIC_IP"
+
+# Safety net: schedule a forced poweroff on the EC2 instance so that an
+# orphaned instance (terminal loss, local shutdown, network partition) is
+# terminated by AWS within this window.  `shutdown -h` triggers a systemd
+# poweroff; the instance's --instance-initiated-shutdown-behavior=terminate
+# (set by up.sh) ensures the poweroff results in termination, not just stop.
+# 180 minutes covers the worst-case BB+FastAPI run (~90 min) with a 2× margin.
+SAFETY_SHUTDOWN_MINUTES="${SAFETY_SHUTDOWN_MINUTES:-180}"
+echo ">>> setting EC2 safety shutdown timer: ${SAFETY_SHUTDOWN_MINUTES} min ..."
+ssh "${SSH_OPTS[@]}" "$SERVER_REMOTE" \
+    "sudo shutdown -h +${SAFETY_SHUTDOWN_MINUTES} </dev/null >/dev/null 2>&1" || true
 
 # ---------------------------------------------------------------------------
 # Step 2 — install Docker + HttpArena load-generator tooling (gcannon,

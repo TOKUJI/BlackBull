@@ -17,17 +17,17 @@ requires a malformed field to be ignored in its entirety:
 
 ```python
 @app.route(path='/', methods=[HTTPMethod.GET])
-async def handler(request: Request):
+async def handler(conn: Connection):
     # Dictionary-typed field, e.g. Priority: u=2, i
-    priority = request.headers.get_sf_dict(b'priority')
+    priority = conn.headers.get_sf_dict(b'priority')
     # → {'u': (2, {}), 'i': (True, {})}   or None
 
     # Item-typed field, e.g. Deprecation: @1659578233
-    deprecation = request.headers.get_sf_item(b'deprecation')
+    deprecation = conn.headers.get_sf_item(b'deprecation')
     # → (Date(1659578233), {})            or None
 
     # List-typed field, e.g. Example: sugar, tea;kind=green
-    example = request.headers.get_sf_list(b'example')
+    example = conn.headers.get_sf_list(b'example')
     # → [(Token('sugar'), {}), (Token('tea'), {'kind': Token('green')})]
 ```
 

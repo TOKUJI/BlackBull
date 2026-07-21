@@ -1,5 +1,6 @@
 import ipaddress
 
+from ..connection import CONNECTION_STASH_KEY
 from ..headers import Headers
 
 
@@ -110,5 +111,18 @@ class TrustedProxy:
         xf_prefix = headers.get(b'x-forwarded-prefix', b'').decode()
         if xf_prefix:
             scope['root_path'] = xf_prefix.rstrip('/')
+
+        # Sprint 79 Phase 5: the dispatcher, router, and handlers read the typed
+        # Connection, so mirror the rewrites onto the stashed conn when the
+        # self-hosted actor provided one.  Under an external ASGI server there is
+        # no stash yet — the Connection is built downstream from this
+        # (already-mutated) scope, so ``from_scope`` picks the rewrites up for
+        # free.  ``TrustedProxy`` is the only in-tree scope mutator (§9, risk
+        # table), so this is the one place the conn needs re-syncing.
+        conn = scope.get(CONNECTION_STASH_KEY)
+        if conn is not None:
+            conn.client = tuple(scope['client']) if scope.get('client') else None
+            conn.scheme = scope.get('scheme', conn.scheme)
+            conn.root_path = scope.get('root_path', conn.root_path)
 
         await call_next(scope, receive, send)

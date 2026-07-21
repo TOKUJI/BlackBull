@@ -19,6 +19,8 @@ from ..protocol.frame_types import (
     DEFAULT_INITIAL_WINDOW_SIZE, DEFAULT_MAX_FRAME_SIZE,
 )
 from ..protocol.stream import Stream, StreamState
+from ..connection import Connection, CONNECTION_STASH_KEY
+from ..env import get_settings
 from ..headers import Headers
 from .parser import parse_headers
 from .cap_log import log_cap_hit
@@ -513,12 +515,33 @@ class HTTP2Actor(Actor):
         self._credit_flush_tasks.add(task)
         task.add_done_callback(self._credit_flush_tasks.discard)
 
-    def _fill_scope_connection(self, scope: dict) -> None:
-        """Inject peername/sockname into a freshly-parsed HTTP/2 scope."""
+    def _fill_scope_connection(self, conn: Connection) -> None:
+        """Inject peername/sockname into a freshly-parsed HTTP/2 Connection."""
         if self._peername:
-            scope['client'] = list(self._peername[:2])
+            conn.client = tuple(self._peername[:2])
         if self._sockname:
-            scope['server'] = list(self._sockname[:2])
+            conn.server = tuple(self._sockname[:2])
+
+    def _conn_to_scope(self, conn: Connection) -> dict:
+        """Materialize the ASGI scope dict the H/2 dispatch pipeline consumes.
+
+        Delegates the common *Connection → dispatch-ready scope* work (the
+        ``as_scope`` derivation, the ``BB_FORCE_ASGI_SCOPE`` dual-path round-trip,
+        the ``Headers`` restore, and the stash) to the single canonical
+        :meth:`Connection.to_dispatch_scope` bridge shared with the H/1.1
+        ``run()`` seam, then layers on the websocket-only ``subprotocols`` key
+        (not a ``Connection`` field — proposal §2.1), derived from the request
+        headers the same way the H/1.1 upgrade handler augments its scope.
+        """
+        scope = conn.to_dispatch_scope(force_asgi=get_settings().force_asgi_scope)
+        if scope['type'] == 'websocket':
+            stashed = scope[CONNECTION_STASH_KEY]
+            raw_sp = stashed.headers.get(b'sec-websocket-protocol', b'')
+            scope['subprotocols'] = (
+                [p.strip().decode('utf-8', errors='replace')
+                 for p in raw_sp.split(b',')]
+                if raw_sp else [])
+        return scope
 
     @log
     async def send_frame(self, frame: FrameBase) -> None:
@@ -1071,7 +1094,7 @@ class HTTP2Actor(Actor):
         if not frame.end_headers:
             return False
 
-        scope = parse_headers(frame)
+        conn = parse_headers(frame)
         # RFC 9113 §8.1.1 / §8.2.1 — malformed HEADERS must be rejected with
         # a stream error of type PROTOCOL_ERROR rather than dispatched.
         # parse_payload sets the flag for field-level violations; parse_headers
@@ -1083,8 +1106,10 @@ class HTTP2Actor(Actor):
                 self.factory.rst_stream(stream.stream_id, ErrorCodes.PROTOCOL_ERROR))
             return True
 
+        assert conn is not None  # not malformed → parse_headers built a Connection
+        self._fill_scope_connection(conn)
+        scope = self._conn_to_scope(conn)
         stream.expected_content_length = _extract_content_length(scope)
-        self._fill_scope_connection(scope)
         stream.scope = scope
 
         if scope.get('type') == 'websocket':
@@ -1168,7 +1193,7 @@ class HTTP2Actor(Actor):
 
         header_frame.parse_payload()
 
-        scope = parse_headers(header_frame)
+        conn = parse_headers(header_frame)
         # RFC 9113 §8.1.1 / §8.2.1 — same malformed-HEADERS check as the direct
         # HEADERS path; reject with RST_STREAM PROTOCOL_ERROR.
         if getattr(header_frame, 'malformed', False):
@@ -1178,8 +1203,10 @@ class HTTP2Actor(Actor):
                 self.factory.rst_stream(stream.stream_id, ErrorCodes.PROTOCOL_ERROR))
             return True
 
+        assert conn is not None  # not malformed → parse_headers built a Connection
+        self._fill_scope_connection(conn)
+        scope = self._conn_to_scope(conn)
         stream.expected_content_length = _extract_content_length(scope)
-        self._fill_scope_connection(scope)
 
         if self._active_stream_count >= self.max_concurrent_streams:
             log_cap_hit('h2_max_concurrent_streams',
@@ -1443,26 +1470,36 @@ class HTTP2Actor(Actor):
         # scope['query_string'] is the raw query as bytes.  RFC 9113
         # §8.3.1 puts both into the ``:path`` pseudo-header; split here.
         _pushed_path, _pushed_raw_path, _pushed_query = _split_h2_path(path)
-        pushed_scope: dict = {
-            'type': 'http',
-            'http_version': '2',
-            'method': 'GET',
-            'path': _pushed_path,
-            'raw_path': _pushed_raw_path,
-            'scheme': parent_scope.get('scheme', 'https'),
-            'query_string': _pushed_query,
-            'root_path': '',
-            'client': parent_scope.get('client'),
-            'headers': Headers([(k.encode() if isinstance(k, str) else k,
-                                  v.encode() if isinstance(v, str) else v)
-                                 for k, v in regular]),
-            'extensions': _build_h2_extensions(
+        # Sprint 79: build the synthetic pushed request as a native Connection
+        # and derive its dispatch scope through the canonical
+        # ``Connection.to_dispatch_scope`` bridge, so the dispatcher/router/
+        # handler read ``conn.*`` on the pushed stream too.  ``http2_priority``
+        # is an H/2-only deprecation-alias key (not a Connection field), layered
+        # on after, like the request path.
+        _parent_client = parent_scope.get('client')
+        pushed_conn = Connection(
+            method='GET',
+            path=_pushed_path,
+            raw_path=_pushed_raw_path,
+            headers=Headers([(k.encode() if isinstance(k, str) else k,
+                              v.encode() if isinstance(v, str) else v)
+                             for k, v in regular]),
+            query_string=_pushed_query,
+            http_version='2',
+            scheme=parent_scope.get('scheme', 'https'),
+            type='http',
+            client=tuple(_parent_client) if _parent_client else None,
+            extensions=_build_h2_extensions(
                 push_stream_id, _DEFAULT_PRIORITY,
                 self._peer_initial_window_size,
                 self._conn_window.size),
-            # Deprecation alias — see HEADERS path note.
-            'http2_priority': _DEFAULT_PRIORITY,
-        }
+        )
+        # Server-synthesized push request: same canonical bridge as the HEADERS
+        # path (as_scope + Headers restore + stash), minus the dual-path round-
+        # trip (a push scope is generated, never parsed off the wire).
+        pushed_scope: dict = pushed_conn.to_dispatch_scope()
+        # Deprecation alias — see HEADERS path note.
+        pushed_scope['http2_priority'] = _DEFAULT_PRIORITY
 
         push_recipient = RecipientFactory.http2(queue_depth=self._stream_queue_depth)
         # Pushed requests have no body — same lazy-queue path as GETs with END_STREAM on HEADERS.

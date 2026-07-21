@@ -31,6 +31,43 @@ so the editable install's metadata catches up.
 
 ## [Unreleased]
 
+## [0.60.0] — 2026-07-22
+
+### Changed
+
+- **Native `Connection` interface — the single internal request
+  representation (Sprint 79).** A typed `Connection` dataclass
+  (`blackbull.Connection`) is now BlackBull's one internal model of a
+  request. The protocol actors (HTTP/1.1, HTTP/2, WebSocket) build it
+  directly in their parsers, and the router, dispatcher, and handlers
+  read it. The ASGI `scope` dict is demoted to a **derived** view,
+  produced by `Connection.as_scope()` and consumed by
+  `Connection.from_scope()` only where external compatibility needs it
+  (uvicorn, `httpx.ASGITransport`/TestClient, third-party ASGI
+  middleware). A `_CONNECTION_FIELDS` registry is the single source of
+  truth for both conversions, so the two representations cannot drift;
+  a `BB_FORCE_ASGI_SCOPE=1` dual-path lane forces the round-trip on
+  every request even self-hosted, keeping the compat path honest. This
+  is an **internal refactor with no public API break**: the middleware
+  `(scope, receive, send, call_next)` contract, event `detail['scope']`
+  payloads, `__call__` signature, and handler signatures are all
+  preserved. On the self-hosted path the actor stashes the `Connection`
+  it already built, so consumers reuse it with no re-conversion (no B1/B3
+  regression).
+
+### Deprecated
+
+- **`blackbull.Request` → use `blackbull.Connection`.** The opt-in
+  handler context object was renamed. `blackbull.Request` is now a
+  deprecated alias of `Connection` that emits a `DeprecationWarning` on
+  first attribute access and will be **removed no earlier than
+  2027-08-01** (≥1-year migration window). Migrate by renaming the
+  import and the parameter annotation — the members are identical, with
+  one rename: the raw-scope escape hatch `request.scope` (a stored dict)
+  becomes `conn.as_scope()` (a freshly-derived dict). Docs and examples
+  now use `Connection` throughout; `examples/request_object.py` is
+  renamed to `examples/connection_object.py`.
+
 ## [0.59.1] — 2026-07-20
 
 ### Fixed
@@ -45,7 +82,7 @@ so the editable install's metadata catches up.
   second body chunk) don't arrive within the same event-loop iteration,
   the buffered body is flushed immediately.  The unary coalescing path
   is preserved — synchronous trailers still combine into a single
-  write.  (#TBD)
+  write.  (#173)
 
 ## [0.59.0] — 2026-07-19
 

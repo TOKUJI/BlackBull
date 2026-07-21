@@ -3,7 +3,9 @@ import asyncio
 import pytest
 from unittest.mock import ANY, AsyncMock, patch
 
+from blackbull.connection import Connection
 from blackbull.event_aggregator import EventAggregator
+from blackbull.headers import Headers
 from blackbull.server.http1_actor import HTTP1Actor, RequestActor
 from blackbull.server.recipient import AbstractReader, IncompleteReadError
 from blackbull.server.sender import AbstractWriter
@@ -359,9 +361,9 @@ class TestScopePopulation:
         with patch.object(WebSocketActor, 'run', new=AsyncMock()):
             await actor.run()
 
-        test_scope = actor._parse(raw)
-        actor._fill_connection_info(test_scope)
-        assert test_scope.get('scheme') == 'wss'
+        test_conn = actor._parse(raw)
+        actor._fill_connection_info(test_conn)
+        assert test_conn.scheme == 'wss'
 
     @pytest.mark.asyncio
     async def test_cleartext_advertises_pathsend_extension(self):
@@ -404,7 +406,8 @@ class TestScopePopulation:
 # ---------------------------------------------------------------------------
 
 class TestFillConnectionInfo:
-    """HTTP1Actor._fill_connection_info must populate scope from constructor args."""
+    """HTTP1Actor._fill_connection_info must populate the Connection from
+    constructor args (Sprint 79 Phase 3 — client/server are tuples now)."""
 
     def _make_actor(self, peername=None, sockname=None, ssl=False):
         return HTTP1Actor(
@@ -412,41 +415,47 @@ class TestFillConnectionInfo:
             peername=peername, sockname=sockname, ssl=ssl,
         )
 
+    @staticmethod
+    def _conn(**over) -> Connection:
+        base = dict(method='GET', path='/', raw_path=b'/', headers=Headers([]))
+        base.update(over)
+        return Connection(**base)
+
     def test_peername_sets_client(self):
         actor = self._make_actor(peername=('10.0.0.1', 9999))
-        scope = {'type': 'http', 'server': None}
-        actor._fill_connection_info(scope)
-        assert scope['client'] == ['10.0.0.1', 9999]
+        conn = self._conn(server=None)
+        actor._fill_connection_info(conn)
+        assert conn.client == ('10.0.0.1', 9999)
 
     def test_sockname_sets_server_when_no_host(self):
         actor = self._make_actor(sockname=('0.0.0.0', 7777))
-        scope = {'type': 'http', 'server': None}
-        actor._fill_connection_info(scope)
-        assert scope['server'] == ['0.0.0.0', 7777]
+        conn = self._conn(server=None)
+        actor._fill_connection_info(conn)
+        assert conn.server == ('0.0.0.0', 7777)
 
     def test_host_header_not_overwritten_by_sockname(self):
         actor = self._make_actor(sockname=('0.0.0.0', 7777))
-        scope = {'type': 'http', 'server': ['myhost', 80]}
-        actor._fill_connection_info(scope)
-        assert scope['server'] == ['myhost', 80]
+        conn = self._conn(server=('myhost', 80))
+        actor._fill_connection_info(conn)
+        assert conn.server == ('myhost', 80)
 
     def test_ssl_true_sets_https(self):
         actor = self._make_actor(ssl=True)
-        scope = {'type': 'http', 'scheme': 'http', 'server': None}
-        actor._fill_connection_info(scope)
-        assert scope['scheme'] == 'https'
+        conn = self._conn(scheme='http', server=None)
+        actor._fill_connection_info(conn)
+        assert conn.scheme == 'https'
 
     def test_ssl_false_leaves_scheme(self):
         actor = self._make_actor(ssl=False)
-        scope = {'type': 'http', 'scheme': 'http', 'server': None}
-        actor._fill_connection_info(scope)
-        assert scope['scheme'] == 'http'
+        conn = self._conn(scheme='http', server=None)
+        actor._fill_connection_info(conn)
+        assert conn.scheme == 'http'
 
     def test_ssl_true_websocket_sets_wss(self):
         actor = self._make_actor(ssl=True)
-        scope = {'type': 'websocket', 'scheme': 'ws', 'server': None}
-        actor._fill_connection_info(scope)
-        assert scope['scheme'] == 'wss'
+        conn = self._conn(type='websocket', scheme='ws', server=None)
+        actor._fill_connection_info(conn)
+        assert conn.scheme == 'wss'
 
 
 # ---------------------------------------------------------------------------

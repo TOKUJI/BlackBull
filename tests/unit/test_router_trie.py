@@ -365,17 +365,17 @@ async def test_lookup_cache_parametrized_route_injects_correct_params():
     fn = router[key]
     assert key in router._cache
 
-    # Cached closure injects params correctly
+    # Cached closure injects params correctly (Sprint 79: onto conn.path_params)
     scope: dict = {}
     await fn(scope, None, None)
-    assert scope.get('path_params') == {'task_id': '42'}
+    assert scope['_connection'].path_params == {'task_id': '42'}
 
     # Different path → different cache entry and different params
     key2 = ('/tasks/99', HTTPMethod.GET, Scheme.http)
     fn2 = router[key2]
     scope2: dict = {}
     await fn2(scope2, None, None)
-    assert scope2.get('path_params') == {'task_id': '99'}
+    assert scope2['_connection'].path_params == {'task_id': '99'}
 
 
 # ---------------------------------------------------------------------------
