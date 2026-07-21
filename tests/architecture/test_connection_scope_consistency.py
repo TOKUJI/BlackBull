@@ -25,9 +25,7 @@ _PKG_ROOT = pathlib.Path(blackbull.__file__).parent
 # site onto Connection. Target at Phase 5 close: empty (minus connection.py).
 _MIGRATION_ALLOWLIST = {
     'connection.py',            # the sanctioned conversion point
-    'server/parser.py',         # H2 _make_scope() — moved in Phase 4
-    'server/http1_actor.py',    # H1 _parse() — moved in Phase 3
-    'server/http2_actor.py',    # H2 scope build — moved in Phase 4
+    'server/http2_actor.py',    # H2 push scope build — moves in Phase 5
     'testing.py',               # TestClient scope build — moved in Phase 5
 }
 

@@ -50,15 +50,15 @@ def _h1_scope(raw: bytes) -> dict:
     return actor._parse(raw)
 
 
-def _h2_scope(fields: list[tuple[bytes, bytes]]) -> dict:
+def _h2_scope(fields: list[tuple[bytes, bytes]]):
     block = Encoder().encode(fields)
     flags = HeaderFrameFlags.END_HEADERS | HeaderFrameFlags.END_STREAM
     raw = (len(block).to_bytes(3, 'big') + FrameTypes.HEADERS
            + bytes([flags]) + (1).to_bytes(4, 'big') + block)
     frame = FrameFactory().load(raw)
-    scope = parse_headers(frame)
+    conn = parse_headers(frame)          # Sprint 79 Phase 4 — native Connection
     assert not frame.malformed
-    return scope
+    return conn
 
 
 class TestH1H2HostUniformity:
@@ -70,7 +70,7 @@ class TestH1H2HostUniformity:
                         (b':authority', b'real.example'),
                         (b'host', b'spoofed.example')])
         assert h1.headers.get(b'host') == b'real.example'
-        assert h1.headers.get(b'host') == h2['headers'].get(b'host')
+        assert h1.headers.get(b'host') == h2.headers.get(b'host')
 
     def test_h1_h2_host_uniformity_with_port(self):
         h1 = _h1_scope(b'GET / HTTP/1.1\r\nHost: example.com:8443\r\n\r\n')
@@ -78,4 +78,4 @@ class TestH1H2HostUniformity:
                         (b':scheme', b'https'),
                         (b':authority', b'example.com:8443')])
         assert h1.headers.get(b'host') == b'example.com:8443'
-        assert h1.headers.get(b'host') == h2['headers'].get(b'host')
+        assert h1.headers.get(b'host') == h2.headers.get(b'host')

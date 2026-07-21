@@ -19,6 +19,8 @@ from ..protocol.frame_types import (
     DEFAULT_INITIAL_WINDOW_SIZE, DEFAULT_MAX_FRAME_SIZE,
 )
 from ..protocol.stream import Stream, StreamState
+from ..connection import Connection
+from ..env import get_settings
 from ..headers import Headers
 from .parser import parse_headers
 from .cap_log import log_cap_hit
@@ -513,12 +515,41 @@ class HTTP2Actor(Actor):
         self._credit_flush_tasks.add(task)
         task.add_done_callback(self._credit_flush_tasks.discard)
 
-    def _fill_scope_connection(self, scope: dict) -> None:
-        """Inject peername/sockname into a freshly-parsed HTTP/2 scope."""
+    def _fill_scope_connection(self, conn: Connection) -> None:
+        """Inject peername/sockname into a freshly-parsed HTTP/2 Connection."""
         if self._peername:
-            scope['client'] = list(self._peername[:2])
+            conn.client = tuple(self._peername[:2])
         if self._sockname:
-            scope['server'] = list(self._sockname[:2])
+            conn.server = tuple(self._sockname[:2])
+
+    def _conn_to_scope(self, conn: Connection) -> dict:
+        """Materialize the ASGI scope dict the H/2 dispatch pipeline consumes.
+
+        Phase 4 (Sprint 79): ``parse_headers`` yields a native ``Connection``;
+        the stream/dispatch machinery below still reads an ASGI scope dict (it
+        flips in Phase 5), so derive one here via the single registry-driven
+        builder.  ``BB_FORCE_ASGI_SCOPE`` additionally round-trips through
+        ``from_scope`` so the compat conversion is exercised on every request
+        even self-hosted (§4.3 dual-path lane).  The H/1.1 actor's ``run()``
+        does the identical bridge.
+        """
+        scope = conn.as_scope()
+        if get_settings().force_asgi_scope:
+            scope = Connection.from_scope(scope).as_scope()
+        # Internal consumers call ``Headers`` methods on ``scope['headers']``;
+        # as_scope() emits the ASGI list[tuple] form, so restore the rich
+        # object until Phase 5 switches those reads to ``conn.headers``.
+        scope['headers'] = conn.headers
+        if conn.type == 'websocket':
+            # ``subprotocols`` is a websocket-only ASGI scope key, not a
+            # Connection field — derive it from the request headers here, the
+            # same way the H/1.1 upgrade handler augments its derived scope.
+            raw_sp = conn.headers.get(b'sec-websocket-protocol', b'')
+            scope['subprotocols'] = (
+                [p.strip().decode('utf-8', errors='replace')
+                 for p in raw_sp.split(b',')]
+                if raw_sp else [])
+        return scope
 
     @log
     async def send_frame(self, frame: FrameBase) -> None:
@@ -1071,7 +1102,7 @@ class HTTP2Actor(Actor):
         if not frame.end_headers:
             return False
 
-        scope = parse_headers(frame)
+        conn = parse_headers(frame)
         # RFC 9113 §8.1.1 / §8.2.1 — malformed HEADERS must be rejected with
         # a stream error of type PROTOCOL_ERROR rather than dispatched.
         # parse_payload sets the flag for field-level violations; parse_headers
@@ -1083,8 +1114,9 @@ class HTTP2Actor(Actor):
                 self.factory.rst_stream(stream.stream_id, ErrorCodes.PROTOCOL_ERROR))
             return True
 
+        self._fill_scope_connection(conn)
+        scope = self._conn_to_scope(conn)
         stream.expected_content_length = _extract_content_length(scope)
-        self._fill_scope_connection(scope)
         stream.scope = scope
 
         if scope.get('type') == 'websocket':
@@ -1168,7 +1200,7 @@ class HTTP2Actor(Actor):
 
         header_frame.parse_payload()
 
-        scope = parse_headers(header_frame)
+        conn = parse_headers(header_frame)
         # RFC 9113 §8.1.1 / §8.2.1 — same malformed-HEADERS check as the direct
         # HEADERS path; reject with RST_STREAM PROTOCOL_ERROR.
         if getattr(header_frame, 'malformed', False):
@@ -1178,8 +1210,9 @@ class HTTP2Actor(Actor):
                 self.factory.rst_stream(stream.stream_id, ErrorCodes.PROTOCOL_ERROR))
             return True
 
+        self._fill_scope_connection(conn)
+        scope = self._conn_to_scope(conn)
         stream.expected_content_length = _extract_content_length(scope)
-        self._fill_scope_connection(scope)
 
         if self._active_stream_count >= self.max_concurrent_streams:
             log_cap_hit('h2_max_concurrent_streams',

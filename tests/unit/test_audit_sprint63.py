@@ -321,8 +321,8 @@ class TestXForwardedPrefixTrust:
         flags = HeaderFrameFlags.END_HEADERS | HeaderFrameFlags.END_STREAM
         raw = (len(block).to_bytes(3, 'big') + FrameTypes.HEADERS
                + bytes([flags]) + (1).to_bytes(4, 'big') + block)
-        scope = parse_headers(FrameFactory().load(raw))
-        assert scope.get('root_path', '') == ''
+        conn = parse_headers(FrameFactory().load(raw))
+        assert conn.root_path == ''
 
     @pytest.mark.asyncio
     async def test_trusted_proxy_sets_root_path(self):

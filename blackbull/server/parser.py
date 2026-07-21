@@ -2,30 +2,26 @@ from urllib.parse import unquote, urlsplit
 
 from ..protocol.frame_types import PseudoHeaders
 import logging
+from ..connection import Connection
 from ..headers import Headers
 from .http1_actor import _HOST_FORBIDDEN_BYTES
 
 logger = logging.getLogger(__name__)
 
-_ASGI_VERSION: dict = {'version': '3.0', 'spec_version': '2.2'}
 
+def _default_connection() -> Connection:
+    """Minimal HTTP/2 :class:`Connection` returned on the malformed / early-out
+    paths of :func:`parse_headers`.
 
-def _make_scope():
-    return {
-        'type': 'http',
-        'asgi': _ASGI_VERSION,
-        'http_version': '2',
-        'method': 'HEAD',
-        'scheme': 'https',
-        'path': '',
-        'raw_path': b'',
-        'query_string': b'',
-        'root_path': '',
-        'headers': [],
-        'client': [],
-        'server': [],
-        'state': {},
-    }
+    The actor checks ``frame.malformed`` and answers RST_STREAM before it ever
+    reads this object, so only the defaults matter — it exists to keep the
+    return contract a :class:`Connection` on every path (Sprint 79 Phase 4,
+    the H/2 analogue of :meth:`HTTP1Actor._parse` always yielding a Connection).
+    """
+    return Connection(
+        method='HEAD', path='', raw_path=b'', headers=Headers([]),
+        http_version='2', scheme='https',
+    )
 
 
 def _split_h2_path(raw: str):
@@ -110,30 +106,39 @@ def _request_headers_with_host(frame, *, require_present: bool) -> list | None:
     return frame.headers
 
 
-def parse_headers(frame) -> dict:
-    """Build an ASGI ``http`` (or ``websocket``) scope from a HEADERS frame.
+def parse_headers(frame) -> Connection:
+    """Build a native :class:`Connection` (``http`` or ``websocket``) from a
+    HEADERS frame.
 
     Hot path on every request — kept as a module-level function so that
     callers avoid the dict-lookup + parser allocation that ``ParserFactory``
     requires.
 
+    Sprint 79 Phase 4: yields a :class:`Connection` rather than an ASGI scope
+    dict (the H/2 analogue of :meth:`HTTP1Actor._parse`).  The actor derives
+    the compat scope via :meth:`Connection.as_scope` at the dispatch boundary
+    until Phase 5 switches the consumers onto ``conn`` directly; the
+    websocket-only ``subprotocols`` scope key is likewise attached there (it is
+    not a :class:`Connection` field — see the proposal §2.1 field set), the
+    same way :meth:`HTTP1Actor._handle_upgrade` augments the derived scope.
+
     Also performs request-level pseudo-header presence checks (RFC 9113
     §8.3.1).  Field-level checks already happened in ``parse_payload``; if
-    that flagged ``frame.malformed`` we still build a scope to keep the
+    that flagged ``frame.malformed`` we still return a Connection to keep the
     contract simple but the actor will discard it before dispatch.  If
     parse_headers itself finds a missing or empty required pseudo, it sets
     ``frame.malformed`` so the same actor check rejects the request.
     """
     # Short-circuit if the frame parser already flagged this malformed.
     if getattr(frame, 'malformed', False):
-        return _make_scope()
+        return _default_connection()
 
     # RFC 9113 §8.3.1 — ":status" is a response pseudo-header and MUST NOT
     # appear in a request.  ``parse_payload`` accepted it as a known pseudo-
     # header; we reject it here at the request layer.
     if PseudoHeaders.STATUS in frame.pseudo_headers:
         frame._mark_malformed('response pseudo-header in request: :status')
-        return _make_scope()
+        return _default_connection()
 
     # RFC 9113 §8.3.1 — required request pseudo-headers.
     # CONNECT (RFC 9113 §8.5) omits :scheme and :path; the WebSocket
@@ -141,73 +146,70 @@ def parse_headers(frame) -> dict:
     method = frame.pseudo_headers.get(PseudoHeaders.METHOD)
     if method is None:
         frame._mark_malformed('missing :method')
-        return _make_scope()
+        return _default_connection()
     if method != 'CONNECT':
         if PseudoHeaders.SCHEME not in frame.pseudo_headers:
             frame._mark_malformed('missing :scheme')
-            return _make_scope()
+            return _default_connection()
         path = frame.pseudo_headers.get(PseudoHeaders.PATH)
         if path is None:
             frame._mark_malformed('missing :path')
-            return _make_scope()
+            return _default_connection()
         if path == '':
             frame._mark_malformed('empty :path')
-            return _make_scope()
+            return _default_connection()
 
-    scope = _make_scope()
+    conn = _default_connection()
 
     protocol = frame.pseudo_headers.get(PseudoHeaders.PROTOCOL, '')
 
     if method == 'CONNECT' and protocol == 'websocket':
         # RFC 8441 §4 — Extended CONNECT bootstrapping WebSocket over HTTP/2
-        scope['type'] = 'websocket'
+        conn.type = 'websocket'
         scheme = frame.pseudo_headers.get(PseudoHeaders.SCHEME, 'https')
-        scope['scheme'] = 'wss' if scheme == 'https' else 'ws'
+        conn.scheme = 'wss' if scheme == 'https' else 'ws'
         if path := frame.pseudo_headers.get(PseudoHeaders.PATH):
-            scope['path'], scope['raw_path'], scope['query_string'] = \
+            conn.path, conn.raw_path, conn.query_string = \
                 _split_h2_path(path)
         # RFC 8441 requests carry ``:authority`` too — same grammar check
         # and ``host`` mapping as plain requests, but presence is not
         # enforced (the Extended CONNECT handshake already succeeded).
         raw_headers = _request_headers_with_host(frame, require_present=False)
         if raw_headers is None:
-            return scope
-        scope['headers'] = Headers(raw_headers)
+            return conn
+        conn.headers = Headers(raw_headers)
         # Bug 1.16 — root_path is NOT taken from the client-controlled
         # X-Forwarded-Prefix; only TrustedProxy sets it after verifying the
-        # peer.  Default to the RFC-safe empty mount.
-        scope['root_path'] = ''
-        raw_sp = scope['headers'].get(b'sec-websocket-protocol', b'')
-        scope['subprotocols'] = (
-            [p.strip().decode('utf-8', errors='replace') for p in raw_sp.split(b',')]
-            if raw_sp else [])
-        return scope
+        # peer.  Default to the RFC-safe empty mount.  ``subprotocols`` is
+        # derived from the request headers by the actor bridge.
+        conn.root_path = ''
+        return conn
 
     if method:
-        scope['method'] = method
+        conn.method = method
 
     if path := frame.pseudo_headers.get(PseudoHeaders.PATH):
-        scope['path'], scope['raw_path'], scope['query_string'] = \
+        conn.path, conn.raw_path, conn.query_string = \
             _split_h2_path(path)
 
     if scheme := frame.pseudo_headers.get(PseudoHeaders.SCHEME):
-        scope['scheme'] = scheme
+        conn.scheme = scheme
 
     # RFC 9113 §8.3.1 — validate the host authority and surface
     # ``:authority`` as the ``host`` header (ASGI).  Plain CONNECT is
     # excluded: §8.5 gives its ``:authority`` tunnel semantics, and the
     # presence rule only binds http/https requests.
     if method == 'CONNECT':
-        scope['headers'] = Headers(frame.headers)
+        conn.headers = Headers(frame.headers)
     else:
         raw_headers = _request_headers_with_host(
-            frame, require_present=scope['scheme'] in ('http', 'https'))
+            frame, require_present=conn.scheme in ('http', 'https'))
         if raw_headers is None:
-            return scope
-        scope['headers'] = Headers(raw_headers)
+            return conn
+        conn.headers = Headers(raw_headers)
 
     # Bug 1.16 — root_path is NOT taken from the client-controlled
     # X-Forwarded-Prefix; only TrustedProxy sets it after verifying the peer.
-    scope['root_path'] = ''
+    conn.root_path = ''
 
-    return scope
+    return conn

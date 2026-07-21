@@ -9,7 +9,21 @@ from hypothesis import strategies as st
 # ---------------------------------------------------------------------------
 
 from blackbull.server.http1_actor import HTTP1Actor as _HTTP1Actor
-from blackbull.server.parser import _make_scope as _make_http2_scope, parse_headers as _parse_headers
+from blackbull.server.parser import (
+    _default_connection as _make_http2_conn,
+    parse_headers as _real_parse_headers,
+)
+
+
+def _parse_headers(frame) -> dict:
+    """Parse an HTTP/2 HEADERS frame and return the derived ASGI scope.
+
+    Sprint 79 Phase 4 — ``parse_headers`` now returns a native ``Connection``;
+    this suite asserts on the derived ASGI scope shape (the H/2 actor bridge
+    materializes the same view), so convert via the single ``as_scope()``
+    builder (headers therefore appear in the ASGI ``list[tuple]`` form).
+    """
+    return _real_parse_headers(frame).as_scope()
 
 
 def _get_scope(raw_request: bytes) -> dict:
@@ -72,8 +86,8 @@ class TestParse:
 
     def test_http2_version_string_is_spec_compliant(self):
         """ASGI spec: http_version must be '2' for HTTP/2, not '2.0'."""
-        scope = _make_http2_scope()
-        assert scope['http_version'] == '2'
+        conn = _make_http2_conn()
+        assert conn.http_version == '2'
 
     def test_type_is_http_by_default(self):
         assert _get_scope(_http_request())['type'] == 'http'

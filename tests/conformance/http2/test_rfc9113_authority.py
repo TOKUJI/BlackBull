@@ -3,7 +3,7 @@
 Sprint 72 F.1 (audit follow-up 2026-07-14): HTTP/2 requests must carry a
 host authority — either the ``:authority`` pseudo-header or a literal
 ``Host`` field — and ``:authority`` must be surfaced to the application
-as the ``host`` header in ``scope['headers']`` (ASGI HTTP spec), mirroring
+as the ``host`` header in ``scope.headers`` (ASGI HTTP spec), mirroring
 HTTP/1.1's absolute-form-overrides-Host semantics (RFC 9112 §3.2.2) and
 its userinfo/grammar rejection (the 1.25 fix, Sprint 63).
 
@@ -185,7 +185,7 @@ class TestAuthorityGrammar:
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# F.1b — ASGI mapping: :authority → host in scope['headers']
+# F.1b — ASGI mapping: :authority → host in scope.headers
 # ═══════════════════════════════════════════════════════════════════════
 
 class TestAuthorityHostMapping:
@@ -198,8 +198,8 @@ class TestAuthorityHostMapping:
             _PSEUDO_TRIO + [(b':authority', b'example.com:8443')])
         scope = parse_headers(frame)
         assert not frame.malformed
-        assert scope['headers'].get(b'host') == b'example.com:8443'
-        assert scope['headers'].get(b':authority') == b''  # never leaks
+        assert scope.headers.get(b'host') == b'example.com:8443'
+        assert scope.headers.get(b':authority') == b''  # never leaks
 
     def test_authority_replaces_literal_host(self):
         frame = _load_frame(
@@ -207,14 +207,14 @@ class TestAuthorityHostMapping:
                             (b'host', b'spoofed.example')])
         scope = parse_headers(frame)
         assert not frame.malformed
-        assert scope['headers'].getlist(b'host') == [
+        assert scope.headers.getlist(b'host') == [
             (b'host', b'real.example')]
 
     def test_host_fallback_kept_when_no_authority(self):
         frame = _load_frame(_PSEUDO_TRIO + [(b'host', b'example.com')])
         scope = parse_headers(frame)
         assert not frame.malformed
-        assert scope['headers'].get(b'host') == b'example.com'
+        assert scope.headers.get(b'host') == b'example.com'
 
     def test_missing_both_marks_frame_malformed(self):
         frame = _load_frame(list(_PSEUDO_TRIO))
@@ -230,8 +230,8 @@ class TestAuthorityHostMapping:
         ])
         scope = parse_headers(frame)
         assert not frame.malformed
-        assert scope['type'] == 'websocket'
-        assert scope['headers'].get(b'host') == b'example.com:8443'
+        assert scope.type == 'websocket'
+        assert scope.headers.get(b'host') == b'example.com:8443'
 
     def test_plain_connect_headers_untouched(self):
         """RFC 9113 §8.5 gives :authority different semantics on plain
@@ -240,7 +240,7 @@ class TestAuthorityHostMapping:
                              (b':authority', b'example.com:443')])
         scope = parse_headers(frame)
         assert not frame.malformed
-        assert scope['headers'].get(b'host') == b''
+        assert scope.headers.get(b'host') == b''
 
 
 # ═══════════════════════════════════════════════════════════════════════
