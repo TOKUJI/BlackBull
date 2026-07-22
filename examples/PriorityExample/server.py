@@ -1,9 +1,9 @@
 """
 HTTP/2 Priority Example — BlackBull server
 ==========================================
-Demonstrates how to read RFC 9218 priority hints from the ASGI scope
-extension ``scope['extensions']['http.response.priority']`` and act on
-them in handler code.
+Demonstrates how to read RFC 9218 priority hints from the native
+``Connection`` — ``conn.extensions['http.response.priority']`` — and act
+on them in handler code.
 
 RFC 9218 Priority field
 -----------------------
@@ -11,7 +11,7 @@ Clients send an urgency hint in one of two ways:
 
   1. PRIORITY_UPDATE frame (type 0x10) — sent by HTTP/2-aware clients before
      or after the HEADERS frame.  BlackBull stores this on the stream and
-     copies it into scope before calling the app.
+     exposes it via the Connection's ``extensions`` before calling the app.
 
   2. 'priority' HTTP header — e.g. ``priority: u=1, i``.  BlackBull parses
      this as a fallback when no PRIORITY_UPDATE frame was received.
@@ -24,12 +24,12 @@ The priority field has two components:
 BlackBull does not reorder responses based on urgency.  Acting on the hint
 is entirely up to application code, as shown below.
 
-Scope location (BlackBull v0.31+):
-  scope['extensions']['http.response.priority'] → {'urgency': int, 'incremental': bool}
+Connection location (BlackBull v0.31+):
+  conn.extensions['http.response.priority'] → {'urgency': int, 'incremental': bool}
 
-The legacy ``scope['http2_priority']`` key is still populated for one
-release as a deprecation alias; it is scheduled for removal in
-BlackBull v0.32.0.
+The legacy top-level ``scope['http2_priority']`` key does not survive the
+native ``Connection`` model (Sprint 80) — only ``conn.extensions`` is
+carried across the boundary. Read the extension key.
 
 Endpoints
 ---------
@@ -57,17 +57,16 @@ app = BlackBull()
 _DEFAULT_PRIORITY = {'urgency': 3, 'incremental': False}
 
 
-def _priority(scope: dict) -> dict:
-    """Return scope's priority hint, defaulting to RFC 9218 §4.1 values.
+def _priority(conn) -> dict:
+    """Return the request's priority hint, defaulting to RFC 9218 §4.1 values.
 
-    Reads ``scope['extensions']['http.response.priority']`` — the ASGI
-    extension surface BlackBull adopted in v0.31.  The legacy
-    ``scope['http2_priority']`` key is still populated for backwards
-    compatibility but will be removed in v0.32.0; new code should use
-    the extension.
+    Reads ``conn.extensions['http.response.priority']`` — the extension
+    surface BlackBull populates for HTTP/2 requests (v0.31+).  *conn* is the
+    native :class:`~blackbull.connection.Connection` (handlers receive it as
+    ``scope``; the ``request_received`` event carries it as
+    ``event.detail['scope']``).
     """
-    ext = scope.get('extensions') or {}
-    return ext.get('http.response.priority', _DEFAULT_PRIORITY)
+    return conn.extensions.get('http.response.priority', _DEFAULT_PRIORITY)
 
 
 @app.on('request_received')
@@ -114,7 +113,7 @@ async def handle_priority_echo(scope, receive, send):
                 hint['urgency'], hint['incremental'])
     await send(JSONResponse({
         'priority': hint,
-        'scope_location': "scope['extensions']['http.response.priority']",
+        'conn_location': "conn.extensions['http.response.priority']",
         'note': (
             'Set via PRIORITY_UPDATE frame or "priority" HTTP header. '
             'Defaults: urgency=3, incremental=false (RFC 9218 §4.1).'

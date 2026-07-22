@@ -45,20 +45,29 @@ async def test_post_processing_runs_after_handler(app):
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_scope_mutation_visible_in_handler(app):
+async def test_state_mutation_visible_in_handler(app):
+    # Sprint 80: BlackBull threads a native Connection, so middleware share
+    # per-request data with the handler via ``conn.state`` (the ASGI
+    # ``scope['key'] = ...`` grab-bag idiom is gone).
     async def inject_user(scope, receive, send, call_next):
-        scope['user'] = 'alice'
+        scope.state['user'] = 'alice'
         return await call_next(scope, receive, send)
 
     seen = []
 
     @app.route(methods=[HTTPMethod.GET], path='/user', middlewares=[inject_user])
     async def handler(scope, receive, send):
-        seen.append(scope.get('user'))
+        seen.append(scope.state.get('user'))
         return 'ok'
 
+    async def _sink(*a, **kw):
+        pass
+
+    async def _receive():
+        return {'type': 'http.request', 'body': b'', 'more_body': False}
+
     scope = {'type': 'http', 'method': 'GET', 'path': '/user', 'headers': {}}
-    await app(scope, None, lambda *a, **kw: None)
+    await app(scope, _receive, _sink)
     assert seen == ['alice']
 
 

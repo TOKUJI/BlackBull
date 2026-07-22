@@ -363,10 +363,11 @@ async def test_compression_max_inflight_logs(caps_caplog):
     async def call_next(scope, receive, send):
         await app(scope, receive, send)
 
-    scope = {
+    from blackbull.connection import Connection
+    scope = Connection.from_scope({
         'type': 'http', 'method': 'GET', 'path': '/',
         'headers': [(b'accept-encoding', b'gzip')],
-    }
+    })
     await mw(scope, receive, send, call_next)
 
     assert len(_records_for(caps_caplog, 'compression_max_inflight')) == 1

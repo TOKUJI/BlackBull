@@ -88,7 +88,7 @@ class _FakeAuthExtension:
         @app.route(path='/whoami')
         async def whoami(scope):
             self._whoami_called = True
-            user = scope.get('user', 'anonymous')
+            user = scope.state.get('user', 'anonymous')
             return {'user': user}
 
         # Keep a reference so the route callback is collected properly
@@ -97,7 +97,7 @@ class _FakeAuthExtension:
     async def _auth_middleware(self, scope, receive, send, call_next):
         self._middleware_called = True
         # Dummy auth — always sets 'testuser'
-        scope['user'] = 'testuser'
+        scope.state['user'] = 'testuser'
         await call_next(scope, receive, send)
 
     async def _on_request(self, event):
@@ -137,7 +137,7 @@ class TestInitAppConvention:
         # Add a route that returns the injected user
         @app.route(path='/me')
         async def me(scope):
-            return {'user': scope.get('user', '?')}
+            return {'user': scope.state.get('user', '?')}
 
         with TestClient(app) as client:
             resp = client.get('/me')
@@ -380,7 +380,7 @@ class TestASGIMiddlewareCompat:
 
         async def _x_request_id(scope, receive, send, call_next):
             calls.append('mw_enter')
-            scope['x-request-id'] = 'test-001'
+            scope.state['x-request-id'] = 'test-001'
             await call_next(scope, receive, send)
             calls.append('mw_exit')
 
@@ -388,7 +388,7 @@ class TestASGIMiddlewareCompat:
 
         @app.route(path='/mw-test')
         async def mw_test(scope):
-            return {'request_id': scope.get('x-request-id', '?')}
+            return {'request_id': scope.state.get('x-request-id', '?')}
 
         with TestClient(app) as client:
             resp = client.get('/mw-test')
@@ -478,7 +478,7 @@ class TestExtensionWithTestClient:
                 self._handler = a_route
 
             async def _mw(self, scope, receive, send, call_next):
-                scope['x-ext-a'] = 'yes'
+                scope.state['x-ext-a'] = 'yes'
                 await call_next(scope, receive, send)
 
         class _ExtB:
@@ -487,7 +487,7 @@ class TestExtensionWithTestClient:
 
                 @a.route(path='/b')
                 async def b_route(scope):
-                    return {'ext_a': scope.get('x-ext-a', 'no')}
+                    return {'ext_a': scope.state.get('x-ext-a', 'no')}
 
                 self._handler = b_route
 

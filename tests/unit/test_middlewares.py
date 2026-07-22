@@ -29,6 +29,7 @@ from blackbull.middleware.compression import Compression
 # here, which is the same shape (pre-built, no args).
 compress = Compression()
 from blackbull.headers import Headers
+from blackbull.connection import Connection
 
 try:
     import brotli as _brotli
@@ -299,10 +300,10 @@ class TestHTTPCompression:
             await send({'type': 'http.response.start', 'status': 200, 'headers': []})
             await send({'type': 'http.response.body', 'body': body, 'more_body': False})
 
-        scope = {
+        scope = Connection.from_scope({
             'type': 'http',
             'headers': Headers([(b'accept-encoding', b'gzip')]),
-        }
+        })
         events = []
 
         async def capture_send(event):
@@ -323,10 +324,10 @@ class TestHTTPCompression:
             await send({'type': 'http.response.start', 'status': 200, 'headers': []})
             await send({'type': 'http.response.body', 'body': b'data' * 100, 'more_body': False})
 
-        scope = {
+        scope = Connection.from_scope({
             'type': 'http',
             'headers': Headers([(b'accept-encoding', b'gzip')]),
-        }
+        })
         events = []
 
         async def capture_send(event):
@@ -352,7 +353,7 @@ class TestHTTPCompression:
             await send({'type': 'http.response.start', 'status': 200, 'headers': []})
             await send({'type': 'http.response.body', 'body': body, 'more_body': False})
 
-        scope = {'type': 'http', 'headers': Headers([])}
+        scope = Connection.from_scope({'type': 'http', 'headers': Headers([])})
         events = []
 
         async def capture_send(event):
@@ -375,10 +376,10 @@ class TestHTTPCompression:
             await send({'type': 'http.response.start', 'status': 200, 'headers': []})
             await send({'type': 'http.response.body', 'body': body, 'more_body': False})
 
-        scope = {
+        scope = Connection.from_scope({
             'type': 'http',
             'headers': Headers([(b'accept-encoding', b'gzip')]),
-        }
+        })
         events = []
 
         async def capture_send(event):
@@ -401,10 +402,10 @@ class TestHTTPCompression:
                         'headers': [(b'content-type', b'image/jpeg')]})
             await send({'type': 'http.response.body', 'body': body, 'more_body': False})
 
-        scope = {
+        scope = Connection.from_scope({
             'type': 'http',
             'headers': Headers([(b'accept-encoding', b'gzip')]),
-        }
+        })
         events = []
 
         async def capture_send(event):
@@ -441,10 +442,10 @@ class TestHTTPCompression:
                         'headers': [(b'content-type', content_type)]})
             await send({'type': 'http.response.body', 'body': body, 'more_body': False})
 
-        scope = {
+        scope = Connection.from_scope({
             'type': 'http',
             'headers': Headers([(b'accept-encoding', b'br, gzip')]),
-        }
+        })
         events = []
 
         async def capture_send(event):
@@ -476,10 +477,10 @@ class TestHTTPCompression:
                         'headers': [(b'content-type', content_type)]})
             await send({'type': 'http.response.body', 'body': body, 'more_body': False})
 
-        scope = {
+        scope = Connection.from_scope({
             'type': 'http',
             'headers': Headers([(b'accept-encoding', b'gzip')]),
-        }
+        })
         events = []
 
         async def capture_send(event):
@@ -514,7 +515,7 @@ class TestBrotliCompression:
             await send({'type': 'http.response.start', 'status': 200, 'headers': []})
             await send({'type': 'http.response.body', 'body': body, 'more_body': False})
 
-        scope = {'type': 'http', 'headers': Headers([(b'accept-encoding', b'br')])}
+        scope = Connection.from_scope({'type': 'http', 'headers': Headers([(b'accept-encoding', b'br')])})
         events = []
 
         async def capture_send(event):
@@ -531,7 +532,7 @@ class TestBrotliCompression:
             await send({'type': 'http.response.start', 'status': 200, 'headers': []})
             await send({'type': 'http.response.body', 'body': b'x' * 200, 'more_body': False})
 
-        scope = {'type': 'http', 'headers': Headers([(b'accept-encoding', b'br')])}
+        scope = Connection.from_scope({'type': 'http', 'headers': Headers([(b'accept-encoding', b'br')])})
         events = []
 
         async def capture_send(event):
@@ -550,7 +551,7 @@ class TestBrotliCompression:
             await send({'type': 'http.response.start', 'status': 200, 'headers': []})
             await send({'type': 'http.response.body', 'body': b'x' * 200, 'more_body': False})
 
-        scope = {'type': 'http', 'headers': Headers([(b'accept-encoding', b'gzip, br')])}
+        scope = Connection.from_scope({'type': 'http', 'headers': Headers([(b'accept-encoding', b'gzip, br')])})
         events = []
 
         async def capture_send(event):
@@ -576,7 +577,7 @@ class TestZstdCompression:
             await send({'type': 'http.response.start', 'status': 200, 'headers': []})
             await send({'type': 'http.response.body', 'body': body, 'more_body': False})
 
-        scope = {'type': 'http', 'headers': Headers([(b'accept-encoding', b'zstd')])}
+        scope = Connection.from_scope({'type': 'http', 'headers': Headers([(b'accept-encoding', b'zstd')])})
         events = []
 
         async def capture_send(event):
@@ -594,7 +595,7 @@ class TestZstdCompression:
             await send({'type': 'http.response.start', 'status': 200, 'headers': []})
             await send({'type': 'http.response.body', 'body': b'x' * 200, 'more_body': False})
 
-        scope = {'type': 'http', 'headers': Headers([(b'accept-encoding', b'zstd')])}
+        scope = Connection.from_scope({'type': 'http', 'headers': Headers([(b'accept-encoding', b'zstd')])})
         events = []
 
         async def capture_send(event):

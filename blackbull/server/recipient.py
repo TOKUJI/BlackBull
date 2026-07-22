@@ -12,6 +12,7 @@ from .ws_codec import (
 from .constants import WSCloseCode
 from ..asgi import ASGIEvent
 from ..headers import Headers
+from ..connection import CONNECTION_STASH_KEY, Connection
 from ..protocol.frame_types import FrameBase, Data, DEFAULT_INITIAL_WINDOW_SIZE
 from ..event import Event, EventDispatcher
 import logging
@@ -445,13 +446,31 @@ class HTTP1Recipient(BaseRecipient):
 
     _reader: AbstractReader  # narrows BaseRecipient._reader from AbstractReader | None
 
-    def __init__(self, reader: AbstractReader, scope: dict,
+    def __init__(self, reader: AbstractReader, scope: dict | Connection,
                  *, body_timeout: float = 0.0,
                  deadline: ConnectionDeadline | None = None,
                  chunk_size: int | None = None):
         super().__init__(reader)
-        self._scope = scope
-        headers = scope['headers']
+        # BlackBull's own actor passes the native :class:`Connection` directly
+        # (Sprint 80 native-Connection entry); read its ``headers`` with no scope
+        # materialization. A stashed lazy scope, or an external/hand-built scope
+        # dict, are the other two shapes.
+        #
+        # We deliberately do **not** retain ``scope`` (the Connection): the
+        # actor binds this recipient as ``conn._receive`` for lazy
+        # ``conn.body()``, so a back-reference here would close a per-request
+        # cycle (conn → recipient → conn) reclaimable only by the cyclic GC —
+        # the v0.60.0 tail-latency regression. Only the request path is kept
+        # (a plain ``str``), purely for the log-cap-hit diagnostics below.
+        if isinstance(scope, Connection):
+            headers = scope.headers
+            self._scope_path: str | None = scope.path
+        else:
+            _conn = scope.get(CONNECTION_STASH_KEY) if isinstance(scope, dict) else None
+            headers = _conn.headers if _conn is not None else scope['headers']
+            self._scope_path = (
+                _conn.path if _conn is not None
+                else scope.get('path') if isinstance(scope, dict) else None)
         if not isinstance(headers, Headers):
             headers = Headers(headers)
         te = headers.get(b'transfer-encoding', b'').strip().lower()
@@ -548,7 +567,7 @@ class HTTP1Recipient(BaseRecipient):
             self.framing_broken = True
             log_cap_hit('h1_chunk_line_length',
                         requested=exc.consumed, limit=_CHUNK_LINE_MAX,
-                        scope_path=self._scope.get('path') if self._scope else None,
+                        scope_path=self._scope_path,
                         protocol='http1')
             raise _bad_request(
                 'chunk framing line exceeds length limit') from None
@@ -556,7 +575,7 @@ class HTTP1Recipient(BaseRecipient):
             self.framing_broken = True
             log_cap_hit('h1_chunk_line_length',
                         requested=len(line), limit=_CHUNK_LINE_MAX,
-                        scope_path=self._scope.get('path') if self._scope else None,
+                        scope_path=self._scope_path,
                         protocol='http1')
             raise _bad_request('chunk framing line exceeds length limit')
         return line
@@ -648,7 +667,7 @@ class HTTP1Recipient(BaseRecipient):
             log_cap_hit('body_timeout',
                         requested=self._body_timeout,
                         limit=self._body_timeout,
-                        scope_path=self._scope.get('path') if self._scope else None,
+                        scope_path=self._scope_path,
                         protocol='http1')
             self._done = True
             return {'type': ASGIEvent.HTTP_DISCONNECT}
@@ -898,7 +917,7 @@ class WebSocketRecipient(BaseRecipient):
     def __init__(self, reader: AbstractReader, writer: AbstractWriter, *,
                  require_masked: bool = True,
                  dispatcher: EventDispatcher | None = None,
-                 scope: dict | None = None,
+                 scope: dict | Connection | None = None,
                  ws_queue_depth: int = _WS_EVENT_QUEUE_DEPTH,
                  decompressor=None,
                  max_frame_payload: int | None = None):
@@ -984,7 +1003,8 @@ class WebSocketRecipient(BaseRecipient):
                     log_cap_hit('ws_max_frame_payload',
                                 requested=exc.declared,
                                 limit=self._max_frame_payload,
-                                scope_path=self._scope.get('path') if self._scope else None,
+                                scope_path=(self._scope.path if isinstance(self._scope, Connection)
+                                    else self._scope.get('path')) if self._scope else None,
                                 protocol='ws')
                     raise ProtocolError(
                         str(exc),
@@ -1196,7 +1216,7 @@ class RecipientFactory:
     """
 
     @staticmethod
-    def http1(reader, scope: dict, *,
+    def http1(reader, scope: dict | Connection, *,
               body_timeout: float = 0.0,
               deadline: ConnectionDeadline | None = None) -> HTTP1Recipient:
         if not isinstance(reader, AbstractReader):
@@ -1217,7 +1237,7 @@ class RecipientFactory:
     @staticmethod
     def websocket(reader, writer, *,
                   dispatcher: EventDispatcher | None = None,
-                  scope: dict | None = None,
+                  scope: dict | Connection | None = None,
                   ws_queue_depth: int = _WS_EVENT_QUEUE_DEPTH,
                   decompressor=None) -> WebSocketRecipient:
         if not isinstance(reader, AbstractReader):

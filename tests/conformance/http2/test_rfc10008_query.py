@@ -20,7 +20,7 @@ def _query_app(captured: dict) -> BlackBull:
 
     @app.route(path='/search', methods=[QUERY])
     async def search(scope, receive, send):
-        captured['method'] = scope['method']
+        captured['method'] = scope.method
         captured['body'] = await read_body(receive)
         await send({'type': 'http.response.start', 'status': 200,
                     'headers': [(b'content-type', b'text/plain')]})

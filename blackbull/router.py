@@ -27,6 +27,7 @@ from urllib.parse import parse_qsl
 import uuid as _uuid
 import warnings
 from .di import Depends, _resolve_depends
+from .connection import stashed_connection
 from .utils import Scheme, do_nothing, is_client_error, is_server_error
 
 # RouteGroup is defined in app.py to avoid a circular import;
@@ -846,10 +847,18 @@ def _conn_of(scope, receive):
     **no** re-conversion (the B1/B3 hot path is unchanged). When the app runs
     under an external ASGI server (uvicorn, ``httpx.ASGITransport``) there is
     no stash, so we build one via :meth:`Connection.from_scope` — the single
-    ASGI→native conversion point. Either way ``_receive`` is (re)bound to the
-    caller's channel so ``conn.body()`` drains the right stream once.
+    ASGI→native conversion point.
+
+    ``_receive`` is bound to the caller's channel **only when unset**. On the
+    self-hosted path the actor has already bound the *raw* recipient via
+    :func:`~blackbull.connection.bind_receive_channel`; the ``receive`` threaded
+    to the router here is the disconnect-detecting *wrapper*, which captures
+    ``conn`` — overwriting the raw binding with it would re-form the per-request
+    reference cycle the actor binding exists to avoid (v0.60.0 regression). The
+    external-ASGI path arrives with ``_receive`` already set by ``from_scope``,
+    so it, too, is left untouched; only a hand-built scope that reached the
+    router with no channel bound (some unit drives) falls through to this bind.
     """
-    from .connection import stashed_connection  # noqa: PLC0415 — avoid an import cycle at module load
     conn, built = stashed_connection(scope, receive)
     if built and isinstance(scope, dict):
         # Transitional bridge: an *input* ``path_params`` key on a bare scope
@@ -860,9 +869,8 @@ def _conn_of(scope, receive):
         seed = scope.get('path_params')
         if seed:
             conn.path_params.update(seed)
-    # Rebind ``_receive`` to the caller's channel (even on a stash hit) so
-    # ``conn.body()`` drains the right stream exactly once.
-    conn._receive = receive
+    if conn._receive is None:
+        conn._receive = receive
     return conn
 
 
@@ -872,7 +880,13 @@ def _set_path_params(scope, receive, params: dict) -> None:
     Sprint 79 Phase 5: replaces the old ``scope.setdefault('path_params', {})``
     closure. The handler reads them back via ``conn.path_params`` (see
     :func:`_conn_of`).
+
+    Sprint 80 Tier-1b: no-op fast-return when there are no matched params, so a
+    no-param route never touches ``conn.path_params`` and its lazy backing dict
+    is never allocated.
     """
+    if not params:
+        return
     _conn_of(scope, receive).path_params.update(params)
 
 
@@ -944,7 +958,7 @@ def _adapt_handler(fn, path: str, converters: dict | None = None):
         for name in params:
             ann = annotations.get(name, inspect.Parameter.empty)
             if name == 'scope':
-                kwargs[name] = scope
+                kwargs[name] = conn
             elif name == 'body':
                 raw = await conn.body()
                 if _is_body_dataclass_annotation(ann):
@@ -971,13 +985,13 @@ def _adapt_handler(fn, path: str, converters: dict | None = None):
 
         result = (await fn(**kwargs)) if is_async else fn(**kwargs)
 
-        if await _send_native(result, scope, receive, send):
+        if await _send_native(result, conn, receive, send):
             return
         if converters and (conv := _lookup_converter(converters, type(result))) is not None:
             # Cold path: an app-registered type→sendable converter.  Guarded by
             # ``converters`` truthiness so an empty registry costs nothing here
             # and the common shapes above never reach this branch at all.
-            await _send_converted(conv(result), scope, receive, send)
+            await _send_converted(conv(result), conn, receive, send)
             return
         raise TypeError(
             f"Simplified handler {fn.__name__!r} returned unsupported type "
@@ -1007,7 +1021,7 @@ def _adapt_handler(fn, path: str, converters: dict | None = None):
         conn = _conn_of(scope, receive)
         kwargs: dict = {}
         if has_query:
-            raw_qs = scope.get('query_string') or b''
+            raw_qs = conn.query_string or b''
             query_values = (
                 dict(parse_qsl(raw_qs.decode('latin-1'), keep_blank_values=True))
                 if raw_qs else {})
@@ -1031,7 +1045,7 @@ def _adapt_handler(fn, path: str, converters: dict | None = None):
                             f'to {payload.type.__name__}',
                         ) from exc
             elif kind == 'scope':
-                kwargs[name] = scope
+                kwargs[name] = conn
             elif kind == 'body':
                 raw = await conn.body()
                 ann = annotations.get(name, inspect.Parameter.empty)
@@ -1060,7 +1074,7 @@ def _adapt_handler(fn, path: str, converters: dict | None = None):
 
         if not depends_plan:
             result = (await fn(**kwargs)) if is_async else fn(**kwargs)
-            await _finish_result(result, scope, receive, send, converters, fn_name)
+            await _finish_result(result, conn, receive, send, converters, fn_name)
             return
 
         async with AsyncExitStack() as stack:
@@ -1070,7 +1084,7 @@ def _adapt_handler(fn, path: str, converters: dict | None = None):
             result = (await fn(**kwargs)) if is_async else fn(**kwargs)
             # Send inside the stack's scope so provider teardown runs after
             # the client has the response (LIFO on the stack).
-            await _finish_result(result, scope, receive, send, converters, fn_name)
+            await _finish_result(result, conn, receive, send, converters, fn_name)
 
     return _extended_wrapper
 
@@ -1175,10 +1189,10 @@ def _accept_query_hooks(media_types: Iterable[str]):
     accepted = frozenset(mt.strip().lower() for mt in types)
     response_headers = ((b'accept-query', header),)
 
-    def guard(scope: dict) -> None:
-        if scope['method'] != 'QUERY':
+    def guard(conn) -> None:
+        if conn.method != 'QUERY':
             return
-        media = request_media_type(scope)
+        media = request_media_type(conn)
         if not media:
             raise HTTPException(HTTPStatus.BAD_REQUEST,
                                 'QUERY request requires a Content-Type')
@@ -1189,15 +1203,14 @@ def _accept_query_hooks(media_types: Iterable[str]):
     return response_headers, guard
 
 
-def request_media_type(scope: dict) -> str:
+def request_media_type(conn) -> str:
     """Return the request's media type (``Content-Type`` sans parameters),
     lowercased; ``''`` when no Content-Type is present.
 
-    ``scope['headers']`` is a :class:`~blackbull.headers.Headers` inside
-    ``_dispatch`` (normalised at the app entry point), so a plain ``.get``
-    suffices.
+    ``conn.headers`` is always a :class:`~blackbull.headers.Headers`, so a plain
+    ``.get`` suffices.
     """
-    ct = scope['headers'].get(b'content-type', b'')
+    ct = conn.headers.get(b'content-type', b'')
     if not ct:
         return ''
     return ct.split(b';', 1)[0].strip().lower().decode('latin-1')

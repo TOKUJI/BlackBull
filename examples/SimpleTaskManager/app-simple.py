@@ -63,9 +63,11 @@ async def _parse_json(receive, send) -> dict | None:
         return None
 
 
-async def _authenticate(scope, send) -> tuple[str | None, str]:
-    """Validate Bearer token.  Returns ``(username, token)`` or ``(None, '')`` after sending 401."""
-    auth = scope['headers'].get(b'authorization', b'')
+async def _authenticate(conn, send) -> tuple[str | None, str]:
+    """Validate Bearer token.  Returns ``(username, token)`` or ``(None, '')`` after sending 401.
+
+    *conn* is the native :class:`~blackbull.connection.Connection`."""
+    auth = conn.headers.get(b'authorization', b'')
     token = auth[7:].decode() if auth.startswith(b'Bearer ') else ''
     username = SESSIONS.get(token)
     if username is None:
@@ -184,7 +186,7 @@ async def handle_update_task(scope, receive, send):
     if data is None:
         return
     try:
-        task_id = int(scope['path_params']['task_id'])
+        task_id = int(scope.path_params['task_id'])
     except (KeyError, ValueError):
         await send(JSONResponse({'error': 'invalid task id'},
                                 status=HTTPStatus.BAD_REQUEST))
@@ -206,7 +208,7 @@ async def handle_delete_task(scope, receive, send):
     if user is None:
         return
     try:
-        task_id = int(scope['path_params']['task_id'])
+        task_id = int(scope.path_params['task_id'])
     except (KeyError, ValueError):
         await send(JSONResponse({'error': 'invalid task id'},
                                 status=HTTPStatus.BAD_REQUEST))

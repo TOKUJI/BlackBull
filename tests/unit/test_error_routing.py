@@ -16,8 +16,8 @@ Two layers of coverage:
   dogfooding tests for the TestClient feature.
 
 * **Raw ASGI** (``TestBlackBullErrorDispatch``) — exercises scope
-  inspection (``scope['state']['allowed_methods']``,
-  ``scope['state']['error_exception']``) that the TestClient public
+  inspection (``scope.state['allowed_methods']``,
+  ``scope.state['error_exception']``) that the TestClient public
   API does not expose.  Kept for internal error-routing coverage.
 """
 
@@ -26,6 +26,7 @@ from http import HTTPStatus, HTTPMethod
 
 from blackbull.router import ErrorRouter
 from blackbull.app import BlackBull, _default_error_handler
+from blackbull.headers import Headers
 from blackbull.testing import TestClient
 from blackbull.utils import Scheme
 
@@ -121,14 +122,15 @@ class TestErrorRouterException:
 # ---------------------------------------------------------------------------
 
 def _make_scope(path='/', method='GET', type_='http'):
-    return {
+    from blackbull.connection import Connection
+    return Connection.from_scope({
         'type': type_,
         'method': method,
         'path': path,
         'scheme': 'http',
         'headers': [],
         'state': {},
-    }
+    })
 
 
 class _CaptureSend:
@@ -174,10 +176,10 @@ class TestDefaultErrorHandler:
         scope = _make_scope('/nonexistent')
         send = _CaptureSend()
         await _default_error_handler(scope, None, send)
-        # _default_error_handler reads error_status from scope['state']
+        # _default_error_handler reads error_status from scope.state
         # With empty state it uses INTERNAL_SERVER_ERROR as default,
         # so test by setting the status explicitly.
-        scope['state']['error_status'] = HTTPStatus.NOT_FOUND
+        scope.state['error_status'] = HTTPStatus.NOT_FOUND
         send2 = _CaptureSend()
         await _default_error_handler(scope, None, send2)
         assert send2.status == 404
@@ -185,7 +187,7 @@ class TestDefaultErrorHandler:
     @pytest.mark.asyncio
     async def test_default_handler_includes_status_phrase_in_body(self):
         scope = _make_scope()
-        scope['state']['error_status'] = HTTPStatus.NOT_FOUND
+        scope.state['error_status'] = HTTPStatus.NOT_FOUND
         send = _CaptureSend()
         await _default_error_handler(scope, None, send)
         assert b'Not Found' in send.body
@@ -194,8 +196,8 @@ class TestDefaultErrorHandler:
     async def test_default_handler_includes_exception_info(self):
         scope = _make_scope()
         exc = ValueError("something went wrong")
-        scope['state']['error_status'] = HTTPStatus.INTERNAL_SERVER_ERROR
-        scope['state']['error_exception'] = exc
+        scope.state['error_status'] = HTTPStatus.INTERNAL_SERVER_ERROR
+        scope.state['error_exception'] = exc
         send = _CaptureSend()
         await _default_error_handler(scope, None, send)
         assert b'ValueError' in send.body
@@ -204,8 +206,8 @@ class TestDefaultErrorHandler:
     @pytest.mark.asyncio
     async def test_default_handler_includes_allow_header_for_405(self):
         scope = _make_scope()
-        scope['state']['error_status'] = HTTPStatus.METHOD_NOT_ALLOWED
-        scope['state']['allowed_methods'] = ('get', 'post')
+        scope.state['error_status'] = HTTPStatus.METHOD_NOT_ALLOWED
+        scope.state['allowed_methods'] = ('get', 'post')
         send = _CaptureSend()
         await _default_error_handler(scope, None, send)
         assert send.status == 405
@@ -236,8 +238,8 @@ class TestDevErrorPageTraceback:
             except RuntimeError as e:
                 exc = e
             scope = _make_scope()
-            scope['state']['error_status'] = HTTPStatus.INTERNAL_SERVER_ERROR
-            scope['state']['error_exception'] = exc
+            scope.state['error_status'] = HTTPStatus.INTERNAL_SERVER_ERROR
+            scope.state['error_exception'] = exc
             send = _CaptureSend()
             await _default_error_handler(scope, None, send)
             assert send.status == 500
@@ -261,9 +263,9 @@ class TestDevErrorPageTraceback:
             except RuntimeError as e:
                 exc = e
             scope = _make_scope()
-            scope['headers'] = [(b'accept', b'text/html,application/xhtml+xml')]
-            scope['state']['error_status'] = HTTPStatus.INTERNAL_SERVER_ERROR
-            scope['state']['error_exception'] = exc
+            scope.headers = Headers([(b'accept', b'text/html,application/xhtml+xml')])
+            scope.state['error_status'] = HTTPStatus.INTERNAL_SERVER_ERROR
+            scope.state['error_exception'] = exc
             send = _CaptureSend()
             await _default_error_handler(scope, None, send)
             start = next(e for e in send.events if e['type'] == 'http.response.start')
@@ -301,8 +303,8 @@ class TestDevClientErrorPage:
         try:
             exc = self._client_error()
             scope = _make_scope()
-            scope['state']['error_status'] = HTTPStatus.BAD_REQUEST
-            scope['state']['error_exception'] = exc
+            scope.state['error_status'] = HTTPStatus.BAD_REQUEST
+            scope.state['error_exception'] = exc
             send = _CaptureSend()
             await _default_error_handler(scope, None, send)
             assert send.status == 400
@@ -325,9 +327,9 @@ class TestDevClientErrorPage:
         try:
             exc = self._client_error()
             scope = _make_scope()
-            scope['headers'] = [(b'accept', b'text/html,application/xhtml+xml')]
-            scope['state']['error_status'] = HTTPStatus.BAD_REQUEST
-            scope['state']['error_exception'] = exc
+            scope.headers = Headers([(b'accept', b'text/html,application/xhtml+xml')])
+            scope.state['error_status'] = HTTPStatus.BAD_REQUEST
+            scope.state['error_exception'] = exc
             send = _CaptureSend()
             await _default_error_handler(scope, None, send)
             assert b"missing required query parameter" in send.body
@@ -350,8 +352,8 @@ class TestDevClientErrorPage:
             except HTTPException as e:
                 exc = e
             scope = _make_scope()
-            scope['state']['error_status'] = HTTPStatus.BAD_GATEWAY
-            scope['state']['error_exception'] = exc
+            scope.state['error_status'] = HTTPStatus.BAD_GATEWAY
+            scope.state['error_exception'] = exc
             send = _CaptureSend()
             await _default_error_handler(scope, None, send)
             assert send.status == 502
@@ -375,8 +377,8 @@ class TestProductionErrorPage:
         try:
             exc = ValueError("secret-internal-detail")
             scope = _make_scope()
-            scope['state']['error_status'] = HTTPStatus.INTERNAL_SERVER_ERROR
-            scope['state']['error_exception'] = exc
+            scope.state['error_status'] = HTTPStatus.INTERNAL_SERVER_ERROR
+            scope.state['error_exception'] = exc
             send = _CaptureSend()
             await _default_error_handler(scope, None, send)
             assert send.status == 500
@@ -467,7 +469,7 @@ class TestBlackBullErrorDispatch:
         assert response.status_code == 500
         assert response.text == 'runtime error caught'
 
-    # -- Tests kept as raw ASGI (need scope['state'] inspection) -----------
+    # -- Tests kept as raw ASGI (need scope.state inspection) -----------
 
     @pytest.mark.asyncio
     async def test_on_error_with_exception_base_class_catches_subclass(self):
@@ -476,7 +478,7 @@ class TestBlackBullErrorDispatch:
 
         @app.on_error(Exception)
         async def catch_all(scope, receive, send):
-            caught.append(type(scope['state'].get('error_exception')).__name__)
+            caught.append(type(scope.state.get('error_exception')).__name__)
             await send(b'caught', HTTPStatus.INTERNAL_SERVER_ERROR)
 
         @app.route(path='/key-err')

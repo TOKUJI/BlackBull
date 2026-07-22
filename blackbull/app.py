@@ -27,10 +27,10 @@ import traceback
 # import from this package
 import logging
 from .event import Event, EventDispatcher, EventHandler
-from .headers import Headers
 from .utils import Scheme, is_client_error, is_server_error
 from .router import Router, RouteInfo, ErrorRouter, MethodNotApplicable, PathNotRegistered, ConfigurationError, HTTPException, has_middleware_param
 from .request import ClientDisconnected
+from .connection import Connection, disconnected
 from .config import AppConfig
 logger = logging.getLogger(__name__)
 
@@ -98,44 +98,17 @@ def _inject_response_headers(raw_send, extra_headers):
     return _send
 
 
-def _connection_of(scope, receive):
-    """Return the typed :class:`Connection` for this request (Sprint 79 Phase 5).
-
-    BlackBull's own protocol actors stash the ``Connection`` they parsed on the
-    scope envelope under :data:`~blackbull.connection.CONNECTION_STASH_KEY`, so
-    the self-hosted path reads it back with no re-conversion. Under an external
-    ASGI server (uvicorn,
-    ``httpx.ASGITransport``) there is no stash, so build one via
-    :meth:`Connection.from_scope` — the single ASGI→native conversion point —
-    and link ``scope['state']`` to ``conn.state`` so the centrally-rendered
-    error handlers and terminal events (which still read ``scope['state']``)
-    observe the same grab-bag the dispatcher writes to.
-    """
-    from .connection import stashed_connection  # noqa: PLC0415
-    conn, built = stashed_connection(scope, receive)
-    if built:
-        # External ASGI path only: link ``scope['state']`` to ``conn.state`` so
-        # the centrally-rendered error handlers and terminal events (which still
-        # read ``scope['state']``) observe the same grab-bag the dispatcher
-        # writes to.
-        scope.setdefault('state', conn.state)
-    return conn
-
-
-def _wants_html(scope) -> bool:
+def _wants_html(conn) -> bool:
     """True when the request's Accept header indicates an HTML preference."""
-    for k, v in scope.get('headers', ()):
-        if k.lower() == b'accept':
-            val = v.lower()
-            return b'text/html' in val or b'application/xhtml' in val
-    return False
+    accept = conn.headers.get(b'accept', b'').lower()
+    return b'text/html' in accept or b'application/xhtml' in accept
 
 
-def _render_error_html(status, exc, tb_text: str | None, scope) -> bytes:
+def _render_error_html(status, exc, tb_text: str | None, conn) -> bytes:
     """Build the DEV-mode HTML error page.  Traceback only when exc is set."""
     from html import escape
-    method = escape(scope.get('method', '') or '')
-    path = escape(scope.get('path', '') or '')
+    method = escape(conn.method or '')
+    path = escape(conn.path or '')
     title = f"{int(status)} {status.phrase}"
     tb_block = (
         f"<pre>{escape(tb_text)}</pre>" if tb_text else ''
@@ -162,10 +135,10 @@ def _render_error_html(status, exc, tb_text: str | None, scope) -> bytes:
     ).encode()
 
 
-async def _default_error_handler(scope, receive, send):  # noqa: ARG001
+async def _default_error_handler(conn, receive, send):  # noqa: ARG001
     """Comprehensive fallback error handler registered at BlackBull construction.
 
-    Reads from scope['state']:
+    Reads from conn.state:
       - 'error_status'    : HTTPStatus  (default: INTERNAL_SERVER_ERROR)
       - 'error_exception' : exception instance (optional)
       - 'allowed_methods' : iterable of method names (for 405 Allow header)
@@ -186,13 +159,13 @@ async def _default_error_handler(scope, receive, send):  # noqa: ARG001
     # Imported here to avoid a circular import at module load (env -> app).
     from .env import get_settings, Environment
 
-    state = scope.get('state', {})
+    state = conn.state
     status = state.get('error_status', HTTPStatus.INTERNAL_SERVER_ERROR)
     exc = state.get('error_exception')
     allowed = state.get('allowed_methods', ())
 
     is_dev = get_settings().env == Environment.DEVELOPMENT
-    html_ok = _wants_html(scope)
+    html_ok = _wants_html(conn)
 
     headers = []
     if allowed:
@@ -210,7 +183,7 @@ async def _default_error_handler(scope, receive, send):  # noqa: ARG001
 
     if html_ok:
         body = _render_error_html(status, exc if is_dev else None,
-                                  tb_text, scope)
+                                  tb_text, conn)
         headers.append((b'content-type', b'text/html; charset=utf-8'))
     else:
         lines = [f"{status} {status.phrase}"]
@@ -591,7 +564,7 @@ class BlackBull:
                 await send({'type': 'lifespan.shutdown.complete'})
                 return
 
-    async def _dispatch(self, scope, receive, send):
+    async def _dispatch(self, conn, receive, send):
         """Route and dispatch a single non-lifespan request.
 
         Single emission point for the in-request Level B lifecycle events
@@ -612,46 +585,50 @@ class BlackBull:
         registered handlers pays only a dict lookup, not an ``Event`` +
         detail-dict construction.
         """
-        self._logger.debug((scope, receive, send))
+        self._logger.debug((conn, receive, send))
 
-        try:
-            scheme = Scheme(scope['type'])
-        except ValueError:
-            self._logger.error(f'Invalid scheme ({scope["type"]}) is requested.')
-            raise Exception('Invalid scheme is requested.')
-
-        if scheme == Scheme.websocket:
-            path = scope['path']
+        # The WebSocket path is still ASGI-scope-shaped (``conn`` is the scope
+        # dict there, carrying WS-only extras); route it by its ``path`` key and
+        # hand the WS handler the scope, unchanged. Every HTTP path — native
+        # Connection or the external/forced conversion — arrives as a Connection.
+        if not isinstance(conn, Connection):
+            path = conn['path']
             try:
-                function = self._router[(path, HTTPMethod.GET, scheme)]
+                function = self._router[(path, HTTPMethod.GET, Scheme.websocket)]
             except (MethodNotApplicable, PathNotRegistered):
                 self._logger.warning('No websocket handler registered for %s', path)
                 return
-            await function(scope, receive, send)
+            await function(conn, receive, send)
             return
+
+        try:
+            scheme = Scheme(conn.type)
+        except ValueError:
+            self._logger.error(f'Invalid scheme ({conn.type}) is requested.')
+            raise Exception('Invalid scheme is requested.')
 
         dispatcher = self._dispatcher
         if dispatcher.has_listeners('request_received'):
-            client = scope.get('client') or ('-',)
+            client = conn.client or ('-',)
             await dispatcher.emit(Event('request_received', detail={
-                'scope':        scope,
+                'scope':        conn,
                 'client_ip':    str(client[0]),
-                'method':       scope.get('method', '-'),
-                'path':         scope.get('path', '-'),
-                'http_version': scope.get('http_version', '-'),
-                'headers':      scope.get('headers', []),
+                'method':       conn.method,
+                'path':         conn.path,
+                'http_version': conn.http_version,
+                'headers':      conn.headers,
             }))
-        await self._dispatch_http(scope, receive, send, scheme)
+        await self._dispatch_http(conn, receive, send, scheme)
 
-    async def _dispatch_http(self, scope, receive, send, scheme):
+    async def _dispatch_http(self, conn, receive, send, scheme):
         """Route and run one HTTP request (the non-WebSocket half of _dispatch).
 
-        Sprint 79 Phase 5: routing reads come from the typed ``Connection``
-        (``conn.method`` / ``conn.path`` / ``conn.headers``); the ASGI scope
-        stays as the envelope handed to the handler, error handlers, gRPC, and
-        events (the middleware/event compat contract of §5.4).
+        Sprint 80: BlackBull is a native-Connection framework — the dispatch
+        pipeline threads the typed :class:`Connection` end to end (routing,
+        handler, error handlers, gRPC, and events all read ``conn.*``). The ASGI
+        ``scope`` dict exists only at the external/``BB_FORCE_ASGI_SCOPE`` boundary,
+        where ``__call__`` converts it to a Connection before this is reached.
         """
-        conn = _connection_of(scope, receive)
         # gRPC — HTTP/2 with ``content-type: application/grpc``.  When a
         # registry is installed, such requests bypass the HTTP router and are
         # served as unary gRPC calls (grpc-status reported in trailers).  The
@@ -661,7 +638,7 @@ class BlackBull:
             content_type = conn.headers.get(b'content-type', b'')
             if content_type.strip().startswith(b'application/grpc'):
                 from .grpc import serve_grpc  # noqa: PLC0415 — optional subpackage
-                await serve_grpc(self._grpc_registry, scope, receive, send)
+                await serve_grpc(self._grpc_registry, conn, receive, send)
                 return
 
         # Normalise send for the HTTP path: handlers may emit Response objects
@@ -695,20 +672,20 @@ class BlackBull:
         except MethodNotApplicable as e:
             self._logger.debug("%s: path=%r method=%r allowed=%r",
                          HTTPStatus.METHOD_NOT_ALLOWED.phrase, path, method, e.allowed_methods)
-            scope.setdefault('state', {}).update({
+            conn.state.update({
                 'error_status': HTTPStatus.METHOD_NOT_ALLOWED,
                 'allowed_methods': e.allowed_methods,
             })
             handler = self._error_router[HTTPStatus.METHOD_NOT_ALLOWED]
             if handler is not None:
-                await handler(scope, receive, send)
+                await handler(conn, receive, send)
             return
         except PathNotRegistered:
             self._logger.debug("%s: path=%r", HTTPStatus.NOT_FOUND.phrase, path)
-            scope.setdefault('state', {})['error_status'] = HTTPStatus.NOT_FOUND
+            conn.state['error_status'] = HTTPStatus.NOT_FOUND
             handler = self._error_router[HTTPStatus.NOT_FOUND]
             if handler is not None:
-                await handler(scope, receive, send)
+                await handler(conn, receive, send)
             return
 
         # Per-route hooks (method-agnostic): a route may declare response
@@ -726,20 +703,20 @@ class BlackBull:
         guard = getattr(function, '_bb_request_guard', None)
         if guard is not None:
             try:
-                guard(scope)
+                guard(conn)
             except HTTPException as e:
                 # Rejected before dispatch — routed like a 404/405: by status
                 # (so an @app.on_error(status) handler is honoured, exactly as
                 # for those), no handler body and no lifecycle events.
                 self._logger.info('%s on %s %s: %s', int(e.status),
-                                  scope.get('method', ''), path, e.detail or e)
-                scope.setdefault('state', {}).update({
+                                  conn.method, path, e.detail or e)
+                conn.state.update({
                     'error_status': e.status,
                     'error_exception': e,
                 })
                 handler = self._error_router[e.status]
                 if handler is not None:
-                    await handler(scope, receive, send)
+                    await handler(conn, receive, send)
                 return
 
         self._logger.debug((self, function))
@@ -747,13 +724,13 @@ class BlackBull:
         try:
             if self._dispatcher.has_listeners('before_handler'):
                 await self._dispatcher.emit(Event('before_handler', detail={
-                    'scope':     scope,
-                    'client_ip': scope['client'][0] if scope.get('client') else '',
-                    'method':    scope.get('method', ''),
-                    'path':      scope.get('path', ''),
+                    'scope':     conn,
+                    'client_ip': conn.client[0] if conn.client else '',
+                    'method':    conn.method,
+                    'path':      conn.path,
                     'handler':   function.__name__,
                 }))
-            await function(scope, receive, send)
+            await function(conn, receive, send)
         except ClientDisconnected as e:
             # Peer vanished mid-body — there is no one to answer.  Record it
             # for the after_handler event but log quietly and send nothing.
@@ -768,7 +745,7 @@ class BlackBull:
                 self._logger.error(traceback.format_exc())
             else:
                 self._logger.info('%s on %s %s: %s', int(e.status),
-                                  scope.get('method', ''), scope.get('path', ''),
+                                  conn.method, conn.path,
                                   e.detail or e)
         except Exception as e:
             exc_caught = e
@@ -776,10 +753,10 @@ class BlackBull:
         finally:
             if self._dispatcher.has_listeners('after_handler'):
                 await self._dispatcher.emit(Event('after_handler', detail={
-                    'scope':     scope,
-                    'client_ip': scope['client'][0] if scope.get('client') else '',
-                    'method':    scope.get('method', ''),
-                    'path':      scope.get('path', ''),
+                    'scope':     conn,
+                    'client_ip': conn.client[0] if conn.client else '',
+                    'method':    conn.method,
+                    'path':      conn.path,
                     'handler':   function.__name__,
                     'exception': exc_caught,
                 }))
@@ -787,13 +764,13 @@ class BlackBull:
         if exc_caught is not None and not isinstance(exc_caught, ClientDisconnected):
             err_status = (exc_caught.status if isinstance(exc_caught, HTTPException)
                           else HTTPStatus.INTERNAL_SERVER_ERROR)
-            scope.setdefault('state', {}).update({
+            conn.state.update({
                 'error_status': err_status,
                 'error_exception': exc_caught,
             })
             handler = self._error_router[exc_caught]
             if handler is not None:
-                await handler(scope, receive, send)
+                await handler(conn, receive, send)
 
     def _build_chain(self):
         chain = self._dispatch
@@ -802,25 +779,38 @@ class BlackBull:
         self._chain = chain
 
     async def __call__(self, scope, receive, send):
-        if scope.get('type') == 'lifespan':
+        # Native entry: BlackBull's own server calls ``app(conn, receive, send)``
+        # with a typed :class:`Connection` — BlackBull is a native-Connection
+        # framework, not an ASGI one, so the whole dispatch pipeline (middleware
+        # chain, router, handlers, error handlers, events) threads the Connection
+        # end to end. The ASGI ``app(scope, receive, send)`` form is used *iff*
+        # the caller is an external ASGI server (uvicorn, ``httpx.ASGITransport``)
+        # or ``BB_FORCE_ASGI_SCOPE=1``; there we convert ``scope → Connection``
+        # once, here at the boundary, and thread the Connection from then on.
+        #
+        # ``target`` is the object the actor's disconnect-detecting receive wrapper
+        # shares with us (the Connection natively, the scope dict in the compat
+        # lanes); ``disconnected(target)`` reads the flag off whichever it is.
+        target = scope
+        if isinstance(scope, Connection):
+            request = scope                       # HTTP native
+        elif scope.get('type') == 'lifespan':
             await self._handle_lifespan(scope, receive, send)
             return
+        elif scope.get('type') == 'websocket':
+            # WebSocket stays ASGI-scope-shaped: WS handlers read scope extras
+            # (``subprotocols``, ``_connection_id``, ``_ws_*``) that are not
+            # Connection fields. It still flows through the middleware chain and
+            # the terminal ``scope_completed`` event below.
+            request = scope
+        else:
+            # External ASGI / forced-compat HTTP lane: the single ASGI→native
+            # conversion point (``from_scope`` normalizes headers to ``Headers``
+            # and binds ``receive``). The Connection flows on from here.
+            request = Connection.from_scope(scope, receive)
 
         if self._chain is None:
             self._build_chain()
-
-        # BlackBull handlers and helpers (``parse_cookies``,
-        # ``TrustedProxy``, ``static.StaticFiles``) read ``scope['headers']``
-        # via the ``Headers.get`` / ``.getlist`` API.  BlackBull's own
-        # server attaches a :class:`Headers` instance in
-        # ``parser.py``; external ASGI transports (uvicorn, hypercorn,
-        # ``httpx.ASGITransport``) deliver the standard list-of-tuples
-        # form per the ASGI 3.0 spec.  Normalise once at the entry
-        # point so handlers don't need to care which side they're
-        # running under.
-        raw_headers = scope.get('headers')
-        if raw_headers is not None and not isinstance(raw_headers, Headers):
-            scope['headers'] = Headers(raw_headers)
 
         # Terminal events, emitted here — after the *global* middleware chain —
         # because an ``app.use`` middleware wraps outside ``_dispatch`` and may
@@ -841,28 +831,30 @@ class BlackBull:
         # Both are guarded by ``has_listeners`` so a request with no such
         # listener pays only a dict lookup.
         dispatcher = self._dispatcher
-        want_request_completed = (scope.get('type') == 'http'
+        is_conn = isinstance(request, Connection)
+        want_request_completed = (is_conn and request.type == 'http'
                                   and dispatcher.has_listeners('request_completed'))
         if not (want_request_completed
                 or dispatcher.has_listeners('scope_completed')):
-            await self._chain(scope, receive, send)
+            await self._chain(request, receive, send)
             return
         exc: BaseException | None = None
         try:
-            await self._chain(scope, receive, send)
+            await self._chain(request, receive, send)
         except BaseException as e:
             exc = e
             raise
         finally:
-            if want_request_completed and not scope.get('_disconnected'):
-                log = scope.get('state', {}).get('access_log')
-                client = scope.get('client') or ('-',)
+            if want_request_completed and not disconnected(target):
+                conn = request
+                log = conn.state.get('access_log')
+                client = conn.client or ('-',)
                 await dispatcher.emit(Event('request_completed', detail={
-                    'scope':          scope,
+                    'scope':          conn,
                     'client_ip':      str(client[0]),
-                    'method':         scope.get('method', '-'),
-                    'path':           scope.get('path', '-'),
-                    'http_version':   scope.get('http_version', '-'),
+                    'method':         conn.method,
+                    'path':           conn.path,
+                    'http_version':   conn.http_version,
                     'status':         log.status if log else '-',
                     'response_bytes': log.response_bytes if log else 0,
                     'duration_ms':    log.duration_ms() if log else 0.0,
@@ -871,15 +863,22 @@ class BlackBull:
                 # ``exception`` reflects whether the scope encountered an
                 # error: either one that propagated out of the chain (exc), or
                 # a handler error that ``_dispatch`` already turned into a 500
-                # and recorded in ``scope['state']['error_exception']``.
-                # ``None`` for a clean request (including a 404, which is not
-                # an exception).
-                err = exc or scope.get('state', {}).get('error_exception')
+                # and recorded in the state grab-bag. ``None`` for a clean
+                # request (including a 404, which is not an exception).  Reads
+                # branch on native (Connection) vs the WS/external scope dict.
+                if is_conn:
+                    st, rtype = request.state, request.type
+                    client, rpath = request.client, request.path
+                else:
+                    st = request.get('state') or {}
+                    rtype = request.get('type', '-')
+                    client, rpath = request.get('client'), request.get('path', '-')
+                err = exc or st.get('error_exception')
                 await dispatcher.emit(Event('scope_completed', {
-                    'scope':     scope,
-                    'type':      scope.get('type', '-'),
-                    'client_ip': str((scope.get('client') or ['-'])[0]),
-                    'path':      scope.get('path', '-'),
+                    'scope':     request,
+                    'type':      rtype,
+                    'client_ip': str((client or ['-'])[0]),
+                    'path':      rpath,
                     'exception': err,
                 }))
 

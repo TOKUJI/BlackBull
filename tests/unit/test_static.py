@@ -18,15 +18,14 @@ from blackbull.headers import Headers
 
 
 def _scope(method: str = 'GET', path: str = '/',
-           headers: dict[str, str] | None = None) -> dict:
+           headers: dict[str, str] | None = None) -> 'Connection':
+    # Sprint 80: BlackBull threads a native Connection (not an ASGI scope dict)
+    # through the middleware/handler pipeline for HTTP.
+    from blackbull.connection import Connection
     raw = [(k.lower().encode(), v.encode())
            for k, v in (headers or {}).items()]
-    return {
-        'type': 'http',
-        'method': method,
-        'path': path,
-        'headers': Headers(raw),
-    }
+    return Connection(method=method, path=path, raw_path=path.encode(),
+                      headers=Headers(raw), type='http')
 
 
 async def _noop_receive():
@@ -529,10 +528,10 @@ def large_dir(tmp_path: pathlib.Path) -> pathlib.Path:
     return tmp_path
 
 
-def _scope_with_pathsend(path: str, headers: dict | None = None) -> dict:
-    scope = _scope(path=path, headers=headers)
-    scope['extensions'] = {'http.response.pathsend': {}}
-    return scope
+def _scope_with_pathsend(path: str, headers: dict | None = None) -> 'Connection':
+    conn = _scope(path=path, headers=headers)
+    conn.extensions = {'http.response.pathsend': {}}
+    return conn
 
 
 @pytest.mark.asyncio

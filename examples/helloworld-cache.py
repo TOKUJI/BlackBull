@@ -96,9 +96,9 @@ async def nostore(scope, receive, send):
 
 
 @app.route(path='/private/{n}')
-async def private_n(scope, receive, send):
+async def private_n(scope, receive, send):   # full form: `scope` is a native Connection
     """Each distinct path parameter is a separate cache key."""
-    n = scope.get('path_params', {}).get('n', '?')
+    n = scope.path_params.get('n', '?')
     await send(JSONResponse({'n': n, 'served_at': time.time()}))
 
 

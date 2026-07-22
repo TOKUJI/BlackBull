@@ -8,7 +8,7 @@ Cross-cutting concerns:
     Request logging  → @app.on('request_received')   observer (fire-and-forget)
     Bearer auth      → @app.intercept('before_handler') (short-circuits to 401)
     HTTP/2 priority  → @app.intercept('before_handler') (reads urgency hint)
-    JSON body        → json_body_mw per-route middleware (injects scope['json'])
+    JSON body        → json_body_mw per-route middleware (injects conn.state['json'])
     DB startup       → @app.on_startup
 
 Why @app.on for logging, not middleware?
@@ -96,16 +96,20 @@ SESSIONS: dict[str, str] = {}   # token → username
 # Per-route middleware (request-scoped; not suitable for global intercept)
 # ---------------------------------------------------------------------------
 
-async def json_body_mw(scope, receive, send, call_next):
-    """Read and parse the request body as JSON; inject scope['json']."""
+async def json_body_mw(conn, receive, send, call_next):
+    """Read and parse the request body as JSON; stash it on ``conn.state['json']``.
+
+    ``conn`` is the native :class:`~blackbull.connection.Connection`; middleware
+    shares per-request data with inner layers through ``conn.state`` (the native
+    replacement for the old scope-dict grab-bag)."""
     raw = await read_body(receive)
     try:
-        scope['json'] = json.loads(raw)
+        conn.state['json'] = json.loads(raw)
     except (json.JSONDecodeError, ValueError):
         await send(JSONResponse({'error': 'Invalid JSON'},
                                 status=HTTPStatus.BAD_REQUEST))
         return
-    await call_next(scope, receive, send)
+    await call_next(conn, receive, send)
 
 # ---------------------------------------------------------------------------
 # Custom exception for auth failures — caught by @app.on_error below
@@ -145,14 +149,14 @@ async def require_auth(event):
     path = event.detail['path']
     if not (path.startswith('/tasks') or path == '/logout'):
         return
-    scope = event.detail['scope']
-    auth = scope['headers'].get(b'authorization', b'')
+    conn = event.detail['scope']          # native Connection
+    auth = conn.headers.get(b'authorization', b'')
     token = auth[7:].decode() if auth.startswith(b'Bearer ') else ''
     username = SESSIONS.get(token)
     if not username:
         raise Unauthorized('Unauthorized')
-    scope['user'] = username
-    scope['token'] = token
+    conn.state['user'] = username
+    conn.state['token'] = token
 
 
 @app.intercept('before_handler')
@@ -160,12 +164,13 @@ async def handle_priority(event):
     """Interceptor: read HTTP/2 priority hint and annotate the scope.
 
     urgency 0-1  → high-priority: log prominently.
-    urgency 2-7  → normal/background: annotate scope only.
+    urgency 2-7  → normal/background: annotate conn.state only.
     """
-    scope = event.detail['scope']
-    hint = scope.get('http2_priority', {'urgency': 3, 'incremental': False})
+    conn = event.detail['scope']          # native Connection
+    hint = conn.extensions.get('http.response.priority',
+                               {'urgency': 3, 'incremental': False})
     urgency = hint['urgency']
-    scope['_priority_urgency'] = urgency
+    conn.state['_priority_urgency'] = urgency
     if urgency <= 1:
         logger.info('HIGH-PRIORITY u=%d: %s %s',
                     urgency, event.detail['method'], event.detail['path'])
@@ -199,7 +204,7 @@ async def handle_register_page(scope, receive, send):  # noqa: ARG001
 @app.route(methods=[HTTPMethod.POST], path='/register',
            middlewares=[json_body_mw])
 async def handle_register(scope, receive, send):  # noqa: ARG001
-    data = scope['json']
+    data = scope.state['json']
     username = str(data.get('username', '')).strip()
     password = str(data.get('password', ''))
 
@@ -254,7 +259,7 @@ async def handle_app_page(scope, receive, send):  # noqa: ARG001
 
 @app.route(methods=[HTTPMethod.GET], path='/tasks')
 async def handle_get_tasks(scope, receive, send):  # noqa: ARG001
-    tasks = await db.get_tasks(scope['user'])
+    tasks = await db.get_tasks(scope.state['user'])
     await send(JSONResponse(tasks))
 
 
@@ -265,7 +270,7 @@ async def handle_create_task(scope, body: TaskCreate):
     if not title:
         return JSONResponse({'error': 'title is required'},
                             status=HTTPStatus.BAD_REQUEST)
-    task = await db.create_task(scope['user'], title)
+    task = await db.create_task(scope.state['user'], title)
     return JSONResponse(task, status=HTTPStatus.CREATED)
 
 
@@ -273,16 +278,17 @@ async def handle_create_task(scope, body: TaskCreate):
            middlewares=[json_body_mw])
 async def handle_update_task(scope, receive, send):
     try:
-        task_id = int(scope['path_params']['task_id'])
+        task_id = int(scope.path_params['task_id'])
     except (KeyError, ValueError):
         await send(JSONResponse({'error': 'invalid task id'},
                                 status=HTTPStatus.BAD_REQUEST))
         return
 
+    body = scope.state['json']
     task = await db.update_task(
-        scope['user'], task_id,
-        scope['json'].get('title'),
-        scope['json'].get('completed'),
+        scope.state['user'], task_id,
+        body.get('title'),
+        body.get('completed'),
     )
     if task is None:
         await send(JSONResponse({'error': 'Not found'},
@@ -294,13 +300,13 @@ async def handle_update_task(scope, receive, send):
 @app.route(methods=[HTTPMethod.DELETE], path='/tasks/{task_id}')
 async def handle_delete_task(scope, receive, send):
     try:
-        task_id = int(scope['path_params']['task_id'])
+        task_id = int(scope.path_params['task_id'])
     except (KeyError, ValueError):
         await send(JSONResponse({'error': 'invalid task id'},
                                 status=HTTPStatus.BAD_REQUEST))
         return
 
-    if not await db.delete_task(scope['user'], task_id):
+    if not await db.delete_task(scope.state['user'], task_id):
         await send(JSONResponse({'error': 'Not found'},
                                 status=HTTPStatus.NOT_FOUND))
         return
@@ -309,7 +315,7 @@ async def handle_delete_task(scope, receive, send):
 
 @app.route(methods=[HTTPMethod.POST], path='/logout')
 async def handle_logout(scope, receive, send):
-    SESSIONS.pop(scope.get('token', ''), None)
+    SESSIONS.pop(scope.state.get('token', ''), None)
     await send(JSONResponse({'ok': True}))
 
 

@@ -259,8 +259,8 @@ async def test_disconnected_event_detail_has_request_identification_fields():
     assert d['path'] == '/x'
     assert 'client_ip' in d
     assert 'http_version' in d
-    assert d['scope']['method'] == d['method']
-    assert d['scope']['path'] == d['path']
+    assert d['scope'].method == d['method']
+    assert d['scope'].path == d['path']
     assert 'status' not in d
     assert 'response_bytes' not in d
     assert 'duration_ms' not in d

@@ -159,6 +159,16 @@ def _frame_response(payload: bytes, compress: bool) -> bytes:
     return encode_message(payload)
 
 
+def _req_field(scope, name, default=None):
+    """Read a request field from either a native
+    :class:`~blackbull.connection.Connection` (the ``serve_grpc(conn, …)`` path)
+    or an ASGI ``scope`` dict — the field names (``headers``/``client``/``path``)
+    coincide with the Connection attributes."""
+    if isinstance(scope, dict):
+        return scope.get(name, default)
+    return getattr(scope, name, default)
+
+
 class GrpcContext:
     """Per-call context handed to a gRPC handler.
 
@@ -176,7 +186,7 @@ class GrpcContext:
                  '_send', '_content_type', '_response_encoding',
                  '_initial_metadata', '_started')
 
-    def __init__(self, scope: dict):
+    def __init__(self, scope):
         self.scope = scope
         self.code: GrpcStatus = GrpcStatus.OK
         self.details: str = ''
@@ -203,7 +213,7 @@ class GrpcContext:
 
     def metadata(self, name: bytes, default: bytes = b'') -> bytes:
         """Return a request header (call metadata) value, or *default*."""
-        headers = self.scope.get('headers')
+        headers = _req_field(self.scope, 'headers')
         getter = getattr(headers, 'get', None)
         if getter is not None and not isinstance(headers, (list, tuple)):
             return getter(name, default)
@@ -217,13 +227,13 @@ class GrpcContext:
         pairs — grpcio's ``ServicerContext.invocation_metadata``.  Pseudo-
         headers (``:method``, ``:path``, …) are excluded; they are call routing,
         not application metadata."""
-        headers = self.scope.get('headers') or ()
+        headers = _req_field(self.scope, 'headers') or ()
         return [(k, v) for k, v in headers if not k.startswith(b':')]
 
     def peer(self) -> str:
         """Return the client address as grpcio formats it (``ipv4:host:port`` /
         ``ipv6:[host]:port``), or ``''`` when the transport did not supply one."""
-        client = self.scope.get('client')
+        client = _req_field(self.scope, 'client')
         if not client:
             return ''
         host, port = client[0], client[1]
@@ -674,7 +684,7 @@ async def serve_grpc(registry: GrpcServiceRegistry, scope, receive, send) -> Non
     """Serve a single gRPC call (unary or server-streaming) through the ASGI
     (scope, receive, send) bridge.  Never raises for handler/protocol errors:
     every failure path is reported as a gRPC status."""
-    path = scope.get('path', '')
+    path = _req_field(scope, 'path', '')
     context = GrpcContext(scope)
     # Echo the request's content-type subtype (application/grpc+proto, +json, …)
     # back on the response, defaulting to bare application/grpc.

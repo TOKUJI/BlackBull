@@ -31,14 +31,16 @@ from blackbull.middleware.cache import (
 # ---------------------------------------------------------------------------
 
 def _scope(method: str = 'GET', path: str = '/', query: bytes = b'',
-           headers: list[tuple[bytes, bytes]] | None = None) -> dict:
-    return {
+           headers: list[tuple[bytes, bytes]] | None = None):
+    # Sprint 80: HTTP is dispatched as a native Connection, not an ASGI scope.
+    from blackbull.connection import Connection
+    return Connection.from_scope({
         'type': 'http',
         'method': method,
         'path': path,
         'query_string': query,
         'headers': list(headers or []),
-    }
+    })
 
 
 def _make_handler(status: int = 200, body: bytes = b'hello',
@@ -442,7 +444,7 @@ def _vary_handler(vary_value: bytes = b'Accept-Encoding'):
     async def call_next(scope, receive, send):
         counter['n'] += 1
         ae = b''
-        for k, v in scope.get('headers', []):
+        for k, v in scope.headers:
             if k.lower() == b'accept-encoding':
                 ae = v
         body = b'ENC:' + ae

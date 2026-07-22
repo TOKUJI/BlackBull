@@ -106,10 +106,9 @@ async def test_scope_and_record_fields_agree_on_method_path_and_version():
     assert len(captured) == 1
 
     d = captured[0].detail
-    assert d['method'] == d['scope']['method']
-    assert d['path'] == d['scope']['path']
-    if 'http_version' in d['scope']:
-        assert d['http_version'] == d['scope']['http_version']
+    assert d['method'] == d['scope'].method
+    assert d['path'] == d['scope'].path
+    assert d['http_version'] == d['scope'].http_version
 
 
 @pytest.mark.asyncio

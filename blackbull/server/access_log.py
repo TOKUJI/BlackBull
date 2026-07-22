@@ -127,6 +127,31 @@ class AccessLogRecord:
         return ' '.join(parts)
 
     @classmethod
+    def from_conn(cls, conn) -> 'AccessLogRecord':
+        """Build directly from a :class:`~blackbull.connection.Connection`
+        (Sprint 80 Tier-2) so the self-hosted actor never materializes the ASGI
+        scope just to record the access line."""
+        client = conn.client or ('-',)
+        ae = b''
+        rng = b''
+        if PHASE_TRACE:
+            for k, v in conn.headers:
+                if isinstance(k, bytes):
+                    kl = k.lower()
+                    if kl == b'accept-encoding':
+                        ae = v
+                    elif kl == b'range':
+                        rng = v
+        return cls(
+            client_ip            = str(client[0]),
+            method               = conn.method,
+            path                 = conn.path,
+            http_version         = conn.http_version,
+            req_accept_encoding  = ae,
+            req_range            = rng,
+        )
+
+    @classmethod
     def from_scope(cls, scope: dict) -> 'AccessLogRecord':
         client = scope.get('client') or ['-']
         ae = b''
@@ -217,17 +242,18 @@ class AccessLogRecord:
 
 
 
-def _make_disconnect_detecting_receive(receive, scope: dict, aggregator: 'EventAggregator'):
+def _make_disconnect_detecting_receive(receive, scope, aggregator: 'EventAggregator'):
     """Wrap *receive* to emit request_disconnected when http.disconnect is seen.
 
     Used by both the HTTP/1.1 and HTTP/2 actor paths.
     Sets scope['_disconnected'] = True on first detection (idempotent).
     """
+    from ..connection import disconnected, mark_disconnected  # noqa: PLC0415
     async def detecting_receive():
         event = await receive()
         if isinstance(event, dict) and event.get('type') == ASGIEvent.HTTP_DISCONNECT:
-            if not scope.get('_disconnected'):
-                scope['_disconnected'] = True
+            if not disconnected(scope):
+                mark_disconnected(scope)
                 await aggregator.on_request_disconnected(scope)
         return event
     return detecting_receive

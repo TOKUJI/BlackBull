@@ -159,7 +159,7 @@ async def test_parse_connection_header_does_not_corrupt_scheme(mock_writer) -> N
     received_scope = {}
 
     async def capture_app(scope, receive, send):
-        received_scope.update(scope)
+        received_scope.update(scope.as_scope() if hasattr(scope, 'as_scope') else scope)
         await send({'type': 'http.response.start', 'status': 200, 'headers': []})
         await send({'type': 'http.response.body', 'body': b''})
 
@@ -183,7 +183,7 @@ async def test_parse_host_without_port(mock_writer) -> None:
     received_scope = {}
 
     async def capture_app(scope, receive, send):
-        received_scope.update(scope)
+        received_scope.update(scope.as_scope() if hasattr(scope, 'as_scope') else scope)
         await send({'type': 'http.response.start', 'status': 200, 'headers': []})
         await send({'type': 'http.response.body', 'body': b''})
 
@@ -284,7 +284,7 @@ class TestScopePopulation:
         captured = {}
 
         async def capture_app(scope, receive, send):
-            captured.update(scope)
+            captured.update(scope.as_scope() if hasattr(scope, 'as_scope') else scope)
 
         actor, _writer = _make_actor(raw, capture_app, peername=('192.168.1.10', 54321))
         await actor.run()
@@ -300,7 +300,7 @@ class TestScopePopulation:
         captured = {}
 
         async def capture_app(scope, receive, send):
-            captured.update(scope)
+            captured.update(scope.as_scope() if hasattr(scope, 'as_scope') else scope)
 
         actor, _writer = _make_actor(raw, capture_app, sockname=('0.0.0.0', 9000))
         await actor.run()
@@ -314,7 +314,7 @@ class TestScopePopulation:
         captured = {}
 
         async def capture_app(scope, receive, send):
-            captured.update(scope)
+            captured.update(scope.as_scope() if hasattr(scope, 'as_scope') else scope)
 
         actor, _writer = _make_actor(raw, capture_app, sockname=('0.0.0.0', 9999))
         await actor.run()
@@ -327,7 +327,7 @@ class TestScopePopulation:
         captured = {}
 
         async def capture_app(scope, receive, send):
-            captured.update(scope)
+            captured.update(scope.as_scope() if hasattr(scope, 'as_scope') else scope)
 
         actor, _writer = _make_actor(raw, capture_app, ssl=False)
         await actor.run()
@@ -340,7 +340,7 @@ class TestScopePopulation:
         captured = {}
 
         async def capture_app(scope, receive, send):
-            captured.update(scope)
+            captured.update(scope.as_scope() if hasattr(scope, 'as_scope') else scope)
 
         actor, _writer = _make_actor(raw, capture_app, ssl=True)
         await actor.run()
@@ -375,7 +375,7 @@ class TestScopePopulation:
         captured = {}
 
         async def capture_app(scope, receive, send):
-            captured.update(scope)
+            captured.update(scope.as_scope() if hasattr(scope, 'as_scope') else scope)
 
         actor, _writer = _make_actor(raw, capture_app, ssl=False)
         await actor.run()
@@ -393,7 +393,7 @@ class TestScopePopulation:
         captured = {}
 
         async def capture_app(scope, receive, send):
-            captured.update(scope)
+            captured.update(scope.as_scope() if hasattr(scope, 'as_scope') else scope)
 
         actor, _writer = _make_actor(raw, capture_app, ssl=True)
         await actor.run()

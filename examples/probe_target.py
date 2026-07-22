@@ -12,7 +12,6 @@ Endpoints:
 from http import HTTPStatus
 from blackbull import BlackBull
 from blackbull.response import Response
-from blackbull.request import parse_cookies
 
 app = BlackBull()
 
@@ -32,10 +31,10 @@ async def root_post(body: bytes):
 # ── /echo: echo all request headers ─────────────────────────────────────
 
 @app.route(path='/echo', methods=['GET', 'POST'])
-async def echo_headers(scope, receive, send):
+async def echo_headers(scope, receive, send):   # full form: `scope` is a native Connection
     """Echo all request headers as ``name: value\\n`` per line."""
     lines: list[str] = []
-    for name, value in scope.get('headers', []):
+    for name, value in scope.headers:
         lines.append(f"{name.decode('latin-1')}: {value.decode('latin-1')}")
     body = "\n".join(lines).encode()
     await send({
@@ -52,9 +51,9 @@ async def echo_headers(scope, receive, send):
 # ── /cookie: echo parsed cookies ────────────────────────────────────────
 
 @app.route(path='/cookie', methods=['GET', 'POST'])
-async def cookie_echo(scope, receive, send):
+async def cookie_echo(scope, receive, send):   # full form: `scope` is a native Connection
     """Parse cookies and echo as ``name=value\\n`` per line."""
-    cookies = parse_cookies(scope)
+    cookies = scope.cookies
     lines: list[str] = []
     for name, value in cookies.items():
         lines.append(f"{name}={value}")

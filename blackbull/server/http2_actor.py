@@ -19,7 +19,7 @@ from ..protocol.frame_types import (
     DEFAULT_INITIAL_WINDOW_SIZE, DEFAULT_MAX_FRAME_SIZE,
 )
 from ..protocol.stream import Stream, StreamState
-from ..connection import Connection, CONNECTION_STASH_KEY
+from ..connection import Connection, CONNECTION_STASH_KEY, bind_receive_channel
 from ..env import get_settings
 from ..headers import Headers
 from .parser import parse_headers
@@ -533,10 +533,22 @@ class HTTP2Actor(Actor):
         (not a ``Connection`` field — proposal §2.1), derived from the request
         headers the same way the H/1.1 upgrade handler augments its scope.
         """
-        scope = conn.to_dispatch_scope(force_asgi=get_settings().force_asgi_scope)
-        if scope['type'] == 'websocket':
-            stashed = scope[CONNECTION_STASH_KEY]
-            raw_sp = stashed.headers.get(b'sec-websocket-protocol', b'')
+        # Sprint 80: the HTTP/2 actor stays ASGI-scope-shaped end to end (it
+        # mutates ``stream.scope`` for content-length/priority extensions and
+        # hands the scope to RequestActor). ``app.__call__`` converts this scope
+        # to a native Connection at its own boundary via ``from_scope``, so the
+        # native-Connection dispatch pipeline is fed the same way as H/1.1 —
+        # H/2 was not the Sprint-80 hot-path target. The ``force_asgi`` lane
+        # additionally exercises the full round-trip.
+        if get_settings().force_asgi_scope:
+            scope = conn.to_dispatch_scope(force_asgi=True)
+        else:
+            scope = conn.to_dispatch_scope()
+        if conn.type == 'websocket':
+            # ws-only augmentation; the ``subprotocols`` write materializes the
+            # lazy scope, which is fine — the upgrade path is user-directed and
+            # not the baseline-h2 hot path.
+            raw_sp = conn.headers.get(b'sec-websocket-protocol', b'')
             scope['subprotocols'] = (
                 [p.strip().decode('utf-8', errors='replace')
                  for p in raw_sp.split(b',')]
@@ -1004,6 +1016,12 @@ class HTTP2Actor(Actor):
         completes normally (does not cancel the TaskGroup).
         """
         self._active_stream_count += 1
+
+        # Bind the *raw* recipient onto the Connection for lazy ``conn.body()``
+        # before the disconnect-detecting wrapper is built, so ``conn._receive``
+        # never captures ``conn`` through the wrapper (per-request cycle → cyclic
+        # GC = v0.60.0 tail-latency regression). Idempotent (binds when unset).
+        bind_receive_channel(scope, recipient)
 
         if self._aggregator is not None:
             stream_actor = StreamActor(

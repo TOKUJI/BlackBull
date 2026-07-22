@@ -17,13 +17,14 @@ async def _noop_receive():
     return {'type': 'http.disconnect'}
 
 
-def _scope(accept: bytes = b'gzip') -> dict:
-    return {
+def _scope(accept: bytes = b'gzip'):
+    from blackbull.connection import Connection
+    return Connection.from_scope({
         'type': 'http',
         'method': 'GET',
         'path': '/',
         'headers': [(b'accept-encoding', accept)],
-    }
+    })
 
 
 async def _run(mw, body: bytes, resp_headers, accept: bytes = b'gzip') -> dict:

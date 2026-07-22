@@ -632,12 +632,14 @@ class TestSimplifiedHandlerPathParams:
 
     @pytest.mark.asyncio
     async def test_scope_escape_hatch(self):
+        # Sprint 80: the ``scope`` param is an escape hatch to the raw request,
+        # which is now the native Connection (not an ASGI scope dict).
         captured = {}
         async def fn(scope): captured['scope'] = scope
         wrapper = _adapt_handler(fn, '/')
-        fake_scope = {'type': 'http', 'method': 'GET'}
+        fake_scope = {'type': 'http', 'method': 'GET', 'path': '/', 'headers': []}
         await wrapper(fake_scope, None, AsyncMock())
-        assert captured['scope'] is fake_scope
+        assert captured['scope'] is fake_scope['_connection']
 
 
 class TestSimplifiedHandlerBodyInjection:
@@ -738,8 +740,11 @@ class TestSimplifiedHandlerRequestInjection:
         wrapper = _adapt_handler(fn, '/')
         fake_scope = {'type': 'http', 'headers': []}
         await wrapper(fake_scope, None, AsyncMock())
-        assert captured['scope'] is fake_scope
+        # Both the ``scope`` and ``request`` params now resolve to the one
+        # native Connection for the request.
+        assert captured['scope'] is fake_scope['_connection']
         assert captured['request'] is fake_scope['_connection']
+        assert captured['scope'] is captured['request']
 
     @pytest.mark.asyncio
     async def test_request_with_dataclass_body_single_drain(self):

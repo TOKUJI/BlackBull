@@ -37,6 +37,22 @@ python examples/helloworld-simple.py   # simplified handler form, port 8000
 python app.py --port 8443 --cert cert.pem --key key.pem   # HTTPS + HTTP/2
 ```
 
+## Tool preferences
+
+For code search and refactoring:
+
+| Task | Tool | Why |
+|---|---|---|
+| Structural search / replace | `ast-grep` (`sg`) | Understands AST; no regex false positives |
+| Plain-text grep | `rg` (ripgrep) | Fast, `.gitignore`-aware |
+| File finding | `rg --files` or `rg -l` | One tool, less context switching |
+
+- Prefer `rg` over `grep` / `find` for all text search.
+- Prefer `ast-grep -p 'pattern' -l python` over `rg` when matching code
+  structure (function defs, call sites, class hierarchies).
+- Use `ast-grep -U` for automated structural replacements — it won't
+  corrupt syntax like `sed` can.
+
 ## Simplified handler signatures
 
 Route handlers may omit `scope`, `receive`, and `send`. The router detects this
@@ -76,19 +92,56 @@ defaults → optional and missing-required/failed-coercion → 400. Classificati
 happens once at registration (`_handler_param_plan`, router.py); handlers using
 neither new feature keep the pre-Sprint-74 wrapper (zero-overhead pin). Return
 `str`, `bytes`, `dict`, `Response`, or `None`. Middleware functions and
-WebSocket handlers always use the full `(scope, receive, send)` form.
+WebSocket handlers always use the full `(scope, receive, send)` form — where,
+for HTTP, `scope` is the native `Connection` (see below).
+
+## Native `Connection` (Sprint 80 — BlackBull is no longer an ASGI framework)
+
+BlackBull's own server threads a typed `Connection` (blackbull/connection.py)
+end to end for **HTTP** — `app(conn, receive, send)`, and the middleware chain,
+router, handlers, error handlers, and lifecycle-event `detail['scope']` all
+receive that `Connection`. There is no ASGI `scope` dict on the native hot path
+(the `_LazyScope` bridge was removed). Read request fields as attributes:
+
+| ASGI idiom (old) | Native `Connection` |
+|---|---|
+| `scope['type']` / `scope['method']` / `scope['path']` | `conn.type` / `conn.method` / `conn.path` |
+| `scope['headers']` (list) | `conn.headers` (a `Headers`, `.get(b'name')`) |
+| `scope['path_params']` | `conn.path_params` |
+| `scope['state'][k]` (per-request grab-bag) | `conn.state[k]` |
+| `scope['user'] = ...` (middleware injection) | `conn.state['user'] = ...` |
+| `await read_body(receive)` | unchanged (or `await conn.body()`/`.json()`) |
+
+The **WebSocket** path stays ASGI-scope-shaped (WS carries extras —
+`subprotocols`, `_connection_id`, `_ws_*` — that are not `Connection` fields),
+so a WS handler's `scope` is still a dict.
+
+Two boundaries still convert to/from an ASGI scope dict:
+- **External ASGI hosts** (uvicorn, `httpx.ASGITransport`/TestClient) call
+  `app(scope, …)`; `BlackBull.__call__` does `Connection.from_scope(scope)` once
+  and threads the Connection from there.
+- **`BB_FORCE_ASGI_SCOPE=1`** — the compat lane. BlackBull's server emits a pure
+  ASGI scope and the app round-trips it through `from_scope`. **A raw ASGI
+  callable** (no `BlackBull` instance) mounted on BlackBull's server only works
+  under this flag — otherwise it is handed a `Connection` and `scope['type']`
+  raises. (Raw-ASGI-app support on the native path was removed.)
+
+The send side is unchanged: handlers/middleware still `await send({...})` ASGI
+response events; the sender consumes them.
 
 ## Middleware convention
 
 ```python
-async def my_mw(scope, receive, send, call_next):
-    # pre-handler work
+async def my_mw(scope, receive, send, call_next):   # `scope` is a Connection for HTTP
+    # pre-handler work — read conn.headers, share via conn.state[...]
     await call_next(scope, receive, send)
     # post-handler work
 ```
 
 - `call_next` is bound by `_register_chain` via `functools.partial`
 - Short-circuit by returning without calling `call_next`
+- Non-HTTP (WebSocket) still arrives as a scope dict — guard with
+  `isinstance(scope, Connection)` if the middleware must handle both.
 
 ## Event API
 

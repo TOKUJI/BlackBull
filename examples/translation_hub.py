@@ -179,7 +179,7 @@ _GRPC_TO_HTTP = {
 
 
 @app.route(path='/rooms/{room}/stats')
-async def rest_room_stats(room: str, scope: dict):
+async def rest_room_stats(room: str, scope):   # `scope` is the native Connection
     handler = grpc.lookup('/hub.Telemetry/RoomStats')
     context = GrpcContext(scope)
     try:

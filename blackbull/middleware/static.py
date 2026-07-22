@@ -8,6 +8,7 @@ from pathlib import Path
 from urllib.parse import unquote
 from http import HTTPStatus
 
+from blackbull.connection import Connection
 from blackbull.env import get_settings, Environment
 from blackbull.asgi import ASGIEvent
 
@@ -221,7 +222,10 @@ class StaticFiles:
         return Path(self._root_str)
 
     async def __call__(self, scope, receive, send, call_next=None):
-        if scope.get('type') != 'http' or scope.get('method') not in ('GET', 'HEAD'):
+        # BlackBull threads a native Connection for HTTP; a WebSocket/non-HTTP
+        # scope dict (only possible in the middleware role) passes through.
+        if (not isinstance(scope, Connection) or scope.type != 'http'
+                or scope.method not in ('GET', 'HEAD')):
             if call_next:
                 await call_next(scope, receive, send)
             else:
@@ -235,7 +239,7 @@ class StaticFiles:
                 await self._respond(send, HTTPStatus.NOT_FOUND)
             return
 
-        raw_path = scope.get('path', '/')
+        raw_path = scope.path
 
         if self._url_prefix:
             if not raw_path.startswith(self._url_prefix):
@@ -313,7 +317,7 @@ class StaticFiles:
         ``.gz`` siblings happen only once per path.
         """
         accept = b''
-        for k, v in scope.get('headers', []):
+        for k, v in scope.headers:
             kl = k.lower()
             if kl == b'range':
                 return target, b''
@@ -419,7 +423,7 @@ class StaticFiles:
                 body = None
 
         range_hdr = None
-        for k, v in scope.get('headers', []):
+        for k, v in scope.headers:
             if k.lower() == b'range':
                 range_hdr = v.decode()
                 break
@@ -438,7 +442,7 @@ class StaticFiles:
 
             # Conditional GET — answer 304 before touching the body (avoids the
             # large-file read/stream entirely on a cache revalidation).
-            if _not_modified(scope.get('headers', []), etag, mtime_ns):
+            if _not_modified(scope.headers, etag, mtime_ns):
                 cond_headers: list[tuple[bytes, bytes]] = [
                     (b'etag', etag), (b'last-modified', last_modified)]
                 if content_encoding:
@@ -502,7 +506,7 @@ class StaticFiles:
         #    doesn't carry offset/count), and any server that doesn't
         #    advertise the extension.
         pathsend_ok = (status != HTTPStatus.PARTIAL_CONTENT
-                       and 'http.response.pathsend' in scope.get('extensions', {}))
+                       and 'http.response.pathsend' in scope.extensions)
 
         await send({'type': ASGIEvent.HTTP_RESPONSE_START, 'status': status,
                     'headers': [

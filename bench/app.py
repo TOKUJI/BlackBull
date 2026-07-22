@@ -37,7 +37,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from http import HTTPMethod
 
-from blackbull import BlackBull, Response, read_body
+from blackbull import BlackBull, Connection, Response
 from blackbull.utils import Scheme
 from bench.lag_monitor import LoopLagMonitor
 
@@ -121,11 +121,9 @@ async def one_mb():
 
 
 @app.route(path='/echo', methods=[HTTPMethod.POST])
-async def echo(scope, receive, send):
-    body = await read_body(receive)
-    await send({'type': 'http.response.start', 'status': HTTPStatus.OK,
-                'headers': [(b'content-type', b'application/octet-stream')]})
-    await send({'type': 'http.response.body', 'body': body})
+async def echo(conn: Connection):
+    body = await conn.body()
+    return Response(body, content_type='application/octet-stream')
 
 
 @app.route(path='/metrics', methods=[HTTPMethod.GET])

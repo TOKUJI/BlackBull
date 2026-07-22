@@ -1,7 +1,9 @@
 import ipaddress
 
-from ..connection import CONNECTION_STASH_KEY
+from ..connection import CONNECTION_STASH_KEY, Connection
 from ..headers import Headers
+
+_MISS = object()
 
 
 def _parse_forwarded(value: str) -> dict[str, str]:
@@ -70,39 +72,51 @@ class TrustedProxy:
         return any(addr in net for net in self._networks)
 
     async def __call__(self, scope, receive, send, call_next) -> None:
-        if scope.get('type') not in ('http', 'websocket'):
+        # HTTP arrives as a native :class:`Connection`; the WebSocket path (still
+        # ASGI-scope-shaped) arrives as a scope dict. Read/write the request
+        # fields off whichever we were handed.
+        is_conn = isinstance(scope, Connection)
+        rtype = scope.type if is_conn else scope.get('type')
+        if rtype not in ('http', 'websocket'):
             await call_next(scope, receive, send)
             return
 
-        peer_ip = (scope.get('client') or [''])[0]
+        client = scope.client if is_conn else scope.get('client')
+        peer_ip = (client or [''])[0]
         if not self._is_trusted(peer_ip):
             await call_next(scope, receive, send)
             return
 
-        headers = scope['headers']
+        headers = scope.headers if is_conn else scope['headers']
         if not isinstance(headers, Headers):
             headers = Headers(headers)
+
+        # Accumulate the rewrites (``_MISS`` = unchanged) so the apply step is a
+        # single conn-vs-scope-dict branch.
+        new_client = _MISS
+        new_scheme = _MISS
+        new_root = _MISS
 
         forwarded = headers.get(b'forwarded', b'').decode()
         if forwarded:
             # RFC 7239 takes precedence over X-Forwarded-*
             parsed = _parse_forwarded(forwarded)
             if 'for' in parsed:
-                scope['client'] = [parsed['for'].lstrip('['), 0]
+                new_client = [parsed['for'].lstrip('['), 0]
             if 'proto' in parsed:
-                scope['scheme'] = parsed['proto']
+                new_scheme = parsed['proto']
         else:
             xff = headers.get(b'x-forwarded-for', b'').decode()
             if xff:
                 # Walk left-to-right; first non-trusted entry is the real client
                 for candidate in (h.strip() for h in xff.split(',')):
                     if not self._is_trusted(candidate):
-                        scope['client'] = [candidate, 0]
+                        new_client = [candidate, 0]
                         break
 
             xfp = headers.get(b'x-forwarded-proto', b'').decode()
             if xfp:
-                scope['scheme'] = xfp.strip().lower()
+                new_scheme = xfp.strip().lower()
 
         # X-Forwarded-Prefix — the reverse-proxy mount prefix, honoured only
         # here (behind the trusted-peer gate).  The parser layer deliberately
@@ -110,19 +124,32 @@ class TrustedProxy:
         # untrusted client would otherwise poison URL generation / routing.
         xf_prefix = headers.get(b'x-forwarded-prefix', b'').decode()
         if xf_prefix:
-            scope['root_path'] = xf_prefix.rstrip('/')
+            new_root = xf_prefix.rstrip('/')
 
-        # Sprint 79 Phase 5: the dispatcher, router, and handlers read the typed
-        # Connection, so mirror the rewrites onto the stashed conn when the
-        # self-hosted actor provided one.  Under an external ASGI server there is
-        # no stash yet — the Connection is built downstream from this
-        # (already-mutated) scope, so ``from_scope`` picks the rewrites up for
-        # free.  ``TrustedProxy`` is the only in-tree scope mutator (§9, risk
-        # table), so this is the one place the conn needs re-syncing.
-        conn = scope.get(CONNECTION_STASH_KEY)
-        if conn is not None:
-            conn.client = tuple(scope['client']) if scope.get('client') else None
-            conn.scheme = scope.get('scheme', conn.scheme)
-            conn.root_path = scope.get('root_path', conn.root_path)
+        if is_conn:
+            if new_client is not _MISS:
+                scope.client = tuple(new_client) if new_client else None
+            if new_scheme is not _MISS:
+                scope.scheme = new_scheme
+            if new_root is not _MISS:
+                scope.root_path = new_root
+        else:
+            # WebSocket scope dict — mutate it, then mirror onto the stashed
+            # Connection when the self-hosted actor provided one (``TrustedProxy``
+            # is the only in-tree request mutator, §9 risk table).
+            if new_client is not _MISS:
+                scope['client'] = new_client
+            if new_scheme is not _MISS:
+                scope['scheme'] = new_scheme
+            if new_root is not _MISS:
+                scope['root_path'] = new_root
+            conn = scope.get(CONNECTION_STASH_KEY)
+            if conn is not None:
+                if new_client is not _MISS:
+                    conn.client = tuple(new_client) if new_client else None
+                if new_scheme is not _MISS:
+                    conn.scheme = new_scheme
+                if new_root is not _MISS:
+                    conn.root_path = new_root
 
         await call_next(scope, receive, send)
