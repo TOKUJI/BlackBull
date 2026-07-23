@@ -64,7 +64,7 @@ state = {'slow_calls': 0, 'nostore_calls': 0}
 
 
 @app.route(path='/slow')
-async def slow(scope, receive, send):
+async def slow(conn, receive, send):
     """Pretend-expensive route — sleeps then returns a payload.
 
     Cached by the middleware; subsequent calls within the TTL don't
@@ -81,7 +81,7 @@ async def slow(scope, receive, send):
 
 
 @app.route(path='/nostore')
-async def nostore(scope, receive, send):
+async def nostore(conn, receive, send):
     """Same payload, but ``Cache-Control: no-store`` skips the cache."""
     state['nostore_calls'] += 1
     payload = {
@@ -96,14 +96,14 @@ async def nostore(scope, receive, send):
 
 
 @app.route(path='/private/{n}')
-async def private_n(scope, receive, send):   # full form: `scope` is a native Connection
+async def private_n(conn, receive, send):   # full form: `conn` is a native Connection
     """Each distinct path parameter is a separate cache key."""
-    n = scope.path_params.get('n', '?')
+    n = conn.path_params.get('n', '?')
     await send(JSONResponse({'n': n, 'served_at': time.time()}))
 
 
 @app.route(path='/counter')
-async def counter(scope, receive, send):
+async def counter(conn, receive, send):
     """How many times each cached/uncached handler has actually run."""
     await send(JSONResponse(state))
 

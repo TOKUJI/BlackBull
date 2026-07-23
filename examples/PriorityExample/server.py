@@ -27,7 +27,7 @@ is entirely up to application code, as shown below.
 Connection location (BlackBull v0.31+):
   conn.extensions['http.response.priority'] → {'urgency': int, 'incremental': bool}
 
-The legacy top-level ``scope['http2_priority']`` key does not survive the
+The legacy top-level ``conn['http2_priority']`` key does not survive the
 native ``Connection`` model (Sprint 80) — only ``conn.extensions`` is
 carried across the boundary. Read the extension key.
 
@@ -63,7 +63,7 @@ def _priority(conn) -> dict:
     Reads ``conn.extensions['http.response.priority']`` — the extension
     surface BlackBull populates for HTTP/2 requests (v0.31+).  *conn* is the
     native :class:`~blackbull.connection.Connection` (handlers receive it as
-    ``scope``; the ``request_received`` event carries it as
+    ``conn``; the ``request_received`` event carries it as
     ``event.detail['conn']``).
     """
     return conn.extensions.get('http.response.priority', _DEFAULT_PRIORITY)
@@ -87,7 +87,7 @@ async def log_priority(event):
 
 
 @app.route(path='/')
-async def handle_index(scope, receive, send):
+async def handle_index(conn, receive, send):
     body = {
         'endpoints': {
             '/': 'This listing',
@@ -106,9 +106,9 @@ async def handle_index(scope, receive, send):
 
 
 @app.route(path='/priority-echo')
-async def handle_priority_echo(scope, receive, send):
+async def handle_priority_echo(conn, receive, send):
     """Return the priority hint BlackBull resolved for this request."""
-    hint = _priority(scope)
+    hint = _priority(conn)
     logger.info('priority-echo: urgency=%d incremental=%s',
                 hint['urgency'], hint['incremental'])
     await send(JSONResponse({
@@ -122,13 +122,13 @@ async def handle_priority_echo(scope, receive, send):
 
 
 @app.route(path='/work')
-async def handle_work(scope, receive, send):
+async def handle_work(conn, receive, send):
     """Variable-cost endpoint: work duration scales with urgency.
 
     urgency 0 → 0 ms, urgency 7 → 700 ms.
     High-urgency clients get a response immediately; background fetches wait.
     """
-    hint = _priority(scope)
+    hint = _priority(conn)
     urgency = hint['urgency']
     delay = urgency * 0.1           # 0 – 0.7 s
 

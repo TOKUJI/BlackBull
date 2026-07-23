@@ -3,8 +3,8 @@ from blackbull import BlackBull
 app = BlackBull()
 
 @app.route(path='/')
-async def hello(scope, receive, send):   # full form: `scope` is a native Connection
-    assert scope.type == 'http'
+async def hello(conn, receive, send):   # full form: `conn` is a native Connection
+    assert conn.type == 'http'
 
     response_body = b'Hello, world!'
 

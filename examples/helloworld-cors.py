@@ -153,7 +153,7 @@ app = BlackBull()
 
 
 @app.route(path='/')
-async def index(scope, receive, send):
+async def index(conn, receive, send):
     await send({
         'type': 'http.response.start',
         'status': 200,
@@ -168,7 +168,7 @@ async def hello():
 
 
 @app.route(path='/api/echo', methods=[HTTPMethod.POST])
-async def echo(scope, receive, send):
+async def echo(conn, receive, send):
     body = await read_body(receive)
     try:
         data = json.loads(body)

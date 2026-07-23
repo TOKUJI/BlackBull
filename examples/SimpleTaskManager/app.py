@@ -133,7 +133,7 @@ async def startup():
 
 
 @app.on_error(Unauthorized)
-async def handle_unauthorized(scope, receive, send):
+async def handle_unauthorized(conn, receive, send):
     """Convert Unauthorized raised by the auth interceptor into a 401 response."""
     await send(JSONResponse({'error': 'Unauthorized'}, status=HTTPStatus.UNAUTHORIZED))
 
@@ -161,7 +161,7 @@ async def require_auth(event):
 
 @app.intercept('before_handler')
 async def handle_priority(event):
-    """Interceptor: read HTTP/2 priority hint and annotate the scope.
+    """Interceptor: read HTTP/2 priority hint and annotate the conn.
 
     urgency 0-1  → high-priority: log prominently.
     urgency 2-7  → normal/background: annotate conn.state only.
@@ -192,19 +192,19 @@ async def log_response(event):
 # ---------------------------------------------------------------------------
 
 @app.route(methods=[HTTPMethod.GET], path='/')
-async def handle_login_page(scope, receive, send):  # noqa: ARG001
+async def handle_login_page(conn, receive, send):  # noqa: ARG001
     await send(Response(_load('login.html')))
 
 
 @app.route(methods=[HTTPMethod.GET], path='/register')
-async def handle_register_page(scope, receive, send):  # noqa: ARG001
+async def handle_register_page(conn, receive, send):  # noqa: ARG001
     await send(Response(_load('register.html')))
 
 
 @app.route(methods=[HTTPMethod.POST], path='/register',
            middlewares=[json_body_mw])
-async def handle_register(scope, receive, send):  # noqa: ARG001
-    data = scope.state['json']
+async def handle_register(conn, receive, send):  # noqa: ARG001
+    data = conn.state['json']
     username = str(data.get('username', '')).strip()
     password = str(data.get('password', ''))
 
@@ -250,7 +250,7 @@ async def handle_login(body: Credentials) -> AuthSuccess:
 
 # /app — always public; the page JS checks auth via GET /tasks on load
 @app.route(methods=[HTTPMethod.GET], path='/app')
-async def handle_app_page(scope, receive, send):  # noqa: ARG001
+async def handle_app_page(conn, receive, send):  # noqa: ARG001
     await send(Response(_load('index.html')))
 
 # ---------------------------------------------------------------------------
@@ -258,35 +258,35 @@ async def handle_app_page(scope, receive, send):  # noqa: ARG001
 # ---------------------------------------------------------------------------
 
 @app.route(methods=[HTTPMethod.GET], path='/tasks')
-async def handle_get_tasks(scope, receive, send):  # noqa: ARG001
-    tasks = await db.get_tasks(scope.state['user'])
+async def handle_get_tasks(conn, receive, send):  # noqa: ARG001
+    tasks = await db.get_tasks(conn.state['user'])
     await send(JSONResponse(tasks))
 
 
 @app.route(methods=[HTTPMethod.POST], path='/tasks')
-async def handle_create_task(scope, body: TaskCreate):
+async def handle_create_task(conn, body: TaskCreate):
     """Create a new task for the authenticated user."""
     title = body.title.strip()
     if not title:
         return JSONResponse({'error': 'title is required'},
                             status=HTTPStatus.BAD_REQUEST)
-    task = await db.create_task(scope.state['user'], title)
+    task = await db.create_task(conn.state['user'], title)
     return JSONResponse(task, status=HTTPStatus.CREATED)
 
 
 @app.route(methods=[HTTPMethod.PUT], path='/tasks/{task_id}',
            middlewares=[json_body_mw])
-async def handle_update_task(scope, receive, send):
+async def handle_update_task(conn, receive, send):
     try:
-        task_id = int(scope.path_params['task_id'])
+        task_id = int(conn.path_params['task_id'])
     except (KeyError, ValueError):
         await send(JSONResponse({'error': 'invalid task id'},
                                 status=HTTPStatus.BAD_REQUEST))
         return
 
-    body = scope.state['json']
+    body = conn.state['json']
     task = await db.update_task(
-        scope.state['user'], task_id,
+        conn.state['user'], task_id,
         body.get('title'),
         body.get('completed'),
     )
@@ -298,15 +298,15 @@ async def handle_update_task(scope, receive, send):
 
 
 @app.route(methods=[HTTPMethod.DELETE], path='/tasks/{task_id}')
-async def handle_delete_task(scope, receive, send):
+async def handle_delete_task(conn, receive, send):
     try:
-        task_id = int(scope.path_params['task_id'])
+        task_id = int(conn.path_params['task_id'])
     except (KeyError, ValueError):
         await send(JSONResponse({'error': 'invalid task id'},
                                 status=HTTPStatus.BAD_REQUEST))
         return
 
-    if not await db.delete_task(scope.state['user'], task_id):
+    if not await db.delete_task(conn.state['user'], task_id):
         await send(JSONResponse({'error': 'Not found'},
                                 status=HTTPStatus.NOT_FOUND))
         return
@@ -314,8 +314,8 @@ async def handle_delete_task(scope, receive, send):
 
 
 @app.route(methods=[HTTPMethod.POST], path='/logout')
-async def handle_logout(scope, receive, send):
-    SESSIONS.pop(scope.state.get('token', ''), None)
+async def handle_logout(conn, receive, send):
+    SESSIONS.pop(conn.state.get('token', ''), None)
     await send(JSONResponse({'ok': True}))
 
 

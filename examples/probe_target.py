@@ -31,10 +31,10 @@ async def root_post(body: bytes):
 # ── /echo: echo all request headers ─────────────────────────────────────
 
 @app.route(path='/echo', methods=['GET', 'POST'])
-async def echo_headers(scope, receive, send):   # full form: `scope` is a native Connection
+async def echo_headers(conn, receive, send):   # full form: `conn` is a native Connection
     """Echo all request headers as ``name: value\\n`` per line."""
     lines: list[str] = []
-    for name, value in scope.headers:
+    for name, value in conn.headers:
         lines.append(f"{name.decode('latin-1')}: {value.decode('latin-1')}")
     body = "\n".join(lines).encode()
     await send({
@@ -51,9 +51,9 @@ async def echo_headers(scope, receive, send):   # full form: `scope` is a native
 # ── /cookie: echo parsed cookies ────────────────────────────────────────
 
 @app.route(path='/cookie', methods=['GET', 'POST'])
-async def cookie_echo(scope, receive, send):   # full form: `scope` is a native Connection
+async def cookie_echo(conn, receive, send):   # full form: `conn` is a native Connection
     """Parse cookies and echo as ``name=value\\n`` per line."""
-    cookies = scope.cookies
+    cookies = conn.cookies
     lines: list[str] = []
     for name, value in cookies.items():
         lines.append(f"{name}={value}")
