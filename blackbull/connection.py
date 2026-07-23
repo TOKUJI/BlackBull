@@ -18,10 +18,11 @@ prevents the two representations from drifting apart.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Callable, NamedTuple
+from typing import Any, AsyncIterator, Callable, NamedTuple
 
 from .headers import Headers
-from .request import read_body, cookies_from_headers, ClientDisconnected, _json_or_none
+from .request import (read_body, stream_body, cookies_from_headers,
+                      ClientDisconnected, _json_or_none)
 
 __all__ = ['Connection', 'ClientDisconnected', 'CONNECTION_STASH_KEY',
            'disconnected', 'mark_disconnected']
@@ -425,12 +426,47 @@ class Connection:
         """Return the complete request body, draining ``receive`` at most once.
 
         Repeated calls (and :meth:`json` / :meth:`text`) return the cached
-        bytes. A mid-body disconnect raises :class:`ClientDisconnected`.
+        bytes. A mid-body disconnect raises :class:`ClientDisconnected`. Raises
+        :class:`RuntimeError` if :meth:`stream` already consumed the body — the
+        channel is a single drain, so there is nothing left to buffer.
         """
         if not self._body_read:
             self._body = await read_body(self._receive)
             self._body_read = True
+        elif self._body is None:
+            # _body_read set with no cached bytes ⇒ stream() drained the channel.
+            raise RuntimeError(
+                'Connection.body() unavailable: stream() has already consumed '
+                'the request body incrementally.')
         return self._body
+
+    async def stream(self) -> AsyncIterator[bytes]:
+        """Yield the request body one chunk at a time, draining ``receive`` once.
+
+        The streaming counterpart to :meth:`body`.  Use it when the handler only
+        needs to *process* the body incrementally — count/hash/forward a large
+        upload — so the working set stays one chunk instead of the whole
+        payload::
+
+            total = 0
+            async for chunk in conn.stream():
+                total += len(chunk)
+
+        Mutually exclusive with :meth:`body`/:meth:`json`/:meth:`text`, which
+        buffer: the body is a single-drain stream, so mixing the two on one
+        request raises :class:`RuntimeError` rather than silently returning a
+        partial or empty body.  A mid-body disconnect raises
+        :class:`ClientDisconnected`.
+        """
+        if self._body_read:
+            raise RuntimeError(
+                'Connection.stream() cannot run after body()/json()/text() '
+                'has already drained (and buffered) the request body.')
+        # Mark drained up front so a later body() call fails fast rather than
+        # re-reading an exhausted channel and returning b''.
+        self._body_read = True
+        async for chunk in stream_body(self._receive):
+            yield chunk
 
     async def json(self) -> Any:
         """Parse the cached body as JSON (``None`` on empty/invalid input)."""

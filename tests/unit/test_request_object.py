@@ -157,6 +157,63 @@ class TestBody:
             await req.body()
 
 
+class TestStream:
+    @pytest.mark.asyncio
+    async def test_stream_yields_chunks_without_buffering(self):
+        receive, _ = make_receive([
+            {'type': 'http.request', 'body': b'chunk1', 'more_body': True},
+            {'type': 'http.request', 'body': b'chunk2', 'more_body': False},
+        ])
+        req = _conn({'headers': []}, receive)
+        chunks = [c async for c in req.stream()]
+        assert chunks == [b'chunk1', b'chunk2']
+
+    @pytest.mark.asyncio
+    async def test_stream_counts_full_body(self):
+        receive, _ = make_receive([
+            {'type': 'http.request', 'body': b'a' * 100, 'more_body': True},
+            {'type': 'http.request', 'body': b'b' * 40, 'more_body': False},
+        ])
+        req = _conn({'headers': []}, receive)
+        total = 0
+        async for chunk in req.stream():
+            total += len(chunk)
+        assert total == 140
+
+    @pytest.mark.asyncio
+    async def test_stream_after_body_raises(self):
+        """stream() and body() both drain once; buffering first then streaming
+        must fail loudly rather than yield an empty/partial stream."""
+        receive, _ = single_body_receive(b'payload')
+        req = _conn({'headers': []}, receive)
+        assert await req.body() == b'payload'
+        with pytest.raises(RuntimeError):
+            async for _ in req.stream():
+                pass
+
+    @pytest.mark.asyncio
+    async def test_body_after_stream_raises(self):
+        """The reverse: once stream() has drained the channel, body() must not
+        silently return b'' from the exhausted receive."""
+        receive, _ = single_body_receive(b'payload')
+        req = _conn({'headers': []}, receive)
+        async for _ in req.stream():
+            pass
+        with pytest.raises(RuntimeError):
+            await req.body()
+
+    @pytest.mark.asyncio
+    async def test_stream_mid_body_disconnect_raises(self):
+        receive, _ = make_receive([
+            {'type': 'http.request', 'body': b'partial', 'more_body': True},
+            {'type': 'http.disconnect'},
+        ])
+        req = _conn({'headers': []}, receive)
+        with pytest.raises(ClientDisconnected):
+            async for _ in req.stream():
+                pass
+
+
 class TestJson:
     @pytest.mark.asyncio
     async def test_valid_json_parsed(self):
