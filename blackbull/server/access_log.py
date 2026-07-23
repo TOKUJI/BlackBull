@@ -151,28 +151,6 @@ class AccessLogRecord:
             req_range            = rng,
         )
 
-    @classmethod
-    def from_scope(cls, scope: dict) -> 'AccessLogRecord':
-        client = scope.get('client') or ['-']
-        ae = b''
-        rng = b''
-        if PHASE_TRACE:
-            for k, v in scope.get('headers', []):
-                if isinstance(k, bytes):
-                    kl = k.lower()
-                    if kl == b'accept-encoding':
-                        ae = v
-                    elif kl == b'range':
-                        rng = v
-        return cls(
-            client_ip            = str(client[0]),
-            method               = scope.get('method', '-'),
-            path                 = scope.get('path', '-'),
-            http_version         = scope.get('http_version', '-'),
-            req_accept_encoding  = ae,
-            req_range            = rng,
-        )
-
     def duration_ms(self) -> float:
         # Return the finalize() snapshot when present so the value is stable
         # across the emit → enqueue → listener-format hop; fall back to a live

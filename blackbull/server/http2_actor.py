@@ -74,18 +74,17 @@ def _signal_recipients(recipients: dict[int, _StreamRecipient]) -> None:
         recipient.put_disconnect()
 
 
-def _make_log_record(target):
+def _make_log_record(conn: Connection):
     # Publish the record for the app layer: BlackBull._dispatch sources the
     # request_completed detail's wire fields (status / response_bytes /
-    # duration_ms) from the request's ``state['access_log']`` (Sprint 64 event
-    # consolidation) — same contract as the HTTP/1.1 actor.
-    if isinstance(target, Connection):
-        record = AccessLogRecord.from_conn(target)
-        target.state['access_log'] = record
-        return record
-    record = AccessLogRecord.from_scope(target)
-    if isinstance(target.get('state'), dict):
-        target['state']['access_log'] = record
+    # duration_ms) from the request's ``conn.state['access_log']`` (Sprint 64
+    # event consolidation) — same contract as the HTTP/1.1 actor. The actor
+    # always has the parsed Connection, even on the BB_FORCE_ASGI_SCOPE lane
+    # (where the emitted scope shares ``conn.state`` by identity, so the app's
+    # rebuilt Connection sees the same record) — so the log record is always
+    # built from the Connection, never an ASGI scope dict.
+    record = AccessLogRecord.from_conn(conn)
+    conn.state['access_log'] = record
     return record
 
 _DEFAULT_PRIORITY: dict[str, int | bool] = {'urgency': 3, 'incremental': False}
@@ -1173,7 +1172,7 @@ class HTTP2Actor(Actor):
             # No body to deliver — skip queue allocation; recipient synthesizes
             # the empty http.request event on first receive() call if needed.
             stream_recipient.mark_end_of_stream_on_headers()
-        log_record = _make_log_record(target)
+        log_record = _make_log_record(conn)
         capturing_send = _make_capturing_send(send, log_record)
         self._spawn_stream_task(tg, stream.stream_id, target, stream_recipient, capturing_send, log_record)
         return True
@@ -1266,7 +1265,7 @@ class HTTP2Actor(Actor):
         stream.conn = target
         stream_recipient = self._make_stream_recipient(stream.stream_id)
         self._recipients[stream.stream_id] = stream_recipient
-        log_record = _make_log_record(target)
+        log_record = _make_log_record(conn)
         capturing_send = _make_capturing_send(send, log_record)
         self._spawn_stream_task(tg, stream.stream_id, target, stream_recipient, capturing_send, log_record)
         return True
@@ -1553,7 +1552,7 @@ class HTTP2Actor(Actor):
         push_sender = SenderFactory.http2(
             self._writer, self.factory, push_stream_id, push_callback=None,
             conn_window=self._conn_window)
-        log_record = _make_log_record(push_target)
+        log_record = _make_log_record(pushed_conn)
         capturing_send = _make_capturing_send(push_sender, log_record)
 
         if self._task_group is not None:

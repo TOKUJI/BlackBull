@@ -510,7 +510,10 @@ class BlackBull:
             return handler
         return decorator
 
-    async def _handle_lifespan(self, scope, receive, send):  # noqa: ARG001
+    async def _handle_lifespan(self, receive, send):
+        # Lifespan carries an ASGI ``{'type': 'lifespan'}`` scope, but this
+        # handler is driven entirely by ``receive``/``send`` events — the scope
+        # itself is unused, so ``__call__`` does not pass it.
         while True:
             event = await receive()
             if event['type'] == 'lifespan.startup':
@@ -779,35 +782,37 @@ class BlackBull:
             chain = functools.partial(mw, call_next=chain)
         self._chain = chain
 
-    async def __call__(self, scope, receive, send):
+    async def __call__(self, conn, receive, send):
         # Native entry: BlackBull's own server calls ``app(conn, receive, send)``
         # with a typed :class:`Connection` — BlackBull is a native-Connection
         # framework, not an ASGI one, so the whole dispatch pipeline (middleware
         # chain, router, handlers, error handlers, events) threads the Connection
         # end to end. The ASGI ``app(scope, receive, send)`` form is used *iff*
         # the caller is an external ASGI server (uvicorn, ``httpx.ASGITransport``)
-        # or ``BB_FORCE_ASGI_SCOPE=1``; there we convert ``scope → Connection``
-        # once, here at the boundary, and thread the Connection from then on.
+        # or ``BB_FORCE_ASGI_SCOPE=1``; there ``conn`` arrives as an ASGI scope
+        # dict and we convert it to a Connection once, here at the boundary, and
+        # thread the Connection from then on. (Lifespan is the one scope that is
+        # not a request and never becomes a Connection.)
         #
         # ``target`` is the object the actor's disconnect-detecting receive wrapper
         # shares with us (the Connection natively, the scope dict in the compat
         # lanes); ``disconnected(target)`` reads the flag off whichever it is.
-        target = scope
-        if isinstance(scope, Connection):
-            request = scope                       # HTTP native
-        elif scope.get('type') == 'lifespan':
-            await self._handle_lifespan(scope, receive, send)
+        target = conn
+        if isinstance(conn, Connection):
+            request = conn                        # HTTP/WebSocket native
+        elif conn.get('type') == 'lifespan':
+            await self._handle_lifespan(receive, send)
             return
-        elif scope.get('type') == 'websocket':
+        elif conn.get('type') == 'websocket':
             # External ASGI host (uvicorn) delivered a websocket scope dict.
             # WebSocket is native too (Sprint 80): convert it to a Connection at
             # the boundary — the WS extras are derived (``conn.subprotocols``
             # reads the request header) or actor-set (``conn._ws``), so no scope
             # dict is threaded past here. BlackBull's own server already hands us
             # a Connection (it hits the first branch).
-            request = scope.get(CONNECTION_STASH_KEY)
+            request = conn.get(CONNECTION_STASH_KEY)
             if request is None:
-                request = Connection.from_scope(scope, receive)
+                request = Connection.from_scope(conn, receive)
         else:
             # HTTP dispatched as a scope dict. BlackBull's own HTTP/2 actor
             # stashes the Connection it already built (``parse_headers`` →
@@ -820,9 +825,9 @@ class BlackBull:
             # ``receive``), keeping the per-request graph acyclic (Step 1).
             # Only true external ASGI hosts / the ``force_asgi`` lane carry no
             # stash → the single ASGI→native ``from_scope`` conversion point.
-            request = scope.get(CONNECTION_STASH_KEY)
+            request = conn.get(CONNECTION_STASH_KEY)
             if request is None:
-                request = Connection.from_scope(scope, receive)
+                request = Connection.from_scope(conn, receive)
 
         if self._chain is None:
             self._build_chain()
@@ -845,9 +850,12 @@ class BlackBull:
         #
         # Both are guarded by ``has_listeners`` so a request with no such
         # listener pays only a dict lookup.
+        # ``request`` is always a Connection here: the native branch keeps it,
+        # and every ASGI-boundary branch (http/websocket) converted it via
+        # ``from_scope`` above. Only lifespan is not a request, and it returned
+        # early. So the terminal-event reads are unconditionally native.
         dispatcher = self._dispatcher
-        is_conn = isinstance(request, Connection)
-        want_request_completed = (is_conn and request.type == 'http'
+        want_request_completed = (request.type == 'http'
                                   and dispatcher.has_listeners('request_completed'))
         if not (want_request_completed
                 or dispatcher.has_listeners('scope_completed')):
@@ -879,15 +887,9 @@ class BlackBull:
                 # error: either one that propagated out of the chain (exc), or
                 # a handler error that ``_dispatch`` already turned into a 500
                 # and recorded in the state grab-bag. ``None`` for a clean
-                # request (including a 404, which is not an exception).  Reads
-                # branch on native (Connection) vs the WS/external scope dict.
-                if is_conn:
-                    st, rtype = request.state, request.type
-                    client, rpath = request.client, request.path
-                else:
-                    st = request.get('state') or {}
-                    rtype = request.get('type', '-')
-                    client, rpath = request.get('client'), request.get('path', '-')
+                # request (including a 404, which is not an exception).
+                st, rtype = request.state, request.type
+                client, rpath = request.client, request.path
                 err = exc or st.get('error_exception')
                 await dispatcher.emit(Event('scope_completed', {
                     'conn':     request,

@@ -176,7 +176,7 @@ async def test_startup_rejects_middleware_without_call_next():
     async def mock_receive():
         return next(events)
 
-    await app._handle_lifespan({'type': 'lifespan'}, mock_receive, mock_send)
+    await app._handle_lifespan(mock_receive, mock_send)
 
     assert failed_messages
     assert 'call_next' in failed_messages[0]
@@ -204,7 +204,7 @@ async def test_startup_accepts_undecorated_valid_middleware():
     async def mock_receive():
         return next(events)
 
-    await app._handle_lifespan({'type': 'lifespan'}, mock_receive, mock_send)
+    await app._handle_lifespan(mock_receive, mock_send)
 
     assert not failed
 
