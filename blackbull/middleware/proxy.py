@@ -18,7 +18,7 @@ def _parse_forwarded(value: str) -> dict[str, str]:
 
     Splitting on ``;`` alone (the pre-Sprint-69 behaviour) folded the
     second element's ``for=`` into the first value, poisoning
-    ``scope['client']``.
+    ``conn['client']``.
     """
     first_element = value.split(',', 1)[0]
     result = {}
@@ -31,7 +31,7 @@ def _parse_forwarded(value: str) -> dict[str, str]:
 
 
 class TrustedProxy:
-    """Rewrite ``scope['client']`` and ``scope['scheme']`` from proxy headers.
+    """Rewrite ``conn['client']`` and ``conn['scheme']`` from proxy headers.
 
     Applied only when the direct TCP peer matches the configured trusted set,
     preventing malicious clients from spoofing ``X-Forwarded-For``.
@@ -40,7 +40,7 @@ class TrustedProxy:
 
     1. RFC 7239 ``Forwarded`` — ``for=<ip>; proto=<scheme>``
     2. ``X-Forwarded-For`` — comma-separated IP chain; leftmost non-trusted IP wins
-    3. ``X-Forwarded-Proto`` — rewrite ``scope['scheme']``
+    3. ``X-Forwarded-Proto`` — rewrite ``conn['scheme']``
 
     Args:
         trusted_proxies: IP addresses or CIDR strings (IPv4 or IPv6).  Accepts a
@@ -71,28 +71,28 @@ class TrustedProxy:
             return False
         return any(addr in net for net in self._networks)
 
-    async def __call__(self, scope, receive, send, call_next) -> None:
+    async def __call__(self, conn, receive, send, call_next) -> None:
         # HTTP arrives as a native :class:`Connection`; the WebSocket path (still
         # ASGI-scope-shaped) arrives as a scope dict. Read/write the request
         # fields off whichever we were handed.
-        is_conn = isinstance(scope, Connection)
-        rtype = scope.type if is_conn else scope.get('type')
+        is_conn = isinstance(conn, Connection)
+        rtype = conn.type if is_conn else conn.get('type')
         if rtype not in ('http', 'websocket'):
-            await call_next(scope, receive, send)
+            await call_next(conn, receive, send)
             return
 
-        client = scope.client if is_conn else scope.get('client')
+        client = conn.client if is_conn else conn.get('client')
         peer_ip = (client or [''])[0]
         if not self._is_trusted(peer_ip):
-            await call_next(scope, receive, send)
+            await call_next(conn, receive, send)
             return
 
-        headers = scope.headers if is_conn else scope['headers']
+        headers = conn.headers if is_conn else conn['headers']
         if not isinstance(headers, Headers):
             headers = Headers(headers)
 
         # Accumulate the rewrites (``_MISS`` = unchanged) so the apply step is a
-        # single conn-vs-scope-dict branch.
+        # single conn-vs-conn-dict branch.
         new_client = _MISS
         new_scheme = _MISS
         new_root = _MISS
@@ -128,28 +128,28 @@ class TrustedProxy:
 
         if is_conn:
             if new_client is not _MISS:
-                scope.client = tuple(new_client) if new_client else None
+                conn.client = tuple(new_client) if new_client else None
             if new_scheme is not _MISS:
-                scope.scheme = new_scheme
+                conn.scheme = new_scheme
             if new_root is not _MISS:
-                scope.root_path = new_root
+                conn.root_path = new_root
         else:
             # WebSocket scope dict — mutate it, then mirror onto the stashed
             # Connection when the self-hosted actor provided one (``TrustedProxy``
             # is the only in-tree request mutator, §9 risk table).
             if new_client is not _MISS:
-                scope['client'] = new_client
+                conn['client'] = new_client
             if new_scheme is not _MISS:
-                scope['scheme'] = new_scheme
+                conn['scheme'] = new_scheme
             if new_root is not _MISS:
-                scope['root_path'] = new_root
-            conn = scope.get(CONNECTION_STASH_KEY)
-            if conn is not None:
+                conn['root_path'] = new_root
+            stashed = conn.get(CONNECTION_STASH_KEY)
+            if stashed is not None:
                 if new_client is not _MISS:
-                    conn.client = tuple(new_client) if new_client else None
+                    stashed.client = tuple(new_client) if new_client else None
                 if new_scheme is not _MISS:
-                    conn.scheme = new_scheme
+                    stashed.scheme = new_scheme
                 if new_root is not _MISS:
-                    conn.root_path = new_root
+                    stashed.root_path = new_root
 
-        await call_next(scope, receive, send)
+        await call_next(conn, receive, send)

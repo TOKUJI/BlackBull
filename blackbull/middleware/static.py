@@ -221,30 +221,30 @@ class StaticFiles:
         the hot path keeps its plain-string representation."""
         return Path(self._root_str)
 
-    async def __call__(self, scope, receive, send, call_next=None):
+    async def __call__(self, conn, receive, send, call_next=None):
         # BlackBull threads a native Connection for HTTP; a WebSocket/non-HTTP
         # scope dict (only possible in the middleware role) passes through.
-        if (not isinstance(scope, Connection) or scope.type != 'http'
-                or scope.method not in ('GET', 'HEAD')):
+        if (not isinstance(conn, Connection) or conn.type != 'http'
+                or conn.method not in ('GET', 'HEAD')):
             if call_next:
-                await call_next(scope, receive, send)
+                await call_next(conn, receive, send)
             else:
                 await self._respond(send, HTTPStatus.NOT_FOUND)
             return
 
         if get_settings().env == Environment.PRODUCTION:
             if call_next:
-                await call_next(scope, receive, send)
+                await call_next(conn, receive, send)
             else:
                 await self._respond(send, HTTPStatus.NOT_FOUND)
             return
 
-        raw_path = scope.path
+        raw_path = conn.path
 
         if self._url_prefix:
             if not raw_path.startswith(self._url_prefix):
                 if call_next:
-                    await call_next(scope, receive, send)
+                    await call_next(conn, receive, send)
                 else:
                     await self._respond(send, HTTPStatus.NOT_FOUND)
                 return
@@ -270,15 +270,15 @@ class StaticFiles:
                 candidate = os.path.realpath(os.path.join(target, self._index))
                 if ((candidate == self._root_str or candidate.startswith(self._root_sep))
                         and os.path.isfile(candidate)):
-                    await self._serve(scope, send, candidate)
+                    await self._serve(conn, send, candidate)
                     return
             if call_next:
-                await call_next(scope, receive, send)
+                await call_next(conn, receive, send)
             else:
                 await self._respond(send, HTTPStatus.NOT_FOUND)
             return
 
-        await self._serve(scope, send, target)
+        await self._serve(conn, send, target)
 
     @staticmethod
     def _client_accepts(accept_header: bytes, encoding: bytes) -> bool:
@@ -300,7 +300,7 @@ class StaticFiles:
             return True
         return False
 
-    def _negotiate(self, scope, target: str) -> tuple[str, bytes]:
+    def _negotiate(self, conn, target: str) -> tuple[str, bytes]:
         """Pick which file to serve and what Content-Encoding to advertise.
 
         Returns ``(path_to_serve, content_encoding)``.  `content_encoding`
@@ -317,7 +317,7 @@ class StaticFiles:
         ``.gz`` siblings happen only once per path.
         """
         accept = b''
-        for k, v in scope.headers:
+        for k, v in conn.headers:
             kl = k.lower()
             if kl == b'range':
                 return target, b''
@@ -351,9 +351,9 @@ class StaticFiles:
                 return sibling, enc
         return target, b''
 
-    async def _serve(self, scope, send, path: str):
+    async def _serve(self, conn, send, path: str):
         # Pick variant (precompressed sibling if available + accepted).
-        served_path, content_encoding = self._negotiate(scope, path)
+        served_path, content_encoding = self._negotiate(conn, path)
 
         body: bytes | None
         mime: bytes
@@ -423,7 +423,7 @@ class StaticFiles:
                 body = None
 
         range_hdr = None
-        for k, v in scope.headers:
+        for k, v in conn.headers:
             if k.lower() == b'range':
                 range_hdr = v.decode()
                 break
@@ -442,7 +442,7 @@ class StaticFiles:
 
             # Conditional GET — answer 304 before touching the body (avoids the
             # large-file read/stream entirely on a cache revalidation).
-            if _not_modified(scope.headers, etag, mtime_ns):
+            if _not_modified(conn.headers, etag, mtime_ns):
                 cond_headers: list[tuple[bytes, bytes]] = [
                     (b'etag', etag), (b'last-modified', last_modified)]
                 if content_encoding:
@@ -506,7 +506,7 @@ class StaticFiles:
         #    doesn't carry offset/count), and any server that doesn't
         #    advertise the extension.
         pathsend_ok = (status != HTTPStatus.PARTIAL_CONTENT
-                       and 'http.response.pathsend' in scope.extensions)
+                       and 'http.response.pathsend' in conn.extensions)
 
         await send({'type': ASGIEvent.HTTP_RESPONSE_START, 'status': status,
                     'headers': [

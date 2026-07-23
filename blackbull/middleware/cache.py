@@ -46,7 +46,7 @@ Usage::
     app.use(Cache(max_age=600))     # 10-minute TTL
 
     @app.route(path='/feed')
-    async def feed(scope, receive, send):
+    async def feed(conn, receive, send):
         ...   # served from cache for 10 min after first hit
 """
 from __future__ import annotations

@@ -131,7 +131,7 @@ class Compression:
         from blackbull.middleware import Compression
 
         @app.route(path='/', middlewares=[Compression()])
-        async def handler(scope, receive, send): ...
+        async def handler(conn, receive, send): ...
     """
 
     def __init__(self, min_size: int = _MIN_SIZE,
