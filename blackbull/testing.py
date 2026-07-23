@@ -234,19 +234,19 @@ class WebSocketTestSession:
             encoded_headers.append(
                 (b'sec-websocket-protocol',
                  ', '.join(subprotocols).encode('latin-1')))
-        # Build the derived scope through Connection.as_scope() — the single
-        # native→ASGI conversion point — so the TestClient's WebSocket scope is
-        # generated exactly the way the real server's is, never hand-rolled.
-        # The TestClient simulates an external ASGI host, so it drives the app
-        # with a scope dict; BlackBull.__call__ converts it back to a Connection
-        # via from_scope. ``subprotocols`` are derived from the request header
-        # (added above), matching how a real client offers them over the wire.
+        # WebSocket is native (Sprint 80): drive the app the way BlackBull's own
+        # server does — ``app(conn, receive, send)`` with a typed Connection — so
+        # the test path never round-trips through an ASGI scope dict (no
+        # ``as_scope`` → ``from_scope`` bounce; that conversion is the external
+        # ASGI boundary's job, exercised by the HTTP TestClient's httpx transport).
+        # ``subprotocols`` are derived from the request header (added above),
+        # matching how a real client offers them over the wire.
         from .connection import Connection  # noqa: PLC0415
         from .headers import Headers  # noqa: PLC0415
-        conn = Connection(
+        self._conn = Connection(
             method='GET',
-            # ASGI parity with the real server (Sprint 68): scope['path'] is
-            # the percent-decoded path component; raw_path is the undecoded
+            # Parity with the real server (Sprint 68): ``conn.path`` is the
+            # percent-decoded path component; ``raw_path`` is the undecoded
             # bytes (UTF-8, not latin-1, so a caller-supplied non-ASCII path
             # round-trips as the server would have received it).
             path=(unquote(raw_path, encoding='utf-8', errors='replace')
@@ -263,8 +263,6 @@ class WebSocketTestSession:
             client=('testclient', 50000),
             server=('testserver', 80),
         )
-        self.scope = conn.as_scope()
-        self.scope['headers'] = encoded_headers
         self._loop_thread = _LoopThread()
         self._app_task: asyncio.Task | None = None
         self._accepted = False
@@ -279,7 +277,7 @@ class WebSocketTestSession:
             async def send(event):
                 self._loop_thread.server_to_client.put(event)
 
-            self._app_task = asyncio.create_task(self.app(self.scope, receive, send))
+            self._app_task = asyncio.create_task(self.app(self._conn, receive, send))
 
         self._loop_thread.run_coro(_spawn(), timeout=self.timeout)
         self._loop_thread.run_coro(
