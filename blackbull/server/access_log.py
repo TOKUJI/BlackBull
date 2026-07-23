@@ -64,6 +64,38 @@ def emit_access_log(record: 'AccessLogRecord') -> None:
             _access_logger.info(record, extra=extra)
 
 
+def request_record_needed(aggregator: 'EventAggregator | None') -> bool:
+    """Whether the per-request :class:`AccessLogRecord` will be consumed.
+
+    The record (and the ``conn.state['access_log']`` write it forces, plus the
+    ``emit`` at request end) exists only for three consumers: the access log
+    (``blackbull.access`` at INFO), phase tracing, and the ``request_completed``
+    event's wire fields. When none is active the record is dead weight on every
+    request — a per-request allocation the v0.60.0 Connection graph makes more
+    costly under concurrency (extra live objects for the cyclic GC to scan) —
+    so the actor skips building it. Consumers already tolerate its absence: the
+    sender guards ``if self._log_record is not None`` and ``request_completed``
+    reads ``conn.state.get('access_log')`` with ``'-'``/``0`` placeholders."""
+    if PHASE_TRACE or _access_logger.isEnabledFor(logging.INFO):
+        return True
+    return aggregator is not None and aggregator.has_request_completed_listeners()
+
+
+def disconnect_events_observed(aggregator: 'EventAggregator | None') -> bool:
+    """Whether the disconnect-detecting receive wrapper is observed.
+
+    The wrapper (a per-request closure) exists to (a) emit ``request_disconnected``
+    and (b) ``mark_disconnected`` so ``request_completed`` can suppress itself on
+    a dropped request. With neither listener present nothing observes either
+    effect, so the actor dispatches the raw ``receive`` directly and saves the
+    closure. Body-level disconnect detection (``conn.body()`` →
+    ``ClientDisconnected``) is independent of this wrapper and unaffected."""
+    if aggregator is None:
+        return False
+    return (aggregator.has_request_disconnected_listeners()
+            or aggregator.has_request_completed_listeners())
+
+
 @dataclass
 class AccessLogRecord:
     """Per-request record populated in two phases.

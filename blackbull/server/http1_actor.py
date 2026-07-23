@@ -23,7 +23,11 @@ from ..headers import Headers
 from .deadline import ConnectionDeadline
 from .recipient import AbstractReader, IncompleteReadError, RecipientFactory, _WS_EVENT_QUEUE_DEPTH
 from .sender import AbstractWriter, SenderFactory
-from .access_log import AccessLogRecord as _AccessLogRecord, _make_disconnect_detecting_receive, emit_access_log as _emit_access_log
+from .access_log import (AccessLogRecord as _AccessLogRecord,
+                         _make_disconnect_detecting_receive,
+                         emit_access_log as _emit_access_log,
+                         request_record_needed as _request_record_needed,
+                         disconnect_events_observed as _disconnect_events_observed)
 from .cap_log import log_cap_hit
 
 logger = logging.getLogger(__name__)
@@ -529,15 +533,28 @@ class HTTP1Actor(Actor):
                         == b'100-continue'):
                     await send(b'', HTTPStatus.CONTINUE)
 
-                log_record = _AccessLogRecord.from_conn(conn)
-                if _PHASE_TRACE:
-                    log_record.phases['loop_start'] = (
-                        _loop_start_perf, _loop_start_cpu)
-                log_record.mark('parsed')
-                # Write onto ``conn.state`` directly (the same dict the scope
-                # exposes as ``scope['state']``) so recording the access log does
-                # not materialize the lazy scope.
-                conn.state['access_log'] = log_record
+                # Build the access-log record only when something consumes it
+                # (access log / phase trace / request_completed listener). On the
+                # baseline hot path — no logging, no listeners — skipping it drops
+                # a per-request allocation and the ``conn.state`` dict it forces
+                # (Sprint 80 alloc-reduction; the Connection graph's per-request
+                # objects are what the cyclic GC scans under concurrency). The
+                # legacy (no-aggregator) branch of ``_dispatch_request`` reads the
+                # record unconditionally, so keep building it when there is no
+                # aggregator. Consumers below are all None-tolerant (the sender
+                # guards ``_log_record is not None``; the finally guards ``emit``).
+                if self._aggregator is None or _request_record_needed(self._aggregator):
+                    log_record = _AccessLogRecord.from_conn(conn)
+                    if _PHASE_TRACE:
+                        log_record.phases['loop_start'] = (
+                            _loop_start_perf, _loop_start_cpu)
+                    log_record.mark('parsed')
+                    # Write onto ``conn.state`` directly (the same dict the scope
+                    # exposes as ``scope['state']``) so recording the access log
+                    # does not materialize the lazy scope.
+                    conn.state['access_log'] = log_record
+                else:
+                    log_record = None
                 # Sprint 38 Task B — reset per-request sender state.  The
                 # HTTP1Sender instance is shared across keep-alive
                 # requests on this connection; without this reset
@@ -1107,8 +1124,14 @@ class HTTP1Actor(Actor):
         # tail-latency regression. Idempotent (only binds when unset).
         bind_receive_channel(conn, inner_receive)
         if self._aggregator is not None:
-            detecting_receive = _make_disconnect_detecting_receive(
-                inner_receive, conn, self._aggregator)
+            # Wrap receive for disconnect detection only when a listener observes
+            # it (request_disconnected, or request_completed via mark_disconnected);
+            # otherwise dispatch the raw receive and save the per-request closure.
+            if _disconnect_events_observed(self._aggregator):
+                detecting_receive = _make_disconnect_detecting_receive(
+                    inner_receive, conn, self._aggregator)
+            else:
+                detecting_receive = inner_receive
             request_actor = RequestActor(
                 conn, detecting_receive, capturing_send,
                 self._app, self._aggregator,
@@ -1123,8 +1146,9 @@ class HTTP1Actor(Actor):
             except BaseException:
                 return False
             finally:
-                log_record.mark('dispatch_done')
-                _emit_access_log(log_record)
+                if log_record is not None:
+                    log_record.mark('dispatch_done')
+                    _emit_access_log(log_record)
         else:
             _dispatcher = getattr(self._app, '_dispatcher', None)
             if _dispatcher is not None:

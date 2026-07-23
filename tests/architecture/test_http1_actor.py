@@ -649,3 +649,76 @@ async def test_ws_upgrade_without_accept_id_generates_unified_format():
 
     cid = seen_conns[0].connection_id
     assert len(cid) == 20 and set(cid) <= set('0123456789abcdef')
+
+
+# ---------------------------------------------------------------------------
+# Alloc-reduction (Sprint 80): the baseline hot path skips the per-request
+# AccessLogRecord when nothing consumes it. Pins the optimization so a future
+# change can't silently make the record unconditional again.
+# ---------------------------------------------------------------------------
+
+def _real_agg_actor(raw: bytes, app, aggregator):
+    """Build an actor with a *real* EventAggregator (not None/AsyncMock) so the
+    record/disconnect gates take their production branch."""
+    writer = _FakeWriter()
+    first_line, rest = raw.split(b'\r\n', 1)
+    reader = _FakeReader(rest)
+    actor = HTTP1Actor(
+        reader, writer, app, aggregator,
+        request=first_line + b'\r\n',
+        peername=('127.0.0.1', 54321), sockname=('0.0.0.0', 8000),
+    )
+    return actor, writer
+
+
+@pytest.mark.asyncio
+async def test_baseline_hot_path_skips_access_log_record():
+    """Access logging off + no request_completed listener ⇒ the actor must not
+    build the AccessLogRecord (nor the ``conn.state['access_log']`` it forces)."""
+    import logging
+    from blackbull import BlackBull
+
+    app = BlackBull()
+    seen: dict = {}
+
+    @app.route(path='/')
+    async def index(conn):
+        seen['state_keys'] = list(conn.state.keys())
+        return b'ok'
+
+    agg = EventAggregator(app._dispatcher)
+    access_logger = logging.getLogger('blackbull.access')
+    prev = access_logger.level
+    access_logger.setLevel(logging.WARNING)  # ensure INFO disabled
+    try:
+        actor, _ = _real_agg_actor(_http_get(), app, agg)
+        await actor.run()
+    finally:
+        access_logger.setLevel(prev)
+
+    assert 'access_log' not in seen['state_keys']
+
+
+@pytest.mark.asyncio
+async def test_request_completed_listener_forces_access_log_record():
+    """The inverse: a request_completed listener reads the record's wire fields,
+    so the actor must still build it and publish it on ``conn.state``."""
+    from blackbull import BlackBull
+
+    app = BlackBull()
+    seen: dict = {}
+
+    @app.route(path='/')
+    async def index(conn):
+        seen['state_keys'] = list(conn.state.keys())
+        return b'ok'
+
+    @app.on('request_completed')
+    async def _rc(event):
+        pass
+
+    agg = EventAggregator(app._dispatcher)
+    actor, _ = _real_agg_actor(_http_get(), app, agg)
+    await actor.run()
+
+    assert 'access_log' in seen['state_keys']

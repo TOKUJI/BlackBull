@@ -117,6 +117,23 @@ class EventAggregator:
             "subprotocol":   subprotocol,
         }))
 
+    def has_request_completed_listeners(self) -> bool:
+        """Return True if any ``request_completed`` handler is registered.
+
+        Read on the request hot path to decide whether the per-request
+        AccessLogRecord (whose wire fields this event reports) must be built,
+        and whether the disconnect-detecting receive wrapper (whose
+        ``mark_disconnected`` this event reads to suppress itself on a dropped
+        request) is observed."""
+        return self._dispatcher.has_listeners('request_completed')
+
+    def has_request_disconnected_listeners(self) -> bool:
+        """Return True if any ``request_disconnected`` handler is registered.
+
+        Read on the request hot path to decide whether the disconnect-detecting
+        receive wrapper needs to be built at all."""
+        return self._dispatcher.has_listeners('request_disconnected')
+
     def has_websocket_message_listeners(self) -> bool:
         """Return True if any ``websocket_message`` handler is registered.
 
