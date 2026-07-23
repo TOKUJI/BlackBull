@@ -166,7 +166,7 @@ async def test_websocket_message_event_fires_for_text_frame():
     assert e.name == 'websocket_message'
     assert e.detail['text'] == 'hello'
     assert e.detail['bytes'] is None
-    assert e.detail['scope']['path'] == '/ws'
+    assert e.detail['conn']['path'] == '/ws'
 
 
 @pytest.mark.asyncio

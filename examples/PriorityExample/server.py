@@ -64,7 +64,7 @@ def _priority(conn) -> dict:
     surface BlackBull populates for HTTP/2 requests (v0.31+).  *conn* is the
     native :class:`~blackbull.connection.Connection` (handlers receive it as
     ``scope``; the ``request_received`` event carries it as
-    ``event.detail['scope']``).
+    ``event.detail['conn']``).
     """
     return conn.extensions.get('http.response.priority', _DEFAULT_PRIORITY)
 
@@ -76,7 +76,7 @@ async def log_priority(event):
     Uses @app.on (observer) so priority logging is fire-and-forget and can
     never block or short-circuit the handler.
     """
-    hint = _priority(event.detail['scope'])
+    hint = _priority(event.detail['conn'])
     logger.info(
         '%s %s | priority: u=%d incremental=%s',
         event.detail['method'],

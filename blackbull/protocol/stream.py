@@ -1,6 +1,6 @@
 """HTTP/2 stream state and the priority tree (RFC 7540 §5).
 
-Each ``Stream`` node owns the ASGI ``scope`` for one in-flight request as
+Each ``Stream`` node owns the dispatch target (native Connection, or ASGI scope on the compat lanes) for one in-flight request as
 well as its position in the dependency tree (parent + weight) used by the
 priority machinery.  ``StreamState`` enumerates the lifecycle states
 defined in RFC 7540 §5.1; ``on_headers_received`` / ``on_data_received``
@@ -23,7 +23,7 @@ class StreamState(Enum):
 class Stream:
     """One node in the HTTP/2 stream-priority tree (RFC 7540 §5.1, §5.3).
 
-    A ``Stream`` carries the ASGI ``scope`` for one in-flight request,
+    A ``Stream`` carries the request's dispatch target (Connection or ASGI scope),
     plus its position in the priority tree (parent + weight).
 
     ``identifier == 0`` is the connection-level pseudo-stream
@@ -42,7 +42,7 @@ class Stream:
     # attribute referenced anywhere on the class must be declared here.
     __slots__ = (
         'parent', 'weight', 'stream_id', 'window_size',
-        'children', 'scope', 'state', 'priority_hint',
+        'children', 'conn', 'state', 'priority_hint',
         'closed_via_rst',
         'expected_content_length', 'received_data_bytes',
     )
@@ -56,7 +56,9 @@ class Stream:
             self.window_size = window_size
 
         self.children = {}
-        self.scope = None
+        # The dispatch target for this stream's request: the native Connection
+        # (HTTP), or an ASGI scope dict on the WebSocket / force_asgi lanes.
+        self.conn = None
         self.state = StreamState.IDLE
         self.priority_hint: dict[str, int | bool] | None = None
         # RFC 9113 §5.1 — distinguishes closed-via-END_STREAM (normal close)
@@ -149,4 +151,4 @@ class Stream:
         return None
 
     def __repr__(self):
-        return f'Stream(ID: {self.stream_id}, scope={self.scope}, state={self.state})'
+        return f'Stream(ID: {self.stream_id}, conn={self.conn}, state={self.state})'

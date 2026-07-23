@@ -84,7 +84,7 @@ def test_native_baseline_request_never_materializes_scope_dict():
     ``Request`` — must never build an ASGI scope dict at all. BlackBull is a
     native-Connection framework: the dispatch pipeline threads ``conn`` end to
     end and only the ``BB_FORCE_ASGI_SCOPE`` / external-ASGI boundary calls
-    ``as_scope``/``to_dispatch_scope``/``_scope_contents``. If any
+    ``as_scope``/``to_asgi_scope``/``_scope_contents``. If any
     framework-internal hot-path code starts deriving a scope from the
     Connection, one of those methods fires and this fails."""
     import asyncio
@@ -100,7 +100,7 @@ def test_native_baseline_request_never_materializes_scope_dict():
 
     # Trip-wire: record any scope-derivation call on the Connection.
     built: list[str] = []
-    spied = ('as_scope', 'to_dispatch_scope', '_scope_contents')
+    spied = ('as_scope', 'to_asgi_scope', '_scope_contents')
     originals = {name: getattr(Connection, name) for name in spied}
 
     def _make_spy(name, orig):

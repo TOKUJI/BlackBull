@@ -149,7 +149,7 @@ async def require_auth(event):
     path = event.detail['path']
     if not (path.startswith('/tasks') or path == '/logout'):
         return
-    conn = event.detail['scope']          # native Connection
+    conn = event.detail['conn']          # native Connection
     auth = conn.headers.get(b'authorization', b'')
     token = auth[7:].decode() if auth.startswith(b'Bearer ') else ''
     username = SESSIONS.get(token)
@@ -166,7 +166,7 @@ async def handle_priority(event):
     urgency 0-1  → high-priority: log prominently.
     urgency 2-7  → normal/background: annotate conn.state only.
     """
-    conn = event.detail['scope']          # native Connection
+    conn = event.detail['conn']          # native Connection
     hint = conn.extensions.get('http.response.priority',
                                {'urgency': 3, 'incremental': False})
     urgency = hint['urgency']

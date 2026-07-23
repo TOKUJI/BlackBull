@@ -30,7 +30,7 @@ from .event import Event, EventDispatcher, EventHandler
 from .utils import Scheme, is_client_error, is_server_error
 from .router import Router, RouteInfo, ErrorRouter, MethodNotApplicable, PathNotRegistered, ConfigurationError, HTTPException, has_middleware_param
 from .request import ClientDisconnected
-from .connection import Connection, disconnected
+from .connection import Connection, disconnected, CONNECTION_STASH_KEY
 from .config import AppConfig
 logger = logging.getLogger(__name__)
 
@@ -474,7 +474,7 @@ class BlackBull:
 
             @app.on('scope_completed', blocking=True)   # awaited cleanup
             async def close_session(event: Event):
-                session = event.detail['scope'].get('state', {}).get('db')
+                session = event.detail['conn'].get('state', {}).get('db')
                 if session is not None:
                     await session.close()
             ```
@@ -611,7 +611,7 @@ class BlackBull:
         if dispatcher.has_listeners('request_received'):
             client = conn.client or ('-',)
             await dispatcher.emit(Event('request_received', detail={
-                'scope':        conn,
+                'conn':        conn,
                 'client_ip':    str(client[0]),
                 'method':       conn.method,
                 'path':         conn.path,
@@ -724,7 +724,7 @@ class BlackBull:
         try:
             if self._dispatcher.has_listeners('before_handler'):
                 await self._dispatcher.emit(Event('before_handler', detail={
-                    'scope':     conn,
+                    'conn':     conn,
                     'client_ip': conn.client[0] if conn.client else '',
                     'method':    conn.method,
                     'path':      conn.path,
@@ -753,7 +753,7 @@ class BlackBull:
         finally:
             if self._dispatcher.has_listeners('after_handler'):
                 await self._dispatcher.emit(Event('after_handler', detail={
-                    'scope':     conn,
+                    'conn':     conn,
                     'client_ip': conn.client[0] if conn.client else '',
                     'method':    conn.method,
                     'path':      conn.path,
@@ -804,10 +804,20 @@ class BlackBull:
             # the terminal ``scope_completed`` event below.
             request = scope
         else:
-            # External ASGI / forced-compat HTTP lane: the single ASGI→native
-            # conversion point (``from_scope`` normalizes headers to ``Headers``
-            # and binds ``receive``). The Connection flows on from here.
-            request = Connection.from_scope(scope, receive)
+            # HTTP dispatched as a scope dict. BlackBull's own HTTP/2 actor
+            # stashes the Connection it already built (``parse_headers`` →
+            # ``Connection``, ``bind_receive_channel`` → its raw receive) under
+            # ``CONNECTION_STASH_KEY``; reuse it. ``from_scope`` would otherwise
+            # rebuild a byte-identical Connection — measured ~1.8 µs/req, the
+            # dominant HTTP/2 per-stream cost (v0.60.0 regression, §9 Step 2a).
+            # Do NOT rebind ``_receive``: the stash already holds the *raw*
+            # recipient (the disconnect-detecting wrapper is passed separately as
+            # ``receive``), keeping the per-request graph acyclic (Step 1).
+            # Only true external ASGI hosts / the ``force_asgi`` lane carry no
+            # stash → the single ASGI→native ``from_scope`` conversion point.
+            request = scope.get(CONNECTION_STASH_KEY)
+            if request is None:
+                request = Connection.from_scope(scope, receive)
 
         if self._chain is None:
             self._build_chain()
@@ -850,7 +860,7 @@ class BlackBull:
                 log = conn.state.get('access_log')
                 client = conn.client or ('-',)
                 await dispatcher.emit(Event('request_completed', detail={
-                    'scope':          conn,
+                    'conn':          conn,
                     'client_ip':      str(client[0]),
                     'method':         conn.method,
                     'path':           conn.path,
@@ -875,7 +885,7 @@ class BlackBull:
                     client, rpath = request.get('client'), request.get('path', '-')
                 err = exc or st.get('error_exception')
                 await dispatcher.emit(Event('scope_completed', {
-                    'scope':     request,
+                    'conn':     request,
                     'type':      rtype,
                     'client_ip': str((client or ['-'])[0]),
                     'path':      rpath,

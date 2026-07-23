@@ -56,7 +56,7 @@ CONNECTION_STASH_KEY = '_connection'
 
 #: Shared, never-mutated ASGI info sub-dict for the native dispatch scope
 #: (Sprint 80 Tier-1b). ``as_scope()`` still emits a fresh copy for the external
-#: compat boundary; only the self-hosted ``to_dispatch_scope`` fast path reuses
+#: compat boundary; only the self-hosted ``to_asgi_scope`` fast path reuses
 #: this constant to save one dict allocation per request. ASGI consumers read
 #: ``scope['asgi']['version']`` but never mutate the sub-dict.
 _DISPATCH_ASGI_INFO = {'version': '3.0', 'spec_version': '2.2'}
@@ -313,7 +313,7 @@ class Connection:
         conn._receive = receive
         return conn
 
-    def to_dispatch_scope(self, *, force_asgi: bool = False) -> dict:
+    def to_asgi_scope(self, *, force_asgi: bool = False) -> dict:
         """Materialize the ASGI scope the dispatch pipeline consumes, with this
         typed :class:`Connection` stashed on it for zero-reconversion reads.
 
@@ -370,7 +370,7 @@ class Connection:
         buffering middleware's writes reach the handler; ``headers`` is the rich
         :class:`Headers` object (internal ``.get()`` callers want it). The one
         place a dispatch scope's key/values are assembled, used by
-        ``to_dispatch_scope`` for the ``BB_FORCE_ASGI_SCOPE`` / external boundary."""
+        ``to_asgi_scope`` for the ``BB_FORCE_ASGI_SCOPE`` / external boundary."""
         client = self.client
         server = self.server
         scope = {

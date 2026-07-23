@@ -508,7 +508,7 @@ class HTTP1Actor(Actor):
                 # plumbing (RecipientFactory, access log, keep-alive) always reads
                 # ``conn``.
                 if cfg.force_asgi_scope:
-                    app_arg = conn.to_dispatch_scope(force_asgi=True)  # pure scope
+                    app_arg = conn.to_asgi_scope(force_asgi=True)  # pure scope
                 else:
                     app_arg = conn                                     # native Connection
 
@@ -517,7 +517,7 @@ class HTTP1Actor(Actor):
                     # carries WS-only extras — subprotocols, _connection_id — that
                     # are not Connection fields); hand it a real scope dict with
                     # the Connection stashed for any conn.* reads.
-                    await self._handle_upgrade(conn.to_dispatch_scope())
+                    await self._handle_upgrade(conn.to_asgi_scope())
                     return
 
                 # RFC 9110 §10.1.1 / §15.2 — a server MUST NOT send a 1xx
@@ -1078,7 +1078,7 @@ class HTTP1Actor(Actor):
                     await dispatcher.emit(Event(
                         'request_disconnected',
                         detail={
-                            'scope':        scope,
+                            'conn':        scope,
                             'client_ip':    log_record.client_ip,
                             'method':       log_record.method,
                             'path':         log_record.path,

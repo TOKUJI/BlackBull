@@ -88,7 +88,7 @@ Pass `blocking=True` to await the observer in registration order
 ```python
 @app.on('scope_completed', blocking=True)
 async def close_session(event: Event):
-    session = event.detail['scope'].get('state', {}).get('db_session')
+    session = event.detail['conn'].get('state', {}).get('db_session')
     if session is not None:
         await session.close()
 ```
@@ -185,7 +185,7 @@ runs as an ASGI app under an external server (uvicorn, hypercorn,
 ```python
 @app.intercept('request_received')
 async def require_api_key(event):
-    headers = event.detail['scope']['headers']
+    headers = event.detail['conn']['headers']
     if headers.get(b'x-api-key') != b'secret':
         raise PermissionError('missing or invalid API key')
 
@@ -260,7 +260,7 @@ is gone:
 ```python
 @app.on('scope_completed', blocking=True)
 async def cleanup(event: Event):
-    scope = event.detail['scope']
+    scope = event.detail['conn']
     tmp = scope.get('state', {}).get('tempfile')
     if tmp is not None:
         os.unlink(tmp)
@@ -305,10 +305,10 @@ server accepted — including ones the handler never reads.
 @app.on('websocket_message')
 async def log_message(event: Event):
     if event.detail['text'] is not None:
-        print(f"[ws] text on {event.detail['scope']['path']}: "
+        print(f"[ws] text on {event.detail['conn']['path']}: "
               f"{event.detail['text']!r}")
     else:
-        print(f"[ws] binary on {event.detail['scope']['path']}: "
+        print(f"[ws] binary on {event.detail['conn']['path']}: "
               f"{len(event.detail['bytes'])} bytes")
 ```
 

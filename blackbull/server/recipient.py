@@ -1100,7 +1100,7 @@ class WebSocketRecipient(BaseRecipient):
             await self._dispatcher.emit(Event(
                 'websocket_message',
                 detail={
-                    'scope': self._scope,
+                    'conn': self._scope,
                     'text': asgi_event['text'],
                     'bytes': asgi_event['bytes'],
                 },
@@ -1161,7 +1161,7 @@ class WebSocketRecipient(BaseRecipient):
             await self._dispatcher.emit(Event(
                 'websocket_disconnected',
                 detail={
-                    'scope':         self._scope,
+                    'conn':         self._scope,
                     'connection_id': self._scope.get('_connection_id', ''),
                     'client_ip':     self._scope['client'][0] if self._scope.get('client') else '',
                     'path':          self._scope.get('path', ''),

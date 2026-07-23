@@ -178,7 +178,7 @@ async def test_websocket_connected_detail_shape():
     assert len(captured) == 1
 
     d = captured[0].detail
-    assert 'scope' in d
+    assert 'conn' in d
     assert isinstance(d['connection_id'], str) and len(d['connection_id']) > 0
     assert isinstance(d['client_ip'], str)
     assert d['path'] == '/ws'
@@ -264,7 +264,7 @@ async def test_connection_id_available_in_scope_during_message():
 
     @app.on('websocket_message')
     async def on_message(event: Event):
-        cid = event.detail['scope'].get('_connection_id', '')
+        cid = event.detail['conn'].get('_connection_id', '')
         message_ids.append(cid)
         message_seen.set()
 

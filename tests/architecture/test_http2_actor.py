@@ -146,10 +146,10 @@ async def test_stream_error_isolated(fake_two_stream_reader, fake_writer) -> Non
     call_count = 0
     completed = 0
 
-    async def app_with_one_error(scope, _receive, send):
+    async def app_with_one_error(conn, _receive, send):
         nonlocal call_count, completed
         call_count += 1
-        if scope.get('path') == '/' and call_count == 1:
+        if conn.path == '/' and call_count == 1:
             raise RuntimeError('stream error')
         await send({'type': 'http.response.start', 'status': 200, 'headers': []})
         await send({'type': 'http.response.body', 'body': b''})
@@ -164,16 +164,17 @@ async def test_stream_error_isolated(fake_two_stream_reader, fake_writer) -> Non
 
 
 # ---------------------------------------------------------------------------
-# Test 4: scope['client'] and scope['server'] populated from TCP metadata
+# Test 4: conn.client and conn.server populated from TCP metadata
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_scope_has_client_and_server(fake_h2_reader, fake_writer) -> None:
-    """Regression: HTTP2Actor must inject peername/sockname into scope."""
-    received_scope = {}
+async def test_conn_has_client_and_server(fake_h2_reader, fake_writer) -> None:
+    """Regression: HTTP2Actor must inject peername/sockname into the Connection."""
+    received = {}
 
-    async def capture_app(scope, receive, send):
-        received_scope.update(scope)
+    async def capture_app(conn, receive, send):
+        received['client'] = conn.client
+        received['server'] = conn.server
         await send({'type': 'http.response.start', 'status': 200, 'headers': []})
         await send({'type': 'http.response.body', 'body': b''})
 
@@ -185,8 +186,8 @@ async def test_scope_has_client_and_server(fake_h2_reader, fake_writer) -> None:
     )
     await actor.run()
 
-    assert received_scope['client'] == ['192.168.1.1', 54321]
-    assert received_scope['server'] == ['0.0.0.0', 443]
+    assert received['client'] == ('192.168.1.1', 54321)
+    assert received['server'] == ('0.0.0.0', 443)
 
 
 # ---------------------------------------------------------------------------

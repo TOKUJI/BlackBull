@@ -55,7 +55,7 @@ For code search and refactoring:
 
 ## Simplified handler signatures
 
-Route handlers may omit `scope`, `receive`, and `send`. The router detects this
+Route handlers may omit `conn`, `receive`, and `send`. The router detects this
 at registration time and wraps the function automatically:
 
 ```python
@@ -82,7 +82,8 @@ async def search(q: str, page: int = 1, db=Depends(get_db)):
 ```
 
 Supported parameters: named path params (coerced to annotation type), `body: bytes`,
-`scope`, `Request` (annotation `Request` under any name, or the bare name
+`conn`/`connection` (the native `Connection`; `scope` is a deprecated alias),
+`Request` (annotation `Request` under any name, or the bare name
 `request` unannotated) — `request.body()`/`json()`/`text()` cache one drain of
 `receive`, shared with a coexisting `body` param — `Depends(provider)` as a
 default value (per-request provider injection, Sprint 74), and **query params**
@@ -99,8 +100,10 @@ for HTTP, `scope` is the native `Connection` (see below).
 
 BlackBull's own server threads a typed `Connection` (blackbull/connection.py)
 end to end for **HTTP** — `app(conn, receive, send)`, and the middleware chain,
-router, handlers, error handlers, and lifecycle-event `detail['scope']` all
-receive that `Connection`. There is no ASGI `scope` dict on the native hot path
+router, handlers, error handlers, and lifecycle-event `detail['conn']` all
+receive that `Connection`. This holds for **HTTP/2 too** (Sprint 80 follow-up):
+the H/2 actor threads the `Connection` directly — no per-stream ASGI scope dict,
+no `from_scope` rebuild. There is no ASGI `scope` dict on the native hot path
 (the `_LazyScope` bridge was removed). Read request fields as attributes:
 
 | ASGI idiom (old) | Native `Connection` |
@@ -132,16 +135,18 @@ response events; the sender consumes them.
 ## Middleware convention
 
 ```python
-async def my_mw(scope, receive, send, call_next):   # `scope` is a Connection for HTTP
+async def my_mw(conn, receive, send, call_next):   # `conn` is a Connection for HTTP
     # pre-handler work — read conn.headers, share via conn.state[...]
-    await call_next(scope, receive, send)
+    await call_next(conn, receive, send)
     # post-handler work
 ```
 
+- The first argument is named `conn` — BlackBull threads a `Connection`, not an
+  ASGI scope. (The word "scope" is reserved for a genuine ASGI scope dict.)
 - `call_next` is bound by `_register_chain` via `functools.partial`
 - Short-circuit by returning without calling `call_next`
 - Non-HTTP (WebSocket) still arrives as a scope dict — guard with
-  `isinstance(scope, Connection)` if the middleware must handle both.
+  `isinstance(conn, Connection)` if the middleware must handle both.
 
 ## Event API
 
@@ -153,7 +158,7 @@ async def log_it(event): ...
 
 @app.intercept('before_handler')     # synchronous; exceptions propagate to emitter
 async def auth(event):               # every handler receives the Event
-    if not valid(event.detail['scope']):
+    if not valid(event.detail['conn']):   # the Connection (WS events: a scope dict)
         raise PermissionError('denied')
 ```
 

@@ -91,4 +91,4 @@ async def test_lifecycle_event_detail_reports_query_method():
     d = captured[0].detail
     assert d['method'] == 'QUERY'
     assert d['path'] == '/search'
-    assert d['scope'].method == 'QUERY'
+    assert d['conn'].method == 'QUERY'

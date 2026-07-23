@@ -72,7 +72,7 @@ class EventAggregator:
         client, method, path, http_version = _request_fields(scope)
         client = client or ['-']
         await self._dispatcher.emit(Event("request_disconnected", {
-            'scope':        scope,
+            'conn':        scope,
             'client_ip':    str(client[0]),
             'method':       method,
             'path':         path,
@@ -86,7 +86,7 @@ class EventAggregator:
         if not self._dispatcher.has_listeners('error'):
             return
         await self._dispatcher.emit(
-            Event("error", {"scope": scope, "exception": exception})
+            Event("error", {'conn': scope, "exception": exception})
         )
 
     # ------------------------------------------------------------------
@@ -99,7 +99,7 @@ class EventAggregator:
         """Fire Level B ``websocket_connected``."""
         client = scope.get('client')
         await self._dispatcher.emit(Event("websocket_connected", {
-            "scope":         scope,
+            'conn':         scope,
             "connection_id": scope.get('_connection_id', ''),
             "client_ip":     client[0] if client else '',
             "path":          scope.get('path', ''),
@@ -126,7 +126,7 @@ class EventAggregator:
     ) -> None:
         """Fire Level B ``websocket_message``."""
         await self._dispatcher.emit(
-            Event("websocket_message", {"scope": scope, "message": message})
+            Event("websocket_message", {'conn': scope, "message": message})
         )
 
     async def on_websocket_disconnected(
@@ -135,7 +135,7 @@ class EventAggregator:
         """Fire Level B ``websocket_disconnected``."""
         client = scope.get('client')
         await self._dispatcher.emit(Event("websocket_disconnected", {
-            "scope":         scope,
+            'conn':         scope,
             "connection_id": scope.get('_connection_id', ''),
             "client_ip":     client[0] if client else '',
             "path":          scope.get('path', ''),

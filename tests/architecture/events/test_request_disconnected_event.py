@@ -254,13 +254,13 @@ async def test_disconnected_event_detail_has_request_identification_fields():
     assert len(captured) == 1
 
     d = captured[0].detail
-    assert 'scope' in d
+    assert 'conn' in d
     assert d['method'] == 'GET'
     assert d['path'] == '/x'
     assert 'client_ip' in d
     assert 'http_version' in d
-    assert d['scope'].method == d['method']
-    assert d['scope'].path == d['path']
+    assert d['conn'].method == d['method']
+    assert d['conn'].path == d['path']
     assert 'status' not in d
     assert 'response_bytes' not in d
     assert 'duration_ms' not in d

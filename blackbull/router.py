@@ -746,10 +746,11 @@ def _handler_param_plan(fn, path_param_names: set) -> tuple:
 
     Returns ``(params, annotations, categories)`` where *categories* maps
     parameter name → ``(kind, payload)`` with kind one of ``'path'``,
-    ``'scope'``, ``'body'``, ``'request'``, ``'dataclass'``, ``'depends'``
+    ``'conn'``, ``'body'``, ``'request'``, ``'dataclass'``, ``'depends'``
     (payload: the :class:`~blackbull.di.Depends` instance), or ``'query'``
     (payload: :class:`_QuerySpec`).  Precedence: path params first, then the
-    reserved names ``body``/``scope``, then a ``Depends`` default, then
+    reserved names ``body``/``conn`` (``connection``/``scope`` alias), then a
+    ``Depends`` default, then
     ``Connection`` recognition, then a dataclass body annotation; anything left
     is a query param — the fallback category.
 
@@ -785,13 +786,16 @@ def _handler_param_plan(fn, path_param_names: set) -> tuple:
                     f"is a path param of {sorted(path_param_names)!r} and "
                     f"cannot carry a Depends default.")
             categories[name] = ('path', None)
-        elif name in ('body', 'scope'):
+        elif name in ('body', 'conn', 'connection', 'scope'):
             if is_dep:
                 raise TypeError(
                     f"Simplified handler {fn.__name__!r}: parameter {name!r} "
                     f"is reserved for the request {name} and cannot carry a "
                     f"Depends default — rename the parameter.")
-            categories[name] = (name, None)
+            # ``conn`` / ``connection`` inject the native Connection; ``scope`` is
+            # a deprecated alias for the same object (BlackBull threads a
+            # Connection, not an ASGI scope, on the native path).
+            categories[name] = ('body' if name == 'body' else 'conn', None)
         elif is_dep:
             categories[name] = ('depends', default)
         elif ann is _Conn or (name == 'request' and ann is inspect.Parameter.empty):
@@ -809,7 +813,7 @@ def _handler_param_plan(fn, path_param_names: set) -> tuple:
                 raise TypeError(
                     f"Simplified handler {fn.__name__!r}: cannot resolve "
                     f"parameter {name!r}. Expected a path param of "
-                    f"{sorted(path_param_names)!r}, 'body', 'scope', a "
+                    f"{sorted(path_param_names)!r}, 'body', 'conn', a "
                     f"parameter annotated with Connection (or named 'request'), "
                     f"a dataclass body param, a Depends(...) default, or a "
                     f"query param annotated str/int/float/bool "
@@ -905,7 +909,8 @@ def _adapt_handler(fn, path: str, converters: dict | None = None):
       instantiated; nested dataclasses, ``list[T]``, and ``T | None`` are
       handled recursively.  ``body: SomeDataclass`` also works.
     - 'body' (un-annotated, or annotated as ``bytes``) → await read_body(receive)
-    - 'scope' → the raw scope dict
+    - 'conn' / 'connection' (or the deprecated alias 'scope') → the native
+      :class:`~blackbull.connection.Connection`
     - Annotation is ``Request`` (any name), or the name is ``request`` with no
       annotation → a per-request ``Request(scope, receive)`` context object.
       Its ``body()`` cache is the drain point for 'body' / dataclass params
@@ -957,7 +962,7 @@ def _adapt_handler(fn, path: str, converters: dict | None = None):
         kwargs: dict = {}
         for name in params:
             ann = annotations.get(name, inspect.Parameter.empty)
-            if name == 'scope':
+            if categories[name][0] == 'conn':
                 kwargs[name] = conn
             elif name == 'body':
                 raw = await conn.body()
@@ -1044,7 +1049,7 @@ def _adapt_handler(fn, path: str, converters: dict | None = None):
                             f'query parameter {name!r}: cannot coerce {raw!r} '
                             f'to {payload.type.__name__}',
                         ) from exc
-            elif kind == 'scope':
+            elif kind == 'conn':
                 kwargs[name] = conn
             elif kind == 'body':
                 raw = await conn.body()

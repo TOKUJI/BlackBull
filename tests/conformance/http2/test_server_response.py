@@ -428,7 +428,7 @@ async def test_priority_update_existing_stream_stores_hint():
     frame.priority_field = 'u=2'
 
     stream = MagicMock()
-    stream.scope = {}
+    stream.conn = {}
     handler = MagicMock()
     handler.find_stream.return_value = stream
 
@@ -436,7 +436,7 @@ async def test_priority_update_existing_stream_stores_hint():
     await responder.respond(handler)
 
     assert stream.priority_hint == {'urgency': 2}
-    assert stream.scope['http2_priority'] == {'urgency': 2}
+    assert stream.conn['http2_priority'] == {'urgency': 2}
 
 
 @pytest.mark.asyncio
@@ -447,7 +447,7 @@ async def test_priority_update_new_stream_precreated():
     frame.priority_field = 'u=1'
 
     new_stream = MagicMock()
-    new_stream.scope = None  # scope not yet available
+    new_stream.conn = None  # dispatch target not yet available
 
     handler = MagicMock()
     # First call: None (stream doesn't exist), second call: the new stream
