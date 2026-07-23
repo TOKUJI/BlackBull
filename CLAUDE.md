@@ -93,8 +93,10 @@ defaults → optional and missing-required/failed-coercion → 400. Classificati
 happens once at registration (`_handler_param_plan`, router.py); handlers using
 neither new feature keep the pre-Sprint-74 wrapper (zero-overhead pin). Return
 `str`, `bytes`, `dict`, `Response`, or `None`. Middleware functions and
-WebSocket handlers always use the full `(scope, receive, send)` form — where,
-for HTTP, `scope` is the native `Connection` (see below).
+WebSocket handlers always use the full `(conn, receive, send)` form — `conn`
+is the native `Connection` for both HTTP and WebSocket (see below). The
+full-form pin is now the presence of both channel params (`receive`+`send`),
+so the first param may be named `conn`/`connection`/`scope`/`websocket`.
 
 ## Native `Connection` (Sprint 80 — BlackBull is no longer an ASGI framework)
 
@@ -115,9 +117,15 @@ no `from_scope` rebuild. There is no ASGI `scope` dict on the native hot path
 | `scope['user'] = ...` (middleware injection) | `conn.state['user'] = ...` |
 | `await read_body(receive)` | unchanged (or `await conn.body()`/`.json()`) |
 
-The **WebSocket** path stays ASGI-scope-shaped (WS carries extras —
-`subprotocols`, `_connection_id`, `_ws_*` — that are not `Connection` fields),
-so a WS handler's `scope` is still a dict.
+**WebSocket is native too** (Sprint 80 follow-up): the H/1.1 upgrade path and
+the H/2 RFC-8441 path both thread the same typed `Connection` — `app(conn,
+receive, send)`, `WebSocketActor`, the WS lifecycle events, and the recipient
+all read `conn.*`. The former scope-dict extras now live on the Connection:
+`subprotocols` is a **derived property** (parsed from the request header),
+`connection_id` is the existing field, and the transient handshake plumbing
+(the deferred 101/200 responder, permessage-deflate params, auto-negotiated
+subprotocol) sits in a private `conn._ws` bag that is `None` on every HTTP
+request. No scope dict is threaded for WebSocket on the native path.
 
 Two boundaries still convert to/from an ASGI scope dict:
 - **External ASGI hosts** (uvicorn, `httpx.ASGITransport`/TestClient) call
@@ -145,8 +153,10 @@ async def my_mw(conn, receive, send, call_next):   # `conn` is a Connection for 
   ASGI scope. (The word "scope" is reserved for a genuine ASGI scope dict.)
 - `call_next` is bound by `_register_chain` via `functools.partial`
 - Short-circuit by returning without calling `call_next`
-- Non-HTTP (WebSocket) still arrives as a scope dict — guard with
-  `isinstance(conn, Connection)` if the middleware must handle both.
+- WebSocket also arrives as a `Connection` (Sprint 80). The only ASGI scope
+  dict a middleware can still see is the compat lane (`BB_FORCE_ASGI_SCOPE` /
+  an external ASGI host), so guard with `isinstance(conn, Connection)` only if
+  the middleware must also run under that flag.
 
 ## Event API
 
@@ -158,7 +168,7 @@ async def log_it(event): ...
 
 @app.intercept('before_handler')     # synchronous; exceptions propagate to emitter
 async def auth(event):               # every handler receives the Event
-    if not valid(event.detail['conn']):   # the Connection (WS events: a scope dict)
+    if not valid(event.detail['conn']):   # the Connection (HTTP and WebSocket)
         raise PermissionError('denied')
 ```
 

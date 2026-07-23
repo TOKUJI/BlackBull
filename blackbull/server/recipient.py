@@ -12,7 +12,9 @@ from .ws_codec import (
 from .constants import WSCloseCode
 from ..asgi import ASGIEvent
 from ..headers import Headers
-from ..connection import CONNECTION_STASH_KEY, Connection
+from ..connection import (
+    CONNECTION_STASH_KEY, Connection, disconnected, mark_disconnected,
+)
 from ..protocol.frame_types import FrameBase, Data, DEFAULT_INITIAL_WINDOW_SIZE
 from ..event import Event, EventDispatcher
 import logging
@@ -1154,17 +1156,30 @@ class WebSocketRecipient(BaseRecipient):
             {'type': ASGIEvent.WS_DISCONNECT, 'code': WSCloseCode.PROTOCOL_ERROR})
 
     async def _emit_disconnected(self, code: int) -> None:
-        """Emit websocket_disconnected exactly once per connection."""
-        if (self._dispatcher is not None and self._scope is not None
-                and not self._scope.get('_ws_disconnected')):
-            self._scope['_ws_disconnected'] = True
+        """Emit websocket_disconnected exactly once per connection.
+
+        The de-dup flag rides the same client-disconnect marker the HTTP path
+        uses (``disconnected``/``mark_disconnected``), so a native Connection
+        needs no WS-specific extra.
+        """
+        conn = self._scope
+        if (self._dispatcher is not None and conn is not None
+                and not disconnected(conn)):
+            mark_disconnected(conn)
+            if isinstance(conn, Connection):
+                client = conn.client
+                connection_id, path = conn.connection_id, conn.path
+            else:
+                client = conn.get('client')
+                connection_id = conn.get('_connection_id', '')
+                path = conn.get('path', '')
             await self._dispatcher.emit(Event(
                 'websocket_disconnected',
                 detail={
-                    'conn':         self._scope,
-                    'connection_id': self._scope.get('_connection_id', ''),
-                    'client_ip':     self._scope['client'][0] if self._scope.get('client') else '',
-                    'path':          self._scope.get('path', ''),
+                    'conn':          conn,
+                    'connection_id': connection_id,
+                    'client_ip':     client[0] if client else '',
+                    'path':          path,
                     'code':          code,
                 },
             ))

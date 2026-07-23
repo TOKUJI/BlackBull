@@ -422,11 +422,17 @@ def has_middleware_param(fn) -> bool:
 has_inner = has_middleware_param  # backward-compat alias
 
 
-_ASGI_PARAMS = frozenset({'scope', 'receive', 'send'})
+#: A full-form handler is identified by carrying **both** transport channels
+#: (``receive`` and ``send``); its first positional param is the request context
+#: — the native ``conn``/``connection`` (Sprint 80), the deprecated ``scope``
+#: alias, or a WS handler's ``websocket``. The context name is not part of the
+#: test: a simplified handler never takes ``receive``/``send`` (those are the
+#: framework's channels, not request data), so their presence alone is decisive.
+_CHANNEL_PARAMS = frozenset({'receive', 'send'})
 
 
 def _is_simplified_handler(fn) -> bool:
-    """Return True if *fn* lacks the full ASGI (scope, receive, send) signature.
+    """Return True if *fn* lacks the full (conn, receive, send) signature.
 
     Middlewares (call_next/inner) and variadic handlers (*args/**kwargs) are
     never considered simplified — they can already accept any arguments.
@@ -438,7 +444,7 @@ def _is_simplified_handler(fn) -> bool:
     for p in params.values():
         if p.kind in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD):
             return False
-    return not _ASGI_PARAMS.issubset(params)
+    return not _CHANNEL_PARAMS.issubset(params)
 
 
 def _to_jsonable(value: Any) -> Any:

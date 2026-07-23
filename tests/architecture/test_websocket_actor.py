@@ -3,11 +3,20 @@ import asyncio
 import pytest
 from unittest.mock import AsyncMock
 
+from blackbull.connection import Connection
 from blackbull.event_aggregator import EventAggregator
+from blackbull.headers import Headers
 from blackbull.server.recipient import AbstractReader
 from blackbull.server.sender import AbstractWriter
 from blackbull.server.websocket_actor import WebSocketActor
 from blackbull.server.ws_codec import encode_frame
+
+
+def _ws_conn(connection_id: str = 'test-id') -> Connection:
+    """A native WebSocket Connection — the arg the WS path threads (Sprint 80)."""
+    return Connection(method='GET', path='/', raw_path=b'/',
+                      headers=Headers([]), type='websocket',
+                      connection_id=connection_id)
 
 
 # ---------------------------------------------------------------------------
@@ -137,22 +146,22 @@ def mock_ws_app_two_msgs():
 async def test_websocket_lifecycle_events(
         fake_ws_reader, fake_writer, mock_ws_app) -> None:
     aggregator = AsyncMock(spec_set=EventAggregator)
-    scope = {'type': 'websocket', '_connection_id': 'test-id'}
+    conn = _ws_conn()
     actor = WebSocketActor(
-        fake_ws_reader, fake_writer, scope, mock_ws_app, aggregator)
+        fake_ws_reader, fake_writer, conn, mock_ws_app, aggregator)
     await actor.run()
 
-    aggregator.on_websocket_connected.assert_called_once_with(scope, None)
-    aggregator.on_websocket_disconnected.assert_called_once_with(scope, code=1006)
+    aggregator.on_websocket_connected.assert_called_once_with(conn, None)
+    aggregator.on_websocket_disconnected.assert_called_once_with(conn, code=1006)
 
 
 @pytest.mark.asyncio
 async def test_websocket_message_fires_per_message(
         fake_ws_reader_two_msgs, fake_writer, mock_ws_app_two_msgs) -> None:
     aggregator = AsyncMock(spec_set=EventAggregator)
-    scope = {'type': 'websocket', '_connection_id': 'test-id'}
+    conn = _ws_conn()
     actor = WebSocketActor(
-        fake_ws_reader_two_msgs, fake_writer, scope, mock_ws_app_two_msgs, aggregator)
+        fake_ws_reader_two_msgs, fake_writer, conn, mock_ws_app_two_msgs, aggregator)
     await actor.run()
 
     assert aggregator.on_websocket_message.call_count == 2
@@ -162,18 +171,18 @@ async def test_websocket_message_fires_per_message(
 async def test_websocket_protocol_error_isolated(
         fake_bad_frame_reader, fake_writer) -> None:
     aggregator = AsyncMock(spec_set=EventAggregator)
-    scope = {'type': 'websocket', '_connection_id': 'test-id'}
+    conn = _ws_conn()
 
     async def app(scope, receive, send):
         await receive()  # websocket.connect
         await receive()  # raises ValueError (unmasked frame)
 
     actor = WebSocketActor(
-        fake_bad_frame_reader, fake_writer, scope, app, aggregator)
+        fake_bad_frame_reader, fake_writer, conn, app, aggregator)
     await actor.run()  # must not raise
 
     aggregator.on_error.assert_called_once()
-    aggregator.on_websocket_disconnected.assert_called_once_with(scope, code=1006)
+    aggregator.on_websocket_disconnected.assert_called_once_with(conn, code=1006)
     close_1002 = encode_frame((1002).to_bytes(2, 'big'), opcode=0x8)
     assert close_1002 in bytes(fake_writer.written), (
         'CLOSE(1002) frame must be written to the wire on protocol violation'
@@ -185,13 +194,13 @@ async def test_protocol_violation_closes_writer(
         fake_bad_frame_reader, fake_writer) -> None:
     """writer.close() must be called explicitly on protocol violations (P1 §7.2)."""
     aggregator = AsyncMock(spec_set=EventAggregator)
-    scope = {'type': 'websocket', '_connection_id': 'test-id'}
+    conn = _ws_conn()
 
     async def app(scope, receive, send):
         await receive()   # websocket.connect
         await receive()   # raises ValueError (unmasked frame)
 
-    actor = WebSocketActor(fake_bad_frame_reader, fake_writer, scope, app, aggregator)
+    actor = WebSocketActor(fake_bad_frame_reader, fake_writer, conn, app, aggregator)
     await actor.run()
 
 
@@ -203,7 +212,7 @@ async def test_cancellation_propagates_and_is_not_reported_as_error(
     on_error — cancellation is not an error.  Regression: run() used to catch
     BaseException, swallowing CancelledError."""
     aggregator = AsyncMock(spec_set=EventAggregator)
-    scope = {'type': 'websocket', '_connection_id': 'test-id'}
+    conn = _ws_conn()
     accepted = asyncio.Event()
 
     async def app(scope, receive, send):
@@ -212,7 +221,7 @@ async def test_cancellation_propagates_and_is_not_reported_as_error(
         accepted.set()
         await asyncio.Event().wait()  # block until cancelled
 
-    actor = WebSocketActor(_FakeReader(b''), fake_writer, scope, app, aggregator)
+    actor = WebSocketActor(_FakeReader(b''), fake_writer, conn, app, aggregator)
     task = asyncio.create_task(actor.run())
     await accepted.wait()
     task.cancel()

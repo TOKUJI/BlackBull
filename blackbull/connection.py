@@ -125,6 +125,7 @@ _CONNECTION_FIELDS: list[_FieldSpec] = [
     _FieldSpec('_cookies',       None, None, None),   # parsed-cookies cache
     _FieldSpec('_receive',       None, None, None),   # ASGI receive channel
     _FieldSpec('_disconnected',  None, None, None),   # client-disconnect flag (actor→app)
+    _FieldSpec('_ws',            None, None, None),   # WebSocket handshake internals bag
 ]
 
 
@@ -259,6 +260,14 @@ class Connection:
     # ``request_completed`` event. Lives on the Connection (not the scope) so the
     # native ``app(conn, …)`` path shares it across the actor↔app boundary.
     _disconnected: bool = field(default=False, compare=False, repr=False)
+    # WebSocket handshake internals, populated by the protocol actor's upgrade
+    # path and consumed once by ``WebSocketActor`` — the deferred 101/200
+    # responder (``send_101``), the auto-negotiated subprotocol
+    # (``auto_subprotocol``), and the RFC 7692 permessage-deflate params
+    # (``deflate``). ``None`` on every HTTP request (the field is one slot, no
+    # allocation), so the HTTP hot path pays nothing. Not an ASGI scope key —
+    # these are private plumbing, never surfaced to a handler.
+    _ws: dict[str, Any] | None = field(default=None, compare=False, repr=False)
 
     # ---- path params (lazy — allocated on first access) ------------------
 
@@ -274,6 +283,20 @@ class Connection:
     @path_params.setter
     def path_params(self, value: dict[str, Any]) -> None:
         self._path_params = value
+
+    # ---- WebSocket subprotocols (derived from the request header) ---------
+
+    @property
+    def subprotocols(self) -> list[str]:
+        """The client-offered WebSocket subprotocols (ASGI websocket scope's
+        ``subprotocols``), parsed from the ``Sec-WebSocket-Protocol`` request
+        header. Empty on HTTP requests and on a WS handshake that offered none.
+        Derived — not stored — so it needs no ASGI round-trip and the header
+        stays the single source of truth."""
+        raw = self.headers.get(b'sec-websocket-protocol', b'')
+        if not raw:
+            return []
+        return [p.strip().decode('utf-8', errors='replace') for p in raw.split(b',')]
 
     # ---- ASGI conversion — generated from _CONNECTION_FIELDS --------------
 

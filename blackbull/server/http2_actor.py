@@ -541,23 +541,14 @@ class HTTP2Actor(Actor):
         """Materialize an ASGI scope dict for the **compat lanes only**.
 
         The native HTTP/2 dispatch path never calls this — it threads the
-        :class:`Connection` itself. Two boundaries still need an ASGI scope:
-
-        - **WebSocket-over-HTTP/2** stays ASGI-scope-shaped (RFC 8441): it carries
-          ``subprotocols`` / ``_connection_id`` / ``_ws_*`` extras that are not
-          Connection fields, layered on here.
-        - **``BB_FORCE_ASGI_SCOPE``** (§4.3): a pure ASGI scope round-tripped
-          back through ``from_scope`` at the app boundary.
+        :class:`Connection` itself (WebSocket included, Sprint 80). The one
+        boundary that still needs an ASGI scope is **``BB_FORCE_ASGI_SCOPE``**
+        (§4.3): a pure ASGI scope round-tripped back through ``from_scope`` at
+        the app boundary. Also used to synthesize the pushed-request scope for
+        server push.
         """
-        scope = (conn.to_asgi_scope(force_asgi=True) if self._force_asgi
-                 else conn.to_asgi_scope())
-        if conn.type == 'websocket':
-            raw_sp = conn.headers.get(b'sec-websocket-protocol', b'')
-            scope['subprotocols'] = (
-                [p.strip().decode('utf-8', errors='replace')
-                 for p in raw_sp.split(b',')]
-                if raw_sp else [])
-        return scope
+        return (conn.to_asgi_scope(force_asgi=True) if self._force_asgi
+                else conn.to_asgi_scope())
 
     @log
     async def send_frame(self, frame: FrameBase) -> None:
@@ -1148,20 +1139,22 @@ class HTTP2Actor(Actor):
 
         if conn.type == 'websocket':
             # RFC 8441 — Extended CONNECT bootstrapping WebSocket over HTTP/2.
-            # WS stays ASGI-scope-shaped (carries subprotocols / _ws_* extras).
+            # WebSocket is native too (Sprint 80): thread the Connection — its
+            # WS extras (subprotocols / the deferred 200 responder) live on it,
+            # so there is no scope dict even under BB_FORCE_ASGI_SCOPE (the
+            # force-asgi lane only round-trips the HTTP app boundary).
             # Off by default (BB_H2_ENABLE_WEBSOCKET): when the operator has
             # not opted in we never advertised ENABLE_CONNECT_PROTOCOL, so a
             # conforming peer would not send :protocol=websocket.  A
             # non-conforming one is rejected here with PROTOCOL_ERROR.
-            ws_scope = self._conn_to_asgi_scope(conn)
-            stream.expected_content_length = _extract_content_length(ws_scope)
-            stream.conn = ws_scope
+            stream.expected_content_length = _extract_content_length(conn)
+            stream.conn = conn
             if not self._ws_over_h2_enabled:
                 await self.send_frame(self.factory.rst_stream(
                     stream.stream_id, ErrorCodes.PROTOCOL_ERROR))
                 return True
             stream.on_headers_received(end_stream=False)
-            log_record = _make_log_record(ws_scope)
+            log_record = _make_log_record(conn)
             await self._handle_h2_websocket(stream, tg, log_record)
             return True
 
@@ -1250,12 +1243,12 @@ class HTTP2Actor(Actor):
 
         assert conn is not None  # not malformed → parse_headers built a Connection
         self._fill_scope_connection(conn)
-        # Native HTTP dispatch (Connection); ASGI scope only for the WS / force_asgi
-        # compat lanes (the CONTINUATION path has no dedicated WS handler, so a
-        # WS request split across CONTINUATION frames keeps its pre-existing
-        # dict-dispatch behaviour rather than crashing).
-        target = (self._conn_to_asgi_scope(conn)
-                  if (conn.type == 'websocket' or self._force_asgi) else conn)
+        # Native dispatch (Connection); ASGI scope only for the force_asgi compat
+        # lane. The CONTINUATION path has no dedicated WS handler, so a WS request
+        # split across CONTINUATION frames threads its Connection through the
+        # generic dispatch (``__call__`` routes it by ``conn.type == 'websocket'``)
+        # rather than through ``_handle_h2_websocket``.
+        target = self._conn_to_asgi_scope(conn) if self._force_asgi else conn
         stream.expected_content_length = _extract_content_length(target)
 
         if self._active_stream_count >= self.max_concurrent_streams:
@@ -1380,11 +1373,11 @@ class HTTP2Actor(Actor):
     ) -> None:
         """Bootstrap a WebSocket connection over HTTP/2 per RFC 8441.
 
-        Stores a deferred _ws_send_200 callback under the same scope key
-        (_ws_send_101) that WebSocketActor._send() already reads, so that
-        WebSocketActor can be reused without modification.  The 200 HEADERS
-        response (and optional sec-websocket-protocol) is sent when the ASGI
-        app calls websocket.accept.
+        Stores a deferred _ws_send_200 callback in the Connection's WS bag
+        (``conn._ws['send_101']``) that WebSocketActor._send() reads, so
+        WebSocketActor is shared with the H/1.1 path unchanged.  The 200 HEADERS
+        response (and optional sec-websocket-protocol) is sent when the app
+        calls websocket.accept.
         """
         from ..env import get_settings as _get_settings  # noqa: PLC0415
         from .conn_id import new_connection_id  # noqa: PLC0415
@@ -1397,21 +1390,21 @@ class HTTP2Actor(Actor):
         cfg = _get_settings()
         ws_cap = cfg.h2_ws_max_streams_per_connection
         if ws_cap > 0 and self._ws_stream_count >= ws_cap:
-            _ws_scope = stream.conn
+            _ws_conn = stream.conn
             log_cap_hit('h2_ws_max_streams_per_connection',
                         requested=self._ws_stream_count + 1,
                         limit=ws_cap,
-                        scope_path=_ws_scope.get('path') if isinstance(_ws_scope, dict) else None,
+                        scope_path=_ws_conn.path if isinstance(_ws_conn, Connection) else None,
                         protocol='h2-ws')
             await self.send_frame(self.factory.rst_stream(
                 stream.stream_id, ErrorCodes.REFUSED_STREAM))
             return
 
-        scope = stream.conn  # WS streams store the ASGI scope dict here
-        assert scope is not None
+        conn = stream.conn  # WS streams store the native Connection here
+        assert conn is not None
         # One id per TCP connection: reuse the accept-time id; mint one only
         # when the actor was constructed without it (direct test drives).
-        scope['_connection_id'] = self._connection_id or new_connection_id()
+        conn.connection_id = self._connection_id or new_connection_id()
         stream_send = self.make_sender(stream.stream_id)
 
         async def _ws_send_200(subprotocol=None):
@@ -1427,7 +1420,8 @@ class HTTP2Actor(Actor):
             # without END_STREAM so the stream stays open for WS DATA frames.
             await stream_send.send_response_headers(HTTPStatus(200), headers)
 
-        scope['_ws_send_101'] = _ws_send_200  # WebSocketActor calls this on websocket.accept
+        # WebSocketActor calls this on websocket.accept (shared 'send_101' key).
+        conn._ws = {'send_101': _ws_send_200}
 
         sid = stream.stream_id
 
@@ -1452,7 +1446,7 @@ class HTTP2Actor(Actor):
 
         log_record.status = 200
         ws_actor = WebSocketActor(
-            ws_reader, ws_writer, scope, self.app, aggregator,
+            ws_reader, ws_writer, conn, self.app, aggregator,
             peername=self._peername, sockname=self._sockname, ssl=self._ssl,
         )
 

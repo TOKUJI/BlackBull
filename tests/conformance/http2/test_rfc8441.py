@@ -183,8 +183,8 @@ class TestExtendedConnectHandshake:
     async def test_scope_type_is_websocket(self):
         captured = {}
 
-        async def app(scope, receive, send):
-            captured['type'] = scope['type']
+        async def app(conn, receive, send):
+            captured['type'] = conn.type
             await receive()          # websocket.connect
             await send({'type': 'websocket.accept'})
             await receive()          # websocket.disconnect (from EOF)
@@ -195,8 +195,8 @@ class TestExtendedConnectHandshake:
     async def test_scope_http_version_is_2(self):
         captured = {}
 
-        async def app(scope, receive, send):
-            captured['http_version'] = scope['http_version']
+        async def app(conn, receive, send):
+            captured['http_version'] = conn.http_version
             await receive()
             await send({'type': 'websocket.accept'})
             await receive()
@@ -207,8 +207,8 @@ class TestExtendedConnectHandshake:
     async def test_scope_path(self):
         captured = {}
 
-        async def app(scope, receive, send):
-            captured['path'] = scope['path']
+        async def app(conn, receive, send):
+            captured['path'] = conn.path
             await receive()
             await send({'type': 'websocket.accept'})
             await receive()
@@ -224,8 +224,8 @@ class TestExtendedConnectHandshake:
     async def test_scope_scheme_wss_for_https(self):
         captured = {}
 
-        async def app(scope, receive, send):
-            captured['scheme'] = scope['scheme']
+        async def app(conn, receive, send):
+            captured['scheme'] = conn.scheme
             await receive()
             await send({'type': 'websocket.accept'})
             await receive()
@@ -241,8 +241,8 @@ class TestExtendedConnectHandshake:
     async def test_scope_scheme_ws_for_http(self):
         captured = {}
 
-        async def app(scope, receive, send):
-            captured['scheme'] = scope['scheme']
+        async def app(conn, receive, send):
+            captured['scheme'] = conn.scheme
             await receive()
             await send({'type': 'websocket.accept'})
             await receive()
@@ -258,8 +258,8 @@ class TestExtendedConnectHandshake:
     async def test_scope_subprotocols_parsed(self):
         captured = {}
 
-        async def app(scope, receive, send):
-            captured['subprotocols'] = scope.get('subprotocols', [])
+        async def app(conn, receive, send):
+            captured['subprotocols'] = conn.subprotocols
             await receive()
             await send({'type': 'websocket.accept'})
             await receive()
@@ -279,7 +279,7 @@ class TestExtendedConnectHandshake:
 
         writes = []
 
-        async def app(scope, receive, send):
+        async def app(conn, receive, send):
             await receive()
             await send({'type': 'websocket.accept'})
             await receive()
@@ -321,7 +321,7 @@ class TestExtendedConnectHandshake:
 
         writes = []
 
-        async def app(scope, receive, send):
+        async def app(conn, receive, send):
             await receive()
             await send({'type': 'websocket.accept', 'subprotocol': 'chat'})
             await receive()
@@ -372,7 +372,7 @@ class TestDataExchange:
         received = {}
         done = asyncio.Event()
 
-        async def app(scope, receive, send):
+        async def app(conn, receive, send):
             await receive()          # websocket.connect
             await send({'type': 'websocket.accept'})
             event = await receive()  # websocket.receive
@@ -400,7 +400,7 @@ class TestDataExchange:
         with bytes field."""
         received = {}
 
-        async def app(scope, receive, send):
+        async def app(conn, receive, send):
             await receive()
             await send({'type': 'websocket.accept'})
             event = await receive()
@@ -428,7 +428,7 @@ class TestDataExchange:
         being returned from the app's receive()."""
         received_events = []
 
-        async def app(scope, receive, send):
+        async def app(conn, receive, send):
             await receive()              # websocket.connect
             await send({'type': 'websocket.accept'})
             event = await receive()      # websocket.disconnect (from END_STREAM)
@@ -457,7 +457,7 @@ class TestDataExchange:
 
         writes = []
 
-        async def app(scope, receive, send):
+        async def app(conn, receive, send):
             await receive()
             await send({'type': 'websocket.accept'})
             await send({'type': 'websocket.send', 'text': 'hi'})
@@ -511,8 +511,8 @@ class TestNegativeCases:
         """Plain CONNECT (no :protocol) must not produce a websocket scope."""
         scopes = []
 
-        async def app(scope, receive, send):
-            scopes.append(scope.get('type'))
+        async def app(conn, receive, send):
+            scopes.append(conn.type)
             # Regular HTTP CONNECT — just reply
             await send({'type': 'http.response.start', 'status': 200, 'headers': []})
             await send({'type': 'http.response.body', 'body': b'', 'more_body': False})
@@ -532,8 +532,8 @@ class TestNegativeCases:
         """CONNECT + :protocol=ftp must not produce a websocket scope."""
         scopes = []
 
-        async def app(scope, receive, send):
-            scopes.append(scope.get('type'))
+        async def app(conn, receive, send):
+            scopes.append(conn.type)
             await send({'type': 'http.response.start', 'status': 400, 'headers': []})
             await send({'type': 'http.response.body', 'body': b'', 'more_body': False})
 
@@ -553,8 +553,8 @@ class TestNegativeCases:
         receive their own scope and messages independently."""
         scopes = []
 
-        async def app(scope, receive, send):
-            scopes.append(scope.get('path'))
+        async def app(conn, receive, send):
+            scopes.append(conn.path)
             await receive()          # websocket.connect
             await send({'type': 'websocket.accept'})
             await receive()          # disconnect (EOF)
@@ -598,8 +598,8 @@ class TestOptInGating:
         monkeypatch.setenv('BB_H2_ENABLE_WEBSOCKET', '0')
         called = []
 
-        async def app(scope, receive, send):
-            called.append(scope)
+        async def app(conn, receive, send):
+            called.append(conn)
 
         handler, _, _ = _make_h2_actor(app)
         handler.receive = AsyncMock(side_effect=[
@@ -652,7 +652,7 @@ class TestWebSocketStreamCap:
 
     @staticmethod
     def _blocking_app():
-        async def app(scope, receive, send):
+        async def app(conn, receive, send):
             # Park forever — handler.run() will be cancelled by wait_for.
             await asyncio.Event().wait()
         return app

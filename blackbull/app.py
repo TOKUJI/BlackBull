@@ -587,12 +587,13 @@ class BlackBull:
         """
         self._logger.debug((conn, receive, send))
 
-        # The WebSocket path is still ASGI-scope-shaped (``conn`` is the scope
-        # dict there, carrying WS-only extras); route it by its ``path`` key and
-        # hand the WS handler the scope, unchanged. Every HTTP path — native
-        # Connection or the external/forced conversion — arrives as a Connection.
-        if not isinstance(conn, Connection):
-            path = conn['path']
+        # WebSocket is native too (Sprint 80): ``conn`` is a Connection here as
+        # well. Route it by its ``path`` to the registered WS handler, which
+        # receives ``(conn, receive, send)``. WS has its own lifecycle events
+        # (websocket_connected/message/disconnected), so it skips the HTTP
+        # request_received emit and _dispatch_http below.
+        if conn.type == 'websocket':
+            path = conn.path
             try:
                 function = self._router[(path, HTTPMethod.GET, Scheme.websocket)]
             except (MethodNotApplicable, PathNotRegistered):
@@ -798,11 +799,15 @@ class BlackBull:
             await self._handle_lifespan(scope, receive, send)
             return
         elif scope.get('type') == 'websocket':
-            # WebSocket stays ASGI-scope-shaped: WS handlers read scope extras
-            # (``subprotocols``, ``_connection_id``, ``_ws_*``) that are not
-            # Connection fields. It still flows through the middleware chain and
-            # the terminal ``scope_completed`` event below.
-            request = scope
+            # External ASGI host (uvicorn) delivered a websocket scope dict.
+            # WebSocket is native too (Sprint 80): convert it to a Connection at
+            # the boundary — the WS extras are derived (``conn.subprotocols``
+            # reads the request header) or actor-set (``conn._ws``), so no scope
+            # dict is threaded past here. BlackBull's own server already hands us
+            # a Connection (it hits the first branch).
+            request = scope.get(CONNECTION_STASH_KEY)
+            if request is None:
+                request = Connection.from_scope(scope, receive)
         else:
             # HTTP dispatched as a scope dict. BlackBull's own HTTP/2 actor
             # stashes the Connection it already built (``parse_headers`` →

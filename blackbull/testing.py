@@ -226,12 +226,21 @@ class WebSocketTestSession:
         if cookies:
             cookie_str = '; '.join(f'{k}={v}' for k, v in cookies.items())
             encoded_headers.append((b'cookie', cookie_str.encode('latin-1')))
-        # Sprint 79 Phase 5: build the derived scope through Connection.as_scope()
-        # — the single native→ASGI conversion point — so the TestClient's
-        # WebSocket scope is generated exactly the way the real server's is,
-        # never hand-rolled.  ``subprotocols`` is a websocket-only ASGI key (not
-        # a Connection field), so it is layered on after, mirroring how the
-        # H/1.1 upgrade handler and the H/2 bridge augment their derived scope.
+        # Offer the requested subprotocols the way a real client does — via the
+        # Sec-WebSocket-Protocol request header. WebSocket is native now
+        # (Sprint 80): ``conn.subprotocols`` derives from this header, so the
+        # header (not a scope key) is what the server reads.
+        if subprotocols:
+            encoded_headers.append(
+                (b'sec-websocket-protocol',
+                 ', '.join(subprotocols).encode('latin-1')))
+        # Build the derived scope through Connection.as_scope() — the single
+        # native→ASGI conversion point — so the TestClient's WebSocket scope is
+        # generated exactly the way the real server's is, never hand-rolled.
+        # The TestClient simulates an external ASGI host, so it drives the app
+        # with a scope dict; BlackBull.__call__ converts it back to a Connection
+        # via from_scope. ``subprotocols`` are derived from the request header
+        # (added above), matching how a real client offers them over the wire.
         from .connection import Connection  # noqa: PLC0415
         from .headers import Headers  # noqa: PLC0415
         conn = Connection(
@@ -256,7 +265,6 @@ class WebSocketTestSession:
         )
         self.scope = conn.as_scope()
         self.scope['headers'] = encoded_headers
-        self.scope['subprotocols'] = list(subprotocols or [])
         self._loop_thread = _LoopThread()
         self._app_task: asyncio.Task | None = None
         self._accepted = False

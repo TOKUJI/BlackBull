@@ -10,6 +10,7 @@ from blackbull import BlackBull
 from blackbull.event import Event
 from blackbull.utils import Scheme
 from blackbull.server.http1_actor import HTTP1Actor
+from blackbull.connection import Connection
 from blackbull.server.websocket_actor import WebSocketActor
 from blackbull.server.recipient import AbstractReader
 from blackbull.server.sender import AbstractWriter
@@ -74,28 +75,25 @@ def _make_client_frame(payload: bytes, opcode: int = 0x1, fin: bool = True) -> b
     return header + mask + masked
 
 
-def _make_ws_scope(path: str) -> dict:
-    return {
-        'type': 'websocket',
-        'asgi': {'version': '3.0', 'spec_version': '2.0'},
-        'http_version': '1.1',
-        'method': 'GET',
-        'scheme': 'ws',
-        'path': path,
-        'raw_path': path.encode(),
-        'query_string': b'',
-        'root_path': '',
-        'headers': Headers([
+def _make_ws_conn(path: str) -> Connection:
+    """The native WebSocket Connection the upgrade path threads (Sprint 80)."""
+    return Connection(
+        type='websocket',
+        http_version='1.1',
+        method='GET',
+        scheme='ws',
+        path=path,
+        raw_path=path.encode(),
+        headers=Headers([
             (b'host', b'localhost:8000'),
             (b'upgrade', b'websocket'),
             (b'connection', b'upgrade'),
             (b'sec-websocket-key', b'dGhlIHNhbXBsZSBub25jZQ=='),
             (b'sec-websocket-version', b'13'),
         ]),
-        'client': ['127.0.0.1', 54321],
-        'server': ['localhost', 8000],
-        'state': {},
-    }
+        client=('127.0.0.1', 54321),
+        server=('localhost', 8000),
+    )
 
 
 async def _drive_ws_session(app, path: str) -> None:
@@ -104,18 +102,18 @@ async def _drive_ws_session(app, path: str) -> None:
     Uses _FakeReader(b'') so _read_loop hits IncompleteReadError and
     emits websocket_disconnected with code 1006.
     """
-    scope = _make_ws_scope(path)
+    conn = _make_ws_conn(path)
     aggregator = EventAggregator(app._dispatcher)
-    actor = WebSocketActor(_FakeReader(b''), _FakeWriter(), scope, app, aggregator)
+    actor = WebSocketActor(_FakeReader(b''), _FakeWriter(), conn, app, aggregator)
     await actor.run()
 
 
 async def _drive_ws_session_with_close(app, path: str) -> None:
     """Run a WebSocket session ending with a proper client close frame (code 1000)."""
-    scope = _make_ws_scope(path)
+    conn = _make_ws_conn(path)
     close_frame = _make_client_frame(b'', opcode=0x8)
     aggregator = EventAggregator(app._dispatcher)
-    actor = WebSocketActor(_FakeReader(close_frame), _FakeWriter(), scope, app, aggregator)
+    actor = WebSocketActor(_FakeReader(close_frame), _FakeWriter(), conn, app, aggregator)
     await actor.run()
 
 

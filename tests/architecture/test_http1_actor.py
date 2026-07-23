@@ -609,10 +609,10 @@ class TestAccessLogging:
 
 @pytest.mark.asyncio
 async def test_ws_upgrade_reuses_actor_connection_id():
-    seen_scopes = []
+    seen_conns = []
 
-    async def ws_app(scope, receive, send):
-        seen_scopes.append(scope)
+    async def ws_app(conn, receive, send):
+        seen_conns.append(conn)
         event = await receive()
         assert event['type'] == 'websocket.connect'
         await send({'type': 'websocket.accept'})
@@ -628,18 +628,18 @@ async def test_ws_upgrade_reuses_actor_connection_id():
     )
     await actor.run()
 
-    assert len(seen_scopes) == 1
-    assert seen_scopes[0]['_connection_id'] == 'cid-ws-7'
+    assert len(seen_conns) == 1
+    assert seen_conns[0].connection_id == 'cid-ws-7'
 
 
 @pytest.mark.asyncio
 async def test_ws_upgrade_without_accept_id_generates_unified_format():
     """Fallback (no accept-time id) mints via conn_id.new_connection_id —
     same 20-hex format as every other connection id."""
-    seen_scopes = []
+    seen_conns = []
 
-    async def ws_app(scope, receive, send):
-        seen_scopes.append(scope)
+    async def ws_app(conn, receive, send):
+        seen_conns.append(conn)
         event = await receive()
         assert event['type'] == 'websocket.connect'
         await send({'type': 'websocket.accept'})
@@ -647,5 +647,5 @@ async def test_ws_upgrade_without_accept_id_generates_unified_format():
     actor, _writer = _make_actor(_ws_request(), app=ws_app)
     await actor.run()
 
-    cid = seen_scopes[0]['_connection_id']
+    cid = seen_conns[0].connection_id
     assert len(cid) == 20 and set(cid) <= set('0123456789abcdef')

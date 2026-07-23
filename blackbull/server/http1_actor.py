@@ -513,11 +513,12 @@ class HTTP1Actor(Actor):
                     app_arg = conn                                     # native Connection
 
                 if conn.type == 'websocket':
-                    # The WebSocket upgrade path is still ASGI-scope-shaped (it
-                    # carries WS-only extras — subprotocols, _connection_id — that
-                    # are not Connection fields); hand it a real scope dict with
-                    # the Connection stashed for any conn.* reads.
-                    await self._handle_upgrade(conn.to_asgi_scope())
+                    # WebSocket is native too (Sprint 80): the upgrade path
+                    # threads the typed Connection — the WS-only extras
+                    # (subprotocols, the deferred 101 responder, deflate params)
+                    # live on it (``conn.subprotocols`` / ``conn._ws``), so there
+                    # is no scope dict here.
+                    await self._handle_upgrade(conn)
                     return
 
                 # RFC 9110 §10.1.1 / §15.2 — a server MUST NOT send a 1xx
@@ -959,8 +960,8 @@ class HTTP1Actor(Actor):
         if self._ssl:
             conn.scheme = 'wss' if conn.type == 'websocket' else 'https'
 
-    async def _handle_upgrade(self, scope: dict) -> None:
-        """Handle WebSocket upgrade."""
+    async def _handle_upgrade(self, conn: Connection) -> None:
+        """Handle WebSocket upgrade (native Connection, Sprint 80)."""
         from .conn_id import new_connection_id  # noqa: PLC0415
         from .websocket_actor import WebSocketActor  # noqa: PLC0415
         aggregator = self._aggregator
@@ -971,16 +972,16 @@ class HTTP1Actor(Actor):
             from ..event_aggregator import EventAggregator  # noqa: PLC0415
             aggregator = EventAggregator(EventDispatcher())
 
-        log_record = _AccessLogRecord.from_scope(scope)
+        log_record = _AccessLogRecord.from_conn(conn)
         log_record.status = 101  # HTTP 101 Switching Protocols
 
-        if not await self._do_ws_handshake(scope):
+        if not await self._do_ws_handshake(conn):
             return  # version check failed; 400 already sent
         # One id per TCP connection: reuse the accept-time id; mint one only
         # when the actor was constructed without it (direct test drives).
-        scope['_connection_id'] = self._connection_id or new_connection_id()
+        conn.connection_id = self._connection_id or new_connection_id()
         ws_actor = WebSocketActor(
-            self._reader, self._writer, scope, self._app, aggregator,
+            self._reader, self._writer, conn, self._app, aggregator,
             peername=self._peername, sockname=self._sockname, ssl=self._ssl,
             ws_queue_depth=self._ws_queue_depth,
         )
@@ -990,7 +991,7 @@ class HTTP1Actor(Actor):
             log_record.close_code = ws_actor._disconnect_code
             _emit_access_log(log_record)
 
-    async def _do_ws_handshake(self, scope: dict) -> bool:
+    async def _do_ws_handshake(self, conn: Connection) -> bool:
         """Validate the WebSocket upgrade and store a deferred 101 callback.
 
         Returns True if the handshake is valid and ready to proceed, False if
@@ -1002,7 +1003,7 @@ class HTTP1Actor(Actor):
         (RFC 6455 §4.2.2).
         """
         send = SenderFactory.http1(self._writer)
-        headers = scope.get('headers', Headers([]))
+        headers = conn.headers
         key = headers.get(b'sec-websocket-key', b'').strip()
         # RFC 6455 §4.2.1 — the client MUST send a Sec-WebSocket-Key whose
         # base64-decoded value is 16 bytes.  An absent or malformed key is a
@@ -1023,13 +1024,10 @@ class HTTP1Actor(Actor):
                        [(b'sec-websocket-version', b'13')])
             return False
 
-        # Populate scope['subprotocols'] per ASGI WebSocket spec
-        raw_sp = headers.get(b'sec-websocket-protocol', b'')
-        client_protos = (
-            [p.strip().decode('utf-8', errors='replace') for p in raw_sp.split(b',')]
-            if raw_sp else []
-        )
-        scope['subprotocols'] = client_protos
+        # The client-offered subprotocols (ASGI websocket scope's
+        # ``subprotocols``) are derived from the request header by the
+        # ``conn.subprotocols`` property — no need to stash them.
+        client_protos = conn.subprotocols
 
         # Auto-negotiate from app.available_ws_protocols (backward-compat fallback).
         # This is used when the handler calls websocket.accept without a subprotocol.
@@ -1037,9 +1035,8 @@ class HTTP1Actor(Actor):
         available = {(p.decode('utf-8', errors='replace') if isinstance(p, bytes) else p)
                      for p in available_raw}
         auto_subprotocol = next((p for p in client_protos if p in available), None)
-        scope['_ws_auto_subprotocol'] = auto_subprotocol
 
-        # RFC 7692 permessage-deflate negotiation.  Cached on the scope so
+        # RFC 7692 permessage-deflate negotiation.  Cached on the Connection so
         # WebSocketActor can pick it up after the handshake commits, and
         # echoed back as ``Sec-WebSocket-Extensions`` in the 101 response.
         from ..env import get_settings as _get_settings  # noqa: PLC0415
@@ -1049,7 +1046,6 @@ class HTTP1Actor(Actor):
         if _get_settings().ws_permessage_deflate:
             offer = headers.get(b'sec-websocket-extensions', b'')
             deflate_params, deflate_response = _negotiate_deflate(offer or None)
-        scope['_ws_deflate'] = deflate_params
 
         async def _send_101(subprotocol=None):
             hs_headers = Headers([
@@ -1064,7 +1060,11 @@ class HTTP1Actor(Actor):
                 hs_headers.append(b'sec-websocket-extensions', deflate_response)
             await send(b'', HTTPStatus.SWITCHING_PROTOCOLS, hs_headers)
 
-        scope['_ws_send_101'] = _send_101
+        conn._ws = {
+            'send_101': _send_101,
+            'auto_subprotocol': auto_subprotocol,
+            'deflate': deflate_params,
+        }
         return True
 
     @staticmethod

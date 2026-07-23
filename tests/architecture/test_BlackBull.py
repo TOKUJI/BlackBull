@@ -404,23 +404,27 @@ async def test_dispatch_invalid_scheme_raises():
 
 @pytest.mark.asyncio
 async def test_dispatch_websocket_no_handler_returns_silently():
+    from blackbull.connection import Connection
     app = BlackBull()
-    scope = {'type': 'websocket', 'path': '/ws', 'headers': []}
+    conn = Connection(method='GET', path='/ws', raw_path=b'/ws',
+                      headers=Headers([]), type='websocket')
     # No handler registered — should return without raising
-    await app._dispatch(scope, AsyncMock(), AsyncMock())
+    await app._dispatch(conn, AsyncMock(), AsyncMock())
 
 
 @pytest.mark.asyncio
 async def test_dispatch_websocket_calls_handler():
+    from blackbull.connection import Connection
     app = BlackBull()
     called = []
 
     @app.route(path='/ws', scheme=Scheme.websocket)
-    async def ws_handler(scope, receive, send):
+    async def ws_handler(conn, receive, send):
         called.append(True)
 
-    scope = {'type': 'websocket', 'path': '/ws', 'headers': []}
-    await app._dispatch(scope, AsyncMock(), AsyncMock())
+    conn = Connection(method='GET', path='/ws', raw_path=b'/ws',
+                      headers=Headers([]), type='websocket')
+    await app._dispatch(conn, AsyncMock(), AsyncMock())
     assert called == [True]
 
 

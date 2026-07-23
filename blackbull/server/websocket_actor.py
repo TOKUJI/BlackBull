@@ -5,6 +5,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from ..actor import Actor, Message
+from ..connection import Connection
 from ..event_aggregator import EventAggregator
 from ..asgi import ASGIEvent
 from .conn_id import new_connection_id
@@ -36,7 +37,7 @@ class WebSocketActor(Actor):
         self,
         reader: AbstractReader,
         writer: AbstractWriter,
-        scope: dict[str, Any],
+        conn: Connection,
         app: Callable[..., Awaitable[None]],
         aggregator: EventAggregator,
         *,
@@ -48,17 +49,18 @@ class WebSocketActor(Actor):
         super().__init__()
         self._reader = reader
         self._writer = writer
-        self._scope = scope
+        self._conn = conn
         self._app = app
         self._aggregator = aggregator
         self._peername = peername
         self._sockname = sockname
         self._ssl = ssl
         # permessage-deflate (RFC 7692) — when the handshake negotiated it,
-        # the scope carries a :class:`DeflateParams`.  Instantiate the
-        # streaming inflater + deflater so the recipient/sender don't need
+        # the Connection's WS bag carries a :class:`DeflateParams`.  Instantiate
+        # the streaming inflater + deflater so the recipient/sender don't need
         # to know about negotiation logic.
-        deflate: DeflateParams | None = scope.pop('_ws_deflate', None) if scope else None
+        ws_bag = conn._ws or {}
+        deflate: DeflateParams | None = ws_bag.get('deflate')
         decompressor = (
             InboundDecompressor(
                 wbits=deflate.client_max_window_bits,
@@ -81,17 +83,17 @@ class WebSocketActor(Actor):
 
     async def run(self) -> None:
         try:
-            await self._app(self._scope, self._receive, self._send)
+            await self._app(self._conn, self._receive, self._send)
         except asyncio.CancelledError:
             # Cancellation is not an error: re-raise so the task actually
             # cancels rather than completing normally.  (Mirrors HTTP1Actor;
             # the finally below still runs the disconnect/close cleanup.)
             raise
         except BaseException as exc:
-            await self._aggregator.on_error(self._scope, exc)
+            await self._aggregator.on_error(self._conn, exc)
         finally:
             await self._aggregator.on_websocket_disconnected(
-                self._scope, code=self._disconnect_code)
+                self._conn, code=self._disconnect_code)
             await self._writer.close()
 
     async def _receive(self) -> dict[str, Any]:
@@ -100,24 +102,25 @@ class WebSocketActor(Actor):
             # Hot path: skip the Event + detail-dict build and emit indirection
             # entirely when no ``websocket_message`` handler is registered.
             if self._aggregator.has_websocket_message_listeners():
-                await self._aggregator.on_websocket_message(self._scope, event)
+                await self._aggregator.on_websocket_message(self._conn, event)
         elif event.get('type') == ASGIEvent.WS_DISCONNECT:
             self._disconnect_code = event.get('code', WSCloseCode.ABNORMAL)
         return event
 
     async def _send(self, event: dict[str, Any], _status=None, _headers=None) -> None:
         if isinstance(event, dict) and event.get('type') == ASGIEvent.WS_ACCEPT:
-            send_101 = self._scope.pop('_ws_send_101', None)
+            ws_bag = self._conn._ws or {}
+            send_101 = ws_bag.pop('send_101', None)
             if send_101:
                 subprotocol = (event.get('subprotocol')
-                               or self._scope.pop('_ws_auto_subprotocol', None))
+                               or ws_bag.pop('auto_subprotocol', None))
                 await send_101(subprotocol)
-            if not self._scope.get('_connection_id'):
+            if not self._conn.connection_id:
                 # Normally set by the HTTP actor's upgrade path from the
                 # accept-time id; mint one only for direct test drives.
-                self._scope['_connection_id'] = new_connection_id()
+                self._conn.connection_id = new_connection_id()
             await self._aggregator.on_websocket_connected(
-                self._scope, event.get('subprotocol'))
+                self._conn, event.get('subprotocol'))
         await self._ws_send(event)
 
     async def _handle(self, msg: Message) -> None:
