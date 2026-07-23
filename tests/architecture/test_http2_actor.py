@@ -462,3 +462,66 @@ async def test_stream_semaphore_caps_active_handlers():
     gate.set()
     await asyncio.wait_for(run_task, timeout=2.0)
     assert active == 0, 'all handlers should have finished after gate opened'
+
+
+# ---------------------------------------------------------------------------
+# Alloc-reduction (P2 / Sprint 80): the H2 HEADERS dispatch path skips the
+# per-request AccessLogRecord (and the capturing-send wrapper) when nothing
+# consumes it — mirrors the HTTP/1.1 gate (P3). A real EventAggregator is
+# required so has_request_completed_listeners() reports true registration
+# state (an AsyncMock returns a truthy mock and would always build the record).
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_h2_baseline_hot_path_skips_access_log_record():
+    """Access logging off + no request_completed listener ⇒ the H2 actor must
+    not build the AccessLogRecord (nor the conn.state['access_log'] it forces)."""
+    import logging
+    from blackbull import BlackBull
+
+    app = BlackBull()
+    seen: dict = {}
+
+    @app.route(path='/')
+    async def index(conn):
+        seen['state_keys'] = list(conn.state.keys())
+        return b'ok'
+
+    agg = EventAggregator(app._dispatcher)
+    reader = _FakeReader(_make_headers_frame(stream_id=1, end_stream=True))
+    actor = HTTP2Actor(reader, _FakeWriter(), app, agg)
+    access_logger = logging.getLogger('blackbull.access')
+    prev = access_logger.level
+    access_logger.setLevel(logging.WARNING)  # ensure INFO disabled
+    try:
+        await actor.run()
+    finally:
+        access_logger.setLevel(prev)
+
+    assert 'access_log' not in seen['state_keys']
+
+
+@pytest.mark.asyncio
+async def test_h2_request_completed_listener_forces_access_log_record():
+    """The inverse: a request_completed listener reads the record's wire fields,
+    so the H2 actor must still build it and publish it on conn.state."""
+    from blackbull import BlackBull
+
+    app = BlackBull()
+    seen: dict = {}
+
+    @app.route(path='/')
+    async def index(conn):
+        seen['state_keys'] = list(conn.state.keys())
+        return b'ok'
+
+    @app.on('request_completed')
+    async def _rc(event):
+        pass
+
+    agg = EventAggregator(app._dispatcher)
+    reader = _FakeReader(_make_headers_frame(stream_id=1, end_stream=True))
+    actor = HTTP2Actor(reader, _FakeWriter(), app, agg)
+    await actor.run()
+
+    assert 'access_log' in seen['state_keys']

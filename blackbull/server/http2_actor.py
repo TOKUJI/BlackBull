@@ -29,7 +29,12 @@ from .recipient import (AbstractReader, IncompleteReadError,
                         _HTTP2_STREAM_QUEUE_DEPTH)
 from .response import ResponderFactory
 from .sender import AbstractWriter, ConnectionWindow, SenderFactory
-from .access_log import AccessLogRecord, _make_capturing_send, _make_disconnect_detecting_receive, emit_access_log as _emit_access_log
+from .access_log import (
+    AccessLogRecord, _make_capturing_send, _make_disconnect_detecting_receive,
+    emit_access_log as _emit_access_log,
+    request_record_needed as _request_record_needed,
+    disconnect_events_observed as _disconnect_events_observed,
+)
 from ..asgi import ASGIEvent
 from .http1_actor import RequestActor
 
@@ -211,7 +216,11 @@ class StreamActor(Actor):
                     self._stream_id, ErrorCodes.INTERNAL_ERROR)
             )
         finally:
-            _emit_access_log(self._log_record)
+            # log_record is None on the baseline hot path when nothing consumes
+            # it (no access log, no request_completed listener) — the gate lives
+            # at the dispatch call sites (_request_record_needed).
+            if self._log_record is not None:
+                _emit_access_log(self._log_record)
 
     async def _handle(self, msg: Message) -> None:  # never reached
         raise NotImplementedError
@@ -1025,11 +1034,19 @@ class HTTP2Actor(Actor):
         bind_receive_channel(conn, recipient)
 
         if self._aggregator is not None:
+            # Wrap receive for disconnect detection only when a listener observes
+            # it (request_disconnected / request_completed); otherwise dispatch the
+            # raw recipient and save the per-request closure. Body-level disconnect
+            # (conn.body() → ClientDisconnected) is independent of this wrapper.
+            if _disconnect_events_observed(self._aggregator):
+                dispatch_receive = _make_disconnect_detecting_receive(
+                    recipient, conn, self._aggregator)
+            else:
+                dispatch_receive = recipient
             stream_actor = StreamActor(
                 stream_id=stream_id,
                 conn=conn,
-                receive=_make_disconnect_detecting_receive(
-                    recipient, conn, self._aggregator),
+                receive=dispatch_receive,
                 send=send,
                 app=self.app,
                 aggregator=self._aggregator,
@@ -1172,9 +1189,17 @@ class HTTP2Actor(Actor):
             # No body to deliver — skip queue allocation; recipient synthesizes
             # the empty http.request event on first receive() call if needed.
             stream_recipient.mark_end_of_stream_on_headers()
-        log_record = _make_log_record(conn)
-        capturing_send = _make_capturing_send(send, log_record)
-        self._spawn_stream_task(tg, stream.stream_id, target, stream_recipient, capturing_send, log_record)
+        # Build the access-log record (and wrap send to capture status/bytes)
+        # only when something consumes it: access log, phase trace, or a
+        # request_completed listener. The legacy (aggregator=None) path always
+        # builds it — _run_with_log emits unconditionally. See P3 (HTTP/1.1).
+        if self._aggregator is None or _request_record_needed(self._aggregator):
+            log_record = _make_log_record(conn)
+            dispatch_send = _make_capturing_send(send, log_record)
+        else:
+            log_record = None
+            dispatch_send = send
+        self._spawn_stream_task(tg, stream.stream_id, target, stream_recipient, dispatch_send, log_record)
         return True
 
     async def _on_continuation_frame(
@@ -1265,9 +1290,15 @@ class HTTP2Actor(Actor):
         stream.conn = target
         stream_recipient = self._make_stream_recipient(stream.stream_id)
         self._recipients[stream.stream_id] = stream_recipient
-        log_record = _make_log_record(conn)
-        capturing_send = _make_capturing_send(send, log_record)
-        self._spawn_stream_task(tg, stream.stream_id, target, stream_recipient, capturing_send, log_record)
+        # Same consumer-gate as the HEADERS path (P3): skip the record + capturing
+        # send wrapper when nothing reads them.
+        if self._aggregator is None or _request_record_needed(self._aggregator):
+            log_record = _make_log_record(conn)
+            dispatch_send = _make_capturing_send(send, log_record)
+        else:
+            log_record = None
+            dispatch_send = send
+        self._spawn_stream_task(tg, stream.stream_id, target, stream_recipient, dispatch_send, log_record)
         return True
 
     async def _on_data_frame(self, frame, stream: 'Stream') -> None:
