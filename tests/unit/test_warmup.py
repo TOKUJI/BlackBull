@@ -3,7 +3,7 @@
 Warm-up runs an app's registered hooks once, in the master, before it binds a
 socket or forks workers, so every worker inherits the warmed heap via COW.  The
 mechanism lives in :mod:`blackbull.server.warmup`; the public API is
-:meth:`BlackBull.on_warmup` and :meth:`BlackBull.drive_asgi`.
+:meth:`BlackBull.on_warmup` and :meth:`BlackBull.warm_request`.
 """
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ import time
 
 import pytest
 
-from blackbull import BlackBull
+from blackbull import BlackBull, Connection, Headers
 from blackbull.server import warmup as warmup_mod
 from blackbull.server.warmup import run_warmup, warmup_inline, warm_tls
 
@@ -161,11 +161,11 @@ async def test_warmup_respects_budget(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# drive_asgi
+# warm_request
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_drive_asgi_invokes_app_n_times():
+async def test_warm_request_invokes_app_n_times():
     app = BlackBull()
     hits = {'n': 0, 'bodies': []}
 
@@ -175,16 +175,16 @@ async def test_drive_asgi_invokes_app_n_times():
         hits['bodies'].append(body)
         return b'ok'
 
-    scope = {'type': 'http', 'method': 'POST', 'path': '/warm',
-             'headers': [(b'content-type', b'application/octet-stream')]}
-    await app.drive_asgi(scope, body=b'payload', n=5)
+    conn = Connection(method='POST', path='/warm', raw_path=b'/warm',
+                      headers=Headers([(b'content-type', b'application/octet-stream')]))
+    await app.warm_request(conn, body=b'payload', n=5)
 
     assert hits['n'] == 5
     assert hits['bodies'] == [b'payload'] * 5
 
 
 @pytest.mark.asyncio
-async def test_drive_asgi_from_warmup_hook():
+async def test_warm_request_from_warmup_hook():
     app = BlackBull()
     count = {'n': 0}
 
@@ -195,8 +195,9 @@ async def test_drive_asgi_from_warmup_hook():
 
     @app.on_warmup
     async def warm(a):
-        scope = {'type': 'http', 'method': 'GET', 'path': '/ping', 'headers': []}
-        await a.drive_asgi(scope, n=3)
+        conn = Connection(method='GET', path='/ping', raw_path=b'/ping',
+                          headers=Headers([]))
+        await a.warm_request(conn, n=3)
 
     await warmup_inline(app, None)
     assert count['n'] == 3

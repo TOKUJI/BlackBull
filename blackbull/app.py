@@ -390,7 +390,7 @@ class BlackBull:
         Hooks receive the ``app`` and must do **pure warming only** — drive hot
         code paths, prime codecs/TLS — and acquire **no** per-worker resources
         (DB pools, sockets, live connections); those belong in
-        :meth:`on_startup`, which runs per worker.  Use :meth:`drive_asgi` to
+        :meth:`on_startup`, which runs per worker.  Use :meth:`warm_request` to
         exercise the ASGI dispatch/handler path in-process, and
         :func:`blackbull.server.warmup.warm_tls` to prime the TLS handshake.
 
@@ -403,25 +403,30 @@ class BlackBull:
 
             @app.on_warmup
             async def warm(app):
-                scope = {'type': 'http', 'method': 'POST', 'path': '/rpc',
-                         'headers': [(b'content-type', b'application/grpc')]}
-                await app.drive_asgi(scope, body=req_bytes, n=2000)
+                from blackbull import Connection, Headers
+                conn = Connection(
+                    method='POST', path='/rpc', raw_path=b'/rpc',
+                    headers=Headers([(b'content-type', b'application/grpc')]))
+                await app.warm_request(conn, body=req_bytes, n=2000)
         """
         self._warmup_hooks.append(fn)
         return fn
 
-    async def drive_asgi(self, scope: dict, *, body: bytes = b'', n: int = 1
-                         ) -> None:
-        """Invoke this ASGI app in-process *n* times to warm the request path.
+    async def warm_request(self, conn: Connection, *, body: bytes = b'', n: int = 1
+                           ) -> None:
+        """Invoke this app in-process *n* times with a :class:`Connection` to
+        warm the request path.
 
-        A warm-up primitive: drives the full ``__call__`` → middleware →
-        ``_dispatch`` chain (HTTP, gRPC, whatever the *scope* routes to) with a
-        synthetic ``receive`` that yields *body* once and a ``send`` that
+        A warm-up primitive: drives the full **native** ``__call__`` →
+        middleware → ``_dispatch`` chain (HTTP, gRPC, whatever *conn* routes to)
+        with a synthetic ``receive`` that yields *body* once and a ``send`` that
         discards output.  Faults in code pages and trips PEP 659 specialization
         on the dispatch + handler + codec — no socket, no wire I/O.  Intended
         for use from an :meth:`on_warmup` hook; safe to call anytime.
 
-        *scope* is shallow-copied per call, so the same dict may be reused.
+        Each iteration runs on a fresh copy of *conn* (its own body cache,
+        ``state`` and receive binding), so the one template drives all *n* runs
+        cleanly.
         """
         async def _send(_event) -> None:
             pass
@@ -437,7 +442,14 @@ class BlackBull:
                             'more_body': False}
                 return {'type': 'http.request', 'body': b'', 'more_body': False}
 
-            await self(dict(scope), _receive, _send)
+            # A fresh Connection per iteration — copy the request identity, leave
+            # the per-request caches (_body / _receive / state) at their defaults.
+            fresh = Connection(
+                method=conn.method, path=conn.path, raw_path=conn.raw_path,
+                headers=conn.headers, query_string=conn.query_string,
+                http_version=conn.http_version, scheme=conn.scheme, type=conn.type,
+            )
+            await self(fresh, _receive, _send)
 
     def on(self, event_name: str, *, blocking: bool = False
            ) -> Callable[[EventHandler], EventHandler]:
