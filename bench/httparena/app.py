@@ -193,9 +193,15 @@ async def json_comp_endpoint(count: int, conn: Connection):
 
 @app.route(path='/upload', methods=[HTTPMethod.POST])
 async def upload_endpoint(conn: Connection):
-    # Sprint 79: uses ``Connection.body()`` instead of manual ASGI receive loop.
-    body = await conn.body()
-    return Response(str(len(body)).encode(), content_type=_PLAIN)
+    # Sprint 80: stream the body with ``Connection.stream()`` — the profile only
+    # needs the byte count, so we never materialize the (up to 20 MB) payload.
+    # ``conn.body()`` would ``b''.join`` the whole upload (~4-12x the CPU and a
+    # multiple of the throughput under load); streaming keeps a one-chunk working
+    # set, matching the HttpArena "small read buffers" fast path.
+    size = 0
+    async for chunk in conn.stream():
+        size += len(chunk)
+    return Response(str(size).encode(), content_type=_PLAIN)
 
 
 # Liveness for ``launcher.py``'s readiness probe.
@@ -242,12 +248,12 @@ def _int_qs(conn: Connection, name, default):
 
 
 @app.route(path='/async-db', methods=[HTTPMethod.GET])
-async def async_db_endpoint(req: Connection, conn=Depends(db.get_db_conn)):
+async def async_db_endpoint(req: Connection, db_conn=Depends(db.get_db_conn)):
     # Sprint 79: ``req`` is the BlackBull Connection; ``conn`` is the db handle.
     min_price = _int_qs(req, 'min', 10)
     max_price = _int_qs(req, 'max', 50)
     limit = max(1, min(_int_qs(req, 'limit', 50), 50))
-    items = await db.async_db(conn, min_price, max_price, limit)
+    items = await db.async_db(db_conn, min_price, max_price, limit)
     return JSONResponse({'items': items, 'count': len(items)})
 
 
@@ -256,25 +262,25 @@ async def async_db_endpoint(req: Connection, conn=Depends(db.get_db_conn)):
 # ---------------------------------------------------------------------------
 
 @app.route(path='/crud/items', methods=[HTTPMethod.GET])
-async def crud_items_list(req: Connection, conn=Depends(db.get_db_conn)):
+async def crud_items_list(req: Connection, db_conn=Depends(db.get_db_conn)):
     # Sprint 79: ``req`` is the BlackBull Connection; ``conn`` is the db handle.
     qs = _qs(req)
     category = qs.get('category', [None])[0]
     page = _int_qs(req, 'page', 1)
     limit = max(1, min(_int_qs(req, 'limit', 10), 50))
-    items = await db.crud_list(conn, category, page, limit)
+    items = await db.crud_list(db_conn, category, page, limit)
     # Load-more semantics: total == items in this response (per the contract).
     return JSONResponse({'items': items, 'total': len(items),
                          'page': page, 'limit': limit})
 
 
 @app.route(path='/crud/items', methods=[HTTPMethod.POST])
-async def crud_items_create(body: bytes, conn=Depends(db.get_db_conn)):
+async def crud_items_create(body: bytes, db_conn=Depends(db.get_db_conn)):
     try:
         data = json.loads(body)
     except ValueError:
         return Response(b'invalid JSON', status=400, content_type=_PLAIN)
-    ok = await db.crud_create(conn, data)
+    ok = await db.crud_create(db_conn, data)
     if not ok:
         return Response(b'unavailable', status=503, content_type=_PLAIN)
     return JSONResponse({'id': data.get('id')}, status=201)
@@ -291,12 +297,12 @@ async def crud_items_get(item_id: int, pool=Depends(db.get_pool)):
 
 
 @app.route(path='/crud/items/{item_id:int}', methods=[HTTPMethod.PUT])
-async def crud_items_update(item_id: int, body: bytes, conn=Depends(db.get_db_conn)):
+async def crud_items_update(item_id: int, body: bytes, db_conn=Depends(db.get_db_conn)):
     try:
         data = json.loads(body)
     except ValueError:
         return Response(b'invalid JSON', status=400, content_type=_PLAIN)
-    ok = await db.crud_update(conn, item_id, data)
+    ok = await db.crud_update(db_conn, item_id, data)
     if not ok:
         return Response(b'not found', status=404, content_type=_PLAIN)
     return JSONResponse({'id': item_id})
