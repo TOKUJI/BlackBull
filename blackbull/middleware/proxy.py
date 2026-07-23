@@ -72,9 +72,9 @@ class TrustedProxy:
         return any(addr in net for net in self._networks)
 
     async def __call__(self, conn, receive, send, call_next) -> None:
-        # HTTP arrives as a native :class:`Connection`; the WebSocket path (still
-        # ASGI-scope-shaped) arrives as a scope dict. Read/write the request
-        # fields off whichever we were handed.
+        # HTTP and WebSocket both arrive as a native :class:`Connection`; the
+        # dict branch is defensive against a raw ASGI scope dict (only reachable
+        # outside BlackBull's own dispatch). Read/write off whichever we got.
         is_conn = isinstance(conn, Connection)
         rtype = conn.type if is_conn else conn.get('type')
         if rtype not in ('http', 'websocket'):

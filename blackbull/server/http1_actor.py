@@ -289,14 +289,14 @@ class RequestActor(Actor):
 
     def __init__(
         self,
-        scope: dict | Connection,
+        conn: dict | Connection,
         receive: Callable[..., Awaitable[Any]],
         send: Callable[..., Awaitable[Any]],
         app: Callable[..., Awaitable[None]],
         aggregator: EventAggregator,
     ) -> None:
         super().__init__()
-        self._scope = scope
+        self._conn = conn
         self._receive = receive
         self._send = send
         self._app = app
@@ -304,9 +304,9 @@ class RequestActor(Actor):
 
     async def run(self) -> None:  # override: single-shot, no inbox loop
         try:
-            await self._app(self._scope, self._receive, self._send)
+            await self._app(self._conn, self._receive, self._send)
         except BaseException as e:
-            await self._aggregator.on_error(self._scope, e)
+            await self._aggregator.on_error(self._conn, e)
             raise
 
     async def _handle(self, msg: Message) -> None:  # never reached
@@ -827,10 +827,10 @@ class HTTP1Actor(Actor):
         # unquote semantics match uvicorn: '+' stays literal, malformed
         # escapes pass through, errors='replace' can never raise.
         if b'%' in _raw_path_b:
-            _scope_path = unquote(_raw_path_b.decode('ascii'),
+            _decoded_path = unquote(_raw_path_b.decode('ascii'),
                                   encoding='utf-8', errors='replace')
         else:
-            _scope_path = _raw_path_b.decode('utf-8')
+            _decoded_path = _raw_path_b.decode('utf-8')
 
         raw: list[tuple[bytes, bytes]] = []
         for line in lines[idx + 1:]:
@@ -910,7 +910,7 @@ class HTTP1Actor(Actor):
             http_version=version[5:].decode('utf-8'),
             method=method.decode('utf-8'),
             scheme='http',
-            path=_scope_path,
+            path=_decoded_path,
             # ASGI: raw_path is the undecoded path component only — the
             # query string is carried in query_string, never here.
             raw_path=_raw_path_b,
@@ -1068,17 +1068,17 @@ class HTTP1Actor(Actor):
         return True
 
     @staticmethod
-    def _make_legacy_disconnect_receive(receive, scope: dict | Connection, dispatcher, log_record):
+    def _make_legacy_disconnect_receive(receive, conn: dict | Connection, dispatcher, log_record):
         """Legacy disconnect-detecting receive wrapper (mirrors server.py helper)."""
         async def detecting_receive():
             event = await receive()
             if isinstance(event, dict) and event.get('type') == ASGIEvent.HTTP_DISCONNECT:
-                if not disconnected(scope):
-                    mark_disconnected(scope)
+                if not disconnected(conn):
+                    mark_disconnected(conn)
                     await dispatcher.emit(Event(
                         'request_disconnected',
                         detail={
-                            'conn':        scope,
+                            'conn':        conn,
                             'client_ip':    log_record.client_ip,
                             'method':       log_record.method,
                             'path':         log_record.path,
@@ -1090,7 +1090,7 @@ class HTTP1Actor(Actor):
 
     async def _dispatch_request(
         self,
-        scope: dict | Connection,
+        conn: dict | Connection,
         inner_receive,
         capturing_send,
         log_record,
@@ -1105,12 +1105,12 @@ class HTTP1Actor(Actor):
         # instead would close a per-request reference cycle (conn._receive →
         # wrapper → conn) reclaimable only by the cyclic GC — the v0.60.0
         # tail-latency regression. Idempotent (only binds when unset).
-        bind_receive_channel(scope, inner_receive)
+        bind_receive_channel(conn, inner_receive)
         if self._aggregator is not None:
             detecting_receive = _make_disconnect_detecting_receive(
-                inner_receive, scope, self._aggregator)
+                inner_receive, conn, self._aggregator)
             request_actor = RequestActor(
-                scope, detecting_receive, capturing_send,
+                conn, detecting_receive, capturing_send,
                 self._app, self._aggregator,
             )
             try:
@@ -1129,11 +1129,11 @@ class HTTP1Actor(Actor):
             _dispatcher = getattr(self._app, '_dispatcher', None)
             if _dispatcher is not None:
                 detecting_receive = self._make_legacy_disconnect_receive(
-                    inner_receive, scope, _dispatcher, log_record)
+                    inner_receive, conn, _dispatcher, log_record)
             else:
                 detecting_receive = inner_receive
             try:
-                await self._app(scope, detecting_receive, capturing_send)
+                await self._app(conn, detecting_receive, capturing_send)
             except BaseException:
                 raise
             finally:

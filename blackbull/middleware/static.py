@@ -222,8 +222,9 @@ class StaticFiles:
         return Path(self._root_str)
 
     async def __call__(self, conn, receive, send, call_next=None):
-        # BlackBull threads a native Connection for HTTP; a WebSocket/non-HTTP
-        # scope dict (only possible in the middleware role) passes through.
+        # BlackBull threads a native Connection for HTTP and WebSocket alike;
+        # the guard is defensive against a raw ASGI scope dict (only reachable
+        # if this middleware runs outside BlackBull's own dispatch).
         if (not isinstance(conn, Connection) or conn.type != 'http'
                 or conn.method not in ('GET', 'HEAD')):
             if call_next:

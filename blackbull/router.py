@@ -602,7 +602,7 @@ def _lookup_converter(converters: dict, result_type: type):
     return None
 
 
-async def _send_native(result, scope, receive, send) -> bool:
+async def _send_native(result, conn, receive, send) -> bool:
     """Serialise a *natively supported* handler/converter return value to ASGI.
 
     The single source of truth for return-value → ASGI mapping, shared by the
@@ -632,13 +632,13 @@ async def _send_native(result, scope, receive, send) -> bool:
         # Existing StreamingResponse / EventSourceResponse instance — let it
         # drive scope/receive/send directly so subclasses keep control over
         # the start event.
-        await result(scope, receive, send)
+        await result(conn, receive, send)
     elif inspect.isasyncgen(result):
         # ``async def stream(): yield ...`` shape — wrap in a default-typed
         # StreamingResponse.  Backpressure flows naturally because each
         # ``await send()`` on a body event blocks on flow-control credit
         # (HTTP/2) or drain (HTTP/1).
-        await _StreamingResponse(result)(scope, receive, send)
+        await _StreamingResponse(result)(conn, receive, send)
     elif isinstance(result, _Response):
         await send(result)
     elif isinstance(result, bytes):
@@ -655,21 +655,21 @@ async def _send_native(result, scope, receive, send) -> bool:
     return True
 
 
-async def _send_converted(value, scope, receive, send) -> None:
+async def _send_converted(value, conn, receive, send) -> None:
     """Serialise a converter's output and send it.
 
     A converter must return a *natively supported* sendable (see
     :func:`_send_native`).  Anything else raises here — the intended loud
     failure — rather than silently dropping the response.
     """
-    if await _send_native(value, scope, receive, send):
+    if await _send_native(value, conn, receive, send):
         return
     raise TypeError(
         'a registered converter must return a Response, StreamingResponse, '
         f'bytes, str, dict, list, dataclass, or None; got {type(value).__name__!r}')
 
 
-async def _finish_result(result, scope, receive, send, converters, fn_name: str) -> None:
+async def _finish_result(result, conn, receive, send, converters, fn_name: str) -> None:
     """Send a simplified handler's return value — native shapes first, then
     the app's converter registry, then the loud ``TypeError``.
 
@@ -677,10 +677,10 @@ async def _finish_result(result, scope, receive, send, converters, fn_name: str)
     function so the extended (query/``Depends``) wrapper shares it without
     the basic wrapper gaining a per-request call.
     """
-    if await _send_native(result, scope, receive, send):
+    if await _send_native(result, conn, receive, send):
         return
     if converters and (conv := _lookup_converter(converters, type(result))) is not None:
-        await _send_converted(conv(result), scope, receive, send)
+        await _send_converted(conv(result), conn, receive, send)
         return
     raise TypeError(
         f"Simplified handler {fn_name!r} returned unsupported type "
@@ -847,8 +847,13 @@ def _handler_param_plan(fn, path_param_names: set) -> tuple:
     return params, annotations, categories
 
 
-def _conn_of(scope, receive):
+def _conn_of(target, receive):
     """Return the :class:`Connection` for this request.
+
+    *target* is the threaded dispatch object: a :class:`Connection` on the
+    self-hosted and external paths alike (``BlackBull.__call__`` converts an
+    inbound ASGI scope via :meth:`Connection.from_scope` before dispatch), or a
+    hand-built ASGI scope dict on a direct unit-test drive of a wrapper.
 
     Sprint 79 Phase 5 (consumer switch): the protocol actor builds the
     ``Connection`` in its parser and stashes it on the ASGI scope envelope
@@ -869,14 +874,14 @@ def _conn_of(scope, receive):
     so it, too, is left untouched; only a hand-built scope that reached the
     router with no channel bound (some unit drives) falls through to this bind.
     """
-    conn, built = stashed_connection(scope, receive)
-    if built and isinstance(scope, dict):
+    conn, built = stashed_connection(target, receive)
+    if built and isinstance(target, dict):
         # Transitional bridge: an *input* ``path_params`` key on a bare scope
         # (external callers, and the router's own unit tests that drive a
         # wrapper directly) seeds ``conn.path_params``.  The framework itself no
         # longer writes path params onto the scope — ``_set_path_params`` sets
         # them on the Connection (proposal §2.2).
-        seed = scope.get('path_params')
+        seed = target.get('path_params')
         if seed:
             conn.path_params.update(seed)
     if conn._receive is None:
@@ -884,7 +889,7 @@ def _conn_of(scope, receive):
     return conn
 
 
-def _set_path_params(scope, receive, params: dict) -> None:
+def _set_path_params(target, receive, params: dict) -> None:
     """Record matched URL path params on the request's :class:`Connection`.
 
     Sprint 79 Phase 5: replaces the old ``scope.setdefault('path_params', {})``
@@ -897,7 +902,7 @@ def _set_path_params(scope, receive, params: dict) -> None:
     """
     if not params:
         return
-    _conn_of(scope, receive).path_params.update(params)
+    _conn_of(target, receive).path_params.update(params)
 
 
 def _adapt_handler(fn, path: str, converters: dict | None = None):
@@ -960,11 +965,11 @@ def _adapt_handler(fn, path: str, converters: dict | None = None):
     is_async = inspect.iscoroutinefunction(fn)
 
     @wraps(fn)
-    async def _wrapper(scope, receive, send):
+    async def _wrapper(conn, receive, send):
         # The typed Connection is the single source for the request object,
         # the body cache (one drain point shared with the body branches), and
         # the path params (set by the router's ``_inject`` on ``conn``).
-        conn = _conn_of(scope, receive)
+        conn = _conn_of(conn, receive)
         kwargs: dict = {}
         for name in params:
             ann = annotations.get(name, inspect.Parameter.empty)
@@ -1028,8 +1033,8 @@ def _adapt_handler(fn, path: str, converters: dict | None = None):
     fn_name = fn.__name__
 
     @wraps(fn)
-    async def _extended_wrapper(scope, receive, send):
-        conn = _conn_of(scope, receive)
+    async def _extended_wrapper(conn, receive, send):
+        conn = _conn_of(conn, receive)
         kwargs: dict = {}
         if has_query:
             raw_qs = conn.query_string or b''
@@ -1456,10 +1461,10 @@ class Router:
         if h is not None:
             if params:
                 _fn, _params = h, params
-                async def _inject(scope, receive, send,
+                async def _inject(conn, receive, send,
                                   _fn=_fn, _params=_params):
-                    _set_path_params(scope, receive, _params)
-                    return await _fn(scope, receive, send)
+                    _set_path_params(conn, receive, _params)
+                    return await _fn(conn, receive, send)
                 # Preserve any route hooks across the path-param wrapper so
                 # the dispatcher still finds them.
                 _copy_route_hooks(_inject, _fn)
@@ -1486,10 +1491,10 @@ class Router:
                 logger.debug("raw-regex hit: pattern=%r fn=%r", pattern, fn)
                 if gdict := m.groupdict():
                     _fn, _params = fn, gdict
-                    async def _inject(scope, receive, send,
+                    async def _inject(conn, receive, send,
                                       _fn=_fn, _params=_params):
-                        _set_path_params(scope, receive, _params)
-                        return await _fn(scope, receive, send)
+                        _set_path_params(conn, receive, _params)
+                        return await _fn(conn, receive, send)
                     _copy_route_hooks(_inject, _fn)
                     return _inject
                 return fn
@@ -1621,8 +1626,8 @@ class Router:
         # _resolve rather than forwarded as kwargs to the outermost
         # middleware (which would raise TypeError for unknown keyword args).
         _ic = inner_chain
-        async def _chain_wrapper(scope, receive, send):
-            return await _ic(scope, receive, send)
+        async def _chain_wrapper(conn, receive, send):
+            return await _ic(conn, receive, send)
 
         if accept_query is not None:
             _chain_wrapper._bb_response_headers, _chain_wrapper._bb_request_guard = \
@@ -1847,11 +1852,11 @@ class ErrorRouter:
         errors = ErrorRouter()
 
         @errors[HTTPStatus.NOT_FOUND]
-        async def handle_404(scope, receive, send):
+        async def handle_404(conn, receive, send):
             ...
 
         @errors[ValueError]
-        async def handle_value_error(scope, receive, send):
+        async def handle_value_error(conn, receive, send):
             ...
 
         handler = errors[HTTPStatus.NOT_FOUND]   # → handle_404

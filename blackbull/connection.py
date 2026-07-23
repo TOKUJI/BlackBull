@@ -21,7 +21,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, NamedTuple
 
 from .headers import Headers
-from .request import read_body, parse_cookies, ClientDisconnected, _json_or_none
+from .request import read_body, cookies_from_headers, ClientDisconnected, _json_or_none
 
 __all__ = ['Connection', 'ClientDisconnected', 'CONNECTION_STASH_KEY',
            'disconnected', 'mark_disconnected']
@@ -141,11 +141,14 @@ def _scope_fields() -> list[_FieldSpec]:
     return _SCOPE_FIELDS
 
 
-def stashed_connection(scope, receive) -> tuple['Connection', bool]:
+def stashed_connection(target, receive) -> tuple['Connection', bool]:
     """Return the typed :class:`Connection` for this request, plus whether it
     was freshly built.
 
-    The one *scope → Connection* accessor shared by the dispatcher
+    *target* is the threaded dispatch object — a :class:`Connection` on the
+    native path, or an ASGI scope dict on the external/compat lane.
+
+    The one *ASGI-scope → Connection* accessor shared by the dispatcher
     (``app._connection_of``) and the router (``router._conn_of``), Sprint 79.
     BlackBull's own protocol actors stash the ``Connection`` they parsed on the
     scope envelope under :data:`CONNECTION_STASH_KEY`, so the self-hosted path
@@ -161,19 +164,19 @@ def stashed_connection(scope, receive) -> tuple['Connection', bool]:
     differ by call site.
     """
     # Native path (Sprint 80): the actor/app hands the typed Connection straight
-    # through, so ``scope`` *is* the Connection — return it, nothing to build.
-    if isinstance(scope, Connection):
-        return scope, False
-    conn = scope.get(CONNECTION_STASH_KEY) if isinstance(scope, dict) else None
+    # through, so ``target`` *is* the Connection — return it, nothing to build.
+    if isinstance(target, Connection):
+        return target, False
+    conn = target.get(CONNECTION_STASH_KEY) if isinstance(target, dict) else None
     if conn is not None:
         return conn, False
-    conn = Connection.from_scope(scope, receive)
-    if isinstance(scope, dict):
-        scope[CONNECTION_STASH_KEY] = conn
+    conn = Connection.from_scope(target, receive)
+    if isinstance(target, dict):
+        target[CONNECTION_STASH_KEY] = conn
     return conn, True
 
 
-def bind_receive_channel(scope, receive) -> None:
+def bind_receive_channel(target, receive) -> None:
     """Bind the **raw** body-receive channel onto the request's Connection so
     lazy ``conn.body()`` / ``request.body()`` drain the right stream once.
 
@@ -192,8 +195,8 @@ def bind_receive_channel(scope, receive) -> None:
     ``httpx.ASGITransport``), where :meth:`Connection.from_scope` already bound
     the host's own receive channel, keeps that binding.
     """
-    conn = scope if isinstance(scope, Connection) else (
-        scope.get(CONNECTION_STASH_KEY) if isinstance(scope, dict) else None)
+    conn = target if isinstance(target, Connection) else (
+        target.get(CONNECTION_STASH_KEY) if isinstance(target, dict) else None)
     if conn is not None and conn._receive is None:
         conn._receive = receive
 
@@ -441,6 +444,6 @@ class Connection:
     def cookies(self) -> dict[str, str]:
         """Cookies from the ``Cookie`` header, parsed once and cached."""
         if self._cookies is None:
-            self._cookies = parse_cookies({'headers': self.headers})
+            self._cookies = cookies_from_headers(self.headers)
         return self._cookies
 

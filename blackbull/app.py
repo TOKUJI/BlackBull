@@ -1010,19 +1010,19 @@ class BlackBull:
         Usage::
 
             @app.on_error(HTTPStatus.FORBIDDEN)
-            async def handle_403(scope, receive, send):
+            async def handle_403(conn, receive, send):
                 ...
 
             @app.on_error(403)            # int shorthand
-            async def handle_403(scope, receive, send):
+            async def handle_403(conn, receive, send):
                 ...
 
             @app.on_error(ValueError)
-            async def handle_value_error(scope, receive, send):
+            async def handle_value_error(conn, receive, send):
                 ...
 
-        The handler receives (scope, receive, send).
-        scope['state'] contains:
+        The handler receives (conn, receive, send).
+        conn.state contains:
           - 'error_status'    : HTTPStatus
           - 'error_exception' : exception instance (when triggered by an exception)
           - 'allowed_methods' : allowed method names (for 405)

@@ -256,7 +256,7 @@ class AsyncAPIExtension(Extension):
 
         spec_path, docs_path = self.spec_path, self.docs_path
 
-        async def _asyncapi_spec(scope, receive, send):  # noqa: ARG001
+        async def _asyncapi_spec(conn, receive, send):  # noqa: ARG001
             await send(JSONResponse(self._generate(app)))
         # Flag so a *future* AsyncAPI-aware generator never documents itself;
         # set before registration so the original handler carries the attribute
@@ -268,7 +268,7 @@ class AsyncAPIExtension(Extension):
         if docs_path is not None:
             ui_title = f'{self.title} — AsyncAPI'
 
-            async def _asyncapi_docs(scope, receive, send):  # noqa: ARG001
+            async def _asyncapi_docs(conn, receive, send):  # noqa: ARG001
                 await send(Response(asyncapi_html(spec_path, title=ui_title)))
             _asyncapi_docs.__blackbull_asyncapi_internal__ = True
             app.route(methods=HTTPMethod.GET, path=docs_path)(_asyncapi_docs)

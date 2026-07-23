@@ -242,19 +242,19 @@ class AccessLogRecord:
 
 
 
-def _make_disconnect_detecting_receive(receive, scope, aggregator: 'EventAggregator'):
+def _make_disconnect_detecting_receive(receive, conn, aggregator: 'EventAggregator'):
     """Wrap *receive* to emit request_disconnected when http.disconnect is seen.
 
     Used by both the HTTP/1.1 and HTTP/2 actor paths.
-    Sets scope['_disconnected'] = True on first detection (idempotent).
+    Marks *conn* disconnected on first detection (idempotent).
     """
     from ..connection import disconnected, mark_disconnected  # noqa: PLC0415
     async def detecting_receive():
         event = await receive()
         if isinstance(event, dict) and event.get('type') == ASGIEvent.HTTP_DISCONNECT:
-            if not disconnected(scope):
-                mark_disconnected(scope)
-                await aggregator.on_request_disconnected(scope)
+            if not disconnected(conn):
+                mark_disconnected(conn)
+                await aggregator.on_request_disconnected(conn)
         return event
     return detecting_receive
 

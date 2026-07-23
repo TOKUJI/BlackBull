@@ -149,7 +149,9 @@ class Cache:
     # ---- ASGI surface ----------------------------------------------------
 
     async def __call__(self, conn, receive, send, call_next):
-        # Native Connection for HTTP; WebSocket/non-HTTP arrives as a scope dict.
+        # Native Connection for HTTP and WebSocket; the guard is defensive
+        # against a raw ASGI scope dict (only reachable outside BlackBull's own
+        # dispatch).
         if not isinstance(conn, Connection):
             await call_next(conn, receive, send)
             return

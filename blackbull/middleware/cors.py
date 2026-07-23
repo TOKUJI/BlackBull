@@ -73,8 +73,9 @@ class CORS:
         return hdrs
 
     async def __call__(self, conn, receive, send, call_next) -> None:
-        # BlackBull threads a native ``Connection`` for HTTP; the WebSocket /
-        # non-HTTP path arrives as an ASGI scope dict — pass it straight through.
+        # BlackBull threads a native ``Connection`` for HTTP and WebSocket; the
+        # guard is defensive against a raw ASGI scope dict (only reachable if
+        # this middleware runs outside BlackBull's own dispatch) — pass through.
         if not isinstance(conn, Connection):
             await call_next(conn, receive, send)
             return

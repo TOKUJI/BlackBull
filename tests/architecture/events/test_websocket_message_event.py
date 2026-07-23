@@ -7,6 +7,8 @@ import asyncio
 import pytest
 from blackbull import BlackBull, Event
 from blackbull.utils import Scheme
+from blackbull.connection import Connection
+from blackbull.headers import Headers
 from blackbull.server.recipient import WebSocketRecipient, AsyncioReader
 from blackbull.server.sender import AbstractWriter
 
@@ -72,13 +74,9 @@ class _FakeWriter(AbstractWriter):
 # Test harness helpers
 # ---------------------------------------------------------------------------
 
-def _make_scope(path: str) -> dict:
-    return {
-        'type': 'websocket',
-        'path': path,
-        'headers': [],
-        'query_string': b'',
-    }
+def _make_conn(path: str) -> Connection:
+    return Connection(method='GET', path=path, raw_path=path.encode(),
+                      headers=Headers([]), type='websocket')
 
 
 async def _drive_ws_client(app, path, *, send_text=None, send_bytes=None):
@@ -88,16 +86,16 @@ async def _drive_ws_client(app, path, *, send_text=None, send_bytes=None):
     else:
         payload, opcode = send_bytes, 0x2
     raw = _make_client_frame(payload, opcode=opcode) + _make_client_frame(b'', opcode=0x8)
-    scope = _make_scope(path)
+    conn = _make_conn(path)
     receive = WebSocketRecipient(
         AsyncioReader(_FakeReader(raw)),
         _FakeWriter(),
         dispatcher=app._dispatcher,
-        scope=scope,
+        conn=conn,
     )
     async def send(event, status=None, headers=None):
         pass
-    await app(scope, receive, send)
+    await app(conn, receive, send)
 
 
 async def _drive_ws_client_fragments(app, path, *, fragments):
@@ -107,32 +105,32 @@ async def _drive_ws_client_fragments(app, path, *, fragments):
     for i, part in enumerate(rest):
         raw += _make_client_frame(part.encode(), opcode=0x0, fin=(i == len(rest) - 1))
     raw += _make_client_frame(b'', opcode=0x8)
-    scope = _make_scope(path)
+    conn = _make_conn(path)
     receive = WebSocketRecipient(
         AsyncioReader(_FakeReader(raw)),
         _FakeWriter(),
         dispatcher=app._dispatcher,
-        scope=scope,
+        conn=conn,
     )
     async def send(event, status=None, headers=None):
         pass
-    await app(scope, receive, send)
+    await app(conn, receive, send)
 
 
 async def _drive_ws_client_multi(app, path, *, messages):
     """Run app against multiple WebSocket text messages."""
     raw = b''.join(_make_client_frame(m.encode(), opcode=0x1) for m in messages)
     raw += _make_client_frame(b'', opcode=0x8)
-    scope = _make_scope(path)
+    conn = _make_conn(path)
     receive = WebSocketRecipient(
         AsyncioReader(_FakeReader(raw)),
         _FakeWriter(),
         dispatcher=app._dispatcher,
-        scope=scope,
+        conn=conn,
     )
     async def send(event, status=None, headers=None):
         pass
-    await app(scope, receive, send)
+    await app(conn, receive, send)
 
 
 # ---------------------------------------------------------------------------
@@ -166,7 +164,7 @@ async def test_websocket_message_event_fires_for_text_frame():
     assert e.name == 'websocket_message'
     assert e.detail['text'] == 'hello'
     assert e.detail['bytes'] is None
-    assert e.detail['conn']['path'] == '/ws'
+    assert e.detail['conn'].path == '/ws'
 
 
 @pytest.mark.asyncio

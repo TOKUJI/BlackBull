@@ -3,16 +3,16 @@ from typing import Any
 from blackbull.event import Event, EventDispatcher
 
 
-def _request_fields(scope):
+def _request_fields(conn):
     """Read the common request identity fields for a Level B event detail from
     either a native :class:`~blackbull.connection.Connection` (the ``app(conn, …)``
-    path) or an ASGI ``scope`` dict (the WebSocket / ``BB_FORCE_ASGI_SCOPE`` /
-    external-server path). Returns ``(client, method, path, http_version)``."""
+    path) or an ASGI scope dict (only the ``BB_FORCE_ASGI_SCOPE`` / external-server
+    compat lane). Returns ``(client, method, path, http_version)``."""
     from blackbull.connection import Connection  # noqa: PLC0415 — avoid import cycle
-    if isinstance(scope, Connection):
-        return scope.client, scope.method, scope.path, scope.http_version
-    return (scope.get('client'), scope.get('method', '-'),
-            scope.get('path', '-'), scope.get('http_version', '-'))
+    if isinstance(conn, Connection):
+        return conn.client, conn.method, conn.path, conn.http_version
+    return (conn.get('client'), conn.get('method', '-'),
+            conn.get('path', '-'), conn.get('http_version', '-'))
 
 
 def _ws_fields(conn):
@@ -71,18 +71,18 @@ class EventAggregator:
     # ASGI hosts (uvicorn, TestClient) too, exactly once per request.  Only
     # wire-level events remain here.
 
-    async def on_request_disconnected(self, scope) -> None:
+    async def on_request_disconnected(self, conn) -> None:
         """Fire Level B ``request_disconnected``.
 
-        *scope* is the native :class:`~blackbull.connection.Connection` on the
-        self-hosted HTTP path, or an ASGI scope dict on the WebSocket / external
-        path — :func:`_request_fields` reads either."""
+        *conn* is the native :class:`~blackbull.connection.Connection` on the
+        self-hosted path, or an ASGI scope dict only on the ``BB_FORCE_ASGI_SCOPE``
+        / external compat lane — :func:`_request_fields` reads either."""
         if not self._dispatcher.has_listeners('request_disconnected'):
             return
-        client, method, path, http_version = _request_fields(scope)
+        client, method, path, http_version = _request_fields(conn)
         client = client or ['-']
         await self._dispatcher.emit(Event("request_disconnected", {
-            'conn':        scope,
+            'conn':        conn,
             'client_ip':    str(client[0]),
             'method':       method,
             'path':         path,
@@ -90,13 +90,14 @@ class EventAggregator:
         }))
 
     async def on_error(
-        self, scope, exception: BaseException
+        self, conn, exception: BaseException
     ) -> None:
-        """Fire Level B ``error`` (``scope`` is a Connection or an ASGI scope dict)."""
+        """Fire Level B ``error`` (``conn`` is a Connection, or a scope dict on
+        the compat lane)."""
         if not self._dispatcher.has_listeners('error'):
             return
         await self._dispatcher.emit(
-            Event("error", {'conn': scope, "exception": exception})
+            Event("error", {'conn': conn, "exception": exception})
         )
 
     # ------------------------------------------------------------------

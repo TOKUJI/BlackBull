@@ -5,7 +5,10 @@ Provides:
 - `read_body`: buffers all ASGI ``http.request`` chunks into a single ``bytes`` object.
 - `read_json`: buffers the body and parses it as JSON (``None`` on empty/invalid).
 - `read_text`: buffers the body and decodes it as text.
-- `parse_cookies`: parses the ``Cookie`` request header into a ``dict[str, str]``.
+- `cookies_from_headers`: parses the ``Cookie`` header(s) into a ``dict[str, str]``
+  straight from a headers object — the native core (what ``Connection.cookies`` uses).
+- `parse_cookies`: the ASGI-scope-shaped wrapper of the above, for external
+  callers that hold a scope dict.
 
 The opt-in HTTP context object formerly named ``Request`` moved to
 :class:`blackbull.connection.Connection` (Sprint 79 Phase 5); ``Request`` is now
@@ -116,17 +119,18 @@ async def read_text(receive, encoding: str = 'utf-8') -> str:
     return body.decode(encoding, errors='replace')
 
 
-def parse_cookies(scope) -> dict[str, str]:
-    """Parse the ``Cookie`` request header from an ASGI scope into a dict.
+def parse_cookies(source) -> dict[str, str]:
+    """Parse the ``Cookie`` request header into a dict.
 
-    Works identically for HTTP/1.1, HTTP/2, and WebSocket scopes.
-    HTTP/1.1 sends a single combined ``Cookie`` header; HTTP/2 may split it
-    into multiple fields (RFC 7540 §8.1.2.5).  All ``cookie`` fields are
-    collected and joined before parsing, so both wire formats produce the
-    same result.
+    *source* is a mapping carrying a ``'headers'`` key — an ASGI scope dict, or
+    the ``{'headers': conn.headers}`` wrapper ``Connection.cookies`` passes.
+    Works identically for HTTP/1.1, HTTP/2, and WebSocket. HTTP/1.1 sends a
+    single combined ``Cookie`` header; HTTP/2 may split it into multiple fields
+    (RFC 7540 §8.1.2.5).  All ``cookie`` fields are collected and joined before
+    parsing, so both wire formats produce the same result.
 
     Accepts either of the two header shapes that may appear on
-    ``scope['headers']``:
+    ``source['headers']``:
 
     - A plain list/iterable of ``(name, value)`` bytes tuples — the
       standard ASGI 3.0 form, used by external servers (uvicorn,
@@ -134,7 +138,18 @@ def parse_cookies(scope) -> dict[str, str]:
     - A :class:`blackbull.headers.Headers` instance — what BlackBull's
       own server attaches as a handler ergonomics enhancement.
     """
-    headers = scope.get('headers', ())
+    return cookies_from_headers(source.get('headers', ()))
+
+
+def cookies_from_headers(headers) -> dict[str, str]:
+    """Parse the ``Cookie`` header(s) into a dict, straight from a headers
+    object/iterable — no ASGI scope dict involved.
+
+    This is the native core: :meth:`Connection.cookies` calls it directly on
+    ``conn.headers``; :func:`parse_cookies` is the ASGI-scope-shaped wrapper kept
+    for external callers that hold a scope dict. Accepts a
+    :class:`blackbull.headers.Headers` instance (uses ``getlist``) or a plain
+    iterable of ``(name, value)`` bytes tuples (the ASGI 3.0 form)."""
     getlist = getattr(headers, 'getlist', None)
     if getlist is not None:
         cookie_values = [v for _, v in getlist(b'cookie')]
