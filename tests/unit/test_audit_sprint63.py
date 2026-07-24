@@ -316,12 +316,16 @@ class TestXForwardedPrefixTrust:
 
         block = Encoder().encode([
             (b':method', b'GET'), (b':path', b'/'), (b':scheme', b'https'),
+            (b':authority', b'example.com'),
             (b'x-forwarded-prefix', b'/evil'),
         ])
         flags = HeaderFrameFlags.END_HEADERS | HeaderFrameFlags.END_STREAM
         raw = (len(block).to_bytes(3, 'big') + FrameTypes.HEADERS
                + bytes([flags]) + (1).to_bytes(4, 'big') + block)
-        conn = parse_headers(FrameFactory().load(raw))
+        frame = FrameFactory().load(raw)
+        conn = parse_headers(frame)
+        assert not frame.malformed
+        assert conn is not None
         assert conn.root_path == ''
 
     @pytest.mark.asyncio
