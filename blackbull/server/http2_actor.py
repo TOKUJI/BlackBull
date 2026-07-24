@@ -19,7 +19,7 @@ from ..protocol.frame_types import (
     DEFAULT_INITIAL_WINDOW_SIZE, DEFAULT_MAX_FRAME_SIZE,
 )
 from ..protocol.stream import Stream, StreamState
-from ..connection import Connection, CONNECTION_STASH_KEY, bind_receive_channel
+from ..connection import Connection, bind_receive_channel
 from ..env import get_settings
 from ..headers import Headers
 from .parser import parse_headers

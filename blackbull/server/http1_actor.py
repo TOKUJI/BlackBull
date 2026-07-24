@@ -18,7 +18,7 @@ from ..event import Event
 from ..event_aggregator import EventAggregator
 from ..asgi import ASGIEvent
 from ..connection import (
-    Connection, CONNECTION_STASH_KEY, bind_receive_channel, disconnected, mark_disconnected)
+    Connection, bind_receive_channel, disconnected, mark_disconnected)
 from ..headers import Headers
 from .deadline import ConnectionDeadline
 from .recipient import AbstractReader, IncompleteReadError, RecipientFactory, _WS_EVENT_QUEUE_DEPTH

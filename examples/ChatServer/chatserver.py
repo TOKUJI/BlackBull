@@ -198,6 +198,16 @@ class _SessionDict(dict):
         super().clear()
         self.modified = True
 
+    # `modified` is transient dirty-tracking, deliberately excluded from
+    # equality: a session's identity is its *content*, not whether this
+    # particular instance has been written to. Define __eq__ explicitly
+    # (delegating to dict) so that exclusion is an intentional decision, not
+    # an accident of subclassing.
+    def __eq__(self, other) -> bool:
+        return dict.__eq__(self, other)
+
+    __hash__ = None   # dicts (and thus sessions) are unhashable
+
 
 def _b64(raw: bytes) -> str:
     # Strip '=' padding so the token is a clean cookie value.
