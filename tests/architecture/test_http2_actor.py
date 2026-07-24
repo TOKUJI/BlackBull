@@ -12,6 +12,22 @@ from blackbull.protocol.frame_types import (
 from blackbull.server.recipient import AbstractReader
 from blackbull.server.sender import AbstractWriter
 from blackbull.server.http2_actor import HTTP2Actor
+from blackbull.connection import Connection
+
+
+def _req_field(target, name):
+    """Read a request field from what the actor dispatched — a native
+    ``Connection`` (attribute) on the default lane, or an ASGI scope dict under
+    ``BB_FORCE_ASGI_SCOPE`` (key). These actor-level tests use a bare capturing
+    app, so the compat lane hands them the raw scope dict (no ``from_scope``
+    rebuild a real ``BlackBull`` app would do). ``client``/``server`` come back
+    as ``[host, port]`` lists in a scope, normalized to tuples here."""
+    if isinstance(target, Connection):
+        return getattr(target, name)
+    val = target.get(name)
+    if name in ('client', 'server') and isinstance(val, list):
+        return tuple(val)
+    return val
 
 
 # ---------------------------------------------------------------------------
@@ -149,7 +165,7 @@ async def test_stream_error_isolated(fake_two_stream_reader, fake_writer) -> Non
     async def app_with_one_error(conn, _receive, send):
         nonlocal call_count, completed
         call_count += 1
-        if conn.path == '/' and call_count == 1:
+        if _req_field(conn, 'path') == '/' and call_count == 1:
             raise RuntimeError('stream error')
         await send({'type': 'http.response.start', 'status': 200, 'headers': []})
         await send({'type': 'http.response.body', 'body': b''})
@@ -173,8 +189,8 @@ async def test_conn_has_client_and_server(fake_h2_reader, fake_writer) -> None:
     received = {}
 
     async def capture_app(conn, receive, send):
-        received['client'] = conn.client
-        received['server'] = conn.server
+        received['client'] = _req_field(conn, 'client')
+        received['server'] = _req_field(conn, 'server')
         await send({'type': 'http.response.start', 'status': 200, 'headers': []})
         await send({'type': 'http.response.body', 'body': b''})
 

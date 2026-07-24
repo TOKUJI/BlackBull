@@ -44,6 +44,20 @@ from blackbull.event_aggregator import EventAggregator
 from blackbull.headers import Headers
 from blackbull.protocol.frame import FrameFactory
 from blackbull.protocol.frame_types import FrameTypes, HeaderFrameFlags
+
+
+def _dispatched_extensions(target):
+    """``extensions`` of what the actor dispatched — a native ``Connection``
+    (attribute) on the default lane, or an ASGI scope dict (key) under
+    ``BB_FORCE_ASGI_SCOPE``. The sentinel must not escape via either shape."""
+    return target.extensions if isinstance(target, Connection) else target.get('extensions')
+
+
+def _dispatched_method_path(target):
+    """``(method, path)`` of the dispatched target, lane-agnostically."""
+    if isinstance(target, Connection):
+        return target.method, target.path
+    return target.get('method'), target.get('path')
 from blackbull.server import parser as parser_mod
 from blackbull.server.http2_actor import HTTP2Actor
 from blackbull.server.recipient import AbstractReader
@@ -150,9 +164,7 @@ async def test_extensions_sentinel_replaced_before_app_sees_connection():
     await actor.run()
 
     assert 'conn' in seen, 'app was never dispatched'
-    conn = seen['conn']
-    assert isinstance(conn, Connection)
-    assert conn.extensions is not parser_mod._EMPTY_H2_EXTENSIONS, (
+    assert _dispatched_extensions(seen['conn']) is not parser_mod._EMPTY_H2_EXTENSIONS, (
         'the shared empty-extensions sentinel reached application code — '
         '_apply_priority_and_extensions must replace it before dispatch')
 
@@ -198,10 +210,9 @@ async def test_extensions_sentinel_replaced_before_app_sees_connection_via_conti
     await actor.run()
 
     assert 'conn' in seen, 'app was never dispatched (CONTINUATION path)'
-    conn = seen['conn']
-    assert isinstance(conn, Connection)
-    assert conn.method == 'GET' and conn.path == '/'  # sanity: real request, not a stub
-    assert conn.extensions is not parser_mod._EMPTY_H2_EXTENSIONS, (
+    method, path = _dispatched_method_path(seen['conn'])
+    assert method == 'GET' and path == '/'  # sanity: real request, not a stub
+    assert _dispatched_extensions(seen['conn']) is not parser_mod._EMPTY_H2_EXTENSIONS, (
         'the shared empty-extensions sentinel reached application code via '
         'the CONTINUATION completion path — _apply_priority_and_extensions '
         'must replace it there too, independently of the HEADERS path')

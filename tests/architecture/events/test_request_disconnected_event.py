@@ -16,6 +16,7 @@ import asyncio
 import pytest
 from unittest.mock import MagicMock, AsyncMock, patch
 from blackbull import BlackBull
+from blackbull.connection import Connection
 from blackbull.event import Event
 from blackbull.server.http1_actor import HTTP1Actor
 from blackbull.server.websocket_actor import WebSocketActor
@@ -259,8 +260,15 @@ async def test_disconnected_event_detail_has_request_identification_fields():
     assert d['path'] == '/x'
     assert 'client_ip' in d
     assert 'http_version' in d
-    assert d['conn'].method == d['method']
-    assert d['conn'].path == d['path']
+    # detail['conn'] is a native Connection on the default lane, or an ASGI
+    # scope dict on the BB_FORCE_ASGI_SCOPE / external compat lane (see
+    # EventAggregator.on_request_disconnected) — cross-check either shape.
+    if isinstance(d['conn'], Connection):
+        assert d['conn'].method == d['method']
+        assert d['conn'].path == d['path']
+    else:
+        assert d['conn']['method'] == d['method']
+        assert d['conn']['path'] == d['path']
     assert 'status' not in d
     assert 'response_bytes' not in d
     assert 'duration_ms' not in d

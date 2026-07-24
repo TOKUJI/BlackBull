@@ -48,10 +48,20 @@ class _StreamRecipient(Protocol):
     def put_DATAFrame(self, frame) -> bool: pass
 
 
-def _req_headers(target) -> 'Headers | list':
+def _req_headers(target) -> Headers:
     """Request headers of a dispatch *target* — the native :class:`Connection`
-    (attribute) or, on the ``force_asgi`` / WebSocket lanes, an ASGI scope dict."""
-    return target.headers if isinstance(target, Connection) else target.get('headers', Headers([]))
+    (attribute) or, on the ``force_asgi`` / WebSocket lanes, an ASGI scope dict.
+
+    Always returns a :class:`Headers`.  A scope dict's ``headers`` is a plain
+    ``list`` of ``(bytes, bytes)`` tuples (the ASGI wire shape), so it is wrapped
+    here — callers rely on ``Headers`` methods (``_resolve_priority`` calls
+    ``.get()``); iterating one (``_extract_content_length``) works either way.
+    Wrapping happens only on the compat lane; the native path returns the
+    ``Connection``'s ``Headers`` as-is."""
+    if isinstance(target, Connection):
+        return target.headers
+    raw = target.get('headers', [])
+    return raw if isinstance(raw, Headers) else Headers(raw)
 
 
 def _extract_content_length(target) -> int | None:
