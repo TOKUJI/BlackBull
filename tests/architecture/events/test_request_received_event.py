@@ -141,7 +141,7 @@ async def test_request_received_detail_shape():
     assert len(captured) == 1
 
     d = captured[0].detail
-    assert 'scope' in d
+    assert 'conn' in d
     assert isinstance(d['client_ip'], str)
     assert d['method'] == 'GET'
     assert d['path'] == '/hello'

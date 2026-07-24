@@ -107,7 +107,7 @@ class _FakeWriter(AbstractWriter):
         self.closed = True
 
 
-async def _noop_app(scope, receive, send):
+async def _noop_app(conn, receive, send):
     pass
 
 
@@ -183,7 +183,7 @@ async def test_ws_max_frame_payload_logs(caps_caplog):
 
     recipient = WebSocketRecipient(
         reader=reader, writer=writer,
-        scope={'path': '/ws'},
+        conn={'path': '/ws'},
         max_frame_payload=1024,
     )
     recipient._event_queue = asyncio.Queue()    # _read_loop asserts non-None
@@ -226,7 +226,7 @@ async def test_ws_max_frame_payload_no_log_under_cap(caps_caplog):
 
     recipient = WebSocketRecipient(
         reader=reader, writer=writer,
-        scope={'path': '/ws'},
+        conn={'path': '/ws'},
         max_frame_payload=1024,
     )
     recipient._event_queue = asyncio.Queue()
@@ -253,8 +253,8 @@ async def test_body_timeout_logs(caps_caplog):
         async def readuntil(self, sep: bytes) -> bytes:
             raise asyncio.TimeoutError()
 
-    scope = {'path': '/upload', 'headers': [(b'content-length', b'1024')]}
-    recipient = HTTP1Recipient(reader=_SlowReader(), scope=scope,
+    conn = {'path': '/upload', 'headers': [(b'content-length', b'1024')]}
+    recipient = HTTP1Recipient(reader=_SlowReader(), conn=conn,
                                body_timeout=0.0)
     recipient._content_length = 1024  # bypass the parser
 
@@ -279,8 +279,8 @@ async def test_body_timeout_no_log_when_data_arrives(caps_caplog):
             raise asyncio.IncompleteReadError(b'', 0)
 
     # Simple content-length request — one readexactly call, then http.disconnect.
-    scope = {'path': '/upload', 'headers': [(b'content-length', b'5')]}
-    recipient = HTTP1Recipient(reader=_FastReader(), scope=scope,
+    conn = {'path': '/upload', 'headers': [(b'content-length', b'5')]}
+    recipient = HTTP1Recipient(reader=_FastReader(), conn=conn,
                                body_timeout=30.0)
     recipient._content_length = 5  # bypass parser
 
@@ -355,19 +355,20 @@ async def test_compression_max_inflight_logs(caps_caplog):
 
     body = b'x' * 256
 
-    async def app(scope, receive, send):
+    async def app(conn, receive, send):
         await send({'type': 'http.response.start', 'status': 200,
                     'headers': [(b'content-type', b'text/plain')]})
         await send({'type': 'http.response.body', 'body': body, 'more_body': False})
 
-    async def call_next(scope, receive, send):
-        await app(scope, receive, send)
+    async def call_next(conn, receive, send):
+        await app(conn, receive, send)
 
-    scope = {
+    from blackbull.connection import Connection
+    conn = Connection.from_scope({
         'type': 'http', 'method': 'GET', 'path': '/',
         'headers': [(b'accept-encoding', b'gzip')],
-    }
-    await mw(scope, receive, send, call_next)
+    })
+    await mw(conn, receive, send, call_next)
 
     assert len(_records_for(caps_caplog, 'compression_max_inflight')) == 1
 
@@ -390,19 +391,19 @@ async def test_compression_max_inflight_no_log_under_cap(caps_caplog):
 
     body = b'x' * 256
 
-    async def app(scope, receive, send):
+    async def app(conn, receive, send):
         await send({'type': 'http.response.start', 'status': 200,
                     'headers': [(b'content-type', b'text/plain')]})
         await send({'type': 'http.response.body', 'body': body, 'more_body': False})
 
-    async def call_next(scope, receive, send):
-        await app(scope, receive, send)
+    async def call_next(conn, receive, send):
+        await app(conn, receive, send)
 
-    scope = {
+    conn = {
         'type': 'http', 'method': 'GET', 'path': '/',
         'headers': [(b'accept-encoding', b'gzip')],
     }
-    await mw(scope, receive, send, call_next)
+    await mw(conn, receive, send, call_next)
 
     assert _records_for(caps_caplog, 'compression_max_inflight') == []
 
@@ -576,7 +577,7 @@ async def test_request_timeout_logs(caps_caplog, monkeypatch):
     monkeypatch.setenv('BB_REQUEST_TIMEOUT', '0.01')
     reset_settings_cache()
 
-    async def _slow_handler(scope, receive, send):
+    async def _slow_handler(conn, receive, send):
         # Never sends a response — timeout fires first.
         await asyncio.Event().wait()
 
@@ -655,7 +656,7 @@ async def test_h2_ws_max_streams_per_connection_logs(caps_caplog, monkeypatch):
     actor._ws_stream_count = 3  # at cap → next WS stream refused
 
     stream = MagicMock(spec=Stream)
-    stream.scope = {'path': '/ws', 'type': 'websocket'}
+    stream.conn = {'path': '/ws', 'type': 'websocket'}
     stream.stream_id = 5
     tg = MagicMock(spec=asyncio.TaskGroup)
     log_record = MagicMock()

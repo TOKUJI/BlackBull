@@ -5,7 +5,7 @@ Same functionality as ``app.py`` (login/register, CRUD tasks, Bearer auth)
 but without using middleware or the event API.  Cross-cutting concerns are
 handled by inline helper calls in each route:
 
-    Bearer auth  → ``_authenticate(scope)`` called at the top of each
+    Bearer auth  → ``_authenticate(conn)`` called at the top of each
                    protected handler; rejects with 401 inline.
     JSON body    → ``_parse_json(receive, send)`` called at the top of
                    each POST / PUT handler.
@@ -63,9 +63,11 @@ async def _parse_json(receive, send) -> dict | None:
         return None
 
 
-async def _authenticate(scope, send) -> tuple[str | None, str]:
-    """Validate Bearer token.  Returns ``(username, token)`` or ``(None, '')`` after sending 401."""
-    auth = scope['headers'].get(b'authorization', b'')
+async def _authenticate(conn, send) -> tuple[str | None, str]:
+    """Validate Bearer token.  Returns ``(username, token)`` or ``(None, '')`` after sending 401.
+
+    *conn* is the native :class:`~blackbull.connection.Connection`."""
+    auth = conn.headers.get(b'authorization', b'')
     token = auth[7:].decode() if auth.startswith(b'Bearer ') else ''
     username = SESSIONS.get(token)
     if username is None:
@@ -85,17 +87,17 @@ app = BlackBull()
 # ---------------------------------------------------------------------------
 
 @app.route(methods=[HTTPMethod.GET], path='/')
-async def handle_login_page(scope, receive, send):  # noqa: ARG001
+async def handle_login_page(conn, receive, send):  # noqa: ARG001
     await send(Response(_load('login.html')))
 
 
 @app.route(methods=[HTTPMethod.GET], path='/register')
-async def handle_register_page(scope, receive, send):  # noqa: ARG001
+async def handle_register_page(conn, receive, send):  # noqa: ARG001
     await send(Response(_load('register.html')))
 
 
 @app.route(methods=[HTTPMethod.POST], path='/register')
-async def handle_register(scope, receive, send):
+async def handle_register(conn, receive, send):
     data = await _parse_json(receive, send)
     if data is None:
         return
@@ -119,7 +121,7 @@ async def handle_register(scope, receive, send):
 
 
 @app.route(methods=[HTTPMethod.POST], path='/login')
-async def handle_login(scope, receive, send):
+async def handle_login(conn, receive, send):
     data = await _parse_json(receive, send)
     if data is None:
         return
@@ -142,7 +144,7 @@ async def handle_login(scope, receive, send):
 
 
 @app.route(methods=[HTTPMethod.GET], path='/app')
-async def handle_app_page(scope, receive, send):  # noqa: ARG001
+async def handle_app_page(conn, receive, send):  # noqa: ARG001
     await send(Response(_load('index.html')))
 
 # ---------------------------------------------------------------------------
@@ -150,8 +152,8 @@ async def handle_app_page(scope, receive, send):  # noqa: ARG001
 # ---------------------------------------------------------------------------
 
 @app.route(methods=[HTTPMethod.GET], path='/tasks')
-async def handle_get_tasks(scope, receive, send):  # noqa: ARG001
-    user, _ = await _authenticate(scope, send)
+async def handle_get_tasks(conn, receive, send):  # noqa: ARG001
+    user, _ = await _authenticate(conn, send)
     if user is None:
         return
     tasks = await db.get_tasks(user)
@@ -159,8 +161,8 @@ async def handle_get_tasks(scope, receive, send):  # noqa: ARG001
 
 
 @app.route(methods=[HTTPMethod.POST], path='/tasks')
-async def handle_create_task(scope, receive, send):
-    user, _ = await _authenticate(scope, send)
+async def handle_create_task(conn, receive, send):
+    user, _ = await _authenticate(conn, send)
     if user is None:
         return
     data = await _parse_json(receive, send)
@@ -176,15 +178,15 @@ async def handle_create_task(scope, receive, send):
 
 
 @app.route(methods=[HTTPMethod.PUT], path='/tasks/{task_id}')
-async def handle_update_task(scope, receive, send):
-    user, _ = await _authenticate(scope, send)
+async def handle_update_task(conn, receive, send):
+    user, _ = await _authenticate(conn, send)
     if user is None:
         return
     data = await _parse_json(receive, send)
     if data is None:
         return
     try:
-        task_id = int(scope['path_params']['task_id'])
+        task_id = int(conn.path_params['task_id'])
     except (KeyError, ValueError):
         await send(JSONResponse({'error': 'invalid task id'},
                                 status=HTTPStatus.BAD_REQUEST))
@@ -201,12 +203,12 @@ async def handle_update_task(scope, receive, send):
 
 
 @app.route(methods=[HTTPMethod.DELETE], path='/tasks/{task_id}')
-async def handle_delete_task(scope, receive, send):
-    user, _ = await _authenticate(scope, send)
+async def handle_delete_task(conn, receive, send):
+    user, _ = await _authenticate(conn, send)
     if user is None:
         return
     try:
-        task_id = int(scope['path_params']['task_id'])
+        task_id = int(conn.path_params['task_id'])
     except (KeyError, ValueError):
         await send(JSONResponse({'error': 'invalid task id'},
                                 status=HTTPStatus.BAD_REQUEST))
@@ -220,8 +222,8 @@ async def handle_delete_task(scope, receive, send):
 
 
 @app.route(methods=[HTTPMethod.POST], path='/logout')
-async def handle_logout(scope, receive, send):
-    _, token = await _authenticate(scope, send)
+async def handle_logout(conn, receive, send):
+    _, token = await _authenticate(conn, send)
     if not token:
         return
     SESSIONS.pop(token, None)

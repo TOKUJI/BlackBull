@@ -34,6 +34,15 @@ _EPHEMERAL_PORT = 0
 # Fixture: an ASGIServer + simple echo app, started on an ephemeral port
 # ---------------------------------------------------------------------------
 
+def _rget(scope, key, default=None):
+    """Read a request field from either the native :class:`Connection` (BlackBull's
+    server threads it for HTTP) or an ASGI scope dict (the WebSocket path)."""
+    from blackbull.connection import Connection
+    if isinstance(scope, Connection):
+        return getattr(scope, key, default)
+    return scope.get(key, default)
+
+
 async def _echo_app(scope, receive, send):
     """Reflects the request body, with a few path-specific behaviours.
 
@@ -42,8 +51,12 @@ async def _echo_app(scope, receive, send):
     - default    → ``OK`` with body equal to the request body, else ``b'hello'``
 
     Also accepts WebSocket scopes — echoes every received frame back to the client.
+
+    Sprint 80: BlackBull threads a native ``Connection`` for HTTP requests (the
+    WebSocket path stays ASGI-scope-shaped), so request fields are read via
+    :func:`_rget`, which works against either representation.
     """
-    if scope.get('type') == 'websocket':
+    if _rget(scope, 'type') == 'websocket':
         await receive()  # consume the synthetic 'websocket.connect' event
         await send({'type': 'websocket.accept'})
         while True:
@@ -59,21 +72,21 @@ async def _echo_app(scope, receive, send):
                                 'bytes': event.get('bytes', b'')})
         return
 
-    if scope.get('type') != 'http':
+    if _rget(scope, 'type') != 'http':
         return
 
-    if scope['path'] == '/error':
+    if _rget(scope, 'path') == '/error':
         await send({'type': 'http.response.start',
                     'status': HTTPStatus.INTERNAL_SERVER_ERROR,
                     'headers': [(b'content-type', b'text/plain')]})
         await send({'type': 'http.response.body', 'body': b'oh no'})
         return
 
-    if scope['path'] == '/path':
+    if _rget(scope, 'path') == '/path':
         await send({'type': 'http.response.start', 'status': HTTPStatus.OK,
                     'headers': [(b'content-type', b'text/plain')]})
         await send({'type': 'http.response.body',
-                    'body': scope['path'].encode()})
+                    'body': _rget(scope, 'path').encode()})
         return
 
     body_parts: list[bytes] = []

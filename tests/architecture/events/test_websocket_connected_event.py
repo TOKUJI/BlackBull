@@ -8,6 +8,7 @@ Affected-tests baseline (must not regress after implementation):
 import asyncio
 import pytest
 from blackbull import BlackBull
+from blackbull.connection import Connection
 from blackbull.event import Event
 from blackbull.utils import Scheme
 from blackbull.server.http1_actor import HTTP1Actor
@@ -77,45 +78,42 @@ def _make_client_frame(payload: bytes, opcode: int = 0x1, fin: bool = True) -> b
     return header + mask + masked
 
 
-def _make_ws_scope(path: str) -> dict:
-    return {
-        'type': 'websocket',
-        'asgi': {'version': '3.0', 'spec_version': '2.0'},
-        'http_version': '1.1',
-        'method': 'GET',
-        'scheme': 'ws',
-        'path': path,
-        'raw_path': path.encode(),
-        'query_string': b'',
-        'root_path': '',
-        'headers': Headers([
+def _make_ws_conn(path: str) -> Connection:
+    """The native WebSocket Connection the upgrade path threads (Sprint 80)."""
+    return Connection(
+        type='websocket',
+        http_version='1.1',
+        method='GET',
+        scheme='ws',
+        path=path,
+        raw_path=path.encode(),
+        headers=Headers([
             (b'host', b'localhost:8000'),
             (b'upgrade', b'websocket'),
             (b'connection', b'upgrade'),
             (b'sec-websocket-key', b'dGhlIHNhbXBsZSBub25jZQ=='),
             (b'sec-websocket-version', b'13'),
         ]),
-        'client': ['127.0.0.1', 54321],
-        'server': ['localhost', 8000],
-        'state': {},
-    }
+        client=('127.0.0.1', 54321),
+        server=('localhost', 8000),
+    )
 
 
 async def _drive_ws_session(app, path: str) -> None:
     """Run a WebSocket session via WebSocketActor.run() (no client messages)."""
-    scope = _make_ws_scope(path)
+    conn = _make_ws_conn(path)
     aggregator = EventAggregator(app._dispatcher)
-    actor = WebSocketActor(_FakeReader(b''), _FakeWriter(), scope, app, aggregator)
+    actor = WebSocketActor(_FakeReader(b''), _FakeWriter(), conn, app, aggregator)
     await actor.run()
 
 
 async def _drive_ws_session_with_message(app, path: str, *, message: str) -> None:
     """Run a WebSocket session with one text message from the client."""
-    scope = _make_ws_scope(path)
+    conn = _make_ws_conn(path)
     payload = message.encode('utf-8')
     raw = _make_client_frame(payload, opcode=0x1) + _make_client_frame(b'', opcode=0x8)
     aggregator = EventAggregator(app._dispatcher)
-    actor = WebSocketActor(_FakeReader(raw), _FakeWriter(), scope, app, aggregator)
+    actor = WebSocketActor(_FakeReader(raw), _FakeWriter(), conn, app, aggregator)
     await actor.run()
 
 
@@ -178,7 +176,7 @@ async def test_websocket_connected_detail_shape():
     assert len(captured) == 1
 
     d = captured[0].detail
-    assert 'scope' in d
+    assert 'conn' in d
     assert isinstance(d['connection_id'], str) and len(d['connection_id']) > 0
     assert isinstance(d['client_ip'], str)
     assert d['path'] == '/ws'
@@ -250,9 +248,9 @@ async def test_websocket_connected_exactly_once():
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_connection_id_available_in_scope_during_message():
-    """websocket_connected writes _connection_id into scope; websocket_message
-    observers see the same ID."""
+async def test_connection_id_available_in_conn_during_message():
+    """websocket_connected sets conn.connection_id; websocket_message observers
+    see the same ID on the Connection."""
     app = BlackBull()
     connected_ids: list[str] = []
     message_ids: list[str] = []
@@ -264,7 +262,7 @@ async def test_connection_id_available_in_scope_during_message():
 
     @app.on('websocket_message')
     async def on_message(event: Event):
-        cid = event.detail['scope'].get('_connection_id', '')
+        cid = event.detail['conn'].connection_id
         message_ids.append(cid)
         message_seen.set()
 

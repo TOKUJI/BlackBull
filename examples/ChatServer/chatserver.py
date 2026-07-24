@@ -12,14 +12,15 @@ Communication method ↔ HTTP version mapping:
 The example uses the framework's middleware pipeline so the protocol code stays
 focused on the protocol itself:
 
-  - :class:`blackbull_session.SessionExtension` (the ``blackbull-session``
-    package) — signed-cookie sessions; handlers read / write
-    ``scope['session']`` and the extension re-emits Set-Cookie
+  - ``session_mw``   — inline native signed-cookie sessions (HMAC-SHA256);
+    handlers read / write ``conn.state['session']`` and it re-emits Set-Cookie
+    when the session was mutated (a self-contained replacement for the external
+    ``blackbull-session`` package, updated for the native Connection model)
   - :class:`blackbull.middleware.Compression` — gzips JSON / HTML responses
     when the client accepts them; streaming responses (SSE) pass through
   - ``auth_mw``      — resolves the cookie's opaque session id to the rich
-    server-side :class:`ChatSession` record and injects ``scope['chat_session']``
-  - ``json_body_mw`` — parses the request body as JSON, injects ``scope['json']``
+    server-side :class:`ChatSession` record and injects ``conn.state['chat_session']``
+  - ``json_body_mw`` — parses the request body as JSON, injects ``conn.state['json']``
 
 Protected routes are registered through a ``RouteGroup`` (``app.group()``) so
 ``auth_mw`` is applied automatically without listing it on every decorator.
@@ -55,8 +56,11 @@ from blackbull import (
     read_body,
 )
 from blackbull.middleware import Compression
-from blackbull_session import SessionExtension
 from blackbull.utils import Scheme
+
+import base64
+import hashlib
+import hmac
 
 _TEMPLATES = pathlib.Path(__file__).parent / 'templates'
 
@@ -159,24 +163,134 @@ def _sse_encode(event: dict) -> bytes:
     return b'data: ' + json.dumps(event).encode() + b'\n\n'
 
 # ---------------------------------------------------------------------------
+# Signed-cookie session (native Connection)
+# ---------------------------------------------------------------------------
+# A self-contained, native replacement for the external ``blackbull-session``
+# package: BlackBull threads a typed :class:`Connection` (Sprint 80), so a
+# middleware receives ``conn`` and shares per-request data through ``conn.state``
+# — not by mutating an ASGI scope dict. The session payload is HMAC-SHA256
+# signed so a client cannot forge it.
+
+_SESSION_COOKIE = 'session'
+_SESSION_SECRET = os.environ.get(
+    # Demo secret — set BB_SESSION_SECRET in production.  DO NOT ship this
+    # inline default: anyone who can read the source can forge a session.
+    'BB_SESSION_SECRET', 'chat-demo-secret-not-for-production').encode()
+
+
+class _SessionDict(dict):
+    """A dict that records whether it was mutated, so the session middleware
+    re-emits ``Set-Cookie`` only when the handler actually changed it."""
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.modified = False
+
+    def __setitem__(self, key, value) -> None:
+        super().__setitem__(key, value)
+        self.modified = True
+
+    def __delitem__(self, key) -> None:
+        super().__delitem__(key)
+        self.modified = True
+
+    def clear(self) -> None:
+        super().clear()
+        self.modified = True
+
+    # `modified` is transient dirty-tracking, deliberately excluded from
+    # equality: a session's identity is its *content*, not whether this
+    # particular instance has been written to. Define __eq__ explicitly
+    # (delegating to dict) so that exclusion is an intentional decision, not
+    # an accident of subclassing.
+    def __eq__(self, other) -> bool:
+        return dict.__eq__(self, other)
+
+    __hash__ = None   # dicts (and thus sessions) are unhashable
+
+
+def _b64(raw: bytes) -> str:
+    # Strip '=' padding so the token is a clean cookie value.
+    return base64.urlsafe_b64encode(raw).rstrip(b'=').decode()
+
+
+def _unb64(text: str) -> bytes:
+    return base64.urlsafe_b64decode(text + '=' * (-len(text) % 4))
+
+
+def _sign(payload: str) -> str:
+    return _b64(hmac.new(_SESSION_SECRET, payload.encode(), hashlib.sha256).digest())
+
+
+def _encode_session(data: dict) -> str:
+    payload = _b64(json.dumps(data).encode())
+    return f'{payload}.{_sign(payload)}'
+
+
+def _decode_session(raw: str) -> dict:
+    try:
+        payload, sig = raw.split('.', 1)
+        if not hmac.compare_digest(_sign(payload), sig):
+            return {}   # tampered or wrong secret → empty session
+        return json.loads(_unb64(payload))
+    except (ValueError, json.JSONDecodeError):
+        return {}
+
+
+async def session_mw(conn, receive, send, call_next):
+    """Load the signed ``session`` cookie into ``conn.state['session']`` and
+    re-emit ``Set-Cookie`` on the response when a handler mutated it.
+
+    WebSocket has no ``http.response.start`` to attach the cookie to, so it gets
+    a read-only session load with no Set-Cookie.
+    """
+    raw = conn.cookies.get(_SESSION_COOKIE, '')
+    session = _SessionDict(_decode_session(raw) if raw else {})
+    conn.state['session'] = session
+
+    if conn.type == 'websocket':
+        await call_next(conn, receive, send)
+        return
+
+    async def wrapped_send(event):
+        if (isinstance(event, dict)
+                and event.get('type') == 'http.response.start'
+                and session.modified):
+            headers = list(event.get('headers', []))
+            if session:
+                value = _encode_session(dict(session))
+                cookie = (f'{_SESSION_COOKIE}={value}; Path=/; '
+                          'HttpOnly; SameSite=Lax')
+            else:
+                # Emptied session → evict the cookie from the browser.
+                cookie = (f'{_SESSION_COOKIE}=; Path=/; HttpOnly; '
+                          'SameSite=Lax; Max-Age=0')
+            headers.append((b'set-cookie', cookie.encode()))
+            event = {**event, 'headers': headers}
+        await send(event)
+
+    await call_next(conn, receive, wrapped_send)
+
+
+# ---------------------------------------------------------------------------
 # Middleware definitions
 # ---------------------------------------------------------------------------
 
-async def auth_mw(scope, receive, send, call_next):
+async def auth_mw(conn, receive, send, call_next):
     """Resolve the signed-cookie session id to a rich ``ChatSession`` record.
 
-    The framework's :class:`Session` middleware has already populated
-    ``scope['session']`` (a dict) by decoding the signed cookie.  This
-    middleware reads its ``id`` field, looks up the server-side state, and
-    injects ``scope['chat_session']`` for handlers — or rejects:
+    ``session_mw`` (above) has already populated ``conn.state['session']`` (a
+    dict) by decoding the signed cookie.  This middleware reads its ``id``
+    field, looks up the server-side state, and injects
+    ``conn.state['chat_session']`` for handlers — or rejects:
 
     HTTP:      sends 401 JSON response.
     WebSocket: consumes the connect event, then closes with 4401.
     """
-    sid = scope.get('session', {}).get('id', '')
+    sid = conn.state.get('session', {}).get('id', '')
     chat_session = state.get(sid) if sid else None
 
-    if scope.get('type') == 'websocket':
+    if conn.type == 'websocket':
         event = await receive()
         if event.get('type') != 'websocket.connect':
             return
@@ -187,12 +301,12 @@ async def auth_mw(scope, receive, send, call_next):
         await send(JSONResponse({'error': 'Unauthorized'}, status=HTTPStatus.UNAUTHORIZED))
         return
 
-    scope['chat_session'] = chat_session
-    await call_next(scope, receive, send)
+    conn.state['chat_session'] = chat_session
+    await call_next(conn, receive, send)
 
 
-async def json_body_mw(scope, receive, send, call_next):
-    """Parse JSON body → scope['json']; wrap send so bare dicts become JSON responses.
+async def json_body_mw(conn, receive, send, call_next):
+    """Parse JSON body → conn.state['json']; wrap send so bare dicts become JSON responses.
 
     Rejects malformed JSON with 400.  Handlers that pass a bare dict (no ``type``
     key) to ``send`` receive an automatic ``JSONResponse``; handlers that need a
@@ -200,7 +314,7 @@ async def json_body_mw(scope, receive, send, call_next):
     """
     raw = await read_body(receive)
     try:
-        scope['json'] = json.loads(raw)
+        conn.state['json'] = json.loads(raw)
     except (json.JSONDecodeError, ValueError):
         await send(JSONResponse({'error': 'Invalid JSON'}, status=HTTPStatus.BAD_REQUEST))
         return
@@ -211,7 +325,7 @@ async def json_body_mw(scope, receive, send, call_next):
         else:
             await send(event)
 
-    await call_next(scope, receive, json_send)
+    await call_next(conn, receive, json_send)
 
 # ---------------------------------------------------------------------------
 # Application
@@ -219,25 +333,18 @@ async def json_body_mw(scope, receive, send, call_next):
 
 app = BlackBull()
 app.use(Compression())          # gzips JSON / HTML responses when the client accepts it
-SessionExtension(
-    app,
-    # Demo secret — set BB_SESSION_SECRET in production.  DO NOT use this
-    # inline default for anything real: anyone who can read the source can
-    # forge a session.
-    secret=os.environ.get('BB_SESSION_SECRET', 'chat-demo-secret-not-for-production'),
-    secure=False,   # demo runs over plain HTTP unless --cert/--key are passed
-)
+app.use(session_mw)             # signed-cookie session → conn.state['session']
 protected = app.group(middlewares=[auth_mw])
 
 
 @app.route(methods=[HTTPMethod.GET], path='/')
-async def handle_login_page(scope, receive, send):  # noqa: ARG001
+async def handle_login_page(conn, receive, send):  # noqa: ARG001
     await send(Response(_load('login.html')))
 
 
 @app.route(methods=[HTTPMethod.POST], path='/login', middlewares=[json_body_mw])
-async def handle_do_login(scope, receive, send):
-    data = scope['json']
+async def handle_do_login(conn, receive, send):
+    data = conn.state['json']
 
     username = str(data.get('username', '')).strip()
     comm_type = str(data.get('method', 'poll'))
@@ -249,7 +356,7 @@ async def handle_do_login(scope, receive, send):
         await send(JSONResponse({'error': 'Unsupported method'}, status=HTTPStatus.BAD_REQUEST))
         return
 
-    existing_sid = scope['session'].get('id', '')
+    existing_sid = conn.state['session'].get('id', '')
     chat_session = state.get(existing_sid) if existing_sid else None
 
     if chat_session is None:
@@ -257,20 +364,20 @@ async def handle_do_login(scope, receive, send):
     else:
         chat_session.comm_type = comm_type
 
-    # The Session middleware re-emits Set-Cookie when scope['session'] is
-    # touched; we only need to add the plain ``chat_method`` cookie that the
+    # ``session_mw`` re-emits Set-Cookie because assigning ``id`` marks the
+    # session modified; we only add the plain ``chat_method`` cookie that the
     # client-side JS reads to pick its transport.
-    scope['session']['id'] = chat_session.session_id
+    conn.state['session']['id'] = chat_session.session_id
     await send(JSONResponse({'ok': True}, headers=[
         cookie_header('chat_method', comm_type, http_only=False),
     ]))
 
 
 @app.route(methods=[HTTPMethod.GET], path='/chat')
-async def handle_chat_page(scope, receive, send):
+async def handle_chat_page(conn, receive, send):
     # Redirect to login if no valid session; 302 differs from 401 so this
     # route is intentionally outside the `protected` group.
-    sid = scope['session'].get('id', '')
+    sid = conn.state['session'].get('id', '')
     if not sid or state.get(sid) is None:
         await send({'type': 'http.response.start', 'status': 302,
                     'headers': [(b'location', b'/')]})
@@ -280,9 +387,9 @@ async def handle_chat_page(scope, receive, send):
 
 
 @protected.route(methods=[HTTPMethod.POST], path='/send', middlewares=[json_body_mw])
-async def handle_send(scope, receive, send):
-    session: ChatSession = scope['chat_session']
-    data: dict = scope['json']
+async def handle_send(conn, receive, send):
+    session: ChatSession = conn.state['chat_session']
+    data: dict = conn.state['json']
 
     text = str(data.get('message', '')).strip()
     if not text:
@@ -295,9 +402,9 @@ async def handle_send(scope, receive, send):
 
 
 @app.route(methods=[HTTPMethod.POST], path='/logout')
-async def handle_logout(scope, receive, send):  # noqa: ARG001
+async def handle_logout(conn, receive, send):  # noqa: ARG001
     # Not in `protected`: logout must succeed even with an expired session cookie.
-    sid = scope['session'].get('id', '')
+    sid = conn.state['session'].get('id', '')
     if sid:
         session = await state.remove(sid)
         if session:
@@ -307,9 +414,9 @@ async def handle_logout(scope, receive, send):  # noqa: ARG001
             }
             await state.broadcast(leave_event)
 
-    # ``clear()`` empties the session dict and the Session middleware emits a
-    # Max-Age=0 cookie to evict it from the browser.
-    scope['session'].clear()
+    # ``clear()`` empties the session dict and marks it modified, so
+    # ``session_mw`` emits a Max-Age=0 cookie to evict it from the browser.
+    conn.state['session'].clear()
     expire = 'Thu, 01 Jan 1970 00:00:00 GMT'
     await send(JSONResponse({'ok': True}, headers=[
         (b'set-cookie', f'chat_method=; Path=/; Expires={expire}; SameSite=Lax'.encode()),
@@ -317,15 +424,15 @@ async def handle_logout(scope, receive, send):  # noqa: ARG001
 
 
 @protected.route(methods=[HTTPMethod.GET], path='/sse')
-async def handle_sse(scope, receive, send):  # noqa: ARG001
-    if scope.get('http_version') != '2':
+async def handle_sse(conn, receive, send):  # noqa: ARG001
+    if conn.http_version != '2':
         await send(JSONResponse(
             {'error': 'SSE requires HTTP/2. Connect via HTTPS with a client that supports HTTP/2.'},
             status=HTTPStatus.BAD_REQUEST,
         ))
         return
 
-    session: ChatSession = scope['chat_session']
+    session: ChatSession = conn.state['chat_session']
 
     await send({
         'type': 'http.response.start',
@@ -380,8 +487,8 @@ async def handle_sse(scope, receive, send):  # noqa: ARG001
 
 
 @protected.route(methods=[HTTPMethod.GET], path='/poll')
-async def handle_poll(scope, receive, send):  # noqa: ARG001
-    session: ChatSession = scope['chat_session']
+async def handle_poll(conn, receive, send):  # noqa: ARG001
+    session: ChatSession = conn.state['chat_session']
 
     was_connected = session.connected
     session.connected = True
@@ -415,8 +522,8 @@ async def handle_poll(scope, receive, send):  # noqa: ARG001
 
 
 @protected.route(methods=[HTTPMethod.GET], path='/ws', scheme=Scheme.websocket)
-async def handle_websocket(scope, receive, send):
-    session: ChatSession = scope['chat_session']
+async def handle_websocket(conn, receive, send):
+    session: ChatSession = conn.state['chat_session']
     await send({'type': 'websocket.accept'})
     session.connected = True
     session.disconnect_time = None

@@ -256,7 +256,7 @@ class TestPushPromiseAuthority:
     async def test_push_promise_uses_scope_host(self):
         handler, app = _make_h2_actor()
         parent = handler.root_stream.add_child(1)
-        parent.scope = {
+        parent.conn = {
             'type': 'http', 'scheme': 'https',
             'headers': Headers([(b'host', b'example.com:8443')]),
         }

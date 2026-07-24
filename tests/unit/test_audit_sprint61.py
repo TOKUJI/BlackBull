@@ -25,6 +25,7 @@ from pathlib import Path
 import pytest
 
 from blackbull.asgi import ASGIEvent
+from blackbull.connection import Connection
 from blackbull.request import read_body, read_json, read_text, ClientDisconnected
 from blackbull.server.recipient import (
     AbstractReader, HTTP1Recipient, IncompleteReadError,
@@ -269,14 +270,20 @@ def test_upgrade_websocket_still_switches_scope():
     assert scope.scheme == 'ws'
 
 
+def _ws_conn(headers) -> Connection:
+    return Connection(method='GET', path='/ws', raw_path=b'/ws',
+                      headers=headers, type='websocket')
+
+
 @pytest.mark.asyncio
 async def test_ws_handshake_rejects_missing_key():
+    from blackbull.headers import Headers
     writer = _RecordingWriter()
     actor = _make_actor(writer)
-    scope = {'headers': __import__('blackbull.headers', fromlist=['Headers']).Headers([
+    conn = _ws_conn(Headers([
         (b'sec-websocket-version', b'13'),
-    ])}
-    ok = await actor._do_ws_handshake(scope)
+    ]))
+    ok = await actor._do_ws_handshake(conn)
     assert ok is False
     assert b'400' in bytes(writer.data), 'missing Sec-WebSocket-Key must 400'
 
@@ -286,11 +293,11 @@ async def test_ws_handshake_rejects_malformed_key():
     from blackbull.headers import Headers
     writer = _RecordingWriter()
     actor = _make_actor(writer)
-    scope = {'headers': Headers([
+    conn = _ws_conn(Headers([
         (b'sec-websocket-key', b'not-16-bytes-base64!!'),
         (b'sec-websocket-version', b'13'),
-    ])}
-    assert await actor._do_ws_handshake(scope) is False
+    ]))
+    assert await actor._do_ws_handshake(conn) is False
     assert b'400' in bytes(writer.data)
 
 
@@ -300,11 +307,11 @@ async def test_ws_handshake_accepts_valid_key():
     from blackbull.headers import Headers
     writer = _RecordingWriter()
     actor = _make_actor(writer)
-    scope = {'headers': Headers([
+    conn = _ws_conn(Headers([
         (b'sec-websocket-key', b64encode(b'0123456789abcdef')),  # 16 bytes
         (b'sec-websocket-version', b'13'),
-    ])}
-    assert await actor._do_ws_handshake(scope) is True
+    ]))
+    assert await actor._do_ws_handshake(conn) is True
 
 
 # ---------------------------------------------------------------------------

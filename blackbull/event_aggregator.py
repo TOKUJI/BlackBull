@@ -3,6 +3,28 @@ from typing import Any
 from blackbull.event import Event, EventDispatcher
 
 
+def _request_fields(conn):
+    """Read the common request identity fields for a Level B event detail from
+    either a native :class:`~blackbull.connection.Connection` (the ``app(conn, …)``
+    path) or an ASGI scope dict (only the ``BB_FORCE_ASGI_SCOPE`` / external-server
+    compat lane). Returns ``(client, method, path, http_version)``."""
+    from blackbull.connection import Connection  # noqa: PLC0415 — avoid import cycle
+    if isinstance(conn, Connection):
+        return conn.client, conn.method, conn.path, conn.http_version
+    return (conn.get('client'), conn.get('method', '-'),
+            conn.get('path', '-'), conn.get('http_version', '-'))
+
+
+def _ws_fields(conn):
+    """Read ``(client, connection_id, path)`` for a WebSocket event detail from
+    a native :class:`~blackbull.connection.Connection` (Sprint 80) or, on a
+    direct test drive, an ASGI scope dict."""
+    from blackbull.connection import Connection  # noqa: PLC0415 — avoid import cycle
+    if isinstance(conn, Connection):
+        return conn.client, conn.connection_id, conn.path
+    return (conn.get('client'), conn.get('_connection_id', ''), conn.get('path', ''))
+
+
 class EventAggregator:
     """Translates Level A Actor messages into Level B EventDispatcher calls.
 
@@ -49,27 +71,33 @@ class EventAggregator:
     # ASGI hosts (uvicorn, TestClient) too, exactly once per request.  Only
     # wire-level events remain here.
 
-    async def on_request_disconnected(self, scope: dict[str, Any]) -> None:
-        """Fire Level B ``request_disconnected``."""
+    async def on_request_disconnected(self, conn) -> None:
+        """Fire Level B ``request_disconnected``.
+
+        *conn* is the native :class:`~blackbull.connection.Connection` on the
+        self-hosted path, or an ASGI scope dict only on the ``BB_FORCE_ASGI_SCOPE``
+        / external compat lane — :func:`_request_fields` reads either."""
         if not self._dispatcher.has_listeners('request_disconnected'):
             return
-        client = scope.get('client') or ['-']
+        client, method, path, http_version = _request_fields(conn)
+        client = client or ['-']
         await self._dispatcher.emit(Event("request_disconnected", {
-            'scope':        scope,
+            'conn':        conn,
             'client_ip':    str(client[0]),
-            'method':       scope.get('method', '-'),
-            'path':         scope.get('path', '-'),
-            'http_version': scope.get('http_version', '-'),
+            'method':       method,
+            'path':         path,
+            'http_version': http_version,
         }))
 
     async def on_error(
-        self, scope: dict[str, Any], exception: BaseException
+        self, conn, exception: BaseException
     ) -> None:
-        """Fire Level B ``error``."""
+        """Fire Level B ``error`` (``conn`` is a Connection, or a scope dict on
+        the compat lane)."""
         if not self._dispatcher.has_listeners('error'):
             return
         await self._dispatcher.emit(
-            Event("error", {"scope": scope, "exception": exception})
+            Event("error", {'conn': conn, "exception": exception})
         )
 
     # ------------------------------------------------------------------
@@ -77,17 +105,34 @@ class EventAggregator:
     # ------------------------------------------------------------------
 
     async def on_websocket_connected(
-        self, scope: dict[str, Any], subprotocol: str | None = None
+        self, conn, subprotocol: str | None = None
     ) -> None:
-        """Fire Level B ``websocket_connected``."""
-        client = scope.get('client')
+        """Fire Level B ``websocket_connected`` (``conn`` is a Connection)."""
+        client, connection_id, path = _ws_fields(conn)
         await self._dispatcher.emit(Event("websocket_connected", {
-            "scope":         scope,
-            "connection_id": scope.get('_connection_id', ''),
+            'conn':         conn,
+            "connection_id": connection_id,
             "client_ip":     client[0] if client else '',
-            "path":          scope.get('path', ''),
+            "path":          path,
             "subprotocol":   subprotocol,
         }))
+
+    def has_request_completed_listeners(self) -> bool:
+        """Return True if any ``request_completed`` handler is registered.
+
+        Read on the request hot path to decide whether the per-request
+        AccessLogRecord (whose wire fields this event reports) must be built,
+        and whether the disconnect-detecting receive wrapper (whose
+        ``mark_disconnected`` this event reads to suppress itself on a dropped
+        request) is observed."""
+        return self._dispatcher.has_listeners('request_completed')
+
+    def has_request_disconnected_listeners(self) -> bool:
+        """Return True if any ``request_disconnected`` handler is registered.
+
+        Read on the request hot path to decide whether the disconnect-detecting
+        receive wrapper needs to be built at all."""
+        return self._dispatcher.has_listeners('request_disconnected')
 
     def has_websocket_message_listeners(self) -> bool:
         """Return True if any ``websocket_message`` handler is registered.
@@ -105,23 +150,23 @@ class EventAggregator:
         return self._ws_msg_cache_val
 
     async def on_websocket_message(
-        self, scope: dict[str, Any], message: dict[str, Any]
+        self, conn, message: dict[str, Any]
     ) -> None:
-        """Fire Level B ``websocket_message``."""
+        """Fire Level B ``websocket_message`` (``conn`` is a Connection)."""
         await self._dispatcher.emit(
-            Event("websocket_message", {"scope": scope, "message": message})
+            Event("websocket_message", {'conn': conn, "message": message})
         )
 
     async def on_websocket_disconnected(
-        self, scope: dict[str, Any], code: int = 1006
+        self, conn, code: int = 1006
     ) -> None:
-        """Fire Level B ``websocket_disconnected``."""
-        client = scope.get('client')
+        """Fire Level B ``websocket_disconnected`` (``conn`` is a Connection)."""
+        client, connection_id, path = _ws_fields(conn)
         await self._dispatcher.emit(Event("websocket_disconnected", {
-            "scope":         scope,
-            "connection_id": scope.get('_connection_id', ''),
+            'conn':         conn,
+            "connection_id": connection_id,
             "client_ip":     client[0] if client else '',
-            "path":          scope.get('path', ''),
+            "path":          path,
             "code":          code,
         }))
 

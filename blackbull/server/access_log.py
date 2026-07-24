@@ -64,6 +64,38 @@ def emit_access_log(record: 'AccessLogRecord') -> None:
             _access_logger.info(record, extra=extra)
 
 
+def request_record_needed(aggregator: 'EventAggregator | None') -> bool:
+    """Whether the per-request :class:`AccessLogRecord` will be consumed.
+
+    The record (and the ``conn.state['access_log']`` write it forces, plus the
+    ``emit`` at request end) exists only for three consumers: the access log
+    (``blackbull.access`` at INFO), phase tracing, and the ``request_completed``
+    event's wire fields. When none is active the record is dead weight on every
+    request — a per-request allocation the v0.60.0 Connection graph makes more
+    costly under concurrency (extra live objects for the cyclic GC to scan) —
+    so the actor skips building it. Consumers already tolerate its absence: the
+    sender guards ``if self._log_record is not None`` and ``request_completed``
+    reads ``conn.state.get('access_log')`` with ``'-'``/``0`` placeholders."""
+    if PHASE_TRACE or _access_logger.isEnabledFor(logging.INFO):
+        return True
+    return aggregator is not None and aggregator.has_request_completed_listeners()
+
+
+def disconnect_events_observed(aggregator: 'EventAggregator | None') -> bool:
+    """Whether the disconnect-detecting receive wrapper is observed.
+
+    The wrapper (a per-request closure) exists to (a) emit ``request_disconnected``
+    and (b) ``mark_disconnected`` so ``request_completed`` can suppress itself on
+    a dropped request. With neither listener present nothing observes either
+    effect, so the actor dispatches the raw ``receive`` directly and saves the
+    closure. Body-level disconnect detection (``conn.body()`` →
+    ``ClientDisconnected``) is independent of this wrapper and unaffected."""
+    if aggregator is None:
+        return False
+    return (aggregator.has_request_disconnected_listeners()
+            or aggregator.has_request_completed_listeners())
+
+
 @dataclass
 class AccessLogRecord:
     """Per-request record populated in two phases.
@@ -127,12 +159,15 @@ class AccessLogRecord:
         return ' '.join(parts)
 
     @classmethod
-    def from_scope(cls, scope: dict) -> 'AccessLogRecord':
-        client = scope.get('client') or ['-']
+    def from_conn(cls, conn) -> 'AccessLogRecord':
+        """Build directly from a :class:`~blackbull.connection.Connection`
+        (Sprint 80 Tier-2) so the self-hosted actor never materializes the ASGI
+        scope just to record the access line."""
+        client = conn.client or ('-',)
         ae = b''
         rng = b''
         if PHASE_TRACE:
-            for k, v in scope.get('headers', []):
+            for k, v in conn.headers:
                 if isinstance(k, bytes):
                     kl = k.lower()
                     if kl == b'accept-encoding':
@@ -141,9 +176,9 @@ class AccessLogRecord:
                         rng = v
         return cls(
             client_ip            = str(client[0]),
-            method               = scope.get('method', '-'),
-            path                 = scope.get('path', '-'),
-            http_version         = scope.get('http_version', '-'),
+            method               = conn.method,
+            path                 = conn.path,
+            http_version         = conn.http_version,
             req_accept_encoding  = ae,
             req_range            = rng,
         )
@@ -217,18 +252,19 @@ class AccessLogRecord:
 
 
 
-def _make_disconnect_detecting_receive(receive, scope: dict, aggregator: 'EventAggregator'):
+def _make_disconnect_detecting_receive(receive, conn, aggregator: 'EventAggregator'):
     """Wrap *receive* to emit request_disconnected when http.disconnect is seen.
 
     Used by both the HTTP/1.1 and HTTP/2 actor paths.
-    Sets scope['_disconnected'] = True on first detection (idempotent).
+    Marks *conn* disconnected on first detection (idempotent).
     """
+    from ..connection import disconnected, mark_disconnected  # noqa: PLC0415
     async def detecting_receive():
         event = await receive()
         if isinstance(event, dict) and event.get('type') == ASGIEvent.HTTP_DISCONNECT:
-            if not scope.get('_disconnected'):
-                scope['_disconnected'] = True
-                await aggregator.on_request_disconnected(scope)
+            if not disconnected(conn):
+                mark_disconnected(conn)
+                await aggregator.on_request_disconnected(conn)
         return event
     return detecting_receive
 

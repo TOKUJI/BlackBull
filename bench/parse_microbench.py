@@ -68,9 +68,10 @@ def main() -> None:
 
     h = _make_handler()
     # Sanity: each request parses without raising.
+    # Sprint 79: ``_parse`` now returns a ``Connection`` dataclass, not a dict.
     for name, data in REQUESTS.items():
-        scope = h._parse(data)
-        assert scope['type'] == 'http', name
+        conn = h._parse(data)
+        assert conn.type == 'http', name
 
     print(f'{"request":<16} {"bytes":>6} {"headers":>8} {"_parse ns":>12}')
     for name, data in REQUESTS.items():

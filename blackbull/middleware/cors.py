@@ -1,5 +1,5 @@
 from ..asgi import ASGIEvent
-from ..headers import Headers
+from ..connection import Connection
 from .utils import as_middleware
 
 
@@ -72,23 +72,24 @@ class CORS:
             hdrs.append((b'vary', b'Origin'))
         return hdrs
 
-    async def __call__(self, scope, receive, send, call_next) -> None:
-        if scope.get('type') != 'http':
-            await call_next(scope, receive, send)
+    async def __call__(self, conn, receive, send, call_next) -> None:
+        # BlackBull threads a native ``Connection`` for HTTP and WebSocket; the
+        # guard is defensive against a raw ASGI scope dict (only reachable if
+        # this middleware runs outside BlackBull's own dispatch) — pass through.
+        if not isinstance(conn, Connection):
+            await call_next(conn, receive, send)
             return
 
-        headers = scope.get('headers', [])
-        if not isinstance(headers, Headers):
-            headers = Headers(headers)
+        headers = conn.headers
 
         origin = headers.get(b'origin', b'').decode()
         if not origin or not self._is_allowed(origin):
-            await call_next(scope, receive, send)
+            await call_next(conn, receive, send)
             return
 
         # Preflight: respond directly, never call call_next
         acr_method = headers.get(b'access-control-request-method', b'')
-        if scope.get('method') == 'OPTIONS' and acr_method:
+        if conn.method == 'OPTIONS' and acr_method:
             cors_hdrs = self._cors_headers(origin)
             cors_hdrs.append((b'access-control-allow-methods', self._methods.encode()))
             cors_hdrs.append((b'access-control-allow-headers', self._allow_hdrs.encode()))
@@ -108,4 +109,4 @@ class CORS:
                 event = {**event, 'headers': existing}
             await send(event)
 
-        await call_next(scope, receive, cors_send)
+        await call_next(conn, receive, cors_send)

@@ -32,7 +32,7 @@ def _normalize_send(inner_send):
     """
     async def normalized(event):
         if isinstance(event, Response):
-            # Response is ASGI-callable and ignores scope/receive (it is a pure
+            # Response is ASGI-callable and ignores conn/receive (it is a pure
             # serialiser wearing the ASGI-app signature), so drive it with the
             # inner send to reuse the one Response→ASGI path.
             await event(None, None, inner_send)
@@ -51,24 +51,24 @@ def as_middleware(target):
     The wrapper therefore only ever sees plain dict events and does not need
     ``isinstance`` guards.
 
-    Applied to an async function (signature ``(scope, receive, send, call_next)``)::
+    Applied to an async function (signature ``(conn, receive, send, call_next)``)::
 
         @as_middleware
-        async def timing_mw(scope, receive, send, call_next):
+        async def timing_mw(conn, receive, send, call_next):
             async def timed_send(event):
                 # event is always a dict here
                 await send(event)
-            await call_next(scope, receive, timed_send)
+            await call_next(conn, receive, timed_send)
 
     Applied to a class whose ``__call__`` is the middleware coroutine::
 
         @as_middleware
         class Cache:
-            async def __call__(self, scope, receive, send, call_next):
+            async def __call__(self, conn, receive, send, call_next):
                 async def cap_send(event):
                     # event is always a dict here
                     ...
-                await call_next(scope, receive, cap_send)
+                await call_next(conn, receive, cap_send)
 
     Power users who need to handle raw ``send`` arguments (e.g. because their
     middleware is used in a context where no simplified handlers are registered)
@@ -79,20 +79,20 @@ def as_middleware(target):
         original_call = target.__call__
 
         @wraps(original_call)
-        async def wrapped_call(self, scope, receive, send, call_next):
-            async def normalizing_call_next(scope, receive, inner_send):
-                return await call_next(scope, receive, _normalize_send(inner_send))
-            return await original_call(self, scope, receive, send, normalizing_call_next)
+        async def wrapped_call(self, conn, receive, send, call_next):
+            async def normalizing_call_next(conn, receive, inner_send):
+                return await call_next(conn, receive, _normalize_send(inner_send))
+            return await original_call(self, conn, receive, send, normalizing_call_next)
 
         target.__call__ = wrapped_call
         target.__blackbull_middleware__ = True
         return target
 
     @wraps(target)
-    async def wrapper(scope, receive, send, call_next):
-        async def normalizing_call_next(scope, receive, inner_send):
-            return await call_next(scope, receive, _normalize_send(inner_send))
-        return await target(scope, receive, send, normalizing_call_next)
+    async def wrapper(conn, receive, send, call_next):
+        async def normalizing_call_next(conn, receive, inner_send):
+            return await call_next(conn, receive, _normalize_send(inner_send))
+        return await target(conn, receive, send, normalizing_call_next)
 
     wrapper.__blackbull_middleware__ = True
     return wrapper

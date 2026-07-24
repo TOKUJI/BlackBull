@@ -71,7 +71,7 @@ from blackbull.request import read_body
 # HTML test page (embedded so the example stays self-contained)
 # ---------------------------------------------------------------------------
 
-_HTML = b"""\
+_HTML = """\
 <!doctype html>
 <html lang="en">
 <head>
@@ -143,7 +143,7 @@ async function doPreflight() {
 </script>
 </body>
 </html>
-"""
+""".encode()   # UTF-8: the page contains non-ASCII glyphs (— and →)
 
 # ---------------------------------------------------------------------------
 # Application
@@ -153,7 +153,7 @@ app = BlackBull()
 
 
 @app.route(path='/')
-async def index(scope, receive, send):
+async def index(conn, receive, send):
     await send({
         'type': 'http.response.start',
         'status': 200,
@@ -168,7 +168,7 @@ async def hello():
 
 
 @app.route(path='/api/echo', methods=[HTTPMethod.POST])
-async def echo(scope, receive, send):
+async def echo(conn, receive, send):
     body = await read_body(receive)
     try:
         data = json.loads(body)
@@ -199,7 +199,7 @@ if __name__ == '__main__':
     origins = args.cors_origins or ['*']
 
     # When running behind nginx, trust the loopback proxy so that
-    # scope['scheme'] reflects the client's HTTPS (not plain HTTP).
+    # conn.scheme reflects the client's HTTPS (not plain HTTP).
     app.use(TrustedProxy(['127.0.0.1', '::1']))
 
     app.use(CORS(

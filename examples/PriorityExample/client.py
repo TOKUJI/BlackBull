@@ -5,7 +5,7 @@ Demonstrates sending HTTP/2 priority hints to the BlackBull priority server.
 
 Priority hints are sent as a standard 'priority' HTTP header (RFC 9218 §4.2).
 httpx forwards this header over HTTP/2; the server parses it and populates
-``scope['extensions']['http.response.priority']`` (BlackBull v0.31+) for
+``conn.extensions['http.response.priority']`` (BlackBull v0.31+) for
 application code to inspect.
 
 BlackBull also accepts PRIORITY_UPDATE frames (type 0x10) directly, but that

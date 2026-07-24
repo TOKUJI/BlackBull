@@ -31,6 +31,70 @@ so the editable install's metadata catches up.
 
 ## [Unreleased]
 
+## [0.61.0] — 2026-07-24
+
+### Added
+
+- **Native streaming request-body API — `Connection.stream()`.**
+  `async for chunk in conn.stream()` async-iterates the request body
+  chunk-by-chunk without ever buffering it, the non-accumulating
+  counterpart to `conn.body()`/`.json()`/`.text()`. It measures identical
+  to a raw-`receive` stream loop (zero framework overhead), so streaming
+  handlers no longer have to drop out of the `Connection` idiom back to the
+  raw ASGI triplet. Because the request body is a single drain, `stream()`
+  is mutually exclusive with the buffering accessors — buffering after
+  streaming (or vice versa) raises `RuntimeError` rather than silently
+  returning a partial body; a mid-body disconnect raises
+  `ClientDisconnected`. New `request.stream_body(receive)` underpins it.
+
+### Fixed
+
+- **v0.60.0 framework-overhead regression — resolved.** v0.60.0's native
+  `Connection` refactor regressed the framework-overhead-bound HttpArena
+  profiles ~18–25% on identical hardware (baseline / baseline-h2 /
+  pipelined / limited-conn). Root cause was the per-request cost of the new
+  object model (a second scope-dict representation built every request, a
+  per-request reference cycle, and unconditionally-built access-log records
+  and disconnect closures), not any single line. Recovered by: a
+  direct-attribute dispatch-scope builder with a precomputed field list; a
+  lazy scope view (`_LazyScope`) that serves ASGI keys straight from the
+  backing `Connection` and never materializes a dict body on the
+  self-hosted path; lazy `path_params`; eliminating the per-request
+  reference cycle; and gating the per-request access-log record, the
+  capturing-send wrapper, and the disconnect-detecting receive closure
+  behind actual consumers (no listener → not built) on both the HTTP/1.1
+  and HTTP/2 dispatch paths. Final same-instance EC2 A/B against v0.59.1
+  came back mean +0.78% / median +0.52% — regression closed.
+- **WebSocket-over-HTTP/2 access-log method.** RFC 8441 sessions now record
+  their true `CONNECT` method in the access log (and expose it on
+  `conn.method` to method-gating middleware) instead of a leftover `HEAD`
+  placeholder, matching how HTTP/1.1 upgrades log their real `GET`. Routing
+  and lifecycle events were already unaffected (they branch on
+  `conn.type`).
+
+### Internal
+
+- **Full-native `Connection` dispatch (HTTP/1.1, HTTP/2, WebSocket).** The
+  protocol actors now thread the typed `Connection` end-to-end; the ASGI
+  `scope` dict is built only at a genuine ASGI boundary (external host,
+  `BB_FORCE_ASGI_SCOPE`, or a handler/middleware that asks for it). The
+  name "scope" is now reserved exclusively for real ASGI scope dicts —
+  every internal `Connection` parameter formerly called `scope` was
+  renamed. WebSocket is native too: no scope dict is threaded on the native
+  WS path. No public API break — simplified and full `(conn, receive,
+  send)` handler forms, the middleware contract, and lifecycle-event
+  payloads are all preserved.
+- **Connection allocation hygiene.** The HTTP/2 header parser
+  (`parse_headers`) was restructured to construct the `Connection` once
+  with the real `Headers` (removing a throwaway `Headers([])` built and
+  discarded every request) under a uniform `None ⟺ malformed` contract,
+  and the plain-HTTP branch now uses a lean `object.__new__` builder with a
+  shared empty-extensions sentinel. `parse_headers()` itself is ~20–24%
+  faster head-to-head; pinned by field-drift and sentinel-escape
+  architecture tests. No throughput claim — shipped as hygiene.
+- Examples, warm-up, and the WebSocket test session were migrated to the
+  native `Connection` model.
+
 ## [0.60.0] — 2026-07-22
 
 ### Changed

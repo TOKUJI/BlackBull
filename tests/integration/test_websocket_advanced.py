@@ -19,10 +19,10 @@ def _make_app() -> BlackBull:
     app = BlackBull()
 
     @app.route(path='/chat', scheme=Scheme.websocket)
-    async def chat(scope, receive, send):
+    async def chat(conn, receive, send):
         await receive()  # websocket.connect
         # Echo back the first requested subprotocol (or None)
-        subprotocols = scope.get('subprotocols', [])
+        subprotocols = conn.subprotocols
         subprotocol = subprotocols[0] if subprotocols else None
         await send({'type': 'websocket.accept', 'subprotocol': subprotocol})
         msg = await receive()
@@ -30,7 +30,7 @@ def _make_app() -> BlackBull:
         await send({'type': 'websocket.close', 'code': 1000})
 
     @app.route(path='/going-away', scheme=Scheme.websocket)
-    async def going_away(scope, receive, send):
+    async def going_away(conn, receive, send):
         await receive()  # websocket.connect
         await send({'type': 'websocket.accept', 'subprotocol': None})
         await receive()  # wait for one message

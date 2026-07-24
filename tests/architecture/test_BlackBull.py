@@ -13,6 +13,7 @@ import pytest_asyncio
 
 # Test targets
 from blackbull import BlackBull, Response, WebSocketResponse
+from blackbull.headers import Headers
 from blackbull.utils import Scheme
 # from blackbull.middlewares import websocket
 
@@ -391,31 +392,39 @@ def test_ws_protocols_setter_keeps_bytes():
 
 @pytest.mark.asyncio
 async def test_dispatch_invalid_scheme_raises():
+    from blackbull.connection import Connection
     app = BlackBull()
-    scope = {'type': 'ftp', 'method': 'GET', 'path': '/', 'headers': []}
+    # BlackBull dispatches a native Connection for HTTP; an unrecognized
+    # ``type`` must raise (only ``websocket`` is dispatched scope-dict-shaped).
+    conn = Connection(method='GET', path='/', raw_path=b'/',
+                      headers=Headers([]), type='ftp')
     with pytest.raises(Exception, match='Invalid scheme'):
-        await app._dispatch(scope, AsyncMock(), AsyncMock())
+        await app._dispatch(conn, AsyncMock(), AsyncMock())
 
 
 @pytest.mark.asyncio
 async def test_dispatch_websocket_no_handler_returns_silently():
+    from blackbull.connection import Connection
     app = BlackBull()
-    scope = {'type': 'websocket', 'path': '/ws', 'headers': []}
+    conn = Connection(method='GET', path='/ws', raw_path=b'/ws',
+                      headers=Headers([]), type='websocket')
     # No handler registered — should return without raising
-    await app._dispatch(scope, AsyncMock(), AsyncMock())
+    await app._dispatch(conn, AsyncMock(), AsyncMock())
 
 
 @pytest.mark.asyncio
 async def test_dispatch_websocket_calls_handler():
+    from blackbull.connection import Connection
     app = BlackBull()
     called = []
 
     @app.route(path='/ws', scheme=Scheme.websocket)
-    async def ws_handler(scope, receive, send):
+    async def ws_handler(conn, receive, send):
         called.append(True)
 
-    scope = {'type': 'websocket', 'path': '/ws', 'headers': []}
-    await app._dispatch(scope, AsyncMock(), AsyncMock())
+    conn = Connection(method='GET', path='/ws', raw_path=b'/ws',
+                      headers=Headers([]), type='websocket')
+    await app._dispatch(conn, AsyncMock(), AsyncMock())
     assert called == [True]
 
 

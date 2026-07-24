@@ -168,12 +168,12 @@ async def log_response(event):
 
 
 @app.route(path='/')
-async def hello(scope, receive, send):
+async def hello(conn, receive, send):
     await send(Response(b'Hello, world!'))
 
 
 @app.route(path='/tasks')
-async def tasks(scope, receive, send):
+async def tasks(conn, receive, send):
     await send(JSONResponse([{'id': 1, 'title': 'Buy milk'},
                              {'id': 2, 'title': 'Walk the dog'}]))
 

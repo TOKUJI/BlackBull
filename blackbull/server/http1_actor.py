@@ -17,12 +17,17 @@ from ..actor import Actor, Message
 from ..event import Event
 from ..event_aggregator import EventAggregator
 from ..asgi import ASGIEvent
-from ..connection import Connection, CONNECTION_STASH_KEY
+from ..connection import (
+    Connection, bind_receive_channel, disconnected, mark_disconnected)
 from ..headers import Headers
 from .deadline import ConnectionDeadline
 from .recipient import AbstractReader, IncompleteReadError, RecipientFactory, _WS_EVENT_QUEUE_DEPTH
 from .sender import AbstractWriter, SenderFactory
-from .access_log import AccessLogRecord as _AccessLogRecord, _make_disconnect_detecting_receive, emit_access_log as _emit_access_log
+from .access_log import (AccessLogRecord as _AccessLogRecord,
+                         _make_disconnect_detecting_receive,
+                         emit_access_log as _emit_access_log,
+                         request_record_needed as _request_record_needed,
+                         disconnect_events_observed as _disconnect_events_observed)
 from .cap_log import log_cap_hit
 
 logger = logging.getLogger(__name__)
@@ -288,14 +293,14 @@ class RequestActor(Actor):
 
     def __init__(
         self,
-        scope: dict[str, Any],
+        conn: dict | Connection,
         receive: Callable[..., Awaitable[Any]],
         send: Callable[..., Awaitable[Any]],
         app: Callable[..., Awaitable[None]],
         aggregator: EventAggregator,
     ) -> None:
         super().__init__()
-        self._scope = scope
+        self._conn = conn
         self._receive = receive
         self._send = send
         self._app = app
@@ -303,9 +308,9 @@ class RequestActor(Actor):
 
     async def run(self) -> None:  # override: single-shot, no inbox loop
         try:
-            await self._app(self._scope, self._receive, self._send)
+            await self._app(self._conn, self._receive, self._send)
         except BaseException as e:
-            await self._aggregator.on_error(self._scope, e)
+            await self._aggregator.on_error(self._conn, e)
             raise
 
     async def _handle(self, msg: Message) -> None:  # never reached
@@ -497,37 +502,59 @@ class HTTP1Actor(Actor):
                     return
                 self._fill_connection_info(conn)
 
-                # The parser yields a native ``Connection``; the dispatch
-                # pipeline consumes an ASGI scope with the typed Connection
-                # stashed for zero-reconversion reads.  The single canonical
-                # ``Connection → dispatch-ready scope`` bridge (shared with the
-                # H/2 ``_conn_to_scope`` seam) does the ``as_scope`` derivation,
-                # the ``BB_FORCE_ASGI_SCOPE`` dual-path round-trip (§4.3), the
-                # ``Headers`` restore, the ``_asterisk_form`` re-expose, and the
-                # stash.
-                scope = conn.to_dispatch_scope(force_asgi=cfg.force_asgi_scope)
-                # Under the dual-path lane the bridge rebuilds ``conn``; read the
-                # dispatched object back so any later reference is the stashed one.
-                conn = scope[CONNECTION_STASH_KEY]
+                # Sprint 80 Tier-2 / native-Connection entry: BlackBull's own
+                # server dispatches the typed ``Connection`` directly — the app
+                # is ``app(conn, receive, send)``, no ASGI scope object at all.
+                # Only ``BB_FORCE_ASGI_SCOPE=1`` takes the compat lane: the server
+                # converts ``Connection → scope`` (a pure ASGI dict, no stash) and
+                # the app converts it back with ``from_scope`` at dispatch — so
+                # ``app(scope, …)`` is used *iff* the flag is set. The actor's own
+                # plumbing (RecipientFactory, access log, keep-alive) always reads
+                # ``conn``.
+                if cfg.force_asgi_scope:
+                    app_arg = conn.to_asgi_scope(force_asgi=True)  # pure scope
+                else:
+                    app_arg = conn                                     # native Connection
 
-                if scope.get('type') == 'websocket':
-                    await self._handle_upgrade(scope)
+                if conn.type == 'websocket':
+                    # WebSocket is native too (Sprint 80): the upgrade path
+                    # threads the typed Connection — the WS-only extras
+                    # (subprotocols, the deferred 101 responder, deflate params)
+                    # live on it (``conn.subprotocols`` / ``conn._ws``), so there
+                    # is no scope dict here.
+                    await self._handle_upgrade(conn)
                     return
 
                 # RFC 9110 §10.1.1 / §15.2 — a server MUST NOT send a 1xx
                 # response to an HTTP/1.0 client (COMP-NO-1XX-HTTP10); the
                 # Expect header is ignored and the body read normally.
-                if (scope['http_version'] != '1.0'
-                        and scope['headers'].get(b'expect').lower()
+                if (conn.http_version != '1.0'
+                        and conn.headers.get(b'expect').lower()
                         == b'100-continue'):
                     await send(b'', HTTPStatus.CONTINUE)
 
-                log_record = _AccessLogRecord.from_scope(scope)
-                if _PHASE_TRACE:
-                    log_record.phases['loop_start'] = (
-                        _loop_start_perf, _loop_start_cpu)
-                log_record.mark('parsed')
-                scope['state']['access_log'] = log_record
+                # Build the access-log record only when something consumes it
+                # (access log / phase trace / request_completed listener). On the
+                # baseline hot path — no logging, no listeners — skipping it drops
+                # a per-request allocation and the ``conn.state`` dict it forces
+                # (Sprint 80 alloc-reduction; the Connection graph's per-request
+                # objects are what the cyclic GC scans under concurrency). The
+                # legacy (no-aggregator) branch of ``_dispatch_request`` reads the
+                # record unconditionally, so keep building it when there is no
+                # aggregator. Consumers below are all None-tolerant (the sender
+                # guards ``_log_record is not None``; the finally guards ``emit``).
+                if self._aggregator is None or _request_record_needed(self._aggregator):
+                    log_record = _AccessLogRecord.from_conn(conn)
+                    if _PHASE_TRACE:
+                        log_record.phases['loop_start'] = (
+                            _loop_start_perf, _loop_start_cpu)
+                    log_record.mark('parsed')
+                    # Write onto ``conn.state`` directly (the same dict the scope
+                    # exposes as ``scope['state']``) so recording the access log
+                    # does not materialize the lazy scope.
+                    conn.state['access_log'] = log_record
+                else:
+                    log_record = None
                 # Sprint 38 Task B — reset per-request sender state.  The
                 # HTTP1Sender instance is shared across keep-alive
                 # requests on this connection; without this reset
@@ -557,15 +584,17 @@ class HTTP1Actor(Actor):
                 # original ``HEAD`` from the request line.
                 send._head_mode = (conn.method == 'HEAD')
                 if send._head_mode:
+                    # Rewrite on the Connection only; a materialized scope reads
+                    # ``method`` back from ``conn`` (now 'GET'), so no separate
+                    # ``scope['method']`` write (which would force materialization).
                     conn.method = 'GET'
-                    scope['method'] = 'GET'
                 inner_receive = RecipientFactory.http1(
-                    self._reader, scope,
+                    self._reader, conn,
                     body_timeout=cfg.body_timeout,
                     deadline=dl,
                 )
 
-                if scope.get('_asterisk_form'):
+                if conn._asterisk_form:
                     # RFC 9112 §3.2.4 — ``OPTIONS *`` is a server-wide request
                     # whose target is not a resource, so it never routes.
                     # Answer at the server level with 204 + an Allow header
@@ -573,7 +602,7 @@ class HTTP1Actor(Actor):
                     await capturing_send(b'', HTTPStatus.NO_CONTENT,
                                          [(b'allow', _SERVER_WIDE_ALLOW)])
                     ok = True
-                    if not self._should_keep_alive(scope):
+                    if not self._should_keep_alive(conn):
                         break
                     self._request = b''
                     try:
@@ -599,24 +628,24 @@ class HTTP1Actor(Actor):
                     if cfg.request_timeout > 0:
                         ok = await asyncio.wait_for(
                             self._dispatch_request(
-                                scope, inner_receive, capturing_send, log_record),
+                                app_arg, inner_receive, capturing_send, log_record),
                             timeout=cfg.request_timeout,
                         )
                     else:
                         ok = await self._dispatch_request(
-                            scope, inner_receive, capturing_send, log_record)
+                            app_arg, inner_receive, capturing_send, log_record)
                 except (asyncio.TimeoutError, TimeoutError):
                     logger.warning(
                         '408 Request Timeout — handler on %s %s exceeded '
                         'BB_REQUEST_TIMEOUT=%.1fs; closing connection',
-                        scope.get('method', '?'), scope.get('path', '?'),
+                        conn.method, conn.path,
                         cfg.request_timeout,
                     )
                     log_cap_hit('request_timeout',
                                 requested=cfg.request_timeout,
                                 limit=cfg.request_timeout,
                                 peer=self._peername,
-                                scope_path=scope.get('path'),
+                                scope_path=conn.path,
                                 protocol='http1')
                     if not send._started:
                         await self._send_error_and_close(
@@ -637,7 +666,7 @@ class HTTP1Actor(Actor):
                 # RFC 9112 §9.1 — honour Connection: close.  HTTP/1.0
                 # connections without ``Connection: keep-alive`` likewise
                 # default to non-persistent.
-                if not self._should_keep_alive(scope):
+                if not self._should_keep_alive(conn):
                     break
 
                 self._request = b''
@@ -815,10 +844,10 @@ class HTTP1Actor(Actor):
         # unquote semantics match uvicorn: '+' stays literal, malformed
         # escapes pass through, errors='replace' can never raise.
         if b'%' in _raw_path_b:
-            _scope_path = unquote(_raw_path_b.decode('ascii'),
+            _decoded_path = unquote(_raw_path_b.decode('ascii'),
                                   encoding='utf-8', errors='replace')
         else:
-            _scope_path = _raw_path_b.decode('utf-8')
+            _decoded_path = _raw_path_b.decode('utf-8')
 
         raw: list[tuple[bytes, bytes]] = []
         for line in lines[idx + 1:]:
@@ -898,7 +927,7 @@ class HTTP1Actor(Actor):
             http_version=version[5:].decode('utf-8'),
             method=method.decode('utf-8'),
             scheme='http',
-            path=_scope_path,
+            path=_decoded_path,
             # ASGI: raw_path is the undecoded path component only — the
             # query string is carried in query_string, never here.
             raw_path=_raw_path_b,
@@ -948,8 +977,8 @@ class HTTP1Actor(Actor):
         if self._ssl:
             conn.scheme = 'wss' if conn.type == 'websocket' else 'https'
 
-    async def _handle_upgrade(self, scope: dict) -> None:
-        """Handle WebSocket upgrade."""
+    async def _handle_upgrade(self, conn: Connection) -> None:
+        """Handle WebSocket upgrade (native Connection, Sprint 80)."""
         from .conn_id import new_connection_id  # noqa: PLC0415
         from .websocket_actor import WebSocketActor  # noqa: PLC0415
         aggregator = self._aggregator
@@ -960,16 +989,16 @@ class HTTP1Actor(Actor):
             from ..event_aggregator import EventAggregator  # noqa: PLC0415
             aggregator = EventAggregator(EventDispatcher())
 
-        log_record = _AccessLogRecord.from_scope(scope)
+        log_record = _AccessLogRecord.from_conn(conn)
         log_record.status = 101  # HTTP 101 Switching Protocols
 
-        if not await self._do_ws_handshake(scope):
+        if not await self._do_ws_handshake(conn):
             return  # version check failed; 400 already sent
         # One id per TCP connection: reuse the accept-time id; mint one only
         # when the actor was constructed without it (direct test drives).
-        scope['_connection_id'] = self._connection_id or new_connection_id()
+        conn.connection_id = self._connection_id or new_connection_id()
         ws_actor = WebSocketActor(
-            self._reader, self._writer, scope, self._app, aggregator,
+            self._reader, self._writer, conn, self._app, aggregator,
             peername=self._peername, sockname=self._sockname, ssl=self._ssl,
             ws_queue_depth=self._ws_queue_depth,
         )
@@ -979,7 +1008,7 @@ class HTTP1Actor(Actor):
             log_record.close_code = ws_actor._disconnect_code
             _emit_access_log(log_record)
 
-    async def _do_ws_handshake(self, scope: dict) -> bool:
+    async def _do_ws_handshake(self, conn: Connection) -> bool:
         """Validate the WebSocket upgrade and store a deferred 101 callback.
 
         Returns True if the handshake is valid and ready to proceed, False if
@@ -991,7 +1020,7 @@ class HTTP1Actor(Actor):
         (RFC 6455 §4.2.2).
         """
         send = SenderFactory.http1(self._writer)
-        headers = scope.get('headers', Headers([]))
+        headers = conn.headers
         key = headers.get(b'sec-websocket-key', b'').strip()
         # RFC 6455 §4.2.1 — the client MUST send a Sec-WebSocket-Key whose
         # base64-decoded value is 16 bytes.  An absent or malformed key is a
@@ -1012,13 +1041,10 @@ class HTTP1Actor(Actor):
                        [(b'sec-websocket-version', b'13')])
             return False
 
-        # Populate scope['subprotocols'] per ASGI WebSocket spec
-        raw_sp = headers.get(b'sec-websocket-protocol', b'')
-        client_protos = (
-            [p.strip().decode('utf-8', errors='replace') for p in raw_sp.split(b',')]
-            if raw_sp else []
-        )
-        scope['subprotocols'] = client_protos
+        # The client-offered subprotocols (ASGI websocket scope's
+        # ``subprotocols``) are derived from the request header by the
+        # ``conn.subprotocols`` property — no need to stash them.
+        client_protos = conn.subprotocols
 
         # Auto-negotiate from app.available_ws_protocols (backward-compat fallback).
         # This is used when the handler calls websocket.accept without a subprotocol.
@@ -1026,9 +1052,8 @@ class HTTP1Actor(Actor):
         available = {(p.decode('utf-8', errors='replace') if isinstance(p, bytes) else p)
                      for p in available_raw}
         auto_subprotocol = next((p for p in client_protos if p in available), None)
-        scope['_ws_auto_subprotocol'] = auto_subprotocol
 
-        # RFC 7692 permessage-deflate negotiation.  Cached on the scope so
+        # RFC 7692 permessage-deflate negotiation.  Cached on the Connection so
         # WebSocketActor can pick it up after the handshake commits, and
         # echoed back as ``Sec-WebSocket-Extensions`` in the 101 response.
         from ..env import get_settings as _get_settings  # noqa: PLC0415
@@ -1038,7 +1063,6 @@ class HTTP1Actor(Actor):
         if _get_settings().ws_permessage_deflate:
             offer = headers.get(b'sec-websocket-extensions', b'')
             deflate_params, deflate_response = _negotiate_deflate(offer or None)
-        scope['_ws_deflate'] = deflate_params
 
         async def _send_101(subprotocol=None):
             hs_headers = Headers([
@@ -1053,21 +1077,25 @@ class HTTP1Actor(Actor):
                 hs_headers.append(b'sec-websocket-extensions', deflate_response)
             await send(b'', HTTPStatus.SWITCHING_PROTOCOLS, hs_headers)
 
-        scope['_ws_send_101'] = _send_101
+        conn._ws = {
+            'send_101': _send_101,
+            'auto_subprotocol': auto_subprotocol,
+            'deflate': deflate_params,
+        }
         return True
 
     @staticmethod
-    def _make_legacy_disconnect_receive(receive, scope: dict, dispatcher, log_record):
+    def _make_legacy_disconnect_receive(receive, conn: dict | Connection, dispatcher, log_record):
         """Legacy disconnect-detecting receive wrapper (mirrors server.py helper)."""
         async def detecting_receive():
             event = await receive()
             if isinstance(event, dict) and event.get('type') == ASGIEvent.HTTP_DISCONNECT:
-                if not scope.get('_disconnected'):
-                    scope['_disconnected'] = True
+                if not disconnected(conn):
+                    mark_disconnected(conn)
                     await dispatcher.emit(Event(
                         'request_disconnected',
                         detail={
-                            'scope':        scope,
+                            'conn':        conn,
                             'client_ip':    log_record.client_ip,
                             'method':       log_record.method,
                             'path':         log_record.path,
@@ -1079,7 +1107,7 @@ class HTTP1Actor(Actor):
 
     async def _dispatch_request(
         self,
-        scope: dict,
+        conn: dict | Connection,
         inner_receive,
         capturing_send,
         log_record,
@@ -1089,11 +1117,23 @@ class HTTP1Actor(Actor):
         Returns True on success, False if an unhandled error should close the connection.
         """
         import asyncio  # noqa: PLC0415
+        # Bind the *raw* recipient onto the Connection for lazy ``conn.body()``
+        # before any disconnect-detecting wrapper is built. Binding the wrapper
+        # instead would close a per-request reference cycle (conn._receive →
+        # wrapper → conn) reclaimable only by the cyclic GC — the v0.60.0
+        # tail-latency regression. Idempotent (only binds when unset).
+        bind_receive_channel(conn, inner_receive)
         if self._aggregator is not None:
-            detecting_receive = _make_disconnect_detecting_receive(
-                inner_receive, scope, self._aggregator)
+            # Wrap receive for disconnect detection only when a listener observes
+            # it (request_disconnected, or request_completed via mark_disconnected);
+            # otherwise dispatch the raw receive and save the per-request closure.
+            if _disconnect_events_observed(self._aggregator):
+                detecting_receive = _make_disconnect_detecting_receive(
+                    inner_receive, conn, self._aggregator)
+            else:
+                detecting_receive = inner_receive
             request_actor = RequestActor(
-                scope, detecting_receive, capturing_send,
+                conn, detecting_receive, capturing_send,
                 self._app, self._aggregator,
             )
             try:
@@ -1106,17 +1146,20 @@ class HTTP1Actor(Actor):
             except BaseException:
                 return False
             finally:
-                log_record.mark('dispatch_done')
-                _emit_access_log(log_record)
+                if log_record is not None:
+                    log_record.mark('dispatch_done')
+                    _emit_access_log(log_record)
         else:
             _dispatcher = getattr(self._app, '_dispatcher', None)
             if _dispatcher is not None:
                 detecting_receive = self._make_legacy_disconnect_receive(
-                    inner_receive, scope, _dispatcher, log_record)
+                    inner_receive, conn, _dispatcher, log_record)
             else:
                 detecting_receive = inner_receive
             try:
-                await self._app(scope, detecting_receive, capturing_send)
+                await self._app(conn, detecting_receive, capturing_send)
+            except BaseException:
+                raise
             finally:
                 log_record.mark('dispatch_done')
                 _emit_access_log(log_record)
@@ -1169,10 +1212,13 @@ class HTTP1Actor(Actor):
                     f'BB_HEADER_MAX_TOTAL={max_total}')
         self._request = bytes(buf)
 
-    def _should_keep_alive(self, scope: dict) -> bool:
-        """Return True if the connection should persist after this request."""
-        http_version = scope.get('http_version', '1.0')
-        connection = scope['headers'].get(b'connection', b'').lower()
+    def _should_keep_alive(self, conn) -> bool:
+        """Return True if the connection should persist after this request.
+
+        Reads the :class:`Connection` directly (Sprint 80 Tier-2) so the
+        per-request keep-alive decision never materializes the lazy scope."""
+        http_version = conn.http_version
+        connection = conn.headers.get(b'connection', b'').lower()
         if http_version == '1.1':
             return connection != b'close'
         return connection == b'keep-alive'

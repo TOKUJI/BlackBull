@@ -18,12 +18,32 @@ prevents the two representations from drifting apart.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Callable, NamedTuple
+from typing import Any, AsyncIterator, Callable, NamedTuple
 
 from .headers import Headers
-from .request import read_body, parse_cookies, ClientDisconnected, _json_or_none
+from .request import (read_body, stream_body, cookies_from_headers,
+                      ClientDisconnected, _json_or_none)
 
-__all__ = ['Connection', 'ClientDisconnected', 'CONNECTION_STASH_KEY']
+__all__ = ['Connection', 'ClientDisconnected', 'CONNECTION_STASH_KEY',
+           'disconnected', 'mark_disconnected']
+
+
+def disconnected(target) -> bool:
+    """True if the client disconnected mid-request. Accepts either a native
+    :class:`Connection` (the ``app(conn, …)`` path) or an ASGI ``scope`` dict
+    (the ``BB_FORCE_ASGI_SCOPE`` / external-server path)."""
+    if isinstance(target, Connection):
+        return target._disconnected
+    return bool(target.get('_disconnected'))
+
+
+def mark_disconnected(target) -> None:
+    """Record a mid-request client disconnect on a :class:`Connection` or an
+    ASGI ``scope`` dict (idempotent — caller guards on :func:`disconnected`)."""
+    if isinstance(target, Connection):
+        target._disconnected = True
+    else:
+        target['_disconnected'] = True
 
 
 #: Envelope key under which a protocol actor stashes the typed :class:`Connection`
@@ -34,6 +54,13 @@ __all__ = ['Connection', 'ClientDisconnected', 'CONNECTION_STASH_KEY']
 #: otherwise silently miss the stash and force a redundant ``from_scope`` on the
 #: hot path, invisible to tests.
 CONNECTION_STASH_KEY = '_connection'
+
+#: Shared, never-mutated ASGI info sub-dict for the native dispatch scope
+#: (Sprint 80 Tier-1b). ``as_scope()`` still emits a fresh copy for the external
+#: compat boundary; only the self-hosted ``to_asgi_scope`` fast path reuses
+#: this constant to save one dict allocation per request. ASGI consumers read
+#: ``scope['asgi']['version']`` but never mutate the sub-dict.
+_DISPATCH_ASGI_INFO = {'version': '3.0', 'spec_version': '2.2'}
 
 
 # ---------------------------------------------------------------------------
@@ -91,26 +118,38 @@ _CONNECTION_FIELDS: list[_FieldSpec] = [
     _FieldSpec('state',        'state',        _identity, _identity),
     _FieldSpec('extensions',   'extensions',   _identity, _identity),
     # -- Connection-only: not part of the ASGI scope (scope_key=None) --------
-    _FieldSpec('path_params',    None, None, None),   # set by the router
+    _FieldSpec('_path_params',   None, None, None),   # lazy; exposed via the path_params property
     _FieldSpec('connection_id',  None, None, None),   # opaque id, set at accept
     _FieldSpec('_asterisk_form', None, None, None),   # H1 OPTIONS * marker
     _FieldSpec('_body',          None, None, None),   # body cache
     _FieldSpec('_body_read',     None, None, None),   # body-drained flag
     _FieldSpec('_cookies',       None, None, None),   # parsed-cookies cache
     _FieldSpec('_receive',       None, None, None),   # ASGI receive channel
+    _FieldSpec('_disconnected',  None, None, None),   # client-disconnect flag (actor→app)
+    _FieldSpec('_ws',            None, None, None),   # WebSocket handshake internals bag
 ]
+
+
+#: The scope-mapped registry entries, computed **once** at module load — the
+#: ASGI round-trip subset of ``_CONNECTION_FIELDS``. Rebuilding this filtered
+#: list on every ``as_scope()``/``from_scope()`` call was a measurable per-request
+#: cost on the self-hosted hot path (Sprint 80 Tier-1), so it is a constant.
+_SCOPE_FIELDS: list[_FieldSpec] = [s for s in _CONNECTION_FIELDS if s.scope_key is not None]
 
 
 def _scope_fields() -> list[_FieldSpec]:
     """Registry entries that participate in the ASGI scope round-trip."""
-    return [s for s in _CONNECTION_FIELDS if s.scope_key is not None]
+    return _SCOPE_FIELDS
 
 
-def stashed_connection(scope, receive) -> tuple['Connection', bool]:
+def stashed_connection(target, receive) -> tuple['Connection', bool]:
     """Return the typed :class:`Connection` for this request, plus whether it
     was freshly built.
 
-    The one *scope → Connection* accessor shared by the dispatcher
+    *target* is the threaded dispatch object — a :class:`Connection` on the
+    native path, or an ASGI scope dict on the external/compat lane.
+
+    The one *ASGI-scope → Connection* accessor shared by the dispatcher
     (``app._connection_of``) and the router (``router._conn_of``), Sprint 79.
     BlackBull's own protocol actors stash the ``Connection`` they parsed on the
     scope envelope under :data:`CONNECTION_STASH_KEY`, so the self-hosted path
@@ -125,13 +164,42 @@ def stashed_connection(scope, receive) -> tuple['Connection', bool]:
     router seeds ``path_params`` from an input scope key — because those needs
     differ by call site.
     """
-    conn = scope.get(CONNECTION_STASH_KEY) if isinstance(scope, dict) else None
+    # Native path (Sprint 80): the actor/app hands the typed Connection straight
+    # through, so ``target`` *is* the Connection — return it, nothing to build.
+    if isinstance(target, Connection):
+        return target, False
+    conn = target.get(CONNECTION_STASH_KEY) if isinstance(target, dict) else None
     if conn is not None:
         return conn, False
-    conn = Connection.from_scope(scope, receive)
-    if isinstance(scope, dict):
-        scope[CONNECTION_STASH_KEY] = conn
+    conn = Connection.from_scope(target, receive)
+    if isinstance(target, dict):
+        target[CONNECTION_STASH_KEY] = conn
     return conn, True
+
+
+def bind_receive_channel(target, receive) -> None:
+    """Bind the **raw** body-receive channel onto the request's Connection so
+    lazy ``conn.body()`` / ``request.body()`` drain the right stream once.
+
+    Called by the protocol actor with the *unwrapped* recipient — never with a
+    disconnect-detecting wrapper. Storing the wrapper would form a per-request
+    reference cycle: ``conn._receive`` → wrapper → (closure captures) ``conn``.
+    The refcount of a cyclic group never reaches zero when the request's local
+    refs drop, so reclamation is deferred to the generational cyclic GC — whose
+    periodic pauses were the v0.60.0 tail-latency regression (see
+    ``.claude/planning/research/v0600-regression-investigation.md`` §6). The raw
+    recipient does **not** reference ``conn`` (HTTP/1.1 keeps only the path
+    string; HTTP/2 keeps none), so ``conn`` → recipient is an acyclic chain that
+    refcounting frees the instant the request ends.
+
+    Idempotent — binds only when unset, so the external-ASGI path (uvicorn /
+    ``httpx.ASGITransport``), where :meth:`Connection.from_scope` already bound
+    the host's own receive channel, keeps that binding.
+    """
+    conn = target if isinstance(target, Connection) else (
+        target.get(CONNECTION_STASH_KEY) if isinstance(target, dict) else None)
+    if conn is not None and conn._receive is None:
+        conn._receive = receive
 
 
 # ---------------------------------------------------------------------------
@@ -167,7 +235,14 @@ class Connection:
 
     # -- mutable per-request state ----------------------------------------
     state: dict[str, Any] = field(default_factory=dict)
-    path_params: dict[str, str] = field(default_factory=dict)
+    # Lazy: no dict is allocated until the router actually matches path params
+    # (Sprint 80 Tier-1b). No-param routes — the framework-bound hot profiles
+    # (baseline/pipelined/limited-conn) — never touch it, saving one dict per
+    # request. Exposed via the ``path_params`` property below; excluded from
+    # equality (a transient routing detail, never an identity input).
+    # Values are ``Any``: the router's type converters coerce matched segments
+    # to the annotated type (``{id:int}`` → ``int``), so the dict is not str→str.
+    _path_params: dict[str, Any] | None = field(default=None, compare=False, repr=False)
     root_path: str = ''
     type: str = 'http'
     extensions: dict[str, dict] = field(default_factory=dict)
@@ -178,9 +253,54 @@ class Connection:
     _body: bytes | None = field(default=None, compare=False, repr=False)
     _body_read: bool = field(default=False, compare=False, repr=False)
     _cookies: dict[str, str] | None = field(default=None, compare=False, repr=False)
-    # The ASGI ``receive`` channel, bound by the actor / ``from_scope``; only
-    # ever a receive callable or ``None`` (before body access is wired).
+    # The **raw** ``receive`` channel (recipient), bound by the actor via
+    # ``bind_receive_channel`` / by ``from_scope`` on the external path; only
+    # ever a receive callable or ``None`` (before body access is wired). Must
+    # stay the unwrapped recipient — a disconnect-detecting wrapper captures
+    # ``conn`` and would form a per-request reference cycle (v0.60.0 regression).
     _receive: Callable | None = field(default=None, compare=False, repr=False)
+    # Set by the actor's disconnect-detecting receive wrapper when the client
+    # drops mid-request; read by ``BlackBull.__call__`` to skip the terminal
+    # ``request_completed`` event. Lives on the Connection (not the scope) so the
+    # native ``app(conn, …)`` path shares it across the actor↔app boundary.
+    _disconnected: bool = field(default=False, compare=False, repr=False)
+    # WebSocket handshake internals, populated by the protocol actor's upgrade
+    # path and consumed once by ``WebSocketActor`` — the deferred 101/200
+    # responder (``send_101``), the auto-negotiated subprotocol
+    # (``auto_subprotocol``), and the RFC 7692 permessage-deflate params
+    # (``deflate``). ``None`` on every HTTP request (the field is one slot, no
+    # allocation), so the HTTP hot path pays nothing. Not an ASGI scope key —
+    # these are private plumbing, never surfaced to a handler.
+    _ws: dict[str, Any] | None = field(default=None, compare=False, repr=False)
+
+    # ---- path params (lazy — allocated on first access) ------------------
+
+    @property
+    def path_params(self) -> dict[str, Any]:
+        """Matched URL path params, set by the router (values are converter-
+        coerced, hence ``Any``). The backing dict is created lazily on first
+        access so no-param routes allocate nothing."""
+        if self._path_params is None:
+            self._path_params = {}
+        return self._path_params
+
+    @path_params.setter
+    def path_params(self, value: dict[str, Any]) -> None:
+        self._path_params = value
+
+    # ---- WebSocket subprotocols (derived from the request header) ---------
+
+    @property
+    def subprotocols(self) -> list[str]:
+        """The client-offered WebSocket subprotocols (ASGI websocket scope's
+        ``subprotocols``), parsed from the ``Sec-WebSocket-Protocol`` request
+        header. Empty on HTTP requests and on a WS handshake that offered none.
+        Derived — not stored — so it needs no ASGI round-trip and the header
+        stays the single source of truth."""
+        raw = self.headers.get(b'sec-websocket-protocol', b'')
+        if not raw:
+            return []
+        return [p.strip().decode('utf-8', errors='replace') for p in raw.split(b',')]
 
     # ---- ASGI conversion — generated from _CONNECTION_FIELDS --------------
 
@@ -192,7 +312,7 @@ class Connection:
         buffering middleware's writes reach the handler.
         """
         scope: dict = {'asgi': {'version': '3.0', 'spec_version': '2.2'}}
-        for spec in _scope_fields():
+        for spec in _SCOPE_FIELDS:
             scope[spec.scope_key] = spec.to_scope(getattr(self, spec.attr))
         return scope
 
@@ -202,7 +322,7 @@ class Connection:
         ASGI→native point). Unknown keys are ignored; missing optional keys
         fall back to the field defaults."""
         kwargs: dict[str, Any] = {}
-        for spec in _scope_fields():
+        for spec in _SCOPE_FIELDS:
             if spec.scope_key in scope:
                 kwargs[spec.attr] = spec.from_scope(scope[spec.scope_key])
         # A conformant ASGI http/websocket scope always carries method, path,
@@ -220,7 +340,7 @@ class Connection:
         conn._receive = receive
         return conn
 
-    def to_dispatch_scope(self, *, force_asgi: bool = False) -> dict:
+    def to_asgi_scope(self, *, force_asgi: bool = False) -> dict:
         """Materialize the ASGI scope the dispatch pipeline consumes, with this
         typed :class:`Connection` stashed on it for zero-reconversion reads.
 
@@ -243,18 +363,61 @@ class Connection:
         Protocol-specific augmentation (the websocket-only ``subprotocols`` key)
         is layered on by the caller *after* this returns — it is not a
         :class:`Connection` field (proposal §2.1).
+
+        Sprint 80 Tier-1: the default (``force_asgi=False``) native path builds
+        the scope by **direct attribute access**, placing the rich ``Headers``
+        object straight in (no ``list(headers)`` that the old code computed via
+        the registry and then immediately discarded), and skips the per-field
+        function-call indirection of ``as_scope()``. The ``force_asgi`` dual-path
+        conformance lane (§4.3) keeps the full ``as_scope`` → ``from_scope`` →
+        ``as_scope`` round-trip so the compat conversion is still exercised.
         """
-        scope = self.as_scope()
-        conn = self
         if force_asgi:
-            rebuilt = Connection.from_scope(scope)
-            rebuilt._asterisk_form = self._asterisk_form
-            conn = rebuilt
-            scope = conn.as_scope()
-        scope['headers'] = conn.headers
-        if conn._asterisk_form:
+            # Dual-path conformance lane (§4.3): emit a **pure** ASGI scope — the
+            # exact shape an external server (uvicorn) delivers — with NO stashed
+            # Connection. The server's job ends at ``Connection → scope``; the app
+            # then does ``scope → Connection`` via ``from_scope`` at dispatch,
+            # exercising *both* conversion directions on every request. ``headers``
+            # stays the ASGI list-of-tuples form (``as_scope``); the app normalizes
+            # it to :class:`Headers` at its entry, as it does for real uvicorn input.
+            scope = self.as_scope()
+            if self._asterisk_form:
+                scope['_asterisk_form'] = True
+            return scope
+
+        # Native hot path — direct build, Headers object placed as-is.
+        scope = self._scope_contents()
+        scope[CONNECTION_STASH_KEY] = self
+        return scope
+
+    def _scope_contents(self) -> dict:
+        """The ASGI scope key/values derived from this Connection, **without**
+        the stashed-Connection key. Direct attribute access (no registry
+        indirection); ``state``/``extensions`` are shared by reference so a
+        buffering middleware's writes reach the handler; ``headers`` is the rich
+        :class:`Headers` object (internal ``.get()`` callers want it). The one
+        place a dispatch scope's key/values are assembled, used by
+        ``to_asgi_scope`` for the ``BB_FORCE_ASGI_SCOPE`` / external boundary."""
+        client = self.client
+        server = self.server
+        scope = {
+            'asgi': _DISPATCH_ASGI_INFO,
+            'type': self.type,
+            'http_version': self.http_version,
+            'method': self.method,
+            'scheme': self.scheme,
+            'path': self.path,
+            'raw_path': self.raw_path,
+            'query_string': self.query_string,
+            'root_path': self.root_path,
+            'headers': self.headers,
+            'client': list(client) if client is not None else None,
+            'server': list(server) if server is not None else None,
+            'state': self.state,
+            'extensions': self.extensions,
+        }
+        if self._asterisk_form:
             scope['_asterisk_form'] = True
-        scope[CONNECTION_STASH_KEY] = conn
         return scope
 
     # ---- body access (single-drain cache) --------------------------------
@@ -263,12 +426,47 @@ class Connection:
         """Return the complete request body, draining ``receive`` at most once.
 
         Repeated calls (and :meth:`json` / :meth:`text`) return the cached
-        bytes. A mid-body disconnect raises :class:`ClientDisconnected`.
+        bytes. A mid-body disconnect raises :class:`ClientDisconnected`. Raises
+        :class:`RuntimeError` if :meth:`stream` already consumed the body — the
+        channel is a single drain, so there is nothing left to buffer.
         """
         if not self._body_read:
             self._body = await read_body(self._receive)
             self._body_read = True
+        elif self._body is None:
+            # _body_read set with no cached bytes ⇒ stream() drained the channel.
+            raise RuntimeError(
+                'Connection.body() unavailable: stream() has already consumed '
+                'the request body incrementally.')
         return self._body
+
+    async def stream(self) -> AsyncIterator[bytes]:
+        """Yield the request body one chunk at a time, draining ``receive`` once.
+
+        The streaming counterpart to :meth:`body`.  Use it when the handler only
+        needs to *process* the body incrementally — count/hash/forward a large
+        upload — so the working set stays one chunk instead of the whole
+        payload::
+
+            total = 0
+            async for chunk in conn.stream():
+                total += len(chunk)
+
+        Mutually exclusive with :meth:`body`/:meth:`json`/:meth:`text`, which
+        buffer: the body is a single-drain stream, so mixing the two on one
+        request raises :class:`RuntimeError` rather than silently returning a
+        partial or empty body.  A mid-body disconnect raises
+        :class:`ClientDisconnected`.
+        """
+        if self._body_read:
+            raise RuntimeError(
+                'Connection.stream() cannot run after body()/json()/text() '
+                'has already drained (and buffered) the request body.')
+        # Mark drained up front so a later body() call fails fast rather than
+        # re-reading an exhausted channel and returning b''.
+        self._body_read = True
+        async for chunk in stream_body(self._receive):
+            yield chunk
 
     async def json(self) -> Any:
         """Parse the cached body as JSON (``None`` on empty/invalid input)."""
@@ -282,5 +480,6 @@ class Connection:
     def cookies(self) -> dict[str, str]:
         """Cookies from the ``Cookie`` header, parsed once and cached."""
         if self._cookies is None:
-            self._cookies = parse_cookies({'headers': self.headers})
+            self._cookies = cookies_from_headers(self.headers)
         return self._cookies
+

@@ -273,7 +273,8 @@ class TestHTTP11KeepAlive:
         paths = []
 
         async def capturing_app(scope, receive, send):
-            paths.append(scope['path'])
+            # BlackBull's server threads the native Connection for HTTP.
+            paths.append(scope.path)
 
         actor = HTTP1Actor(_FakeReader(req1_rest + req2), _FakeWriter(),
                            capturing_app, None, request=req1_first_line + b'\r\n')

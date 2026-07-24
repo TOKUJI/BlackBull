@@ -57,7 +57,7 @@ _repo_root = os.environ.get('BLACKBULL_SRC', '/src/BlackBull')
 if os.path.isdir(_repo_root) and _repo_root not in sys.path:
     sys.path.insert(0, _repo_root)
 
-from blackbull import BlackBull, Connection, Depends, JSONResponse, Response
+from blackbull import BlackBull, Depends, JSONResponse, Response, read_body
 from blackbull.middleware.compression import Compression
 
 import db
@@ -106,9 +106,8 @@ _NO_DATASET = b'No dataset'
 _PLAIN = 'text/plain; charset=utf-8'
 
 
-def _qs(conn: Connection):
-    """Parse query string from a Connection into a multi-value dict."""
-    raw = conn.query_string or b''
+def _qs(scope):
+    raw = scope.get('query_string') or b''
     return parse_qs(raw.decode('latin-1'), keep_blank_values=True)
 
 
@@ -117,42 +116,43 @@ async def pipeline():
     return Response(_PIPELINE_BODY, content_type=_PLAIN)
 
 
-async def _baseline_handler(conn: Connection):
+async def _baseline_handler(scope, receive, send):
     """Shared body for /baseline11 (H/1.1) and /baseline2 (H/2).
 
     HttpArena uses path-suffix to distinguish the two profiles, but
     the semantics are identical: sum integer query params, add posted
     body if integer, return as text/plain.
-
-    Sprint 79: uses ``Connection`` instead of the raw ASGI triplet.
     """
     total = 0
-    for vals in _qs(conn).values():
+    for vals in _qs(scope).values():
         for v in vals:
             try:
                 total += int(v)
             except ValueError:
                 pass
-    if conn.method == 'POST':
-        body = await conn.body()
+    if scope['method'] == 'POST':
+        body = await read_body(receive)
         if body:
             try:
                 total += int(body.strip())
             except ValueError:
                 pass
-    return Response(str(total).encode(), content_type=_PLAIN)
+    payload = str(total).encode()
+    await send({'type': 'http.response.start', 'status': 200,
+                'headers': [(b'content-type', _PLAIN.encode())]})
+    await send({'type': 'http.response.body', 'body': payload})
 
 
 @app.route(path='/baseline11', methods=[HTTPMethod.GET, HTTPMethod.POST])
-async def baseline11(conn: Connection):
-    return await _baseline_handler(conn)
+async def baseline11(scope, receive, send):
+    await _baseline_handler(scope, receive, send)
 
 
 # HttpArena's H/2 baseline profile uses /baseline2 (path suffix
 # disambiguates from the H/1.1 /baseline11).  Same semantics.
 @app.route(path='/baseline2', methods=[HTTPMethod.GET, HTTPMethod.POST])
-async def baseline2(conn: Connection):
-    return await _baseline_handler(conn)
+async def baseline2(scope, receive, send):
+    await _baseline_handler(scope, receive, send)
 
 
 def _json_payload(count: int, m: float):
@@ -167,41 +167,44 @@ def _json_payload(count: int, m: float):
 
 
 @app.route(path='/json/{count:int}', methods=[HTTPMethod.GET])
-async def json_endpoint(count: int, conn: Connection):
+async def json_endpoint(count: int, scope):
     if not DATASET_ITEMS:
         return Response(_NO_DATASET, status=500, content_type=_PLAIN)
     try:
-        m = float(_qs(conn).get('m', ['0'])[0])
+        m = float(_qs(scope).get('m', ['0'])[0])
     except ValueError:
         m = 0.0
     return JSONResponse(_json_payload(count, m))
 
 
 @app.route(path='/json-comp/{count:int}', methods=[HTTPMethod.GET])
-async def json_comp_endpoint(count: int, conn: Connection):
+async def json_comp_endpoint(count: int, scope):
     # Same payload as /json; the Compression middleware registered
     # at module top wraps the response with gzip / brotli / zstd per
     # the client's Accept-Encoding.
     if not DATASET_ITEMS:
         return Response(_NO_DATASET, status=500, content_type=_PLAIN)
     try:
-        m = float(_qs(req).get('m', ['0'])[0])
+        m = float(_qs(scope).get('m', ['0'])[0])
     except ValueError:
         m = 0.0
     return JSONResponse(_json_payload(count, m))
 
 
 @app.route(path='/upload', methods=[HTTPMethod.POST])
-async def upload_endpoint(conn: Connection):
-    # Sprint 80: stream the body with ``Connection.stream()`` — the profile only
-    # needs the byte count, so we never materialize the (up to 20 MB) payload.
-    # ``conn.body()`` would ``b''.join`` the whole upload (~4-12x the CPU and a
-    # multiple of the throughput under load); streaming keeps a one-chunk working
-    # set, matching the HttpArena "small read buffers" fast path.
+async def upload_endpoint(scope, receive, send):
     size = 0
-    async for chunk in conn.stream():
-        size += len(chunk)
-    return Response(str(size).encode(), content_type=_PLAIN)
+    while True:
+        msg = await receive()
+        if msg['type'] != 'http.request':
+            break
+        size += len(msg.get('body') or b'')
+        if not msg.get('more_body', False):
+            break
+    payload = str(size).encode()
+    await send({'type': 'http.response.start', 'status': 200,
+                'headers': [(b'content-type', _PLAIN.encode())]})
+    await send({'type': 'http.response.body', 'body': payload})
 
 
 # Liveness for ``launcher.py``'s readiness probe.
@@ -239,21 +242,19 @@ async def ws_echo(scope, receive, send):
 # when no database is configured, per the HttpArena contract).
 # ---------------------------------------------------------------------------
 
-def _int_qs(conn: Connection, name, default):
-    """Read an integer query param from a Connection."""
+def _int_qs(scope, name, default):
     try:
-        return int(_qs(conn).get(name, [str(default)])[0])
+        return int(_qs(scope).get(name, [str(default)])[0])
     except (ValueError, IndexError):
         return default
 
 
 @app.route(path='/async-db', methods=[HTTPMethod.GET])
-async def async_db_endpoint(req: Connection, db_conn=Depends(db.get_db_conn)):
-    # Sprint 79: ``req`` is the BlackBull Connection; ``conn`` is the db handle.
-    min_price = _int_qs(req, 'min', 10)
-    max_price = _int_qs(req, 'max', 50)
-    limit = max(1, min(_int_qs(req, 'limit', 50), 50))
-    items = await db.async_db(db_conn, min_price, max_price, limit)
+async def async_db_endpoint(scope, conn=Depends(db.get_db_conn)):
+    min_price = _int_qs(scope, 'min', 10)
+    max_price = _int_qs(scope, 'max', 50)
+    limit = max(1, min(_int_qs(scope, 'limit', 50), 50))
+    items = await db.async_db(conn, min_price, max_price, limit)
     return JSONResponse({'items': items, 'count': len(items)})
 
 
@@ -262,25 +263,24 @@ async def async_db_endpoint(req: Connection, db_conn=Depends(db.get_db_conn)):
 # ---------------------------------------------------------------------------
 
 @app.route(path='/crud/items', methods=[HTTPMethod.GET])
-async def crud_items_list(req: Connection, db_conn=Depends(db.get_db_conn)):
-    # Sprint 79: ``req`` is the BlackBull Connection; ``conn`` is the db handle.
-    qs = _qs(req)
+async def crud_items_list(scope, conn=Depends(db.get_db_conn)):
+    qs = _qs(scope)
     category = qs.get('category', [None])[0]
-    page = _int_qs(req, 'page', 1)
-    limit = max(1, min(_int_qs(req, 'limit', 10), 50))
-    items = await db.crud_list(db_conn, category, page, limit)
+    page = _int_qs(scope, 'page', 1)
+    limit = max(1, min(_int_qs(scope, 'limit', 10), 50))
+    items = await db.crud_list(conn, category, page, limit)
     # Load-more semantics: total == items in this response (per the contract).
     return JSONResponse({'items': items, 'total': len(items),
                          'page': page, 'limit': limit})
 
 
 @app.route(path='/crud/items', methods=[HTTPMethod.POST])
-async def crud_items_create(body: bytes, db_conn=Depends(db.get_db_conn)):
+async def crud_items_create(body: bytes, conn=Depends(db.get_db_conn)):
     try:
         data = json.loads(body)
     except ValueError:
         return Response(b'invalid JSON', status=400, content_type=_PLAIN)
-    ok = await db.crud_create(db_conn, data)
+    ok = await db.crud_create(conn, data)
     if not ok:
         return Response(b'unavailable', status=503, content_type=_PLAIN)
     return JSONResponse({'id': data.get('id')}, status=201)
@@ -297,12 +297,12 @@ async def crud_items_get(item_id: int, pool=Depends(db.get_pool)):
 
 
 @app.route(path='/crud/items/{item_id:int}', methods=[HTTPMethod.PUT])
-async def crud_items_update(item_id: int, body: bytes, db_conn=Depends(db.get_db_conn)):
+async def crud_items_update(item_id: int, body: bytes, conn=Depends(db.get_db_conn)):
     try:
         data = json.loads(body)
     except ValueError:
         return Response(b'invalid JSON', status=400, content_type=_PLAIN)
-    ok = await db.crud_update(db_conn, item_id, data)
+    ok = await db.crud_update(conn, item_id, data)
     if not ok:
         return Response(b'not found', status=404, content_type=_PLAIN)
     return JSONResponse({'id': item_id})

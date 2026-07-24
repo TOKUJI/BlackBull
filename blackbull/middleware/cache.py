@@ -46,7 +46,7 @@ Usage::
     app.use(Cache(max_age=600))     # 10-minute TTL
 
     @app.route(path='/feed')
-    async def feed(scope, receive, send):
+    async def feed(conn, receive, send):
         ...   # served from cache for 10 min after first hit
 """
 from __future__ import annotations
@@ -57,6 +57,7 @@ import time
 from collections import OrderedDict
 
 from ..asgi import ASGIEvent
+from ..connection import Connection
 from .utils import as_middleware
 
 logger = logging.getLogger(__name__)
@@ -147,27 +148,30 @@ class Cache:
 
     # ---- ASGI surface ----------------------------------------------------
 
-    async def __call__(self, scope, receive, send, call_next):
-        if scope.get('type') != 'http':
-            await call_next(scope, receive, send)
+    async def __call__(self, conn, receive, send, call_next):
+        # Native Connection for HTTP and WebSocket; the guard is defensive
+        # against a raw ASGI scope dict (only reachable outside BlackBull's own
+        # dispatch).
+        if not isinstance(conn, Connection):
+            await call_next(conn, receive, send)
             return
 
-        method = scope.get('method', '')
+        method = conn.method
         if method not in self._cacheable_methods:
-            await call_next(scope, receive, send)
+            await call_next(conn, receive, send)
             return
 
-        req_headers = _request_headers(scope)
+        req_headers = _request_headers(conn)
         if not self._cache_authenticated and b'authorization' in req_headers:
             # RFC 9111 §3.5 — caches MUST NOT use responses to requests with
             # Authorization unless explicit cache-control allows it.
-            await call_next(scope, receive, send)
+            await call_next(conn, receive, send)
             return
         if _request_has_no_store(req_headers):
-            await call_next(scope, receive, send)
+            await call_next(conn, receive, send)
             return
 
-        base_key = (method, scope.get('path', ''), scope.get('query_string', b''))
+        base_key = (method, conn.path, conn.query_string)
         # Look up the bucket for this URL, then the specific variant inside it
         # using the Vary fields recorded on the bucket (empty tuple ⇒ the single
         # non-varying entry keyed by ``()``).
@@ -281,7 +285,7 @@ class Cache:
             if flushed:
                 await send(event)
 
-        await call_next(scope, receive, cap_send)
+        await call_next(conn, receive, cap_send)
 
         # If the handler never emitted a body event the response was
         # never flushed — forward whatever we have so the client at
@@ -315,10 +319,10 @@ class Cache:
 # focused on the orchestration logic).
 # ---------------------------------------------------------------------------
 
-def _request_headers(scope) -> dict[bytes, bytes]:
+def _request_headers(conn) -> dict[bytes, bytes]:
     """Index the request headers by lowercase name → value (first occurrence)."""
     out: dict[bytes, bytes] = {}
-    for name, value in scope.get('headers', []):
+    for name, value in conn.headers:
         n = name.lower()
         if n not in out:
             out[n] = value

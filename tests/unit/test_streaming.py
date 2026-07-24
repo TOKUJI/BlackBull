@@ -49,8 +49,12 @@ class _SendfileBytesWriter(BytesWriter):
         return count
 
 
-def _make_scope(type_: str = 'http') -> dict:
-    return {'type': type_, 'method': 'GET', 'path': '/', 'headers': []}
+def _make_scope(type_: str = 'http'):
+    scope = {'type': type_, 'method': 'GET', 'path': '/', 'headers': []}
+    if type_ == 'http':
+        from blackbull.connection import Connection
+        return Connection.from_scope(scope)
+    return scope
 
 
 # ---------------------------------------------------------------------------
@@ -299,10 +303,11 @@ class TestCompressionStreaming:
     @pytest.mark.asyncio
     async def test_streaming_not_compressed(self):
         mw = Compression(min_size=1)
-        scope = {
+        from blackbull.connection import Connection
+        scope = Connection.from_scope({
             'type': 'http',
             'headers': [(b'accept-encoding', b'gzip')],
-        }
+        })
         received: list = []
 
         async def call_next(scope, receive, send):
@@ -323,10 +328,11 @@ class TestCompressionStreaming:
     async def test_single_body_still_compressed(self):
         import gzip
         mw = Compression(min_size=1)
-        scope = {
+        from blackbull.connection import Connection
+        scope = Connection.from_scope({
             'type': 'http',
             'headers': [(b'accept-encoding', b'gzip')],
-        }
+        })
         received: list = []
 
         async def call_next(scope, receive, send):

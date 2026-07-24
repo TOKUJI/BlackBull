@@ -56,8 +56,8 @@ def rfc8441_server_port():
     app = BlackBull()
 
     @app.route(path='/ws', scheme=Scheme.websocket)
-    async def ws_echo(scope, receive, send):
-        assert scope['type'] == 'websocket'
+    async def ws_echo(conn, receive, send):
+        assert conn.type == 'websocket'
         await receive()  # websocket.connect
         await send({'type': 'websocket.accept'})
         while True:
@@ -73,8 +73,8 @@ def rfc8441_server_port():
                 break
 
     @app.route(path='/ws-chat', scheme=Scheme.websocket)
-    async def ws_chat(scope, receive, send):
-        assert scope['type'] == 'websocket'
+    async def ws_chat(conn, receive, send):
+        assert conn.type == 'websocket'
         await receive()
         await send({'type': 'websocket.accept', 'subprotocol': 'chat'})
         await receive()  # disconnect

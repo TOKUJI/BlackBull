@@ -99,7 +99,7 @@ async def test_event_source_response_emits_text_event_stream_content_type():
         yield 'hi'
 
     cap = _AsgiCapture()
-    await EventSourceResponse(src())(scope={'type': 'http'},
+    await EventSourceResponse(src())(conn={'type': 'http'},
                                      receive=None, send=cap)
 
     start = cap.events[0]
@@ -118,7 +118,7 @@ async def test_event_source_response_streams_one_body_event_per_yield():
         yield 'c'
 
     cap = _AsgiCapture()
-    await EventSourceResponse(src())(scope={'type': 'http'},
+    await EventSourceResponse(src())(conn={'type': 'http'},
                                      receive=None, send=cap)
 
     # 1 start + 3 body chunks + 1 final empty body = 5 events.
@@ -144,7 +144,7 @@ async def test_event_source_response_explicit_headers_win():
     await EventSourceResponse(
         src(),
         headers=[(b'cache-control', b'public, max-age=10')],
-    )(scope={'type': 'http'}, receive=None, send=cap)
+    )(conn={'type': 'http'}, receive=None, send=cap)
 
     headers = dict(cap.events[0]['headers'])
     assert headers[b'cache-control'] == b'public, max-age=10'

@@ -52,6 +52,21 @@ When writing route handlers or debugging handler behaviour, consult
 docs/getting-started/ and examples/ before guessing.  A
 signature mistake (full ASGI vs simplified form) wastes EC2 hours.
 
+### 8. Prefer structural search over regex for code changes
+
+When searching for code patterns to refactor or replace, use the following
+priority order:
+
+1. **`ast-grep` (`sg`)** — for any structural search/replace. Write a pattern
+   in the target language (not regex). Example:
+   `sg -p 'await $SEND({$$$ARGS})' -l python blackbull/`
+2. **`rg` (ripgrep)** — for plain-text search when structure doesn't matter.
+   Always prefer `rg` over `grep` or `find | xargs grep`.
+3. **`grep`** — only as a last resort.
+
+Never use regex to match language syntax (function signatures, class defs,
+call expressions). Use `ast-grep` for those.
+
 
 ## Task-to-skill mapping
 

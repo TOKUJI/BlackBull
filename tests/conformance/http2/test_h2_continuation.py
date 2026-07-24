@@ -227,9 +227,9 @@ class TestContinuationHandling:
         await handler.run()
 
         assert app.call_count == 1
-        scope = app.call_args[0][0]
-        assert scope['method'] == 'GET'
-        assert scope['path'] == '/api/resource'
+        conn = app.call_args[0][0]
+        assert conn.method == 'GET'
+        assert conn.path == '/api/resource'
 
     async def test_app_not_called_after_headers_only(self):
         """The app must NOT be called after the HEADERS-only frame; it must wait for
@@ -303,9 +303,9 @@ class TestContinuationHandling:
         await handler.run()
 
         assert app.call_count == 1
-        scope = app.call_args[0][0]
-        assert scope['method'] == 'PUT'
-        assert scope['path'] == '/data'
+        conn = app.call_args[0][0]
+        assert conn.method == 'PUT'
+        assert conn.path == '/data'
 
     async def test_two_independent_requests_each_with_continuation(self):
         """Two separate streams, each split over HEADERS+CONTINUATION, must yield
@@ -343,8 +343,8 @@ class TestContinuationHandling:
         await handler.run()
 
         assert app.call_count == 2
-        scopes = [call[0][0] for call in app.call_args_list]
-        paths = {s['path'] for s in scopes}
+        conns = [call[0][0] for call in app.call_args_list]
+        paths = {c.path for c in conns}
         assert paths == {'/first', '/second'}
 
 

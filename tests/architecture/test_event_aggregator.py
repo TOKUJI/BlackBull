@@ -29,7 +29,7 @@ async def test_on_error_with_exception_group(aggregator, dispatcher) -> None:
     eg = ExceptionGroup("multi", [ValueError("a"), RuntimeError("b")])
     await aggregator.on_error(scope, eg)
     dispatcher.emit.assert_called_once_with(
-        Event("error", {"scope": scope, "exception": eg})
+        Event("error", {"conn": scope, "exception": eg})
     )
 
 

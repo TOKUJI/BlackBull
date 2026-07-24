@@ -108,11 +108,11 @@ class Response:
         self.headers = [(b'content-type', content_type.encode())]
         self.headers.extend(_normalize_headers(headers))
 
-    async def __call__(self, scope, receive, send) -> None:
+    async def __call__(self, conn, receive, send) -> None:
         """Drive this response as an ASGI app: emit ``start`` then ``body``.
 
         Mirrors :class:`StreamingResponse` so every BlackBull response type
-        shares one protocol — ``await response(scope, receive, send)`` —
+        shares one protocol — ``await response(conn, receive, send)`` —
         whether returned from a simplified handler, invoked explicitly by a
         full-form handler, or normalised by ``app._wrap_send``.  Keeping the
         start/body serialisation here means there is a single source of truth
@@ -178,8 +178,8 @@ class StreamingResponse:
                 await asyncio.sleep(0.1)
 
         @app.route(path='/stream')
-        async def handler(scope, receive, send):
-            await StreamingResponse(lines())(scope, receive, send)
+        async def handler(conn, receive, send):
+            await StreamingResponse(lines())(conn, receive, send)
     """
 
     def __init__(self, content: AsyncIterator,
@@ -192,7 +192,7 @@ class StreamingResponse:
         self._headers = _normalize_headers(headers)
         self._media_type = media_type
 
-    async def __call__(self, scope, receive, send) -> None:
+    async def __call__(self, conn, receive, send) -> None:
         h = list(self._headers)
         if not any(k.lower() == b'content-type' for k, _ in h):
             h.insert(0, (b'content-type', self._media_type.encode()))

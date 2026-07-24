@@ -8,7 +8,7 @@ _accept  = {'type': ASGIEvent.WS_ACCEPT, 'subprotocol': None}
 _close   = {'type': ASGIEvent.WS_CLOSE}
 
 
-async def websocket(scope, receive, send, call_next):
+async def websocket(conn, receive, send, call_next):
     msg = await receive()
 
     if msg.get('type') != ASGIEvent.WS_CONNECT:
@@ -17,5 +17,5 @@ async def websocket(scope, receive, send, call_next):
         )
 
     await send(_accept)
-    await call_next(scope, receive, send)
+    await call_next(conn, receive, send)
     await send(_close)

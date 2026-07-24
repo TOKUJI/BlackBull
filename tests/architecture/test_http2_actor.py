@@ -12,6 +12,22 @@ from blackbull.protocol.frame_types import (
 from blackbull.server.recipient import AbstractReader
 from blackbull.server.sender import AbstractWriter
 from blackbull.server.http2_actor import HTTP2Actor
+from blackbull.connection import Connection
+
+
+def _req_field(target, name):
+    """Read a request field from what the actor dispatched — a native
+    ``Connection`` (attribute) on the default lane, or an ASGI scope dict under
+    ``BB_FORCE_ASGI_SCOPE`` (key). These actor-level tests use a bare capturing
+    app, so the compat lane hands them the raw scope dict (no ``from_scope``
+    rebuild a real ``BlackBull`` app would do). ``client``/``server`` come back
+    as ``[host, port]`` lists in a scope, normalized to tuples here."""
+    if isinstance(target, Connection):
+        return getattr(target, name)
+    val = target.get(name)
+    if name in ('client', 'server') and isinstance(val, list):
+        return tuple(val)
+    return val
 
 
 # ---------------------------------------------------------------------------
@@ -146,10 +162,10 @@ async def test_stream_error_isolated(fake_two_stream_reader, fake_writer) -> Non
     call_count = 0
     completed = 0
 
-    async def app_with_one_error(scope, _receive, send):
+    async def app_with_one_error(conn, _receive, send):
         nonlocal call_count, completed
         call_count += 1
-        if scope.get('path') == '/' and call_count == 1:
+        if _req_field(conn, 'path') == '/' and call_count == 1:
             raise RuntimeError('stream error')
         await send({'type': 'http.response.start', 'status': 200, 'headers': []})
         await send({'type': 'http.response.body', 'body': b''})
@@ -164,16 +180,17 @@ async def test_stream_error_isolated(fake_two_stream_reader, fake_writer) -> Non
 
 
 # ---------------------------------------------------------------------------
-# Test 4: scope['client'] and scope['server'] populated from TCP metadata
+# Test 4: conn.client and conn.server populated from TCP metadata
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_scope_has_client_and_server(fake_h2_reader, fake_writer) -> None:
-    """Regression: HTTP2Actor must inject peername/sockname into scope."""
-    received_scope = {}
+async def test_conn_has_client_and_server(fake_h2_reader, fake_writer) -> None:
+    """Regression: HTTP2Actor must inject peername/sockname into the Connection."""
+    received = {}
 
-    async def capture_app(scope, receive, send):
-        received_scope.update(scope)
+    async def capture_app(conn, receive, send):
+        received['client'] = _req_field(conn, 'client')
+        received['server'] = _req_field(conn, 'server')
         await send({'type': 'http.response.start', 'status': 200, 'headers': []})
         await send({'type': 'http.response.body', 'body': b''})
 
@@ -185,8 +202,8 @@ async def test_scope_has_client_and_server(fake_h2_reader, fake_writer) -> None:
     )
     await actor.run()
 
-    assert received_scope['client'] == ['192.168.1.1', 54321]
-    assert received_scope['server'] == ['0.0.0.0', 443]
+    assert received['client'] == ('192.168.1.1', 54321)
+    assert received['server'] == ('0.0.0.0', 443)
 
 
 # ---------------------------------------------------------------------------
@@ -461,3 +478,66 @@ async def test_stream_semaphore_caps_active_handlers():
     gate.set()
     await asyncio.wait_for(run_task, timeout=2.0)
     assert active == 0, 'all handlers should have finished after gate opened'
+
+
+# ---------------------------------------------------------------------------
+# Alloc-reduction (P2 / Sprint 80): the H2 HEADERS dispatch path skips the
+# per-request AccessLogRecord (and the capturing-send wrapper) when nothing
+# consumes it — mirrors the HTTP/1.1 gate (P3). A real EventAggregator is
+# required so has_request_completed_listeners() reports true registration
+# state (an AsyncMock returns a truthy mock and would always build the record).
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_h2_baseline_hot_path_skips_access_log_record():
+    """Access logging off + no request_completed listener ⇒ the H2 actor must
+    not build the AccessLogRecord (nor the conn.state['access_log'] it forces)."""
+    import logging
+    from blackbull import BlackBull
+
+    app = BlackBull()
+    seen: dict = {}
+
+    @app.route(path='/')
+    async def index(conn):
+        seen['state_keys'] = list(conn.state.keys())
+        return b'ok'
+
+    agg = EventAggregator(app._dispatcher)
+    reader = _FakeReader(_make_headers_frame(stream_id=1, end_stream=True))
+    actor = HTTP2Actor(reader, _FakeWriter(), app, agg)
+    access_logger = logging.getLogger('blackbull.access')
+    prev = access_logger.level
+    access_logger.setLevel(logging.WARNING)  # ensure INFO disabled
+    try:
+        await actor.run()
+    finally:
+        access_logger.setLevel(prev)
+
+    assert 'access_log' not in seen['state_keys']
+
+
+@pytest.mark.asyncio
+async def test_h2_request_completed_listener_forces_access_log_record():
+    """The inverse: a request_completed listener reads the record's wire fields,
+    so the H2 actor must still build it and publish it on conn.state."""
+    from blackbull import BlackBull
+
+    app = BlackBull()
+    seen: dict = {}
+
+    @app.route(path='/')
+    async def index(conn):
+        seen['state_keys'] = list(conn.state.keys())
+        return b'ok'
+
+    @app.on('request_completed')
+    async def _rc(event):
+        pass
+
+    agg = EventAggregator(app._dispatcher)
+    reader = _FakeReader(_make_headers_frame(stream_id=1, end_stream=True))
+    actor = HTTP2Actor(reader, _FakeWriter(), app, agg)
+    await actor.run()
+
+    assert 'access_log' in seen['state_keys']

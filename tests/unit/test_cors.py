@@ -9,11 +9,17 @@ def _make_scope(method='GET', origin=None, headers=None, type_='http'):
     raw = list((headers or {}).items())
     if origin:
         raw.append((b'origin', origin.encode()))
-    return {
+    scope = {
         'type': type_,
         'method': method,
         'headers': Headers(raw),
     }
+    # Sprint 80: HTTP is dispatched as a native Connection; non-HTTP (websocket)
+    # still travels as an ASGI scope dict, exactly as the middleware sees it.
+    if type_ == 'http':
+        from blackbull.connection import Connection
+        return Connection.from_scope(scope)
+    return scope
 
 
 async def _call(mw, scope):

@@ -16,13 +16,14 @@ import pytest
 from blackbull.middleware.compression import Compression
 
 
-def _scope(accept_encoding: bytes = b'gzip') -> dict:
-    return {
+def _scope(accept_encoding: bytes = b'gzip'):
+    from blackbull.connection import Connection
+    return Connection.from_scope({
         'type': 'http',
         'method': 'GET',
         'path': '/',
         'headers': [(b'accept-encoding', accept_encoding)],
-    }
+    })
 
 
 async def _noop_receive():

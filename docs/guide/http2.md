@@ -82,7 +82,7 @@ async def search(scope, receive, send):
 ```python
 @app.intercept('before_handler')
 async def handle_priority(event):
-    scope = event.detail['scope']
+    scope = event.detail['conn']
     ext = scope.get('extensions') or {}
     hint = ext.get('http.response.priority', {'urgency': 3, 'incremental': False})
     if hint['urgency'] <= 1:

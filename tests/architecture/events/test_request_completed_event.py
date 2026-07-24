@@ -85,7 +85,7 @@ async def _run_request(app, raw: bytes) -> None:
 
 @pytest.mark.asyncio
 async def test_scope_and_record_fields_agree_on_method_path_and_version():
-    """detail['scope'] and the flattened record fields must agree."""
+    """detail['conn'] and the flattened record fields must agree."""
     app = BlackBull()
     captured: list[Event] = []
     seen = asyncio.Event()
@@ -106,10 +106,9 @@ async def test_scope_and_record_fields_agree_on_method_path_and_version():
     assert len(captured) == 1
 
     d = captured[0].detail
-    assert d['method'] == d['scope']['method']
-    assert d['path'] == d['scope']['path']
-    if 'http_version' in d['scope']:
-        assert d['http_version'] == d['scope']['http_version']
+    assert d['method'] == d['conn'].method
+    assert d['path'] == d['conn'].path
+    assert d['http_version'] == d['conn'].http_version
 
 
 @pytest.mark.asyncio

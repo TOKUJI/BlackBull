@@ -9,10 +9,7 @@ from hypothesis import strategies as st
 # ---------------------------------------------------------------------------
 
 from blackbull.server.http1_actor import HTTP1Actor as _HTTP1Actor
-from blackbull.server.parser import (
-    _default_connection as _make_http2_conn,
-    parse_headers as _real_parse_headers,
-)
+from blackbull.server.parser import parse_headers as _real_parse_headers
 
 
 def _parse_headers(frame) -> dict:
@@ -92,7 +89,8 @@ class TestParse:
 
     def test_http2_version_string_is_spec_compliant(self):
         """ASGI spec: http_version must be '2' for HTTP/2, not '2.0'."""
-        conn = _make_http2_conn()
+        conn = _real_parse_headers(_make_h2_headers_frame_dispatch())
+        assert conn is not None
         assert conn.http_version == '2'
 
     def test_type_is_http_by_default(self):
@@ -340,6 +338,7 @@ def _make_h2_headers_frame_dispatch(extra_headers: list | None = None,
         (b':method', b'GET'),
         (b':path',   path.encode('utf-8')),
         (b':scheme', b'https'),
+        (b':authority', b'example.com'),
     ]
     if extra_headers:
         header_list.extend(extra_headers)
@@ -374,6 +373,51 @@ class TestHTTP2ScopeFields:
         )
         scope = _parse_headers(frame)
         assert scope.get('root_path') == ''
+
+
+class TestParseHeadersNoneContract:
+    """Sprint 80 alloc hygiene (`connection-alloc-hygiene.md` Phase 1,
+    2026-07-24): ``parse_headers`` returns ``None`` on every path that marks
+    the frame malformed, uniformly — including host-authority validation
+    failure, which the pre-refactor version answered with a half-built
+    ``Connection`` instead (never observed by the real actor, which checks
+    ``frame.malformed`` before reading the result, but a real difference for
+    any direct caller). Pins ``result is None ⟺ frame.malformed``."""
+
+    def test_missing_authority_and_host_returns_none(self):
+        from hpack import Encoder
+        from blackbull.protocol.frame import FrameFactory
+        from blackbull.protocol.frame_types import FrameTypes, HeaderFrameFlags
+
+        block = Encoder().encode([
+            (b':method', b'GET'), (b':path', b'/'), (b':scheme', b'https'),
+        ])  # no :authority, no Host — https requires one of the two
+        flags = HeaderFrameFlags.END_HEADERS | HeaderFrameFlags.END_STREAM
+        raw = (len(block).to_bytes(3, 'big') + FrameTypes.HEADERS
+               + bytes([flags]) + (1).to_bytes(4, 'big') + block)
+        frame = FrameFactory().load(raw)
+        assert _real_parse_headers(frame) is None
+        assert frame.malformed
+
+    def test_empty_authority_returns_none(self):
+        from hpack import Encoder
+        from blackbull.protocol.frame import FrameFactory
+        from blackbull.protocol.frame_types import FrameTypes, HeaderFrameFlags
+
+        block = Encoder().encode([
+            (b':method', b'GET'), (b':path', b'/'), (b':scheme', b'https'),
+            (b':authority', b''),
+        ])
+        flags = HeaderFrameFlags.END_HEADERS | HeaderFrameFlags.END_STREAM
+        raw = (len(block).to_bytes(3, 'big') + FrameTypes.HEADERS
+               + bytes([flags]) + (1).to_bytes(4, 'big') + block)
+        frame = FrameFactory().load(raw)
+        assert _real_parse_headers(frame) is None
+        assert frame.malformed
+
+    def test_well_formed_frame_returns_connection_not_none(self):
+        conn = _real_parse_headers(_make_h2_headers_frame_dispatch())
+        assert conn is not None
 
 
 class TestPathPercentDecodingH1:

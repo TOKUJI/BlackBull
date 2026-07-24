@@ -159,7 +159,7 @@ async def test_parse_connection_header_does_not_corrupt_scheme(mock_writer) -> N
     received_scope = {}
 
     async def capture_app(scope, receive, send):
-        received_scope.update(scope)
+        received_scope.update(scope.as_scope() if hasattr(scope, 'as_scope') else scope)
         await send({'type': 'http.response.start', 'status': 200, 'headers': []})
         await send({'type': 'http.response.body', 'body': b''})
 
@@ -183,7 +183,7 @@ async def test_parse_host_without_port(mock_writer) -> None:
     received_scope = {}
 
     async def capture_app(scope, receive, send):
-        received_scope.update(scope)
+        received_scope.update(scope.as_scope() if hasattr(scope, 'as_scope') else scope)
         await send({'type': 'http.response.start', 'status': 200, 'headers': []})
         await send({'type': 'http.response.body', 'body': b''})
 
@@ -284,7 +284,7 @@ class TestScopePopulation:
         captured = {}
 
         async def capture_app(scope, receive, send):
-            captured.update(scope)
+            captured.update(scope.as_scope() if hasattr(scope, 'as_scope') else scope)
 
         actor, _writer = _make_actor(raw, capture_app, peername=('192.168.1.10', 54321))
         await actor.run()
@@ -300,7 +300,7 @@ class TestScopePopulation:
         captured = {}
 
         async def capture_app(scope, receive, send):
-            captured.update(scope)
+            captured.update(scope.as_scope() if hasattr(scope, 'as_scope') else scope)
 
         actor, _writer = _make_actor(raw, capture_app, sockname=('0.0.0.0', 9000))
         await actor.run()
@@ -314,7 +314,7 @@ class TestScopePopulation:
         captured = {}
 
         async def capture_app(scope, receive, send):
-            captured.update(scope)
+            captured.update(scope.as_scope() if hasattr(scope, 'as_scope') else scope)
 
         actor, _writer = _make_actor(raw, capture_app, sockname=('0.0.0.0', 9999))
         await actor.run()
@@ -327,7 +327,7 @@ class TestScopePopulation:
         captured = {}
 
         async def capture_app(scope, receive, send):
-            captured.update(scope)
+            captured.update(scope.as_scope() if hasattr(scope, 'as_scope') else scope)
 
         actor, _writer = _make_actor(raw, capture_app, ssl=False)
         await actor.run()
@@ -340,7 +340,7 @@ class TestScopePopulation:
         captured = {}
 
         async def capture_app(scope, receive, send):
-            captured.update(scope)
+            captured.update(scope.as_scope() if hasattr(scope, 'as_scope') else scope)
 
         actor, _writer = _make_actor(raw, capture_app, ssl=True)
         await actor.run()
@@ -375,7 +375,7 @@ class TestScopePopulation:
         captured = {}
 
         async def capture_app(scope, receive, send):
-            captured.update(scope)
+            captured.update(scope.as_scope() if hasattr(scope, 'as_scope') else scope)
 
         actor, _writer = _make_actor(raw, capture_app, ssl=False)
         await actor.run()
@@ -393,7 +393,7 @@ class TestScopePopulation:
         captured = {}
 
         async def capture_app(scope, receive, send):
-            captured.update(scope)
+            captured.update(scope.as_scope() if hasattr(scope, 'as_scope') else scope)
 
         actor, _writer = _make_actor(raw, capture_app, ssl=True)
         await actor.run()
@@ -609,10 +609,10 @@ class TestAccessLogging:
 
 @pytest.mark.asyncio
 async def test_ws_upgrade_reuses_actor_connection_id():
-    seen_scopes = []
+    seen_conns = []
 
-    async def ws_app(scope, receive, send):
-        seen_scopes.append(scope)
+    async def ws_app(conn, receive, send):
+        seen_conns.append(conn)
         event = await receive()
         assert event['type'] == 'websocket.connect'
         await send({'type': 'websocket.accept'})
@@ -628,18 +628,18 @@ async def test_ws_upgrade_reuses_actor_connection_id():
     )
     await actor.run()
 
-    assert len(seen_scopes) == 1
-    assert seen_scopes[0]['_connection_id'] == 'cid-ws-7'
+    assert len(seen_conns) == 1
+    assert seen_conns[0].connection_id == 'cid-ws-7'
 
 
 @pytest.mark.asyncio
 async def test_ws_upgrade_without_accept_id_generates_unified_format():
     """Fallback (no accept-time id) mints via conn_id.new_connection_id —
     same 20-hex format as every other connection id."""
-    seen_scopes = []
+    seen_conns = []
 
-    async def ws_app(scope, receive, send):
-        seen_scopes.append(scope)
+    async def ws_app(conn, receive, send):
+        seen_conns.append(conn)
         event = await receive()
         assert event['type'] == 'websocket.connect'
         await send({'type': 'websocket.accept'})
@@ -647,5 +647,78 @@ async def test_ws_upgrade_without_accept_id_generates_unified_format():
     actor, _writer = _make_actor(_ws_request(), app=ws_app)
     await actor.run()
 
-    cid = seen_scopes[0]['_connection_id']
+    cid = seen_conns[0].connection_id
     assert len(cid) == 20 and set(cid) <= set('0123456789abcdef')
+
+
+# ---------------------------------------------------------------------------
+# Alloc-reduction (Sprint 80): the baseline hot path skips the per-request
+# AccessLogRecord when nothing consumes it. Pins the optimization so a future
+# change can't silently make the record unconditional again.
+# ---------------------------------------------------------------------------
+
+def _real_agg_actor(raw: bytes, app, aggregator):
+    """Build an actor with a *real* EventAggregator (not None/AsyncMock) so the
+    record/disconnect gates take their production branch."""
+    writer = _FakeWriter()
+    first_line, rest = raw.split(b'\r\n', 1)
+    reader = _FakeReader(rest)
+    actor = HTTP1Actor(
+        reader, writer, app, aggregator,
+        request=first_line + b'\r\n',
+        peername=('127.0.0.1', 54321), sockname=('0.0.0.0', 8000),
+    )
+    return actor, writer
+
+
+@pytest.mark.asyncio
+async def test_baseline_hot_path_skips_access_log_record():
+    """Access logging off + no request_completed listener ⇒ the actor must not
+    build the AccessLogRecord (nor the ``conn.state['access_log']`` it forces)."""
+    import logging
+    from blackbull import BlackBull
+
+    app = BlackBull()
+    seen: dict = {}
+
+    @app.route(path='/')
+    async def index(conn):
+        seen['state_keys'] = list(conn.state.keys())
+        return b'ok'
+
+    agg = EventAggregator(app._dispatcher)
+    access_logger = logging.getLogger('blackbull.access')
+    prev = access_logger.level
+    access_logger.setLevel(logging.WARNING)  # ensure INFO disabled
+    try:
+        actor, _ = _real_agg_actor(_http_get(), app, agg)
+        await actor.run()
+    finally:
+        access_logger.setLevel(prev)
+
+    assert 'access_log' not in seen['state_keys']
+
+
+@pytest.mark.asyncio
+async def test_request_completed_listener_forces_access_log_record():
+    """The inverse: a request_completed listener reads the record's wire fields,
+    so the actor must still build it and publish it on ``conn.state``."""
+    from blackbull import BlackBull
+
+    app = BlackBull()
+    seen: dict = {}
+
+    @app.route(path='/')
+    async def index(conn):
+        seen['state_keys'] = list(conn.state.keys())
+        return b'ok'
+
+    @app.on('request_completed')
+    async def _rc(event):
+        pass
+
+    agg = EventAggregator(app._dispatcher)
+    actor, _ = _real_agg_actor(_http_get(), app, agg)
+    await actor.run()
+
+    assert 'access_log' in seen['state_keys']

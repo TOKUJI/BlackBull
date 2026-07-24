@@ -105,7 +105,7 @@ async def on_temperature(msg: Message, room: str):
 # --- MQTT -> WebSocket -------------------------------------------------------
 
 @app.route(path='/ws', scheme=Scheme.websocket)
-async def ws_feed(scope, receive, send):
+async def ws_feed(conn, receive, send):
     event = await receive()
     if event['type'] != 'websocket.connect':
         return
@@ -179,9 +179,9 @@ _GRPC_TO_HTTP = {
 
 
 @app.route(path='/rooms/{room}/stats')
-async def rest_room_stats(room: str, scope: dict):
+async def rest_room_stats(room: str, conn):   # `conn` is the native Connection
     handler = grpc.lookup('/hub.Telemetry/RoomStats')
-    context = GrpcContext(scope)
+    context = GrpcContext(conn)
     try:
         payload = await handler(json.dumps(room).encode(), context)
     except GrpcError as exc:

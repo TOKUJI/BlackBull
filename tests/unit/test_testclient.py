@@ -180,27 +180,28 @@ def test_websocket_text_round_trip() -> None:
             assert ws.receive_text() == 'hello'
 
 
-def test_ws_testclient_scope_matches_server_decoding() -> None:
-    """Sprint 68 — the WS test client must build the same scope the real
-    server would: percent-decoded ``path``, undecoded UTF-8 ``raw_path``,
-    query excluded from both."""
+def test_ws_testclient_conn_matches_server_decoding() -> None:
+    """Sprint 68 — the WS test client must build the same request fields the
+    real server would: percent-decoded ``path``, undecoded UTF-8 ``raw_path``,
+    query excluded from both. WebSocket is native (Sprint 80), so the session
+    threads a Connection — assert on ``conn.*``, not a scope dict."""
     session = WebSocketTestSession(app=None, path='/chat/caf%C3%A9?x=%41')
-    assert session.scope['path'] == '/chat/café'
-    assert session.scope['raw_path'] == b'/chat/caf%C3%A9'
-    assert session.scope['query_string'] == b'x=%41'
+    assert session._conn.path == '/chat/café'
+    assert session._conn.raw_path == b'/chat/caf%C3%A9'
+    assert session._conn.query_string == b'x=%41'
 
 
 def test_ws_testclient_plain_path_unchanged() -> None:
     session = WebSocketTestSession(app=None, path='/chat/room')
-    assert session.scope['path'] == '/chat/room'
-    assert session.scope['raw_path'] == b'/chat/room'
+    assert session._conn.path == '/chat/room'
+    assert session._conn.raw_path == b'/chat/room'
 
 
 def test_ws_testclient_non_ascii_query_string_utf8() -> None:
     """query_string is UTF-8 encoded, for parity with raw_path and the real
     server — a non-ASCII query must not raise (was latin-1, Sprint 68 follow-up)."""
     session = WebSocketTestSession(app=None, path='/search?q=café')
-    assert session.scope['query_string'] == 'q=café'.encode('utf-8')
+    assert session._conn.query_string == 'q=café'.encode('utf-8')
 
 
 def test_websocket_binary_round_trip() -> None:

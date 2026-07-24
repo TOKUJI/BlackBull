@@ -531,7 +531,7 @@ class OpenAPIExtension(Extension):
         title, version, description = self.title, self.version, self.description
         spec_path, docs_path = self.spec_path, self.docs_path
 
-        async def _openapi_spec(scope, receive, send):  # noqa: ARG001
+        async def _openapi_spec(conn, receive, send):  # noqa: ARG001
             spec = generate_spec(app, title=title, version=version,
                                  description=description)
             await send(JSONResponse(spec))
@@ -546,7 +546,7 @@ class OpenAPIExtension(Extension):
         if docs_path is not None:
             ui_title = f'{title} — Swagger UI'
 
-            async def _swagger_ui(scope, receive, send):  # noqa: ARG001
+            async def _swagger_ui(conn, receive, send):  # noqa: ARG001
                 html = swagger_ui_html(spec_path, title=ui_title)
                 await send(Response(html))
             _swagger_ui.__blackbull_openapi_internal__ = True

@@ -75,3 +75,65 @@ def test_migration_allowlist_entries_exist():
     """Guard against the allowlist rotting: every entry must name a real file."""
     for rel in _MIGRATION_ALLOWLIST:
         assert (_PKG_ROOT / rel).exists(), f'_MIGRATION_ALLOWLIST names a missing file: {rel}'
+
+
+def test_native_baseline_request_never_materializes_scope_dict():
+    """Sprint 80 exit invariant: a baseline request served by BlackBull's own
+    dispatch — a bare :class:`Connection` handed to ``app`` (native path), no
+    user ``app.use`` middleware, a handler taking neither ``scope`` nor
+    ``Request`` — must never build an ASGI scope dict at all. BlackBull is a
+    native-Connection framework: the dispatch pipeline threads ``conn`` end to
+    end and only the ``BB_FORCE_ASGI_SCOPE`` / external-ASGI boundary calls
+    ``as_scope``/``to_asgi_scope``/``_scope_contents``. If any
+    framework-internal hot-path code starts deriving a scope from the
+    Connection, one of those methods fires and this fails."""
+    import asyncio
+    from blackbull import BlackBull
+    from blackbull.headers import Headers
+    from blackbull.connection import Connection
+
+    app = BlackBull()
+
+    @app.route(path='/')
+    async def _hello():
+        return b'ok'
+
+    # Trip-wire: record any scope-derivation call on the Connection.
+    built: list[str] = []
+    spied = ('as_scope', 'to_asgi_scope', '_scope_contents')
+    originals = {name: getattr(Connection, name) for name in spied}
+
+    def _make_spy(name, orig):
+        def _spy(self, *a, **kw):
+            built.append(name)
+            return orig(self, *a, **kw)
+        return _spy
+
+    for name, orig in originals.items():
+        setattr(Connection, name, _make_spy(name, orig))
+
+    try:
+        conn = Connection(type='http', http_version='1.1', method='GET', scheme='http',
+                          path='/', raw_path=b'/', query_string=b'', root_path='',
+                          headers=Headers([(b'host', b'localhost')]),
+                          client=('127.0.0.1', 5), server=('localhost', 80), extensions={})
+        sent = []
+
+        async def receive():
+            return {'type': 'http.request', 'body': b'', 'more_body': False}
+
+        async def send(ev):
+            sent.append(ev)
+
+        # Native entry: hand the Connection straight to the app (as the actor does).
+        asyncio.run(app(conn, receive, send))
+    finally:
+        for name, orig in originals.items():
+            setattr(Connection, name, orig)
+
+    assert built == [], (
+        'Sprint 80 regression: a native baseline request derived an ASGI scope '
+        f'dict via {built!r}. Some framework-internal code built a scope instead '
+        'of reading the Connection on the hot path.')
+    start = [e for e in sent if e.get('type') == 'http.response.start']
+    assert start and start[0]['status'] == 200

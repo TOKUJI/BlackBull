@@ -3,6 +3,7 @@ import functools
 import gzip
 from collections.abc import Callable
 from ..asgi import ASGIEvent
+from ..connection import Connection
 from ..headers import Headers
 from ..asgi import ResponseStart, ResponseBody, parse_response_event
 from ..server.cap_log import log_cap_hit
@@ -130,7 +131,7 @@ class Compression:
         from blackbull.middleware import Compression
 
         @app.route(path='/', middlewares=[Compression()])
-        async def handler(scope, receive, send): ...
+        async def handler(conn, receive, send): ...
     """
 
     def __init__(self, min_size: int = _MIN_SIZE,
@@ -218,15 +219,15 @@ class Compression:
             await send(event)
         return vary_send
 
-    async def __call__(self, scope, receive, send, call_next):
-        if scope.get('type') != 'http':
-            await call_next(scope, receive, send)
+    async def __call__(self, conn, receive, send, call_next):
+        # Native Connection for HTTP and WebSocket; the guard is defensive
+        # against a raw ASGI scope dict (only reachable outside BlackBull's own
+        # dispatch).
+        if not isinstance(conn, Connection):
+            await call_next(conn, receive, send)
             return
 
-        headers = scope.get('headers', [])
-        if not isinstance(headers, Headers):
-            headers = Headers(headers)
-        accept = headers.get(b'accept-encoding', b'')
+        accept = conn.headers.get(b'accept-encoding', b'')
         selection = self._select_codec(accept)
         if selection is None:
             # No codec the client accepts (e.g. no/identity Accept-Encoding).
@@ -234,7 +235,7 @@ class Compression:
             # so a downstream shared cache needs Vary: Accept-Encoding — else it
             # stores this identity variant under the bare key and replays it to a
             # later client that does accept an encoding (bug 1.21f, Branch 1).
-            await call_next(scope, receive, self._vary_ensuring_send(send))
+            await call_next(conn, receive, self._vary_ensuring_send(send))
             return
 
         codec_name, compressor = selection
@@ -305,7 +306,7 @@ class Compression:
                 case _:
                     await send(parsed)
 
-        await call_next(scope, receive, intercepting_send)
+        await call_next(conn, receive, intercepting_send)
 
         if streaming:
             return

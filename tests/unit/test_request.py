@@ -1,6 +1,7 @@
 import pytest
 
-from blackbull.request import read_body, read_json, read_text, parse_cookies
+from blackbull.request import (read_body, read_json, read_text, parse_cookies,
+                               stream_body, ClientDisconnected)
 from blackbull.headers import Headers
 
 
@@ -172,6 +173,65 @@ async def test_read_body_skips_empty_intermediate_chunks():
         return next(it)
 
     assert await read_body(receive) == b'ab'
+
+
+# ---------------------------------------------------------------------------
+# stream_body
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_stream_body_yields_each_chunk_in_order():
+    received = [c async for c in stream_body(_receive_from(
+        {'body': b'one', 'more_body': True},
+        {'body': b'two', 'more_body': True},
+        {'body': b'three', 'more_body': False},
+    ))]
+    assert received == [b'one', b'two', b'three']
+
+
+@pytest.mark.asyncio
+async def test_stream_body_skips_empty_intermediate_chunks():
+    received = [c async for c in stream_body(_receive_from(
+        {'body': b'a', 'more_body': True},
+        {'body': b'', 'more_body': True},
+        {'body': b'b', 'more_body': False},
+    ))]
+    assert received == [b'a', b'b']
+
+
+@pytest.mark.asyncio
+async def test_stream_body_empty_body_yields_nothing():
+    received = [c async for c in stream_body(_receive_from(b''))]
+    assert received == []
+
+
+@pytest.mark.asyncio
+async def test_stream_body_never_materializes_whole_payload():
+    """The streaming contract: the sum equals the payload, but no single yield
+    is larger than one source chunk (the whole body is never joined)."""
+    total = 0
+    max_chunk = 0
+    async for chunk in stream_body(_receive_from(
+        {'body': b'x' * 4096, 'more_body': True},
+        {'body': b'y' * 4096, 'more_body': True},
+        {'body': b'z' * 4096, 'more_body': False},
+    )):
+        total += len(chunk)
+        max_chunk = max(max_chunk, len(chunk))
+    assert total == 3 * 4096
+    assert max_chunk == 4096
+
+
+@pytest.mark.asyncio
+async def test_stream_body_disconnect_mid_body_raises():
+    received = []
+    with pytest.raises(ClientDisconnected):
+        async for chunk in stream_body(_receive_from(
+            {'body': b'partial', 'more_body': True},
+            {'type': 'http.disconnect'},
+        )):
+            received.append(chunk)
+    assert received == [b'partial']  # chunks before the disconnect were delivered
 
 
 # ---------------------------------------------------------------------------
