@@ -4924,22 +4924,22 @@ automatically normalised — Response/JSONResponse objects are expanded into
 ASGI event dicts before reaching the middleware's inner <code>send</code> wrapper.
 The wrapper therefore only ever sees plain dict events and does not need
 <code>isinstance</code> guards.</p>
-<p>Applied to an async function (signature <code>(scope, receive, send, call_next)</code>)::</p>
+<p>Applied to an async function (signature <code>(conn, receive, send, call_next)</code>)::</p>
 <pre><code>@as_middleware
-async def timing_mw(scope, receive, send, call_next):
+async def timing_mw(conn, receive, send, call_next):
     async def timed_send(event):
         # event is always a dict here
         await send(event)
-    await call_next(scope, receive, timed_send)
+    await call_next(conn, receive, timed_send)
 </code></pre>
 <p>Applied to a class whose <code>__call__</code> is the middleware coroutine::</p>
 <pre><code>@as_middleware
 class Cache:
-    async def __call__(self, scope, receive, send, call_next):
+    async def __call__(self, conn, receive, send, call_next):
         async def cap_send(event):
             # event is always a dict here
             ...
-        await call_next(scope, receive, cap_send)
+        await call_next(conn, receive, cap_send)
 </code></pre>
 <p>Power users who need to handle raw <code>send</code> arguments (e.g. because their
 middleware is used in a context where no simplified handlers are registered)

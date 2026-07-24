@@ -2215,6 +2215,28 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#blackbull.event_aggregator.EventAggregator.has_request_completed_listeners" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        has_request_completed_listeners
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.event_aggregator.EventAggregator.has_request_disconnected_listeners" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        has_request_disconnected_listeners
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.event_aggregator.EventAggregator.has_websocket_message_listeners" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4978,6 +5000,28 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#blackbull.event_aggregator.EventAggregator.has_request_completed_listeners" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        has_request_completed_listeners
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.event_aggregator.EventAggregator.has_request_disconnected_listeners" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        has_request_disconnected_listeners
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.event_aggregator.EventAggregator.has_websocket_message_listeners" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5226,6 +5270,49 @@ It is a framework-internal component.</p>
 <div class="doc doc-object doc-function">
 
 
+<h4 id="blackbull.event_aggregator.EventAggregator.has_request_completed_listeners" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">has_request_completed_listeners</span><span class="p">()</span></code>
+
+<a href="#blackbull.event_aggregator.EventAggregator.has_request_completed_listeners" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Return True if any <code>request_completed</code> handler is registered.</p>
+<p>Read on the request hot path to decide whether the per-request
+AccessLogRecord (whose wire fields this event reports) must be built,
+and whether the disconnect-detecting receive wrapper (whose
+<code>mark_disconnected</code> this event reads to suppress itself on a dropped
+request) is observed.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.event_aggregator.EventAggregator.has_request_disconnected_listeners" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">has_request_disconnected_listeners</span><span class="p">()</span></code>
+
+<a href="#blackbull.event_aggregator.EventAggregator.has_request_disconnected_listeners" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Return True if any <code>request_disconnected</code> handler is registered.</p>
+<p>Read on the request hot path to decide whether the disconnect-detecting
+receive wrapper needs to be built at all.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
 <h4 id="blackbull.event_aggregator.EventAggregator.has_websocket_message_listeners" class="doc doc-heading">
             <code class="highlight language-python"><span class="n">has_websocket_message_listeners</span><span class="p">()</span></code>
 
@@ -5341,7 +5428,7 @@ not yet known at accept time) and the registered protocol name (e.g.
 
 
 <h4 id="blackbull.event_aggregator.EventAggregator.on_error" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">on_error</span><span class="p">(</span><span class="n">scope</span><span class="p">,</span> <span class="n">exception</span><span class="p">)</span></code>
+            <code class="highlight language-python"><span class="n">on_error</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">exception</span><span class="p">)</span></code>
 
   <span class="doc doc-labels">
       <small class="doc doc-label doc-label-async"><code>async</code></small>
@@ -5352,7 +5439,8 @@ not yet known at accept time) and the registered protocol name (e.g.
 
     <div class="doc doc-contents ">
 
-        <p>Fire Level B <code>error</code>.</p>
+        <p>Fire Level B <code>error</code> (<code>conn</code> is a Connection, or a scope dict on
+the compat lane).</p>
 
 
     </div>
@@ -5407,7 +5495,7 @@ not yet known at accept time) and the registered protocol name (e.g.
 
 
 <h4 id="blackbull.event_aggregator.EventAggregator.on_request_disconnected" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">on_request_disconnected</span><span class="p">(</span><span class="n">scope</span><span class="p">)</span></code>
+            <code class="highlight language-python"><span class="n">on_request_disconnected</span><span class="p">(</span><span class="n">conn</span><span class="p">)</span></code>
 
   <span class="doc doc-labels">
       <small class="doc doc-label doc-label-async"><code>async</code></small>
@@ -5419,6 +5507,9 @@ not yet known at accept time) and the registered protocol name (e.g.
     <div class="doc doc-contents ">
 
         <p>Fire Level B <code>request_disconnected</code>.</p>
+<p><em>conn</em> is the native :class:<code>~blackbull.connection.Connection</code> on the
+self-hosted path, or an ASGI scope dict only on the <code>BB_FORCE_ASGI_SCOPE</code>
+/ external compat lane — :func:<code>_request_fields</code> reads either.</p>
 
 
     </div>
@@ -5429,7 +5520,7 @@ not yet known at accept time) and the registered protocol name (e.g.
 
 
 <h4 id="blackbull.event_aggregator.EventAggregator.on_websocket_connected" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">on_websocket_connected</span><span class="p">(</span><span class="n">scope</span><span class="p">,</span> <span class="n">subprotocol</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
+            <code class="highlight language-python"><span class="n">on_websocket_connected</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">subprotocol</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
 
   <span class="doc doc-labels">
       <small class="doc doc-label doc-label-async"><code>async</code></small>
@@ -5440,7 +5531,7 @@ not yet known at accept time) and the registered protocol name (e.g.
 
     <div class="doc doc-contents ">
 
-        <p>Fire Level B <code>websocket_connected</code>.</p>
+        <p>Fire Level B <code>websocket_connected</code> (<code>conn</code> is a Connection).</p>
 
 
     </div>
@@ -5451,7 +5542,7 @@ not yet known at accept time) and the registered protocol name (e.g.
 
 
 <h4 id="blackbull.event_aggregator.EventAggregator.on_websocket_disconnected" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">on_websocket_disconnected</span><span class="p">(</span><span class="n">scope</span><span class="p">,</span> <span class="n">code</span><span class="o">=</span><span class="mi">1006</span><span class="p">)</span></code>
+            <code class="highlight language-python"><span class="n">on_websocket_disconnected</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">code</span><span class="o">=</span><span class="mi">1006</span><span class="p">)</span></code>
 
   <span class="doc doc-labels">
       <small class="doc doc-label doc-label-async"><code>async</code></small>
@@ -5462,7 +5553,7 @@ not yet known at accept time) and the registered protocol name (e.g.
 
     <div class="doc doc-contents ">
 
-        <p>Fire Level B <code>websocket_disconnected</code>.</p>
+        <p>Fire Level B <code>websocket_disconnected</code> (<code>conn</code> is a Connection).</p>
 
 
     </div>
@@ -5473,7 +5564,7 @@ not yet known at accept time) and the registered protocol name (e.g.
 
 
 <h4 id="blackbull.event_aggregator.EventAggregator.on_websocket_message" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">on_websocket_message</span><span class="p">(</span><span class="n">scope</span><span class="p">,</span> <span class="n">message</span><span class="p">)</span></code>
+            <code class="highlight language-python"><span class="n">on_websocket_message</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">message</span><span class="p">)</span></code>
 
   <span class="doc doc-labels">
       <small class="doc doc-label doc-label-async"><code>async</code></small>
@@ -5484,7 +5575,7 @@ not yet known at accept time) and the registered protocol name (e.g.
 
     <div class="doc doc-contents ">
 
-        <p>Fire Level B <code>websocket_message</code>.</p>
+        <p>Fire Level B <code>websocket_message</code> (<code>conn</code> is a Connection).</p>
 
 
     </div>

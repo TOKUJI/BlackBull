@@ -5003,7 +5003,7 @@
     <div class="doc doc-contents first">
 
         <p>HTTP/2 stream state and the priority tree (RFC 7540 §5).</p>
-<p>Each <code>Stream</code> node owns the ASGI <code>scope</code> for one in-flight request as
+<p>Each <code>Stream</code> node owns the dispatch target (native Connection, or ASGI scope on the compat lanes) for one in-flight request as
 well as its position in the dependency tree (parent + weight) used by the
 priority machinery.  <code>StreamState</code> enumerates the lifecycle states
 defined in RFC 7540 §5.1; <code>on_headers_received</code> / <code>on_data_received</code>
@@ -5046,7 +5046,7 @@ root of every priority tree.</p>
 
 
         <p>One node in the HTTP/2 stream-priority tree (RFC 7540 §5.1, §5.3).</p>
-<p>A <code>Stream</code> carries the ASGI <code>scope</code> for one in-flight request,
+<p>A <code>Stream</code> carries the request's dispatch target (Connection or ASGI scope),
 plus its position in the priority tree (parent + weight).</p>
 <p><code>identifier == 0</code> is the connection-level pseudo-stream
 (RFC 7540 §5.1.1) and acts as the root of the tree; SETTINGS, PING,

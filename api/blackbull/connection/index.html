@@ -2125,6 +2125,28 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.connection.Connection.path_params" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        path_params
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.connection.Connection.subprotocols" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        subprotocols
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.connection.Connection.as_scope" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2169,6 +2191,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.connection.Connection.stream" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        stream
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.connection.Connection.text" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2180,10 +2213,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#blackbull.connection.Connection.to_dispatch_scope" class="md-nav__link">
+  <a href="#blackbull.connection.Connection.to_asgi_scope" class="md-nav__link">
     <span class="md-ellipsis">
       
-        to_dispatch_scope
+        to_asgi_scope
       
     </span>
   </a>
@@ -2192,6 +2225,39 @@
         
       </ul>
     </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.connection.bind_receive_channel" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bind_receive_channel
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.connection.disconnected" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        disconnected
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.connection.mark_disconnected" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        mark_disconnected
+      
+    </span>
+  </a>
   
 </li>
         
@@ -4967,6 +5033,28 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.connection.Connection.path_params" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        path_params
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.connection.Connection.subprotocols" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        subprotocols
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.connection.Connection.as_scope" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5011,6 +5099,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.connection.Connection.stream" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        stream
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.connection.Connection.text" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5022,10 +5121,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#blackbull.connection.Connection.to_dispatch_scope" class="md-nav__link">
+  <a href="#blackbull.connection.Connection.to_asgi_scope" class="md-nav__link">
     <span class="md-ellipsis">
       
-        to_dispatch_scope
+        to_asgi_scope
       
     </span>
   </a>
@@ -5034,6 +5133,39 @@
         
       </ul>
     </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.connection.bind_receive_channel" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bind_receive_channel
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.connection.disconnected" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        disconnected
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.connection.mark_disconnected" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        mark_disconnected
+      
+    </span>
+  </a>
   
 </li>
         
@@ -5240,6 +5372,57 @@ middleware, and handlers. The ASGI <code>scope</code> dict is a <em>derived</em>
 
 </div>
 
+<div class="doc doc-object doc-attribute">
+
+
+
+<h4 id="blackbull.connection.Connection.path_params" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">path_params</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-property"><code>property</code></small>
+      <small class="doc doc-label doc-label-writable"><code>writable</code></small>
+  </span>
+
+<a href="#blackbull.connection.Connection.path_params" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Matched URL path params, set by the router (values are converter-
+coerced, hence <code>Any</code>). The backing dict is created lazily on first
+access so no-param routes allocate nothing.</p>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-attribute">
+
+
+
+<h4 id="blackbull.connection.Connection.subprotocols" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">subprotocols</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-property"><code>property</code></small>
+  </span>
+
+<a href="#blackbull.connection.Connection.subprotocols" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>The client-offered WebSocket subprotocols (ASGI websocket scope's
+<code>subprotocols</code>), parsed from the <code>Sec-WebSocket-Protocol</code> request
+header. Empty on HTTP requests and on a WS handshake that offered none.
+Derived — not stored — so it needs no ASGI round-trip and the header
+stays the single source of truth.</p>
+
+    </div>
+
+</div>
+
 
 
 
@@ -5281,7 +5464,9 @@ buffering middleware's writes reach the handler.</p>
 
         <p>Return the complete request body, draining <code>receive</code> at most once.</p>
 <p>Repeated calls (and :meth:<code>json</code> / :meth:<code>text</code>) return the cached
-bytes. A mid-body disconnect raises :class:<code>ClientDisconnected</code>.</p>
+bytes. A mid-body disconnect raises :class:<code>ClientDisconnected</code>. Raises
+:class:<code>RuntimeError</code> if :meth:<code>stream</code> already consumed the body — the
+channel is a single drain, so there is nothing left to buffer.</p>
 
 
     </div>
@@ -5337,6 +5522,41 @@ fall back to the field defaults.</p>
 <div class="doc doc-object doc-function">
 
 
+<h4 id="blackbull.connection.Connection.stream" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">stream</span><span class="p">()</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-async"><code>async</code></small>
+  </span>
+
+<a href="#blackbull.connection.Connection.stream" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Yield the request body one chunk at a time, draining <code>receive</code> once.</p>
+<p>The streaming counterpart to :meth:<code>body</code>.  Use it when the handler only
+needs to <em>process</em> the body incrementally — count/hash/forward a large
+upload — so the working set stays one chunk instead of the whole
+payload::</p>
+<pre><code>total = 0
+async for chunk in conn.stream():
+    total += len(chunk)
+</code></pre>
+<p>Mutually exclusive with :meth:<code>body</code>/:meth:<code>json</code>/:meth:<code>text</code>, which
+buffer: the body is a single-drain stream, so mixing the two on one
+request raises :class:<code>RuntimeError</code> rather than silently returning a
+partial or empty body.  A mid-body disconnect raises
+:class:<code>ClientDisconnected</code>.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
 <h4 id="blackbull.connection.Connection.text" class="doc doc-heading">
             <code class="highlight language-python"><span class="n">text</span><span class="p">(</span><span class="n">encoding</span><span class="o">=</span><span class="s1">&#39;utf-8&#39;</span><span class="p">)</span></code>
 
@@ -5359,10 +5579,10 @@ fall back to the field defaults.</p>
 <div class="doc doc-object doc-function">
 
 
-<h4 id="blackbull.connection.Connection.to_dispatch_scope" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">to_dispatch_scope</span><span class="p">(</span><span class="o">*</span><span class="p">,</span> <span class="n">force_asgi</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span></code>
+<h4 id="blackbull.connection.Connection.to_asgi_scope" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">to_asgi_scope</span><span class="p">(</span><span class="o">*</span><span class="p">,</span> <span class="n">force_asgi</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span></code>
 
-<a href="#blackbull.connection.Connection.to_dispatch_scope" class="headerlink" title="Permanent link">&para;</a></h4>
+<a href="#blackbull.connection.Connection.to_asgi_scope" class="headerlink" title="Permanent link">&para;</a></h4>
 
 
     <div class="doc doc-contents ">
@@ -5388,6 +5608,13 @@ they used to hand-roll the same five steps:</p>
 <p>Protocol-specific augmentation (the websocket-only <code>subprotocols</code> key)
 is layered on by the caller <em>after</em> this returns — it is not a
 :class:<code>Connection</code> field (proposal §2.1).</p>
+<p>Sprint 80 Tier-1: the default (<code>force_asgi=False</code>) native path builds
+the scope by <strong>direct attribute access</strong>, placing the rich <code>Headers</code>
+object straight in (no <code>list(headers)</code> that the old code computed via
+the registry and then immediately discarded), and skips the per-field
+function-call indirection of <code>as_scope()</code>. The <code>force_asgi</code> dual-path
+conformance lane (§4.3) keeps the full <code>as_scope</code> → <code>from_scope</code> →
+<code>as_scope</code> round-trip so the compat conversion is still exercised.</p>
 
 
     </div>
@@ -5406,8 +5633,79 @@ is layered on by the caller <em>after</em> this returns — it is not a
 <div class="doc doc-object doc-function">
 
 
+<h3 id="blackbull.connection.bind_receive_channel" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">bind_receive_channel</span><span class="p">(</span><span class="n">target</span><span class="p">,</span> <span class="n">receive</span><span class="p">)</span></code>
+
+<a href="#blackbull.connection.bind_receive_channel" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Bind the <strong>raw</strong> body-receive channel onto the request's Connection so
+lazy <code>conn.body()</code> / <code>request.body()</code> drain the right stream once.</p>
+<p>Called by the protocol actor with the <em>unwrapped</em> recipient — never with a
+disconnect-detecting wrapper. Storing the wrapper would form a per-request
+reference cycle: <code>conn._receive</code> → wrapper → (closure captures) <code>conn</code>.
+The refcount of a cyclic group never reaches zero when the request's local
+refs drop, so reclamation is deferred to the generational cyclic GC — whose
+periodic pauses were the v0.60.0 tail-latency regression (see
+<code>.claude/planning/research/v0600-regression-investigation.md</code> §6). The raw
+recipient does <strong>not</strong> reference <code>conn</code> (HTTP/1.1 keeps only the path
+string; HTTP/2 keeps none), so <code>conn</code> → recipient is an acyclic chain that
+refcounting frees the instant the request ends.</p>
+<p>Idempotent — binds only when unset, so the external-ASGI path (uvicorn /
+<code>httpx.ASGITransport</code>), where :meth:<code>Connection.from_scope</code> already bound
+the host's own receive channel, keeps that binding.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="blackbull.connection.disconnected" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">disconnected</span><span class="p">(</span><span class="n">target</span><span class="p">)</span></code>
+
+<a href="#blackbull.connection.disconnected" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>True if the client disconnected mid-request. Accepts either a native
+:class:<code>Connection</code> (the <code>app(conn, …)</code> path) or an ASGI <code>scope</code> dict
+(the <code>BB_FORCE_ASGI_SCOPE</code> / external-server path).</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="blackbull.connection.mark_disconnected" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">mark_disconnected</span><span class="p">(</span><span class="n">target</span><span class="p">)</span></code>
+
+<a href="#blackbull.connection.mark_disconnected" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Record a mid-request client disconnect on a :class:<code>Connection</code> or an
+ASGI <code>scope</code> dict (idempotent — caller guards on :func:<code>disconnected</code>).</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
 <h3 id="blackbull.connection.stashed_connection" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">stashed_connection</span><span class="p">(</span><span class="n">scope</span><span class="p">,</span> <span class="n">receive</span><span class="p">)</span></code>
+            <code class="highlight language-python"><span class="n">stashed_connection</span><span class="p">(</span><span class="n">target</span><span class="p">,</span> <span class="n">receive</span><span class="p">)</span></code>
 
 <a href="#blackbull.connection.stashed_connection" class="headerlink" title="Permanent link">&para;</a></h3>
 
@@ -5416,7 +5714,9 @@ is layered on by the caller <em>after</em> this returns — it is not a
 
         <p>Return the typed :class:<code>Connection</code> for this request, plus whether it
 was freshly built.</p>
-<p>The one <em>scope → Connection</em> accessor shared by the dispatcher
+<p><em>target</em> is the threaded dispatch object — a :class:<code>Connection</code> on the
+native path, or an ASGI scope dict on the external/compat lane.</p>
+<p>The one <em>ASGI-scope → Connection</em> accessor shared by the dispatcher
 (<code>app._connection_of</code>) and the router (<code>router._conn_of</code>), Sprint 79.
 BlackBull's own protocol actors stash the <code>Connection</code> they parsed on the
 scope envelope under :data:<code>CONNECTION_STASH_KEY</code>, so the self-hosted path

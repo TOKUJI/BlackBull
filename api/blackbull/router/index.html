@@ -5514,11 +5514,11 @@ registered with it need no migration.</p>
 <pre><code>errors = ErrorRouter()
 
 @errors[HTTPStatus.NOT_FOUND]
-async def handle_404(scope, receive, send):
+async def handle_404(conn, receive, send):
     ...
 
 @errors[ValueError]
-async def handle_value_error(scope, receive, send):
+async def handle_value_error(conn, receive, send):
     ...
 
 handler = errors[HTTPStatus.NOT_FOUND]   # → handle_404
@@ -6199,7 +6199,7 @@ logging.</p>
 
 
 <h3 id="blackbull.router.request_media_type" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">request_media_type</span><span class="p">(</span><span class="n">scope</span><span class="p">)</span></code>
+            <code class="highlight language-python"><span class="n">request_media_type</span><span class="p">(</span><span class="n">conn</span><span class="p">)</span></code>
 
 <a href="#blackbull.router.request_media_type" class="headerlink" title="Permanent link">&para;</a></h3>
 
@@ -6208,9 +6208,8 @@ logging.</p>
 
         <p>Return the request's media type (<code>Content-Type</code> sans parameters),
 lowercased; <code>''</code> when no Content-Type is present.</p>
-<p><code>scope['headers']</code> is a :class:<code>~blackbull.headers.Headers</code> inside
-<code>_dispatch</code> (normalised at the app entry point), so a plain <code>.get</code>
-suffices.</p>
+<p><code>conn.headers</code> is always a :class:<code>~blackbull.headers.Headers</code>, so a plain
+<code>.get</code> suffices.</p>
 
 
     </div>

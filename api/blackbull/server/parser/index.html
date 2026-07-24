@@ -4923,6 +4923,22 @@ until Phase 5 switches the consumers onto <code>conn</code> directly; the
 websocket-only <code>subprotocols</code> scope key is likewise attached there (it is
 not a :class:<code>Connection</code> field — see the proposal §2.1 field set), the
 same way :meth:<code>HTTP1Actor._handle_upgrade</code> augments the derived scope.</p>
+<p>Sprint 80 alloc hygiene (<code>proposals/connection-alloc-hygiene.md</code>,
+2026-07-24): builds the :class:<code>Connection</code> <strong>once</strong>, at the very end, from
+locals accumulated while walking the pseudo-headers — the same
+single-construction idiom :meth:<code>HTTP1Actor._parse</code> already uses (Phase 1).
+The previous version built a placeholder via a removed
+<code>_default_connection</code> helper (with a throwaway <code>Headers([])</code>, discarded
+~154 ns/req) and mutated it field by field. Every early-out below now
+returns <code>None</code> instead of a half-built <code>Connection</code> — including the
+(previously reachable but never-observed) host-validation-failure path,
+since <code>_request_headers_with_host</code> already marks <code>frame.malformed</code>
+before returning <code>None</code>, and every caller checks <code>frame.malformed</code>
+before reading this function's result. The contract is now uniformly
+<code>result is None ⟺ frame.malformed</code>. The plain-HTTP branch's final
+construction goes through <code>_build_h2_connection</code> (Phase 2 — an
+<code>object.__new__</code> lean builder), not the dataclass constructor; see that
+function's docstring.</p>
 <p>Also performs request-level pseudo-header presence checks (RFC 9113
 §8.3.1).  Field-level checks already happened in <code>parse_payload</code>.  On any
 known-bad input — <code>parse_payload</code> having flagged <code>frame.malformed</code>, or a

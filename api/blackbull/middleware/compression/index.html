@@ -4925,7 +4925,7 @@ falls back gracefully to gzip or no compression.</p>
 <pre><code>from blackbull.middleware import Compression
 
 @app.route(path='/', middlewares=[Compression()])
-async def handler(scope, receive, send): ...
+async def handler(conn, receive, send): ...
 </code></pre>
 
 

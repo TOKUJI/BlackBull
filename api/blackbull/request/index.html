@@ -3692,6 +3692,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.request.cookies_from_headers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        cookies_from_headers
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.request.parse_cookies" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3729,6 +3740,17 @@
     <span class="md-ellipsis">
       
         read_text
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.request.stream_body" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        stream_body
       
     </span>
   </a>
@@ -4883,6 +4905,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.request.cookies_from_headers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        cookies_from_headers
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.request.parse_cookies" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4920,6 +4953,17 @@
     <span class="md-ellipsis">
       
         read_text
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.request.stream_body" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        stream_body
       
     </span>
   </a>
@@ -4972,7 +5016,10 @@
 <li><code>read_body</code>: buffers all ASGI <code>http.request</code> chunks into a single <code>bytes</code> object.</li>
 <li><code>read_json</code>: buffers the body and parses it as JSON (<code>None</code> on empty/invalid).</li>
 <li><code>read_text</code>: buffers the body and decodes it as text.</li>
-<li><code>parse_cookies</code>: parses the <code>Cookie</code> request header into a <code>dict[str, str]</code>.</li>
+<li><code>cookies_from_headers</code>: parses the <code>Cookie</code> header(s) into a <code>dict[str, str]</code>
+  straight from a headers object — the native core (what <code>Connection.cookies</code> uses).</li>
+<li><code>parse_cookies</code>: the ASGI-scope-shaped wrapper of the above, for external
+  callers that hold a scope dict.</li>
 </ul>
 <p>The opt-in HTTP context object formerly named <code>Request</code> moved to
 :class:<code>blackbull.connection.Connection</code> (Sprint 79 Phase 5); <code>Request</code> is now
@@ -5057,22 +5104,47 @@ bytes had arrived before the disconnect.</p>
 <div class="doc doc-object doc-function">
 
 
+<h3 id="blackbull.request.cookies_from_headers" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">cookies_from_headers</span><span class="p">(</span><span class="n">headers</span><span class="p">)</span></code>
+
+<a href="#blackbull.request.cookies_from_headers" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Parse the <code>Cookie</code> header(s) into a dict, straight from a headers
+object/iterable — no ASGI scope dict involved.</p>
+<p>This is the native core: :meth:<code>Connection.cookies</code> calls it directly on
+<code>conn.headers</code>; :func:<code>parse_cookies</code> is the ASGI-scope-shaped wrapper kept
+for external callers that hold a scope dict. Accepts a
+:class:<code>blackbull.headers.Headers</code> instance (uses <code>getlist</code>) or a plain
+iterable of <code>(name, value)</code> bytes tuples (the ASGI 3.0 form).</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
 <h3 id="blackbull.request.parse_cookies" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">parse_cookies</span><span class="p">(</span><span class="n">scope</span><span class="p">)</span></code>
+            <code class="highlight language-python"><span class="n">parse_cookies</span><span class="p">(</span><span class="n">source</span><span class="p">)</span></code>
 
 <a href="#blackbull.request.parse_cookies" class="headerlink" title="Permanent link">&para;</a></h3>
 
 
     <div class="doc doc-contents ">
 
-        <p>Parse the <code>Cookie</code> request header from an ASGI scope into a dict.</p>
-<p>Works identically for HTTP/1.1, HTTP/2, and WebSocket scopes.
-HTTP/1.1 sends a single combined <code>Cookie</code> header; HTTP/2 may split it
-into multiple fields (RFC 7540 §8.1.2.5).  All <code>cookie</code> fields are
-collected and joined before parsing, so both wire formats produce the
-same result.</p>
+        <p>Parse the <code>Cookie</code> request header into a dict.</p>
+<p><em>source</em> is a mapping carrying a <code>'headers'</code> key — an ASGI scope dict, or
+the <code>{'headers': conn.headers}</code> wrapper <code>Connection.cookies</code> passes.
+Works identically for HTTP/1.1, HTTP/2, and WebSocket. HTTP/1.1 sends a
+single combined <code>Cookie</code> header; HTTP/2 may split it into multiple fields
+(RFC 7540 §8.1.2.5).  All <code>cookie</code> fields are collected and joined before
+parsing, so both wire formats produce the same result.</p>
 <p>Accepts either of the two header shapes that may appear on
-<code>scope['headers']</code>:</p>
+<code>source['headers']</code>:</p>
 <ul>
 <li>A plain list/iterable of <code>(name, value)</code> bytes tuples — the
   standard ASGI 3.0 form, used by external servers (uvicorn,
@@ -5173,6 +5245,39 @@ raising — a malformed body never crashes the handler.  Override
 <p>A mid-body client disconnect still propagates as
 :class:<code>ClientDisconnected</code>: a truncated upload must not be decoded and
 returned as if it were the complete text.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="blackbull.request.stream_body" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">stream_body</span><span class="p">(</span><span class="n">receive</span><span class="p">)</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-async"><code>async</code></small>
+  </span>
+
+<a href="#blackbull.request.stream_body" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Yield the request body one <code>http.request</code> chunk at a time.</p>
+<p>The streaming counterpart to :func:<code>read_body</code>: it never accumulates the
+whole payload, so a handler that only needs to <em>process</em> the body (count
+bytes, hash it, forward it, parse incrementally) holds one chunk at a time
+instead of the entire upload.  For a 20 MB upload this is the difference
+between a ~64 KiB and a ~20 MB working set — and, because <code>read_body</code>
+additionally <code>b''.join</code>s the chunk list, several times the throughput
+under concurrency (the join is a full-payload memcpy plus GC pressure).</p>
+<p>Empty chunks are skipped.  A mid-body <code>http.disconnect</code> raises
+:class:<code>ClientDisconnected</code> (with no <code>partial</code> — chunks already yielded
+are the caller's to keep), so a truncated upload is never silently treated
+as complete.</p>
 
 
     </div>

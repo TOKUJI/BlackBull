@@ -3876,6 +3876,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.server.access_log.AccessLogRecord.from_conn" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        from_conn
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.server.access_log.AccessLogRecord.mark" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3903,10 +3914,32 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.server.access_log.disconnect_events_observed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        disconnect_events_observed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.server.access_log.emit_access_log" class="md-nav__link">
     <span class="md-ellipsis">
       
         emit_access_log
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.access_log.request_record_needed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        request_record_needed
       
     </span>
   </a>
@@ -4925,6 +4958,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.server.access_log.AccessLogRecord.from_conn" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        from_conn
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.server.access_log.AccessLogRecord.mark" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4952,10 +4996,32 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.server.access_log.disconnect_events_observed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        disconnect_events_observed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.server.access_log.emit_access_log" class="md-nav__link">
     <span class="md-ellipsis">
       
         emit_access_log
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.access_log.request_record_needed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        request_record_needed
       
     </span>
   </a>
@@ -5113,6 +5179,30 @@ record waited in the logging queue.  Idempotent; returns <code>self</code>.</p>
 <div class="doc doc-object doc-function">
 
 
+<h4 id="blackbull.server.access_log.AccessLogRecord.from_conn" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">from_conn</span><span class="p">(</span><span class="n">conn</span><span class="p">)</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-classmethod"><code>classmethod</code></small>
+  </span>
+
+<a href="#blackbull.server.access_log.AccessLogRecord.from_conn" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Build directly from a :class:<code>~blackbull.connection.Connection</code>
+(Sprint 80 Tier-2) so the self-hosted actor never materializes the ASGI
+scope just to record the access line.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
 <h4 id="blackbull.server.access_log.AccessLogRecord.mark" class="doc doc-heading">
             <code class="highlight language-python"><span class="n">mark</span><span class="p">(</span><span class="n">name</span><span class="p">)</span></code>
 
@@ -5159,6 +5249,30 @@ tracing is disabled, so callers don't need to guard themselves.</p>
 <div class="doc doc-object doc-function">
 
 
+<h3 id="blackbull.server.access_log.disconnect_events_observed" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">disconnect_events_observed</span><span class="p">(</span><span class="n">aggregator</span><span class="p">)</span></code>
+
+<a href="#blackbull.server.access_log.disconnect_events_observed" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Whether the disconnect-detecting receive wrapper is observed.</p>
+<p>The wrapper (a per-request closure) exists to (a) emit <code>request_disconnected</code>
+and (b) <code>mark_disconnected</code> so <code>request_completed</code> can suppress itself on
+a dropped request. With neither listener present nothing observes either
+effect, so the actor dispatches the raw <code>receive</code> directly and saves the
+closure. Body-level disconnect detection (<code>conn.body()</code> →
+<code>ClientDisconnected</code>) is independent of this wrapper and unaffected.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
 <h3 id="blackbull.server.access_log.emit_access_log" class="doc doc-heading">
             <code class="highlight language-python"><span class="n">emit_access_log</span><span class="p">(</span><span class="n">record</span><span class="p">)</span></code>
 
@@ -5191,6 +5305,33 @@ attached their own handlers/filters to <code>blackbull.access</code> — those w
 bypassed by a direct enqueue, so we defer to the full path to keep the
 documented "extend the access log via a custom handler/filter" pattern
 working (see docs/guide/logging.md).</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="blackbull.server.access_log.request_record_needed" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">request_record_needed</span><span class="p">(</span><span class="n">aggregator</span><span class="p">)</span></code>
+
+<a href="#blackbull.server.access_log.request_record_needed" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Whether the per-request :class:<code>AccessLogRecord</code> will be consumed.</p>
+<p>The record (and the <code>conn.state['access_log']</code> write it forces, plus the
+<code>emit</code> at request end) exists only for three consumers: the access log
+(<code>blackbull.access</code> at INFO), phase tracing, and the <code>request_completed</code>
+event's wire fields. When none is active the record is dead weight on every
+request — a per-request allocation the v0.60.0 Connection graph makes more
+costly under concurrency (extra live objects for the cyclic GC to scan) —
+so the actor skips building it. Consumers already tolerate its absence: the
+sender guards <code>if self._log_record is not None</code> and <code>request_completed</code>
+reads <code>conn.state.get('access_log')</code> with <code>'-'</code>/<code>0</code> placeholders.</p>
 
 
     </div>
