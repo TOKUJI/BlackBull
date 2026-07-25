@@ -113,6 +113,8 @@ venv.bak/
 
 # private development notes (not for end users)
 CLAUDE_DEV.md
+# CLAUDE.md is a symlink to AGENTS.md — create locally: ln -s AGENTS.md CLAUDE.md
+CLAUDE.md
 .claude/design/
 .claude/planning/
 .claude/patterns/

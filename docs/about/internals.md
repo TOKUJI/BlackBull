@@ -248,6 +248,25 @@ respective actors.
 | `ConnectionActor` unhandled | Log + close connection | One connection's failure is bounded |
 | `ASGIServer` accept error | Backoff + retry | Server stays alive across transient errors |
 
+## Send-path invariant
+
+Protocol senders never choose between joining and vectored I/O
+themselves.  They always call `BaseSender._write_many(parts)`,
+and the internal size gate (`_VECTORED_JOIN_THRESHOLD`, 32 KiB)
+decides the path:
+
+- **Join path** (≤ 32 KiB total): concatenates parts into one
+  buffer and writes once.  Cheaper for small payloads — avoids
+  the memoryview setup, `sendmsg` syscall overhead, and
+  writer re-registration under backpressure that vectored I/O
+  imposes per call.
+- **Vectored path** (> 32 KiB): uses `transport.writelines`
+  with memoryviews.  Worth the overhead only for large payloads.
+
+Callers must never call `transport.writelines` directly with
+small parts.  The gate is the single decision point, and the
+invariant keeps performance predictable across payload sizes.
+
 ## The pieces around the actor core
 
 The actor hierarchy is the *control* side.  The *data* side is
