@@ -71,7 +71,7 @@ DURATION="${DURATION:-60}"
 # steady-state before the measured runs start.
 WARMUP="${WARMUP:-15}"
 
-STACKS_ALL="blackbull uvicorn hypercorn granian daphne nginx"
+STACKS_ALL="blackbull uvicorn hypercorn granian daphne nginx sanic"
 # Sprint 24 added Lane E (connection churn).  Defaulting it off in the
 # all-lanes set so existing AWS runs (and the cost envelope they assume)
 # don't grow without intent — opt in with LANES="A B-wrk B-oha C D E-wrk".
