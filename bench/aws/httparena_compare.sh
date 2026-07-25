@@ -87,8 +87,13 @@ export TOPO=single
 
 : "${PROFILES:?must be set explicitly, space-separated (e.g. 'baseline baseline-h2 echo-ws json json-comp json-tls limited-conn pipelined static static-h2 upload')}"
 FRAMEWORKS="${FRAMEWORKS:-blackbull fastapi}"
+# Supported frameworks: blackbull, fastapi, sanic
 KEEP_INSTANCE="${KEEP_INSTANCE:-0}"
 SKIP_VALIDATE="${SKIP_VALIDATE:-0}"
+# BB_UVLOOP: baked into the BlackBull image ENV. Default 0 (pure-Python event
+# loop) so the identity measurement is the default; pass BB_UVLOOP=1 to bench
+# the uvloop path.
+BB_UVLOOP="${BB_UVLOOP:-0}"
 
 # --- Web server tuning defaults -------------------------------------------
 # WEB_WORKERS: empty string means "let each framework decide at runtime"
@@ -131,6 +136,7 @@ echo "  WRK_CPUS:      ${WRK_CPUS:-<no limit>}"
 echo "  WRK_NOFILE:    $WRK_NOFILE"
 echo "  --- blackbull ---"
 echo "  LOCAL_BB_WHEEL: ${LOCAL_BB_WHEEL:-0}"
+echo "  BB_UVLOOP:      $BB_UVLOOP"
 echo "  BB_ACCESS_LOG:  ${BB_ACCESS_LOG:-0}"
 echo
 
@@ -431,11 +437,12 @@ WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1 \\
     PYTHONUNBUFFERED=1 \\
     PIP_NO_CACHE_DIR=1 \\
-    PIP_DISABLE_PIP_VERSION_CHECK=1
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \\
+    BB_UVLOOP=${BB_UVLOOP}
 
 COPY ${LOCAL_WHEEL_NAME} /tmp/
 # asyncpg + redis back the async-db / crud profiles (Postgres + Redis sidecars).
-RUN cd /tmp && pip install --no-cache-dir "/tmp/${LOCAL_WHEEL_NAME}[compression]" asyncpg redis
+RUN cd /tmp && pip install --no-cache-dir "/tmp/${LOCAL_WHEEL_NAME}[compression,speed]" asyncpg redis
 VOLUME /results
 
 COPY app.py launcher.py db.py grpc_bench.py /app/
@@ -453,9 +460,10 @@ WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1 \\
     PYTHONUNBUFFERED=1 \\
     PIP_NO_CACHE_DIR=1 \\
-    PIP_DISABLE_PIP_VERSION_CHECK=1
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \\
+    BB_UVLOOP=${BB_UVLOOP}
 
-RUN pip install --no-cache-dir 'blackbull[compression]==${BLACKBULL_VERSION}' asyncpg redis
+RUN pip install --no-cache-dir 'blackbull[compression,speed]==${BLACKBULL_VERSION}' asyncpg redis
 VOLUME /results
 
 COPY app.py launcher.py db.py grpc_bench.py /app/
@@ -478,6 +486,39 @@ ssh "${SSH_OPTS[@]}" "$SERVER_REMOTE" \
      && chmod +x HttpArena/frameworks/blackbull/build.sh'
 
 echo "    staged."
+
+# ---------------------------------------------------------------------------
+# Step 4b — stage bench/httparena/sanic/ as the `sanic` framework.
+# Same pattern as BlackBull: upload app.py, launcher.py, meta.json,
+# requirements.txt, Dockerfile, and build.sh.
+# Only stages if "sanic" is in $FRAMEWORKS.
+# ---------------------------------------------------------------------------
+if [[ " $FRAMEWORKS " == *" sanic "* ]]; then
+    echo ">>> staging sanic framework dir on the instance ..."
+    ssh "${SSH_OPTS[@]}" "$SERVER_REMOTE" 'mkdir -p HttpArena/frameworks/sanic'
+
+    _SANIC_RSYNC_FILES=(
+        "$REPO_ROOT/bench/httparena/sanic/app.py"
+        "$REPO_ROOT/bench/httparena/sanic/launcher.py"
+        "$REPO_ROOT/bench/httparena/sanic/meta.json"
+        "$REPO_ROOT/bench/httparena/sanic/requirements.txt"
+        "$REPO_ROOT/bench/httparena/sanic/Dockerfile"
+        "$REPO_ROOT/bench/httparena/sanic/build.sh"
+    )
+    rsync -e "ssh ${SSH_OPTS[*]}" -az --delete \
+        "${_SANIC_RSYNC_FILES[@]}" \
+        "$SERVER_REMOTE:HttpArena/frameworks/sanic/"
+
+    ssh "${SSH_OPTS[@]}" "$SERVER_REMOTE" \
+        'chmod +x HttpArena/frameworks/sanic/build.sh
+         echo "    build context:"; ls -1 HttpArena/frameworks/sanic/'
+
+    # Flip meta.json enabled=true on the remote copy.
+    ssh "${SSH_OPTS[@]}" "$SERVER_REMOTE" \
+        'sed -i "s/\"enabled\": false/\"enabled\": true/" HttpArena/frameworks/sanic/meta.json'
+
+    echo "    sanic staged."
+fi
 
 # ---------------------------------------------------------------------------
 # Step 5 — pre-build framework images BEFORE installing the docker shim.
