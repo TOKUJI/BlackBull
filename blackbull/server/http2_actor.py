@@ -20,7 +20,6 @@ from ..protocol.frame_types import (
 )
 from ..protocol.stream import Stream, StreamState
 from ..connection import Connection, bind_receive_channel
-from ..env import get_settings
 from ..headers import Headers
 from .parser import parse_headers
 from .cap_log import log_cap_hit
