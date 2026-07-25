@@ -1205,7 +1205,7 @@ class WebSocketRecipient(BaseRecipient):
             try:
                 await task
             except asyncio.CancelledError:
-                pass
+                pass  # Expected: the task was cancelled intentionally.
 
     async def __call__(self) -> dict:
         if not self._connect_sent:

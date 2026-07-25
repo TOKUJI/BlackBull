@@ -1143,7 +1143,7 @@ class HTTP1Actor(Actor):
                 # the cancellation; swallowing it here would convert a
                 # timeout into a normal close without the 408 synthesis.
                 raise
-            except BaseException:
+            except Exception:
                 return False
             finally:
                 if log_record is not None:

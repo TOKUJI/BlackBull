@@ -89,7 +89,7 @@ class WebSocketActor(Actor):
             # cancels rather than completing normally.  (Mirrors HTTP1Actor;
             # the finally below still runs the disconnect/close cleanup.)
             raise
-        except BaseException as exc:
+        except Exception as exc:
             await self._aggregator.on_error(self._conn, exc)
         finally:
             await self._aggregator.on_websocket_disconnected(
