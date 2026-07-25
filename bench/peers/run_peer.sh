@@ -42,7 +42,7 @@ BIND_HOST="${BIND_HOST:-127.0.0.1}"
 
 if [ -z "$stack" ]; then
     echo "Usage: $0 <stack> [port] [cert] [key]" >&2
-    echo "Bases: blackbull, uvicorn, hypercorn, granian, daphne, nginx" >&2
+    echo "Bases: blackbull, uvicorn, hypercorn, granian, daphne, nginx, sanic" >&2
     echo "Variants (Sprint 14): <base>-cleartext, <base>-nginx, uvicorn-h11" >&2
     echo "Variants (Sprint 16): blackbull-w<N> (N workers, e.g. blackbull-w4)" >&2
     exit 1
@@ -157,7 +157,7 @@ case "$base" in
                 BB_H2_CONNECTION_WINDOW_SIZE=65535
                 BB_H2_MAX_CONCURRENT_STREAMS=100
                 BB_ACCESS_LOG=0
-            blackbull bench.peers.asgi_app:app
+            blackbull bench.peers.native_app:app
                 --bind "${BIND_HOST}:${upstream_port}"
                 "${bb_tls_args[@]}"
         )
@@ -282,12 +282,30 @@ json.dump(cfg, open(sys.argv[2], 'w'))
         nginx -c "$conf" -t 2>&1 || exit 1
         exec nginx -c "$conf"
         ;;
+    sanic)
+        # Sanic's built-in server (HTTP/1.1 + WebSocket).  No HTTP/2, no
+        # cleartext/nginx variants — this is a native-stack comparison
+        # against BlackBull's own server.
+        # Sanic 25.x: TLS via ssl={'cert': ..., 'key': ...}
+        if [ "$variant" = "tls" ]; then
+            ssl_args=(--cert "$cert" --key "$key")
+        else
+            ssl_args=()
+        fi
+        LAUNCH_CMD=(
+            python3 bench/peers/sanic_app.py
+                --host "$BIND_HOST" --port "$upstream_port"
+                "${ssl_args[@]}"
+        )
+        finalize
+        ;;
     *)
         echo "Unknown base stack: $base (from input '$stack')" >&2
-        echo "Valid bases: blackbull, uvicorn, hypercorn, granian, daphne, nginx" >&2
+        echo "Valid bases: blackbull, uvicorn, hypercorn, granian, daphne, nginx, sanic" >&2
         echo "Variants (blackbull|uvicorn|granian only): -cleartext, -nginx" >&2
         echo "Variants (uvicorn only): -h11" >&2
         echo "Variants (blackbull only):  -w<N>  (e.g. blackbull-w4)" >&2
+        echo "Sanic runs its built-in server (HTTP/1.1 + WS); TLS via ssl={...}." >&2
         exit 1
         ;;
 esac
