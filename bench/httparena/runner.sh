@@ -82,17 +82,7 @@ BENCHMARK_PID=$!
 echo "[runner] benchmark_pid=${BENCHMARK_PID}" | tee -a "${RUN_LOG}"
 
 # ---------------------------------------
-# 3 monitor起動
-# ---------------------------------------
-~/src/monitor.sh "${FW}" "${PROF}" \
-    "${EVENT_PID}" \
-    "${BENCHMARK_PID}" &
-MONITOR_PID=$!
-
-echo "[runner] monitor_pid=${MONITOR_PID}" | tee -a "${RUN_LOG}"
-
-# ---------------------------------------
-# 4 benchmark完了待ち
+# 3 benchmark完了待ち
 # ---------------------------------------
 wait "${BENCHMARK_PID}"
 RC=$?
@@ -100,7 +90,7 @@ RC=$?
 echo "[runner] benchmark finished rc=${RC}" | tee -a "${RUN_LOG}"
 
 # ---------------------------------------
-# 5 即時回収フェーズ
+# 4 即時回収フェーズ
 # ---------------------------------------
 
 sudo docker ps -a --filter 'ancestor=wrk' --format '{{.ID}} {{.Image}}' \
@@ -119,24 +109,11 @@ for cid in ${CIDS}; do
 done
 
 # ---------------------------------------
-# 6 monitor停止（benchmark後に停止制御）
-# ---------------------------------------
-kill "${MONITOR_PID}" 2>/dev/null || true
-wait "${MONITOR_PID}" 2>/dev/null || true
-
-echo "[runner] monitor stopped" | tee -a "${RUN_LOG}"
-
-# ---------------------------------------
-# 7 docker events停止
+# 5 docker events停止
 # ---------------------------------------
 kill "${EVENT_PID}" 2>/dev/null || true
 
 echo "[runner] event stopped" | tee -a "${RUN_LOG}"
-
-# ---------------------------------------
-# 8 postprocess
-# ---------------------------------------
-~/src/postprocess.sh "${FW}" "${PROF}"
 
 echo "[runner] done rc=${RC}" | tee -a "${RUN_LOG}"
 
