@@ -4829,6 +4829,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#send-path-invariant" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Send-path invariant
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#the-pieces-around-the-actor-core" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5152,6 +5163,17 @@
     <span class="md-ellipsis">
       
         How exceptions propagate
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#send-path-invariant" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Send-path invariant
       
     </span>
   </a>
@@ -5510,6 +5532,23 @@ respective actors.</p>
 </tr>
 </tbody>
 </table>
+<h2 id="send-path-invariant">Send-path invariant<a class="headerlink" href="#send-path-invariant" title="Permanent link">&para;</a></h2>
+<p>Protocol senders never choose between joining and vectored I/O
+themselves.  They always call <code>BaseSender._write_many(parts)</code>,
+and the internal size gate (<code>_VECTORED_JOIN_THRESHOLD</code>, 32 KiB)
+decides the path:</p>
+<ul>
+<li><strong>Join path</strong> (≤ 32 KiB total): concatenates parts into one
+  buffer and writes once.  Cheaper for small payloads — avoids
+  the memoryview setup, <code>sendmsg</code> syscall overhead, and
+  writer re-registration under backpressure that vectored I/O
+  imposes per call.</li>
+<li><strong>Vectored path</strong> (&gt; 32 KiB): uses <code>transport.writelines</code>
+  with memoryviews.  Worth the overhead only for large payloads.</li>
+</ul>
+<p>Callers must never call <code>transport.writelines</code> directly with
+small parts.  The gate is the single decision point, and the
+invariant keeps performance predictable across payload sizes.</p>
 <h2 id="the-pieces-around-the-actor-core">The pieces around the actor core<a class="headerlink" href="#the-pieces-around-the-actor-core" title="Permanent link">&para;</a></h2>
 <p>The actor hierarchy is the <em>control</em> side.  The <em>data</em> side is
 the protocol stack:</p>
