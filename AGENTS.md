@@ -133,16 +133,17 @@ This file is the only doc auto-loaded every session. The docs below are **not**
 loaded automatically — open the relevant one when the trigger applies. Do not
 duplicate their content here; link, don't copy.
 
-Entries under `.claude/` and `bench/sprint-logs/` are **git-ignored** (available
-only to the project author and their AI agents).  Each entry lists a public
+Entries under `.claude/` are **git-ignored** (stored in a private companion
+repo; see `.claude/CLAUDE_DEV.md` for setup).  Each entry lists a public
 fallback where one exists.
 
 | When you are… | Read |
 |---|---|
-| Doing any framework change (workflow, testing, type rules) | `CLAUDE_DEV.md` [private] |
+| Doing any framework change (workflow, testing, type rules) | `.claude/CLAUDE_DEV.md` [private] |
 | Writing/adjusting tests | `.claude/patterns/testing.md` [private] / `.github/skills/create-test/SKILL.md` |
 | Running benchmarks or profiling | `.claude/patterns/benchmarking.md` [private] / `.github/skills/bench-compare/SKILL.md` |
-| Tracing a regression across sprints | `bench/sprint-logs/` [private] — per-sprint bottleneck-attribution logs.  `bench/CHARACTERIZATION.md` is the public summary; sprint-logs hold the raw diagnostic numbers |
+| Running peer server comparisons (FastAPI / Sanic / etc.) locally | `.github/skills/peer-compare/SKILL.md` |
+| Tracing a regression across sprints | `.claude/sprint-logs/` [private] — per-sprint bottleneck-attribution logs.  `bench/CHARACTERIZATION.md` is the public summary; sprint-logs hold the raw diagnostic numbers |
 | Cutting a release / sprint close | `.claude/patterns/release.md` [private] / `.github/skills/sprint-close/SKILL.md` |
 | Reasoning about actors / events | `.claude/design/actor-model.md` + `.claude/design/event-catalogue.md` [both private] |
 | Checking a known gotcha before acting | `.claude/patterns/cautions.md` [private] |
@@ -150,7 +151,7 @@ fallback where one exists.
 | Reading a point-in-time design | `.claude/planning/designs/` [private] |
 
 **Skills** (invocable, harness-surfaced; `.github/skills/` is public):
-`sprint-close`, `bench-compare`, `pre-release-docs`, `update-roadmap`,
+`sprint-close`, `bench-compare`, `peer-compare`, `pre-release-docs`, `update-roadmap`,
 `create-test`, `type-check`, `add-event`, `new-http2-frame`, `protocol-handler`,
 `httparena-bench`, `run-http11probe`.
 
