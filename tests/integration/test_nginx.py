@@ -4,12 +4,20 @@ from http import HTTPMethod
 import json
 from pathlib import Path
 import time
-import docker as _docker
 import httpx
 import pytest
 import pytest_asyncio
 from multiprocessing import Process
-from testcontainers.core.container import DockerContainer
+
+# --- Module-level skip when the Docker stack isn't available ----------------
+# The docker/testcontainers packages are optional extras; importing them at
+# module scope turns a missing extra into a collection error that breaks the
+# whole run rather than skipping this file.
+pytest.importorskip('docker')
+pytest.importorskip('testcontainers')
+
+import docker as _docker  # noqa: E402  (after importorskip)
+from testcontainers.core.container import DockerContainer  # noqa: E402
 
 # Test targets
 from blackbull import BlackBull
