@@ -8,7 +8,7 @@ Public API:
 """
 from functools import wraps
 
-from ..asgi import ASGISendCallable, ASGISendEvent
+from ..asgi import ASGISendCallable
 from ..response import Response
 
 

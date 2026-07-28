@@ -31,7 +31,7 @@ from .utils import Scheme, is_client_error, is_server_error
 from .router import Router, RouteInfo, ErrorRouter, MethodNotApplicable, PathNotRegistered, ConfigurationError, HTTPException, has_middleware_param
 from .request import ClientDisconnected
 from .connection import Connection, disconnected, CONNECTION_STASH_KEY
-from .asgi import ASGIReceiveCallable, ASGISendCallable, ASGISendEvent
+from .asgi import ASGIReceiveCallable, ASGISendCallable
 from .config import AppConfig
 logger = logging.getLogger(__name__)
 
