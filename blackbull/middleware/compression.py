@@ -5,7 +5,7 @@ from collections.abc import Callable
 from ..asgi import ASGIEvent
 from ..connection import Connection
 from ..headers import Headers
-from ..asgi import ASGISendEvent, ResponseStart, ResponseBody, parse_response_event
+from ..asgi import ResponseStart, ResponseBody, parse_response_event
 from ..server.cap_log import log_cap_hit
 from .utils import as_middleware
 
@@ -208,7 +208,9 @@ class Compression:
         (bug 1.21f, Branch 1).  Same predicate as the compress path's decision
         point: compressible Content-Type AND no pre-existing Content-Encoding.
         """
-        async def vary_send(event: ASGISendEvent) -> None:
+        # Unannotated on purpose: rebuilt per request (see _wrap_send in
+        # app.py).  ``event`` is an ASGISendEvent.
+        async def vary_send(event):
             parsed = parse_response_event(event)
             if isinstance(parsed, ResponseStart) and \
                     _is_compressible_content_type(parsed.headers) and \
@@ -245,7 +247,9 @@ class Compression:
         streaming = False
         skip_compression = False
 
-        async def intercepting_send(event: ASGISendEvent) -> None:
+        # Unannotated on purpose: rebuilt per request (see _wrap_send in
+        # app.py).  ``event`` is an ASGISendEvent.
+        async def intercepting_send(event):
             nonlocal streaming, skip_compression, start_forwarded
             # Fast path: once the start event has been forwarded under a
             # pass-through decision (already-encoded response, non-
