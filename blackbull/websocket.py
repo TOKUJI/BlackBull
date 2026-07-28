@@ -39,6 +39,7 @@ from .headers import Headers
 logger = logging.getLogger(__name__)
 
 __all__ = ['WebSocket', 'WebSocketDisconnect',
+           'connect_consumed', 'mark_connect_consumed',
            'handshake_accepted', 'mark_handshake_accepted',
            'handshake_closed', 'mark_handshake_closed']
 
@@ -72,6 +73,19 @@ _NO_STATUS = 1005
 # middleware is unit-tested against a bare ``{}`` connection, and the
 # ``BB_FORCE_ASGI_SCOPE`` boundary threads a scope dict.
 
+# Two *distinct* states, because middleware does both independently:
+#
+#   consumed  — the ``websocket.connect`` event has been taken off the receive
+#               channel, but nothing has been answered yet.  An auth
+#               middleware that pops connect so it can reject with a close
+#               code leaves the connection here (see
+#               examples/ChatServer/chatserver.py ``auth_mw``).
+#   accepted  — ``websocket.accept`` has been sent; the connection is live.
+#
+# Collapsing them would be a real bug, not a simplification: a handler that
+# adopted "accepted" from a merely-consumed connection would never send the
+# accept, and the client would hang on a handshake nobody completed.
+_CONSUMED_KEY = '_handshake_connect_consumed'
 _ACCEPTED_KEY = '_handshake_accepted'
 _CLOSED_KEY = '_handshake_closed'
 
@@ -92,6 +106,27 @@ def _ws_bag(conn, *, create: bool = False) -> dict | None:
     return bag
 
 
+def connect_consumed(conn) -> bool:
+    """True once the ``websocket.connect`` event has been read for *conn*."""
+    bag = _ws_bag(conn)
+    if bag is None:
+        return False
+    return bool(bag.get(_CONSUMED_KEY) or bag.get(_ACCEPTED_KEY))
+
+
+def mark_connect_consumed(conn) -> None:
+    """Record that ``websocket.connect`` has been taken off the channel.
+
+    For middleware that pops the connect event *without* answering it — an
+    auth layer that wants the option to reject with a close code, say.  A
+    handler-side :class:`WebSocket` then knows not to wait for a handshake
+    offer that is already gone, but still sends the accept itself.
+    """
+    bag = _ws_bag(conn, create=True)
+    if bag is not None:
+        bag[_CONSUMED_KEY] = True
+
+
 def handshake_accepted(conn) -> bool:
     """True once the WebSocket handshake has been accepted for *conn*."""
     bag = _ws_bag(conn)
@@ -99,10 +134,15 @@ def handshake_accepted(conn) -> bool:
 
 
 def mark_handshake_accepted(conn) -> None:
-    """Record that ``websocket.accept`` has been sent for *conn*."""
+    """Record that ``websocket.accept`` has been sent for *conn*.
+
+    Implies :func:`connect_consumed` — the offer must have been read before
+    it could be answered.
+    """
     bag = _ws_bag(conn, create=True)
     if bag is not None:
         bag[_ACCEPTED_KEY] = True
+        bag[_CONSUMED_KEY] = True
 
 
 def handshake_closed(conn) -> bool:
@@ -160,13 +200,15 @@ class WebSocket:
         self._conn = conn
         self._receive = receive
         self._send = send
-        # Middleware may have completed the handshake before the handler ran
-        # (blackbull.middleware.websocket does).  Adopt that state instead of
-        # waiting for a `websocket.connect` that has already been consumed.
-        already = handshake_accepted(conn)
-        self._connect_seen = already
-        self._accepted = already
-        self._accepted_elsewhere = already
+        # Middleware may have got here first.  Two independent facts to
+        # adopt: whether the connect event is already off the channel, and
+        # whether the handshake was actually accepted.  An auth middleware
+        # that pops connect to keep the option of rejecting sets only the
+        # first — this object must then still send the accept itself.
+        accepted = handshake_accepted(conn)
+        self._connect_seen = connect_consumed(conn)
+        self._accepted = accepted
+        self._accepted_elsewhere = accepted
         self._closed = False
         self._disconnected = False
         self._close_code: int | None = None
@@ -259,6 +301,7 @@ class WebSocket:
         if self._connect_seen:
             return
         self._connect_seen = True
+        mark_connect_consumed(self._conn)
         event = await self._receive()
         etype = event.get('type')
         if etype == ASGIEvent.WS_DISCONNECT:
@@ -273,12 +316,13 @@ class WebSocket:
             raise RuntimeError(
                 f'WebSocket handshake was already consumed: expected '
                 f'{ASGIEvent.WS_CONNECT!r} but the channel yielded '
-                f'{etype!r}.  Middleware that accepts on the handler\'s '
-                f'behalf must call '
-                f'blackbull.websocket.mark_handshake_accepted(conn) so the '
-                f'WebSocket object can adopt the completed handshake; '
-                f'without it the client\'s first message would be mistaken '
-                f'for the handshake.')
+                f'{etype!r}.  Middleware that takes the handshake off the '
+                f'receive channel must record it, or the client\'s first '
+                f'message is mistaken for the handshake: call '
+                f'blackbull.websocket.mark_handshake_accepted(conn) if it '
+                f'also sent websocket.accept, or mark_connect_consumed(conn) '
+                f'if it only read the connect event and left accepting to '
+                f'the handler.')
 
     async def accept(self,
                      subprotocol: str | None = None,

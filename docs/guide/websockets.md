@@ -162,13 +162,25 @@ itself, the middleware does not append a second close.
 With the object form the middleware is largely redundant: `await
 ws.accept()` is the one line it was removing.
 
-!!! note "Writing your own accepting middleware"
+!!! note "Writing middleware that touches the handshake"
 
-    Middleware that sends `websocket.accept` on the handler's behalf should
-    call `blackbull.websocket.mark_handshake_accepted(conn)` afterwards.
-    Without it, a downstream `WebSocket` object would read the client's
-    first *message* expecting the handshake; the object detects this and
-    raises rather than silently dropping the message.
+    Middleware that takes the `websocket.connect` event off the receive
+    channel must record it, or a downstream `WebSocket` object will read the
+    client's first *message* expecting the handshake.  Which call depends on
+    how far the middleware went:
+
+    | Middleware did | Call | The object then |
+    |---|---|---|
+    | Read connect **and** sent `websocket.accept` | `mark_handshake_accepted(conn)` | Starts accepted; a bare `accept()` is a no-op |
+    | Read connect only, left accepting to the handler | `mark_connect_consumed(conn)` | Doesn't wait for connect, still sends the accept |
+
+    Both live in `blackbull.websocket`.  The second is the shape an auth
+    middleware wants — pop connect so you keep the option of rejecting with
+    a close code, then delegate; `examples/ChatServer/chatserver.py`'s
+    `auth_mw` does exactly that.  The distinction is not cosmetic: marking a
+    merely-consumed connection as *accepted* would make the handler skip its
+    own `accept()`, leaving the client hanging on a handshake nobody
+    completed.  Omit both and the object raises, naming each.
 
 ## Typed WebSocket events
 

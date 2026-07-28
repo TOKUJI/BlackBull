@@ -266,3 +266,45 @@ def test_handler_close_suppresses_the_middlewares_trailing_close():
             with pytest.raises(WebSocketDisconnect) as excinfo:
                 ws.receive_text()
     assert excinfo.value.code == 1000
+
+
+def test_middleware_that_consumes_connect_without_accepting():
+    """The examples/ChatServer `auth_mw` shape.
+
+    An auth middleware pops `websocket.connect` so it keeps the option of
+    rejecting with a close code, then delegates *without* accepting. The
+    object must not wait for a connect that is gone, and must still send the
+    accept itself — adopting "accepted" here would leave the client hanging
+    on a handshake nobody completed.
+    """
+    from blackbull.websocket import mark_connect_consumed
+
+    app = BlackBull()
+
+    async def auth_mw(conn, receive, send, call_next):
+        event = await receive()                  # consume connect
+        if event.get('type') != 'websocket.connect':
+            return
+        mark_connect_consumed(conn)
+        if conn.headers.get(b'authorization') != b'letmein':
+            await send({'type': 'websocket.close', 'code': 4401})
+            return
+        await call_next(conn, receive, send)
+
+    @app.route(path='/guarded', scheme=Scheme.websocket, middlewares=[auth_mw])
+    async def guarded(ws: WebSocket):
+        await ws.accept()                        # the handler still accepts
+        async for message in ws:
+            await ws.send(message)
+
+    with TestClient(app) as client:
+        with client.websocket_connect(
+                '/guarded', headers=[('authorization', 'letmein')]) as ws:
+            ws.send_text('hello')
+            assert ws.receive_text() == 'hello'
+
+    with TestClient(app) as client:
+        with pytest.raises(WebSocketDisconnect) as excinfo:
+            with client.websocket_connect('/guarded'):
+                pass
+        assert excinfo.value.code == 4401

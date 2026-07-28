@@ -83,10 +83,16 @@ so the editable install's metadata catches up.
   has already gone out.  If the handler closes the connection itself, the
   middleware no longer appends a second close frame.
 
-  Middleware that accepts on a handler's behalf should call
-  `blackbull.websocket.mark_handshake_accepted(conn)`.  Without it the
-  object cannot know, and raises a `RuntimeError` naming the fix rather than
-  swallowing the message.
+  Middleware that takes the handshake off the receive channel records it
+  with one of two calls, which are **not** interchangeable:
+  `blackbull.websocket.mark_handshake_accepted(conn)` when it also sent
+  `websocket.accept`, or `mark_connect_consumed(conn)` when it only read the
+  connect event and left accepting to the handler (the shape an auth
+  middleware wants — `examples/ChatServer/chatserver.py`'s `auth_mw` does
+  this).  Marking a merely-consumed connection as accepted would make the
+  handler skip its own `accept()` and leave the client hanging on a
+  handshake nobody completed.  Omit both and the object raises a
+  `RuntimeError` naming each, rather than swallowing the message.
 
 ### Internal
 
