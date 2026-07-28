@@ -50,6 +50,32 @@ async def chat(scope, receive, send):
         await send({'type': 'websocket.send', 'text': event.get('text', '')})
 ```
 
+## Typed WebSocket events
+
+The events are plain ASGI dicts on the wire, but their shapes are declared
+as `TypedDict`s, so a type checker can narrow them on the `type` key:
+
+```python
+from blackbull import ASGIReceiveCallable, ASGISendCallable
+from blackbull.asgi import ASGIEvent
+
+async def chat(conn, receive: ASGIReceiveCallable, send: ASGISendCallable):
+    while True:
+        event = await receive()
+        if event['type'] == ASGIEvent.WS_DISCONNECT:
+            break
+        if event['type'] == ASGIEvent.WS_RECEIVE:
+            # Narrowed to WebSocketReceiveEvent: `text` and `bytes` are known
+            # keys here, and both are Optional — BlackBull always sets both,
+            # with one of them None.
+            await send({'type': 'websocket.send', 'text': event.get('text') or ''})
+```
+
+`FragmentAssembler` has already reassembled fragments by this point, so a
+`websocket.receive` event is always one complete message — which is why the
+declared type has `text: str | None` and `bytes: bytes | None` rather than
+modelling a partial frame.  The declarations change nothing at runtime.
+
 ## permessage-deflate (RFC 7692)
 
 `permessage-deflate` compression is negotiated automatically when

@@ -109,6 +109,23 @@ def test_declarations_are_clean(pyright_diagnostics):
     )
 
 
+def test_only_the_negative_file_has_diagnostics(pyright_diagnostics):
+    """`expect_errors.py` is the *only* file in scope allowed to error.
+
+    Named-file assertions alone would let a newly added `tests/typing/`
+    module sit in the gate's scope failing silently, since nothing would
+    look at it.
+    """
+    offenders = sorted(set(pyright_diagnostics) - {NEGATIVE.name})
+    assert not offenders, (
+        f'unexpected diagnostics outside {NEGATIVE.name}: '
+        + '; '.join(
+            f'{name} (line(s) {sorted(pyright_diagnostics[name])})'
+            for name in offenders
+        )
+    )
+
+
 def test_every_expected_error_is_reported(pyright_diagnostics):
     """Each `# EXPECT-ERROR` line must draw at least one diagnostic.
 

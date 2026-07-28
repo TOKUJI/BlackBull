@@ -31,6 +31,51 @@ so the editable install's metadata catches up.
 
 ## [Unreleased]
 
+### Added
+
+- **Typed `receive`/`send` message channel.**  The 19 ASGI 3.0 message
+  shapes are now declared as `TypedDict`s keyed by a `Literal` `type` tag,
+  with a union per direction — `ASGIReceiveEvent` (7 members) and
+  `ASGISendEvent` (12) — and a callable alias per direction,
+  `ASGIReceiveCallable` / `ASGISendCallable`.  All four are exported from
+  `blackbull`; the individual shapes (`HTTPResponseStartEvent`,
+  `WebSocketReceiveEvent`, …) are importable from `blackbull.asgi`.
+
+  Because the unions are discriminated on `type`, comparing or `match`-ing
+  against `event['type']` narrows to a single member, so a type checker can
+  reject a wrong key, a wrong value type, or an event sent in the wrong
+  direction.  It also catches the 0.43.2-class type-confusion bug — a
+  `Response` object reaching a middleware `send` wrapper, which fails at
+  runtime on `event['type']` — statically rather than at runtime.
+
+  **This is a declaration-only change.**  The dicts on the wire are
+  unchanged, nothing is validated or converted at runtime, and unannotated
+  application code keeps working exactly as before.
+
+- **Static type-check gate.**  `tests/architecture/test_typing_gate.py` runs
+  pyright over a deliberately narrow scope (`blackbull/asgi.py` +
+  `tests/typing/`) and asserts both directions: the narrowing proofs produce
+  zero diagnostics, and every `# EXPECT-ERROR` line in the negative proof
+  draws at least one.  Requires the `[testing]` extra (pyright is pinned
+  exactly); skips cleanly when pyright is unavailable.
+
+### Changed
+
+- Project description and overview no longer call BlackBull an "ASGI 3.0
+  framework".  Since Sprint 79/80 the internal representation is a native,
+  typed `Connection` threaded end to end, and ASGI is an interop boundary
+  (external ASGI hosts, `BB_FORCE_ASGI_SCOPE=1`) — the prose now says so.
+  ASGI-prefixed *type names* are kept deliberately: they mark the boundary
+  vocabulary, and the values they carry are spec-defined ASGI strings.
+
+### Fixed
+
+- `tests/integration/test_nginx.py` imported the optional `docker` /
+  `testcontainers` extras at module scope, so a missing extra became a
+  collection error that interrupted the whole pytest session instead of
+  skipping one file.  Now guarded with `pytest.importorskip`, matching the
+  sibling differential test.
+
 ## [0.61.0] — 2026-07-24
 
 ### Added
