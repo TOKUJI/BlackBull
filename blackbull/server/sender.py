@@ -14,7 +14,8 @@ from .cap_log import log_cap_hit
 from .constants import WSCloseCode
 from .ws_codec import WSOpcode, encode_frame, encode_frame_header
 import logging
-from ..asgi import ASGIEvent
+from ..asgi import (ASGIEvent, ASGISendEvent, HTTPDisconnectEvent,
+                    WebSocketAcceptEvent, WebSocketCloseEvent, WebSocketSendEvent)
 from ..headers import Headers, HeaderList
 
 logger = logging.getLogger(__name__)
@@ -296,6 +297,23 @@ class AsyncioWriter(AbstractWriter):
 # Sender hierarchy
 # ---------------------------------------------------------------------------
 
+# The senders accept strictly more than the public ASGI send contract, so
+# they get a private widening rather than polluting ``ASGISendEvent``:
+#
+# - ``http.disconnect`` arrives on the *send* side as an internal signal from
+#   the actor (an IncompleteReadError on the read side), not as an ASGI send
+#   event — see the ``HTTP_DISCONNECT`` case in ``HTTP1Sender.__call__``.
+# - raw ``bytes`` is the ``send(body, status, headers)`` convenience form.
+#
+# Keeping the public alias honestly ASGI-shaped is the point: an app or
+# middleware author holding an ``ASGISendCallable`` should not be told that
+# sending a disconnect or a bare byte string is legal, because through the
+# app-facing channel it is not.
+_SenderEvent = ASGISendEvent | HTTPDisconnectEvent
+_SenderBody = _SenderEvent | bytes
+_WSSenderEvent = WebSocketSendEvent | WebSocketCloseEvent | WebSocketAcceptEvent
+
+
 class BaseSender(ABC):
     """Abstract base for ASGI-event → wire-format senders.
 
@@ -323,7 +341,9 @@ class BaseSender(ABC):
         self._closed = False
 
     @abstractmethod
-    async def __call__(self, body, status: HTTPStatus = HTTPStatus.OK, headers: HeaderList = []): pass
+    async def __call__(self, body: _SenderBody,
+                       status: HTTPStatus = HTTPStatus.OK,
+                       headers: HeaderList = []): pass
 
     async def _guarded_write(self, write_fn, arg) -> None:
         """Run *write_fn(arg)* tolerant of peer-closed transports.
@@ -431,7 +451,7 @@ class HTTP1Sender(BaseSender):
         # (~7% of HTTP/1.1 CPU in the profile).  When None, no capture.
         self._log_record = None
 
-    async def __call__(self, body,
+    async def __call__(self, body: _SenderBody,
                        status: HTTPStatus = HTTPStatus.OK,
                        headers: HeaderList = ()):
         """Dispatch on *body* and write the resulting HTTP/1.1 bytes.
@@ -1002,7 +1022,9 @@ class HTTP2Sender(BaseSender):
         if delta > 0:
             self.wake_window()
 
-    async def __call__(self, body, status: HTTPStatus = HTTPStatus.OK, headers: HeaderList = []):
+    async def __call__(self, body: _SenderBody | FrameBase,
+                       status: HTTPStatus = HTTPStatus.OK,
+                       headers: HeaderList = []):
         # Control-plane: raw frame object (SETTINGS, PING ACK, WINDOW_UPDATE, …)
         if isinstance(body, FrameBase):
             logger.debug('HTTP2Sender raw frame: %r', body)
@@ -1180,7 +1202,9 @@ class WebSocketSender(BaseSender):
         # outbound frames are sent verbatim (RSV1=0).
         self._compressor = compressor
 
-    async def __call__(self, body, _status: HTTPStatus | None = None, _headers: HeaderList = []):
+    async def __call__(self, body: _WSSenderEvent,
+                       _status: HTTPStatus | None = None,
+                       _headers: HeaderList = []):
         if not isinstance(body, dict):
             raise TypeError(f'WebSocketSender expected a dict, got {type(body)!r}')
 

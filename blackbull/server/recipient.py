@@ -10,7 +10,7 @@ from .ws_codec import (
     read_payload,
 )
 from .constants import WSCloseCode
-from ..asgi import ASGIEvent
+from ..asgi import ASGIEvent, ASGIReceiveEvent
 from ..headers import Headers
 from ..connection import (
     CONNECTION_STASH_KEY, Connection, disconnected, mark_disconnected,
@@ -811,7 +811,7 @@ class HTTP2Recipient(BaseRecipient):
                         protocol='http2')
             return False
 
-    def put_event(self, event: dict) -> bool:
+    def put_event(self, event: ASGIReceiveEvent) -> bool:
         """Enqueue a pre-built event dict. Returns False if the queue is full."""
         try:
             self._ensure_queue().put_nowait((event, 0))

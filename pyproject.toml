@@ -5,7 +5,7 @@ name = "blackbull"
 # between sprints.  No 1.0 commitment until the framework's identity
 # and surface have stabilised across several sprints.  See CHANGELOG.md.
 version = "0.61.0"
-description = "Async ASGI 3.0 framework with a from-scratch HTTP/1.1 parser, HTTP/2 frame layer, and WebSocket codec. HPACK delegates to the hpack library."
+description = "Async native-Connection web framework with ASGI 3.0 interop, a from-scratch HTTP/1.1 parser, HTTP/2 frame layer, and WebSocket codec. HPACK delegates to the hpack library."
 readme = "README.md"
 requires-python = ">=3.11"
 
@@ -139,6 +139,12 @@ testing = [
     # schema in tests/unit/test_openapi.py — proves the spec we emit is
     # consumable by the wider OpenAPI ecosystem.
     "openapi-spec-validator",
+    # Drives the static type-check gate in
+    # tests/architecture/test_typing_gate.py.  Pinned exactly: the gate
+    # asserts on diagnostic *positions*, so a version bump that re-words or
+    # re-anchors a diagnostic must be an explicit, reviewed change rather
+    # than something CI picks up on its own.
+    "pyright==1.1.408",
 ]
 
 docs = [
@@ -180,6 +186,19 @@ benchmark = []  # k6 and h2load are installed via bench/install.sh (not pip pack
 profiling = [
     "py-spy",
 ]
+
+[tool.pyright]
+# Deliberately narrow scope.  Whole-repo pyright drowns in pre-existing
+# diagnostics that predate any typing work; this gate exists to prove one
+# thing — that the ASGI message unions narrow on ``event['type']`` — so it
+# covers only the declarations and the proofs that exercise them.
+# `tests/architecture/test_typing_gate.py` is the runner.
+include = ["blackbull/asgi.py", "tests/typing"]
+strict = ["tests/typing"]
+# The floor from `requires-python`, not the interpreter the venv happens to
+# run: the narrowing must hold for the oldest Python we support.
+pythonVersion = "3.11"
+typeCheckingMode = "standard"
 
 [tool.coverage.run]
 source = ["blackbull"]

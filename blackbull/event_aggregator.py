@@ -1,5 +1,6 @@
 from typing import Any
 
+from blackbull.asgi import WebSocketReceiveEvent
 from blackbull.event import Event, EventDispatcher
 
 
@@ -150,7 +151,7 @@ class EventAggregator:
         return self._ws_msg_cache_val
 
     async def on_websocket_message(
-        self, conn, message: dict[str, Any]
+        self, conn, message: WebSocketReceiveEvent
     ) -> None:
         """Fire Level B ``websocket_message`` (``conn`` is a Connection)."""
         await self._dispatcher.emit(

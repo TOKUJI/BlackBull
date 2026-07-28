@@ -31,11 +31,12 @@ from .utils import Scheme, is_client_error, is_server_error
 from .router import Router, RouteInfo, ErrorRouter, MethodNotApplicable, PathNotRegistered, ConfigurationError, HTTPException, has_middleware_param
 from .request import ClientDisconnected
 from .connection import Connection, disconnected, CONNECTION_STASH_KEY
+from .asgi import ASGIReceiveCallable, ASGISendCallable
 from .config import AppConfig
 logger = logging.getLogger(__name__)
 
 
-def _wrap_send(raw_send):
+def _wrap_send(raw_send: ASGISendCallable):
     """Adapt the handler-facing ``send`` to accept BlackBull convenience shapes.
 
     BlackBull lets a handler emit more than bare ASGI dicts: a ``Response``
@@ -61,6 +62,12 @@ def _wrap_send(raw_send):
     """
     from .response import Response as _Response, _emit_response
 
+    # Deliberately unannotated: this closure is rebuilt on every request, and
+    # a parameter annotation makes each rebuild construct an ``__annotate__``
+    # closure too — measured at ~+0.2 us/req (~3 % of in-process dispatch) on
+    # the micro-driver.  Annotations are only free on definitions evaluated
+    # once at import; the accepted shapes are documented above instead.
+    # Accepts: ASGISendEvent | Response | bytes | bytearray | memoryview.
     async def _send(event, status=HTTPStatus.OK, headers=[]):
         if isinstance(event, _Response):
             await event(None, None, raw_send)
@@ -77,7 +84,7 @@ def _wrap_send(raw_send):
     return _send
 
 
-def _inject_response_headers(raw_send, extra_headers):
+def _inject_response_headers(raw_send: ASGISendCallable, extra_headers):
     """Wrap *raw_send* to append *extra_headers* to the response.
 
     A route may declare headers (via the ``_bb_response_headers`` hook) that
@@ -88,6 +95,8 @@ def _inject_response_headers(raw_send, extra_headers):
     are appended to the ``http.response.start`` event; every other event
     passes straight through.
     """
+    # Unannotated for the same per-request-closure reason as _wrap_send;
+    # ``event`` is an ASGISendEvent.
     async def _send(event):
         if isinstance(event, dict) and event.get('type') == 'http.response.start':
             headers: list = list(event.get('headers') or [])
@@ -579,7 +588,8 @@ class BlackBull:
                 await send({'type': 'lifespan.shutdown.complete'})
                 return
 
-    async def _dispatch(self, conn, receive, send):
+    async def _dispatch(self, conn, receive: ASGIReceiveCallable | None,
+                        send: ASGISendCallable):
         """Route and dispatch a single non-lifespan request.
 
         Single emission point for the in-request Level B lifecycle events
@@ -636,7 +646,8 @@ class BlackBull:
             }))
         await self._dispatch_http(conn, receive, send, scheme)
 
-    async def _dispatch_http(self, conn, receive, send, scheme):
+    async def _dispatch_http(self, conn, receive: ASGIReceiveCallable | None,
+                             send: ASGISendCallable, scheme):
         """Route and run one HTTP request (the non-WebSocket half of _dispatch).
 
         Sprint 80: BlackBull is a native-Connection framework — the dispatch
@@ -794,7 +805,14 @@ class BlackBull:
             chain = functools.partial(mw, call_next=chain)
         self._chain = chain
 
-    async def __call__(self, conn, receive, send):
+    async def __call__(self, conn, receive: ASGIReceiveCallable | None,
+                       send: ASGISendCallable):
+        # ``receive`` is Optional because a handler that never reads a body
+        # never touches it: the router guards on ``conn._receive is None`` and
+        # dispatch completes normally.  A conforming ASGI host always passes a
+        # real callable, but the tolerance is load-bearing for direct drives,
+        # so the annotation states it rather than quietly outlawing it.
+        #
         # Native entry: BlackBull's own server calls ``app(conn, receive, send)``
         # with a typed :class:`Connection` — BlackBull is a native-Connection
         # framework, not an ASGI one, so the whole dispatch pipeline (middleware

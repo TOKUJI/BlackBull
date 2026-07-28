@@ -16,7 +16,7 @@ from urllib.parse import unquote
 from ..actor import Actor, Message
 from ..event import Event
 from ..event_aggregator import EventAggregator
-from ..asgi import ASGIEvent
+from ..asgi import ASGIEvent, ASGIReceiveCallable, ASGISendCallable
 from ..connection import (
     Connection, bind_receive_channel, disconnected, mark_disconnected)
 from ..headers import Headers
@@ -294,8 +294,8 @@ class RequestActor(Actor):
     def __init__(
         self,
         conn: dict | Connection,
-        receive: Callable[..., Awaitable[Any]],
-        send: Callable[..., Awaitable[Any]],
+        receive: ASGIReceiveCallable,
+        send: ASGISendCallable,
         app: Callable[..., Awaitable[None]],
         aggregator: EventAggregator,
     ) -> None:

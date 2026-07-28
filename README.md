@@ -1,6 +1,7 @@
 # BlackBull
 
-**BlackBull** is a Python ASGI 3.0 web framework for developers who
+**BlackBull** is a Python web framework — native typed `Connection`
+end to end, ASGI 3.0 kept as an interop boundary — for developers who
 want one `pip install`, zero C compilers, and the ability to
 programmatically test their HTTP clients and servers against
 deliberate protocol misbehaviour.
@@ -76,7 +77,10 @@ Hello, world!
   new safe, idempotent, cacheable method that carries a request body,
   with `Accept-Query` content negotiation.
 - **Typed throughout.** Your editor and `mypy` / `pyright` see
-  every parameter; PEP 561 typed distribution.
+  every parameter; PEP 561 typed distribution.  The `receive`/`send`
+  message channel is a discriminated union — all 19 ASGI event shapes
+  are `TypedDict`s keyed by a `Literal` tag, so `event['type']`
+  narrows and a malformed send is a type error, not a traceback.
 
 ## Install
 
@@ -131,8 +135,10 @@ async def search(q: str, page: int = 1, db=Depends(get_db)):
     return await db.find(q, page=page)   # /search?q=bull&page=2
 ```
 
-Drop down to full ASGI `(scope, receive, send)` whenever you need it
-— routes accept either shape.
+Drop down to the full `(conn, receive, send)` form whenever you need
+it — routes accept either shape.  `conn` is the native typed
+`Connection`; `receive`/`send` carry ASGI 3.0 events, declared as
+`TypedDict`s so a type checker narrows them on `event['type']`.
 
 ## TLS + HTTP/2
 

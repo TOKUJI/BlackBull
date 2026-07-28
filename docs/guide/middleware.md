@@ -30,6 +30,39 @@ Signature: `async def mw(scope, receive, send, call_next)`.
 Middleware functions keep the full `(scope, receive, send, call_next)`
 shape; the simplified handler form does **not** apply to them.
 
+## Typing the message channel
+
+The events crossing `receive` and `send` are ASGI 3.0 dicts — that wire
+contract is unchanged and always will be.  What BlackBull adds is a set of
+`TypedDict` *declarations* for them, so a type checker can tell which keys
+are legal on which event:
+
+```python
+from blackbull import ASGIReceiveCallable, ASGISendCallable, ASGISendEvent
+
+async def add_header_mw(conn, receive: ASGIReceiveCallable,
+                        send: ASGISendCallable, call_next):
+    async def wrapped(event: ASGISendEvent) -> None:
+        if event['type'] == 'http.response.start':
+            # Narrowed here: pyright/mypy know `status` and `headers` exist
+            # on this branch, and that `body` does not.
+            event = {**event,
+                     'headers': list(event.get('headers', [])) + [(b'x-custom', b'1')]}
+        await send(event)
+    await call_next(conn, receive, wrapped)
+```
+
+`ASGISendEvent` and `ASGIReceiveEvent` are unions discriminated on the
+`type` key, so comparing or `match`-ing against it narrows the union to a
+single member.  A checker then rejects the classic mistake this guards —
+passing a `Response` object where an event dict belongs, which fails at
+runtime on `event['type']`.
+
+The individual shapes (`HTTPResponseStartEvent`, `WebSocketReceiveEvent`, …)
+are importable from `blackbull.asgi` if you want to name one directly.
+Everything here is annotation-only: nothing is validated or converted at
+runtime, and unannotated middleware keeps working exactly as before.
+
 ## The `@as_middleware` decorator
 
 Route handlers can return `Response` / `JSONResponse` objects

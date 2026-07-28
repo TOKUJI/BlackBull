@@ -21,6 +21,8 @@ from hashlib import sha1
 from http import HTTPStatus
 from typing import Iterable
 
+from ..asgi import WebSocketDisconnectEvent, WebSocketReceiveEvent
+
 import logging
 from ..headers import Headers
 from ..server.recipient import (AbstractReader, AsyncioReader,
@@ -85,7 +87,7 @@ class WebSocketSession:
     async def ping(self, data: bytes = b'') -> None:
         await self._send_frame(data, WSOpcode.PING)
 
-    async def receive(self) -> dict:
+    async def receive(self) -> WebSocketReceiveEvent | WebSocketDisconnectEvent:
         """Read one ASGI ``websocket.*`` event from the connection.
 
         Returns one of:

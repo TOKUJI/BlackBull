@@ -36,6 +36,8 @@ import threading
 from typing import Any
 from urllib.parse import unquote
 
+from .asgi import ASGIReceiveEvent
+
 import httpx
 
 
@@ -372,7 +374,7 @@ class WebSocketTestSession:
                 pass  # best-effort disconnect notification during teardown.
         self._teardown()
 
-    def _send_client_event(self, event: dict) -> None:
+    def _send_client_event(self, event: ASGIReceiveEvent) -> None:
         self._loop_thread.run_coro(
             self._loop_thread.client_to_server.put(event),
             timeout=self.timeout,
