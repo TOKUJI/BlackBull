@@ -7,18 +7,106 @@ negotiated automatically.
 
 ## Registering a route
 
-WebSocket routes use `scheme=Scheme.websocket`.  The handler
-always receives the full `(scope, receive, send)` triplet —
-the simplified handler form does **not** apply:
+WebSocket routes use `scheme=Scheme.websocket`.  Declare a `WebSocket`
+parameter and the framework hands you the connection as an object:
 
 ```python
-from blackbull import BlackBull
+from blackbull import BlackBull, WebSocket
 from blackbull.utils import Scheme
 
 app = BlackBull()
 
 @app.route(path='/ws', scheme=Scheme.websocket)
-async def ws_handler(scope, receive, send):
+async def ws_handler(ws: WebSocket):
+    await ws.accept()
+    async for message in ws:
+        await ws.send(message)
+```
+
+That is the whole echo server.  The loop ends when the client goes away —
+no sentinel event to test for, and no `try`/`except` around it.
+
+`Sec-WebSocket-Version: 13` is validated automatically.
+
+### The API
+
+| Call | Does |
+|---|---|
+| `await ws.accept(subprotocol=None, headers=None)` | Completes the handshake.  Nothing may be sent before it. |
+| `await ws.close(code=1000, reason=None)` | Closes.  Called *before* `accept()`, it rejects the connection instead.  Idempotent, so `finally: await ws.close()` is safe. |
+| `await ws.send_text(str)` / `send_bytes(bytes)` | Sends one complete message. |
+| `await ws.send_json(obj, binary=False)` | Serialises and sends. |
+| `await ws.send(str \| bytes)` | Picks text or binary from the Python type. |
+| `await ws.receive()` | One message: `str` for text, `bytes` for binary.  Raises `WebSocketDisconnect` when the peer closes. |
+| `await ws.receive_text()` / `receive_bytes()` / `receive_json()` | Same, requiring a particular kind. |
+| `async for message in ws` | Iterates messages; **ends** at disconnect rather than raising. |
+
+Connection facts are on the object too — `ws.path`, `ws.headers`,
+`ws.path_params`, `ws.query_string`, `ws.client`, `ws.subprotocols` — and
+the full [`Connection`](requests-and-responses.md) is `ws.connection`.  State
+is readable via `ws.accepted`, `ws.client_disconnected`, and `ws.close_code`.
+
+The parameter is matched by annotation first, so `ws: WebSocket` works under
+any name.  Un-annotated, the names `ws` and `websocket` are recognised.  You
+can take the `Connection` alongside it:
+
+```python
+@app.route(path='/room/{name}', scheme=Scheme.websocket)
+async def room(ws: WebSocket, conn: Connection):
+    await ws.accept()
+    await ws.send_text(f'welcome to {conn.path_params["name"]}')
+```
+
+A parameter that is neither is a `TypeError` **at registration**, not on the
+first connection.  Path params, query params, and `Depends` are not injected
+into WebSocket handlers yet — read them from `ws.path_params` and
+`ws.query_string` for now.
+
+### Rejecting a connection
+
+Call `close()` without accepting.  The client's `connect()` fails outright,
+rather than seeing a connection open and immediately shut:
+
+```python
+@app.route(path='/private', scheme=Scheme.websocket)
+async def private(ws: WebSocket):
+    if not authorized(ws.headers):
+        await ws.close(4401, 'unauthorized')
+        return
+    await ws.accept()
+    ...
+```
+
+### Catching the close code
+
+`async for` swallows the disconnect because most loops do not care why the
+peer left.  When you do, call `receive()` directly:
+
+```python
+from blackbull import WebSocketDisconnect
+
+@app.route(path='/audited', scheme=Scheme.websocket)
+async def audited(ws: WebSocket):
+    await ws.accept()
+    try:
+        while True:
+            await ws.send_text(await ws.receive_text())
+    except WebSocketDisconnect as exc:
+        logger.info('closed: %s %s', exc.code, exc.reason)
+```
+
+## The raw event form
+
+The `(conn, receive, send)` triplet keeps working exactly as before, and is
+**not deprecated** — it stays supported for at least a year past the release
+that introduced the object (v0.63.0), and there is no plan to remove it.
+Reach for it when you need to see the events themselves: writing middleware,
+driving the handshake in an unusual order, or handling an event the object
+does not model.
+
+```python
+@app.route(path='/ws-raw', scheme=Scheme.websocket)
+async def ws_raw(conn, receive, send):
     await receive()                          # consume 'websocket.connect'
     await send({'type': 'websocket.accept'})
     while True:
@@ -29,7 +117,10 @@ async def ws_handler(scope, receive, send):
         await send({'type': 'websocket.send', 'text': text})
 ```
 
-`Sec-WebSocket-Version: 13` is validated automatically.
+The two forms are the same connection seen at different levels: the object's
+methods emit exactly these events, so framing, fragmentation, and close
+semantics are identical either way.  A route is classified once, at
+registration, by whether its signature contains both `receive` and `send`.
 
 ## The `websocket` middleware
 
@@ -50,7 +141,51 @@ async def chat(scope, receive, send):
         await send({'type': 'websocket.send', 'text': event.get('text', '')})
 ```
 
+It works with the `WebSocket` object too — it records the completed
+handshake on the connection, and the object adopts that state instead of
+waiting for a `websocket.connect` that has already been consumed:
+
+```python
+@app.route(path='/chat', scheme=Scheme.websocket, middlewares=[websocket])
+async def chat(ws: WebSocket):
+    async for message in ws:        # already accepted
+        await ws.send(message)
+```
+
+A bare `await ws.accept()` in that handler is tolerated as a no-op, so the
+same body works whether or not the middleware is on the route.  Asking for
+something the middleware cannot retroactively provide —
+`await ws.accept('chat')`, or extra headers — raises instead, since the 101
+has already gone out.  Likewise, if the handler closes the connection
+itself, the middleware does not append a second close.
+
+With the object form the middleware is largely redundant: `await
+ws.accept()` is the one line it was removing.
+
+!!! note "Writing middleware that touches the handshake"
+
+    Middleware that takes the `websocket.connect` event off the receive
+    channel must record it, or a downstream `WebSocket` object will read the
+    client's first *message* expecting the handshake.  Which call depends on
+    how far the middleware went:
+
+    | Middleware did | Call | The object then |
+    |---|---|---|
+    | Read connect **and** sent `websocket.accept` | `mark_handshake_accepted(conn)` | Starts accepted; a bare `accept()` is a no-op |
+    | Read connect only, left accepting to the handler | `mark_connect_consumed(conn)` | Doesn't wait for connect, still sends the accept |
+
+    Both live in `blackbull.websocket`.  The second is the shape an auth
+    middleware wants — pop connect so you keep the option of rejecting with
+    a close code, then delegate; `examples/ChatServer/chatserver.py`'s
+    `auth_mw` does exactly that.  The distinction is not cosmetic: marking a
+    merely-consumed connection as *accepted* would make the handler skip its
+    own `accept()`, leaving the client hanging on a handshake nobody
+    completed.  Omit both and the object raises, naming each.
+
 ## Typed WebSocket events
+
+These apply to the raw form; the `WebSocket` object hides the events
+entirely, and constructs them itself against these same declarations.
 
 The events are plain ASGI dicts on the wire, but their shapes are declared
 as `TypedDict`s, so a type checker can narrow them on the `type` key:
@@ -166,6 +301,9 @@ The app sees a single event:
 ```python
 {'type': 'websocket.receive', 'text': 'hello', 'bytes': None}
 ```
+
+— or, through the `WebSocket` object, one iteration of `async for` yielding
+the `str` `'hello'`.
 
 Control frames (ping, pong, close) may legally appear between
 data fragments; BlackBull handles them immediately (responding

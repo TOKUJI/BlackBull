@@ -197,8 +197,17 @@ def test_pyright_scope_is_narrow():
     """The gate's scope stays deliberately small.
 
     Whole-repo pyright would drown in pre-existing diagnostics; if someone
-    widens `include`, this gate stops meaning "the message channel narrows"
-    and starts meaning "the repo is pyright-clean", which it is not.
+    widens `include` to the package, this gate stops meaning "the message
+    channel narrows" and starts meaning "the repo is pyright-clean", which
+    it is not.
+
+    Growing by a *named module written against the declarations* is the
+    intended way for this list to change — `blackbull/websocket.py` (Sprint
+    82) constructs the WebSocket event shapes, so type-checking it proves the
+    declarations hold where they are actually used.  Each addition is a
+    reviewed decision, which is exactly what an assertion on the literal set
+    forces.  What must never appear is a directory that pulls in code the
+    declarations had nothing to do with.
     """
     import tomllib
 
@@ -206,4 +215,12 @@ def test_pyright_scope_is_narrow():
         config = tomllib.load(fh)
 
     include = config['tool']['pyright']['include']
-    assert set(include) == {'blackbull/asgi.py', 'tests/typing'}, include
+    assert set(include) == {
+        'blackbull/asgi.py',
+        'blackbull/websocket.py',
+        'tests/typing',
+    }, include
+    package_entries = [p for p in include if p.startswith('blackbull/')]
+    assert all(p.endswith('.py') for p in package_entries), (
+        'the gate covers named modules, not package directories: '
+        f'{package_entries}')

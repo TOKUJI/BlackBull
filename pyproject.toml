@@ -191,9 +191,15 @@ profiling = [
 # Deliberately narrow scope.  Whole-repo pyright drowns in pre-existing
 # diagnostics that predate any typing work; this gate exists to prove one
 # thing — that the ASGI message unions narrow on ``event['type']`` — so it
-# covers only the declarations and the proofs that exercise them.
+# covers only the declarations, the proofs that exercise them, and the
+# framework code written *against* them.
+# `blackbull/websocket.py` (Sprint 82) is the first such consumer: the
+# WebSocket object is where the declared shapes are actually constructed, so
+# a wrong key or a wrong value type there is caught rather than shipped.
+# Adding it already paid — it caught a `client` property declared narrower
+# than `Connection.client` really is.
 # `tests/architecture/test_typing_gate.py` is the runner.
-include = ["blackbull/asgi.py", "tests/typing"]
+include = ["blackbull/asgi.py", "blackbull/websocket.py", "tests/typing"]
 strict = ["tests/typing"]
 # The floor from `requires-python`, not the interpreter the venv happens to
 # run: the narrowing must hold for the oldest Python we support.

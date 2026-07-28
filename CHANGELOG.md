@@ -31,6 +31,84 @@ so the editable install's metadata catches up.
 
 ## [Unreleased]
 
+### Added
+
+- **High-level WebSocket API.**  WebSocket handlers can now take a typed
+  `WebSocket` object instead of raw event dicts:
+
+  ```python
+  @app.route(path='/ws', scheme=Scheme.websocket)
+  async def ws_handler(ws: WebSocket):
+      await ws.accept()
+      async for message in ws:
+          await ws.send(message)
+  ```
+
+  `accept()` / `close()` drive the handshake (calling `close()` *before*
+  `accept()` rejects the connection outright), `send_text` / `send_bytes` /
+  `send_json` / `send` write one complete message, and `receive` and its
+  typed variants return bare `str`/`bytes` rather than an event.  Iterating
+  with `async for` ends at disconnect instead of raising; call `receive()`
+  directly and catch `WebSocketDisconnect` when the close code matters.
+  Connection facts are on the object (`ws.path`, `ws.headers`,
+  `ws.path_params`, `ws.subprotocols`, `ws.client`, `ws.connection`), as is
+  handshake state (`ws.accepted`, `ws.client_disconnected`, `ws.close_code`).
+
+  The parameter is resolved by annotation first, so `ws: WebSocket` works
+  under any name; un-annotated, `ws` and `websocket` are recognised, and a
+  `Connection` can be injected alongside.  A parameter that is neither is a
+  `TypeError` **at registration**, not on the first connection.
+
+  **The raw `(conn, receive, send)` form is not deprecated** and keeps
+  working unchanged — supported for at least a year past this release, with
+  no removal planned.  A route is classified once, at registration, by
+  whether its signature contains both `receive` and `send`, so the raw form
+  reaches the router untouched and pays nothing.  The object's methods emit
+  exactly the events the raw form sends by hand: framing, fragmentation, and
+  close semantics are identical, and the object is built once per
+  *connection*, not per message.
+
+- **`blackbull.middleware.websocket` composes with the WebSocket object.**
+  The middleware accepts the handshake before the handler runs, which would
+  otherwise leave the object waiting for a `websocket.connect` that had
+  already been consumed — and reading the client's first *message* as the
+  handshake, silently dropping it.
+
+  Handshake state is now recorded on the connection by whichever layer
+  completes it, and read by the others.  A `WebSocket` built downstream of
+  the middleware starts already-accepted; a bare `await ws.accept()` in that
+  handler is a tolerated no-op, so the same handler body works with or
+  without the middleware on the route.  `await ws.accept('chat')` (or extra
+  headers) raises instead of silently dropping the request, since the 101
+  has already gone out.  If the handler closes the connection itself, the
+  middleware no longer appends a second close frame.
+
+  Middleware that takes the handshake off the receive channel records it
+  with one of two calls, which are **not** interchangeable:
+  `blackbull.websocket.mark_handshake_accepted(conn)` when it also sent
+  `websocket.accept`, or `mark_connect_consumed(conn)` when it only read the
+  connect event and left accepting to the handler (the shape an auth
+  middleware wants — `examples/ChatServer/chatserver.py`'s `auth_mw` does
+  this).  Marking a merely-consumed connection as accepted would make the
+  handler skip its own `accept()` and leave the client hanging on a
+  handshake nobody completed.  Omit both and the object raises a
+  `RuntimeError` naming each, rather than swallowing the message.
+
+### Internal
+
+- The pyright gate now also covers `blackbull/websocket.py`, the first
+  framework module written *against* the ASGI message declarations rather
+  than declaring them.  It caught a `client` property typed narrower than
+  `Connection.client` actually is.  The scope-pin test was updated
+  accordingly and now additionally refuses package *directories*, so the
+  gate can grow by reviewed module but not drift into whole-repo checking.
+
+- `blackbull.testing.WebSocketDisconnect` is re-exported from
+  `blackbull.websocket` rather than defined separately.  Both meant "the
+  other end closed", and two identically-named exception classes would mean
+  an `except` written against one silently missing the other.  Existing
+  `from blackbull.testing import WebSocketDisconnect` imports are unaffected.
+
 ## [0.62.0] — 2026-07-28
 
 ### Added
