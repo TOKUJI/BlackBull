@@ -68,6 +68,18 @@ so the editable install's metadata catches up.
   ASGI-prefixed *type names* are kept deliberately: they mark the boundary
   vocabulary, and the values they carry are spec-defined ASGI strings.
 
+### Internal
+
+- Per-request `send` wrapper closures are deliberately left unannotated.  A
+  nested `async def` created inside a per-request factory rebuilds an
+  `__annotate__` closure on every creation — measured at ~93 ns per closure
+  on CPython 3.14, or ~0.23 µs/req (~3.4 % of in-process dispatch) across the
+  three wrappers on the HTTP/1.1 path.  Annotations are only free on
+  definitions evaluated once at import.  The accepted event shapes are
+  documented in a comment at each site instead; `Compression`'s two wrappers
+  are now covered by the same rule, making them slightly cheaper than in
+  0.61.0.
+
 ### Fixed
 
 - `tests/integration/test_nginx.py` imported the optional `docker` /

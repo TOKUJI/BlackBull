@@ -1,19 +1,23 @@
 # BlackBull
 
-BlackBull is a Python web framework that speaks the
+BlackBull is a Python web framework with pure-Python implementations of
+HTTP/1.1, HTTP/2 (with ALPN), WebSocket, gRPC, and an MQTT 5 broker — all
+on one process, no reverse proxy or sidecar required.  No required C
+extensions outside the standard library, one `pip install`, one
+deployable.
+
+Internally it threads its own typed `Connection` end to end; the
 [**ASGI 3.0**](https://asgi.readthedocs.io/en/latest/specs/main.html)
-interface[^asgi], with pure-Python implementations of HTTP/1.1, HTTP/2
-(with ALPN), WebSocket, gRPC, and an MQTT 5 broker — all on one process,
-no reverse proxy or sidecar required.  No required C extensions outside
-the standard library, one `pip install`, one deployable.
+interface[^asgi] is kept as an interop boundary, so a BlackBull app also
+runs unchanged under uvicorn, Hypercorn, or `httpx.ASGITransport`.
 
 [^asgi]: ASGI is the async successor to WSGI — a single small interface
     that lets the same app object speak HTTP and WebSocket without
-    separate adapters.  Apps written against
-    [Starlette](https://www.starlette.io/),
-    [Quart](https://quart.palletsprojects.com/),
-    [FastAPI](https://fastapi.tiangolo.com/),
-    or any other ASGI 3.0 framework work on BlackBull.
+    separate adapters.  BlackBull apps are ASGI-callable, so any ASGI
+    host can serve them.  The reverse direction — hosting a *foreign*
+    ASGI app (Starlette, Quart, FastAPI) on BlackBull's own server —
+    needs `BB_FORCE_ASGI_SCOPE=1`, which makes the server emit a plain
+    ASGI `scope` dict instead of a `Connection`.
 
 !!! warning "Early Alpha"
     BlackBull is in **Early Alpha**.  The API may change between MINOR
