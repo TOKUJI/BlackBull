@@ -30,11 +30,57 @@ v1 scope fences (add on real demand, not speculatively):
 * no interface binding and no interception: duck typing and the event API
   (``@app.intercept``) already cover those.
 """
+import ast
 import inspect
+import textwrap
+import warnings
 from contextlib import asynccontextmanager
 from typing import Any, Callable
 
 __all__ = ['Depends']
+
+
+def _cleanup_after_bare_yield(provider) -> bool:
+    """True when *provider* has cleanup code that an exception would skip.
+
+    An async-generator provider is driven through
+    :func:`~contextlib.asynccontextmanager`, so an exception in the handler is
+    re-raised **at the yield**.  Statements written after a bare ``yield``
+    therefore never run on that path — the resource leaks precisely when
+    something went wrong.  A WebSocket makes this bite harder than HTTP,
+    because a socket ends by exception far more often than a request does.
+
+    The shape reported is narrow on purpose: a ``yield`` that is not inside a
+    ``try`` at all, with at least one statement after it.  A yield inside any
+    ``try`` is left alone — ``finally`` covers every path, and ``except`` /
+    ``else`` mean the author is deliberately telling success from failure (the
+    commit-or-rollback provider).  A yield with nothing after it has no
+    cleanup to lose, and an ``async with`` around the yield cleans up by
+    itself.  Returns False rather than guessing when the source is
+    unavailable (C-defined, REPL, ``exec``) — a diagnostic must never be the
+    reason registration fails.
+    """
+    try:
+        tree = ast.parse(textwrap.dedent(inspect.getsource(provider)))
+    except (OSError, TypeError, SyntaxError, IndentationError):
+        return False
+
+    fn = next((n for n in ast.walk(tree)
+               if isinstance(n, ast.AsyncFunctionDef)), None)
+    if fn is None:
+        return False
+
+    guarded = {id(y) for t in ast.walk(fn) if isinstance(t, ast.Try)
+               for stmt in t.body for y in ast.walk(stmt)
+               if isinstance(y, (ast.Yield, ast.YieldFrom))}
+
+    for y in (n for n in ast.walk(fn) if isinstance(n, (ast.Yield, ast.YieldFrom))):
+        if id(y) in guarded:
+            continue
+        end = getattr(y, 'end_lineno', y.lineno)
+        if any(isinstance(s, ast.stmt) and s.lineno > end for s in ast.walk(fn)):
+            return True
+    return False
 
 
 class Depends:
@@ -99,6 +145,24 @@ class Depends:
             # (a second yield raises RuntimeError), exceptions thrown into
             # the generator at the yield point, cleanup via AsyncExitStack.
             self._acm_factory = asynccontextmanager(provider)
+            # Registration-time signal, not a runtime one: cleanup after a bare
+            # yield is skipped on exactly the paths that need it most.  Warn
+            # rather than raise — the shape is legal, and a provider whose
+            # handler never fails works fine today.
+            if _cleanup_after_bare_yield(provider):
+                warnings.warn(
+                    f'Depends provider '
+                    f'{getattr(provider, "__name__", provider)!r} has cleanup '
+                    f'after a bare `yield`. It is skipped when the handler '
+                    f'raises — and on a WebSocket, when the peer disconnects. '
+                    f'Wrap the yield so cleanup always runs:\n'
+                    f'    try:\n'
+                    f'        yield value\n'
+                    f'    finally:\n'
+                    f'        ...  # release here\n'
+                    f'Use `except`/`else` instead if the cleanup needs to tell '
+                    f'success from failure (commit vs rollback).',
+                    UserWarning, stacklevel=2)
         elif inspect.iscoroutinefunction(provider):
             self._kind = self._ASYNC_FN
         elif inspect.isgeneratorfunction(provider):

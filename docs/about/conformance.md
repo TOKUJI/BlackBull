@@ -162,9 +162,20 @@ same input, each categorised:
 | `BOTH_REJECTED` | Both servers reject the malformed input | 4 |
 | `OK` | Both servers respond identically | 1 |
 
-The two `STATUS_DIFFER` entries are documented as known
-divergences from nginx behaviour in
-[`KNOWN_LIMITATIONS.md`](https://github.com/TOKUJI/BlackBull/blob/master/KNOWN_LIMITATIONS.md).
+Both `STATUS_DIFFER` entries are **RFC-defensible** — BlackBull is
+the stricter reader — and are kept in the corpus deliberately rather
+than treated as bugs:
+
+| Wire request | nginx | BlackBull | Why we're right |
+|---|---|---|---|
+| `GET&nbsp;&nbsp;http://localhost/x HTTP/1.0` (double-SP between method and target) | 200 | 400 | RFC 9112 §3 — request-line tokens are separated by exactly one SP.  nginx is lenient; we reject. |
+| `GET&nbsp;&nbsp;http://localhost/x HTTP/9.9` (double-SP **and** unknown version) | 505 | 400 | Validation-order choice: the request-line SP grammar (RFC 9112 §3) is checked before the HTTP version, so the malformed line is 400 first.  nginx reports the version problem (505) instead.  A *well-formed* request with an unsupported version does get 505 from BlackBull (RFC 9110 §15.6.6). |
+
+Both are also recorded in
+[`tests/conformance/http1/fuzz/user-corpus/diff_README.md`](https://github.com/TOKUJI/BlackBull/blob/master/tests/conformance/http1/fuzz/user-corpus/).
+We are not chasing nginx parity unless a real user need appears —
+being stricter than a permissive server is a conformance result, not
+a defect.
 
 #### Docker-free regression replay
 

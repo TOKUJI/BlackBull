@@ -18,6 +18,14 @@ Every item here is something the project knows about and has a
 position on.  Behaviours that aren't listed below — anything that
 would surprise us as well — belong on the GitHub issue tracker.
 
+**A limitation is not the same as a missing feature.** This file lists
+things that could *surprise* you: a default that is not what you would
+guess, a cost you would not predict, a surface that is narrower than its
+equivalent elsewhere.  Capabilities BlackBull simply doesn't aim to
+provide — HTTP/3, an ORM, a gRPC client — are not limitations; they are
+scope, and they live in [Deliberate non-goals](#deliberate-non-goals--not-limitations)
+at the end so they don't pad the list above.
+
 ---
 
 ## Protocol-level
@@ -49,20 +57,6 @@ with BlackBull on HTTP/1.1 behind it — eliminates this surface
 entirely because nginx does not forward RFC 8441 Extended
 CONNECT to the backend.
 
-### HTTP/2 multiplex overhead vs HTTP/1.1
-
-The HTTP/2 implementation is conformant (passes `h2spec`,
-RFC 9113) but each stream carries actor-machinery overhead — a
-per-stream queue, sender state, and priority-tree bookkeeping —
-that the HTTP/1.1 path doesn't pay.  Single-connection,
-high-multiplex workloads will spend more per request on HTTP/2
-than on HTTP/1.1; the difference grows with mux depth.
-
-If a workload needs maximum throughput on a single HTTP/2
-connection at high mux, a fronting HTTP/2 terminator (nginx,
-Envoy) is the usual production shape; BlackBull behind that
-terminator on HTTP/1.1 is the matched-cost path.
-
 ### h2c prior-knowledge shares the HTTP/1.1 port
 
 BlackBull's plaintext listener auto-detects the HTTP/2
@@ -81,135 +75,76 @@ the exact "with N slow connections, first new connection
 accepted within M ms" curve — only the qualitative claim "RFC
 9110 §15.5.9 compliant 408 plus the three timeouts work".
 
-### HTTP QUERY (RFC 10008) — two deliberate edges
+### HTTP QUERY (RFC 10008): `Accept-Query` is not synthesised on OPTIONS
 
 QUERY routing, `Accept-Query` content negotiation, and Content-Type
-enforcement ship (see the [routing guide](docs/guide/routing.md)), but
-two edges are out of scope for now:
-
-- **OpenAPI**: QUERY routes are excluded from the generated document.
-  OpenAPI 3.1 has no `query` operation; 3.2 adds one — revisit when the
-  emitter moves to 3.2.  QUERY is never faked as another operation.
-- **`Accept-Query` on OPTIONS**: RFC 10008 mentions emitting the header
-  on OPTIONS for a path; BlackBull only auto-handles OPTIONS when a route
-  is registered for it, so the header is emitted on the QUERY route's own
-  responses (including its 415), not synthesised on an unrouted OPTIONS.
-
-No browser implements QUERY; server + client + tests are the whole story.
+enforcement ship (see the [routing guide](docs/guide/routing.md)).  One
+edge: RFC 10008 mentions emitting `Accept-Query` on OPTIONS for a path,
+but BlackBull only auto-handles OPTIONS when a route is registered for
+it, so the header rides the QUERY route's own responses (including its
+415) rather than being synthesised on an unrouted OPTIONS.
 
 ---
 
-## RFC-defensible differential-corpus divergences
+## Runtime constraints
 
-The differential fuzz harness compares BlackBull's response to
-the same request against nginx.  Two captured divergences are
-**RFC-defensible**, kept in the corpus deliberately, and not
-treated as bugs:
+Behaviours that hold at run time regardless of how you deploy.  The
+operational how-to for each lives in the deployment guide; what's here is
+the part that can surprise you.
 
-| Wire request | nginx | BlackBull | Why we're right |
-|---|---|---|---|
-| `GET&nbsp;&nbsp;http://localhost/x HTTP/1.0` (double-SP between method and target) | 200 | 400 | RFC 9112 §3 — request-line tokens are separated by exactly one SP.  nginx is lenient; we reject. |
-| `GET&nbsp;&nbsp;http://localhost/x HTTP/9.9` (double-SP **and** unknown version) | 505 | 400 | Validation-order choice: the request-line SP grammar (RFC 9112 §3) is checked before the HTTP version, so the malformed line is 400 first.  nginx reports the version problem (505) instead.  A *well-formed* request with an unsupported version does get 505 from BlackBull (RFC 9110 §15.6.6). |
+### Raw protocol sockets are cleartext unless you ask for TLS
 
-Both are documented in
-[`tests/conformance/http1/fuzz/user-corpus/diff_README.md`](tests/conformance/http1/fuzz/user-corpus/).
-We're not chasing nginx parity here unless a real user need
-appears.
+A socket bound by `app.raw_handler()` or `app.register_protocol_handler()`
+carries **no TLS by default**.  Register the binding with `tls=True`
+(`app.raw_handler(name, port=…, tls=True)`, `MQTTExtension(port=8883,
+tls=True)`) to serve it through the same TLS machinery as the HTTPS
+listener — certificate from `certfile`/`keyfile` or `ssl_context`, with
+startup failing fast when `tls=True` has no certificate to use.  A
+TLS-terminating proxy in front of the raw socket is a fine alternative.
 
----
+A raw protocol also has a **single owner** — it is bound on worker 0 only,
+while HTTP scales across all workers.  See
+[Workers](docs/deployment/workers.md) for the mechanics, including why
+`--reload` forces `workers=1` when a protocol port is bound.
 
-## Deployment notes
+### MQTT broker state is in-memory and lost on restart
 
-### Raw protocol handlers: single-owner, HTTP still scales, cleartext by default
+The MQTT 5 broker (`blackbull.mqtt`, opt-in via `blackbull[mqtt]`) rides the
+raw-protocol bridge, so it inherits both constraints above.  Beyond those:
 
-When a non-ASGI protocol handler is registered via `app.raw_handler()` or
-`app.register_protocol_handler()`, BlackBull applies these constraints:
+**State does not survive a restart.**  Subscriptions, sessions, and retained
+messages live in the one serving process — not shared across workers, not
+persisted.  A restart, or a worker-0 respawn after a crash, clears all
+session and retained state.  Sessions are kept for the process lifetime
+rather than expired on a timer.
 
-**The protocol has a single owner, but HTTP scales (Sprint 55).** A stateful
-broker must have one owner (see the MQTT section below), so the master binds
-the protocol port once and hands it to **worker 0** only; the broker lives
-there.  HTTP is stateless, so `app.run(port=8000, workers=4)` alongside, say,
-`MQTTExtension(port=1883)` now runs HTTP on **all** workers while the broker
-runs on worker 0.  If worker 0 crashes the master respawns it and it
-re-inherits the still-open listening socket, so the broker resumes on the same
-port (clients reconnect; in-memory broker state is not preserved — see below).
-
-The one exception is **auto-reload** (`--reload`): it hands listening sockets
-across an `exec` via fd inheritance, and that handoff does not yet include the
-protocol listeners, so `reload=True` with a port-bound protocol still forces
-`workers=1`.  Run without reload to scale HTTP alongside the broker.
-
-`BB_SOCKET_REUSEPORT=1` makes each HTTP worker bind its own kernel accept
-queue (best load distribution); without it the workers share the master's
-listening socket.  The protocol port is always bound without `SO_REUSEPORT`
-— a single owner is the point.
-
-**Cleartext by default; TLS is opt-in per binding (Sprint 75)** — a raw
-protocol socket is bound without TLS unless the binding is registered with
-`tls=True` (`app.raw_handler(name, port=…, tls=True)` /
-`MQTTExtension(port=8883, tls=True)`), in which case it is served through
-the same TLS machinery as the HTTPS listener (certificate from
-`certfile`/`keyfile` or `ssl_context`; startup fails fast when `tls=True`
-has no certificate to use).  A TLS-terminating proxy in front of the raw
-socket remains a fine alternative.
-
-### MQTT broker: best-effort taps, in-memory single-process state
-
-The MQTT 5 broker (`blackbull.mqtt`, opt-in via `blackbull[mqtt]`) rides
-the raw-protocol bridge above, so it inherits its constraints —
-**single-owner** (the broker runs on worker 0; HTTP still scales across all
-workers) and **cleartext unless registered with `tls=True`**
-(`MQTTExtension(port=8883, tls=True)` for `mqtts://`).  Beyond those:
-
-**Why a single broker owner is a protocol requirement, not an
-implementation limitation.**  The MQTT 5.0 specification (OASIS Committee Specification
-02, March 2019) defines semantics that depend on broker-side state visible
-to every connection: publish-subscribe matching (§3.3), retained messages
-(§3.3.2.3), session state across Clean Start = 0 reconnects (§3.1.2.11),
-Will messages (§3.1.2.5), and QoS 1/2 delivery tracking (§4.3).  All five
-break if that state is split across worker processes with no shared store.
-This is consistent with industry practice: the Eclipse Mosquitto
-reference implementation ([mosquitto.org](https://mosquitto.org/)) is
-single-threaded by architecture for the same reason, and EMQX clusters via
-Erlang distributed message passing rather than local worker splitting.
-(Confirmed 2026-06-25 against the OASIS MQTT 5.0 specification and
-Mosquitto's project documentation.)
+**Nothing is queued for offline sessions.**  A disconnected client with a
+live session (`Session Expiry Interval > 0`) gets §4.4 replay of its
+*unacknowledged in-flight* QoS 1/2 messages on reconnect, but messages
+**newly published while it was offline are not queued** and will never reach
+it.  The same applies to a shared-subscription group with no connected
+member.  If you need store-and-forward for offline consumers, use a broker
+with persistent offline queues.
 
 **`on_message` taps are best-effort observability, not a delivery path.**
-In the default `tap_mode='actor'`, each PUBLISH is *offered* to a
-bounded-inbox `TapActor` that **drops the newest message on overflow**
-(with a running dropped-count logged) so a slow tap can never
-back-pressure routing.  Use a real MQTT subscription when you need
-guaranteed delivery; treat a tap as a probe.
+In the default `tap_mode='actor'` each PUBLISH is *offered* to a
+bounded-inbox `TapActor` that drops the newest message on overflow (with a
+running dropped-count logged), so a slow tap can never back-pressure
+routing.  Use a real MQTT subscription when you need guaranteed delivery.
 
-**Broker state is in-memory and per-process.**  Subscriptions, sessions,
-and retained messages live in the one serving process (worker 0) — not
-shared across workers (hence the single-owner model) and not persisted
-across a restart.  A restart, or a worker-0 respawn after a crash, clears
-all session and retained state.  Sessions are also kept for the process
-lifetime rather than expired on a timer.
-
-**New messages are not queued for offline sessions.**  A disconnected
-client with a live session (`Session Expiry Interval > 0`) gets §4.4
-replay of its *unacknowledged in-flight* QoS 1/2 messages on reconnect,
-but messages **newly published while it was offline are not queued** and
-will never be delivered to it.  The same applies to a shared-subscription
-group with no connected member (see
-[`docs/guide/mqtt.md`](docs/guide/mqtt.md)).  If you need store-and-forward
-for offline consumers, use a broker with persistent offline queues.
-
-### Multi-worker scaling tops out at physical core count
-
-Worker throughput scales roughly to the **physical core count**,
-not the logical (SMT-thread) count.  Multiplying workers past
-the physical-core ceiling does not multiply throughput.  Plan
-capacity against `nproc / 2` on typical SMT-enabled hardware.
+Why one owner is a *protocol* requirement rather than an implementation
+shortcut — and how Mosquitto and EMQX handle the same constraint — is
+explained in [the MQTT guide](docs/guide/mqtt.md).
 
 ---
 
-## What BlackBull doesn't do
+## Deliberately narrow surfaces
 
-### Static-file serving is not a production CDN
+These are implemented and supported, but fenced tighter than the
+equivalent surface in a larger framework.  Each fence is lifted on
+demonstrated demand, not speculatively.
+
+### Static-file serving: know the per-request cost
 
 [`blackbull/middleware/static.py`](blackbull/middleware/static.py)
 serves files three ways at runtime:
@@ -237,16 +172,8 @@ in to keep prior performance.
 
 `StaticFiles` itself emits no `ETag`; pair it with the `Cache`
 middleware for ETag / `If-None-Match` revalidation (`blackbull serve`
-does this for you).  What's still missing across all paths:
-byte-range-multipart and CDN edge-cache invalidation glue.  For
-anything user-visible, front a real static-file server (nginx,
-S3 + CloudFront).
-
-### No internal database layer
-
-BlackBull is a protocol-layer framework.  There is no built-in
-ORM, no connection pool, no migration tool.  Apps should bring
-their own (`asyncpg`, `databases`, `tortoise-orm`, etc.).
+does this for you).  Byte-range-multipart responses are not
+implemented across any of the three paths.
 
 ### `Depends` is deliberately minimal; query params are scalars only
 
@@ -262,30 +189,33 @@ optionally `| None`); repeated-key aggregation (`?tag=a&tag=b` →
 `conn.query_string` yourself for those.  Fences are lifted on
 demonstrated demand, not speculatively.
 
-### WebSocket handlers take no injected parameters
+### WebSocket injection: annotated query params only, one lifetime
 
-The v0.63.0 `WebSocket` object is resolved by signature, but only
-two things can appear there: the socket itself (`ws: WebSocket`, or
-the bare name `ws`/`websocket`) and optionally `conn: Connection`.
-Path params, query params, and `Depends` are **not** injected into a
-WebSocket handler the way they are into an HTTP one — read them off
-the connection (`ws.path_params['room']`, `ws.query_string`).
-Anything else in the signature is a registration-time `TypeError`
-rather than a surprise on the first connection.  Injection parity is
-the subject of queued follow-up work, not a permanent fence.
+Since v0.64.0 a WebSocket handler resolves path params, query
+params, and `Depends` from its signature, as an HTTP handler does.
+Two deliberate differences remain.
 
-### Optional `[speed-h1]` C parser stub not implemented
+A WebSocket **query param must carry its annotation** — on an HTTP
+route a bare name is taken as a `str` query param, but the reserved
+names (`ws`, `websocket`, `conn`, `connection`) make bare parameters
+ambiguous on a socket, so `async def chat(socket)` stays a
+registration-time `TypeError` instead of silently becoming a query
+param named `socket`.  There is also no body parameter: a WebSocket
+has no request body, so the HTTP `body`/dataclass forms have no
+analogue.
 
-`pyproject.toml` lists no `[speed-h1]` extra today.  The
-pure-Python HTTP/1 parser is fast enough that swapping in a C
-parser (e.g. `httptools`) isn't on the critical path; a future
-opt-in knob is sketched in the roadmap but not built.
+`Depends` resolves **once per connection**, with no way to ask for
+another lifetime.  That is correct for values and wrong for scarce
+resources — a socket pins its dependency for hours, so a pool of N
+serves N concurrent sockets.  Application-scope the pool
+(`@app.on_startup`) and borrow per use; see the dependency-lifetime
+section of `docs/guide/websockets.md`.  Per-message scope is not
+merely unimplemented but structurally unavailable: it needs a
+per-frame dispatch seam, and the handler owns its receive loop.  A
+declared-scope API is unlocked on demonstrated demand, not
+speculatively.
 
-### No HTTP/3 / QUIC
-
-Out of scope.  Revisit if a real user need appears.
-
-### gRPC: core handlers exchange raw bytes; reflection is v1alpha-only
+### gRPC: reflection is v1alpha-only
 
 All four gRPC RPC shapes — unary, server-streaming, client-streaming, and
 bidirectional — ship in `blackbull.grpc` (`app.enable_grpc`), with `gzip`
@@ -295,10 +225,9 @@ WebSocket, with `grpc-status` reported in trailers (a trailing HEADERS
 frame). Core handlers exchange raw message bytes by design; object-typed
 servicers, server reflection, `grpc.health.v1`, and rich error details ship
 in the optional [`blackbull-protobuf`](https://github.com/TOKUJI/blackbull-protobuf)
-package (`pip install 'blackbull[protobuf]'`). Remaining gaps: reflection
-serves `grpc.reflection.v1alpha` only (`v1` is a planned fast-follow;
-grpcurl and most clients fall back to v1alpha automatically), and BlackBull
-is server-side only — use `grpcio` for a client. See
+package (`pip install 'blackbull[protobuf]'`). The remaining gap: reflection
+serves `grpc.reflection.v1alpha` only — `v1` is a planned fast-follow, and
+grpcurl and most clients fall back to v1alpha automatically. See
 [`docs/guide/grpc.md`](https://github.com/TOKUJI/BlackBull/blob/master/docs/guide/grpc.md).
 
 ### CLI `--bind` host is advisory
@@ -312,6 +241,23 @@ field on `AppConfig`) is advisory — the socket layer binds dual-stack
 on **all** interfaces, so `--bind 127.0.0.1:8000` still listens on
 every interface.  Use a `unix:` bind, `fd://` socket activation, or a
 fronting proxy when interface filtering matters.
+
+---
+
+## Deliberate non-goals — not limitations
+
+Capabilities BlackBull does not aim to provide.  Nothing here is a gap
+in an implemented feature; each is a scope decision with a supported
+alternative.  Listed so the question is answered once — not as a
+shortfall list.
+
+| Not provided | Why, and what to use |
+|---|---|
+| **HTTP/3 / QUIC** | Out of scope at Early Alpha. Revisit if a real user need appears. Front with a proxy that terminates H3 if you need it at the edge. |
+| **ORM / connection pool / migrations** | BlackBull is a protocol-layer framework, like Flask and Starlette. Bring `asyncpg`, `databases`, `tortoise-orm`, or `SQLAlchemy`. |
+| **A gRPC client** | Server-side only, by design. Use `grpcio` for clients. |
+| **CDN edge-cache invalidation glue** | For user-visible static assets, front a real static server or CDN (nginx, S3 + CloudFront). The built-in `StaticFiles` targets app-adjacent assets. |
+| **A C-accelerated HTTP/1 parser (`[speed-h1]`)** | No such extra exists. A pure-Python parser on every path is the project's identity; accelerating it with a C dependency would trade that away. Performance work targets the Python path instead. |
 
 ---
 

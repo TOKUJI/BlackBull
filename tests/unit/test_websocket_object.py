@@ -466,10 +466,15 @@ def test_raw_triplet_handler_is_not_wrapped_at_all():
     assert not hasattr(_registered(app, '/raw2'), '__wrapped__')
 
 
+def _kinds(plan) -> tuple[str, ...]:
+    """Just the categories of a param plan, in signature order."""
+    return tuple(kind for _, kind, _ in plan)
+
+
 @pytest.mark.parametrize('name', ['ws', 'websocket'])
 def test_bare_parameter_names_get_the_object(name):
     plan = _websocket_param_plan(eval(f'lambda {name}: None'))
-    assert plan == ('ws',)
+    assert _kinds(plan) == ('ws',)
 
 
 def test_annotation_wins_over_name():
@@ -477,14 +482,14 @@ def test_annotation_wins_over_name():
     async def handler(ws: Connection):
         pass
 
-    assert _websocket_param_plan(handler) == ('conn',)
+    assert _kinds(_websocket_param_plan(handler)) == ('conn',)
 
 
 def test_object_and_connection_together():
     async def handler(ws: WebSocket, conn: Connection):
         pass
 
-    assert _websocket_param_plan(handler) == ('ws', 'conn')
+    assert _kinds(_websocket_param_plan(handler)) == ('ws', 'conn')
 
 
 def test_unresolvable_parameter_fails_at_registration_not_at_connect_time():
@@ -506,7 +511,7 @@ def test_an_explicit_annotation_works_under_any_parameter_name():
     async def handler(sock: WebSocket):
         pass
 
-    assert _websocket_param_plan(handler) == ('ws',)
+    assert _kinds(_websocket_param_plan(handler)) == ('ws',)
 
 
 def test_http_route_is_unaffected_by_the_websocket_branch():

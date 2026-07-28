@@ -221,6 +221,28 @@ same certificate the HTTPS listener uses — pass `certfile`/`keyfile` (or an
 `tls=True` is set with no certificate configured. Cleartext remains the
 default (`tls=False`), so existing deployments are unchanged.
 
+## Why the broker has a single owner
+
+The broker runs on **worker 0** only, while HTTP scales across all workers.
+That is a protocol requirement, not an implementation shortcut.
+
+MQTT 5.0 (OASIS Committee Specification 02, March 2019) defines semantics
+that depend on broker-side state visible to *every* connection:
+publish-subscribe matching (§3.3), retained messages (§3.3.2.3), session
+state across `Clean Start = 0` reconnects (§3.1.2.11), Will messages
+(§3.1.2.5), and QoS 1/2 delivery tracking (§4.3).  All five break if that
+state is split across worker processes with no shared store.
+
+This matches industry practice: the Eclipse Mosquitto reference
+implementation ([mosquitto.org](https://mosquitto.org/)) is single-threaded
+by architecture for the same reason, and EMQX clusters via Erlang
+distributed message passing rather than splitting state across local
+workers.  (Confirmed 2026-06-25 against the OASIS MQTT 5.0 specification and
+Mosquitto's project documentation.)
+
+See [Workers](../deployment/workers.md) for how the single-owner binding
+interacts with `--reload` and `SO_REUSEPORT`.
+
 ## Limitations
 
 - **No MQTT-over-WebSocket transport.** TLS is supported via

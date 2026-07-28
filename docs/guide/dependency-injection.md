@@ -30,7 +30,7 @@ unchanged, the same rule as every other simplified-model feature.
 
 | Provider | Injected value | Cleanup |
 |---|---|---|
-| `async def p(): yield v` | `v` (must yield exactly once) | code after `yield` / `finally`, after the response is sent |
+| `async def p(): yield v` | `v` (must yield exactly once) | after the response is sent — but see [Write cleanup in a `finally`](#write-cleanup-in-a-finally) |
 | `async def p(): return v` | `v` | none |
 | `def p(): return v` | `v` | none |
 
@@ -87,6 +87,57 @@ acquire/release accounting — ships as
   as usual (500, or the registered `error_handler`).
 - A provider exception before `yield` aborts the request the same way —
   the handler never runs.
+
+### Write cleanup in a `finally`
+
+Cleanup written *after* a bare `yield` runs on the success path only.  When
+the handler raises, the exception is re-raised **at the `yield`**, so the
+trailing statements never execute — the resource leaks exactly when
+something went wrong:
+
+```python
+async def get_conn():
+    conn = await pool.acquire()
+    yield conn
+    await pool.release(conn)     # ✗ skipped when the handler raises
+
+async def get_conn():
+    conn = await pool.acquire()
+    try:
+        yield conn
+    finally:
+        await pool.release(conn)  # ✓ runs on every path
+```
+
+BlackBull **warns at registration** when it sees the first shape, naming the
+provider.  The warning is deliberately narrow: a `yield` inside any `try` is
+left alone, and so is a provider with nothing after the `yield` (there is no
+cleanup to lose) or one whose `yield` sits inside an `async with` (the
+context manager already handles every path).
+
+This is ordinary [`@asynccontextmanager`](https://docs.python.org/3/library/contextlib.html#contextlib.asynccontextmanager)
+behaviour, and it is not a wart to be fixed: the exception has to reach the
+generator so a provider can tell success from failure.
+
+```python
+async def get_tx():
+    tx = await db.begin()
+    try:
+        yield tx
+    except Exception:
+        await tx.rollback()      # knows it failed
+        raise
+    else:
+        await tx.commit()        # knows it succeeded
+```
+
+If the framework instead swallowed the exception to force cleanup to run,
+this provider would **commit on error**.  That is why the weak form is
+warned about rather than silently repaired.
+
+On a WebSocket the same rule matters more, because a socket ends by
+exception far more often than a request does — see
+[dependency lifetime](websockets.md#dependency-lifetime-read-this-before-injecting-a-database-handle).
 
 ## Zero cost when unused
 

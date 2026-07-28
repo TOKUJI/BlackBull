@@ -67,12 +67,18 @@ def test_example_object_json_round_trips(websocket_object_app):
             assert ws.receive_json() == {'seen': 1, 'echo': {'a': 1}}
 
 
-def test_example_object_reads_path_params_off_the_connection(websocket_object_app):
+def test_example_object_injects_path_and_query_params(websocket_object_app):
     with TestClient(websocket_object_app) as client:
         with client.websocket_connect('/rooms/lobby') as ws:
-            assert ws.receive_text() == 'welcome to lobby'
+            assert ws.receive_text() == 'welcome to lobby (from 0)'
             ws.send_text('hi')
             assert ws.receive_text() == '[lobby] hi'
+
+
+def test_example_object_query_param_overrides_its_default(websocket_object_app):
+    with TestClient(websocket_object_app) as client:
+        with client.websocket_connect('/rooms/lobby?since=7') as ws:
+            assert ws.receive_text() == 'welcome to lobby (from 7)'
 
 
 def test_example_object_rejects_without_credentials(websocket_object_app):

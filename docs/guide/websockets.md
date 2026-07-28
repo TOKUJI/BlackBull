@@ -57,10 +57,92 @@ async def room(ws: WebSocket, conn: Connection):
     await ws.send_text(f'welcome to {conn.path_params["name"]}')
 ```
 
-A parameter that is neither is a `TypeError` **at registration**, not on the
-first connection.  Path params, query params, and `Depends` are not injected
-into WebSocket handlers yet — read them from `ws.path_params` and
-`ws.query_string` for now.
+A parameter that is none of the recognised kinds is a `TypeError` **at
+registration**, not on the first connection.
+
+### Injected parameters
+
+A WebSocket handler declares what it needs the same way an HTTP handler does
+— path params, query params, and `Depends` all resolve from the signature:
+
+```python
+@app.route(path='/rooms/{room}', scheme=Scheme.websocket)
+async def chat(ws: WebSocket, room: str, since: int = 0,
+               db=Depends(get_db)):
+    await ws.accept()
+    await ws.send_text(f'{room} from {since}')
+```
+
+| Declared | Resolves to |
+|---|---|
+| Name matches a `{param}` in the path | `ws.path_params[name]`, coerced to the annotation if given |
+| Any other annotated `str`/`int`/`float`/`bool` (optionally `\| None`) | The query param of that name |
+| `Depends(provider)` default | The provider's value, once per connection |
+
+Two differences from the HTTP form are worth knowing:
+
+**A query param must carry its annotation.** On an HTTP route a bare name is
+taken as a `str` query param; on a WebSocket it is a `TypeError`. The reserved
+names make bare parameters ambiguous — `async def chat(socket)` almost
+certainly means the socket, not a query param called `socket` — so the
+annotation is required and a typo fails at registration instead of rejecting
+every connection at runtime.
+
+**There is no body parameter.** A WebSocket has no request body, so the HTTP
+`body` and dataclass-body forms have no WebSocket equivalent.
+
+When a declared parameter cannot be bound — a required query param missing, a
+value that will not coerce — the handshake is **refused with close code 1008**
+(policy violation) and the handler never runs. The HTTP path answers the same
+failure with `400`; a WebSocket has no response to put a status on.
+
+#### Dependency lifetime — read this before injecting a database handle
+
+A `Depends` on a WebSocket is resolved **once per connection** and released
+when the handler exits. That is the correct scope for values — an
+authenticated user, a parsed token, per-connection config — and the **wrong**
+scope for scarce resources:
+
+!!! warning "A socket holds its dependency for hours, not milliseconds"
+
+    An HTTP request holds a pooled connection for the duration of the
+    response.  A WebSocket holds it for the life of the socket.  A pool of 20
+    therefore serves 20 *concurrent sockets*, and the 21st client blocks
+    until someone disconnects.  Worse, a pinned connection sitting idle gets
+    reaped underneath you — MySQL `wait_timeout`, PgBouncer, and AWS NAT
+    idle timeouts all drop long-idle connections, so the handler wakes up
+    holding a dead one.
+
+Give the *pool* application scope and borrow from it per use instead:
+
+```python
+@app.on_startup
+async def open_pool():
+    app.state.pool = await asyncpg.create_pool(DSN)
+
+@app.route(path='/rooms/{room}', scheme=Scheme.websocket)
+async def chat(ws: WebSocket, room: str, user=Depends(current_user)):
+    await ws.accept()
+    async for message in ws:                       # user: per connection ✓
+        async with app.state.pool.acquire() as db:  # db: per use ✓
+            await db.execute('insert into messages …', room, message)
+```
+
+**Write cleanup in a `finally`.** Teardown runs whenever the handler exits —
+clean close, `WebSocketDisconnect`, or an exception — but cleanup written
+*after* a bare `yield` is skipped on the exception paths, because the
+exception is thrown into the generator at the `yield`. This is ordinary
+`@asynccontextmanager` behaviour and it bites harder here, since a socket ends
+by exception far more often than a request does:
+
+```python
+async def get_conn():
+    conn = await pool.acquire()
+    try:
+        yield conn
+    finally:                    # runs on disconnect and on error alike
+        await pool.release(conn)
+```
 
 ### Rejecting a connection
 

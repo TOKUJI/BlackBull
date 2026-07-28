@@ -306,3 +306,97 @@ class TestDependsEndToEnd:
         with TestClient(app, raise_app_exceptions=False) as client:
             r = client.get('/broken')
             assert r.status_code == 500
+
+
+class TestBareYieldDiagnostic:
+    """Cleanup after a bare ``yield`` is skipped exactly when it matters.
+
+    The semantics are correct and must not change — an exception has to reach
+    the generator so a commit/rollback provider can tell success from failure
+    (``test_exception_aware_provider_is_not_flagged``). What the framework can
+    do is refuse to let the weak form be *silent*, so the gap surfaces at
+    registration rather than as a production leak.
+    """
+
+    def _warned(self, provider) -> bool:
+        import warnings
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter('always')
+            Depends(provider)
+        return any('bare `yield`' in str(w.message) for w in caught)
+
+    def test_cleanup_after_bare_yield_is_flagged(self):
+        async def get_db():
+            yield 'db'
+            print('release')
+
+        assert self._warned(get_db)
+
+    def test_try_finally_is_not_flagged(self):
+        async def get_db():
+            try:
+                yield 'db'
+            finally:
+                print('release')
+
+        assert not self._warned(get_db)
+
+    def test_exception_aware_provider_is_not_flagged(self):
+        """commit-or-rollback: the author is deliberately reading the exception,
+        which is the capability that forbids 'just always run the cleanup'."""
+        async def get_tx():
+            try:
+                yield 'tx'
+            except Exception:
+                print('rollback')
+                raise
+            else:
+                print('commit')
+
+        assert not self._warned(get_tx)
+
+    def test_provider_with_nothing_after_the_yield_is_not_flagged(self):
+        async def get_db():
+            yield 'db'
+
+        assert not self._warned(get_db)
+
+    def test_async_with_around_the_yield_is_not_flagged(self):
+        """The context manager already cleans up on every path."""
+        class _Pool:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *exc):
+                return False
+
+        async def get_db():
+            async with _Pool() as pool:
+                yield pool
+
+        assert not self._warned(get_db)
+
+    def test_non_generator_providers_are_not_flagged(self):
+        async def a_value():
+            return 'v'
+
+        def a_sync_value():
+            return 'v'
+
+        assert not self._warned(a_value)
+        assert not self._warned(a_sync_value)
+
+    def test_unavailable_source_is_not_an_error(self):
+        """A diagnostic must never be the reason registration fails."""
+        ns: dict = {}
+        exec('async def dyn():\n    yield 1\n    print(2)\n', ns)
+        assert not self._warned(ns['dyn'])
+
+    def test_the_warning_names_the_provider_and_suggests_the_fix(self):
+        async def get_conn():
+            yield 'c'
+            print('release')
+
+        with pytest.warns(UserWarning, match='get_conn') as rec:
+            Depends(get_conn)
+        assert 'finally' in str(rec[0].message)
