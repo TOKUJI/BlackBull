@@ -4888,12 +4888,15 @@
 
 
 <h1 id="blackbull">BlackBull<a class="headerlink" href="#blackbull" title="Permanent link">&para;</a></h1>
-<p>BlackBull is a Python web framework that speaks the
+<p>BlackBull is a Python web framework with pure-Python implementations of
+HTTP/1.1, HTTP/2 (with ALPN), WebSocket, gRPC, and an MQTT 5 broker — all
+on one process, no reverse proxy or sidecar required.  No required C
+extensions outside the standard library, one <code>pip install</code>, one
+deployable.</p>
+<p>Internally it threads its own typed <code>Connection</code> end to end; the
 <a href="https://asgi.readthedocs.io/en/latest/specs/main.html"><strong>ASGI 3.0</strong></a>
-interface<sup id="fnref:asgi"><a class="footnote-ref" href="#fn:asgi">1</a></sup>, with pure-Python implementations of HTTP/1.1, HTTP/2
-(with ALPN), WebSocket, gRPC, and an MQTT 5 broker — all on one process,
-no reverse proxy or sidecar required.  No required C extensions outside
-the standard library, one <code>pip install</code>, one deployable.</p>
+interface<sup id="fnref:asgi"><a class="footnote-ref" href="#fn:asgi">1</a></sup> is kept as an interop boundary, so a BlackBull app also
+runs unchanged under uvicorn, Hypercorn, or <code>httpx.ASGITransport</code>.</p>
 <div class="admonition warning">
 <p class="admonition-title">Early Alpha</p>
 <p>BlackBull is in <strong>Early Alpha</strong>.  The API may change between MINOR
@@ -4980,11 +4983,11 @@ ASGI-triplet form.</p>
 <li id="fn:asgi">
 <p>ASGI is the async successor to WSGI — a single small interface
 that lets the same app object speak HTTP and WebSocket without
-separate adapters.  Apps written against
-<a href="https://www.starlette.io/">Starlette</a>,
-<a href="https://quart.palletsprojects.com/">Quart</a>,
-<a href="https://fastapi.tiangolo.com/">FastAPI</a>,
-or any other ASGI 3.0 framework work on BlackBull.&#160;<a class="footnote-backref" href="#fnref:asgi" title="Jump back to footnote 1 in the text">&#8617;</a></p>
+separate adapters.  BlackBull apps are ASGI-callable, so any ASGI
+host can serve them.  The reverse direction — hosting a <em>foreign</em>
+ASGI app (Starlette, Quart, FastAPI) on BlackBull's own server —
+needs <code>BB_FORCE_ASGI_SCOPE=1</code>, which makes the server emit a plain
+ASGI <code>scope</code> dict instead of a <code>Connection</code>.&#160;<a class="footnote-backref" href="#fnref:asgi" title="Jump back to footnote 1 in the text">&#8617;</a></p>
 </li>
 </ol>
 </div>

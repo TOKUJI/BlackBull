@@ -720,6 +720,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#typed-websocket-events" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Typed WebSocket events
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#permessage-deflate-rfc-7692" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4894,6 +4905,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#typed-websocket-events" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Typed WebSocket events
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#permessage-deflate-rfc-7692" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5020,6 +5042,27 @@ inner handler can skip that boilerplate:</p>
             <span class="k">break</span>
         <span class="k">await</span> <span class="n">send</span><span class="p">({</span><span class="s1">&#39;type&#39;</span><span class="p">:</span> <span class="s1">&#39;websocket.send&#39;</span><span class="p">,</span> <span class="s1">&#39;text&#39;</span><span class="p">:</span> <span class="n">event</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;text&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">)})</span>
 </code></pre></div>
+<h2 id="typed-websocket-events">Typed WebSocket events<a class="headerlink" href="#typed-websocket-events" title="Permanent link">&para;</a></h2>
+<p>The events are plain ASGI dicts on the wire, but their shapes are declared
+as <code>TypedDict</code>s, so a type checker can narrow them on the <code>type</code> key:</p>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">blackbull</span><span class="w"> </span><span class="kn">import</span> <span class="n">ASGIReceiveCallable</span><span class="p">,</span> <span class="n">ASGISendCallable</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">blackbull.asgi</span><span class="w"> </span><span class="kn">import</span> <span class="n">ASGIEvent</span>
+
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">chat</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">receive</span><span class="p">:</span> <span class="n">ASGIReceiveCallable</span><span class="p">,</span> <span class="n">send</span><span class="p">:</span> <span class="n">ASGISendCallable</span><span class="p">):</span>
+    <span class="k">while</span> <span class="kc">True</span><span class="p">:</span>
+        <span class="n">event</span> <span class="o">=</span> <span class="k">await</span> <span class="n">receive</span><span class="p">()</span>
+        <span class="k">if</span> <span class="n">event</span><span class="p">[</span><span class="s1">&#39;type&#39;</span><span class="p">]</span> <span class="o">==</span> <span class="n">ASGIEvent</span><span class="o">.</span><span class="n">WS_DISCONNECT</span><span class="p">:</span>
+            <span class="k">break</span>
+        <span class="k">if</span> <span class="n">event</span><span class="p">[</span><span class="s1">&#39;type&#39;</span><span class="p">]</span> <span class="o">==</span> <span class="n">ASGIEvent</span><span class="o">.</span><span class="n">WS_RECEIVE</span><span class="p">:</span>
+            <span class="c1"># Narrowed to WebSocketReceiveEvent: `text` and `bytes` are known</span>
+            <span class="c1"># keys here, and both are Optional — BlackBull always sets both,</span>
+            <span class="c1"># with one of them None.</span>
+            <span class="k">await</span> <span class="n">send</span><span class="p">({</span><span class="s1">&#39;type&#39;</span><span class="p">:</span> <span class="s1">&#39;websocket.send&#39;</span><span class="p">,</span> <span class="s1">&#39;text&#39;</span><span class="p">:</span> <span class="n">event</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;text&#39;</span><span class="p">)</span> <span class="ow">or</span> <span class="s1">&#39;&#39;</span><span class="p">})</span>
+</code></pre></div>
+<p><code>FragmentAssembler</code> has already reassembled fragments by this point, so a
+<code>websocket.receive</code> event is always one complete message — which is why the
+declared type has <code>text: str | None</code> and <code>bytes: bytes | None</code> rather than
+modelling a partial frame.  The declarations change nothing at runtime.</p>
 <h2 id="permessage-deflate-rfc-7692">permessage-deflate (RFC 7692)<a class="headerlink" href="#permessage-deflate-rfc-7692" title="Permanent link">&para;</a></h2>
 <p><code>permessage-deflate</code> compression is negotiated automatically when
 the client offers it on the handshake.  The server replies with

@@ -597,6 +597,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#typing-the-message-channel" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Typing the message channel
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#the-as_middleware-decorator" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4994,6 +5005,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#typing-the-message-channel" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Typing the message channel
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#the-as_middleware-decorator" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5227,6 +5249,33 @@ Quart / ASGI 3.0 generally, with one BlackBull convenience
 </ul>
 <p>Middleware functions keep the full <code>(scope, receive, send, call_next)</code>
 shape; the simplified handler form does <strong>not</strong> apply to them.</p>
+<h2 id="typing-the-message-channel">Typing the message channel<a class="headerlink" href="#typing-the-message-channel" title="Permanent link">&para;</a></h2>
+<p>The events crossing <code>receive</code> and <code>send</code> are ASGI 3.0 dicts — that wire
+contract is unchanged and always will be.  What BlackBull adds is a set of
+<code>TypedDict</code> <em>declarations</em> for them, so a type checker can tell which keys
+are legal on which event:</p>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">blackbull</span><span class="w"> </span><span class="kn">import</span> <span class="n">ASGIReceiveCallable</span><span class="p">,</span> <span class="n">ASGISendCallable</span><span class="p">,</span> <span class="n">ASGISendEvent</span>
+
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">add_header_mw</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">receive</span><span class="p">:</span> <span class="n">ASGIReceiveCallable</span><span class="p">,</span>
+                        <span class="n">send</span><span class="p">:</span> <span class="n">ASGISendCallable</span><span class="p">,</span> <span class="n">call_next</span><span class="p">):</span>
+    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">wrapped</span><span class="p">(</span><span class="n">event</span><span class="p">:</span> <span class="n">ASGISendEvent</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">event</span><span class="p">[</span><span class="s1">&#39;type&#39;</span><span class="p">]</span> <span class="o">==</span> <span class="s1">&#39;http.response.start&#39;</span><span class="p">:</span>
+            <span class="c1"># Narrowed here: pyright/mypy know `status` and `headers` exist</span>
+            <span class="c1"># on this branch, and that `body` does not.</span>
+            <span class="n">event</span> <span class="o">=</span> <span class="p">{</span><span class="o">**</span><span class="n">event</span><span class="p">,</span>
+                     <span class="s1">&#39;headers&#39;</span><span class="p">:</span> <span class="nb">list</span><span class="p">(</span><span class="n">event</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;headers&#39;</span><span class="p">,</span> <span class="p">[]))</span> <span class="o">+</span> <span class="p">[(</span><span class="sa">b</span><span class="s1">&#39;x-custom&#39;</span><span class="p">,</span> <span class="sa">b</span><span class="s1">&#39;1&#39;</span><span class="p">)]}</span>
+        <span class="k">await</span> <span class="n">send</span><span class="p">(</span><span class="n">event</span><span class="p">)</span>
+    <span class="k">await</span> <span class="n">call_next</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">wrapped</span><span class="p">)</span>
+</code></pre></div>
+<p><code>ASGISendEvent</code> and <code>ASGIReceiveEvent</code> are unions discriminated on the
+<code>type</code> key, so comparing or <code>match</code>-ing against it narrows the union to a
+single member.  A checker then rejects the classic mistake this guards —
+passing a <code>Response</code> object where an event dict belongs, which fails at
+runtime on <code>event['type']</code>.</p>
+<p>The individual shapes (<code>HTTPResponseStartEvent</code>, <code>WebSocketReceiveEvent</code>, …)
+are importable from <code>blackbull.asgi</code> if you want to name one directly.
+Everything here is annotation-only: nothing is validated or converted at
+runtime, and unannotated middleware keeps working exactly as before.</p>
 <h2 id="the-as_middleware-decorator">The <code>@as_middleware</code> decorator<a class="headerlink" href="#the-as_middleware-decorator" title="Permanent link">&para;</a></h2>
 <p>Route handlers can return <code>Response</code> / <code>JSONResponse</code> objects
 instead of calling <code>send(...)</code> with raw ASGI events.  A middleware
