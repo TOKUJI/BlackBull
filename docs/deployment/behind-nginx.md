@@ -146,6 +146,21 @@ The nginx upstream then looks like:
 upstream blackbull { server unix:/run/blackbull.sock; }
 ```
 
+## When fronting HTTP/2 is the right call
+
+HTTP/2 costs more per request than HTTP/1.1 in *every* implementation — each
+stream carries state, framing, and flow control that HTTP/1.1 does not.  That
+is the protocol, not a BlackBull property, but it has a deployment
+consequence worth naming: if a workload needs maximum throughput on a single
+HTTP/2 connection at high multiplex, the usual production shape is a fronting
+HTTP/2 terminator (nginx, Envoy) with BlackBull on HTTP/1.1 behind it — the
+arrangement this page describes.
+
+BlackBull's own HTTP/2 is conformant (`h2spec`, RFC 9113).  How its
+per-stream cost compares to other servers is **not measured**: the
+`bench/CHARACTERIZATION.md` A-lane (h2load at n=1/10/50) is specified but has
+no recorded results, so no comparative claim is made in either direction.
+
 ## Next
 
 - [Workers](workers.md) — multi-worker is a natural fit behind

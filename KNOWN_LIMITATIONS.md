@@ -86,107 +86,55 @@ it, so the header rides the QUERY route's own responses (including its
 
 ---
 
-## Deployment notes
+## Runtime constraints
 
-### Raw protocol handlers: single-owner, HTTP still scales, cleartext by default
+Behaviours that hold at run time regardless of how you deploy.  The
+operational how-to for each lives in the deployment guide; what's here is
+the part that can surprise you.
 
-When a non-ASGI protocol handler is registered via `app.raw_handler()` or
-`app.register_protocol_handler()`, BlackBull applies these constraints:
+### Raw protocol sockets are cleartext unless you ask for TLS
 
-**The protocol has a single owner, but HTTP scales (Sprint 55).** A stateful
-broker must have one owner (see the MQTT section below), so the master binds
-the protocol port once and hands it to **worker 0** only; the broker lives
-there.  HTTP is stateless, so `app.run(port=8000, workers=4)` alongside, say,
-`MQTTExtension(port=1883)` now runs HTTP on **all** workers while the broker
-runs on worker 0.  If worker 0 crashes the master respawns it and it
-re-inherits the still-open listening socket, so the broker resumes on the same
-port (clients reconnect; in-memory broker state is not preserved — see below).
+A socket bound by `app.raw_handler()` or `app.register_protocol_handler()`
+carries **no TLS by default**.  Register the binding with `tls=True`
+(`app.raw_handler(name, port=…, tls=True)`, `MQTTExtension(port=8883,
+tls=True)`) to serve it through the same TLS machinery as the HTTPS
+listener — certificate from `certfile`/`keyfile` or `ssl_context`, with
+startup failing fast when `tls=True` has no certificate to use.  A
+TLS-terminating proxy in front of the raw socket is a fine alternative.
 
-The one exception is **auto-reload** (`--reload`): it hands listening sockets
-across an `exec` via fd inheritance, and that handoff does not yet include the
-protocol listeners, so `reload=True` with a port-bound protocol still forces
-`workers=1`.  Run without reload to scale HTTP alongside the broker.
+A raw protocol also has a **single owner** — it is bound on worker 0 only,
+while HTTP scales across all workers.  See
+[Workers](docs/deployment/workers.md) for the mechanics, including why
+`--reload` forces `workers=1` when a protocol port is bound.
 
-`BB_SOCKET_REUSEPORT=1` makes each HTTP worker bind its own kernel accept
-queue (best load distribution); without it the workers share the master's
-listening socket.  The protocol port is always bound without `SO_REUSEPORT`
-— a single owner is the point.
+### MQTT broker state is in-memory and lost on restart
 
-**Cleartext by default; TLS is opt-in per binding (Sprint 75)** — a raw
-protocol socket is bound without TLS unless the binding is registered with
-`tls=True` (`app.raw_handler(name, port=…, tls=True)` /
-`MQTTExtension(port=8883, tls=True)`), in which case it is served through
-the same TLS machinery as the HTTPS listener (certificate from
-`certfile`/`keyfile` or `ssl_context`; startup fails fast when `tls=True`
-has no certificate to use).  A TLS-terminating proxy in front of the raw
-socket remains a fine alternative.
+The MQTT 5 broker (`blackbull.mqtt`, opt-in via `blackbull[mqtt]`) rides the
+raw-protocol bridge, so it inherits both constraints above.  Beyond those:
 
-### MQTT broker: best-effort taps, in-memory single-process state
+**State does not survive a restart.**  Subscriptions, sessions, and retained
+messages live in the one serving process — not shared across workers, not
+persisted.  A restart, or a worker-0 respawn after a crash, clears all
+session and retained state.  Sessions are kept for the process lifetime
+rather than expired on a timer.
 
-The MQTT 5 broker (`blackbull.mqtt`, opt-in via `blackbull[mqtt]`) rides
-the raw-protocol bridge above, so it inherits its constraints —
-**single-owner** (the broker runs on worker 0; HTTP still scales across all
-workers) and **cleartext unless registered with `tls=True`**
-(`MQTTExtension(port=8883, tls=True)` for `mqtts://`).  Beyond those:
-
-**Why a single broker owner is a protocol requirement, not an
-implementation limitation.**  The MQTT 5.0 specification (OASIS Committee Specification
-02, March 2019) defines semantics that depend on broker-side state visible
-to every connection: publish-subscribe matching (§3.3), retained messages
-(§3.3.2.3), session state across Clean Start = 0 reconnects (§3.1.2.11),
-Will messages (§3.1.2.5), and QoS 1/2 delivery tracking (§4.3).  All five
-break if that state is split across worker processes with no shared store.
-This is consistent with industry practice: the Eclipse Mosquitto
-reference implementation ([mosquitto.org](https://mosquitto.org/)) is
-single-threaded by architecture for the same reason, and EMQX clusters via
-Erlang distributed message passing rather than local worker splitting.
-(Confirmed 2026-06-25 against the OASIS MQTT 5.0 specification and
-Mosquitto's project documentation.)
+**Nothing is queued for offline sessions.**  A disconnected client with a
+live session (`Session Expiry Interval > 0`) gets §4.4 replay of its
+*unacknowledged in-flight* QoS 1/2 messages on reconnect, but messages
+**newly published while it was offline are not queued** and will never reach
+it.  The same applies to a shared-subscription group with no connected
+member.  If you need store-and-forward for offline consumers, use a broker
+with persistent offline queues.
 
 **`on_message` taps are best-effort observability, not a delivery path.**
-In the default `tap_mode='actor'`, each PUBLISH is *offered* to a
-bounded-inbox `TapActor` that **drops the newest message on overflow**
-(with a running dropped-count logged) so a slow tap can never
-back-pressure routing.  Use a real MQTT subscription when you need
-guaranteed delivery; treat a tap as a probe.
+In the default `tap_mode='actor'` each PUBLISH is *offered* to a
+bounded-inbox `TapActor` that drops the newest message on overflow (with a
+running dropped-count logged), so a slow tap can never back-pressure
+routing.  Use a real MQTT subscription when you need guaranteed delivery.
 
-**Broker state is in-memory and per-process.**  Subscriptions, sessions,
-and retained messages live in the one serving process (worker 0) — not
-shared across workers (hence the single-owner model) and not persisted
-across a restart.  A restart, or a worker-0 respawn after a crash, clears
-all session and retained state.  Sessions are also kept for the process
-lifetime rather than expired on a timer.
-
-**New messages are not queued for offline sessions.**  A disconnected
-client with a live session (`Session Expiry Interval > 0`) gets §4.4
-replay of its *unacknowledged in-flight* QoS 1/2 messages on reconnect,
-but messages **newly published while it was offline are not queued** and
-will never be delivered to it.  The same applies to a shared-subscription
-group with no connected member (see
-[`docs/guide/mqtt.md`](docs/guide/mqtt.md)).  If you need store-and-forward
-for offline consumers, use a broker with persistent offline queues.
-
-### HTTP/2 costs more per request than HTTP/1.1
-
-Not a BlackBull property — HTTP/2 carries per-stream state, framing,
-and flow control that HTTP/1.1 does not, in every implementation.
-Noted here only because the deployment consequence is easy to miss:
-if a workload needs maximum throughput on a single HTTP/2 connection
-at high multiplex, the usual production shape is a fronting HTTP/2
-terminator (nginx, Envoy) with BlackBull on HTTP/1.1 behind it.
-
-BlackBull's HTTP/2 is conformant (`h2spec`, RFC 9113).  How its
-per-stream cost compares to other servers is **not measured** — the
-`bench/CHARACTERIZATION.md` A-lane (h2load at n=1/10/50) is specified
-but has no recorded results, so no comparative claim is made here in
-either direction.
-
-### Multi-worker scaling tops out at physical core count
-
-Worker throughput scales roughly to the **physical core count**,
-not the logical (SMT-thread) count.  Multiplying workers past
-the physical-core ceiling does not multiply throughput.  Plan
-capacity against `nproc / 2` on typical SMT-enabled hardware.
+Why one owner is a *protocol* requirement rather than an implementation
+shortcut — and how Mosquitto and EMQX handle the same constraint — is
+explained in [the MQTT guide](docs/guide/mqtt.md).
 
 ---
 

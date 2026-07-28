@@ -48,6 +48,10 @@ Hello, world!
   `gunicorn` class path.
 - **Readable stack.** Every byte on the wire passes through Python
   you can step through with `pdb`.  No C extensions to debug.
+- **New protocols, early.** HTTP QUERY (RFC 10008) — a safe,
+  idempotent, cacheable method with a request body — ships with
+  routing, `Accept-Query` negotiation, and Content-Type
+  enforcement, years before it reaches the standard library.
 - **Declare, don't plumb.** Handlers name what they need — path
   params, query params, the body, a `Connection` view, a
   `WebSocket` on a websocket route, or a `Depends(get_db)` resource
@@ -151,6 +155,28 @@ app.run(port=8443, certfile='cert.pem', keyfile='key.pem')
 
 ALPN negotiates `h2` automatically; HTTP/1.1 clients fall back via
 the same socket.
+
+## HTTP QUERY (RFC 10008)
+
+A safe, idempotent, **cacheable** method that carries a request body — for
+the searches that don't fit in a URL and shouldn't be a `POST`:
+
+```python
+from blackbull import QUERY
+
+@app.route(path='/search', methods=[QUERY])
+async def search(body: bytes):
+    return run_query(body)
+```
+
+BlackBull ships QUERY routing, `Accept-Query` content negotiation, and
+Content-Type enforcement.  `http.HTTPMethod` has no `QUERY` member — RFC
+10008 postdates the 3.15 feature freeze, so the earliest stdlib arrival is
+3.16 — and because `HTTPMethod` is a `StrEnum`, the exported string stays
+equal- and hash-compatible with a future `HTTPMethod.QUERY`.  Routes
+registered today need no migration.
+
+See the [routing guide](https://tokuji.github.io/BlackBull/guide/routing/).
 
 ## WebSocket
 

@@ -135,6 +135,38 @@ closed.  The defaults match Apache's `LimitRequestLine` /
 | `BB_MAX_CONNECTIONS` | `500` per worker | Connections beyond the cap are refused at accept time.  Combine with `BB_SOCKET_BACKLOG` for graceful overload.  `0` = unlimited. |
 | `BB_REQUEST_TIMEOUT` | `0` (off) | Per-HTTP/2-stream deadline in seconds.  Set in production (e.g. `30`) so an ASGI handler hung on an upstream call can't keep its stream slot indefinitely.  Stream is cancelled via `RST_STREAM CANCEL`. |
 
+## Scaling ceiling — plan against physical cores
+
+Worker throughput scales roughly to the **physical core count**, not the
+logical (SMT-thread) count.  Adding workers past the physical-core ceiling
+does not multiply throughput.  Plan capacity against `nproc / 2` on typical
+SMT-enabled hardware.
+
+## Workers alongside a raw protocol handler
+
+A non-ASGI protocol registered via `app.raw_handler()` or
+`app.register_protocol_handler()` follows a different rule from HTTP,
+because a stateful broker must have exactly one owner.
+
+**The protocol has a single owner; HTTP still scales.**  The master binds
+the protocol port once and hands it to **worker 0** only, so the broker
+lives there — while `app.run(port=8000, workers=4)` alongside, say,
+`MQTTExtension(port=1883)` still runs HTTP on **all** workers.  If worker 0
+crashes, the master respawns it and it re-inherits the still-open listening
+socket, so the broker resumes on the same port.  Clients reconnect;
+in-memory broker state does not survive (see
+[MQTT](../guide/mqtt.md)).
+
+**Auto-reload is the exception.**  `--reload` hands listening sockets across
+an `exec` via fd inheritance, and that handoff does not yet include the
+protocol listeners — so `reload=True` with a port-bound protocol still forces
+`workers=1`.  Run without reload to scale HTTP alongside the broker.
+
+**`SO_REUSEPORT` applies to HTTP only.**  `BB_SOCKET_REUSEPORT=1` gives each
+HTTP worker its own kernel accept queue (best load distribution); without it
+the workers share the master's listening socket.  The protocol port is always
+bound *without* `SO_REUSEPORT` — a single owner is the point.
+
 ## Production checklist
 
 A reasonable production environment:
