@@ -4668,6 +4668,34 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/websocket/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    websocket
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -5355,15 +5383,22 @@ middlewares:</p>
 </code></pre></div>
 <p>For middleware ordering semantics see <a href="../middleware/">Middleware</a>.</p>
 <h2 id="websocket-routes">WebSocket routes<a class="headerlink" href="#websocket-routes" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">blackbull.utils</span><span class="w"> </span><span class="kn">import</span> <span class="n">Scheme</span>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">blackbull</span><span class="w"> </span><span class="kn">import</span> <span class="n">WebSocket</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">blackbull.utils</span><span class="w"> </span><span class="kn">import</span> <span class="n">Scheme</span>
 
 <span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">&#39;/ws&#39;</span><span class="p">,</span> <span class="n">scheme</span><span class="o">=</span><span class="n">Scheme</span><span class="o">.</span><span class="n">websocket</span><span class="p">)</span>
-<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">ws_handler</span><span class="p">(</span><span class="n">scope</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
-    <span class="o">...</span>
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">ws_handler</span><span class="p">(</span><span class="n">ws</span><span class="p">:</span> <span class="n">WebSocket</span><span class="p">):</span>
+    <span class="k">await</span> <span class="n">ws</span><span class="o">.</span><span class="n">accept</span><span class="p">()</span>
+    <span class="k">async</span> <span class="k">for</span> <span class="n">message</span> <span class="ow">in</span> <span class="n">ws</span><span class="p">:</span>
+        <span class="k">await</span> <span class="n">ws</span><span class="o">.</span><span class="n">send</span><span class="p">(</span><span class="n">message</span><span class="p">)</span>
 </code></pre></div>
-<p>WebSocket handlers always receive the full
-<code>(scope, receive, send)</code> triplet — the simplified form does not
-apply.  See <a href="../websockets/">WebSockets</a> for the handshake,
+<p>Declaring a <code>WebSocket</code> parameter gets you the connection as an object.
+The raw <code>(conn, receive, send)</code> triplet is still accepted and still
+supported; a route is classified once, at registration, by whether its
+signature contains both <code>receive</code> and <code>send</code>.  The HTTP simplified-handler
+features — path params, query params, <code>Depends</code> — are not injected into
+WebSocket handlers yet.</p>
+<p>See <a href="../websockets/">WebSockets</a> for the handshake,
 subprotocol negotiation, fragmented messages, <code>permessage-deflate</code>,
 and the RFC 8441 (HTTP/2) transport.</p>
 <h2 id="lookup-cache">Lookup cache<a class="headerlink" href="#lookup-cache" title="Permanent link">&para;</a></h2>

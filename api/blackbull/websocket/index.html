@@ -10,28 +10,28 @@
       
       
       
-        <link rel="canonical" href="https://TOKUJI.github.io/BlackBull/api/blackbull/client/http1/">
+        <link rel="canonical" href="https://TOKUJI.github.io/BlackBull/api/blackbull/websocket/">
       
       
-        <link rel="prev" href="../exceptions/">
+        <link rel="prev" href="../utils/">
       
       
-        <link rel="next" href="../http2/">
+        <link rel="next" href="../../../about/architecture/">
       
       
         
       
       
-      <link rel="icon" href="../../../../assets/images/favicon.png">
+      <link rel="icon" href="../../../assets/images/favicon.png">
       <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
     
     
       
-        <title>http1 - BlackBull</title>
+        <title>websocket - BlackBull</title>
       
     
     
-      <link rel="stylesheet" href="../../../../assets/stylesheets/main.ec1eaa64.min.css">
+      <link rel="stylesheet" href="../../../assets/stylesheets/main.ec1eaa64.min.css">
       
       
 
@@ -50,11 +50,11 @@
       
     
     
-      <link rel="stylesheet" href="../../../../assets/_mkdocstrings.css">
+      <link rel="stylesheet" href="../../../assets/_mkdocstrings.css">
     
-      <link rel="stylesheet" href="../../../../stylesheets/extra.css">
+      <link rel="stylesheet" href="../../../stylesheets/extra.css">
     
-    <script>__md_scope=new URL("../../../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    <script>__md_scope=new URL("../../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
     
       
 
@@ -72,7 +72,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#blackbullclienthttp1" class="md-skip">
+        <a href="#blackbullwebsocket" class="md-skip">
           Skip to content
         </a>
       
@@ -88,7 +88,7 @@
 
 <header class="md-header md-header--shadow" data-md-component="header">
   <nav class="md-header__inner md-grid" aria-label="Header">
-    <a href="../../../.." title="BlackBull" class="md-header__button md-logo" aria-label="BlackBull" data-md-component="logo">
+    <a href="../../.." title="BlackBull" class="md-header__button md-logo" aria-label="BlackBull" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
@@ -108,7 +108,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              http1
+              websocket
             
           </span>
         </div>
@@ -198,7 +198,7 @@
 
 <nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
   <label class="md-nav__title" for="__drawer">
-    <a href="../../../.." title="BlackBull" class="md-nav__button md-logo" aria-label="BlackBull" data-md-component="logo">
+    <a href="../../.." title="BlackBull" class="md-nav__button md-logo" aria-label="BlackBull" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
@@ -228,7 +228,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../.." class="md-nav__link">
+      <a href="../../.." class="md-nav__link">
         
   
   
@@ -302,7 +302,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../getting-started/why-blackbull/" class="md-nav__link">
+      <a href="../../../getting-started/why-blackbull/" class="md-nav__link">
         
   
   
@@ -330,7 +330,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../getting-started/installation/" class="md-nav__link">
+      <a href="../../../getting-started/installation/" class="md-nav__link">
         
   
   
@@ -358,7 +358,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../getting-started/hello-world/" class="md-nav__link">
+      <a href="../../../getting-started/hello-world/" class="md-nav__link">
         
   
   
@@ -386,7 +386,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../getting-started/first-app/" class="md-nav__link">
+      <a href="../../../getting-started/first-app/" class="md-nav__link">
         
   
   
@@ -468,7 +468,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../guide/" class="md-nav__link">
+      <a href="../../../guide/" class="md-nav__link">
         
   
   
@@ -496,7 +496,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../guide/routing/" class="md-nav__link">
+      <a href="../../../guide/routing/" class="md-nav__link">
         
   
   
@@ -524,7 +524,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../guide/middleware/" class="md-nav__link">
+      <a href="../../../guide/middleware/" class="md-nav__link">
         
   
   
@@ -552,7 +552,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../guide/error-handling/" class="md-nav__link">
+      <a href="../../../guide/error-handling/" class="md-nav__link">
         
   
   
@@ -580,7 +580,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../guide/requests-and-responses/" class="md-nav__link">
+      <a href="../../../guide/requests-and-responses/" class="md-nav__link">
         
   
   
@@ -608,7 +608,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../guide/dependency-injection/" class="md-nav__link">
+      <a href="../../../guide/dependency-injection/" class="md-nav__link">
         
   
   
@@ -636,7 +636,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../guide/websockets/" class="md-nav__link">
+      <a href="../../../guide/websockets/" class="md-nav__link">
         
   
   
@@ -664,7 +664,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../guide/http2/" class="md-nav__link">
+      <a href="../../../guide/http2/" class="md-nav__link">
         
   
   
@@ -692,7 +692,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../guide/structured-fields/" class="md-nav__link">
+      <a href="../../../guide/structured-fields/" class="md-nav__link">
         
   
   
@@ -720,7 +720,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../guide/raw-protocols/" class="md-nav__link">
+      <a href="../../../guide/raw-protocols/" class="md-nav__link">
         
   
   
@@ -748,7 +748,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../guide/mqtt/" class="md-nav__link">
+      <a href="../../../guide/mqtt/" class="md-nav__link">
         
   
   
@@ -776,7 +776,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../guide/grpc/" class="md-nav__link">
+      <a href="../../../guide/grpc/" class="md-nav__link">
         
   
   
@@ -804,7 +804,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../guide/translation-hub/" class="md-nav__link">
+      <a href="../../../guide/translation-hub/" class="md-nav__link">
         
   
   
@@ -832,7 +832,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../guide/edge-inference/" class="md-nav__link">
+      <a href="../../../guide/edge-inference/" class="md-nav__link">
         
   
   
@@ -860,7 +860,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../guide/streaming/" class="md-nav__link">
+      <a href="../../../guide/streaming/" class="md-nav__link">
         
   
   
@@ -888,7 +888,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../guide/events/" class="md-nav__link">
+      <a href="../../../guide/events/" class="md-nav__link">
         
   
   
@@ -916,7 +916,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../guide/logging/" class="md-nav__link">
+      <a href="../../../guide/logging/" class="md-nav__link">
         
   
   
@@ -944,7 +944,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../guide/static-files/" class="md-nav__link">
+      <a href="../../../guide/static-files/" class="md-nav__link">
         
   
   
@@ -972,7 +972,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../guide/configuration/" class="md-nav__link">
+      <a href="../../../guide/configuration/" class="md-nav__link">
         
   
   
@@ -1000,7 +1000,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../guide/extensions/" class="md-nav__link">
+      <a href="../../../guide/extensions/" class="md-nav__link">
         
   
   
@@ -1028,7 +1028,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../guide/openapi/" class="md-nav__link">
+      <a href="../../../guide/openapi/" class="md-nav__link">
         
   
   
@@ -1056,7 +1056,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../guide/testing/" class="md-nav__link">
+      <a href="../../../guide/testing/" class="md-nav__link">
         
   
   
@@ -1084,7 +1084,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../guide/fault_injection/" class="md-nav__link">
+      <a href="../../../guide/fault_injection/" class="md-nav__link">
         
   
   
@@ -1166,7 +1166,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../deployment/running/" class="md-nav__link">
+      <a href="../../../deployment/running/" class="md-nav__link">
         
   
   
@@ -1194,7 +1194,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../deployment/workers/" class="md-nav__link">
+      <a href="../../../deployment/workers/" class="md-nav__link">
         
   
   
@@ -1222,7 +1222,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../deployment/tls/" class="md-nav__link">
+      <a href="../../../deployment/tls/" class="md-nav__link">
         
   
   
@@ -1250,7 +1250,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../deployment/behind-nginx/" class="md-nav__link">
+      <a href="../../../deployment/behind-nginx/" class="md-nav__link">
         
   
   
@@ -1278,7 +1278,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../deployment/unix-and-fd/" class="md-nav__link">
+      <a href="../../../deployment/unix-and-fd/" class="md-nav__link">
         
   
   
@@ -1306,7 +1306,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../deployment/hot-reload/" class="md-nav__link">
+      <a href="../../../deployment/hot-reload/" class="md-nav__link">
         
   
   
@@ -1390,7 +1390,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../reference/env-vars/" class="md-nav__link">
+      <a href="../../../reference/env-vars/" class="md-nav__link">
         
   
   
@@ -1516,7 +1516,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../" class="md-nav__link">
+      <a href="../" class="md-nav__link">
         
   
   
@@ -1544,7 +1544,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../actor/" class="md-nav__link">
+      <a href="../actor/" class="md-nav__link">
         
   
   
@@ -1572,7 +1572,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../app/" class="md-nav__link">
+      <a href="../app/" class="md-nav__link">
         
   
   
@@ -1600,7 +1600,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../asgi/" class="md-nav__link">
+      <a href="../asgi/" class="md-nav__link">
         
   
   
@@ -1628,7 +1628,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../cli/" class="md-nav__link">
+      <a href="../cli/" class="md-nav__link">
         
   
   
@@ -1653,20 +1653,18 @@
                 
   
   
-    
   
   
-  
     
     
     
     
     
-    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2_1_6" checked>
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2_1_6" >
         
           
           <label class="md-nav__link" for="__nav_5_2_1_6" id="__nav_5_2_1_6_label" tabindex="0">
@@ -1687,7 +1685,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="4" aria-labelledby="__nav_5_2_1_6_label" aria-expanded="true">
+        <nav class="md-nav" data-md-level="4" aria-labelledby="__nav_5_2_1_6_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_5_2_1_6">
             <span class="md-nav__icon md-icon"></span>
             
@@ -1705,7 +1703,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../" class="md-nav__link">
+      <a href="../client/" class="md-nav__link">
         
   
   
@@ -1733,7 +1731,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../client/" class="md-nav__link">
+      <a href="../client/client/" class="md-nav__link">
         
   
   
@@ -1761,7 +1759,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../exceptions/" class="md-nav__link">
+      <a href="../client/exceptions/" class="md-nav__link">
         
   
   
@@ -1786,37 +1784,10 @@
                 
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    http1
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../client/http1/" class="md-nav__link">
         
   
   
@@ -1832,214 +1803,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#blackbull.client.http1" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        http1
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="http1">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.client.http1.HTTP1Client" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        HTTP1Client
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="HTTP1Client">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.client.http1.HTTP1Client.wire_buffer" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        wire_buffer
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.client.http1.HTTP1Client.end_chunked" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        end_chunked
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.client.http1.HTTP1Client.end_headers" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        end_headers
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.client.http1.HTTP1Client.execute_scenario" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        execute_scenario
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.client.http1.HTTP1Client.read_response" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        read_response
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.client.http1.HTTP1Client.reset_wire_buffer" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        reset_wire_buffer
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.client.http1.HTTP1Client.send_body_bytes" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        send_body_bytes
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.client.http1.HTTP1Client.send_chunk" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        send_chunk
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.client.http1.HTTP1Client.send_header_line" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        send_header_line
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.client.http1.HTTP1Client.send_raw" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        send_raw
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.client.http1.HTTP1Client.send_request_line" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        send_request_line
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.client.http1.HTTP1Client.stream" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        stream
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.client.http1.HTTP1RequestSender" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        HTTP1RequestSender
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.client.http1.HTTP1ResponseRecipient" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        HTTP1ResponseRecipient
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -2052,7 +1815,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../http2/" class="md-nav__link">
+      <a href="../client/http2/" class="md-nav__link">
         
   
   
@@ -2080,7 +1843,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../response/" class="md-nav__link">
+      <a href="../client/response/" class="md-nav__link">
         
   
   
@@ -2108,7 +1871,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../scenario/" class="md-nav__link">
+      <a href="../client/scenario/" class="md-nav__link">
         
   
   
@@ -2136,7 +1899,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../scenario_oracle/" class="md-nav__link">
+      <a href="../client/scenario_oracle/" class="md-nav__link">
         
   
   
@@ -2164,7 +1927,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../websocket/" class="md-nav__link">
+      <a href="../client/websocket/" class="md-nav__link">
         
   
   
@@ -2192,7 +1955,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../websocket_h2/" class="md-nav__link">
+      <a href="../client/websocket_h2/" class="md-nav__link">
         
   
   
@@ -2228,7 +1991,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../config/" class="md-nav__link">
+      <a href="../config/" class="md-nav__link">
         
   
   
@@ -2256,7 +2019,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../connection/" class="md-nav__link">
+      <a href="../connection/" class="md-nav__link">
         
   
   
@@ -2284,7 +2047,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../di/" class="md-nav__link">
+      <a href="../di/" class="md-nav__link">
         
   
   
@@ -2312,7 +2075,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../env/" class="md-nav__link">
+      <a href="../env/" class="md-nav__link">
         
   
   
@@ -2340,7 +2103,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../event/" class="md-nav__link">
+      <a href="../event/" class="md-nav__link">
         
   
   
@@ -2368,7 +2131,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../event_aggregator/" class="md-nav__link">
+      <a href="../event_aggregator/" class="md-nav__link">
         
   
   
@@ -2396,7 +2159,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../extension/" class="md-nav__link">
+      <a href="../extension/" class="md-nav__link">
         
   
   
@@ -2471,7 +2234,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../fault_injection/" class="md-nav__link">
+      <a href="../fault_injection/" class="md-nav__link">
         
   
   
@@ -2546,7 +2309,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../fault_injection/catalogue/" class="md-nav__link">
+      <a href="../fault_injection/catalogue/" class="md-nav__link">
         
   
   
@@ -2574,7 +2337,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../fault_injection/catalogue/h2/" class="md-nav__link">
+      <a href="../fault_injection/catalogue/h2/" class="md-nav__link">
         
   
   
@@ -2610,7 +2373,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../fault_injection/h2_server/" class="md-nav__link">
+      <a href="../fault_injection/h2_server/" class="md-nav__link">
         
   
   
@@ -2638,7 +2401,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../fault_injection/oracle_h1/" class="md-nav__link">
+      <a href="../fault_injection/oracle_h1/" class="md-nav__link">
         
   
   
@@ -2666,7 +2429,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../fault_injection/scenario_h1/" class="md-nav__link">
+      <a href="../fault_injection/scenario_h1/" class="md-nav__link">
         
   
   
@@ -2694,7 +2457,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../fault_injection/scenario_h2/" class="md-nav__link">
+      <a href="../fault_injection/scenario_h2/" class="md-nav__link">
         
   
   
@@ -2777,7 +2540,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../grpc/" class="md-nav__link">
+      <a href="../grpc/" class="md-nav__link">
         
   
   
@@ -2805,7 +2568,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../grpc/asgi/" class="md-nav__link">
+      <a href="../grpc/asgi/" class="md-nav__link">
         
   
   
@@ -2833,7 +2596,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../grpc/codec/" class="md-nav__link">
+      <a href="../grpc/codec/" class="md-nav__link">
         
   
   
@@ -2861,7 +2624,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../grpc/compression/" class="md-nav__link">
+      <a href="../grpc/compression/" class="md-nav__link">
         
   
   
@@ -2889,7 +2652,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../grpc/registry/" class="md-nav__link">
+      <a href="../grpc/registry/" class="md-nav__link">
         
   
   
@@ -2917,7 +2680,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../grpc/status/" class="md-nav__link">
+      <a href="../grpc/status/" class="md-nav__link">
         
   
   
@@ -2953,7 +2716,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../headers/" class="md-nav__link">
+      <a href="../headers/" class="md-nav__link">
         
   
   
@@ -2981,7 +2744,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../logger/" class="md-nav__link">
+      <a href="../logger/" class="md-nav__link">
         
   
   
@@ -3056,7 +2819,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/" class="md-nav__link">
+      <a href="../middleware/" class="md-nav__link">
         
   
   
@@ -3084,7 +2847,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/base/" class="md-nav__link">
+      <a href="../middleware/base/" class="md-nav__link">
         
   
   
@@ -3112,7 +2875,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/cache/" class="md-nav__link">
+      <a href="../middleware/cache/" class="md-nav__link">
         
   
   
@@ -3140,7 +2903,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/compression/" class="md-nav__link">
+      <a href="../middleware/compression/" class="md-nav__link">
         
   
   
@@ -3168,7 +2931,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/cors/" class="md-nav__link">
+      <a href="../middleware/cors/" class="md-nav__link">
         
   
   
@@ -3196,7 +2959,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/proxy/" class="md-nav__link">
+      <a href="../middleware/proxy/" class="md-nav__link">
         
   
   
@@ -3224,7 +2987,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/static/" class="md-nav__link">
+      <a href="../middleware/static/" class="md-nav__link">
         
   
   
@@ -3252,7 +3015,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/utils/" class="md-nav__link">
+      <a href="../middleware/utils/" class="md-nav__link">
         
   
   
@@ -3280,7 +3043,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../middleware/websocket/" class="md-nav__link">
+      <a href="../middleware/websocket/" class="md-nav__link">
         
   
   
@@ -3363,7 +3126,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../mqtt/" class="md-nav__link">
+      <a href="../mqtt/" class="md-nav__link">
         
   
   
@@ -3391,7 +3154,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../mqtt/asyncapi/" class="md-nav__link">
+      <a href="../mqtt/asyncapi/" class="md-nav__link">
         
   
   
@@ -3419,7 +3182,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../mqtt/broker/" class="md-nav__link">
+      <a href="../mqtt/broker/" class="md-nav__link">
         
   
   
@@ -3447,7 +3210,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../mqtt/connection/" class="md-nav__link">
+      <a href="../mqtt/connection/" class="md-nav__link">
         
   
   
@@ -3475,7 +3238,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../mqtt/extension/" class="md-nav__link">
+      <a href="../mqtt/extension/" class="md-nav__link">
         
   
   
@@ -3503,7 +3266,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../mqtt/messages/" class="md-nav__link">
+      <a href="../mqtt/messages/" class="md-nav__link">
         
   
   
@@ -3531,7 +3294,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../mqtt/tap/" class="md-nav__link">
+      <a href="../mqtt/tap/" class="md-nav__link">
         
   
   
@@ -3567,7 +3330,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../openapi/" class="md-nav__link">
+      <a href="../openapi/" class="md-nav__link">
         
   
   
@@ -3642,7 +3405,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../protocol/" class="md-nav__link">
+      <a href="../protocol/" class="md-nav__link">
         
   
   
@@ -3670,7 +3433,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../protocol/frame/" class="md-nav__link">
+      <a href="../protocol/frame/" class="md-nav__link">
         
   
   
@@ -3698,7 +3461,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../protocol/frame_types/" class="md-nav__link">
+      <a href="../protocol/frame_types/" class="md-nav__link">
         
   
   
@@ -3726,7 +3489,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../protocol/hpack_fastpath/" class="md-nav__link">
+      <a href="../protocol/hpack_fastpath/" class="md-nav__link">
         
   
   
@@ -3754,7 +3517,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../protocol/rsock/" class="md-nav__link">
+      <a href="../protocol/rsock/" class="md-nav__link">
         
   
   
@@ -3782,7 +3545,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../protocol/stream/" class="md-nav__link">
+      <a href="../protocol/stream/" class="md-nav__link">
         
   
   
@@ -3810,7 +3573,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../protocol/structured_fields/" class="md-nav__link">
+      <a href="../protocol/structured_fields/" class="md-nav__link">
         
   
   
@@ -3846,7 +3609,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../request/" class="md-nav__link">
+      <a href="../request/" class="md-nav__link">
         
   
   
@@ -3874,7 +3637,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../response/" class="md-nav__link">
+      <a href="../response/" class="md-nav__link">
         
   
   
@@ -3902,7 +3665,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../router/" class="md-nav__link">
+      <a href="../router/" class="md-nav__link">
         
   
   
@@ -3977,7 +3740,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/" class="md-nav__link">
+      <a href="../server/" class="md-nav__link">
         
   
   
@@ -4005,7 +3768,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/access_log/" class="md-nav__link">
+      <a href="../server/access_log/" class="md-nav__link">
         
   
   
@@ -4033,7 +3796,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/cap_log/" class="md-nav__link">
+      <a href="../server/cap_log/" class="md-nav__link">
         
   
   
@@ -4061,7 +3824,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/conn_id/" class="md-nav__link">
+      <a href="../server/conn_id/" class="md-nav__link">
         
   
   
@@ -4089,7 +3852,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/connection_actor/" class="md-nav__link">
+      <a href="../server/connection_actor/" class="md-nav__link">
         
   
   
@@ -4117,7 +3880,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/constants/" class="md-nav__link">
+      <a href="../server/constants/" class="md-nav__link">
         
   
   
@@ -4145,7 +3908,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/deadline/" class="md-nav__link">
+      <a href="../server/deadline/" class="md-nav__link">
         
   
   
@@ -4173,7 +3936,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/http1_actor/" class="md-nav__link">
+      <a href="../server/http1_actor/" class="md-nav__link">
         
   
   
@@ -4201,7 +3964,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/http2_actor/" class="md-nav__link">
+      <a href="../server/http2_actor/" class="md-nav__link">
         
   
   
@@ -4229,7 +3992,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/http2_messages/" class="md-nav__link">
+      <a href="../server/http2_messages/" class="md-nav__link">
         
   
   
@@ -4257,7 +4020,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/http2_ws/" class="md-nav__link">
+      <a href="../server/http2_ws/" class="md-nav__link">
         
   
   
@@ -4285,7 +4048,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/multiworker/" class="md-nav__link">
+      <a href="../server/multiworker/" class="md-nav__link">
         
   
   
@@ -4313,7 +4076,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/parser/" class="md-nav__link">
+      <a href="../server/parser/" class="md-nav__link">
         
   
   
@@ -4341,7 +4104,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/permessage_deflate/" class="md-nav__link">
+      <a href="../server/permessage_deflate/" class="md-nav__link">
         
   
   
@@ -4369,7 +4132,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/protocol_registry/" class="md-nav__link">
+      <a href="../server/protocol_registry/" class="md-nav__link">
         
   
   
@@ -4397,7 +4160,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/recipient/" class="md-nav__link">
+      <a href="../server/recipient/" class="md-nav__link">
         
   
   
@@ -4425,7 +4188,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/reload/" class="md-nav__link">
+      <a href="../server/reload/" class="md-nav__link">
         
   
   
@@ -4453,7 +4216,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/response/" class="md-nav__link">
+      <a href="../server/response/" class="md-nav__link">
         
   
   
@@ -4481,7 +4244,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/sender/" class="md-nav__link">
+      <a href="../server/sender/" class="md-nav__link">
         
   
   
@@ -4509,7 +4272,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/server/" class="md-nav__link">
+      <a href="../server/server/" class="md-nav__link">
         
   
   
@@ -4537,7 +4300,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/warmup/" class="md-nav__link">
+      <a href="../server/warmup/" class="md-nav__link">
         
   
   
@@ -4565,7 +4328,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/websocket_actor/" class="md-nav__link">
+      <a href="../server/websocket_actor/" class="md-nav__link">
         
   
   
@@ -4593,7 +4356,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/worker/" class="md-nav__link">
+      <a href="../server/worker/" class="md-nav__link">
         
   
   
@@ -4621,7 +4384,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/ws_codec/" class="md-nav__link">
+      <a href="../server/ws_codec/" class="md-nav__link">
         
   
   
@@ -4657,7 +4420,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../testing/" class="md-nav__link">
+      <a href="../testing/" class="md-nav__link">
         
   
   
@@ -4685,7 +4448,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../utils/" class="md-nav__link">
+      <a href="../utils/" class="md-nav__link">
         
   
   
@@ -4710,10 +4473,37 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../../websocket/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    websocket
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -4729,6 +4519,324 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#blackbull.websocket" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        websocket
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="websocket">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.websocket.WebSocket" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WebSocket
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="WebSocket">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.websocket.WebSocket.accepted" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        accepted
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.websocket.WebSocket.client" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        client
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.websocket.WebSocket.client_disconnected" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        client_disconnected
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.websocket.WebSocket.close_code" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        close_code
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.websocket.WebSocket.connection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        connection
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.websocket.WebSocket.subprotocols" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        subprotocols
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.websocket.WebSocket.__aiter__" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        __aiter__
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.websocket.WebSocket.accept" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        accept
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.websocket.WebSocket.close" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        close
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.websocket.WebSocket.receive" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        receive
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.websocket.WebSocket.receive_bytes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        receive_bytes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.websocket.WebSocket.receive_json" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        receive_json
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.websocket.WebSocket.receive_text" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        receive_text
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.websocket.WebSocket.send" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        send
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.websocket.WebSocket.send_bytes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        send_bytes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.websocket.WebSocket.send_json" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        send_json
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.websocket.WebSocket.send_text" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        send_text
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.websocket.WebSocketDisconnect" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WebSocketDisconnect
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.websocket.connect_consumed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        connect_consumed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.websocket.handshake_accepted" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        handshake_accepted
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.websocket.handshake_closed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        handshake_closed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.websocket.mark_connect_consumed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        mark_connect_consumed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.websocket.mark_handshake_accepted" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        mark_handshake_accepted
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.websocket.mark_handshake_closed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        mark_handshake_closed
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -4811,7 +4919,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../about/architecture/" class="md-nav__link">
+      <a href="../../../about/architecture/" class="md-nav__link">
         
   
   
@@ -4839,7 +4947,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../about/conformance/" class="md-nav__link">
+      <a href="../../../about/conformance/" class="md-nav__link">
         
   
   
@@ -4867,7 +4975,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../about/internals/" class="md-nav__link">
+      <a href="../../../about/internals/" class="md-nav__link">
         
   
   
@@ -4895,7 +5003,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../about/mqtt-actor-design/" class="md-nav__link">
+      <a href="../../../about/mqtt-actor-design/" class="md-nav__link">
         
   
   
@@ -4923,7 +5031,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../about/rfc9113-implementation/" class="md-nav__link">
+      <a href="../../../about/rfc9113-implementation/" class="md-nav__link">
         
   
   
@@ -4951,7 +5059,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../../about/grpc-assessment/" class="md-nav__link">
+      <a href="../../../about/grpc-assessment/" class="md-nav__link">
         
   
   
@@ -5006,34 +5114,34 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#blackbull.client.http1" class="md-nav__link">
+  <a href="#blackbull.websocket" class="md-nav__link">
     <span class="md-ellipsis">
       
-        http1
+        websocket
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="http1">
+    <nav class="md-nav" aria-label="websocket">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#blackbull.client.http1.HTTP1Client" class="md-nav__link">
+  <a href="#blackbull.websocket.WebSocket" class="md-nav__link">
     <span class="md-ellipsis">
       
-        HTTP1Client
+        WebSocket
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="HTTP1Client">
+    <nav class="md-nav" aria-label="WebSocket">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#blackbull.client.http1.HTTP1Client.wire_buffer" class="md-nav__link">
+  <a href="#blackbull.websocket.WebSocket.accepted" class="md-nav__link">
     <span class="md-ellipsis">
       
-        wire_buffer
+        accepted
       
     </span>
   </a>
@@ -5041,10 +5149,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#blackbull.client.http1.HTTP1Client.end_chunked" class="md-nav__link">
+  <a href="#blackbull.websocket.WebSocket.client" class="md-nav__link">
     <span class="md-ellipsis">
       
-        end_chunked
+        client
       
     </span>
   </a>
@@ -5052,10 +5160,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#blackbull.client.http1.HTTP1Client.end_headers" class="md-nav__link">
+  <a href="#blackbull.websocket.WebSocket.client_disconnected" class="md-nav__link">
     <span class="md-ellipsis">
       
-        end_headers
+        client_disconnected
       
     </span>
   </a>
@@ -5063,10 +5171,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#blackbull.client.http1.HTTP1Client.execute_scenario" class="md-nav__link">
+  <a href="#blackbull.websocket.WebSocket.close_code" class="md-nav__link">
     <span class="md-ellipsis">
       
-        execute_scenario
+        close_code
       
     </span>
   </a>
@@ -5074,10 +5182,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#blackbull.client.http1.HTTP1Client.read_response" class="md-nav__link">
+  <a href="#blackbull.websocket.WebSocket.connection" class="md-nav__link">
     <span class="md-ellipsis">
       
-        read_response
+        connection
       
     </span>
   </a>
@@ -5085,10 +5193,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#blackbull.client.http1.HTTP1Client.reset_wire_buffer" class="md-nav__link">
+  <a href="#blackbull.websocket.WebSocket.subprotocols" class="md-nav__link">
     <span class="md-ellipsis">
       
-        reset_wire_buffer
+        subprotocols
       
     </span>
   </a>
@@ -5096,10 +5204,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#blackbull.client.http1.HTTP1Client.send_body_bytes" class="md-nav__link">
+  <a href="#blackbull.websocket.WebSocket.__aiter__" class="md-nav__link">
     <span class="md-ellipsis">
       
-        send_body_bytes
+        __aiter__
       
     </span>
   </a>
@@ -5107,10 +5215,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#blackbull.client.http1.HTTP1Client.send_chunk" class="md-nav__link">
+  <a href="#blackbull.websocket.WebSocket.accept" class="md-nav__link">
     <span class="md-ellipsis">
       
-        send_chunk
+        accept
       
     </span>
   </a>
@@ -5118,10 +5226,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#blackbull.client.http1.HTTP1Client.send_header_line" class="md-nav__link">
+  <a href="#blackbull.websocket.WebSocket.close" class="md-nav__link">
     <span class="md-ellipsis">
       
-        send_header_line
+        close
       
     </span>
   </a>
@@ -5129,10 +5237,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#blackbull.client.http1.HTTP1Client.send_raw" class="md-nav__link">
+  <a href="#blackbull.websocket.WebSocket.receive" class="md-nav__link">
     <span class="md-ellipsis">
       
-        send_raw
+        receive
       
     </span>
   </a>
@@ -5140,10 +5248,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#blackbull.client.http1.HTTP1Client.send_request_line" class="md-nav__link">
+  <a href="#blackbull.websocket.WebSocket.receive_bytes" class="md-nav__link">
     <span class="md-ellipsis">
       
-        send_request_line
+        receive_bytes
       
     </span>
   </a>
@@ -5151,10 +5259,65 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#blackbull.client.http1.HTTP1Client.stream" class="md-nav__link">
+  <a href="#blackbull.websocket.WebSocket.receive_json" class="md-nav__link">
     <span class="md-ellipsis">
       
-        stream
+        receive_json
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.websocket.WebSocket.receive_text" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        receive_text
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.websocket.WebSocket.send" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        send
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.websocket.WebSocket.send_bytes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        send_bytes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.websocket.WebSocket.send_json" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        send_json
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.websocket.WebSocket.send_text" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        send_text
       
     </span>
   </a>
@@ -5167,10 +5330,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#blackbull.client.http1.HTTP1RequestSender" class="md-nav__link">
+  <a href="#blackbull.websocket.WebSocketDisconnect" class="md-nav__link">
     <span class="md-ellipsis">
       
-        HTTP1RequestSender
+        WebSocketDisconnect
       
     </span>
   </a>
@@ -5178,10 +5341,65 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#blackbull.client.http1.HTTP1ResponseRecipient" class="md-nav__link">
+  <a href="#blackbull.websocket.connect_consumed" class="md-nav__link">
     <span class="md-ellipsis">
       
-        HTTP1ResponseRecipient
+        connect_consumed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.websocket.handshake_accepted" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        handshake_accepted
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.websocket.handshake_closed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        handshake_closed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.websocket.mark_connect_consumed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        mark_connect_consumed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.websocket.mark_handshake_accepted" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        mark_handshake_accepted
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.websocket.mark_handshake_closed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        mark_handshake_closed
       
     </span>
   </a>
@@ -5213,29 +5431,44 @@
   
 
 
-<h1 id="blackbullclienthttp1"><code>blackbull.client.http1</code><a class="headerlink" href="#blackbullclienthttp1" title="Permanent link">&para;</a></h1>
+<h1 id="blackbullwebsocket"><code>blackbull.websocket</code><a class="headerlink" href="#blackbullwebsocket" title="Permanent link">&para;</a></h1>
 
 
 <div class="doc doc-object doc-module">
 
 
 
-<h2 id="blackbull.client.http1" class="doc doc-heading">
-            <code>blackbull.client.http1</code>
+<h2 id="blackbull.websocket" class="doc doc-heading">
+            <code>blackbull.websocket</code>
 
 
-<a href="#blackbull.client.http1" class="headerlink" title="Permanent link">&para;</a></h2>
+<a href="#blackbull.websocket" class="headerlink" title="Permanent link">&para;</a></h2>
 
     <div class="doc doc-contents first">
 
-        <p>HTTP/1.1 client (RFC 7230).</p>
-<p>Provides <code>HTTP1Client</code> plus the lower-level <code>HTTP1RequestSender</code> /
-<code>HTTP1ResponseRecipient</code> helpers that frame and unframe HTTP/1.1 messages
-on the wire.</p>
-<p>Symmetric with the server-side <code>HTTP1Sender</code> / <code>HTTP1Recipient</code> in
-:mod:<code>blackbull.server.sender</code> and :mod:<code>blackbull.server.recipient</code>,
-but reversed: the client <em>writes</em> request lines + request headers + request
-body, and <em>reads</em> status lines + response headers + response body.</p>
+        <p>The high-level WebSocket handler object (Sprint 82).</p>
+<p>A :class:<code>WebSocket</code> wraps the raw <code>(conn, receive, send)</code> triplet so a
+handler works in <strong>data and methods</strong> instead of event dicts::</p>
+<pre><code>@app.route(path='/chat', scheme=Scheme.websocket)
+async def chat(ws: WebSocket):
+    await ws.accept()
+    async for message in ws:
+        await ws.send_text(message)
+</code></pre>
+<p>The equivalent raw handler has to know that the first <code>receive()</code> yields
+<code>websocket.connect</code>, that <code>accept</code> is a <em>send</em>, that a text message hides
+under <code>event['text']</code> while a binary one hides under <code>event['bytes']</code>,
+and that the loop ends on a <code>websocket.disconnect</code> whose code lives in yet
+another key.  None of that is protocol knowledge — it is transport encoding,
+which is exactly what a framework should absorb.</p>
+<p><strong>The raw triplet form is not deprecated.</strong>  It stays supported for at least
+a year (see <code>docs/guide/websockets.md</code>); this object is additive, and both
+forms run over the same actor, codec, and sender.  Nothing about the wire
+changes — a handler that uses this object produces byte-identical frames to
+one that sends the dicts by hand.</p>
+<p>Naming follows the Sprint 80 rule: this is a <em>native</em> surface, so it is
+unprefixed and lives outside <code>asgi.py</code>.  The <code>ASGIEvent</code> dicts it builds
+are the boundary representation, and stay there.</p>
 
 
 
@@ -5260,26 +5493,25 @@ body, and <em>reads</em> status lines + response headers + response body.</p>
 
 
 
-<h3 id="blackbull.client.http1.HTTP1Client" class="doc doc-heading">
-            <code>HTTP1Client</code>
+<h3 id="blackbull.websocket.WebSocket" class="doc doc-heading">
+            <code>WebSocket</code>
 
 
-<a href="#blackbull.client.http1.HTTP1Client" class="headerlink" title="Permanent link">&para;</a></h3>
+<a href="#blackbull.websocket.WebSocket" class="headerlink" title="Permanent link">&para;</a></h3>
 
 
     <div class="doc doc-contents ">
 
 
 
-        <p>Async HTTP/1.1 client.</p>
-<p>Use as an async context manager::</p>
-<pre><code>async with HTTP1Client('localhost', 8000) as c:
-    res = await c.request(HTTPMethod.GET, '/path')
-</code></pre>
-<p>The connection persists across multiple <code>request()</code> calls (HTTP/1.1
-persistent connections, RFC 7230 §6.3) until <code>__aexit__</code> closes it.
-Pass <code>ssl=</code> to use TLS.</p>
-<p>The <code>Host</code> header is injected automatically when the caller omits it.</p>
+        <p>One WebSocket connection, as an object.</p>
+<p>Constructed by the framework and handed to handlers that ask for it by
+annotation (<code>ws: WebSocket</code>) or by name (<code>ws</code> / <code>websocket</code>).  A
+handler that takes the raw <code>(conn, receive, send)</code> triplet keeps
+receiving exactly that, and this object is never built for it.</p>
+<p>The handshake is explicit: the connection is not live until
+:meth:<code>accept</code> returns, and sending before that is an error.  To reject a
+connection, call :meth:<code>close</code> instead of :meth:<code>accept</code>.</p>
 
 
 
@@ -5303,21 +5535,135 @@ Pass <code>ssl=</code> to use TLS.</p>
 
 
 
-<h4 id="blackbull.client.http1.HTTP1Client.wire_buffer" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">wire_buffer</span></code>
+<h4 id="blackbull.websocket.WebSocket.accepted" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">accepted</span></code>
 
   <span class="doc doc-labels">
       <small class="doc doc-label doc-label-property"><code>property</code></small>
   </span>
 
-<a href="#blackbull.client.http1.HTTP1Client.wire_buffer" class="headerlink" title="Permanent link">&para;</a></h4>
+<a href="#blackbull.websocket.WebSocket.accepted" class="headerlink" title="Permanent link">&para;</a></h4>
 
 
     <div class="doc doc-contents ">
 
-        <p>Bytes sent so far by the low-level primitives in this session.</p>
-<p>Empty unless the client was constructed with
-<code>record_wire_bytes=True</code>.  Reset with :meth:<code>reset_wire_buffer</code>.</p>
+        <p>True once :meth:<code>accept</code> has completed the handshake.</p>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-attribute">
+
+
+
+<h4 id="blackbull.websocket.WebSocket.client" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">client</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-property"><code>property</code></small>
+  </span>
+
+<a href="#blackbull.websocket.WebSocket.client" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p><code>(host, port)</code> of the peer; the port is <code>None</code> on a UDS.</p>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-attribute">
+
+
+
+<h4 id="blackbull.websocket.WebSocket.client_disconnected" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">client_disconnected</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-property"><code>property</code></small>
+  </span>
+
+<a href="#blackbull.websocket.WebSocket.client_disconnected" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>True once the peer's close has been observed.</p>
+<p>Only ever set by <em>reading</em> — the disconnect arrives on the receive
+channel, so a handler that has stopped receiving will not see this
+flip.  Use it to break out of a send-only loop that also receives.</p>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-attribute">
+
+
+
+<h4 id="blackbull.websocket.WebSocket.close_code" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">close_code</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-property"><code>property</code></small>
+  </span>
+
+<a href="#blackbull.websocket.WebSocket.close_code" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>The close code, once either side has closed; <code>None</code> while open.</p>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-attribute">
+
+
+
+<h4 id="blackbull.websocket.WebSocket.connection" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">connection</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-property"><code>property</code></small>
+  </span>
+
+<a href="#blackbull.websocket.WebSocket.connection" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>The underlying :class:<code>~blackbull.connection.Connection</code>.</p>
+<p>Everything the handshake carried — headers, cookies, TLS state, the
+client address — is reachable through it.  The shortcuts below cover
+the fields WebSocket handlers actually reach for.</p>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-attribute">
+
+
+
+<h4 id="blackbull.websocket.WebSocket.subprotocols" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">subprotocols</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-property"><code>property</code></small>
+  </span>
+
+<a href="#blackbull.websocket.WebSocket.subprotocols" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Subprotocols the client offered, in its order of preference.</p>
 
     </div>
 
@@ -5329,19 +5675,51 @@ Pass <code>ssl=</code> to use TLS.</p>
 <div class="doc doc-object doc-function">
 
 
-<h4 id="blackbull.client.http1.HTTP1Client.end_chunked" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">end_chunked</span><span class="p">()</span></code>
+<h4 id="blackbull.websocket.WebSocket.__aiter__" class="doc doc-heading">
+            <code class="highlight language-python"><span class="fm">__aiter__</span><span class="p">()</span></code>
+
+<a href="#blackbull.websocket.WebSocket.__aiter__" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Iterate messages until the peer disconnects.</p>
+<p>The disconnect ends the loop rather than raising, so the common shape
+is just <code>async for message in ws:</code>.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.websocket.WebSocket.accept" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">accept</span><span class="p">(</span><span class="n">subprotocol</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">headers</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
 
   <span class="doc doc-labels">
       <small class="doc doc-label doc-label-async"><code>async</code></small>
   </span>
 
-<a href="#blackbull.client.http1.HTTP1Client.end_chunked" class="headerlink" title="Permanent link">&para;</a></h4>
+<a href="#blackbull.websocket.WebSocket.accept" class="headerlink" title="Permanent link">&para;</a></h4>
 
 
     <div class="doc doc-contents ">
 
-        <p>Emit the size-0 terminator chunk that closes a chunked body.</p>
+        <p>Complete the handshake.</p>
+<p><em>subprotocol</em> names the one being accepted from :attr:<code>subprotocols</code>;
+leaving it <code>None</code> keeps the server's automatic negotiation, exactly
+as sending <code>{'type': 'websocket.accept', 'subprotocol': None}</code> does
+on the raw path.  <em>headers</em> are extra response headers for the 101.</p>
+<p>Raises :class:<code>WebSocketDisconnect</code> if the peer abandoned the
+handshake before it could be completed.</p>
+<p>When middleware already accepted for you
+(<code>blackbull.middleware.websocket</code>), a bare <code>accept()</code> is a no-op
+so the same handler body works with or without it.  Asking for a
+<em>specific</em> subprotocol or extra headers in that situation raises
+instead of silently dropping the request — the 101 has already gone
+out and cannot carry them.</p>
 
 
     </div>
@@ -5351,19 +5729,23 @@ Pass <code>ssl=</code> to use TLS.</p>
 <div class="doc doc-object doc-function">
 
 
-<h4 id="blackbull.client.http1.HTTP1Client.end_headers" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">end_headers</span><span class="p">()</span></code>
+<h4 id="blackbull.websocket.WebSocket.close" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">close</span><span class="p">(</span><span class="n">code</span><span class="o">=</span><span class="n">_NORMAL_CLOSURE</span><span class="p">,</span> <span class="n">reason</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
 
   <span class="doc doc-labels">
       <small class="doc doc-label doc-label-async"><code>async</code></small>
   </span>
 
-<a href="#blackbull.client.http1.HTTP1Client.end_headers" class="headerlink" title="Permanent link">&para;</a></h4>
+<a href="#blackbull.websocket.WebSocket.close" class="headerlink" title="Permanent link">&para;</a></h4>
 
 
     <div class="doc doc-contents ">
 
-        <p>Emit the bare CRLF that terminates the header block.</p>
+        <p>Close the connection, or reject the handshake.</p>
+<p>Called before :meth:<code>accept</code>, this rejects the connection — the
+client's <code>connect()</code> fails rather than opening and immediately
+closing.  Idempotent, and a no-op once the peer has already gone, so
+a <code>finally: await ws.close()</code> is always safe.</p>
 
 
     </div>
@@ -5373,35 +5755,24 @@ Pass <code>ssl=</code> to use TLS.</p>
 <div class="doc doc-object doc-function">
 
 
-<h4 id="blackbull.client.http1.HTTP1Client.execute_scenario" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">execute_scenario</span><span class="p">(</span><span class="n">scenario</span><span class="p">)</span></code>
+<h4 id="blackbull.websocket.WebSocket.receive" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">receive</span><span class="p">()</span></code>
 
   <span class="doc doc-labels">
       <small class="doc doc-label doc-label-async"><code>async</code></small>
   </span>
 
-<a href="#blackbull.client.http1.HTTP1Client.execute_scenario" class="headerlink" title="Permanent link">&para;</a></h4>
+<a href="#blackbull.websocket.WebSocket.receive" class="headerlink" title="Permanent link">&para;</a></h4>
 
 
     <div class="doc doc-contents ">
 
-        <p>Walk <code>scenario.steps</code> against the connected socket.</p>
-<p>Never raises.  Every outcome (response, timeout, transport
-failure, hard-abort) is folded into the returned
-:class:<code>ScenarioResult</code> so callers can categorise without
-try/except boilerplate per scenario.</p>
+        <p>Await one complete message — <code>str</code> for text, <code>bytes</code> for binary.</p>
+<p>Fragmented messages have already been reassembled, so what comes back
+is always a whole application message.</p>
+<p>Raises :class:<code>WebSocketDisconnect</code> when the peer closes.  Prefer
+<code>async for</code> unless you need the close code.</p>
 
-
-<details class="step-dispatch" open>
-  <summary>Step dispatch</summary>
-  <ul>
-<li>:class:<code>SendBytes</code>   → :meth:<code>send_raw</code></li>
-<li>:class:<code>Sleep</code>       → :func:<code>asyncio.sleep</code></li>
-<li>:class:<code>ReadResponse</code> → :meth:<code>read_response</code></li>
-<li>:class:<code>Abort</code>       → <code>transport.abort()</code> (RST on Linux);
-                         walks no further steps.</li>
-</ul>
-</details>
 
     </div>
 
@@ -5410,23 +5781,19 @@ try/except boilerplate per scenario.</p>
 <div class="doc doc-object doc-function">
 
 
-<h4 id="blackbull.client.http1.HTTP1Client.read_response" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">read_response</span><span class="p">(</span><span class="o">*</span><span class="p">,</span> <span class="n">timeout</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
+<h4 id="blackbull.websocket.WebSocket.receive_bytes" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">receive_bytes</span><span class="p">()</span></code>
 
   <span class="doc doc-labels">
       <small class="doc doc-label doc-label-async"><code>async</code></small>
   </span>
 
-<a href="#blackbull.client.http1.HTTP1Client.read_response" class="headerlink" title="Permanent link">&para;</a></h4>
+<a href="#blackbull.websocket.WebSocket.receive_bytes" class="headerlink" title="Permanent link">&para;</a></h4>
 
 
     <div class="doc doc-contents ">
 
-        <p>Read one HTTP/1.1 response from the connection.</p>
-<p>Optional <code>timeout</code> bounds the entire read (status line + headers
-+ body).  Raises :class:<code>asyncio.TimeoutError</code> if the deadline is
-hit; the caller decides whether to treat that as a transport-
-fail or a normal protocol outcome.</p>
+        <p>Await one message, requiring it to be binary.</p>
 
 
     </div>
@@ -5436,39 +5803,19 @@ fail or a normal protocol outcome.</p>
 <div class="doc doc-object doc-function">
 
 
-<h4 id="blackbull.client.http1.HTTP1Client.reset_wire_buffer" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">reset_wire_buffer</span><span class="p">()</span></code>
-
-<a href="#blackbull.client.http1.HTTP1Client.reset_wire_buffer" class="headerlink" title="Permanent link">&para;</a></h4>
-
-
-    <div class="doc doc-contents ">
-
-        <p>Discard previously captured wire bytes.</p>
-
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-function">
-
-
-<h4 id="blackbull.client.http1.HTTP1Client.send_body_bytes" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">send_body_bytes</span><span class="p">(</span><span class="n">data</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">byte_interval</span><span class="o">=</span><span class="mf">0.0</span><span class="p">)</span></code>
+<h4 id="blackbull.websocket.WebSocket.receive_json" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">receive_json</span><span class="p">()</span></code>
 
   <span class="doc doc-labels">
       <small class="doc doc-label doc-label-async"><code>async</code></small>
   </span>
 
-<a href="#blackbull.client.http1.HTTP1Client.send_body_bytes" class="headerlink" title="Permanent link">&para;</a></h4>
+<a href="#blackbull.websocket.WebSocket.receive_json" class="headerlink" title="Permanent link">&para;</a></h4>
 
 
     <div class="doc doc-contents ">
 
-        <p>Send body octets to the peer.</p>
-<p>Same semantics as :meth:<code>send_raw</code>, kept separate for readability
-at call sites that frame headers separately from the body.</p>
+        <p>Await one message and parse it as JSON (text or binary).</p>
 
 
     </div>
@@ -5478,22 +5825,19 @@ at call sites that frame headers separately from the body.</p>
 <div class="doc doc-object doc-function">
 
 
-<h4 id="blackbull.client.http1.HTTP1Client.send_chunk" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">send_chunk</span><span class="p">(</span><span class="n">data</span><span class="p">)</span></code>
+<h4 id="blackbull.websocket.WebSocket.receive_text" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">receive_text</span><span class="p">()</span></code>
 
   <span class="doc doc-labels">
       <small class="doc doc-label doc-label-async"><code>async</code></small>
   </span>
 
-<a href="#blackbull.client.http1.HTTP1Client.send_chunk" class="headerlink" title="Permanent link">&para;</a></h4>
+<a href="#blackbull.websocket.WebSocket.receive_text" class="headerlink" title="Permanent link">&para;</a></h4>
 
 
     <div class="doc doc-contents ">
 
-        <p>Send one <code>Transfer-Encoding: chunked</code> chunk.</p>
-<p>Caller must have already emitted <code>Transfer-Encoding: chunked</code>
-via :meth:<code>send_header_line</code> and called :meth:<code>end_headers</code>.
-Finish the chunked stream with :meth:<code>end_chunked</code>.</p>
+        <p>Await one message, requiring it to be text.</p>
 
 
     </div>
@@ -5503,22 +5847,19 @@ Finish the chunked stream with :meth:<code>end_chunked</code>.</p>
 <div class="doc doc-object doc-function">
 
 
-<h4 id="blackbull.client.http1.HTTP1Client.send_header_line" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">send_header_line</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="n">value</span><span class="p">)</span></code>
+<h4 id="blackbull.websocket.WebSocket.send" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">send</span><span class="p">(</span><span class="n">data</span><span class="p">)</span></code>
 
   <span class="doc doc-labels">
       <small class="doc doc-label doc-label-async"><code>async</code></small>
   </span>
 
-<a href="#blackbull.client.http1.HTTP1Client.send_header_line" class="headerlink" title="Permanent link">&para;</a></h4>
+<a href="#blackbull.websocket.WebSocket.send" class="headerlink" title="Permanent link">&para;</a></h4>
 
 
     <div class="doc doc-contents ">
 
-        <p>Emit one <code>Name: Value\r\n</code> header line with no dedup or
-validation.  Callers wanting a duplicate <code>Content-Length</code> or a
-header value containing arbitrary bytes use this primitive
-directly.</p>
+        <p>Send <em>data</em> as text or binary, chosen by its Python type.</p>
 
 
     </div>
@@ -5528,25 +5869,19 @@ directly.</p>
 <div class="doc doc-object doc-function">
 
 
-<h4 id="blackbull.client.http1.HTTP1Client.send_raw" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">send_raw</span><span class="p">(</span><span class="n">data</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">byte_interval</span><span class="o">=</span><span class="mf">0.0</span><span class="p">)</span></code>
+<h4 id="blackbull.websocket.WebSocket.send_bytes" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">send_bytes</span><span class="p">(</span><span class="n">data</span><span class="p">)</span></code>
 
   <span class="doc doc-labels">
       <small class="doc doc-label doc-label-async"><code>async</code></small>
   </span>
 
-<a href="#blackbull.client.http1.HTTP1Client.send_raw" class="headerlink" title="Permanent link">&para;</a></h4>
+<a href="#blackbull.websocket.WebSocket.send_bytes" class="headerlink" title="Permanent link">&para;</a></h4>
 
 
     <div class="doc doc-contents ">
 
-        <p>Push arbitrary bytes onto the underlying socket.</p>
-<p>When <code>byte_interval &gt; 0</code> the bytes are transmitted one at a time
-with <code>byte_interval</code> seconds between writes — the primitive
-slowloris-style stall the differential tests rely on.  Each per-
-byte write is followed by <code>drain()</code> (inherited from
-:class:<code>AsyncioWriter</code>), so the bytes actually leave the socket
-on schedule rather than accumulating in the asyncio send buffer.</p>
+        <p>Send one complete binary message.</p>
 
 
     </div>
@@ -5556,23 +5891,21 @@ on schedule rather than accumulating in the asyncio send buffer.</p>
 <div class="doc doc-object doc-function">
 
 
-<h4 id="blackbull.client.http1.HTTP1Client.send_request_line" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">send_request_line</span><span class="p">(</span><span class="n">method</span><span class="p">,</span> <span class="n">target</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">version</span><span class="o">=</span><span class="sa">b</span><span class="s1">&#39;HTTP/1.1&#39;</span><span class="p">)</span></code>
+<h4 id="blackbull.websocket.WebSocket.send_json" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">send_json</span><span class="p">(</span><span class="n">data</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">binary</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span></code>
 
   <span class="doc doc-labels">
       <small class="doc doc-label doc-label-async"><code>async</code></small>
   </span>
 
-<a href="#blackbull.client.http1.HTTP1Client.send_request_line" class="headerlink" title="Permanent link">&para;</a></h4>
+<a href="#blackbull.websocket.WebSocket.send_json" class="headerlink" title="Permanent link">&para;</a></h4>
 
 
     <div class="doc doc-contents ">
 
-        <p>Emit <code>METHOD&lt;SP&gt;TARGET&lt;SP&gt;HTTP/1.1\r\n</code> with no validation.</p>
-<p>Accepts arbitrary bytes for <code>method</code>/<code>target</code>/<code>version</code> so a
-test can deliberately send <code>b"BREW"</code>, lowercase versions, or
-garbage tokens.  No automatic Host or Content-Length injection —
-the caller drives the wire bit by bit.</p>
+        <p>JSON-serialise <em>data</em> and send it as one message.</p>
+<p>Text by default, which is what browsers and most clients expect; pass
+<code>binary=True</code> to send the UTF-8 encoding as a binary frame instead.</p>
 
 
     </div>
@@ -5582,23 +5915,19 @@ the caller drives the wire bit by bit.</p>
 <div class="doc doc-object doc-function">
 
 
-<h4 id="blackbull.client.http1.HTTP1Client.stream" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">stream</span><span class="p">(</span><span class="n">method</span><span class="p">,</span> <span class="n">path</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">headers</span><span class="o">=</span><span class="p">(),</span> <span class="n">body</span><span class="o">=</span><span class="sa">b</span><span class="s1">&#39;&#39;</span><span class="p">)</span></code>
+<h4 id="blackbull.websocket.WebSocket.send_text" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">send_text</span><span class="p">(</span><span class="n">data</span><span class="p">)</span></code>
 
   <span class="doc doc-labels">
       <small class="doc doc-label doc-label-async"><code>async</code></small>
   </span>
 
-<a href="#blackbull.client.http1.HTTP1Client.stream" class="headerlink" title="Permanent link">&para;</a></h4>
+<a href="#blackbull.websocket.WebSocket.send_text" class="headerlink" title="Permanent link">&para;</a></h4>
 
 
     <div class="doc doc-contents ">
 
-        <p>Send a request and yield body chunks lazily.</p>
-<p>Unlike <code>request()</code> this does not buffer the response body, so
-gigabyte-sized responses do not need to fit in memory.  Status and
-headers are not exposed by this method; use <code>request()</code> if you
-need them.</p>
+        <p>Send one complete text message.</p>
 
 
     </div>
@@ -5617,22 +5946,25 @@ need them.</p>
 
 
 
-<h3 id="blackbull.client.http1.HTTP1RequestSender" class="doc doc-heading">
-            <code>HTTP1RequestSender</code>
+<h3 id="blackbull.websocket.WebSocketDisconnect" class="doc doc-heading">
+            <code>WebSocketDisconnect</code>
 
 
-<a href="#blackbull.client.http1.HTTP1RequestSender" class="headerlink" title="Permanent link">&para;</a></h3>
+<a href="#blackbull.websocket.WebSocketDisconnect" class="headerlink" title="Permanent link">&para;</a></h3>
 
 
     <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="Exception">Exception</span></code></p>
 
 
 
-        <p>Writes an HTTP/1.1 request — request line, headers, body — to an <code>AbstractWriter</code>.</p>
-<p>Adds <code>Content-Length</code> automatically for fixed-size byte bodies; switches
-to <code>Transfer-Encoding: chunked</code> for <code>AsyncIterable</code> bodies.  The
-<code>Host</code> header MUST be present (RFC 7230 §5.4) — the helper raises
-<code>ProtocolError</code> if it is not.</p>
+        <p>The peer closed the connection.</p>
+<p>Raised by :meth:<code>WebSocket.receive</code> and its typed variants.  Iterating
+with <code>async for</code> handles this for you — the loop simply ends — so catch
+it only when you call <code>receive()</code> directly and need the close code.</p>
+<p><code>code</code> is the RFC 6455 close code the peer sent, or 1005 when it sent
+none.  <code>reason</code> is its optional UTF-8 explanation.</p>
 
 
 
@@ -5663,56 +5995,120 @@ to <code>Transfer-Encoding: chunked</code> for <code>AsyncIterable</code> bodies
 
 </div>
 
-<div class="doc doc-object doc-class">
+
+<div class="doc doc-object doc-function">
 
 
+<h3 id="blackbull.websocket.connect_consumed" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">connect_consumed</span><span class="p">(</span><span class="n">conn</span><span class="p">)</span></code>
 
-<h3 id="blackbull.client.http1.HTTP1ResponseRecipient" class="doc doc-heading">
-            <code>HTTP1ResponseRecipient</code>
-
-
-<a href="#blackbull.client.http1.HTTP1ResponseRecipient" class="headerlink" title="Permanent link">&para;</a></h3>
+<a href="#blackbull.websocket.connect_consumed" class="headerlink" title="Permanent link">&para;</a></h3>
 
 
     <div class="doc doc-contents ">
 
+        <p>True once the <code>websocket.connect</code> event has been read for <em>conn</em>.</p>
 
-
-        <p>Reads an HTTP/1.1 response from an <code>AbstractReader</code>.</p>
-<p>Decodes both <code>Content-Length</code>-bound and <code>Transfer-Encoding: chunked</code>
-bodies.  Returns a <code>ClientResponse</code>; <code>stream()</code> returns an async
-iterator of body chunks instead, so large responses don't have to fit
-in memory.</p>
-
-
-
-
-
-
-
-
-
-
-
-<div class="doc doc-children">
-
-
-
-
-
-
-
-
-
-
-
-
-  </div>
 
     </div>
 
 </div>
 
+<div class="doc doc-object doc-function">
+
+
+<h3 id="blackbull.websocket.handshake_accepted" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">handshake_accepted</span><span class="p">(</span><span class="n">conn</span><span class="p">)</span></code>
+
+<a href="#blackbull.websocket.handshake_accepted" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>True once the WebSocket handshake has been accepted for <em>conn</em>.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="blackbull.websocket.handshake_closed" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">handshake_closed</span><span class="p">(</span><span class="n">conn</span><span class="p">)</span></code>
+
+<a href="#blackbull.websocket.handshake_closed" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>True once <code>websocket.close</code> has been sent for <em>conn</em>.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="blackbull.websocket.mark_connect_consumed" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">mark_connect_consumed</span><span class="p">(</span><span class="n">conn</span><span class="p">)</span></code>
+
+<a href="#blackbull.websocket.mark_connect_consumed" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Record that <code>websocket.connect</code> has been taken off the channel.</p>
+<p>For middleware that pops the connect event <em>without</em> answering it — an
+auth layer that wants the option to reject with a close code, say.  A
+handler-side :class:<code>WebSocket</code> then knows not to wait for a handshake
+offer that is already gone, but still sends the accept itself.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="blackbull.websocket.mark_handshake_accepted" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">mark_handshake_accepted</span><span class="p">(</span><span class="n">conn</span><span class="p">)</span></code>
+
+<a href="#blackbull.websocket.mark_handshake_accepted" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Record that <code>websocket.accept</code> has been sent for <em>conn</em>.</p>
+<p>Implies :func:<code>connect_consumed</code> — the offer must have been read before
+it could be answered.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="blackbull.websocket.mark_handshake_closed" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">mark_handshake_closed</span><span class="p">(</span><span class="n">conn</span><span class="p">)</span></code>
+
+<a href="#blackbull.websocket.mark_handshake_closed" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Record that <code>websocket.close</code> has been sent for <em>conn</em>.</p>
+
+
+    </div>
+
+</div>
 
 
 
@@ -5770,10 +6166,10 @@ in memory.</p>
     
       
       
-      <script id="__config" type="application/json">{"annotate": null, "base": "../../../..", "features": [], "search": "../../../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+      <script id="__config" type="application/json">{"annotate": null, "base": "../../..", "features": [], "search": "../../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
     
     
-      <script src="../../../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      <script src="../../../assets/javascripts/bundle.d7400e89.min.js"></script>
       
     
   </body>

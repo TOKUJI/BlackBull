@@ -4544,6 +4544,34 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="websocket/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    websocket
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -4893,6 +4921,8 @@
 <li><code>Headers</code>: case-insensitive, ordered, multi-valued HTTP header store.</li>
 <li><code>Connection</code>: the typed internal request representation (Sprint 79); the handler context object exposing <code>method</code>/<code>path</code>/<code>headers</code>/<code>cookies</code>/<code>body()</code>/<code>json()</code>/<code>text()</code>. The ASGI <code>scope</code> is a derived view (<code>Connection.as_scope()</code>).</li>
 <li><code>Request</code>: <strong>deprecated</strong> alias of <code>Connection</code> (Sprint 79 Phase 5). Accessing <code>blackbull.Request</code> emits a <code>DeprecationWarning</code>; replace <code>request: Request</code> handler params with <code>conn: Connection</code> (identical API). Removal no earlier than 2027-08-01.</li>
+<li><code>WebSocket</code>: the high-level WebSocket handler object — <code>await ws.accept()</code>, <code>async for message in ws</code>, <code>ws.send_text()</code>/<code>send_bytes()</code>/<code>send_json()</code>, <code>await ws.close()</code>. Declare <code>async def handler(ws: WebSocket)</code> on a <code>Scheme.websocket</code> route to receive it; the raw <code>(conn, receive, send)</code> form keeps working unchanged.</li>
+<li><code>WebSocketDisconnect</code>: raised by <code>ws.receive()</code> when the peer closes; carries <code>code</code> and <code>reason</code>. <code>async for</code> ends the loop instead of raising.</li>
 <li><code>Depends</code>: per-request provider injection for simplified handlers (async-generator providers get teardown after the response is sent).</li>
 <li><code>cookie_header</code>: builds a <code>Set-Cookie</code> header tuple.</li>
 <li><code>read_body</code>: reads and buffers the full request body from the ASGI receive channel.</li>

@@ -706,6 +706,56 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Registering a route">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-api" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The API
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#rejecting-a-connection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Rejecting a connection
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#catching-the-close-code" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Catching the close code
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-raw-event-form" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The raw event form
+      
+    </span>
+  </a>
+  
 </li>
       
         <li class="md-nav__item">
@@ -4611,6 +4661,34 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/websocket/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    websocket
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -4891,6 +4969,56 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Registering a route">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-api" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The API
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#rejecting-a-connection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Rejecting a connection
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#catching-the-close-code" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Catching the close code
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-raw-event-form" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The raw event form
+      
+    </span>
+  </a>
+  
 </li>
       
         <li class="md-nav__item">
@@ -5007,16 +5135,115 @@
 as an opt-in.  <code>permessage-deflate</code> (RFC 7692) compression is
 negotiated automatically.</p>
 <h2 id="registering-a-route">Registering a route<a class="headerlink" href="#registering-a-route" title="Permanent link">&para;</a></h2>
-<p>WebSocket routes use <code>scheme=Scheme.websocket</code>.  The handler
-always receives the full <code>(scope, receive, send)</code> triplet —
-the simplified handler form does <strong>not</strong> apply:</p>
-<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">blackbull</span><span class="w"> </span><span class="kn">import</span> <span class="n">BlackBull</span>
+<p>WebSocket routes use <code>scheme=Scheme.websocket</code>.  Declare a <code>WebSocket</code>
+parameter and the framework hands you the connection as an object:</p>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">blackbull</span><span class="w"> </span><span class="kn">import</span> <span class="n">BlackBull</span><span class="p">,</span> <span class="n">WebSocket</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">blackbull.utils</span><span class="w"> </span><span class="kn">import</span> <span class="n">Scheme</span>
 
 <span class="n">app</span> <span class="o">=</span> <span class="n">BlackBull</span><span class="p">()</span>
 
 <span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">&#39;/ws&#39;</span><span class="p">,</span> <span class="n">scheme</span><span class="o">=</span><span class="n">Scheme</span><span class="o">.</span><span class="n">websocket</span><span class="p">)</span>
-<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">ws_handler</span><span class="p">(</span><span class="n">scope</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">ws_handler</span><span class="p">(</span><span class="n">ws</span><span class="p">:</span> <span class="n">WebSocket</span><span class="p">):</span>
+    <span class="k">await</span> <span class="n">ws</span><span class="o">.</span><span class="n">accept</span><span class="p">()</span>
+    <span class="k">async</span> <span class="k">for</span> <span class="n">message</span> <span class="ow">in</span> <span class="n">ws</span><span class="p">:</span>
+        <span class="k">await</span> <span class="n">ws</span><span class="o">.</span><span class="n">send</span><span class="p">(</span><span class="n">message</span><span class="p">)</span>
+</code></pre></div>
+<p>That is the whole echo server.  The loop ends when the client goes away —
+no sentinel event to test for, and no <code>try</code>/<code>except</code> around it.</p>
+<p><code>Sec-WebSocket-Version: 13</code> is validated automatically.</p>
+<h3 id="the-api">The API<a class="headerlink" href="#the-api" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Call</th>
+<th>Does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>await ws.accept(subprotocol=None, headers=None)</code></td>
+<td>Completes the handshake.  Nothing may be sent before it.</td>
+</tr>
+<tr>
+<td><code>await ws.close(code=1000, reason=None)</code></td>
+<td>Closes.  Called <em>before</em> <code>accept()</code>, it rejects the connection instead.  Idempotent, so <code>finally: await ws.close()</code> is safe.</td>
+</tr>
+<tr>
+<td><code>await ws.send_text(str)</code> / <code>send_bytes(bytes)</code></td>
+<td>Sends one complete message.</td>
+</tr>
+<tr>
+<td><code>await ws.send_json(obj, binary=False)</code></td>
+<td>Serialises and sends.</td>
+</tr>
+<tr>
+<td><code>await ws.send(str \| bytes)</code></td>
+<td>Picks text or binary from the Python type.</td>
+</tr>
+<tr>
+<td><code>await ws.receive()</code></td>
+<td>One message: <code>str</code> for text, <code>bytes</code> for binary.  Raises <code>WebSocketDisconnect</code> when the peer closes.</td>
+</tr>
+<tr>
+<td><code>await ws.receive_text()</code> / <code>receive_bytes()</code> / <code>receive_json()</code></td>
+<td>Same, requiring a particular kind.</td>
+</tr>
+<tr>
+<td><code>async for message in ws</code></td>
+<td>Iterates messages; <strong>ends</strong> at disconnect rather than raising.</td>
+</tr>
+</tbody>
+</table>
+<p>Connection facts are on the object too — <code>ws.path</code>, <code>ws.headers</code>,
+<code>ws.path_params</code>, <code>ws.query_string</code>, <code>ws.client</code>, <code>ws.subprotocols</code> — and
+the full <a href="../requests-and-responses/"><code>Connection</code></a> is <code>ws.connection</code>.  State
+is readable via <code>ws.accepted</code>, <code>ws.client_disconnected</code>, and <code>ws.close_code</code>.</p>
+<p>The parameter is matched by annotation first, so <code>ws: WebSocket</code> works under
+any name.  Un-annotated, the names <code>ws</code> and <code>websocket</code> are recognised.  You
+can take the <code>Connection</code> alongside it:</p>
+<div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">&#39;/room/</span><span class="si">{name}</span><span class="s1">&#39;</span><span class="p">,</span> <span class="n">scheme</span><span class="o">=</span><span class="n">Scheme</span><span class="o">.</span><span class="n">websocket</span><span class="p">)</span>
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">room</span><span class="p">(</span><span class="n">ws</span><span class="p">:</span> <span class="n">WebSocket</span><span class="p">,</span> <span class="n">conn</span><span class="p">:</span> <span class="n">Connection</span><span class="p">):</span>
+    <span class="k">await</span> <span class="n">ws</span><span class="o">.</span><span class="n">accept</span><span class="p">()</span>
+    <span class="k">await</span> <span class="n">ws</span><span class="o">.</span><span class="n">send_text</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;welcome to </span><span class="si">{</span><span class="n">conn</span><span class="o">.</span><span class="n">path_params</span><span class="p">[</span><span class="s2">&quot;name&quot;</span><span class="p">]</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+</code></pre></div>
+<p>A parameter that is neither is a <code>TypeError</code> <strong>at registration</strong>, not on the
+first connection.  Path params, query params, and <code>Depends</code> are not injected
+into WebSocket handlers yet — read them from <code>ws.path_params</code> and
+<code>ws.query_string</code> for now.</p>
+<h3 id="rejecting-a-connection">Rejecting a connection<a class="headerlink" href="#rejecting-a-connection" title="Permanent link">&para;</a></h3>
+<p>Call <code>close()</code> without accepting.  The client's <code>connect()</code> fails outright,
+rather than seeing a connection open and immediately shut:</p>
+<div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">&#39;/private&#39;</span><span class="p">,</span> <span class="n">scheme</span><span class="o">=</span><span class="n">Scheme</span><span class="o">.</span><span class="n">websocket</span><span class="p">)</span>
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">private</span><span class="p">(</span><span class="n">ws</span><span class="p">:</span> <span class="n">WebSocket</span><span class="p">):</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">authorized</span><span class="p">(</span><span class="n">ws</span><span class="o">.</span><span class="n">headers</span><span class="p">):</span>
+        <span class="k">await</span> <span class="n">ws</span><span class="o">.</span><span class="n">close</span><span class="p">(</span><span class="mi">4401</span><span class="p">,</span> <span class="s1">&#39;unauthorized&#39;</span><span class="p">)</span>
+        <span class="k">return</span>
+    <span class="k">await</span> <span class="n">ws</span><span class="o">.</span><span class="n">accept</span><span class="p">()</span>
+    <span class="o">...</span>
+</code></pre></div>
+<h3 id="catching-the-close-code">Catching the close code<a class="headerlink" href="#catching-the-close-code" title="Permanent link">&para;</a></h3>
+<p><code>async for</code> swallows the disconnect because most loops do not care why the
+peer left.  When you do, call <code>receive()</code> directly:</p>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">blackbull</span><span class="w"> </span><span class="kn">import</span> <span class="n">WebSocketDisconnect</span>
+
+<span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">&#39;/audited&#39;</span><span class="p">,</span> <span class="n">scheme</span><span class="o">=</span><span class="n">Scheme</span><span class="o">.</span><span class="n">websocket</span><span class="p">)</span>
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">audited</span><span class="p">(</span><span class="n">ws</span><span class="p">:</span> <span class="n">WebSocket</span><span class="p">):</span>
+    <span class="k">await</span> <span class="n">ws</span><span class="o">.</span><span class="n">accept</span><span class="p">()</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="k">while</span> <span class="kc">True</span><span class="p">:</span>
+            <span class="k">await</span> <span class="n">ws</span><span class="o">.</span><span class="n">send_text</span><span class="p">(</span><span class="k">await</span> <span class="n">ws</span><span class="o">.</span><span class="n">receive_text</span><span class="p">())</span>
+    <span class="k">except</span> <span class="n">WebSocketDisconnect</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;closed: </span><span class="si">%s</span><span class="s1"> </span><span class="si">%s</span><span class="s1">&#39;</span><span class="p">,</span> <span class="n">exc</span><span class="o">.</span><span class="n">code</span><span class="p">,</span> <span class="n">exc</span><span class="o">.</span><span class="n">reason</span><span class="p">)</span>
+</code></pre></div>
+<h2 id="the-raw-event-form">The raw event form<a class="headerlink" href="#the-raw-event-form" title="Permanent link">&para;</a></h2>
+<p>The <code>(conn, receive, send)</code> triplet keeps working exactly as before, and is
+<strong>not deprecated</strong> — it stays supported for at least a year past the release
+that introduced the object (v0.63.0), and there is no plan to remove it.
+Reach for it when you need to see the events themselves: writing middleware,
+driving the handshake in an unusual order, or handling an event the object
+does not model.</p>
+<div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">&#39;/ws-raw&#39;</span><span class="p">,</span> <span class="n">scheme</span><span class="o">=</span><span class="n">Scheme</span><span class="o">.</span><span class="n">websocket</span><span class="p">)</span>
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">ws_raw</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
     <span class="k">await</span> <span class="n">receive</span><span class="p">()</span>                          <span class="c1"># consume &#39;websocket.connect&#39;</span>
     <span class="k">await</span> <span class="n">send</span><span class="p">({</span><span class="s1">&#39;type&#39;</span><span class="p">:</span> <span class="s1">&#39;websocket.accept&#39;</span><span class="p">})</span>
     <span class="k">while</span> <span class="kc">True</span><span class="p">:</span>
@@ -5026,7 +5253,10 @@ the simplified handler form does <strong>not</strong> apply:</p>
         <span class="n">text</span> <span class="o">=</span> <span class="n">event</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;text&#39;</span><span class="p">)</span> <span class="ow">or</span> <span class="n">event</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;bytes&#39;</span><span class="p">,</span> <span class="sa">b</span><span class="s1">&#39;&#39;</span><span class="p">)</span><span class="o">.</span><span class="n">decode</span><span class="p">()</span>
         <span class="k">await</span> <span class="n">send</span><span class="p">({</span><span class="s1">&#39;type&#39;</span><span class="p">:</span> <span class="s1">&#39;websocket.send&#39;</span><span class="p">,</span> <span class="s1">&#39;text&#39;</span><span class="p">:</span> <span class="n">text</span><span class="p">})</span>
 </code></pre></div>
-<p><code>Sec-WebSocket-Version: 13</code> is validated automatically.</p>
+<p>The two forms are the same connection seen at different levels: the object's
+methods emit exactly these events, so framing, fragmentation, and close
+semantics are identical either way.  A route is classified once, at
+registration, by whether its signature contains both <code>receive</code> and <code>send</code>.</p>
 <h2 id="the-websocket-middleware">The <code>websocket</code> middleware<a class="headerlink" href="#the-websocket-middleware" title="Permanent link">&para;</a></h2>
 <p>The built-in <code>blackbull.middleware.websocket</code> consumes the initial
 <code>websocket.connect</code> event and sends <code>websocket.accept</code>, so the
@@ -5042,7 +5272,60 @@ inner handler can skip that boilerplate:</p>
             <span class="k">break</span>
         <span class="k">await</span> <span class="n">send</span><span class="p">({</span><span class="s1">&#39;type&#39;</span><span class="p">:</span> <span class="s1">&#39;websocket.send&#39;</span><span class="p">,</span> <span class="s1">&#39;text&#39;</span><span class="p">:</span> <span class="n">event</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;text&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">)})</span>
 </code></pre></div>
+<p>It works with the <code>WebSocket</code> object too — it records the completed
+handshake on the connection, and the object adopts that state instead of
+waiting for a <code>websocket.connect</code> that has already been consumed:</p>
+<div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">&#39;/chat&#39;</span><span class="p">,</span> <span class="n">scheme</span><span class="o">=</span><span class="n">Scheme</span><span class="o">.</span><span class="n">websocket</span><span class="p">,</span> <span class="n">middlewares</span><span class="o">=</span><span class="p">[</span><span class="n">websocket</span><span class="p">])</span>
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">chat</span><span class="p">(</span><span class="n">ws</span><span class="p">:</span> <span class="n">WebSocket</span><span class="p">):</span>
+    <span class="k">async</span> <span class="k">for</span> <span class="n">message</span> <span class="ow">in</span> <span class="n">ws</span><span class="p">:</span>        <span class="c1"># already accepted</span>
+        <span class="k">await</span> <span class="n">ws</span><span class="o">.</span><span class="n">send</span><span class="p">(</span><span class="n">message</span><span class="p">)</span>
+</code></pre></div>
+<p>A bare <code>await ws.accept()</code> in that handler is tolerated as a no-op, so the
+same body works whether or not the middleware is on the route.  Asking for
+something the middleware cannot retroactively provide —
+<code>await ws.accept('chat')</code>, or extra headers — raises instead, since the 101
+has already gone out.  Likewise, if the handler closes the connection
+itself, the middleware does not append a second close.</p>
+<p>With the object form the middleware is largely redundant: <code>await
+ws.accept()</code> is the one line it was removing.</p>
+<div class="admonition note">
+<p class="admonition-title">Writing middleware that touches the handshake</p>
+<p>Middleware that takes the <code>websocket.connect</code> event off the receive
+channel must record it, or a downstream <code>WebSocket</code> object will read the
+client's first <em>message</em> expecting the handshake.  Which call depends on
+how far the middleware went:</p>
+<table>
+<thead>
+<tr>
+<th>Middleware did</th>
+<th>Call</th>
+<th>The object then</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Read connect <strong>and</strong> sent <code>websocket.accept</code></td>
+<td><code>mark_handshake_accepted(conn)</code></td>
+<td>Starts accepted; a bare <code>accept()</code> is a no-op</td>
+</tr>
+<tr>
+<td>Read connect only, left accepting to the handler</td>
+<td><code>mark_connect_consumed(conn)</code></td>
+<td>Doesn't wait for connect, still sends the accept</td>
+</tr>
+</tbody>
+</table>
+<p>Both live in <code>blackbull.websocket</code>.  The second is the shape an auth
+middleware wants — pop connect so you keep the option of rejecting with
+a close code, then delegate; <code>examples/ChatServer/chatserver.py</code>'s
+<code>auth_mw</code> does exactly that.  The distinction is not cosmetic: marking a
+merely-consumed connection as <em>accepted</em> would make the handler skip its
+own <code>accept()</code>, leaving the client hanging on a handshake nobody
+completed.  Omit both and the object raises, naming each.</p>
+</div>
 <h2 id="typed-websocket-events">Typed WebSocket events<a class="headerlink" href="#typed-websocket-events" title="Permanent link">&para;</a></h2>
+<p>These apply to the raw form; the <code>WebSocket</code> object hides the events
+entirely, and constructs them itself against these same declarations.</p>
 <p>The events are plain ASGI dicts on the wire, but their shapes are declared
 as <code>TypedDict</code>s, so a type checker can narrow them on the <code>type</code> key:</p>
 <div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">blackbull</span><span class="w"> </span><span class="kn">import</span> <span class="n">ASGIReceiveCallable</span><span class="p">,</span> <span class="n">ASGISendCallable</span>
@@ -5176,6 +5459,8 @@ FIN=1, opcode=0x0,   payload=b&#39;&#39;      ← final continuation
 <p>The app sees a single event:</p>
 <div class="highlight"><pre><span></span><code><span class="p">{</span><span class="s1">&#39;type&#39;</span><span class="p">:</span> <span class="s1">&#39;websocket.receive&#39;</span><span class="p">,</span> <span class="s1">&#39;text&#39;</span><span class="p">:</span> <span class="s1">&#39;hello&#39;</span><span class="p">,</span> <span class="s1">&#39;bytes&#39;</span><span class="p">:</span> <span class="kc">None</span><span class="p">}</span>
 </code></pre></div>
+<p>— or, through the <code>WebSocket</code> object, one iteration of <code>async for</code> yielding
+the <code>str</code> <code>'hello'</code>.</p>
 <p>Control frames (ping, pong, close) may legally appear between
 data fragments; BlackBull handles them immediately (responding
 to pings with pong) and then continues reassembling the

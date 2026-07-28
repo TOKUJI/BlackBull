@@ -4529,6 +4529,34 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../websocket/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    websocket
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -4845,6 +4873,17 @@
 <a href="#blackbull.middleware.websocket" class="headerlink" title="Permanent link">&para;</a></h2>
 
     <div class="doc doc-contents first">
+
+        <p>Handshake middleware — accepts the connection before the handler runs.</p>
+<p>Predates the high-level :class:<code>~blackbull.websocket.WebSocket</code> object and
+exists to strip the accept/close boilerplate from raw-triplet handlers.  It
+works with either handler form: it records the handshake on the connection,
+so a <code>WebSocket</code> object built downstream adopts that state instead of
+waiting for a <code>websocket.connect</code> that has already been consumed.</p>
+<p>With the object form the middleware is largely redundant — <code>await
+ws.accept()</code> is the line it was removing — but combining them is supported
+rather than refused, because a route's middleware list and its handler
+signature are usually changed by different people at different times.</p>
 
 
 

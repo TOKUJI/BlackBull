@@ -4633,6 +4633,34 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../websocket/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    websocket
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -5242,7 +5270,12 @@ that should itself be used as a context manager.</p>
 
 
 
-        <p>Raised when the server side closes (or rejects) the WebSocket.</p>
+        <p>The peer closed the connection.</p>
+<p>Raised by :meth:<code>WebSocket.receive</code> and its typed variants.  Iterating
+with <code>async for</code> handles this for you — the loop simply ends — so catch
+it only when you call <code>receive()</code> directly and need the close code.</p>
+<p><code>code</code> is the RFC 6455 close code the peer sent, or 1005 when it sent
+none.  <code>reason</code> is its optional UTF-8 explanation.</p>
 
 
 

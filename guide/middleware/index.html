@@ -4722,6 +4722,34 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/websocket/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    websocket
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -5365,6 +5393,12 @@ to skip everything below it.</p>
             <span class="k">break</span>
         <span class="k">await</span> <span class="n">send</span><span class="p">({</span><span class="s1">&#39;type&#39;</span><span class="p">:</span> <span class="s1">&#39;websocket.send&#39;</span><span class="p">,</span> <span class="s1">&#39;text&#39;</span><span class="p">:</span> <span class="n">event</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;text&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">)})</span>
 </code></pre></div>
+<p>Works with the high-level <code>WebSocket</code> handler form too — it records the
+completed handshake on the connection, so the object adopts it rather than
+waiting for a <code>websocket.connect</code> that is already gone.  See
+<a href="../websockets/#the-websocket-middleware">WebSockets</a> for the exact
+semantics, including what happens if the handler also calls <code>accept()</code> or
+closes the connection itself.</p>
 <h3 id="compression-compress"><code>Compression</code> / <code>compress</code><a class="headerlink" href="#compression-compress" title="Permanent link">&para;</a></h3>
 <p>Compresses HTTP response bodies using the codec the client prefers
 (brotli &gt; zstd &gt; gzip, based on <code>Accept-Encoding</code>):</p>
