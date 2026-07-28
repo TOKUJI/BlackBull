@@ -117,6 +117,11 @@ venv.bak/
 .claude
 # CLAUDE.md is a symlink to AGENTS.md — create locally: ln -s AGENTS.md CLAUDE.md
 CLAUDE.md
+# Convenience link so GitHub-side tooling finds the skills locally — create
+# with: ln -s ../.claude/skills .github/skills
+# Untracked deliberately: it resolves through .claude above, which is ignored,
+# so a committed symlink would arrive dangling in every clone and in CI.
+.github/skills
 
 # benchmark result files (keep directory + READMEs, ignore data)
 bench/results/*
