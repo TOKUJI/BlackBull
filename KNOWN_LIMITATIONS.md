@@ -18,6 +18,14 @@ Every item here is something the project knows about and has a
 position on.  Behaviours that aren't listed below — anything that
 would surprise us as well — belong on the GitHub issue tracker.
 
+**A limitation is not the same as a missing feature.** This file lists
+things that could *surprise* you: a default that is not what you would
+guess, a cost you would not predict, a surface that is narrower than its
+equivalent elsewhere.  Capabilities BlackBull simply doesn't aim to
+provide — HTTP/3, an ORM, a gRPC client — are not limitations; they are
+scope, and they live in [Deliberate non-goals](#deliberate-non-goals--not-limitations)
+at the end so they don't pad the list above.
+
 ---
 
 ## Protocol-level
@@ -207,9 +215,13 @@ capacity against `nproc / 2` on typical SMT-enabled hardware.
 
 ---
 
-## What BlackBull doesn't do
+## Deliberately narrow surfaces
 
-### Static-file serving is not a production CDN
+These are implemented and supported, but fenced tighter than the
+equivalent surface in a larger framework.  Each fence is lifted on
+demonstrated demand, not speculatively.
+
+### Static-file serving: know the per-request cost
 
 [`blackbull/middleware/static.py`](blackbull/middleware/static.py)
 serves files three ways at runtime:
@@ -237,16 +249,8 @@ in to keep prior performance.
 
 `StaticFiles` itself emits no `ETag`; pair it with the `Cache`
 middleware for ETag / `If-None-Match` revalidation (`blackbull serve`
-does this for you).  What's still missing across all paths:
-byte-range-multipart and CDN edge-cache invalidation glue.  For
-anything user-visible, front a real static-file server (nginx,
-S3 + CloudFront).
-
-### No internal database layer
-
-BlackBull is a protocol-layer framework.  There is no built-in
-ORM, no connection pool, no migration tool.  Apps should bring
-their own (`asyncpg`, `databases`, `tortoise-orm`, etc.).
+does this for you).  Byte-range-multipart responses are not
+implemented across any of the three paths.
 
 ### `Depends` is deliberately minimal; query params are scalars only
 
@@ -288,18 +292,7 @@ per-frame dispatch seam, and the handler owns its receive loop.  A
 declared-scope API is unlocked on demonstrated demand, not
 speculatively.
 
-### Optional `[speed-h1]` C parser stub not implemented
-
-`pyproject.toml` lists no `[speed-h1]` extra today.  The
-pure-Python HTTP/1 parser is fast enough that swapping in a C
-parser (e.g. `httptools`) isn't on the critical path; a future
-opt-in knob is sketched in the roadmap but not built.
-
-### No HTTP/3 / QUIC
-
-Out of scope.  Revisit if a real user need appears.
-
-### gRPC: core handlers exchange raw bytes; reflection is v1alpha-only
+### gRPC: reflection is v1alpha-only
 
 All four gRPC RPC shapes — unary, server-streaming, client-streaming, and
 bidirectional — ship in `blackbull.grpc` (`app.enable_grpc`), with `gzip`
@@ -309,10 +302,9 @@ WebSocket, with `grpc-status` reported in trailers (a trailing HEADERS
 frame). Core handlers exchange raw message bytes by design; object-typed
 servicers, server reflection, `grpc.health.v1`, and rich error details ship
 in the optional [`blackbull-protobuf`](https://github.com/TOKUJI/blackbull-protobuf)
-package (`pip install 'blackbull[protobuf]'`). Remaining gaps: reflection
-serves `grpc.reflection.v1alpha` only (`v1` is a planned fast-follow;
-grpcurl and most clients fall back to v1alpha automatically), and BlackBull
-is server-side only — use `grpcio` for a client. See
+package (`pip install 'blackbull[protobuf]'`). The remaining gap: reflection
+serves `grpc.reflection.v1alpha` only — `v1` is a planned fast-follow, and
+grpcurl and most clients fall back to v1alpha automatically. See
 [`docs/guide/grpc.md`](https://github.com/TOKUJI/BlackBull/blob/master/docs/guide/grpc.md).
 
 ### CLI `--bind` host is advisory
@@ -326,6 +318,23 @@ field on `AppConfig`) is advisory — the socket layer binds dual-stack
 on **all** interfaces, so `--bind 127.0.0.1:8000` still listens on
 every interface.  Use a `unix:` bind, `fd://` socket activation, or a
 fronting proxy when interface filtering matters.
+
+---
+
+## Deliberate non-goals — not limitations
+
+Capabilities BlackBull does not aim to provide.  Nothing here is a gap
+in an implemented feature; each is a scope decision with a supported
+alternative.  Listed so the question is answered once — not as a
+shortfall list.
+
+| Not provided | Why, and what to use |
+|---|---|
+| **HTTP/3 / QUIC** | Out of scope at Early Alpha. Revisit if a real user need appears. Front with a proxy that terminates H3 if you need it at the edge. |
+| **ORM / connection pool / migrations** | BlackBull is a protocol-layer framework, like Flask and Starlette. Bring `asyncpg`, `databases`, `tortoise-orm`, or `SQLAlchemy`. |
+| **A gRPC client** | Server-side only, by design. Use `grpcio` for clients. |
+| **CDN edge-cache invalidation glue** | For user-visible static assets, front a real static server or CDN (nginx, S3 + CloudFront). The built-in `StaticFiles` targets app-adjacent assets. |
+| **A C-accelerated HTTP/1 parser (`[speed-h1]`)** | No such extra exists. A pure-Python parser on every path is the project's identity; accelerating it with a C dependency would trade that away. Performance work targets the Python path instead. |
 
 ---
 
