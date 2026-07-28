@@ -533,13 +533,21 @@ class HTTP2Actor(Actor):
         # Callers may be sync done-callbacks — schedule the replay.  Prefer
         # the connection TaskGroup so run() awaits it; fall back to a bare
         # loop task when the group is already closing (teardown).
-        coro = _replay()
-        try:
-            if self._task_group is not None:
-                task = self._task_group.create_task(coro)
-            else:
-                task = asyncio.get_running_loop().create_task(coro)
-        except RuntimeError:
+        #
+        # Each create_task gets its OWN coroutine object.  Since CPython 3.13
+        # TaskGroup.create_task() closes the coroutine before raising when the
+        # group is exiting/aborting, so handing the same object to the fallback
+        # schedules an already-closed coroutine: the task dies with "cannot
+        # reuse already awaited coroutine" and the credit is silently never
+        # replayed — on exactly the teardown path this fallback exists for.
+        task = None
+        if self._task_group is not None:
+            try:
+                task = self._task_group.create_task(_replay())
+            except RuntimeError:
+                task = None
+        if task is None:
+            coro = _replay()
             try:
                 task = asyncio.get_running_loop().create_task(coro)
             except RuntimeError:
