@@ -57,20 +57,6 @@ with BlackBull on HTTP/1.1 behind it — eliminates this surface
 entirely because nginx does not forward RFC 8441 Extended
 CONNECT to the backend.
 
-### HTTP/2 multiplex overhead vs HTTP/1.1
-
-The HTTP/2 implementation is conformant (passes `h2spec`,
-RFC 9113) but each stream carries actor-machinery overhead — a
-per-stream queue, sender state, and priority-tree bookkeeping —
-that the HTTP/1.1 path doesn't pay.  Single-connection,
-high-multiplex workloads will spend more per request on HTTP/2
-than on HTTP/1.1; the difference grows with mux depth.
-
-If a workload needs maximum throughput on a single HTTP/2
-connection at high mux, a fronting HTTP/2 terminator (nginx,
-Envoy) is the usual production shape; BlackBull behind that
-terminator on HTTP/1.1 is the matched-cost path.
-
 ### h2c prior-knowledge shares the HTTP/1.1 port
 
 BlackBull's plaintext listener auto-detects the HTTP/2
@@ -89,40 +75,14 @@ the exact "with N slow connections, first new connection
 accepted within M ms" curve — only the qualitative claim "RFC
 9110 §15.5.9 compliant 408 plus the three timeouts work".
 
-### HTTP QUERY (RFC 10008) — two deliberate edges
+### HTTP QUERY (RFC 10008): `Accept-Query` is not synthesised on OPTIONS
 
 QUERY routing, `Accept-Query` content negotiation, and Content-Type
-enforcement ship (see the [routing guide](docs/guide/routing.md)), but
-two edges are out of scope for now:
-
-- **OpenAPI**: QUERY routes are excluded from the generated document.
-  OpenAPI 3.1 has no `query` operation; 3.2 adds one — revisit when the
-  emitter moves to 3.2.  QUERY is never faked as another operation.
-- **`Accept-Query` on OPTIONS**: RFC 10008 mentions emitting the header
-  on OPTIONS for a path; BlackBull only auto-handles OPTIONS when a route
-  is registered for it, so the header is emitted on the QUERY route's own
-  responses (including its 415), not synthesised on an unrouted OPTIONS.
-
-No browser implements QUERY; server + client + tests are the whole story.
-
----
-
-## RFC-defensible differential-corpus divergences
-
-The differential fuzz harness compares BlackBull's response to
-the same request against nginx.  Two captured divergences are
-**RFC-defensible**, kept in the corpus deliberately, and not
-treated as bugs:
-
-| Wire request | nginx | BlackBull | Why we're right |
-|---|---|---|---|
-| `GET&nbsp;&nbsp;http://localhost/x HTTP/1.0` (double-SP between method and target) | 200 | 400 | RFC 9112 §3 — request-line tokens are separated by exactly one SP.  nginx is lenient; we reject. |
-| `GET&nbsp;&nbsp;http://localhost/x HTTP/9.9` (double-SP **and** unknown version) | 505 | 400 | Validation-order choice: the request-line SP grammar (RFC 9112 §3) is checked before the HTTP version, so the malformed line is 400 first.  nginx reports the version problem (505) instead.  A *well-formed* request with an unsupported version does get 505 from BlackBull (RFC 9110 §15.6.6). |
-
-Both are documented in
-[`tests/conformance/http1/fuzz/user-corpus/diff_README.md`](tests/conformance/http1/fuzz/user-corpus/).
-We're not chasing nginx parity here unless a real user need
-appears.
+enforcement ship (see the [routing guide](docs/guide/routing.md)).  One
+edge: RFC 10008 mentions emitting `Accept-Query` on OPTIONS for a path,
+but BlackBull only auto-handles OPTIONS when a route is registered for
+it, so the header rides the QUERY route's own responses (including its
+415) rather than being synthesised on an unrouted OPTIONS.
 
 ---
 
@@ -205,6 +165,21 @@ will never be delivered to it.  The same applies to a shared-subscription
 group with no connected member (see
 [`docs/guide/mqtt.md`](docs/guide/mqtt.md)).  If you need store-and-forward
 for offline consumers, use a broker with persistent offline queues.
+
+### HTTP/2 costs more per request than HTTP/1.1
+
+Not a BlackBull property — HTTP/2 carries per-stream state, framing,
+and flow control that HTTP/1.1 does not, in every implementation.
+Noted here only because the deployment consequence is easy to miss:
+if a workload needs maximum throughput on a single HTTP/2 connection
+at high multiplex, the usual production shape is a fronting HTTP/2
+terminator (nginx, Envoy) with BlackBull on HTTP/1.1 behind it.
+
+BlackBull's HTTP/2 is conformant (`h2spec`, RFC 9113).  How its
+per-stream cost compares to other servers is **not measured** — the
+`bench/CHARACTERIZATION.md` A-lane (h2load at n=1/10/50) is specified
+but has no recorded results, so no comparative claim is made here in
+either direction.
 
 ### Multi-worker scaling tops out at physical core count
 
