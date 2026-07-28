@@ -29,7 +29,7 @@ A personal learning project — wire correctness over API stability (ZeroVer).
   implementation internals.  → `.claude/patterns/testing.md`
 
 - **Type-check before committing.** `just typecheck` catches contract
-  violations statically.  → `.github/skills/type-check/SKILL.md`
+  violations statically.  → `.claude/skills/type-check/SKILL.md` [private]
 
 - **Comments explain *why*, never *when*.** If a comment contains a sprint
   number, a date, "still", "previously", "no longer", or "as of version X",
@@ -140,17 +140,18 @@ fallback where one exists.
 | When you are… | Read |
 |---|---|
 | Doing any framework change (workflow, testing, type rules) | `.claude/CLAUDE_DEV.md` [private] |
-| Writing/adjusting tests | `.claude/patterns/testing.md` [private] / `.github/skills/create-test/SKILL.md` |
-| Running benchmarks or profiling | `.claude/patterns/benchmarking.md` [private] / `.github/skills/bench-compare/SKILL.md` |
-| Running peer server comparisons (FastAPI / Sanic / etc.) locally | `.github/skills/peer-compare/SKILL.md` |
+| Writing/adjusting tests | `.claude/patterns/testing.md` + `.claude/skills/create-test/SKILL.md` [both private] |
+| Running benchmarks or profiling | `.claude/patterns/benchmarking.md` + `.claude/skills/bench-compare/SKILL.md` [both private] |
+| Running peer server comparisons (FastAPI / Sanic / etc.) locally | `.claude/skills/peer-compare/SKILL.md` [private] |
 | Tracing a regression across sprints | `.claude/sprint-logs/` [private] — per-sprint bottleneck-attribution logs.  `bench/CHARACTERIZATION.md` is the public summary; sprint-logs hold the raw diagnostic numbers |
-| Cutting a release / sprint close | `.claude/patterns/release.md` [private] / `.github/skills/sprint-close/SKILL.md` |
+| Cutting a release / sprint close | `.claude/patterns/release.md` + `.claude/skills/sprint-close/SKILL.md` [both private] |
 | Reasoning about actors / events | `.claude/design/actor-model.md` + `.claude/design/event-catalogue.md` [both private] |
 | Checking a known gotcha before acting | `.claude/patterns/cautions.md` [private] |
 | Picking/triaging what to build next | `.claude/planning/proposals/INDEX.md` [private] |
 | Reading a point-in-time design | `.claude/planning/designs/` [private] |
 
-**Skills** (invocable, harness-surfaced; `.github/skills/` is public):
+**Skills** (invocable, harness-surfaced; they live in `.claude/skills/` [private] —
+`.github/skills` is an optional local symlink, see `.gitignore`):
 `sprint-close`, `bench-compare`, `peer-compare`, `pre-release-docs`, `update-roadmap`,
 `create-test`, `type-check`, `add-event`, `new-http2-frame`, `protocol-handler`,
 `httparena-bench`, `run-http11probe`.
