@@ -522,3 +522,44 @@ async def test_window_overrun_is_rst_enhance_your_calm():
              if f.FrameType() == FrameTypes.RST_STREAM
              and f.error_code == ErrorCodes.ENHANCE_YOUR_CALM]
     assert calms, 'window overrun must trip the ENHANCE_YOUR_CALM backstop'
+
+
+@pytest.mark.asyncio
+async def test_credit_replay_survives_a_task_group_that_refuses_the_task():
+    """The connection-credit replay must still reach the wire when the
+    connection TaskGroup refuses the task.
+
+    Since CPython 3.13 ``TaskGroup.create_task()`` *closes* the coroutine
+    before raising ``RuntimeError`` for a group that is exiting or aborting.
+    A fallback that re-submits the same coroutine object therefore schedules
+    an already-closed coroutine: the task dies with "cannot reuse already
+    awaited coroutine" and the un-consumed balance is never credited back to
+    stream 0, so the shared connection window leaks shut for every later
+    stream on the connection — on exactly the teardown path the fallback
+    exists to serve.
+
+    The refusing group is faked rather than driven through a real teardown so
+    the contract is pinned on every supported Python, including 3.11/3.12
+    where the interpreter does not close the coroutine and the bug is
+    therefore invisible.
+    """
+    handler = _make_actor()
+
+    class _RefusingTaskGroup:
+        """asyncio.TaskGroup.create_task() on a shutting-down group."""
+
+        def create_task(self, coro, **kwargs):
+            coro.close()          # CPython >= 3.13 closes before it raises
+            raise RuntimeError(
+                'TaskGroup <TaskGroup cancelling> is shutting down')
+
+    handler._task_group = _RefusingTaskGroup()
+
+    recipient = MagicMock()
+    recipient.take_uncredited = MagicMock(return_value=1234)
+
+    handler._release_recipient_credit(recipient)
+    for _ in range(10):           # let the fallback task reach the wire
+        await asyncio.sleep(0)
+
+    assert _window_updates(handler) == [(0, 1234)]

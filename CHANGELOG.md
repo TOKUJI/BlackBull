@@ -82,6 +82,25 @@ so the editable install's metadata catches up.
 
 ### Fixed
 
+- **HTTP/2 connection-window leak on Python 3.13+ (un-drained request
+  bodies).**  When a handler responded without draining its request body —
+  an early `401`/`413`, a validation reject, or simply ignoring the body —
+  the un-consumed DATA bytes were meant to be credited back to the shared
+  connection window as `WINDOW_UPDATE(0)` when the stream was released.  That
+  replay is scheduled from a synchronous done-callback, preferring the
+  connection `TaskGroup` and falling back to a bare loop task once the group
+  is closing.  Both paths were handed the *same* coroutine object, and since
+  CPython 3.13 `TaskGroup.create_task()` closes the coroutine before raising
+  `RuntimeError` for an exiting/aborting group — so the fallback scheduled an
+  already-closed coroutine, the task died with `cannot reuse already awaited
+  coroutine`, and the credit was silently dropped on exactly the teardown
+  path the fallback exists to serve.  The loss is cumulative: after 65535
+  un-drained bytes the connection window is shut and every later request on
+  that connection stalls.  Each `create_task` now gets its own coroutine.
+  Unaffected on 3.11/3.12, where the interpreter does not close the
+  coroutine — which is also why the repository's CI matrix (3.11 + 3.12)
+  never saw it, despite 3.13 and 3.14 being declared-supported.
+
 - `tests/integration/test_nginx.py` imported the optional `docker` /
   `testcontainers` extras at module scope, so a missing extra became a
   collection error that interrupted the whole pytest session instead of
