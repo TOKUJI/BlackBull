@@ -572,13 +572,117 @@ async def test_wrapper_passes_the_same_object_to_both_parameters():
 
 @pytest.mark.asyncio
 async def test_pre_consumed_handshake_fails_loudly_rather_than_eating_a_message():
-    """The `websocket` middleware accepts on the handler's behalf.
+    """A third-party middleware that accepts without recording it.
 
-    Combined with the object form, the first thing on the channel is the
-    client's first *message*, not the handshake.  Treating it as the
-    handshake would silently drop it, so the object refuses instead.
+    The built-in `websocket` middleware calls mark_handshake_accepted(), so
+    the object adopts the completed handshake.  Anything that accepts
+    *without* that marker leaves the client's first message sitting where
+    the handshake should be — silently dropping it would be the worst
+    outcome, so the object refuses and says what to call.
     """
     ws, _ = _ws(_text('first real message'))
 
     with pytest.raises(RuntimeError, match='already consumed'):
         await ws.accept()
+
+
+# ---------------------------------------------------------------------------
+# Handshake state shared with middleware
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_object_adopts_a_handshake_completed_by_middleware():
+    """No connect event is left to read — the object must not wait for one."""
+    from blackbull.websocket import mark_handshake_accepted
+
+    conn = _conn()
+    mark_handshake_accepted(conn)
+    channel = _Channel(_text('first real message'))
+    ws = WebSocket(conn, channel.receive, channel.send)
+
+    assert ws.accepted
+    assert await ws.receive() == 'first real message'
+    assert channel.sent == []          # no second accept went out
+
+
+@pytest.mark.asyncio
+async def test_bare_accept_under_middleware_is_a_no_op():
+    """So the same handler body works with or without the middleware."""
+    from blackbull.websocket import mark_handshake_accepted
+
+    conn = _conn()
+    mark_handshake_accepted(conn)
+    channel = _Channel(_text('hi'))
+    ws = WebSocket(conn, channel.receive, channel.send)
+
+    await ws.accept()
+
+    assert channel.sent == []
+    assert await ws.receive() == 'hi'
+
+
+@pytest.mark.asyncio
+async def test_accept_with_a_subprotocol_under_middleware_raises():
+    """The 101 has gone; silently dropping the request would be worse."""
+    from blackbull.websocket import mark_handshake_accepted
+
+    conn = _conn()
+    mark_handshake_accepted(conn)
+    channel = _Channel()
+    ws = WebSocket(conn, channel.receive, channel.send)
+
+    with pytest.raises(RuntimeError, match='already completed by middleware'):
+        await ws.accept('chat')
+
+
+@pytest.mark.asyncio
+async def test_a_second_accept_under_middleware_is_still_an_error():
+    """The no-op is a one-shot tolerance, not a licence to accept twice."""
+    from blackbull.websocket import mark_handshake_accepted
+
+    conn = _conn()
+    mark_handshake_accepted(conn)
+    channel = _Channel()
+    ws = WebSocket(conn, channel.receive, channel.send)
+
+    await ws.accept()
+    with pytest.raises(RuntimeError, match='more than once'):
+        await ws.accept()
+
+
+@pytest.mark.asyncio
+async def test_close_publishes_state_so_middleware_can_see_it():
+    from blackbull.websocket import handshake_closed
+
+    ws, _ = _ws(CONNECT)
+    await ws.accept()
+    await ws.close(1000)
+
+    assert handshake_closed(ws.connection)
+
+
+@pytest.mark.asyncio
+async def test_accept_publishes_state_so_middleware_can_see_it():
+    from blackbull.websocket import handshake_accepted
+
+    ws, _ = _ws(CONNECT)
+    await ws.accept()
+
+    assert handshake_accepted(ws.connection)
+
+
+def test_handshake_helpers_tolerate_a_plain_dict_connection():
+    """The middleware's unit tests drive it with a bare {} connection, and the
+    BB_FORCE_ASGI_SCOPE boundary threads a scope dict."""
+    from blackbull.websocket import (handshake_accepted, handshake_closed,
+                                     mark_handshake_accepted,
+                                     mark_handshake_closed)
+
+    scope = {}
+    assert not handshake_accepted(scope)
+    mark_handshake_accepted(scope)
+    assert handshake_accepted(scope)
+
+    assert not handshake_closed(scope)
+    mark_handshake_closed(scope)
+    assert handshake_closed(scope)

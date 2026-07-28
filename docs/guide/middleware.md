@@ -180,6 +180,13 @@ async def chat(scope, receive, send):
         await send({'type': 'websocket.send', 'text': event.get('text', '')})
 ```
 
+Works with the high-level `WebSocket` handler form too — it records the
+completed handshake on the connection, so the object adopts it rather than
+waiting for a `websocket.connect` that is already gone.  See
+[WebSockets](websockets.md#the-websocket-middleware) for the exact
+semantics, including what happens if the handler also calls `accept()` or
+closes the connection itself.
+
 ### `Compression` / `compress`
 
 Compresses HTTP response bodies using the codec the client prefers

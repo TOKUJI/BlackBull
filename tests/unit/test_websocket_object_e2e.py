@@ -175,3 +175,94 @@ def test_client_disconnect_ends_the_async_for_and_is_observable():
     disconnected, code = app.state_seen
     assert disconnected
     assert code is not None
+
+
+# ---------------------------------------------------------------------------
+# Composition with the handshake middleware
+# ---------------------------------------------------------------------------
+#
+# `blackbull.middleware.websocket` accepts before the handler runs.  It
+# records that on the connection, so a WebSocket object built downstream
+# adopts the completed handshake rather than reading the client's first
+# message and mistaking it for one.
+
+def _middleware_app() -> BlackBull:
+    from blackbull.middleware import websocket as ws_middleware
+
+    app = BlackBull()
+
+    @app.route(path='/mw-object', scheme=Scheme.websocket,
+               middlewares=[ws_middleware])
+    async def mw_object(ws: WebSocket):
+        """No accept() at all — the middleware did it."""
+        async for message in ws:
+            await ws.send(message)
+
+    @app.route(path='/mw-object-accepts', scheme=Scheme.websocket,
+               middlewares=[ws_middleware])
+    async def mw_object_accepts(ws: WebSocket):
+        """A bare accept() is tolerated, so the body is form-agnostic."""
+        await ws.accept()
+        async for message in ws:
+            await ws.send(message)
+
+    @app.route(path='/mw-object-closes', scheme=Scheme.websocket,
+               middlewares=[ws_middleware])
+    async def mw_object_closes(ws: WebSocket):
+        await ws.send_text('bye')
+        await ws.close(1000)
+
+    @app.route(path='/mw-raw', scheme=Scheme.websocket,
+               middlewares=[ws_middleware])
+    async def mw_raw(conn, receive, send):
+        """The form the middleware was written for — unchanged."""
+        while True:
+            event = await receive()
+            if event.get('type') == 'websocket.disconnect':
+                return
+            if event.get('type') == 'websocket.receive':
+                await send({'type': 'websocket.send',
+                            'text': event.get('text') or ''})
+
+    return app
+
+
+def test_middleware_plus_object_no_accept_in_handler():
+    """The regression this whole mechanism exists for.
+
+    Before the handshake was published on the connection, the object would
+    read the client's first message as its `websocket.connect` — so 'hello'
+    was silently swallowed and the echo never arrived.
+    """
+    app = _middleware_app()
+    with TestClient(app) as client:
+        with client.websocket_connect('/mw-object') as ws:
+            ws.send_text('hello')
+            assert ws.receive_text() == 'hello'
+
+
+def test_middleware_plus_object_with_a_bare_accept():
+    app = _middleware_app()
+    with TestClient(app) as client:
+        with client.websocket_connect('/mw-object-accepts') as ws:
+            ws.send_text('hello')
+            assert ws.receive_text() == 'hello'
+
+
+def test_middleware_still_works_with_the_raw_form():
+    app = _middleware_app()
+    with TestClient(app) as client:
+        with client.websocket_connect('/mw-raw') as ws:
+            ws.send_text('hello')
+            assert ws.receive_text() == 'hello'
+
+
+def test_handler_close_suppresses_the_middlewares_trailing_close():
+    """Only one close frame — the handler's."""
+    app = _middleware_app()
+    with TestClient(app) as client:
+        with client.websocket_connect('/mw-object-closes') as ws:
+            assert ws.receive_text() == 'bye'
+            with pytest.raises(WebSocketDisconnect) as excinfo:
+                ws.receive_text()
+    assert excinfo.value.code == 1000

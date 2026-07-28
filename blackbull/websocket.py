@@ -38,7 +38,9 @@ from .headers import Headers
 
 logger = logging.getLogger(__name__)
 
-__all__ = ['WebSocket', 'WebSocketDisconnect']
+__all__ = ['WebSocket', 'WebSocketDisconnect',
+           'handshake_accepted', 'mark_handshake_accepted',
+           'handshake_closed', 'mark_handshake_closed']
 
 #: RFC 6455 §7.4.1 normal closure — the default for :meth:`WebSocket.close`.
 #: Spelled out rather than imported from ``blackbull.server.constants``: this
@@ -50,6 +52,70 @@ _NORMAL_CLOSURE = 1000
 #: §7.1.5 — 1005 is "no status received"; it is never sent on the wire, it is
 #: what the *application* observes in that case.
 _NO_STATUS = 1005
+
+# ---------------------------------------------------------------------------
+# Handshake state, shared across the layers that can drive it
+# ---------------------------------------------------------------------------
+#
+# The handshake can be completed by the handler (``ws.accept()``), by
+# middleware that accepts on the handler's behalf
+# (``blackbull.middleware.websocket``), or by a raw handler sending the event
+# itself.  Whoever does it records the fact on the *connection*, so the other
+# layers can see it: without that, a middleware-accepted connection would
+# leave the WebSocket object waiting for a handshake that already happened —
+# and treating the client's first message as it.
+#
+# The state lives in the connection's WebSocket bag (``conn._ws``), which
+# already exists for exactly this kind of handshake internal (``send_101``,
+# ``auto_subprotocol``, the negotiated deflate params).  Plain dicts are
+# accepted too, mirroring :func:`blackbull.connection.disconnected` — the
+# middleware is unit-tested against a bare ``{}`` connection, and the
+# ``BB_FORCE_ASGI_SCOPE`` boundary threads a scope dict.
+
+_ACCEPTED_KEY = '_handshake_accepted'
+_CLOSED_KEY = '_handshake_closed'
+
+
+def _ws_bag(conn, *, create: bool = False) -> dict | None:
+    """The connection's WebSocket bag, or None when there is nothing to read."""
+    bag = getattr(conn, '_ws', None)
+    if bag is None and isinstance(conn, dict):
+        # A scope dict (or the bare {} the middleware unit tests pass) is its
+        # own bag — there is no attribute to reach through.
+        return conn
+    if bag is None and create:
+        bag = {}
+        try:
+            conn._ws = bag
+        except (AttributeError, TypeError):      # frozen/slotted stand-ins
+            return None
+    return bag
+
+
+def handshake_accepted(conn) -> bool:
+    """True once the WebSocket handshake has been accepted for *conn*."""
+    bag = _ws_bag(conn)
+    return bool(bag.get(_ACCEPTED_KEY)) if bag is not None else False
+
+
+def mark_handshake_accepted(conn) -> None:
+    """Record that ``websocket.accept`` has been sent for *conn*."""
+    bag = _ws_bag(conn, create=True)
+    if bag is not None:
+        bag[_ACCEPTED_KEY] = True
+
+
+def handshake_closed(conn) -> bool:
+    """True once ``websocket.close`` has been sent for *conn*."""
+    bag = _ws_bag(conn)
+    return bool(bag.get(_CLOSED_KEY)) if bag is not None else False
+
+
+def mark_handshake_closed(conn) -> None:
+    """Record that ``websocket.close`` has been sent for *conn*."""
+    bag = _ws_bag(conn, create=True)
+    if bag is not None:
+        bag[_CLOSED_KEY] = True
 
 
 class WebSocketDisconnect(Exception):
@@ -84,7 +150,8 @@ class WebSocket:
     """
 
     __slots__ = ('_conn', '_receive', '_send', '_connect_seen', '_accepted',
-                 '_closed', '_disconnected', '_close_code', '_close_reason')
+                 '_accepted_elsewhere', '_closed', '_disconnected',
+                 '_close_code', '_close_reason')
 
     def __init__(self,
                  conn: Connection,
@@ -93,8 +160,13 @@ class WebSocket:
         self._conn = conn
         self._receive = receive
         self._send = send
-        self._connect_seen = False
-        self._accepted = False
+        # Middleware may have completed the handshake before the handler ran
+        # (blackbull.middleware.websocket does).  Adopt that state instead of
+        # waiting for a `websocket.connect` that has already been consumed.
+        already = handshake_accepted(conn)
+        self._connect_seen = already
+        self._accepted = already
+        self._accepted_elsewhere = already
         self._closed = False
         self._disconnected = False
         self._close_code: int | None = None
@@ -194,18 +266,19 @@ class WebSocket:
             # can decide what to do rather than writing to a dead transport.
             self._note_disconnect(event)
         elif etype != ASGIEvent.WS_CONNECT:
-            # Something already took the handshake off the channel — almost
-            # always the built-in ``websocket`` middleware, which accepts on
-            # the handler's behalf.  Swallowing this event would silently eat
-            # the client's first message, so refuse loudly instead.
+            # Something took the handshake off the channel without recording
+            # it (the built-in middleware does record it, and is adopted in
+            # __init__ before we ever get here).  Swallowing this event would
+            # silently eat the client's first message, so refuse loudly.
             raise RuntimeError(
                 f'WebSocket handshake was already consumed: expected '
                 f'{ASGIEvent.WS_CONNECT!r} but the channel yielded '
-                f'{etype!r}.  The high-level WebSocket object drives the '
-                f'handshake itself, so it cannot be combined with middleware '
-                f'that accepts for you (blackbull.middleware.websocket) — '
-                f'drop the middleware, or use the raw (conn, receive, send) '
-                f'handler form with it.')
+                f'{etype!r}.  Middleware that accepts on the handler\'s '
+                f'behalf must call '
+                f'blackbull.websocket.mark_handshake_accepted(conn) so the '
+                f'WebSocket object can adopt the completed handshake; '
+                f'without it the client\'s first message would be mistaken '
+                f'for the handshake.')
 
     async def accept(self,
                      subprotocol: str | None = None,
@@ -220,7 +293,24 @@ class WebSocket:
 
         Raises :class:`WebSocketDisconnect` if the peer abandoned the
         handshake before it could be completed.
+
+        When middleware already accepted for you
+        (``blackbull.middleware.websocket``), a bare ``accept()`` is a no-op
+        so the same handler body works with or without it.  Asking for a
+        *specific* subprotocol or extra headers in that situation raises
+        instead of silently dropping the request — the 101 has already gone
+        out and cannot carry them.
         """
+        if self._accepted_elsewhere:
+            self._accepted_elsewhere = False     # a second call is still wrong
+            if subprotocol is None and headers is None:
+                return
+            raise RuntimeError(
+                'WebSocket.accept() was given a subprotocol or headers, but '
+                'the handshake was already completed by middleware '
+                '(blackbull.middleware.websocket), so they cannot be sent.  '
+                'Drop the middleware from this route and let the handler '
+                'accept, or accept with no arguments.')
         if self._accepted:
             raise RuntimeError('WebSocket.accept() called more than once')
         if self._closed:
@@ -235,6 +325,7 @@ class WebSocket:
             event['headers'] = headers
         await self._send(event)
         self._accepted = True
+        mark_handshake_accepted(self._conn)
 
     async def close(self,
                     code: int = _NORMAL_CLOSURE,
@@ -264,6 +355,9 @@ class WebSocket:
         await self._send(event)
         self._close_code = code
         self._close_reason = reason
+        # Published so middleware wrapping this handler does not append a
+        # second close after we return.
+        mark_handshake_closed(self._conn)
 
     # ---- sending ---------------------------------------------------------
 

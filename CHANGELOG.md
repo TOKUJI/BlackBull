@@ -31,8 +31,6 @@ so the editable install's metadata catches up.
 
 ## [Unreleased]
 
-## [0.62.0] — 2026-07-28
-
 ### Added
 
 - **High-level WebSocket API.**  WebSocket handlers can now take a typed
@@ -70,10 +68,44 @@ so the editable install's metadata catches up.
   close semantics are identical, and the object is built once per
   *connection*, not per message.
 
-  One combination is refused: the built-in `blackbull.middleware.websocket`
-  accepts the handshake for the handler, which would leave the object
-  treating the client's first message as the handshake.  It now raises a
-  `RuntimeError` naming the cause instead of silently dropping that message.
+- **`blackbull.middleware.websocket` composes with the WebSocket object.**
+  The middleware accepts the handshake before the handler runs, which would
+  otherwise leave the object waiting for a `websocket.connect` that had
+  already been consumed — and reading the client's first *message* as the
+  handshake, silently dropping it.
+
+  Handshake state is now recorded on the connection by whichever layer
+  completes it, and read by the others.  A `WebSocket` built downstream of
+  the middleware starts already-accepted; a bare `await ws.accept()` in that
+  handler is a tolerated no-op, so the same handler body works with or
+  without the middleware on the route.  `await ws.accept('chat')` (or extra
+  headers) raises instead of silently dropping the request, since the 101
+  has already gone out.  If the handler closes the connection itself, the
+  middleware no longer appends a second close frame.
+
+  Middleware that accepts on a handler's behalf should call
+  `blackbull.websocket.mark_handshake_accepted(conn)`.  Without it the
+  object cannot know, and raises a `RuntimeError` naming the fix rather than
+  swallowing the message.
+
+### Internal
+
+- The pyright gate now also covers `blackbull/websocket.py`, the first
+  framework module written *against* the ASGI message declarations rather
+  than declaring them.  It caught a `client` property typed narrower than
+  `Connection.client` actually is.  The scope-pin test was updated
+  accordingly and now additionally refuses package *directories*, so the
+  gate can grow by reviewed module but not drift into whole-repo checking.
+
+- `blackbull.testing.WebSocketDisconnect` is re-exported from
+  `blackbull.websocket` rather than defined separately.  Both meant "the
+  other end closed", and two identically-named exception classes would mean
+  an `except` written against one silently missing the other.  Existing
+  `from blackbull.testing import WebSocketDisconnect` imports are unaffected.
+
+## [0.62.0] — 2026-07-28
+
+### Added
 
 - **Typed `receive`/`send` message channel.**  The 19 ASGI 3.0 message
   shapes are now declared as `TypedDict`s keyed by a `Literal` `type` tag,
@@ -111,19 +143,6 @@ so the editable install's metadata catches up.
   vocabulary, and the values they carry are spec-defined ASGI strings.
 
 ### Internal
-
-- The pyright gate now also covers `blackbull/websocket.py`, the first
-  framework module written *against* the ASGI message declarations rather
-  than declaring them.  It caught a `client` property typed narrower than
-  `Connection.client` actually is.  The scope-pin test was updated
-  accordingly and now additionally refuses package *directories*, so the
-  gate can grow by reviewed module but not drift into whole-repo checking.
-
-- `blackbull.testing.WebSocketDisconnect` is re-exported from
-  `blackbull.websocket` rather than defined separately.  Both meant "the
-  other end closed", and two identically-named exception classes would mean
-  an `except` written against one silently missing the other.  Existing
-  `from blackbull.testing import WebSocketDisconnect` imports are unaffected.
 
 - Per-request `send` wrapper closures are deliberately left unannotated.  A
   nested `async def` created inside a per-request factory rebuilds an

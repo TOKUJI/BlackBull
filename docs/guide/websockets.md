@@ -124,15 +124,6 @@ registration, by whether its signature contains both `receive` and `send`.
 
 ## The `websocket` middleware
 
-!!! warning "Not for the `WebSocket` object"
-
-    This middleware accepts the handshake on the handler's behalf, and the
-    `WebSocket` object drives the handshake itself — so the two cannot be
-    combined.  The object detects the already-consumed handshake and raises
-    a `RuntimeError` rather than silently eating the client's first message.
-    Use the middleware with the raw form below, or use the object and drop
-    the middleware: `await ws.accept()` is the boilerplate it was removing.
-
 The built-in `blackbull.middleware.websocket` consumes the initial
 `websocket.connect` event and sends `websocket.accept`, so the
 inner handler can skip that boilerplate:
@@ -149,6 +140,35 @@ async def chat(scope, receive, send):
             break
         await send({'type': 'websocket.send', 'text': event.get('text', '')})
 ```
+
+It works with the `WebSocket` object too — it records the completed
+handshake on the connection, and the object adopts that state instead of
+waiting for a `websocket.connect` that has already been consumed:
+
+```python
+@app.route(path='/chat', scheme=Scheme.websocket, middlewares=[websocket])
+async def chat(ws: WebSocket):
+    async for message in ws:        # already accepted
+        await ws.send(message)
+```
+
+A bare `await ws.accept()` in that handler is tolerated as a no-op, so the
+same body works whether or not the middleware is on the route.  Asking for
+something the middleware cannot retroactively provide —
+`await ws.accept('chat')`, or extra headers — raises instead, since the 101
+has already gone out.  Likewise, if the handler closes the connection
+itself, the middleware does not append a second close.
+
+With the object form the middleware is largely redundant: `await
+ws.accept()` is the one line it was removing.
+
+!!! note "Writing your own accepting middleware"
+
+    Middleware that sends `websocket.accept` on the handler's behalf should
+    call `blackbull.websocket.mark_handshake_accepted(conn)` afterwards.
+    Without it, a downstream `WebSocket` object would read the client's
+    first *message* expecting the handshake; the object detects this and
+    raises rather than silently dropping the message.
 
 ## Typed WebSocket events
 
