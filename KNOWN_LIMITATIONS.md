@@ -259,8 +259,20 @@ binding, no interception (the event API covers cross-cutting concerns).
 Query params resolve scalars only (`str`/`int`/`float`/`bool`,
 optionally `| None`); repeated-key aggregation (`?tag=a&tag=b` →
 `list[str]`) and query-model objects are not supported — parse
-`scope['query_string']` yourself for those.  Fences are lifted on
+`conn.query_string` yourself for those.  Fences are lifted on
 demonstrated demand, not speculatively.
+
+### WebSocket handlers take no injected parameters
+
+The v0.63.0 `WebSocket` object is resolved by signature, but only
+two things can appear there: the socket itself (`ws: WebSocket`, or
+the bare name `ws`/`websocket`) and optionally `conn: Connection`.
+Path params, query params, and `Depends` are **not** injected into a
+WebSocket handler the way they are into an HTTP one — read them off
+the connection (`ws.path_params['room']`, `ws.query_string`).
+Anything else in the signature is a registration-time `TypeError`
+rather than a surprise on the first connection.  Injection parity is
+the subject of queued follow-up work, not a permanent fence.
 
 ### Optional `[speed-h1]` C parser stub not implemented
 

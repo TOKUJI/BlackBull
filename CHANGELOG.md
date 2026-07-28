@@ -31,6 +31,8 @@ so the editable install's metadata catches up.
 
 ## [Unreleased]
 
+## [0.63.0] — 2026-07-29
+
 ### Added
 
 - **High-level WebSocket API.**  WebSocket handlers can now take a typed

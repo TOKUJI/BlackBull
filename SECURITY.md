@@ -12,9 +12,9 @@ critical vulnerabilities.
 
 | Version | Supported          |
 | ------- | ------------------ |
+| 0.63.x  | :white_check_mark: |
 | 0.62.x  | :white_check_mark: |
-| 0.61.x  | :white_check_mark: |
-| < 0.61  | :x:                |
+| < 0.62  | :x:                |
 
 This table updates with each minor release.
 
@@ -65,6 +65,12 @@ The following are in scope for security reports:
 - Middleware shipped in `blackbull/middleware/` (Compression,
   StaticFiles, CORS, etc.).
 - Routing, request parsing, and response handling.
+- The WebSocket handshake seam in `blackbull/websocket.py` and
+  `blackbull/middleware/websocket.py`.  Rejection is expressed by
+  closing *before* accepting, and the two layers coordinate through
+  handshake state recorded on the connection — so a defect that lets
+  a connection reach a handler as "accepted" when a middleware meant
+  to reject it is a security report, not a bug report.
 - The `blackbull` CLI and module-level boot path (`blackbull.app.serve`).
 - The async HTTP client under `blackbull/client/` (experimental,
   but in-scope).
