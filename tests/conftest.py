@@ -1,7 +1,18 @@
+import multiprocessing
 import os
 import pathlib
 import pytest
 import pytest_asyncio
+
+
+# The live-server fixtures bind the listening socket in the parent and then
+# start a worker that serves on it, so the child needs the *inherited* socket
+# — plus an app whose handlers are locally-defined closures.  Neither can be
+# pickled, which is what any start method other than ``fork`` requires of a
+# process target.  CPython 3.14 made ``forkserver`` the POSIX default, which
+# turns every such fixture into a setup error; pin the method these fixtures
+# were written against instead of restating it at each call site.
+multiprocessing.set_start_method('fork', force=True)
 
 
 DEFAULT_SKIPPED_MARKERS = {
