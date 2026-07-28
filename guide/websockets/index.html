@@ -721,6 +721,34 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#injected-parameters" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Injected parameters
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Injected parameters">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#dependency-lifetime-read-this-before-injecting-a-database-handle" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Dependency lifetime — read this before injecting a database handle
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#rejecting-a-connection" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4984,6 +5012,34 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#injected-parameters" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Injected parameters
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Injected parameters">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#dependency-lifetime-read-this-before-injecting-a-database-handle" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Dependency lifetime — read this before injecting a database handle
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#rejecting-a-connection" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5206,10 +5262,92 @@ can take the <code>Connection</code> alongside it:</p>
     <span class="k">await</span> <span class="n">ws</span><span class="o">.</span><span class="n">accept</span><span class="p">()</span>
     <span class="k">await</span> <span class="n">ws</span><span class="o">.</span><span class="n">send_text</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;welcome to </span><span class="si">{</span><span class="n">conn</span><span class="o">.</span><span class="n">path_params</span><span class="p">[</span><span class="s2">&quot;name&quot;</span><span class="p">]</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
 </code></pre></div>
-<p>A parameter that is neither is a <code>TypeError</code> <strong>at registration</strong>, not on the
-first connection.  Path params, query params, and <code>Depends</code> are not injected
-into WebSocket handlers yet — read them from <code>ws.path_params</code> and
-<code>ws.query_string</code> for now.</p>
+<p>A parameter that is none of the recognised kinds is a <code>TypeError</code> <strong>at
+registration</strong>, not on the first connection.</p>
+<h3 id="injected-parameters">Injected parameters<a class="headerlink" href="#injected-parameters" title="Permanent link">&para;</a></h3>
+<p>A WebSocket handler declares what it needs the same way an HTTP handler does
+— path params, query params, and <code>Depends</code> all resolve from the signature:</p>
+<div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">&#39;/rooms/</span><span class="si">{room}</span><span class="s1">&#39;</span><span class="p">,</span> <span class="n">scheme</span><span class="o">=</span><span class="n">Scheme</span><span class="o">.</span><span class="n">websocket</span><span class="p">)</span>
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">chat</span><span class="p">(</span><span class="n">ws</span><span class="p">:</span> <span class="n">WebSocket</span><span class="p">,</span> <span class="n">room</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">since</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">0</span><span class="p">,</span>
+               <span class="n">db</span><span class="o">=</span><span class="n">Depends</span><span class="p">(</span><span class="n">get_db</span><span class="p">)):</span>
+    <span class="k">await</span> <span class="n">ws</span><span class="o">.</span><span class="n">accept</span><span class="p">()</span>
+    <span class="k">await</span> <span class="n">ws</span><span class="o">.</span><span class="n">send_text</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">room</span><span class="si">}</span><span class="s1"> from </span><span class="si">{</span><span class="n">since</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Declared</th>
+<th>Resolves to</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Name matches a <code>{param}</code> in the path</td>
+<td><code>ws.path_params[name]</code>, coerced to the annotation if given</td>
+</tr>
+<tr>
+<td>Any other annotated <code>str</code>/<code>int</code>/<code>float</code>/<code>bool</code> (optionally <code>\| None</code>)</td>
+<td>The query param of that name</td>
+</tr>
+<tr>
+<td><code>Depends(provider)</code> default</td>
+<td>The provider's value, once per connection</td>
+</tr>
+</tbody>
+</table>
+<p>Two differences from the HTTP form are worth knowing:</p>
+<p><strong>A query param must carry its annotation.</strong> On an HTTP route a bare name is
+taken as a <code>str</code> query param; on a WebSocket it is a <code>TypeError</code>. The reserved
+names make bare parameters ambiguous — <code>async def chat(socket)</code> almost
+certainly means the socket, not a query param called <code>socket</code> — so the
+annotation is required and a typo fails at registration instead of rejecting
+every connection at runtime.</p>
+<p><strong>There is no body parameter.</strong> A WebSocket has no request body, so the HTTP
+<code>body</code> and dataclass-body forms have no WebSocket equivalent.</p>
+<p>When a declared parameter cannot be bound — a required query param missing, a
+value that will not coerce — the handshake is <strong>refused with close code 1008</strong>
+(policy violation) and the handler never runs. The HTTP path answers the same
+failure with <code>400</code>; a WebSocket has no response to put a status on.</p>
+<h4 id="dependency-lifetime-read-this-before-injecting-a-database-handle">Dependency lifetime — read this before injecting a database handle<a class="headerlink" href="#dependency-lifetime-read-this-before-injecting-a-database-handle" title="Permanent link">&para;</a></h4>
+<p>A <code>Depends</code> on a WebSocket is resolved <strong>once per connection</strong> and released
+when the handler exits. That is the correct scope for values — an
+authenticated user, a parsed token, per-connection config — and the <strong>wrong</strong>
+scope for scarce resources:</p>
+<div class="admonition warning">
+<p class="admonition-title">A socket holds its dependency for hours, not milliseconds</p>
+<p>An HTTP request holds a pooled connection for the duration of the
+response.  A WebSocket holds it for the life of the socket.  A pool of 20
+therefore serves 20 <em>concurrent sockets</em>, and the 21st client blocks
+until someone disconnects.  Worse, a pinned connection sitting idle gets
+reaped underneath you — MySQL <code>wait_timeout</code>, PgBouncer, and AWS NAT
+idle timeouts all drop long-idle connections, so the handler wakes up
+holding a dead one.</p>
+</div>
+<p>Give the <em>pool</em> application scope and borrow from it per use instead:</p>
+<div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">on_startup</span>
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">open_pool</span><span class="p">():</span>
+    <span class="n">app</span><span class="o">.</span><span class="n">state</span><span class="o">.</span><span class="n">pool</span> <span class="o">=</span> <span class="k">await</span> <span class="n">asyncpg</span><span class="o">.</span><span class="n">create_pool</span><span class="p">(</span><span class="n">DSN</span><span class="p">)</span>
+
+<span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">&#39;/rooms/</span><span class="si">{room}</span><span class="s1">&#39;</span><span class="p">,</span> <span class="n">scheme</span><span class="o">=</span><span class="n">Scheme</span><span class="o">.</span><span class="n">websocket</span><span class="p">)</span>
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">chat</span><span class="p">(</span><span class="n">ws</span><span class="p">:</span> <span class="n">WebSocket</span><span class="p">,</span> <span class="n">room</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">user</span><span class="o">=</span><span class="n">Depends</span><span class="p">(</span><span class="n">current_user</span><span class="p">)):</span>
+    <span class="k">await</span> <span class="n">ws</span><span class="o">.</span><span class="n">accept</span><span class="p">()</span>
+    <span class="k">async</span> <span class="k">for</span> <span class="n">message</span> <span class="ow">in</span> <span class="n">ws</span><span class="p">:</span>                       <span class="c1"># user: per connection ✓</span>
+        <span class="k">async</span> <span class="k">with</span> <span class="n">app</span><span class="o">.</span><span class="n">state</span><span class="o">.</span><span class="n">pool</span><span class="o">.</span><span class="n">acquire</span><span class="p">()</span> <span class="k">as</span> <span class="n">db</span><span class="p">:</span>  <span class="c1"># db: per use ✓</span>
+            <span class="k">await</span> <span class="n">db</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span><span class="s1">&#39;insert into messages …&#39;</span><span class="p">,</span> <span class="n">room</span><span class="p">,</span> <span class="n">message</span><span class="p">)</span>
+</code></pre></div>
+<p><strong>Write cleanup in a <code>finally</code>.</strong> Teardown runs whenever the handler exits —
+clean close, <code>WebSocketDisconnect</code>, or an exception — but cleanup written
+<em>after</em> a bare <code>yield</code> is skipped on the exception paths, because the
+exception is thrown into the generator at the <code>yield</code>. This is ordinary
+<code>@asynccontextmanager</code> behaviour and it bites harder here, since a socket ends
+by exception far more often than a request does:</p>
+<div class="highlight"><pre><span></span><code><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">get_conn</span><span class="p">():</span>
+    <span class="n">conn</span> <span class="o">=</span> <span class="k">await</span> <span class="n">pool</span><span class="o">.</span><span class="n">acquire</span><span class="p">()</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="k">yield</span> <span class="n">conn</span>
+    <span class="k">finally</span><span class="p">:</span>                    <span class="c1"># runs on disconnect and on error alike</span>
+        <span class="k">await</span> <span class="n">pool</span><span class="o">.</span><span class="n">release</span><span class="p">(</span><span class="n">conn</span><span class="p">)</span>
+</code></pre></div>
 <h3 id="rejecting-a-connection">Rejecting a connection<a class="headerlink" href="#rejecting-a-connection" title="Permanent link">&para;</a></h3>
 <p>Call <code>close()</code> without accepting.  The client's <code>connect()</code> fails outright,
 rather than seeing a connection open and immediately shut:</p>

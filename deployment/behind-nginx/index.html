@@ -1367,6 +1367,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#when-fronting-http2-is-the-right-call" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        When fronting HTTP/2 is the right call
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#next" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4933,6 +4944,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#when-fronting-http2-is-the-right-call" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        When fronting HTTP/2 is the right call
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#next" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5099,6 +5121,18 @@ exposing a port on <code>0.0.0.0</code>.  See
 <p>The nginx upstream then looks like:</p>
 <div class="highlight"><pre><span></span><code><span class="k">upstream</span><span class="w"> </span><span class="s">blackbull</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="kn">server</span><span class="w"> </span><span class="s">unix:/run/blackbull.sock</span><span class="p">;</span><span class="w"> </span><span class="p">}</span>
 </code></pre></div>
+<h2 id="when-fronting-http2-is-the-right-call">When fronting HTTP/2 is the right call<a class="headerlink" href="#when-fronting-http2-is-the-right-call" title="Permanent link">&para;</a></h2>
+<p>HTTP/2 costs more per request than HTTP/1.1 in <em>every</em> implementation — each
+stream carries state, framing, and flow control that HTTP/1.1 does not.  That
+is the protocol, not a BlackBull property, but it has a deployment
+consequence worth naming: if a workload needs maximum throughput on a single
+HTTP/2 connection at high multiplex, the usual production shape is a fronting
+HTTP/2 terminator (nginx, Envoy) with BlackBull on HTTP/1.1 behind it — the
+arrangement this page describes.</p>
+<p>BlackBull's own HTTP/2 is conformant (<code>h2spec</code>, RFC 9113).  How its
+per-stream cost compares to other servers is <strong>not measured</strong>: the
+<code>bench/CHARACTERIZATION.md</code> A-lane (h2load at n=1/10/50) is specified but has
+no recorded results, so no comparative claim is made in either direction.</p>
 <h2 id="next">Next<a class="headerlink" href="#next" title="Permanent link">&para;</a></h2>
 <ul>
 <li><a href="../workers/">Workers</a> — multi-worker is a natural fit behind

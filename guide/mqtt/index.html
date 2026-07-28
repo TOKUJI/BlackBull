@@ -876,6 +876,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#why-the-broker-has-a-single-owner" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why the broker has a single owner
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#limitations" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4955,6 +4966,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#why-the-broker-has-a-single-owner" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why the broker has a single owner
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#limitations" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5217,6 +5239,23 @@ same certificate the HTTPS listener uses — pass <code>certfile</code>/<code>ke
 <code>ssl_context</code>) to <code>app.run()</code> as usual. The server refuses to start if
 <code>tls=True</code> is set with no certificate configured. Cleartext remains the
 default (<code>tls=False</code>), so existing deployments are unchanged.</p>
+<h2 id="why-the-broker-has-a-single-owner">Why the broker has a single owner<a class="headerlink" href="#why-the-broker-has-a-single-owner" title="Permanent link">&para;</a></h2>
+<p>The broker runs on <strong>worker 0</strong> only, while HTTP scales across all workers.
+That is a protocol requirement, not an implementation shortcut.</p>
+<p>MQTT 5.0 (OASIS Committee Specification 02, March 2019) defines semantics
+that depend on broker-side state visible to <em>every</em> connection:
+publish-subscribe matching (§3.3), retained messages (§3.3.2.3), session
+state across <code>Clean Start = 0</code> reconnects (§3.1.2.11), Will messages
+(§3.1.2.5), and QoS 1/2 delivery tracking (§4.3).  All five break if that
+state is split across worker processes with no shared store.</p>
+<p>This matches industry practice: the Eclipse Mosquitto reference
+implementation (<a href="https://mosquitto.org/">mosquitto.org</a>) is single-threaded
+by architecture for the same reason, and EMQX clusters via Erlang
+distributed message passing rather than splitting state across local
+workers.  (Confirmed 2026-06-25 against the OASIS MQTT 5.0 specification and
+Mosquitto's project documentation.)</p>
+<p>See <a href="../../deployment/workers/">Workers</a> for how the single-owner binding
+interacts with <code>--reload</code> and <code>SO_REUSEPORT</code>.</p>
 <h2 id="limitations">Limitations<a class="headerlink" href="#limitations" title="Permanent link">&para;</a></h2>
 <ul>
 <li><strong>No MQTT-over-WebSocket transport.</strong> TLS is supported via

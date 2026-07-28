@@ -1356,6 +1356,28 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#scaling-ceiling-plan-against-physical-cores" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Scaling ceiling — plan against physical cores
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#workers-alongside-a-raw-protocol-handler" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Workers alongside a raw protocol handler
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#production-checklist" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5034,6 +5056,28 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#scaling-ceiling-plan-against-physical-cores" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Scaling ceiling — plan against physical cores
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#workers-alongside-a-raw-protocol-handler" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Workers alongside a raw protocol handler
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#production-checklist" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5228,6 +5272,31 @@ closed.  The defaults match Apache's <code>LimitRequestLine</code> /
 </tr>
 </tbody>
 </table>
+<h2 id="scaling-ceiling-plan-against-physical-cores">Scaling ceiling — plan against physical cores<a class="headerlink" href="#scaling-ceiling-plan-against-physical-cores" title="Permanent link">&para;</a></h2>
+<p>Worker throughput scales roughly to the <strong>physical core count</strong>, not the
+logical (SMT-thread) count.  Adding workers past the physical-core ceiling
+does not multiply throughput.  Plan capacity against <code>nproc / 2</code> on typical
+SMT-enabled hardware.</p>
+<h2 id="workers-alongside-a-raw-protocol-handler">Workers alongside a raw protocol handler<a class="headerlink" href="#workers-alongside-a-raw-protocol-handler" title="Permanent link">&para;</a></h2>
+<p>A non-ASGI protocol registered via <code>app.raw_handler()</code> or
+<code>app.register_protocol_handler()</code> follows a different rule from HTTP,
+because a stateful broker must have exactly one owner.</p>
+<p><strong>The protocol has a single owner; HTTP still scales.</strong>  The master binds
+the protocol port once and hands it to <strong>worker 0</strong> only, so the broker
+lives there — while <code>app.run(port=8000, workers=4)</code> alongside, say,
+<code>MQTTExtension(port=1883)</code> still runs HTTP on <strong>all</strong> workers.  If worker 0
+crashes, the master respawns it and it re-inherits the still-open listening
+socket, so the broker resumes on the same port.  Clients reconnect;
+in-memory broker state does not survive (see
+<a href="../../guide/mqtt/">MQTT</a>).</p>
+<p><strong>Auto-reload is the exception.</strong>  <code>--reload</code> hands listening sockets across
+an <code>exec</code> via fd inheritance, and that handoff does not yet include the
+protocol listeners — so <code>reload=True</code> with a port-bound protocol still forces
+<code>workers=1</code>.  Run without reload to scale HTTP alongside the broker.</p>
+<p><strong><code>SO_REUSEPORT</code> applies to HTTP only.</strong>  <code>BB_SOCKET_REUSEPORT=1</code> gives each
+HTTP worker its own kernel accept queue (best load distribution); without it
+the workers share the master's listening socket.  The protocol port is always
+bound <em>without</em> <code>SO_REUSEPORT</code> — a single owner is the point.</p>
 <h2 id="production-checklist">Production checklist<a class="headerlink" href="#production-checklist" title="Permanent link">&para;</a></h2>
 <p>A reasonable production environment:</p>
 <div class="highlight"><pre><span></span><code><span class="nv">BB_WORKERS</span><span class="o">=</span><span class="m">0</span><span class="w"> </span><span class="se">\</span>

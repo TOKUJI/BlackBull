@@ -700,6 +700,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Ordering and errors">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#write-cleanup-in-a-finally" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Write cleanup in a finally
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -4886,6 +4903,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Ordering and errors">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#write-cleanup-in-a-finally" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Write cleanup in a finally
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -4955,7 +4989,7 @@ unchanged, the same rule as every other simplified-model feature.</p>
 <tr>
 <td><code>async def p(): yield v</code></td>
 <td><code>v</code> (must yield exactly once)</td>
-<td>code after <code>yield</code> / <code>finally</code>, after the response is sent</td>
+<td>after the response is sent — but see <a href="#write-cleanup-in-a-finally">Write cleanup in a <code>finally</code></a></td>
 </tr>
 <tr>
 <td><code>async def p(): return v</code></td>
@@ -5030,6 +5064,47 @@ acquire/release accounting — ships as
 <li>A provider exception before <code>yield</code> aborts the request the same way —
   the handler never runs.</li>
 </ul>
+<h3 id="write-cleanup-in-a-finally">Write cleanup in a <code>finally</code><a class="headerlink" href="#write-cleanup-in-a-finally" title="Permanent link">&para;</a></h3>
+<p>Cleanup written <em>after</em> a bare <code>yield</code> runs on the success path only.  When
+the handler raises, the exception is re-raised <strong>at the <code>yield</code></strong>, so the
+trailing statements never execute — the resource leaks exactly when
+something went wrong:</p>
+<div class="highlight"><pre><span></span><code><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">get_conn</span><span class="p">():</span>
+    <span class="n">conn</span> <span class="o">=</span> <span class="k">await</span> <span class="n">pool</span><span class="o">.</span><span class="n">acquire</span><span class="p">()</span>
+    <span class="k">yield</span> <span class="n">conn</span>
+    <span class="k">await</span> <span class="n">pool</span><span class="o">.</span><span class="n">release</span><span class="p">(</span><span class="n">conn</span><span class="p">)</span>     <span class="c1"># ✗ skipped when the handler raises</span>
+
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">get_conn</span><span class="p">():</span>
+    <span class="n">conn</span> <span class="o">=</span> <span class="k">await</span> <span class="n">pool</span><span class="o">.</span><span class="n">acquire</span><span class="p">()</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="k">yield</span> <span class="n">conn</span>
+    <span class="k">finally</span><span class="p">:</span>
+        <span class="k">await</span> <span class="n">pool</span><span class="o">.</span><span class="n">release</span><span class="p">(</span><span class="n">conn</span><span class="p">)</span>  <span class="c1"># ✓ runs on every path</span>
+</code></pre></div>
+<p>BlackBull <strong>warns at registration</strong> when it sees the first shape, naming the
+provider.  The warning is deliberately narrow: a <code>yield</code> inside any <code>try</code> is
+left alone, and so is a provider with nothing after the <code>yield</code> (there is no
+cleanup to lose) or one whose <code>yield</code> sits inside an <code>async with</code> (the
+context manager already handles every path).</p>
+<p>This is ordinary <a href="https://docs.python.org/3/library/contextlib.html#contextlib.asynccontextmanager"><code>@asynccontextmanager</code></a>
+behaviour, and it is not a wart to be fixed: the exception has to reach the
+generator so a provider can tell success from failure.</p>
+<div class="highlight"><pre><span></span><code><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">get_tx</span><span class="p">():</span>
+    <span class="n">tx</span> <span class="o">=</span> <span class="k">await</span> <span class="n">db</span><span class="o">.</span><span class="n">begin</span><span class="p">()</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="k">yield</span> <span class="n">tx</span>
+    <span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>
+        <span class="k">await</span> <span class="n">tx</span><span class="o">.</span><span class="n">rollback</span><span class="p">()</span>      <span class="c1"># knows it failed</span>
+        <span class="k">raise</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="k">await</span> <span class="n">tx</span><span class="o">.</span><span class="n">commit</span><span class="p">()</span>        <span class="c1"># knows it succeeded</span>
+</code></pre></div>
+<p>If the framework instead swallowed the exception to force cleanup to run,
+this provider would <strong>commit on error</strong>.  That is why the weak form is
+warned about rather than silently repaired.</p>
+<p>On a WebSocket the same rule matters more, because a socket ends by
+exception far more often than a request does — see
+<a href="../websockets/#dependency-lifetime-read-this-before-injecting-a-database-handle">dependency lifetime</a>.</p>
 <h2 id="zero-cost-when-unused">Zero cost when unused<a class="headerlink" href="#zero-cost-when-unused" title="Permanent link">&para;</a></h2>
 <p>Everything is resolved at <strong>registration time</strong>: a handler that declares
 no <code>Depends</code> parameter compiles to exactly the wrapper it compiled to
