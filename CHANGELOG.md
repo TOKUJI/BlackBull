@@ -31,6 +31,72 @@ so the editable install's metadata catches up.
 
 ## [Unreleased]
 
+### Added
+
+- **WebSocket handlers inject from their signature.**  Path params, query
+  params, and `Depends` now resolve into a WebSocket handler the way they
+  already did for HTTP, alongside the `WebSocket` object:
+
+  ```python
+  @app.route(path='/rooms/{room}', scheme=Scheme.websocket)
+  async def chat(ws: WebSocket, room: str, since: int = 0,
+                 db=Depends(get_db)):
+      ...
+  ```
+
+  This completes injection parity across handler surfaces — no first-party
+  handler form now requires the raw `(conn, receive, send)` triplet, which
+  stays supported and undeprecated.  A lone `ws` parameter keeps the
+  allocation-free Sprint 82 fast path; injection is paid for only by
+  signatures that ask for it.
+
+  Two deliberate differences from the HTTP form: a WebSocket query param
+  **must carry its annotation** (a bare name stays a registration-time
+  `TypeError`, because `chat(socket)` means the socket rather than a query
+  param named `socket`), and there is no body parameter, a WebSocket having
+  no request body.
+
+  A parameter that cannot be bound at connect time — required query param
+  missing, value that will not coerce — **refuses the handshake with close
+  code 1008** and never runs the handler; no dependency is resolved for a
+  connection that is about to be rejected.
+
+  `Depends` resolves **once per connection** and tears down when the handler
+  exits, by any route — clean close, `WebSocketDisconnect`, or exception.
+  Because that means a socket holds its dependency for its whole lifetime,
+  the guide documents the pool-exhaustion hazard and the app-scoped-pool
+  pattern that avoids it.  Note that cleanup written after a bare `yield` is
+  skipped on the exception paths (ordinary `@asynccontextmanager`
+  semantics) — providers should use `try`/`finally`.
+
+- **`Depends` providers are warned when cleanup would be silently skipped.**
+  Code written after a bare `yield` never runs when the handler raises — the
+  exception is re-raised *at* the `yield` — so the resource leaks exactly
+  when something went wrong.  BlackBull now emits a `UserWarning` at
+  registration naming the provider and showing the `try`/`finally` fix.
+
+  The check is deliberately narrow, and stays quiet for every shape that is
+  already correct: a `yield` inside any `try` (`finally` covers all paths;
+  `except`/`else` means the author is deliberately telling success from
+  failure), a provider with nothing after the `yield`, and a `yield` inside
+  an `async with`.  It never fails registration — a provider whose source is
+  unavailable is left alone.
+
+  The semantics themselves are unchanged and intentionally so: the exception
+  must reach the generator, or a commit-or-rollback provider would commit on
+  error.  Applies to HTTP and WebSocket alike.
+
+### Docs
+
+- `docs/guide/dependency-injection.md` gains a **Write cleanup in a
+  `finally`** section; the provider-forms table no longer implies that "code
+  after `yield`" and `finally` are equivalent.
+- `docs/guide/websockets.md` gains an **Injected parameters** section with a
+  dependency-lifetime warning; `KNOWN_LIMITATIONS.md`'s "WebSocket handlers
+  take no injected parameters" entry is replaced by the two narrower fences
+  that remain.  `examples/websocket_object.py` reads `room` from the
+  signature instead of `conn.path_params`.
+
 ## [0.63.0] — 2026-07-29
 
 ### Added

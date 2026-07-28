@@ -909,6 +909,29 @@ def _set_path_params(target, receive, params: dict) -> None:
 #: when they carry no annotation.  ``ws: WebSocket`` works under any name.
 _WS_PARAM_NAMES = frozenset({'ws', 'websocket'})
 
+#: RFC 6455 §7.4.1 close code 1008 — "policy violation".  Used to refuse a
+#: handshake whose declared handler params could not be bound; the HTTP path
+#: answers the equivalent failure with 400, which a WebSocket cannot carry.
+_WS_POLICY_VIOLATION = 1008
+
+#: RFC 6455 §5.5 caps a Close frame payload at 125 bytes, of which the code
+#: takes 2 — so a close *reason* has 123 bytes to work with.
+_WS_MAX_CLOSE_REASON = 123
+
+
+def _path_param_names(path: str) -> set[str]:
+    """The ``{name}`` placeholders declared in a route *path*."""
+    return {m.group(1) for m in Router._param_pattern.finditer(path)}
+
+
+def _truncate_close_reason(detail: str) -> str:
+    """Clip *detail* to fit an RFC 6455 Close frame, without splitting a
+    multi-byte character (a lone surrogate would make the frame unsendable)."""
+    raw = detail.encode('utf-8')
+    if len(raw) <= _WS_MAX_CLOSE_REASON:
+        return detail
+    return raw[:_WS_MAX_CLOSE_REASON].decode('utf-8', errors='ignore')
+
 
 def _is_websocket_route(scheme) -> bool:
     """True when *scheme* selects the WebSocket surface and nothing else.
@@ -924,19 +947,26 @@ def _is_websocket_route(scheme) -> bool:
     return bool(schemes) and all(s == Scheme.websocket for s in schemes)
 
 
-def _websocket_param_plan(fn) -> tuple[str, ...]:
+def _websocket_param_plan(fn, path_param_names: set = frozenset()) -> tuple[tuple, ...]:
     """Classify an object-form WebSocket handler's parameters, once, at
     registration time.
 
-    Returns one category per parameter, in signature order: ``'ws'`` for the
-    :class:`~blackbull.websocket.WebSocket` and ``'conn'`` for the native
-    :class:`~blackbull.connection.Connection`.  Annotation wins over name, so
-    an explicitly annotated parameter always means what it says.
+    Returns ``(name, kind, payload)`` per parameter, in signature order, with
+    kind one of ``'ws'`` (the :class:`~blackbull.websocket.WebSocket`),
+    ``'conn'`` (the native :class:`~blackbull.connection.Connection`),
+    ``'path'`` (payload: the annotation to coerce to, or ``None``),
+    ``'query'`` (payload: :class:`_QuerySpec`), or ``'depends'`` (payload: the
+    :class:`~blackbull.di.Depends` instance).
 
-    Anything else raises ``TypeError`` at registration rather than failing on
-    the first connection.  Path params, query params, and ``Depends`` are the
-    subject of the simplified-handler work queued behind this object; until
-    then, "I don't know what to put here" has to be loud.
+    Annotation wins over name, so an explicitly annotated parameter always
+    means what it says.  Precedence after that mirrors
+    :func:`_handler_param_plan`: path params, then the bare reserved names,
+    then a ``Depends`` default, and query params as the fallback category.
+
+    A WebSocket has no request body, so the ``'body'``/``'dataclass'``
+    categories have no WebSocket analogue — such a parameter falls through to
+    the query branch and is rejected there.  Anything unresolvable raises
+    ``TypeError`` at registration rather than failing on the first connection.
     """
     from .connection import Connection as _Conn  # noqa: PLC0415 — cycle-safe
     from .websocket import WebSocket as _WS      # noqa: PLC0415 — cycle-safe
@@ -951,30 +981,68 @@ def _websocket_param_plan(fn) -> tuple[str, ...]:
     except Exception:
         pass  # unresolved forward refs → fall back to the raw annotations.
 
-    plan: list[str] = []
+    plan: list[tuple] = []
     for name, p in params.items():
         ann = annotations.get(name, inspect.Parameter.empty)
-        if ann is _WS:
-            plan.append('ws')
-        elif ann is _Conn:
-            plan.append('conn')
-        elif ann is inspect.Parameter.empty and name in _WS_PARAM_NAMES:
-            plan.append('ws')
-        elif ann is inspect.Parameter.empty and name in ('conn', 'connection'):
-            plan.append('conn')
+        default = p.default
+        is_dep = isinstance(default, Depends)
+        bare = ann is inspect.Parameter.empty
+
+        if ann is _WS or (bare and name in _WS_PARAM_NAMES):
+            if is_dep:
+                raise TypeError(
+                    f"WebSocket handler {fn.__name__!r}: parameter {name!r} is "
+                    f"reserved for the WebSocket object and cannot carry a "
+                    f"Depends default — rename the parameter.")
+            plan.append((name, 'ws', None))
+        elif ann is _Conn or (bare and name in ('conn', 'connection')):
+            if is_dep:
+                raise TypeError(
+                    f"WebSocket handler {fn.__name__!r}: parameter {name!r} is "
+                    f"reserved for the Connection and cannot carry a Depends "
+                    f"default — rename the parameter.")
+            plan.append((name, 'conn', None))
+        elif name in path_param_names:
+            if is_dep:
+                raise TypeError(
+                    f"WebSocket handler {fn.__name__!r}: parameter {name!r} is "
+                    f"a path param of {sorted(path_param_names)!r} and cannot "
+                    f"carry a Depends default.")
+            plan.append((name, 'path', None if bare else ann))
+        elif is_dep:
+            plan.append((name, 'depends', default))
         else:
-            got = ('no annotation' if ann is inspect.Parameter.empty
-                   else getattr(ann, '__name__', repr(ann)))
-            raise TypeError(
-                f"WebSocket handler {fn.__name__!r}: cannot resolve parameter "
-                f"{name!r} ({got}).  A WebSocket handler takes 'ws: WebSocket' "
-                f"(or the bare name 'ws'/'websocket'), optionally alongside "
-                f"'conn: Connection'.  For full control, declare the raw "
-                f"'(conn, receive, send)' signature instead.")
+            # Unlike the HTTP plan, a *bare* leftover name is not silently taken
+            # as a str query param.  On HTTP that fallback is load-bearing
+            # (`async def search(q)` is idiomatic); on a WebSocket query params
+            # are rare and the reserved-name space makes bare names genuinely
+            # ambiguous — `async def chat(socket)` means the socket, not a query
+            # param named "socket".  Requiring the annotation costs one word and
+            # keeps the Sprint 82 property that a typo fails at registration
+            # instead of rejecting every connection at runtime.
+            target = None if bare else _unwrap_optional(ann)
+            coercer = _QUERY_COERCERS.get(target) if isinstance(target, type) else None
+            if coercer is None:
+                got = 'no annotation' if bare else getattr(ann, '__name__', repr(ann))
+                raise TypeError(
+                    f"WebSocket handler {fn.__name__!r}: cannot resolve parameter "
+                    f"{name!r} ({got}).  Expected 'ws: WebSocket' (or the bare "
+                    f"name 'ws'/'websocket'), 'conn: Connection', a path param of "
+                    f"{sorted(path_param_names)!r}, a Depends(...) default, or a "
+                    f"query param annotated str/int/float/bool (optionally "
+                    f"`| None`) — a WebSocket query param must carry its "
+                    f"annotation, it is not inferred.  A WebSocket has no request "
+                    f"body, so body and dataclass params have no WebSocket form.  "
+                    f"For full control, declare the raw '(conn, receive, send)' "
+                    f"signature instead.")
+            required = default is inspect.Parameter.empty
+            plan.append((name, 'query', _QuerySpec(
+                name=name, type=target, coercer=coercer, required=required,
+                default=None if required else default)))
     return tuple(plan)
 
 
-def _adapt_websocket_handler(fn):
+def _adapt_websocket_handler(fn, path: str = ''):
     """Wrap an object-form WebSocket handler in a ``(conn, receive, send)``
     coroutine, building the :class:`~blackbull.websocket.WebSocket` per
     connection.
@@ -984,34 +1052,114 @@ def _adapt_websocket_handler(fn):
     ``async for`` loop over a long-lived socket allocates nothing extra per
     message.
 
+    **Dependency lifetime.**  A ``Depends`` parameter is resolved **once per
+    connection** and released when the handler returns, via an
+    :class:`~contextlib.AsyncExitStack` that unwinds on every exit — clean
+    close, ``WebSocketDisconnect``, or a handler exception alike.  That means a
+    dependency is held for the *whole socket lifetime*, which on a WebSocket
+    may be hours rather than the milliseconds an HTTP request holds one.  Do
+    not resolve a pooled or otherwise scarce resource this way: app-scope the
+    pool (``@app.on_startup``) and borrow per use inside the handler.  See
+    ``docs/guide/websockets.md``.
+
     Nothing is done to the wire: the wrapper's methods emit the same
     ``websocket.*`` events the raw form sends by hand.
     """
     from .websocket import WebSocket as _WS  # noqa: PLC0415 — cycle-safe
 
-    plan = _websocket_param_plan(fn)
+    plan = _websocket_param_plan(fn, _path_param_names(path))
 
     # The overwhelmingly common shape — a lone ``ws`` — gets a wrapper with no
-    # per-connection argument assembly at all.
-    if plan == ('ws',):
+    # per-connection argument assembly at all.  Unchanged since Sprint 82.
+    if len(plan) == 1 and plan[0][1] == 'ws':
         @wraps(fn)
         async def _ws_wrapper(conn, receive, send):
             await fn(_WS(conn, receive, send))
         return _ws_wrapper
 
+    depends_plan = tuple((n, payload) for n, kind, payload in plan if kind == 'depends')
+    bind_plan = tuple((n, kind, payload) for n, kind, payload in plan if kind != 'depends')
+    has_query = any(kind == 'query' for _, kind, _ in bind_plan)
+    fn_name = fn.__name__
+
     @wraps(fn)
     async def _ws_plan_wrapper(conn, receive, send):
         ws = None
-        args = []
-        for kind in plan:
+        kwargs: dict = {}
+        if has_query:
+            raw_qs = conn.query_string or b''
+            query_values = (
+                dict(parse_qsl(raw_qs.decode('latin-1'), keep_blank_values=True))
+                if raw_qs else {})
+
+        # Bind everything that cannot fail on a resource *before* resolving any
+        # Depends: a connection we are about to reject should never acquire one.
+        for name, kind, payload in bind_plan:
             if kind == 'ws':
                 if ws is None:
                     ws = _WS(conn, receive, send)
-                args.append(ws)
-            else:
-                args.append(conn)
-        await fn(*args)
+                kwargs[name] = ws
+            elif kind == 'conn':
+                kwargs[name] = conn
+            elif kind == 'path':
+                raw = conn.path_params.get(name, '')
+                if (payload is not None and isinstance(payload, type)
+                        and not isinstance(raw, payload)):
+                    try:
+                        kwargs[name] = payload(raw)
+                    except (ValueError, TypeError):
+                        return await _ws_reject(
+                            _WS(conn, receive, send) if ws is None else ws,
+                            f'path param {name!r}: cannot coerce {raw!r} to '
+                            f'{payload.__name__}')
+                else:
+                    kwargs[name] = raw
+            else:  # 'query'
+                raw = query_values.get(name, _QUERY_MISSING)
+                if raw is _QUERY_MISSING:
+                    if payload.required:
+                        return await _ws_reject(
+                            _WS(conn, receive, send) if ws is None else ws,
+                            f'missing required query parameter {name!r} for '
+                            f'handler {fn_name!r}')
+                    kwargs[name] = payload.default
+                else:
+                    try:
+                        kwargs[name] = payload.coercer(raw)
+                    except (ValueError, TypeError):
+                        return await _ws_reject(
+                            _WS(conn, receive, send) if ws is None else ws,
+                            f'query parameter {name!r}: cannot coerce {raw!r} '
+                            f'to {payload.type.__name__}')
+
+        if not depends_plan:
+            await fn(**kwargs)
+            return
+
+        # One stack per connection.  Teardown is LIFO on handler exit and runs
+        # on an exception propagating out of the handler just as it does on a
+        # clean return — that is the whole point of binding it to the `async
+        # with` rather than to a close event.
+        async with AsyncExitStack() as stack:
+            cache: dict = {}
+            for name, dep in depends_plan:
+                kwargs[name] = await _resolve_depends(dep, stack, cache)
+            await fn(**kwargs)
+
     return _ws_plan_wrapper
+
+
+async def _ws_reject(ws, detail: str) -> None:
+    """Reject a WebSocket handshake whose declared params could not be bound.
+
+    The HTTP path answers a bad query param with 400; a WebSocket has no
+    response to put a status on, so the handshake is refused with close code
+    1008 (policy violation) — the same shape FastAPI uses for WebSocket
+    validation failures.  Called before the handler runs, so the client's
+    ``connect()`` fails rather than opening and immediately closing.
+    """
+    logger.info(f'WebSocket handshake rejected: {detail}')
+    await ws.close(code=_WS_POLICY_VIOLATION, reason=_truncate_close_reason(detail))
 
 
 def _adapt_handler(fn, path: str, converters: dict | None = None):
@@ -1052,7 +1200,7 @@ def _adapt_handler(fn, path: str, converters: dict | None = None):
     """
     from .connection import Connection as _Conn
 
-    path_param_names: set[str] = {m.group(1) for m in Router._param_pattern.finditer(path)}
+    path_param_names: set[str] = _path_param_names(path)
     params, annotations, categories = _handler_param_plan(fn, path_param_names)
 
     request_param_names: frozenset[str] = frozenset(
@@ -1691,7 +1839,7 @@ class Router:
             original = fn
             if _is_simplified_handler(fn):
                 if _is_websocket_route(scheme):
-                    fn = _adapt_websocket_handler(fn)
+                    fn = _adapt_websocket_handler(fn, path)
                 else:
                     fn = _adapt_handler(fn, path, self._converters)
 
@@ -1926,7 +2074,7 @@ class Router:
             fns = list(functions)
             original = fns[-1]
             if _is_simplified_handler(fns[-1]):
-                fns[-1] = (_adapt_websocket_handler(fns[-1])
+                fns[-1] = (_adapt_websocket_handler(fns[-1], path)
                            if _is_websocket_route(scheme)
                            else _adapt_handler(fns[-1], path, self._converters))
             self._register_chain(fns, path, methods, scheme,
@@ -1939,7 +2087,7 @@ class Router:
                 if not _is_simplified_handler(fn):
                     adapted = fn
                 elif _is_websocket_route(scheme):
-                    adapted = _adapt_websocket_handler(fn)
+                    adapted = _adapt_websocket_handler(fn, path)
                 else:
                     adapted = _adapt_handler(fn, path, self._converters)
                 self._register_chain(list(middlewares) + [adapted], path, methods, scheme,

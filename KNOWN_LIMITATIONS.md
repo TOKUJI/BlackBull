@@ -262,17 +262,31 @@ optionally `| None`); repeated-key aggregation (`?tag=a&tag=b` →
 `conn.query_string` yourself for those.  Fences are lifted on
 demonstrated demand, not speculatively.
 
-### WebSocket handlers take no injected parameters
+### WebSocket injection: annotated query params only, one lifetime
 
-The v0.63.0 `WebSocket` object is resolved by signature, but only
-two things can appear there: the socket itself (`ws: WebSocket`, or
-the bare name `ws`/`websocket`) and optionally `conn: Connection`.
-Path params, query params, and `Depends` are **not** injected into a
-WebSocket handler the way they are into an HTTP one — read them off
-the connection (`ws.path_params['room']`, `ws.query_string`).
-Anything else in the signature is a registration-time `TypeError`
-rather than a surprise on the first connection.  Injection parity is
-the subject of queued follow-up work, not a permanent fence.
+Since v0.64.0 a WebSocket handler resolves path params, query
+params, and `Depends` from its signature, as an HTTP handler does.
+Two deliberate differences remain.
+
+A WebSocket **query param must carry its annotation** — on an HTTP
+route a bare name is taken as a `str` query param, but the reserved
+names (`ws`, `websocket`, `conn`, `connection`) make bare parameters
+ambiguous on a socket, so `async def chat(socket)` stays a
+registration-time `TypeError` instead of silently becoming a query
+param named `socket`.  There is also no body parameter: a WebSocket
+has no request body, so the HTTP `body`/dataclass forms have no
+analogue.
+
+`Depends` resolves **once per connection**, with no way to ask for
+another lifetime.  That is correct for values and wrong for scarce
+resources — a socket pins its dependency for hours, so a pool of N
+serves N concurrent sockets.  Application-scope the pool
+(`@app.on_startup`) and borrow per use; see the dependency-lifetime
+section of `docs/guide/websockets.md`.  Per-message scope is not
+merely unimplemented but structurally unavailable: it needs a
+per-frame dispatch seam, and the handler owns its receive loop.  A
+declared-scope API is unlocked on demonstrated demand, not
+speculatively.
 
 ### Optional `[speed-h1]` C parser stub not implemented
 

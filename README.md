@@ -51,8 +51,10 @@ Hello, world!
 - **Declare, don't plumb.** Handlers name what they need — path
   params, query params, the body, a `Connection` view, a
   `WebSocket` on a websocket route, or a `Depends(get_db)` resource
-  with teardown after the response — and
-  the router resolves it all when the route is *registered*.  A
+  with teardown when the handler is done — and
+  the router resolves it all when the route is *registered*.  The
+  same signature means the same thing on an HTTP route and a
+  WebSocket one.  A
   handler that uses none of it compiles to the same bare wrapper:
   zero per-request cost for features you didn't ask for.
 - **Break things on purpose.** The same protocol code that serves
@@ -166,7 +168,21 @@ async def ws_echo(ws: WebSocket):
 The loop ends when the client disconnects.  `send_text` / `send_bytes` /
 `send_json` and `receive_text` / `receive_bytes` / `receive_json` are there
 when you want to be explicit, and `await ws.close(code, reason)` before
-`accept()` rejects the handshake outright.  The raw
+`accept()` rejects the handshake outright.
+
+A WebSocket handler declares what it needs the same way an HTTP one does —
+path params, query params, and `Depends` all resolve from the signature:
+
+```python
+@app.route(path='/rooms/{room}', scheme=Scheme.websocket)
+async def chat(ws: WebSocket, room: str, since: int = 0, db=Depends(get_db)):
+    await ws.accept()
+    ...
+```
+
+A `Depends` on a socket is resolved once per *connection* and released when
+the handler exits, so give scarce resources application scope and borrow them
+per use — the guide explains why.  The raw
 `(conn, receive, send)` event form is still supported — see
 [WebSockets](https://tokuji.github.io/BlackBull/guide/websockets/).
 
@@ -314,7 +330,7 @@ for the full tutorial.
 | [`examples/scenario_h1_fault_injection.py`](examples/scenario_h1_fault_injection.py) | HTTP/1.1 fault scenarios driven against stdlib `http.server` |
 | [`examples/scenario_h2_fault_injection.py`](examples/scenario_h2_fault_injection.py) | HTTP/2 fault scenarios served against httpx |
 | [`examples/connection_object.py`](examples/connection_object.py) | Opt-in `Connection` context object — headers, cookies, client, `body()`/`json()`/`text()` |
-| [`examples/websocket_object.py`](examples/websocket_object.py) | High-level `WebSocket` object — `async for` messages, `send_json`, handshake rejection, and the raw event form side by side |
+| [`examples/websocket_object.py`](examples/websocket_object.py) | High-level `WebSocket` object — `async for` messages, `send_json`, path/query injection, handshake rejection, and the raw event form side by side |
 | [`examples/dependency_injection.py`](examples/dependency_injection.py) | `Depends` on a pseudo DB pool — per-request acquire/release with teardown after the response, query params, `use_cache` sharing |
 
 ## Documentation

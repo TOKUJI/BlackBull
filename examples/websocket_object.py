@@ -20,7 +20,7 @@ Try it:
     asyncio.run(main())
     "
 """
-from blackbull import BlackBull, Connection, WebSocket, WebSocketDisconnect
+from blackbull import BlackBull, WebSocket, WebSocketDisconnect
 from blackbull.utils import Scheme
 
 app = BlackBull()
@@ -49,17 +49,18 @@ async def json_stream(ws: WebSocket):
 
 
 @app.route(path='/rooms/{room}', scheme=Scheme.websocket)
-async def room(ws: WebSocket, conn: Connection):
-    """Path params are on the Connection — inject it alongside the object.
+async def room(ws: WebSocket, room: str, since: int = 0):
+    """Path and query params inject straight into the signature.
 
-    (Injecting them directly into the signature, the way HTTP handlers get
-    them, is the next step for this API.)
+    ``room`` matches the ``{room}`` placeholder; ``since`` has no placeholder,
+    so it comes from the query string (``/rooms/lobby?since=7``) with 0 as its
+    default.  A query param must carry its annotation — that is what tells the
+    router it is one.
     """
-    name = conn.path_params['room']
     await ws.accept()
-    await ws.send_text(f'welcome to {name}')
+    await ws.send_text(f'welcome to {room} (from {since})')
     async for message in ws:
-        await ws.send_text(f'[{name}] {message}')
+        await ws.send_text(f'[{room}] {message}')
 
 
 @app.route(path='/private', scheme=Scheme.websocket)
