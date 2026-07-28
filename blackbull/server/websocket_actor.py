@@ -7,7 +7,8 @@ from typing import Any
 from ..actor import Actor, Message
 from ..connection import Connection
 from ..event_aggregator import EventAggregator
-from ..asgi import ASGIEvent
+from ..asgi import (ASGIEvent, WebSocketAcceptEvent, WebSocketCloseEvent,
+                    WebSocketSendEvent)
 from .conn_id import new_connection_id
 from .constants import WSCloseCode
 from .permessage_deflate import (
@@ -107,7 +108,9 @@ class WebSocketActor(Actor):
             self._disconnect_code = event.get('code', WSCloseCode.ABNORMAL)
         return event
 
-    async def _send(self, event: dict[str, Any], _status=None, _headers=None) -> None:
+    async def _send(self,
+                    event: WebSocketSendEvent | WebSocketCloseEvent | WebSocketAcceptEvent,
+                    _status=None, _headers=None) -> None:
         if isinstance(event, dict) and event.get('type') == ASGIEvent.WS_ACCEPT:
             ws_bag = self._conn._ws or {}
             send_101 = ws_bag.pop('send_101', None)

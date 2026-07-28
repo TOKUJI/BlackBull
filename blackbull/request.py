@@ -19,7 +19,7 @@ module holds only the transport-agnostic free functions, which
 import json
 from typing import Any, AsyncIterator
 
-from .asgi import ASGIEvent
+from .asgi import ASGIEvent, ASGIReceiveCallable
 
 
 class ClientDisconnected(Exception):
@@ -38,7 +38,7 @@ class ClientDisconnected(Exception):
         self.partial = partial
 
 
-async def read_body(receive) -> bytes:
+async def read_body(receive: ASGIReceiveCallable) -> bytes:
     """Read the complete request body from the ASGI receive channel.
 
     Collects chunks in a list and joins once, rather than the O(n²) ``+=``
@@ -69,7 +69,7 @@ async def read_body(receive) -> bytes:
     return b''.join(chunks)
 
 
-async def stream_body(receive) -> AsyncIterator[bytes]:
+async def stream_body(receive: ASGIReceiveCallable) -> AsyncIterator[bytes]:
     """Yield the request body one ``http.request`` chunk at a time.
 
     The streaming counterpart to :func:`read_body`: it never accumulates the
@@ -96,7 +96,7 @@ async def stream_body(receive) -> AsyncIterator[bytes]:
             break
 
 
-async def read_json(receive) -> Any:
+async def read_json(receive: ASGIReceiveCallable) -> Any:
     """Read the request body and parse it as JSON.
 
     Returns the parsed JSON value (``dict``, ``list``, ``str``, ``int``,
@@ -131,7 +131,7 @@ def _json_or_none(body: bytes) -> Any:
         return None
 
 
-async def read_text(receive, encoding: str = 'utf-8') -> str:
+async def read_text(receive: ASGIReceiveCallable, encoding: str = 'utf-8') -> str:
     """Read the request body and decode it as text.
 
     Uses ``errors='replace'`` so undecodable bytes become U+FFFD rather than

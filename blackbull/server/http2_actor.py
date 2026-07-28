@@ -34,7 +34,8 @@ from .access_log import (
     request_record_needed as _request_record_needed,
     disconnect_events_observed as _disconnect_events_observed,
 )
-from ..asgi import ASGIEvent
+from ..asgi import (ASGIEvent, ASGIReceiveCallable, ASGISendCallable,
+                    HTTPResponsePushEvent)
 from .http1_actor import RequestActor
 
 logger = logging.getLogger(__name__)
@@ -196,8 +197,8 @@ class StreamActor(Actor):
         self,
         stream_id: int,
         conn: 'dict | Connection',
-        receive: Callable[..., Awaitable[Any]],
-        send: Callable[..., Awaitable[Any]],
+        receive: ASGIReceiveCallable,
+        send: ASGISendCallable,
         app: Callable[..., Awaitable[None]],
         aggregator: EventAggregator,
         http2_actor: 'HTTP2Actor',
@@ -1506,7 +1507,8 @@ class HTTP2Actor(Actor):
         task.add_done_callback(
             self._make_done_cb(stream.stream_id, is_ws=True))
 
-    async def _handle_push(self, event: dict, parent_stream_id: int) -> None:
+    async def _handle_push(self, event: HTTPResponsePushEvent,
+                           parent_stream_id: int) -> None:
         """Handle an 'http.response.push' ASGI event.
 
         RFC 9113 §8.4 (server push) — the pushed request MUST be safe,

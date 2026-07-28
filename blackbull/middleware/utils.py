@@ -8,10 +8,11 @@ Public API:
 """
 from functools import wraps
 
+from ..asgi import ASGISendCallable, ASGISendEvent
 from ..response import Response
 
 
-def _normalize_send(inner_send):
+def _normalize_send(inner_send: ASGISendCallable | None):
     """Return a wrapper around *inner_send* that expands Response objects.
 
     Handlers that use the simplified return-value form call ``send`` with a
@@ -30,6 +31,12 @@ def _normalize_send(inner_send):
     there is a single source of truth for the start/body event shape (shared
     with ``app._wrap_send`` and the simplified-handler dispatch).
     """
+    # ``inner_send`` is Optional because a middleware may be driven with no
+    # send channel at all on pass-through paths (a websocket or lifespan
+    # scope a middleware declines to touch).  The wrapper is built either
+    # way; it is simply never invoked in that case.
+    # Unannotated on purpose: rebuilt per request (see _wrap_send in app.py).
+    # ``event`` is an ASGISendEvent or a Response.
     async def normalized(event):
         if isinstance(event, Response):
             # Response is ASGI-callable and ignores conn/receive (it is a pure
