@@ -15,6 +15,8 @@ Public API exports:
 - `Headers`: case-insensitive, ordered, multi-valued HTTP header store.
 - `Connection`: the typed internal request representation (Sprint 79); the handler context object exposing ``method``/``path``/``headers``/``cookies``/``body()``/``json()``/``text()``. The ASGI ``scope`` is a derived view (``Connection.as_scope()``).
 - `Request`: **deprecated** alias of ``Connection`` (Sprint 79 Phase 5). Accessing ``blackbull.Request`` emits a ``DeprecationWarning``; replace ``request: Request`` handler params with ``conn: Connection`` (identical API). Removal no earlier than 2027-08-01.
+- `WebSocket`: the high-level WebSocket handler object — ``await ws.accept()``, ``async for message in ws``, ``ws.send_text()``/``send_bytes()``/``send_json()``, ``await ws.close()``. Declare ``async def handler(ws: WebSocket)`` on a ``Scheme.websocket`` route to receive it; the raw ``(conn, receive, send)`` form keeps working unchanged.
+- `WebSocketDisconnect`: raised by ``ws.receive()`` when the peer closes; carries ``code`` and ``reason``. ``async for`` ends the loop instead of raising.
 - `Depends`: per-request provider injection for simplified handlers (async-generator providers get teardown after the response is sent).
 - `cookie_header`: builds a ``Set-Cookie`` header tuple.
 - `read_body`: reads and buffers the full request body from the ASGI receive channel.
@@ -55,6 +57,7 @@ from .request import (
     read_body, read_json, read_text, parse_cookies, cookies_from_headers,
     ClientDisconnected)
 from .connection import Connection
+from .websocket import WebSocket, WebSocketDisconnect
 from .response import (
     Response, JSONResponse, RedirectResponse, StreamingResponse,
     EventSourceResponse, WebSocketResponse, cookie_header,

@@ -37,17 +37,17 @@ from typing import Any
 from urllib.parse import unquote
 
 from .asgi import ASGIReceiveEvent
+from .websocket import WebSocketDisconnect
 
 import httpx
 
-
-class WebSocketDisconnect(Exception):
-    """Raised when the server side closes (or rejects) the WebSocket."""
-
-    def __init__(self, code: int = 1000, reason: str = ''):
-        self.code = code
-        self.reason = reason
-        super().__init__(f'WebSocket disconnected: code={code} reason={reason!r}')
+# ``WebSocketDisconnect`` is re-exported, not redefined.  Sprint 82 gave the
+# server side a handler object that raises the same "the other end closed"
+# exception, and two identically-named classes would mean an ``except``
+# written against one silently missing the other.  One class, both sides:
+# ``from blackbull.testing import WebSocketDisconnect`` keeps working, and it
+# is the same object as ``blackbull.WebSocketDisconnect``.
+__all__ = ['TestClient', 'WebSocketTestSession', 'WebSocketDisconnect']
 
 
 class _LoopThread:

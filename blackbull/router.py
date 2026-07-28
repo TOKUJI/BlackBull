@@ -905,6 +905,115 @@ def _set_path_params(target, receive, params: dict) -> None:
     _conn_of(target, receive).path_params.update(params)
 
 
+#: Parameter names that receive the high-level :class:`~blackbull.websocket.WebSocket`
+#: when they carry no annotation.  ``ws: WebSocket`` works under any name.
+_WS_PARAM_NAMES = frozenset({'ws', 'websocket'})
+
+
+def _is_websocket_route(scheme) -> bool:
+    """True when *scheme* selects the WebSocket surface and nothing else.
+
+    A route registered for both schemes keeps the HTTP adaptation: its handler
+    has to satisfy the HTTP contract (return a response), and a WebSocket
+    object would be the wrong argument for half its traffic.  An omitted
+    scheme (``_ANY_SCHEME``) is likewise not WebSocket-only.
+    """
+    if scheme is None or isinstance(scheme, _AnyScheme):
+        return False
+    schemes = (scheme,) if isinstance(scheme, str) else tuple(scheme)
+    return bool(schemes) and all(s == Scheme.websocket for s in schemes)
+
+
+def _websocket_param_plan(fn) -> tuple[str, ...]:
+    """Classify an object-form WebSocket handler's parameters, once, at
+    registration time.
+
+    Returns one category per parameter, in signature order: ``'ws'`` for the
+    :class:`~blackbull.websocket.WebSocket` and ``'conn'`` for the native
+    :class:`~blackbull.connection.Connection`.  Annotation wins over name, so
+    an explicitly annotated parameter always means what it says.
+
+    Anything else raises ``TypeError`` at registration rather than failing on
+    the first connection.  Path params, query params, and ``Depends`` are the
+    subject of the simplified-handler work queued behind this object; until
+    then, "I don't know what to put here" has to be loud.
+    """
+    from .connection import Connection as _Conn  # noqa: PLC0415 — cycle-safe
+    from .websocket import WebSocket as _WS      # noqa: PLC0415 — cycle-safe
+
+    params = inspect.signature(fn).parameters
+    annotations = {n: p.annotation for n, p in params.items()}
+    try:
+        resolved_hints = typing.get_type_hints(fn)
+        for n in annotations:
+            if n in resolved_hints:
+                annotations[n] = resolved_hints[n]
+    except Exception:
+        pass  # unresolved forward refs → fall back to the raw annotations.
+
+    plan: list[str] = []
+    for name, p in params.items():
+        ann = annotations.get(name, inspect.Parameter.empty)
+        if ann is _WS:
+            plan.append('ws')
+        elif ann is _Conn:
+            plan.append('conn')
+        elif ann is inspect.Parameter.empty and name in _WS_PARAM_NAMES:
+            plan.append('ws')
+        elif ann is inspect.Parameter.empty and name in ('conn', 'connection'):
+            plan.append('conn')
+        else:
+            got = ('no annotation' if ann is inspect.Parameter.empty
+                   else getattr(ann, '__name__', repr(ann)))
+            raise TypeError(
+                f"WebSocket handler {fn.__name__!r}: cannot resolve parameter "
+                f"{name!r} ({got}).  A WebSocket handler takes 'ws: WebSocket' "
+                f"(or the bare name 'ws'/'websocket'), optionally alongside "
+                f"'conn: Connection'.  For full control, declare the raw "
+                f"'(conn, receive, send)' signature instead.")
+    return tuple(plan)
+
+
+def _adapt_websocket_handler(fn):
+    """Wrap an object-form WebSocket handler in a ``(conn, receive, send)``
+    coroutine, building the :class:`~blackbull.websocket.WebSocket` per
+    connection.
+
+    The plan is resolved once here, at registration; the wrapper itself only
+    indexes it.  One object per *connection* — not per message — so an
+    ``async for`` loop over a long-lived socket allocates nothing extra per
+    message.
+
+    Nothing is done to the wire: the wrapper's methods emit the same
+    ``websocket.*`` events the raw form sends by hand.
+    """
+    from .websocket import WebSocket as _WS  # noqa: PLC0415 — cycle-safe
+
+    plan = _websocket_param_plan(fn)
+
+    # The overwhelmingly common shape — a lone ``ws`` — gets a wrapper with no
+    # per-connection argument assembly at all.
+    if plan == ('ws',):
+        @wraps(fn)
+        async def _ws_wrapper(conn, receive, send):
+            await fn(_WS(conn, receive, send))
+        return _ws_wrapper
+
+    @wraps(fn)
+    async def _ws_plan_wrapper(conn, receive, send):
+        ws = None
+        args = []
+        for kind in plan:
+            if kind == 'ws':
+                if ws is None:
+                    ws = _WS(conn, receive, send)
+                args.append(ws)
+            else:
+                args.append(conn)
+        await fn(*args)
+    return _ws_plan_wrapper
+
+
 def _adapt_handler(fn, path: str, converters: dict | None = None):
     """Wrap a simplified handler in an ASGI (scope, receive, send) coroutine.
 
@@ -1581,7 +1690,10 @@ class Router:
 
             original = fn
             if _is_simplified_handler(fn):
-                fn = _adapt_handler(fn, path, self._converters)
+                if _is_websocket_route(scheme):
+                    fn = _adapt_websocket_handler(fn)
+                else:
+                    fn = _adapt_handler(fn, path, self._converters)
 
             if hooks is not None:
                 fn._bb_response_headers, fn._bb_request_guard = hooks
@@ -1814,7 +1926,9 @@ class Router:
             fns = list(functions)
             original = fns[-1]
             if _is_simplified_handler(fns[-1]):
-                fns[-1] = _adapt_handler(fns[-1], path, self._converters)
+                fns[-1] = (_adapt_websocket_handler(fns[-1])
+                           if _is_websocket_route(scheme)
+                           else _adapt_handler(fns[-1], path, self._converters))
             self._register_chain(fns, path, methods, scheme,
                                  name=name, original_handler=original,
                                  accept_query=accept_query)
@@ -1822,7 +1936,12 @@ class Router:
 
         if middlewares:
             def decorator(fn):
-                adapted = _adapt_handler(fn, path, self._converters) if _is_simplified_handler(fn) else fn
+                if not _is_simplified_handler(fn):
+                    adapted = fn
+                elif _is_websocket_route(scheme):
+                    adapted = _adapt_websocket_handler(fn)
+                else:
+                    adapted = _adapt_handler(fn, path, self._converters)
                 self._register_chain(list(middlewares) + [adapted], path, methods, scheme,
                                      name=name, original_handler=fn,
                                      accept_query=accept_query)

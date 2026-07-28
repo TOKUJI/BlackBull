@@ -35,6 +35,46 @@ so the editable install's metadata catches up.
 
 ### Added
 
+- **High-level WebSocket API.**  WebSocket handlers can now take a typed
+  `WebSocket` object instead of raw event dicts:
+
+  ```python
+  @app.route(path='/ws', scheme=Scheme.websocket)
+  async def ws_handler(ws: WebSocket):
+      await ws.accept()
+      async for message in ws:
+          await ws.send(message)
+  ```
+
+  `accept()` / `close()` drive the handshake (calling `close()` *before*
+  `accept()` rejects the connection outright), `send_text` / `send_bytes` /
+  `send_json` / `send` write one complete message, and `receive` and its
+  typed variants return bare `str`/`bytes` rather than an event.  Iterating
+  with `async for` ends at disconnect instead of raising; call `receive()`
+  directly and catch `WebSocketDisconnect` when the close code matters.
+  Connection facts are on the object (`ws.path`, `ws.headers`,
+  `ws.path_params`, `ws.subprotocols`, `ws.client`, `ws.connection`), as is
+  handshake state (`ws.accepted`, `ws.client_disconnected`, `ws.close_code`).
+
+  The parameter is resolved by annotation first, so `ws: WebSocket` works
+  under any name; un-annotated, `ws` and `websocket` are recognised, and a
+  `Connection` can be injected alongside.  A parameter that is neither is a
+  `TypeError` **at registration**, not on the first connection.
+
+  **The raw `(conn, receive, send)` form is not deprecated** and keeps
+  working unchanged — supported for at least a year past this release, with
+  no removal planned.  A route is classified once, at registration, by
+  whether its signature contains both `receive` and `send`, so the raw form
+  reaches the router untouched and pays nothing.  The object's methods emit
+  exactly the events the raw form sends by hand: framing, fragmentation, and
+  close semantics are identical, and the object is built once per
+  *connection*, not per message.
+
+  One combination is refused: the built-in `blackbull.middleware.websocket`
+  accepts the handshake for the handler, which would leave the object
+  treating the client's first message as the handshake.  It now raises a
+  `RuntimeError` naming the cause instead of silently dropping that message.
+
 - **Typed `receive`/`send` message channel.**  The 19 ASGI 3.0 message
   shapes are now declared as `TypedDict`s keyed by a `Literal` `type` tag,
   with a union per direction — `ASGIReceiveEvent` (7 members) and
@@ -71,6 +111,19 @@ so the editable install's metadata catches up.
   vocabulary, and the values they carry are spec-defined ASGI strings.
 
 ### Internal
+
+- The pyright gate now also covers `blackbull/websocket.py`, the first
+  framework module written *against* the ASGI message declarations rather
+  than declaring them.  It caught a `client` property typed narrower than
+  `Connection.client` actually is.  The scope-pin test was updated
+  accordingly and now additionally refuses package *directories*, so the
+  gate can grow by reviewed module but not drift into whole-repo checking.
+
+- `blackbull.testing.WebSocketDisconnect` is re-exported from
+  `blackbull.websocket` rather than defined separately.  Both meant "the
+  other end closed", and two identically-named exception classes would mean
+  an `except` written against one silently missing the other.  Existing
+  `from blackbull.testing import WebSocketDisconnect` imports are unaffected.
 
 - Per-request `send` wrapper closures are deliberately left unannotated.  A
   nested `async def` created inside a per-request factory rebuilds an

@@ -274,16 +274,24 @@ For middleware ordering semantics see [Middleware](middleware.md).
 ## WebSocket routes
 
 ```python
+from blackbull import WebSocket
 from blackbull.utils import Scheme
 
 @app.route(path='/ws', scheme=Scheme.websocket)
-async def ws_handler(scope, receive, send):
-    ...
+async def ws_handler(ws: WebSocket):
+    await ws.accept()
+    async for message in ws:
+        await ws.send(message)
 ```
 
-WebSocket handlers always receive the full
-`(scope, receive, send)` triplet — the simplified form does not
-apply.  See [WebSockets](websockets.md) for the handshake,
+Declaring a `WebSocket` parameter gets you the connection as an object.
+The raw `(conn, receive, send)` triplet is still accepted and still
+supported; a route is classified once, at registration, by whether its
+signature contains both `receive` and `send`.  The HTTP simplified-handler
+features — path params, query params, `Depends` — are not injected into
+WebSocket handlers yet.
+
+See [WebSockets](websockets.md) for the handshake,
 subprotocol negotiation, fragmented messages, `permessage-deflate`,
 and the RFC 8441 (HTTP/2) transport.
 

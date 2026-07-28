@@ -152,21 +152,22 @@ the same socket.
 ## WebSocket
 
 ```python
-from http import HTTPMethod
+from blackbull import WebSocket
 from blackbull.utils import Scheme
 
-@app.route(path='/ws', methods=[HTTPMethod.GET], scheme=Scheme.websocket)
-async def ws_echo(scope, receive, send):
-    await receive()                              # websocket.connect
-    await send({'type': 'websocket.accept'})
-    while True:
-        msg = await receive()
-        if msg['type'] == 'websocket.disconnect':
-            break
-        if msg['type'] == 'websocket.receive':
-            await send({'type': 'websocket.send',
-                        'text': msg.get('text') or ''})
+@app.route(path='/ws', scheme=Scheme.websocket)
+async def ws_echo(ws: WebSocket):
+    await ws.accept()
+    async for message in ws:
+        await ws.send(message)
 ```
+
+The loop ends when the client disconnects.  `send_text` / `send_bytes` /
+`send_json` and `receive_text` / `receive_bytes` / `receive_json` are there
+when you want to be explicit, and `await ws.close(code, reason)` before
+`accept()` rejects the handshake outright.  The raw
+`(conn, receive, send)` event form is still supported — see
+[WebSockets](https://tokuji.github.io/BlackBull/guide/websockets/).
 
 ## Beyond HTTP — the Non-ASGI bridge
 
@@ -312,6 +313,7 @@ for the full tutorial.
 | [`examples/scenario_h1_fault_injection.py`](examples/scenario_h1_fault_injection.py) | HTTP/1.1 fault scenarios driven against stdlib `http.server` |
 | [`examples/scenario_h2_fault_injection.py`](examples/scenario_h2_fault_injection.py) | HTTP/2 fault scenarios served against httpx |
 | [`examples/connection_object.py`](examples/connection_object.py) | Opt-in `Connection` context object — headers, cookies, client, `body()`/`json()`/`text()` |
+| [`examples/websocket_object.py`](examples/websocket_object.py) | High-level `WebSocket` object — `async for` messages, `send_json`, handshake rejection, and the raw event form side by side |
 | [`examples/dependency_injection.py`](examples/dependency_injection.py) | `Depends` on a pseudo DB pool — per-request acquire/release with teardown after the response, query params, `use_cache` sharing |
 
 ## Documentation
