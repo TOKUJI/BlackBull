@@ -31,6 +31,8 @@ so the editable install's metadata catches up.
 
 ## [Unreleased]
 
+## [0.62.0] — 2026-07-28
+
 ### Added
 
 - **Typed `receive`/`send` message channel.**  The 19 ASGI 3.0 message
