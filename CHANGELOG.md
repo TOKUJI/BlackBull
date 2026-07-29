@@ -31,6 +31,8 @@ so the editable install's metadata catches up.
 
 ## [Unreleased]
 
+## [0.64.0] — 2026-07-29
+
 ### Added
 
 - **WebSocket handlers inject from their signature.**  Path params, query
@@ -96,6 +98,35 @@ so the editable install's metadata catches up.
   take no injected parameters" entry is replaced by the two narrower fences
   that remain.  `examples/websocket_object.py` reads `room` from the
   signature instead of `conn.path_params`.
+
+- **`README.md` documents HTTP QUERY (RFC 10008)**, which shipped without ever
+  being named there — a reader met its caveats in `KNOWN_LIMITATIONS.md`
+  before meeting the feature.  The new section covers `from blackbull import
+  QUERY` and why routes registered against the exported string need no
+  migration when `http.HTTPMethod` eventually grows a `QUERY` member.
+
+- **`KNOWN_LIMITATIONS.md` separates limitations from deliberate non-goals.**
+  Absent capabilities that were never promised (HTTP/3, an ORM, a gRPC
+  client, CDN glue) moved to a "not limitations" table, and operational
+  how-to moved to where it is actionable: the worker-count ceiling and the
+  worker-0 raw-protocol rule to `docs/deployment/workers.md`, HTTP/2 fronting
+  to `docs/deployment/behind-nginx.md`, the single-broker-owner rationale
+  (an MQTT 5.0 session-state requirement) to `docs/guide/mqtt.md`, and the
+  nginx differential-corpus divergences to `docs/about/conformance.md`.
+  Nothing was dropped; 17 entries became 11 genuine ones.
+
+### Internal
+
+- **The test suite runs on Python 3.14 again.**  CPython 3.14 made
+  `forkserver` the default `multiprocessing` start method on POSIX, and the
+  live-server fixtures bind their listening socket in the parent before
+  starting a worker that serves on it — an inherited socket and an app of
+  locally-defined closures, neither of which pickles.  Every such fixture
+  became a setup error, and because the repo's pre-commit hook runs the
+  suite, the hook could not pass at all on 3.14.  `tests/conftest.py` now
+  pins the `fork` start method those fixtures were written against.  No
+  change to shipped code, and a no-op on 3.11/3.12 where `fork` is already
+  the default.
 
 ## [0.63.0] — 2026-07-29
 
