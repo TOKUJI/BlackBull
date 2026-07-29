@@ -221,7 +221,7 @@ to know how the client delivered the cookies.
 ## Query parameters
 
 Declare them as handler parameters (since v0.56.0).  Any simplified-handler
-parameter that is not a path param, `body`, `scope`, `Connection`, a dataclass
+parameter that is not a path param, `body`, `conn`, `Connection`, a dataclass
 body, or [`Depends`](dependency-injection.md) resolves from the query
 string, coerced to its annotation:
 

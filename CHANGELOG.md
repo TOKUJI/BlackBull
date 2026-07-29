@@ -31,6 +31,34 @@ so the editable install's metadata catches up.
 
 ## [Unreleased]
 
+### Removed
+
+- **The `scope` simplified-handler parameter alias.**  Naming a simplified
+  handler's parameter `scope` used to inject the native `Connection`.  That is
+  backwards: `scope` means a genuine ASGI scope dict everywhere else in the
+  codebase, so the alias handed back an object that answered to the wrong name
+  and made `scope['headers']` look correct — it compiled, registered, and
+  failed at request time with `AttributeError`.  That is precisely how the 33
+  tests below rotted.  It is now a `TypeError` **at registration**:
+
+  ```python
+  @app.route(path='/x')
+  async def h(scope):          # TypeError: parameter 'scope' is not supported
+      ...
+
+  @app.route(path='/x')
+  async def h(conn):           # use this — conn.headers, conn.query_string, …
+      ...
+  ```
+
+  `conn` and `connection` are unchanged.  **Full-form handlers and middleware
+  are unaffected** — `async def h(scope, receive, send)` takes its arguments
+  positionally, so the router never inspects those names; the 196 such handlers
+  in the test corpus and every documented example keep working.  Rejecting the
+  name rather than merely dropping the alias is deliberate: an unannotated
+  `scope` would otherwise fall through to the query-param fallback and silently
+  start receiving a query-string value instead of the request.
+
 ### Fixed
 
 - **33 rotted integration/conformance tests.**  Every one shared a root cause:

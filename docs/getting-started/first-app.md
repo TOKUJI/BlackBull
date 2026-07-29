@@ -93,17 +93,34 @@ async def update_item(item_id: int, conn: Connection):
 See [Requests and responses](../guide/requests-and-responses.md)
 for the full surface.
 
-## The `scope` dict
+## The `conn` escape hatch
 
-Name a parameter `scope` to receive the full scope dict alongside
-other simplified parameters:
+Name a parameter `conn` to receive the full [`Connection`](../guide/requests-and-responses.md)
+alongside other simplified parameters:
 
 ```python
 @app.route(path='/items/{item_id:int}')
-async def get_item(item_id: int, scope):
-    lang = scope['headers'].get(b'accept-language', b'en').decode()
+async def get_item(item_id: int, conn):
+    lang = conn.headers.get(b'accept-language', b'en').decode()
     return {"id": item_id, "lang": lang}
 ```
+
+`connection` works as a synonym.  A `Connection` is an object with typed
+attributes — `conn.headers`, `conn.query_string`, `conn.cookies`,
+`conn.state`, `conn.extensions` — **not** a mapping, so `conn['headers']`
+and `conn.get(...)` do not work.
+
+!!! warning "`scope` is not a valid parameter name"
+
+    A simplified handler may not name a parameter `scope`; doing so raises
+    `TypeError` when the route is registered.  It was accepted until
+    v0.65.0, when it injected the `Connection` — the name promised an ASGI
+    scope dict and delivered something else, so `scope['headers']` compiled
+    fine and failed at request time.  Rename it to `conn`.
+
+    Full-form handlers are unaffected: `async def h(scope, receive, send)`
+    takes its arguments positionally, so the name is never inspected.  It
+    still receives a `Connection`, so `conn` reads better there too.
 
 ## Return value mapping
 

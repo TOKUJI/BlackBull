@@ -755,14 +755,15 @@ def _handler_param_plan(fn, path_param_names: set) -> tuple:
     ``'conn'``, ``'body'``, ``'request'``, ``'dataclass'``, ``'depends'``
     (payload: the :class:`~blackbull.di.Depends` instance), or ``'query'``
     (payload: :class:`_QuerySpec`).  Precedence: path params first, then the
-    reserved names ``body``/``conn`` (``connection``/``scope`` alias), then a
-    ``Depends`` default, then
+    rejected name ``scope``, then the reserved names ``body``/``conn``
+    (``connection`` alias), then a ``Depends`` default, then
     ``Connection`` recognition, then a dataclass body annotation; anything left
     is a query param — the fallback category.
 
-    Raises ``TypeError`` (fail fast, at registration) for a ``Depends``
-    default on a reserved/path name, a second body-consuming parameter, or a
-    leftover parameter whose annotation is not a supported query scalar.
+    Raises ``TypeError`` (fail fast, at registration) for a parameter named
+    ``scope``, a ``Depends`` default on a reserved/path name, a second
+    body-consuming parameter, or a leftover parameter whose annotation is not a
+    supported query scalar.
     """
     from .connection import Connection as _Conn  # Sprint 79: Request is now a Connection alias
 
@@ -792,15 +793,33 @@ def _handler_param_plan(fn, path_param_names: set) -> tuple:
                     f"is a path param of {sorted(path_param_names)!r} and "
                     f"cannot carry a Depends default.")
             categories[name] = ('path', None)
-        elif name in ('body', 'conn', 'connection', 'scope'):
+        elif name == 'scope':
+            # Rejected, not merely unsupported. ``scope`` was once an alias
+            # injecting the Connection, which is backwards: the word means a
+            # genuine ASGI scope dict everywhere else, so the alias handed back
+            # an object that answered to the wrong name and invited
+            # ``scope['headers']`` — a request-time AttributeError.
+            #
+            # This branch must precede the query-param fallback below. Deleting
+            # the alias without it would let an unannotated ``scope`` resolve as
+            # a *query parameter* named "scope", silently rebinding the argument
+            # instead of failing. A path param named ``scope`` is explicit, so
+            # the ``path`` branch above still wins.
+            raise TypeError(
+                f"Simplified handler {fn.__name__!r}: parameter 'scope' is not "
+                f"supported — BlackBull threads a Connection, not an ASGI scope "
+                f"dict, so the name misdescribes what would be injected. Rename "
+                f"it to 'conn' and use the typed attributes (conn.headers, "
+                f"conn.query_string, conn.cookies, conn.state, conn.extensions). "
+                f"Full-form handlers (conn, receive, send) are unaffected — "
+                f"their parameters are positional.")
+        elif name in ('body', 'conn', 'connection'):
             if is_dep:
                 raise TypeError(
                     f"Simplified handler {fn.__name__!r}: parameter {name!r} "
                     f"is reserved for the request {name} and cannot carry a "
                     f"Depends default — rename the parameter.")
-            # ``conn`` / ``connection`` inject the native Connection; ``scope`` is
-            # a deprecated alias for the same object (BlackBull threads a
-            # Connection, not an ASGI scope, on the native path).
+            # ``conn`` / ``connection`` inject the native Connection.
             categories[name] = ('body' if name == 'body' else 'conn', None)
         elif is_dep:
             categories[name] = ('depends', default)
