@@ -1,17 +1,28 @@
 name: pytest
 
-# Two-tier pytest CI (Sprint 51 R8).
+# Four-lane pytest CI.
 #
-# Fast tier  — runs on every push/PR; no Docker, beartype enabled.
-#              Catches regressions in unit, architecture, and property tests.
-# Dual-path  — runs on every push/PR; the same Docker-free suites under
-#              BB_FORCE_ASGI_SCOPE=1, forcing Connection.as_scope()+from_scope()
-#              on every request so the ASGI compat conversion can't bitrot
-#              between sprints (native-connection-interface.md §4.3, Sprint 79 —
-#              previously a manual-only lane).
-# Full tier  — runs weekly (Saturday 05:00 UTC, offset from conformance.yml's
-#              Sunday 03:17 UTC) and on demand; adds --run-all (integration +
-#              docker-dependent tests).
+# Fast tier   — runs on every push/PR across the full supported interpreter
+#               matrix; no Docker, beartype enabled.  Catches regressions in
+#               unit, architecture, and property tests.
+# Integration — runs on every push/PR; tests/integration + tests/conformance
+#               under --run-integration.  The docker-dependent modules
+#               importorskip themselves out, so this lane needs no daemon.
+#               Exists because these suites were previously reachable only
+#               from the weekly Full tier, which is gated on schedule /
+#               workflow_dispatch and therefore gates nothing: 33 tests rotted
+#               red behind that gap before anyone noticed.
+# Dual-path   — runs on every push/PR; the same Docker-free suites under
+#               BB_FORCE_ASGI_SCOPE=1, forcing Connection.as_scope()+from_scope()
+#               on every request so the ASGI compat conversion can't bitrot
+#               between sprints (native-connection-interface.md §4.3, Sprint 79 —
+#               previously a manual-only lane).
+# Full tier   — runs weekly (Saturday 05:00 UTC, offset from conformance.yml's
+#               Sunday 03:17 UTC) and on demand; adds --run-all, which is now
+#               the docker-dependent tests on top of what the integration lane
+#               already gates.  It files an issue when it fails: an unattended
+#               scheduled job that nothing reports on is indistinguishable from
+#               a green one.
 #
 # Both tiers install the full [compression,testing] extras and generate a
 # self-signed TLS cert so TLS-aware tests don't fail due to missing key files.
@@ -40,12 +51,19 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # The matrix must equal the classifiers in pyproject.toml.  Advertising
+        # a version we do not test is the defect that let an HTTP/2
+        # connection-window leak ship: CPython >=3.13 closes a coroutine before
+        # TaskGroup.create_task() raises, the credit-replay fallback then
+        # scheduled a dead coroutine, and the one test that noticed ran only on
+        # the versions where the old behaviour still held.
+        #
         # 3.11 is the declared floor (requires-python = ">=3.11"); running
         # the fast tier there is the *authoritative* check that the floor is
         # honest — a static audit missed HTTPStatus.is_client_error being
         # 3.12-only and let a 3.11 crash ship (fixed 2026-07-18).  Also the
         # compat level a PyPy arm targets in the bench-window plan.
-        python-version: ['3.11', '3.12']
+        python-version: ['3.11', '3.12', '3.13', '3.14']
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
@@ -81,6 +99,42 @@ jobs:
         run: |
           python -m pytest tests/unit tests/architecture tests/properties \
             --timeout=60 -q --beartype-packages=blackbull
+
+  integration:
+    name: Integration lane (integration + conformance)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97   # v7.0.0
+        with:
+          python-version: '3.12'
+
+      - name: Install BlackBull (with test-relevant extras)
+        run: pip install -e '.[compression,testing,fault-injection,reload,speed]'
+
+      - name: Generate self-signed TLS material
+        run: |
+          # subjectAltName must cover the loopback IP: the cert-verifying
+          # integration tests (test_http2_advanced) connect to 127.0.0.1 and
+          # validate the chain + hostname.  CN=localhost alone fails with
+          # "IP address mismatch".  Mirrors the committed tests/cert.pem SAN.
+          openssl req -x509 -newkey rsa:2048 \
+            -keyout tests/key.pem -out tests/cert.pem \
+            -days 365 -nodes -subj '/CN=localhost' \
+            -addext 'subjectAltName=DNS:localhost,IP:127.0.0.1'
+
+      - name: Run integration + conformance suites
+        # --run-integration (not --run-all): the `docker` marker stays skipped,
+        # so no daemon is needed here and the docker-dependent modules
+        # importorskip out.  Measured at ~98s locally for 3526 tests, which is
+        # what made this lane cheap enough to gate every PR.
+        run: |
+          python -m pytest tests/integration tests/conformance \
+            --run-integration --timeout=120 -q --beartype-packages=blackbull
 
   dual-path:
     name: Dual-path lane (BB_FORCE_ASGI_SCOPE=1)
@@ -121,6 +175,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    permissions:
+      contents: read
+      issues: write   # the failure notification below files/updates an issue
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
@@ -168,3 +225,30 @@ jobs:
         run: |
           python -m pytest tests/ --run-all --timeout=120 -q \
             --beartype-packages=blackbull
+
+      - name: Report a scheduled failure
+        # Nothing watches a cron job.  Full tier ran 4 times before this step
+        # existed and 2 of those failed unattended; by the time it was noticed
+        # the logs had aged out.  Uses the preinstalled gh CLI rather than a
+        # third-party action so there is no new SHA to pin.  Reuses one open
+        # issue instead of filing a fresh one weekly.
+        if: failure() && github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          # `gh issue list/create --label` errors on a label that does not
+          # exist yet, so ensure it before either call.
+          gh label create ci-full-tier --color B60205 \
+            --description 'Scheduled Full tier is red' --force
+          existing=$(gh issue list --state open --label ci-full-tier \
+            --json number --jq '.[0].number')
+          body="Scheduled Full tier failed on \`${GITHUB_SHA}\`.
+          Run: ${RUN_URL}
+          Logs age out after 90 days — triage before then."
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body "$body"
+          else
+            gh issue create --title 'Full tier (scheduled) is failing' \
+              --label ci-full-tier --body "$body"
+          fi

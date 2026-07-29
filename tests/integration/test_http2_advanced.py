@@ -36,9 +36,9 @@ def _make_push_app() -> BlackBull:
     app = BlackBull()
 
     @app.route(path='/page')
-    async def page(scope, receive, send):
+    async def page(conn, receive, send):
         # Push /style.css before sending the HTML response
-        if 'http.response.push' in scope.get('extensions', {}):
+        if 'http.response.push' in conn.extensions:
             await send({
                 'type':    'http.response.push',
                 'path':    '/style.css',
@@ -60,8 +60,8 @@ def _make_priority_app() -> BlackBull:
     app = BlackBull()
 
     @app.route(path='/priority')
-    async def priority_route(scope, receive, send):
-        hint = scope.get('http2_priority', {})
+    async def priority_route(conn, receive, send):
+        hint = conn.extensions.get('http.response.priority', {})
         await send({'type': 'http.response.start', 'status': 200,
                     'headers': [(b'content-type', b'application/json')]})
         import json
@@ -72,18 +72,20 @@ def _make_priority_app() -> BlackBull:
 
 
 def _make_stream_info_app() -> BlackBull:
-    """Sprint 32 — echoes both the new extensions surface and the
-    legacy ``http2_priority`` key so the integration test can verify
-    they agree."""
+    """Echoes the H/2 extensions surface a native handler sees.
+
+    The legacy top-level ``http2_priority`` key is deliberately not read
+    here: it is populated only on the ASGI-compat lane, so a native handler
+    has no such key to read.  Its shape contract is pinned in
+    ``tests/unit/test_http2_extensions.py::TestLegacyAliasContract``.
+    """
     app = BlackBull()
 
     @app.route(path='/stream-info')
-    async def stream_info_route(scope, receive, send):
+    async def stream_info_route(conn, receive, send):
         import json
-        ext = scope.get('extensions') or {}
-        legacy = scope.get('http2_priority', {})
+        ext = conn.extensions
         payload = {
-            'legacy_http2_priority': legacy,
             'priority_ext': ext.get('http.response.priority'),
             'http2_stream_ext': ext.get('http.response.http2_stream'),
             'extension_keys': sorted(ext.keys()),
@@ -130,16 +132,17 @@ async def test_server_push_route_reachable(push_app):
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_server_push_scope_extension_present(push_app):
-    """http.response.push is advertised in scope['extensions'] for HTTP/2."""
+async def test_server_push_extension_present(push_app):
+    """http.response.push is advertised in conn.extensions for HTTP/2."""
     _extensions = {}
 
-    # Use a separate app to capture scope without triggering a push to httpx
+    # Use a separate app to capture the extensions without triggering a
+    # push to httpx.
     app2 = BlackBull()
 
     @app2.route(path='/ext')
-    async def ext(scope, receive, send):
-        _extensions.update(scope.get('extensions', {}))
+    async def ext(conn, receive, send):
+        _extensions.update(conn.extensions)
         await send({'type': 'http.response.start', 'status': 200, 'headers': []})
         await send({'type': 'http.response.body', 'body': b'ok', 'more_body': False})
 
@@ -157,7 +160,7 @@ async def test_server_push_scope_extension_present(push_app):
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_priority_hint_in_scope(priority_app):
+async def test_priority_hint_present(priority_app):
     async with httpx.AsyncClient(
         http2=True, verify=_test_ssl_context(),
         base_url=f'https://127.0.0.1:{priority_app.port}',
@@ -174,7 +177,7 @@ async def test_priority_hint_in_scope(priority_app):
 
 
 # ---------------------------------------------------------------------------
-# Sprint 32 — http.response.priority + http.response.http2_stream extensions
+# http.response.priority + http.response.http2_stream extensions
 # ---------------------------------------------------------------------------
 
 @pytest.fixture(scope="module")
@@ -186,10 +189,9 @@ def stream_info_app(manage_cert_and_key):
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_priority_extension_present_in_scope(stream_info_app):
-    """``scope['extensions']['http.response.priority']`` is populated for
-    every HTTP/2 request and carries the same RFC 9218 urgency/incremental
-    values the legacy ``scope['http2_priority']`` does."""
+async def test_priority_extension_present(stream_info_app):
+    """``conn.extensions['http.response.priority']`` is populated for every
+    HTTP/2 request and carries the RFC 9218 urgency/incremental values."""
     async with httpx.AsyncClient(
         http2=True, verify=_test_ssl_context(),
         base_url=f'https://127.0.0.1:{stream_info_app.port}',
@@ -201,15 +203,13 @@ async def test_priority_extension_present_in_scope(stream_info_app):
     assert body['priority_ext'] is not None
     assert body['priority_ext']['urgency'] == 2
     assert body['priority_ext']['incremental'] is True
-    # Deprecation alias must agree.
-    assert body['legacy_http2_priority'] == body['priority_ext']
 
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_http2_stream_extension_present_in_scope(stream_info_app):
-    """``scope['extensions']['http.response.http2_stream']`` carries
-    stream_id and the send-window snapshot."""
+async def test_http2_stream_extension_present(stream_info_app):
+    """``conn.extensions['http.response.http2_stream']`` carries stream_id
+    and the send-window snapshot."""
     async with httpx.AsyncClient(
         http2=True, verify=_test_ssl_context(),
         base_url=f'https://127.0.0.1:{stream_info_app.port}',
@@ -228,9 +228,8 @@ async def test_http2_stream_extension_present_in_scope(stream_info_app):
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_scope_advertises_three_extension_keys(stream_info_app):
-    """The HTTP/2 scope advertises push, priority, and http2_stream
-    keys.  Sprint 32 adds the latter two; the existing push key stays."""
+async def test_advertises_three_extension_keys(stream_info_app):
+    """An HTTP/2 request advertises push, priority, and http2_stream keys."""
     async with httpx.AsyncClient(
         http2=True, verify=_test_ssl_context(),
         base_url=f'https://127.0.0.1:{stream_info_app.port}',

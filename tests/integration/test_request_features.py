@@ -2,7 +2,6 @@
 import pytest
 
 from blackbull import BlackBull
-from blackbull.request import parse_cookies
 from blackbull.testing import TestClient
 
 
@@ -10,22 +9,22 @@ def _make_app() -> BlackBull:
     app = BlackBull()
 
     @app.route(path='/header-echo')
-    async def header_echo(scope):
-        value = scope['headers'].get(b'x-custom-header')
+    async def header_echo(conn):
+        value = conn.headers.get(b'x-custom-header')
         return {'value': value.decode() if value else None}
 
     @app.route(path='/header-multivalue')
-    async def header_multivalue(scope):
-        pairs = scope['headers'].getlist(b'accept')
+    async def header_multivalue(conn):
+        pairs = conn.headers.getlist(b'accept')
         return {'values': [v.decode() for _, v in pairs]}
 
     @app.route(path='/cookies')
-    async def cookies(scope):
-        return parse_cookies(scope)
+    async def cookies(conn):
+        return conn.cookies
 
     @app.route(path='/query')
-    async def query(scope):
-        return {'query_string': scope.get('query_string', b'').decode()}
+    async def query(conn):
+        return {'query_string': conn.query_string.decode()}
 
     return app
 

@@ -3,7 +3,6 @@ import pytest
 
 from blackbull import BlackBull, JSONResponse
 from blackbull.response import cookie_header
-from blackbull.request import parse_cookies
 from blackbull.testing import TestClient
 
 
@@ -11,22 +10,22 @@ def _make_app() -> BlackBull:
     app = BlackBull()
 
     @app.route(path='/set-cookie')
-    async def set_cookie_route(scope, receive, send):
+    async def set_cookie_route(conn, receive, send):
         await send(JSONResponse(
             {'ok': True},
             headers=[cookie_header('session', 'abc123')],
         ))
 
     @app.route(path='/set-cookie-no-httponly')
-    async def set_cookie_no_httponly(scope, receive, send):
+    async def set_cookie_no_httponly(conn, receive, send):
         await send(JSONResponse(
             {'ok': True},
             headers=[cookie_header('pref', 'dark', http_only=False)],
         ))
 
     @app.route(path='/read-cookies')
-    async def read_cookies(scope):
-        return parse_cookies(scope)
+    async def read_cookies(conn):
+        return conn.cookies
 
     return app
 

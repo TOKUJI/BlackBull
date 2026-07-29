@@ -31,6 +31,49 @@ so the editable install's metadata catches up.
 
 ## [Unreleased]
 
+### Fixed
+
+- **33 rotted integration/conformance tests.**  Every one shared a root cause:
+  the test's handler was written against an ASGI scope dict while BlackBull's
+  native dispatch hands it a `Connection`, so the first mapping access raised
+  `AttributeError: 'Connection' object has no attribute 'get'`.  Ported to the
+  typed attributes (`conn.headers`, `conn.query_string`, `conn.cookies`,
+  `conn.state`, `conn.extensions`) across `test_http1_request_timeout.py` (13),
+  `test_middleware_composition.py` (6), `test_http2_advanced.py` (5),
+  `test_request_features.py` (4), `test_trusted_proxy.py` (3), and
+  `test_cookies.py` (2).  No library code changed — the framework was right and
+  the tests had drifted from it.
+
+### Changed
+
+- **The integration tier now gates pull requests.**  `tests/integration` and
+  `tests/conformance` run under `--run-integration` on every push and PR
+  (~98s locally for 3526 tests).  Previously the only job passing
+  `--run-integration` was the weekly Full tier, gated on
+  `schedule`/`workflow_dispatch`, so it gated nothing: the 33 tests above sat
+  red for weeks with no path to a human.
+- **The fast tier runs the full supported matrix** — 3.11, 3.12, 3.13, and
+  3.14, matching the classifiers in `pyproject.toml`.  Testing two of the four
+  versions we advertise is what let a 3.13 `TaskGroup` behaviour change ship an
+  HTTP/2 connection-window leak (fixed in v0.62.0) while CI stayed green.  Both
+  new interpreters were verified green before widening — no triage was needed.
+- **A failing scheduled Full tier now files an issue.**  It had run 4 times
+  and failed 2 of those unattended; by the time anyone looked, the logs had
+  aged out.  Reuses one open `ci-full-tier` issue rather than filing weekly
+  duplicates.
+
+### Tests
+
+- **`tests/architecture/test_native_handler_contract.py`** — a source scan
+  forbidding the shape that rotted: a registered handler or middleware using
+  its `Connection` as a mapping.  Turns a request-time `AttributeError` into a
+  collection-time failure, repo-wide, with no allowlist.  Verified against the
+  pre-fix sources, where it catches 23 of the 25 offending handler definitions
+  behind the 33 failures.  The two it misses passed the `Connection` to a
+  helper that subscripts it (`parse_cookies(conn)`) — indirect use needs
+  call-graph analysis, and the guard documents that gap rather than implying
+  coverage it does not have.
+
 ## [0.64.0] — 2026-07-29
 
 ### Added
