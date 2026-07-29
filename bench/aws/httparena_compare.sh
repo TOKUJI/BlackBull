@@ -18,7 +18,8 @@
 #   PROFILES   space-separated HttpArena profile names
 #              (default: "baseline json json-tls static")
 #   FRAMEWORKS space-separated framework names to run
-#              (default: "blackbull fastapi")
+#              (default: "blackbull fastapi";
+#               supported: blackbull, blackbull-uvloop, fastapi, sanic)
 #   BLACKBULL_VERSION  PyPI version pin (default: pyproject.toml's version)
 #   SPRINT_TAG  prefix on the result directory (default: sprint29)
 #   SKIP_VALIDATE   set to 1 to skip the 49-point correctness check
@@ -87,12 +88,18 @@ export TOPO=single
 
 : "${PROFILES:?must be set explicitly, space-separated (e.g. 'baseline baseline-h2 echo-ws json json-comp json-tls limited-conn pipelined static static-h2 upload')}"
 FRAMEWORKS="${FRAMEWORKS:-blackbull fastapi}"
-# Supported frameworks: blackbull, fastapi, sanic
+# Supported frameworks: blackbull, blackbull-uvloop, fastapi, sanic
 KEEP_INSTANCE="${KEEP_INSTANCE:-0}"
 SKIP_VALIDATE="${SKIP_VALIDATE:-0}"
-# BB_UVLOOP: baked into the BlackBull image ENV. Default 0 (pure-Python event
-# loop) so the identity measurement is the default; pass BB_UVLOOP=1 to bench
-# the uvloop path.
+# BB_UVLOOP: baked into the `blackbull` image ENV. Default 0 (pure-Python event
+# loop) so the identity measurement is the default.
+#
+# To measure what uvloop is worth, do NOT flip this and compare against an
+# earlier run — put `blackbull blackbull-uvloop` in $FRAMEWORKS instead.  The
+# `blackbull-uvloop` variant is the same wheel and the same app with
+# BB_UVLOOP=1, so both loops are measured on one instance in one session
+# against the same peers, and the delta is not confounded by the machine, the
+# generator, or the day.
 BB_UVLOOP="${BB_UVLOOP:-0}"
 
 # --- Web server tuning defaults -------------------------------------------
@@ -379,12 +386,25 @@ scp "${SSH_OPTS[@]}" "$REPO_ROOT/bench/httparena/patch_cpuset.sh" \
 ssh "${SSH_OPTS[@]}" "$SERVER_REMOTE" 'bash ~/patch_cpuset.sh'
 
 # ---------------------------------------------------------------------------
-# Step 4 — vendor bench/httparena/ as the `blackbull` framework.  Rewrite
-# the Dockerfile to install from PyPI.  Flip meta.json enabled=true so
-# HttpArena's harness picks it up.
+# Step 4 — vendor bench/httparena/ as one framework dir per BlackBull variant.
+# Rewrite the Dockerfile to install from PyPI (or the local wheel).  Flip
+# meta.json enabled=true so HttpArena's harness picks it up.
+#
+# Two variants may be requested in the same run:
+#
+#   blackbull          BB_UVLOOP=$BB_UVLOOP   (default 0 — the shipped default)
+#   blackbull-uvloop   BB_UVLOOP=1
+#
+# Naming both in $FRAMEWORKS puts the two event loops on the *same instance in
+# the same session*, alongside the same peers.  That is the only way to read the
+# uvloop delta as a property of BlackBull rather than of the box: the two images
+# differ in exactly one ENV line — same wheel, same app.py, same launcher.py —
+# so nothing else can account for a gap between them.
+#
+# BB_UVLOOP is set in its own ENV layer at the very end of the Dockerfile.  It
+# is not needed at build time, and keeping it after the pip install lets the two
+# variants share every expensive layer: the second image builds in seconds.
 # ---------------------------------------------------------------------------
-echo ">>> staging blackbull framework dir on the instance ..."
-ssh "${SSH_OPTS[@]}" "$SERVER_REMOTE" 'mkdir -p HttpArena/frameworks/blackbull'
 
 # Upload framework files.  In LOCAL_BB_WHEEL=1 mode the wheel is also
 # uploaded so the Dockerfile can COPY+install it from the build context.
@@ -399,36 +419,45 @@ _BB_RSYNC_FILES=(
     "$REPO_ROOT/bench/httparena/db.py"
     "$REPO_ROOT/bench/httparena/grpc_bench.py"
 )
-rsync -e "ssh ${SSH_OPTS[*]}" -az --delete \
-    "${_BB_RSYNC_FILES[@]}" \
-    "$SERVER_REMOTE:HttpArena/frameworks/blackbull/"
-
-# The upstream HttpArena repo vendors a stale frameworks/blackbull/.dockerignore
-# that whitelists only requirements.txt/app.py/launcher.py and excludes
-# everything else (`**`), so db.py / grpc_bench.py never enter the Docker build
-# context and `COPY ... db.py` fails the build.  We don't rsync .dockerignore
-# (so --delete won't remove it), and our rsync already controls exactly which
-# files land in the dir — so just delete the stale ignore file.  Print the
-# resulting build context so the driver log records what the build will see.
-ssh "${SSH_OPTS[@]}" "$SERVER_REMOTE" \
-    'rm -f HttpArena/frameworks/blackbull/.dockerignore
-     echo "    build context:"; ls -1 HttpArena/frameworks/blackbull/'
-
-if [ "$LOCAL_BB_WHEEL" = "1" ]; then
-    echo "    uploading wheel $LOCAL_WHEEL_NAME ..."
-    rsync -e "ssh ${SSH_OPTS[*]}" -az \
-        "$LOCAL_WHEEL" \
-        "$SERVER_REMOTE:HttpArena/frameworks/blackbull/"
-fi
 
 # Access logging is now configured via env vars (BB_LOG_FILE from the shim +
 # BB_ACCESS_LOG), so no logging config file is COPYed into the image.
 _LOGGING_INI_COPY=''
 
-# Generate the Dockerfile on the remote instance.
-if [ "$LOCAL_BB_WHEEL" = "1" ]; then
-    # Dockerfile.dev style: COPY the local wheel, install from it.
-    ssh "${SSH_OPTS[@]}" "$SERVER_REMOTE" "cat > HttpArena/frameworks/blackbull/Dockerfile" <<EOF
+_stage_blackbull() {
+    local fw="$1" uvloop="$2"
+    local dir="HttpArena/frameworks/${fw}"
+
+    echo ">>> staging ${fw} framework dir on the instance (BB_UVLOOP=${uvloop}) ..."
+    ssh "${SSH_OPTS[@]}" "$SERVER_REMOTE" "mkdir -p ${dir}"
+
+    rsync -e "ssh ${SSH_OPTS[*]}" -az --delete \
+        "${_BB_RSYNC_FILES[@]}" \
+        "$SERVER_REMOTE:${dir}/"
+
+    # The upstream HttpArena repo vendors a stale
+    # frameworks/blackbull/.dockerignore that whitelists only
+    # requirements.txt/app.py/launcher.py and excludes everything else (`**`),
+    # so db.py / grpc_bench.py never enter the Docker build context and
+    # `COPY ... db.py` fails the build.  We don't rsync .dockerignore (so
+    # --delete won't remove it), and our rsync already controls exactly which
+    # files land in the dir — so just delete the stale ignore file.  Print the
+    # resulting build context so the driver log records what the build sees.
+    ssh "${SSH_OPTS[@]}" "$SERVER_REMOTE" \
+        "rm -f ${dir}/.dockerignore
+         echo '    build context:'; ls -1 ${dir}/"
+
+    if [ "$LOCAL_BB_WHEEL" = "1" ]; then
+        echo "    uploading wheel $LOCAL_WHEEL_NAME ..."
+        rsync -e "ssh ${SSH_OPTS[*]}" -az \
+            "$LOCAL_WHEEL" \
+            "$SERVER_REMOTE:${dir}/"
+    fi
+
+    # Generate the Dockerfile on the remote instance.
+    if [ "$LOCAL_BB_WHEEL" = "1" ]; then
+        # Dockerfile.dev style: COPY the local wheel, install from it.
+        ssh "${SSH_OPTS[@]}" "$SERVER_REMOTE" "cat > ${dir}/Dockerfile" <<EOF
 # Auto-generated by bench/aws/httparena_compare.sh (LOCAL_BB_WHEEL=1).
 # Installs BlackBull from a locally-built wheel instead of PyPI.
 FROM python:3.13-slim
@@ -437,8 +466,7 @@ WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1 \\
     PYTHONUNBUFFERED=1 \\
     PIP_NO_CACHE_DIR=1 \\
-    PIP_DISABLE_PIP_VERSION_CHECK=1 \\
-    BB_UVLOOP=${BB_UVLOOP}
+    PIP_DISABLE_PIP_VERSION_CHECK=1
 
 COPY ${LOCAL_WHEEL_NAME} /tmp/
 # asyncpg + redis back the async-db / crud profiles (Postgres + Redis sidecars).
@@ -447,11 +475,14 @@ VOLUME /results
 
 COPY app.py launcher.py db.py grpc_bench.py /app/
 ${_LOGGING_INI_COPY}
+# Last layer, and the only one that differs between the blackbull variants —
+# everything above is shared cache.
+ENV BB_UVLOOP=${uvloop}
 EXPOSE 8080 8081 8443
 CMD ["python", "launcher.py"]
 EOF
-else
-    ssh "${SSH_OPTS[@]}" "$SERVER_REMOTE" "cat > HttpArena/frameworks/blackbull/Dockerfile" <<EOF
+    else
+        ssh "${SSH_OPTS[@]}" "$SERVER_REMOTE" "cat > ${dir}/Dockerfile" <<EOF
 # Auto-generated by bench/aws/httparena_compare.sh.
 # Installs BlackBull from PyPI (no source tree on the instance).
 FROM python:3.13-slim
@@ -460,32 +491,45 @@ WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1 \\
     PYTHONUNBUFFERED=1 \\
     PIP_NO_CACHE_DIR=1 \\
-    PIP_DISABLE_PIP_VERSION_CHECK=1 \\
-    BB_UVLOOP=${BB_UVLOOP}
+    PIP_DISABLE_PIP_VERSION_CHECK=1
 
 RUN pip install --no-cache-dir 'blackbull[compression,speed]==${BLACKBULL_VERSION}' asyncpg redis
 VOLUME /results
 
 COPY app.py launcher.py db.py grpc_bench.py /app/
 ${_LOGGING_INI_COPY}
+# Last layer, and the only one that differs between the blackbull variants —
+# everything above is shared cache.
+ENV BB_UVLOOP=${uvloop}
 EXPOSE 8080 8081 8443
 CMD ["python", "launcher.py"]
 EOF
-fi
+    fi
 
-# Flip meta.json enabled=true on the remote copy.
-ssh "${SSH_OPTS[@]}" "$SERVER_REMOTE" \
-    'sed -i "s/\"enabled\": false/\"enabled\": true/" HttpArena/frameworks/blackbull/meta.json'
+    # Flip meta.json enabled=true, and name the variant after its own dir so
+    # HttpArena's report does not show two rows both called "blackbull".
+    ssh "${SSH_OPTS[@]}" "$SERVER_REMOTE" \
+        "sed -i 's/\"enabled\": false/\"enabled\": true/;
+                 s/\"display_name\": \"blackbull\"/\"display_name\": \"${fw}\"/' \
+             ${dir}/meta.json"
 
-# Place a build.sh alongside the Dockerfile so HttpArena's validate.sh
-# calls it instead of `docker build --no-cache`.  Our build.sh omits
-# --no-cache so Docker can reuse the pip layer from Step 5's pre-build.
-ssh "${SSH_OPTS[@]}" "$SERVER_REMOTE" \
-    'printf "#!/usr/bin/env bash\nset -euo pipefail\nSCRIPT_DIR=\"\$(cd \"\$(dirname \"\$0\")\" && pwd)\"\nFRAMEWORK=\"\$(basename \"\$SCRIPT_DIR\")\"\nIMAGE_NAME=\"httparena-\${FRAMEWORK}\"\ndocker build -t \"\$IMAGE_NAME\" \"\$SCRIPT_DIR\"\n" \
-        > HttpArena/frameworks/blackbull/build.sh \
-     && chmod +x HttpArena/frameworks/blackbull/build.sh'
+    # Place a build.sh alongside the Dockerfile so HttpArena's validate.sh
+    # calls it instead of `docker build --no-cache`.  Our build.sh omits
+    # --no-cache so Docker can reuse the pip layer from Step 5's pre-build.
+    ssh "${SSH_OPTS[@]}" "$SERVER_REMOTE" \
+        "printf '#!/usr/bin/env bash\nset -euo pipefail\nSCRIPT_DIR=\"\$(cd \"\$(dirname \"\$0\")\" && pwd)\"\nFRAMEWORK=\"\$(basename \"\$SCRIPT_DIR\")\"\nIMAGE_NAME=\"httparena-\${FRAMEWORK}\"\ndocker build -t \"\$IMAGE_NAME\" \"\$SCRIPT_DIR\"\n' \
+            > ${dir}/build.sh \
+         && chmod +x ${dir}/build.sh"
 
-echo "    staged."
+    echo "    ${fw} staged."
+}
+
+for fw in $FRAMEWORKS; do
+    case "$fw" in
+        blackbull)        _stage_blackbull blackbull "$BB_UVLOOP" ;;
+        blackbull-uvloop) _stage_blackbull blackbull-uvloop 1 ;;
+    esac
+done
 
 # ---------------------------------------------------------------------------
 # Step 4b — stage bench/httparena/sanic/ as the `sanic` framework.
@@ -549,6 +593,41 @@ for fw in $FRAMEWORKS; do
         fi
         echo \"    image \$IMAGE_NAME ready.\"
     " || echo "    (pre-build non-zero for $fw — kept going)"
+done
+
+# ---------------------------------------------------------------------------
+# Step 5b — prove which event loop each BlackBull image will actually run.
+#
+# The dangerous failure is silent: with BB_UVLOOP=1 but no uvloop in the image,
+# ``apply_event_loop_policy`` logs a warning and keeps the stock loop, and the
+# arm still produces a full set of plausible numbers — which then read as
+# "uvloop bought nothing".  So ask the image itself, through BlackBull's own
+# policy installer, and abort the run rather than measure a mislabelled arm.
+# ---------------------------------------------------------------------------
+_LOOP_PROBE='
+import asyncio, os
+from blackbull.env import apply_event_loop_policy, reset_settings_cache
+reset_settings_cache()
+apply_event_loop_policy()
+loop = asyncio.new_event_loop()
+print("BB_UVLOOP=" + str(os.environ.get("BB_UVLOOP"))
+      + " loop=" + type(loop).__module__ + "." + type(loop).__name__)
+loop.close()
+'
+for fw in $FRAMEWORKS; do
+    case "$fw" in blackbull|blackbull-uvloop) ;; *) continue ;; esac
+    _want=$([ "$fw" = "blackbull-uvloop" ] && echo 1 || echo "$BB_UVLOOP")
+    echo ">>> verifying event loop for $fw (expect BB_UVLOOP=${_want}) ..."
+    _probe=$(ssh "${SSH_OPTS[@]}" "$SERVER_REMOTE" \
+        "sudo docker run --rm --entrypoint python httparena-${fw} -c '${_LOOP_PROBE}'" \
+        2>&1 | tail -1) || true
+    echo "    $_probe"
+    case "$_want:$_probe" in
+        1:*uvloop*)   echo "    OK — uvloop active." ;;
+        0:*asyncio*)  echo "    OK — stock asyncio loop." ;;
+        *) echo "FATAL: $fw did not get the intended event loop (wanted BB_UVLOOP=${_want}); probe said: ${_probe}" >&2
+           exit 1 ;;
+    esac
 done
 
 # ---------------------------------------------------------------------------
