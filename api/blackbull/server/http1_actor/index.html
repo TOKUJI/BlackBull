@@ -13,7 +13,7 @@
         <link rel="canonical" href="https://TOKUJI.github.io/BlackBull/api/blackbull/server/http1_actor/">
       
       
-        <link rel="prev" href="../deadline/">
+        <link rel="prev" href="../h1_buffer/">
       
       
         <link rel="next" href="../http2_actor/">
@@ -3935,6 +3935,34 @@
                 
   
   
+  
+  
+    <li class="md-nav__item">
+      <a href="../h1_buffer/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    h1_buffer
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
     
   
   
@@ -4078,6 +4106,23 @@
       
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="RequestActor">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.http1_actor.RequestActor.bind" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bind
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
         
@@ -4999,6 +5044,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="RequestActor">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.http1_actor.RequestActor.bind" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bind
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
         
           <li class="md-nav__item">
@@ -5297,6 +5359,31 @@ escape the app call (e.g. a raising global middleware).</p>
 
 
 
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.server.http1_actor.RequestActor.bind" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">bind</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">)</span></code>
+
+<a href="#blackbull.server.http1_actor.RequestActor.bind" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Point this actor at the next request on the same connection.</p>
+<p>HTTP/1.1 dispatches one request at a time per connection, so the
+instance is free between requests and rebinding it is indistinguishable
+from building a new one — except for the allocation, which the keep-alive
+loop would otherwise pay on every request.  <code>app</code> and <code>aggregator</code>
+are per-connection and stay put.</p>
+<p>Deliberately <strong>not</strong> available to HTTP/2, whose streams are concurrent:
+two live requests sharing one actor would interleave their fields.</p>
+
+
+    </div>
+
+</div>
 
 
 

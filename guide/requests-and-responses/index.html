@@ -4262,6 +4262,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../api/blackbull/server/h1_buffer/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    h1_buffer
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../api/blackbull/server/http1_actor/" class="md-nav__link">
         
   
@@ -5634,7 +5662,7 @@ across HTTP/1.1, HTTP/2, and WebSocket scopes — you don't need
 to know how the client delivered the cookies.</p>
 <h2 id="query-parameters">Query parameters<a class="headerlink" href="#query-parameters" title="Permanent link">&para;</a></h2>
 <p>Declare them as handler parameters (since v0.56.0).  Any simplified-handler
-parameter that is not a path param, <code>body</code>, <code>scope</code>, <code>Connection</code>, a dataclass
+parameter that is not a path param, <code>body</code>, <code>conn</code>, <code>Connection</code>, a dataclass
 body, or <a href="../dependency-injection/"><code>Depends</code></a> resolves from the query
 string, coerced to its annotation:</p>
 <div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">&#39;/search&#39;</span><span class="p">)</span>

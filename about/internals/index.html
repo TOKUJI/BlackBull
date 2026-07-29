@@ -3930,6 +3930,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../api/blackbull/server/h1_buffer/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    h1_buffer
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../api/blackbull/server/http1_actor/" class="md-nav__link">
         
   
@@ -5296,7 +5324,7 @@ back-channels into other components.</p>
 └── ConnectionActor               (one per accepted TCP connection)
       │
       ├── HTTP1Actor              (HTTP/1.1 driver)
-      │     └── RequestActor      (one per HTTP/1.1 request, short-lived)
+      │     └── RequestActor      (one per connection, rebound per request)
       │
       ├── HTTP2Actor              (HTTP/2 connection driver)
       │     └── StreamActor       (one per HTTP/2 stream)
@@ -5358,8 +5386,12 @@ server and under external ASGI hosts.</p>
 <h3 id="http1actor"><code>HTTP1Actor</code><a class="headerlink" href="#http1actor" title="Permanent link">&para;</a></h3>
 <ul>
 <li>Drives the HTTP/1.1 request/response cycle.</li>
-<li>For each request: spawns a <code>RequestActor</code>, awaits its
-  completion, then loops for keep-alive.</li>
+<li>For each request: points its <code>RequestActor</code> at the request and
+  awaits completion, then loops for keep-alive.  The actor, the
+  sender, and the body recipient are built once per <em>connection</em>
+  and rebound per request — a connection dispatches one request at
+  a time, so rebinding is indistinguishable from rebuilding except
+  for the allocation.</li>
 <li>On <code>Connection: Upgrade</code> (WebSocket): hands the reader /
   writer to a new <code>WebSocketActor</code> and exits.</li>
 <li>Supervisor strategy: <strong>isolate</strong> — an error in one request
@@ -5367,7 +5399,10 @@ server and under external ASGI hosts.</p>
 </ul>
 <h3 id="requestactor"><code>RequestActor</code><a class="headerlink" href="#requestactor" title="Permanent link">&para;</a></h3>
 <ul>
-<li>Owns one HTTP/1.1 request lifetime.</li>
+<li>Owns one HTTP/1.1 request lifetime.  Under HTTP/1.1 one instance
+  serves the whole connection, rebound to each request in turn
+  (<code>bind</code>); HTTP/2 builds one per stream, because streams are
+  concurrent and would otherwise interleave their state.</li>
 <li>Receives the parsed headers and body from <code>HTTP1Actor</code>.</li>
 <li>Calls the ASGI app, collects the response, writes it back
   via the connection's writer.</li>

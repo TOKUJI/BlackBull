@@ -492,10 +492,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#the-scope-dict" class="md-nav__link">
+  <a href="#the-conn-escape-hatch" class="md-nav__link">
     <span class="md-ellipsis">
       
-        The scope dict
+        The conn escape hatch
       
     </span>
   </a>
@@ -4078,6 +4078,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../api/blackbull/server/h1_buffer/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    h1_buffer
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../api/blackbull/server/http1_actor/" class="md-nav__link">
         
   
@@ -4955,10 +4983,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#the-scope-dict" class="md-nav__link">
+  <a href="#the-conn-escape-hatch" class="md-nav__link">
     <span class="md-ellipsis">
       
-        The scope dict
+        The conn escape hatch
       
     </span>
   </a>
@@ -5099,14 +5127,29 @@ still works as a deprecated alias (removal no earlier than
 </div>
 <p>See <a href="../../guide/requests-and-responses/">Requests and responses</a>
 for the full surface.</p>
-<h2 id="the-scope-dict">The <code>scope</code> dict<a class="headerlink" href="#the-scope-dict" title="Permanent link">&para;</a></h2>
-<p>Name a parameter <code>scope</code> to receive the full scope dict alongside
-other simplified parameters:</p>
+<h2 id="the-conn-escape-hatch">The <code>conn</code> escape hatch<a class="headerlink" href="#the-conn-escape-hatch" title="Permanent link">&para;</a></h2>
+<p>Name a parameter <code>conn</code> to receive the full <a href="../../guide/requests-and-responses/"><code>Connection</code></a>
+alongside other simplified parameters:</p>
 <div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">&#39;/items/{item_id:int}&#39;</span><span class="p">)</span>
-<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">get_item</span><span class="p">(</span><span class="n">item_id</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">scope</span><span class="p">):</span>
-    <span class="n">lang</span> <span class="o">=</span> <span class="n">scope</span><span class="p">[</span><span class="s1">&#39;headers&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="sa">b</span><span class="s1">&#39;accept-language&#39;</span><span class="p">,</span> <span class="sa">b</span><span class="s1">&#39;en&#39;</span><span class="p">)</span><span class="o">.</span><span class="n">decode</span><span class="p">()</span>
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">get_item</span><span class="p">(</span><span class="n">item_id</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">conn</span><span class="p">):</span>
+    <span class="n">lang</span> <span class="o">=</span> <span class="n">conn</span><span class="o">.</span><span class="n">headers</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="sa">b</span><span class="s1">&#39;accept-language&#39;</span><span class="p">,</span> <span class="sa">b</span><span class="s1">&#39;en&#39;</span><span class="p">)</span><span class="o">.</span><span class="n">decode</span><span class="p">()</span>
     <span class="k">return</span> <span class="p">{</span><span class="s2">&quot;id&quot;</span><span class="p">:</span> <span class="n">item_id</span><span class="p">,</span> <span class="s2">&quot;lang&quot;</span><span class="p">:</span> <span class="n">lang</span><span class="p">}</span>
 </code></pre></div>
+<p><code>connection</code> works as a synonym.  A <code>Connection</code> is an object with typed
+attributes — <code>conn.headers</code>, <code>conn.query_string</code>, <code>conn.cookies</code>,
+<code>conn.state</code>, <code>conn.extensions</code> — <strong>not</strong> a mapping, so <code>conn['headers']</code>
+and <code>conn.get(...)</code> do not work.</p>
+<div class="admonition warning">
+<p class="admonition-title"><code>scope</code> is not a valid parameter name</p>
+<p>A simplified handler may not name a parameter <code>scope</code>; doing so raises
+<code>TypeError</code> when the route is registered.  It was accepted until
+v0.65.0, when it injected the <code>Connection</code> — the name promised an ASGI
+scope dict and delivered something else, so <code>scope['headers']</code> compiled
+fine and failed at request time.  Rename it to <code>conn</code>.</p>
+<p>Full-form handlers are unaffected: <code>async def h(scope, receive, send)</code>
+takes its arguments positionally, so the name is never inspected.  It
+still receives a <code>Connection</code>, so <code>conn</code> reads better there too.</p>
+</div>
 <h2 id="return-value-mapping">Return value mapping<a class="headerlink" href="#return-value-mapping" title="Permanent link">&para;</a></h2>
 <p>What you return determines what BlackBull sends:</p>
 <table>

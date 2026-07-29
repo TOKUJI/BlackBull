@@ -1494,6 +1494,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#http11-internals" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        HTTP/1.1 internals
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#logging" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4100,6 +4111,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../api/blackbull/server/h1_buffer/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    h1_buffer
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../api/blackbull/server/http1_actor/" class="md-nav__link">
         
   
@@ -4977,6 +5016,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#http11-internals" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        HTTP/1.1 internals
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#logging" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5240,6 +5290,23 @@ first-hit-then-summary rate-limit model.</p>
 <td><code>BB_SOCKET_RCVBUF</code></td>
 <td><code>0</code> (kernel default)</td>
 <td><code>SO_RCVBUF</code> (bytes) on each accepted socket.  <code>0</code> leaves the kernel default unchanged.  Same doubling rule as <code>BB_SOCKET_SNDBUF</code>.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="http11-internals">HTTP/1.1 internals<a class="headerlink" href="#http11-internals" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Default</th>
+<th>Controls</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>BB_H1_PROTOCOL</code></td>
+<td><code>0</code></td>
+<td>Read request heads through the buffer-owning front end: one <code>find(b'\r\n\r\n')</code> scan over an accumulated buffer instead of one <code>readuntil(b'\r\n')</code> per header line, keeping any surplus so a keep-alive or pipelined peer's next head is usually already in hand.  <strong>Experimental measurement gate</strong>, not a supported switch — it exists so the two read paths can be A/B'd on identical builds, and will either become the default or be removed once that measurement lands.  Both paths pass the same HTTP/1.1 conformance suite; enabling it changes how bytes arrive, never what a request means.</td>
 </tr>
 </tbody>
 </table>
