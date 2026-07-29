@@ -86,9 +86,9 @@ class _FakeAuthExtension:
         app.on_error(403)(self._on_403)
 
         @app.route(path='/whoami')
-        async def whoami(scope):
+        async def whoami(conn):
             self._whoami_called = True
-            user = scope.state.get('user', 'anonymous')
+            user = conn.state.get('user', 'anonymous')
             return {'user': user}
 
         # Keep a reference so the route callback is collected properly
@@ -136,8 +136,8 @@ class TestInitAppConvention:
 
         # Add a route that returns the injected user
         @app.route(path='/me')
-        async def me(scope):
-            return {'user': scope.state.get('user', '?')}
+        async def me(conn):
+            return {'user': conn.state.get('user', '?')}
 
         with TestClient(app) as client:
             resp = client.get('/me')
@@ -387,8 +387,8 @@ class TestASGIMiddlewareCompat:
         app.use(_x_request_id)
 
         @app.route(path='/mw-test')
-        async def mw_test(scope):
-            return {'request_id': scope.state.get('x-request-id', '?')}
+        async def mw_test(conn):
+            return {'request_id': conn.state.get('x-request-id', '?')}
 
         with TestClient(app) as client:
             resp = client.get('/mw-test')
@@ -486,8 +486,8 @@ class TestExtensionWithTestClient:
                 a.extensions['b'] = self
 
                 @a.route(path='/b')
-                async def b_route(scope):
-                    return {'ext_a': scope.state.get('x-ext-a', 'no')}
+                async def b_route(conn):
+                    return {'ext_a': conn.state.get('x-ext-a', 'no')}
 
                 self._handler = b_route
 

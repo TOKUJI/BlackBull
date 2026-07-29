@@ -588,6 +588,90 @@ class TestSimplifiedHandlerFailFast:
             _adapt_handler(fn, '/items/{id}')
 
 
+class TestScopeParameterRejected:
+    """``scope`` is not a name a simplified handler may take.
+
+    It used to be a deprecated alias injecting the ``Connection``, which is
+    precisely backwards: ``scope`` means a genuine ASGI scope dict everywhere
+    else in the codebase, so the alias handed you an object that answered to
+    the wrong name and invited ``scope['headers']``.  Rejecting it at
+    registration is what makes the mistake unwritable rather than merely
+    discouraged.
+    """
+
+    def test_scope_param_raises_at_registration(self):
+        async def fn(scope): pass
+        with pytest.raises(TypeError, match="parameter 'scope' is not supported"):
+            _adapt_handler(fn, '/')
+
+    def test_error_names_the_replacement(self):
+        """A fail-fast error that does not say what to do instead is a puzzle."""
+        async def fn(scope): pass
+        with pytest.raises(TypeError, match="conn"):
+            _adapt_handler(fn, '/')
+
+    def test_scope_is_not_silently_demoted_to_a_query_param(self):
+        """The regression this guards against.
+
+        With the alias simply deleted, ``scope`` would fall through to the
+        query-param fallback (an unannotated param defaults to ``str``) and a
+        handler would start receiving the *query string value* named "scope" —
+        or ``None`` — instead of failing.  Silent rebinding is worse than the
+        alias was.
+        """
+        async def fn(scope): pass
+        with pytest.raises(TypeError):
+            _adapt_handler(fn, '/')
+
+    def test_path_param_named_scope_still_wins(self):
+        """``/x/{scope}`` names the parameter explicitly — no ambiguity, so
+        the path category keeps its precedence over the rejection."""
+        async def fn(scope): return Response(str(scope).encode())
+        wrapper = _adapt_handler(fn, '/x/{scope}')
+        assert wrapper is not None
+
+    @pytest.mark.asyncio
+    async def test_conn_and_connection_still_inject(self):
+        """Removing the alias must not disturb the names it aliased."""
+        captured = {}
+
+        async def by_conn(conn): captured['v'] = conn
+        async def by_connection(connection): captured['v'] = connection
+
+        for fn in (by_conn, by_connection):
+            captured.clear()
+            fake_scope = {'type': 'http', 'headers': []}
+            await _adapt_handler(fn, '/')(fake_scope, None, AsyncMock())
+            assert captured['v'] is fake_scope['_connection'], (
+                f'{fn.__name__} did not receive the request Connection')
+
+    def test_full_form_handler_may_still_be_named_scope(self):
+        """Full form is positional — the router never reads those names, so
+        the ~196 ``(scope, receive, send)`` handlers in the corpus and the docs
+        are untouched by this change.  Narrowing the blast radius to simplified
+        handlers is why the removal is affordable at all.
+
+        The gate is ``_is_simplified_handler``: a full-form handler never
+        reaches ``_adapt_handler``, which is where the rejection lives.
+        """
+        async def fn(scope, receive, send): pass
+        assert _is_simplified_handler(fn) is False
+
+    def test_full_form_registration_survives_on_a_real_app(self):
+        """The end-to-end version of the above — registration must not raise."""
+        from blackbull.testing import TestClient
+
+        app = BlackBull()
+
+        @app.route(path='/full')
+        async def full(scope, receive, send):
+            await send({'type': 'http.response.start', 'status': 200, 'headers': []})
+            await send({'type': 'http.response.body', 'body': b'ok'})
+
+        with TestClient(app) as client:
+            assert client.get('/full').status_code == 200
+
+
 class TestSimplifiedHandlerPathParams:
     @pytest.mark.asyncio
     async def test_no_params(self):
@@ -631,15 +715,17 @@ class TestSimplifiedHandlerPathParams:
             await wrapper({'path_params': {'task_id': 'notanint'}}, None, AsyncMock())
 
     @pytest.mark.asyncio
-    async def test_scope_escape_hatch(self):
-        # Sprint 80: the ``scope`` param is an escape hatch to the raw request,
-        # which is now the native Connection (not an ASGI scope dict).
+    async def test_conn_escape_hatch(self):
+        # The escape hatch to the raw request is ``conn``: the native
+        # Connection, not an ASGI scope dict.  It was reachable as ``scope``
+        # until that alias was removed — the name promised a dict and
+        # delivered a Connection, which is the whole reason it is gone.
         captured = {}
-        async def fn(scope): captured['scope'] = scope
+        async def fn(conn): captured['conn'] = conn
         wrapper = _adapt_handler(fn, '/')
         fake_scope = {'type': 'http', 'method': 'GET', 'path': '/', 'headers': []}
         await wrapper(fake_scope, None, AsyncMock())
-        assert captured['scope'] is fake_scope['_connection']
+        assert captured['conn'] is fake_scope['_connection']
 
 
 class TestSimplifiedHandlerBodyInjection:
@@ -733,18 +819,18 @@ class TestSimplifiedHandlerRequestInjection:
         assert isinstance(captured['request'], Request)
 
     @pytest.mark.asyncio
-    async def test_request_with_scope(self):
+    async def test_request_with_conn(self):
         captured = {}
-        async def fn(scope, request: Request):
-            captured.update({'scope': scope, 'request': request})
+        async def fn(conn, request: Request):
+            captured.update({'conn': conn, 'request': request})
         wrapper = _adapt_handler(fn, '/')
         fake_scope = {'type': 'http', 'headers': []}
         await wrapper(fake_scope, None, AsyncMock())
-        # Both the ``scope`` and ``request`` params now resolve to the one
-        # native Connection for the request.
-        assert captured['scope'] is fake_scope['_connection']
+        # Both the ``conn`` and ``request`` params resolve to the one native
+        # Connection for the request.
+        assert captured['conn'] is fake_scope['_connection']
         assert captured['request'] is fake_scope['_connection']
-        assert captured['scope'] is captured['request']
+        assert captured['conn'] is captured['request']
 
     @pytest.mark.asyncio
     async def test_request_with_dataclass_body_single_drain(self):

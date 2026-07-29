@@ -9,20 +9,20 @@ from blackbull.testing import TestClient
 def _make_app_trusted() -> BlackBull:
     """App that trusts 127.0.0.1 (the loopback default).
 
-    ``httpx.ASGITransport`` sets ``scope['client']`` to ``('127.0.0.1', 123)``
-    by default, so 127.0.0.1 in the trust list is what makes TestClient
+    ``httpx.ASGITransport`` sets the client to ``('127.0.0.1', 123)`` by
+    default, so 127.0.0.1 in the trust list is what makes TestClient
     requests appear to come from a trusted peer.
     """
     app = BlackBull()
     app.use(TrustedProxy(['127.0.0.1', '::1']))
 
     @app.route(path='/client-ip')
-    async def client_ip(scope):
-        return {'ip': (scope.get('client') or [''])[0]}
+    async def client_ip(conn):
+        return {'ip': (conn.client or [''])[0]}
 
     @app.route(path='/scheme')
-    async def scheme(scope):
-        return {'scheme': scope.get('scheme', '')}
+    async def scheme(conn):
+        return {'scheme': conn.scheme}
 
     return app
 
@@ -34,8 +34,8 @@ def _make_app_untrusted() -> BlackBull:
     app.use(TrustedProxy(['10.0.0.1']))
 
     @app.route(path='/client-ip')
-    async def client_ip(scope):
-        return {'ip': (scope.get('client') or [''])[0]}
+    async def client_ip(conn):
+        return {'ip': (conn.client or [''])[0]}
 
     return app
 
@@ -68,7 +68,7 @@ def test_x_forwarded_proto_rewritten(trusted):
 
 @pytest.mark.integration
 def test_untrusted_sender_header_ignored(untrusted):
-    """When the peer is not trusted, X-Forwarded-For must not rewrite scope['client']."""
+    """When the peer is not trusted, X-Forwarded-For must not rewrite conn.client."""
     r = untrusted.get('/client-ip', headers={'X-Forwarded-For': '203.0.113.99'})
     assert r.status_code == 200
     # The IP should be the actual peer (127.0.0.1), not the forwarded value.

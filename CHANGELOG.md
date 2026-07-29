@@ -31,6 +31,130 @@ so the editable install's metadata catches up.
 
 ## [Unreleased]
 
+## [0.65.0] — 2026-07-29
+
+### Added
+
+- **`BB_H1_PROTOCOL` — buffer-owning HTTP/1.1 read front end (experimental,
+  default off).**  Phase 1a of the H/1.1 fast path.  The header block is
+  located with a single `find(b'\r\n\r\n')` scan over an accumulated buffer
+  instead of one `readuntil(b'\r\n')` per header line, and any bytes read past
+  the delimiter are kept rather than discarded — so a keep-alive or pipelined
+  peer's next head is usually already in hand, and an await that resolves from
+  the buffer never yields to the loop.
+
+  The buffer is not an optimisation detail, it is what makes the scan possible
+  at all.  Two things block the obvious `readuntil(b'\r\n\r\n')` version: a
+  stream `readuntil` cannot see the bytes protocol detection already consumed
+  (a minimal `GET / HTTP/1.0\r\n\r\n` leaves only `\r\n` on the wire, and the
+  search blocks until the peer closes — the deadlock the line-by-line loop was
+  written to avoid), and any chunked scan over-reads into the body or the next
+  pipelined request.  Owning the buffer answers both: the scan starts from the
+  already-consumed prefix, and the surplus has somewhere to live.
+
+  This is a **measurement gate, not a supported switch** — it exists so both
+  read paths can be A/B'd on identical builds, and will become the default or
+  be removed once that lands.  Both paths pass the same HTTP/1.1 conformance
+  suite; the flag changes how bytes arrive, never what a request means.
+
+  `BufferedH1Reader` is registered as an `AbstractReader`.  Without that,
+  `RecipientFactory.http1` re-wrapped it in an `AsyncioReader` on **every**
+  request — the front end whose whole purpose is to remove per-request work was
+  adding an allocation to every request of every keep-alive connection.
+
+### Removed
+
+- **The `scope` simplified-handler parameter alias.**  Naming a simplified
+  handler's parameter `scope` used to inject the native `Connection`.  That is
+  backwards: `scope` means a genuine ASGI scope dict everywhere else in the
+  codebase, so the alias handed back an object that answered to the wrong name
+  and made `scope['headers']` look correct — it compiled, registered, and
+  failed at request time with `AttributeError`.  That is precisely how the 33
+  tests below rotted.  It is now a `TypeError` **at registration**:
+
+  ```python
+  @app.route(path='/x')
+  async def h(scope):          # TypeError: parameter 'scope' is not supported
+      ...
+
+  @app.route(path='/x')
+  async def h(conn):           # use this — conn.headers, conn.query_string, …
+      ...
+  ```
+
+  `conn` and `connection` are unchanged.  **Full-form handlers and middleware
+  are unaffected** — `async def h(scope, receive, send)` takes its arguments
+  positionally, so the router never inspects those names; the 196 such handlers
+  in the test corpus and every documented example keep working.  Rejecting the
+  name rather than merely dropping the alias is deliberate: an unannotated
+  `scope` would otherwise fall through to the query-param fallback and silently
+  start receiving a query-string value instead of the request.
+
+### Fixed
+
+- **33 rotted integration/conformance tests.**  Every one shared a root cause:
+  the test's handler was written against an ASGI scope dict while BlackBull's
+  native dispatch hands it a `Connection`, so the first mapping access raised
+  `AttributeError: 'Connection' object has no attribute 'get'`.  Ported to the
+  typed attributes (`conn.headers`, `conn.query_string`, `conn.cookies`,
+  `conn.state`, `conn.extensions`) across `test_http1_request_timeout.py` (13),
+  `test_middleware_composition.py` (6), `test_http2_advanced.py` (5),
+  `test_request_features.py` (4), `test_trusted_proxy.py` (3), and
+  `test_cookies.py` (2).  No library code changed — the framework was right and
+  the tests had drifted from it.
+
+### Changed
+
+- **HTTP/1.1 keep-alive builds one recipient and one `RequestActor` per
+  connection, not per request.**  Both were rebuilt on every request even
+  though everything they hold that is expensive — the reader, the body
+  timeout, the connection deadline, the app, the aggregator — belongs to the
+  connection, not the request.  They are now rebound (`HTTP1Recipient.bind`,
+  `RequestActor.bind`), which is the trade the sender already made with
+  `reset_per_request_state`.  Safe for HTTP/1.1 specifically because a
+  connection dispatches one request at a time; HTTP/2 keeps building one
+  `RequestActor` per stream, since concurrent streams sharing an instance
+  would interleave their fields.
+
+  Measured on a same-session A/B over 400 serialized keep-alive requests:
+  **17.46 → 16.25 µs/req (−6.9%)** through `HTTP1Actor.run`, with every "after"
+  minimum below every "before" minimum across five runs each.  Rebinding turns
+  out to save more than the two constructors do, because it also skips
+  `RecipientFactory.http1`'s dispatch and the function-level
+  `from ..env import get_settings` that ran inside `__init__` on every request.
+  The 213-vector Http11Probe suite returns an identical per-test verdict before
+  and after (0 failed, 0 errors), which is the check that matters here: the
+  framing state a rebind must reset is exactly what request smuggling exploits
+  when it leaks between requests.
+
+- **The integration tier now gates pull requests.**  `tests/integration` and
+  `tests/conformance` run under `--run-integration` on every push and PR
+  (~98s locally for 3526 tests).  Previously the only job passing
+  `--run-integration` was the weekly Full tier, gated on
+  `schedule`/`workflow_dispatch`, so it gated nothing: the 33 tests above sat
+  red for weeks with no path to a human.
+- **The fast tier runs the full supported matrix** — 3.11, 3.12, 3.13, and
+  3.14, matching the classifiers in `pyproject.toml`.  Testing two of the four
+  versions we advertise is what let a 3.13 `TaskGroup` behaviour change ship an
+  HTTP/2 connection-window leak (fixed in v0.62.0) while CI stayed green.  Both
+  new interpreters were verified green before widening — no triage was needed.
+- **A failing scheduled Full tier now files an issue.**  It had run 4 times
+  and failed 2 of those unattended; by the time anyone looked, the logs had
+  aged out.  Reuses one open `ci-full-tier` issue rather than filing weekly
+  duplicates.
+
+### Tests
+
+- **`tests/architecture/test_native_handler_contract.py`** — a source scan
+  forbidding the shape that rotted: a registered handler or middleware using
+  its `Connection` as a mapping.  Turns a request-time `AttributeError` into a
+  collection-time failure, repo-wide, with no allowlist.  Verified against the
+  pre-fix sources, where it catches 23 of the 25 offending handler definitions
+  behind the 33 failures.  The two it misses passed the `Connection` to a
+  helper that subscripts it (`parse_cookies(conn)`) — indirect use needs
+  call-graph analysis, and the guard documents that gap rather than implying
+  coverage it does not have.
+
 ## [0.64.0] — 2026-07-29
 
 ### Added

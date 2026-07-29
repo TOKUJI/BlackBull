@@ -23,6 +23,16 @@ name: RFC conformance
 # index.json for Autobahn, pytest output for corpus-replay) carry
 # the detail.
 #
+# Interpreter pin: 3.12, under review.  Wire conformance is the layer
+# where an interpreter behaviour change does the most damage — the
+# HTTP/2 connection-window leak fixed in v0.62.0 was exactly that, a
+# CPython >=3.13 TaskGroup change silently disabling a credit replay —
+# so the argument for tracking the newest supported version here is
+# strong.  Held at 3.12 only until test.yml's newly widened 3.13/3.14
+# matrix has proven green in CI: moving both in one change would put
+# two unverified variables in the same run, which is the measurement
+# error this sprint exists to stop repeating.
+#
 # Third-party actions pinned to commit SHAs per the supply-chain
 # hygiene baseline (Sprint 30 Task 6); Dependabot tracks updates.
 

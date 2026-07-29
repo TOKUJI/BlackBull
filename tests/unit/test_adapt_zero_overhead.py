@@ -20,7 +20,7 @@ class _Item:
 
 async def _plain(): return 'x'
 async def _path_only(item_id: int): return item_id
-async def _full_legacy(item_id: int, body: bytes, scope, request: Request): pass
+async def _full_legacy(item_id: int, body: bytes, conn, request: Request): pass
 async def _dataclass_body(item: _Item): pass
 async def _with_query(q: str, page: int = 1): pass
 def _provider(): return 'db'

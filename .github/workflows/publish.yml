@@ -37,6 +37,10 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97   # v7.0.0
         with:
+          # Deliberately pinned, not matrixed: BlackBull is pure Python and
+          # builds one `py3-none-any` wheel, so the building interpreter is
+          # not recorded in the artefact and a matrix here would produce
+          # identical files.  Runtime version coverage is test.yml's job.
           python-version: '3.12'
 
       - name: Install build tooling

@@ -111,10 +111,10 @@ def timeout_server():
     app = BlackBull()
 
     @app.route(path='/sleep')
-    async def sleep_handler(scope, receive, send):
+    async def sleep_handler(conn, receive, send):
         """Sleep for ``?s=N`` seconds (float), then reply.  Allows the test
         to control handler duration without restarting the server."""
-        qs = scope.get('query_string', b'').decode()
+        qs = conn.query_string.decode()
         duration = 0.0
         for param in qs.split('&'):
             if param.startswith('s='):
@@ -141,7 +141,7 @@ def timeout_server():
         return b'pong'
 
     @app.route(path='/buffered-stall')
-    async def buffered_stall_handler(scope, receive, send):
+    async def buffered_stall_handler(conn, receive, send):
         """Send ``http.response.start`` immediately, then stall for a
         duration controlled by ``?s=N`` before sending the body.
 
@@ -150,7 +150,7 @@ def timeout_server():
         set but ``_started`` is still False.  If the timeout fires in
         this window, the synthetic 408 must NOT emit the buffered
         status line (which would be 200, not 408)."""
-        qs = scope.get('query_string', b'').decode()
+        qs = conn.query_string.decode()
         duration = 0.0
         for param in qs.split('&'):
             if param.startswith('s='):
@@ -552,8 +552,8 @@ class TestRequestTimeoutCustomValue:
         app = BlackBull()
 
         @app.route(path='/nap')
-        async def nap_handler(scope, receive, send):
-            qs = scope.get('query_string', b'').decode()
+        async def nap_handler(conn, receive, send):
+            qs = conn.query_string.decode()
             duration = 0.0
             for param in qs.split('&'):
                 if param.startswith('s='):

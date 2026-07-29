@@ -21,7 +21,9 @@ from ..connection import (
     Connection, bind_receive_channel, disconnected, mark_disconnected)
 from ..headers import Headers
 from .deadline import ConnectionDeadline
-from .recipient import AbstractReader, IncompleteReadError, RecipientFactory, _WS_EVENT_QUEUE_DEPTH
+from .h1_buffer import LIMIT_EXCEEDED, BufferedH1Reader
+from .recipient import (AbstractReader, HTTP1Recipient, IncompleteReadError,
+                        RecipientFactory, _WS_EVENT_QUEUE_DEPTH)
 from .sender import AbstractWriter, SenderFactory
 from .access_log import (AccessLogRecord as _AccessLogRecord,
                          _make_disconnect_detecting_receive,
@@ -306,6 +308,23 @@ class RequestActor(Actor):
         self._app = app
         self._aggregator = aggregator
 
+    def bind(self, conn, receive, send) -> 'RequestActor':
+        """Point this actor at the next request on the same connection.
+
+        HTTP/1.1 dispatches one request at a time per connection, so the
+        instance is free between requests and rebinding it is indistinguishable
+        from building a new one — except for the allocation, which the keep-alive
+        loop would otherwise pay on every request.  ``app`` and ``aggregator``
+        are per-connection and stay put.
+
+        Deliberately **not** available to HTTP/2, whose streams are concurrent:
+        two live requests sharing one actor would interleave their fields.
+        """
+        self._conn = conn
+        self._receive = receive
+        self._send = send
+        return self
+
     async def run(self) -> None:  # override: single-shot, no inbox loop
         try:
             await self._app(self._conn, self._receive, self._send)
@@ -353,6 +372,13 @@ class HTTP1Actor(Actor):
         connection_id: str = '',
     ) -> None:
         super().__init__()
+        # ``BB_H1_PROTOCOL`` swaps in the buffer-owning reader.  It is wrapped
+        # here rather than at the transport so the actor above is identical on
+        # both front ends — the flag must change how bytes arrive, never what
+        # the request means.
+        from ..env import get_settings as _get_settings  # noqa: PLC0415
+        if _get_settings().h1_protocol and not isinstance(reader, BufferedH1Reader):
+            reader = BufferedH1Reader(reader)
         self._reader = reader
         self._writer = writer
         self._app = app
@@ -362,6 +388,9 @@ class HTTP1Actor(Actor):
         self._sockname = sockname
         self._ssl = ssl
         self._ws_queue_depth = ws_queue_depth
+        # Built on the first request, rebound on every later one — see
+        # ``RequestActor.bind``.
+        self._request_actor: RequestActor | None = None
         # Accept-time connection id (ConnectionActor's) — the one id for the
         # whole connection.  The WS upgrade path reuses it in the scope
         # instead of minting a second one; empty when the actor is
@@ -396,6 +425,8 @@ class HTTP1Actor(Actor):
         # below once the record exists.
         _loop_start_perf: float = 0.0
         _loop_start_cpu: float = 0.0
+        # Built on the first request that needs one, rebound thereafter.
+        inner_receive: HTTP1Recipient | None = None
         try:
             while True:
                 if _PHASE_TRACE:
@@ -588,11 +619,19 @@ class HTTP1Actor(Actor):
                     # ``method`` back from ``conn`` (now 'GET'), so no separate
                     # ``scope['method']`` write (which would force materialization).
                     conn.method = 'GET'
-                inner_receive = RecipientFactory.http1(
-                    self._reader, conn,
-                    body_timeout=cfg.body_timeout,
-                    deadline=dl,
-                )
+                # One recipient per connection, rebound per request — the same
+                # trade as ``send.reset_per_request_state()`` above, and for the
+                # same reason: the reader, body timeout, and deadline are
+                # connection properties, so rebuilding them per request bought
+                # nothing.  ``bind`` re-derives the framing from the new head.
+                if inner_receive is None:
+                    inner_receive = RecipientFactory.http1(
+                        self._reader, conn,
+                        body_timeout=cfg.body_timeout,
+                        deadline=dl,
+                    )
+                else:
+                    inner_receive.bind(conn)
 
                 if conn._asterisk_form:
                     # RFC 9112 §3.2.4 — ``OPTIONS *`` is a server-wide request
@@ -1132,10 +1171,14 @@ class HTTP1Actor(Actor):
                     inner_receive, conn, self._aggregator)
             else:
                 detecting_receive = inner_receive
-            request_actor = RequestActor(
-                conn, detecting_receive, capturing_send,
-                self._app, self._aggregator,
-            )
+            request_actor = self._request_actor
+            if request_actor is None:
+                request_actor = self._request_actor = RequestActor(
+                    conn, detecting_receive, capturing_send,
+                    self._app, self._aggregator,
+                )
+            else:
+                request_actor.bind(conn, detecting_receive, capturing_send)
             try:
                 await request_actor.run()
             except asyncio.CancelledError:
@@ -1191,6 +1234,9 @@ class HTTP1Actor(Actor):
         exception class regardless of which side caught the overflow.
         """
         import asyncio  # noqa: PLC0415
+        if isinstance(self._reader, BufferedH1Reader):
+            await self._read_headers_scan(max_total)
+            return
         # Accumulate into a bytearray (amortised O(1) append) instead of the
         # O(n²) bytes ``+=`` growth, then publish back as bytes.  The loop
         # condition and size check are byte-for-byte equivalent to the prior
@@ -1211,6 +1257,54 @@ class HTTP1Actor(Actor):
                     f'header block {len(buf)} bytes > '
                     f'BB_HEADER_MAX_TOTAL={max_total}')
         self._request = bytes(buf)
+
+    async def _read_headers_scan(self, max_total: int) -> None:
+        """``BB_H1_PROTOCOL`` header read — one scan, surplus retained.
+
+        Same contract as :meth:`_read_headers`: on return ``self._request``
+        holds exactly the header block, ending in ``\\r\\n\\r\\n``, and raises
+        the same three exceptions so every 400/408/431 path in ``run()`` is
+        shared between the two front ends.
+
+        The scan starts from the bytes protocol detection already consumed
+        (``self._request``), which is what makes a single ``find`` safe here
+        where ``readuntil(b'\\r\\n\\r\\n')`` on the raw stream deadlocks — see
+        ``h1_buffer`` for the two failure modes this avoids.  Anything read
+        past the delimiter is pushed back, so the body reader and the next
+        pipelined request see it untouched.
+        """
+        reader = self._reader
+        prefix = self._request
+        if prefix:
+            # Bytes already consumed upstream sit in front of everything the
+            # reader holds, so the buffer's own offsets stay meaningful.
+            reader.unread(prefix)
+            self._request = b''
+
+        # A delimiter may straddle a chunk join; fill_until rescans the tail
+        # rather than the whole buffer, so this stays linear.  The limit is
+        # what stops a peer that never sends the terminator from growing the
+        # buffer without bound.
+        idx = await reader.fill_until(_REQ_END, limit=max_total)
+        if idx == LIMIT_EXCEEDED:
+            self._request = reader.peek()
+            raise HeaderTooLargeError(
+                f'header block {reader.buffered} bytes > '
+                f'BB_HEADER_MAX_TOTAL={max_total}')
+        if idx == -1:
+            # EOF with no complete head. ``run()`` distinguishes idle EOF from
+            # mid-header EOF by whether ``self._request`` is non-empty, so hand
+            # back what arrived before deciding.
+            self._request = await reader.read(-1)
+            raise IncompleteReadError(self._request)
+
+        end = idx + len(_REQ_END)
+        if max_total > 0 and end > max_total:
+            self._request = reader.peek()[:end]
+            raise HeaderTooLargeError(
+                f'header block {end} bytes > BB_HEADER_MAX_TOTAL={max_total}')
+
+        self._request = await reader.readexactly(end)
 
     def _should_keep_alive(self, conn) -> bool:
         """Return True if the connection should persist after this request.
