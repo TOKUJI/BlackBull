@@ -132,3 +132,29 @@ async def test_read_all_drains_buffer_and_stream():
     r = BufferedH1Reader(_FakeReader(b'AB', b'CD', b'EF'))
     assert await r.read(-1) == b'ABCDEF'
     assert await r.read(-1) == b''
+
+
+def test_counts_as_an_abstract_reader():
+    """``RecipientFactory.http1`` wraps anything that is not an
+    :class:`AbstractReader` in an :class:`AsyncioReader` — **per request**.
+
+    ``BufferedH1Reader`` already presents the whole surface, so failing that
+    check bought nothing but an allocation on every request of every keep-alive
+    connection, paid only on the front end that exists to remove per-request
+    work.  Registration is what keeps the recipient talking to the buffer
+    directly.
+    """
+    from blackbull.server.recipient import AbstractReader
+
+    assert isinstance(BufferedH1Reader(_FakeReader(b'')), AbstractReader)
+
+
+def test_recipient_factory_does_not_rewrap_it():
+    """The property the registration exists for, at the call site that pays."""
+    from blackbull.server.recipient import RecipientFactory
+
+    reader = BufferedH1Reader(_FakeReader(b''))
+    recipient = RecipientFactory.http1(
+        reader, {'headers': [], 'path': '/'})
+
+    assert recipient._reader is reader

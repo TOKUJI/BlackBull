@@ -453,6 +453,43 @@ class HTTP1Recipient(BaseRecipient):
                  deadline: ConnectionDeadline | None = None,
                  chunk_size: int | None = None):
         super().__init__(reader)
+        # P4: deliver a Content-Length body in fixed-size chunks instead of one
+        # giant ``readexactly(content_length)`` allocation.  Falls back to the
+        # ``BB_BODY_CHUNK_SIZE`` setting when not injected (direct-instantiation
+        # tests pass it explicitly).
+        if chunk_size is None:
+            from ..env import get_settings as _get_settings  # noqa: PLC0415
+            chunk_size = _get_settings().body_chunk_size
+        self._chunk_size = chunk_size
+        # Sprint 17 Phase 3 — body-read deadline.  0 = disabled.  Applied
+        # per ``_read_with_timeout`` call (i.e. per chunk for chunked
+        # bodies, single window for Content-Length).  Mirrors nginx
+        # ``client_body_timeout`` semantics: each read has the same bound.
+        #
+        # Sprint 23 — the deadline is rescheduled on the shared
+        # :class:`ConnectionDeadline` rather than allocating a fresh
+        # ``asyncio.wait_for`` Timeout per chunk.  Per-chunk semantics
+        # preserved.
+        self._body_timeout = body_timeout
+        self._deadline = deadline
+        # Everything above belongs to the connection; everything ``bind`` sets
+        # belongs to the request.
+        self.bind(conn)
+
+    def bind(self, conn: dict | Connection) -> 'HTTP1Recipient':
+        """Point this recipient at *conn*, the next request on the connection.
+
+        The reader, chunk size, and deadline are properties of the connection
+        and survive; the framing state is re-derived from the new head.  One
+        recipient per connection instead of one per request is the same trade
+        the sender already makes — safe for HTTP/1.1 because a connection
+        dispatches one request at a time, and **not** safe for HTTP/2, whose
+        streams are concurrent.
+
+        The split is the whole contract: any per-request field left out of this
+        method would leak from request N into request N+1, so new state belongs
+        here, not in ``__init__``.
+        """
         # BlackBull's own actor passes the native :class:`Connection` directly
         # (Sprint 80 native-Connection entry); read its ``headers`` with no
         # conversion. A stashed Connection, or an external/hand-built ASGI scope
@@ -484,30 +521,12 @@ class HTTP1Recipient(BaseRecipient):
         self._chunked = (te == b'chunked')
         # Remaining Content-Length bytes; counts down as the body streams.
         self._content_length = int(cl) if cl else None
-        # P4: deliver a Content-Length body in fixed-size chunks instead of one
-        # giant ``readexactly(content_length)`` allocation.  Falls back to the
-        # ``BB_BODY_CHUNK_SIZE`` setting when not injected (direct-instantiation
-        # tests pass it explicitly).
-        if chunk_size is None:
-            from ..env import get_settings as _get_settings  # noqa: PLC0415
-            chunk_size = _get_settings().body_chunk_size
-        self._chunk_size = chunk_size
         self._done = False
-        # Sprint 17 Phase 3 — body-read deadline.  0 = disabled.  Applied
-        # per ``_read_with_timeout`` call (i.e. per chunk for chunked
-        # bodies, single window for Content-Length).  Mirrors nginx
-        # ``client_body_timeout`` semantics: each read has the same bound.
-        #
-        # Sprint 23 — the deadline is rescheduled on the shared
-        # :class:`ConnectionDeadline` rather than allocating a fresh
-        # ``asyncio.wait_for`` Timeout per chunk.  Per-chunk semantics
-        # preserved.
-        self._body_timeout = body_timeout
-        self._deadline = deadline
         # Set once a chunked-framing violation is detected: the byte stream is
         # now desynced, so the connection MUST close rather than keep-alive
         # (draining would parse smuggled bytes as the next request).
         self.framing_broken = False
+        return self
 
     def needs_drain(self) -> bool:
         """True if a declared request body may still be buffered unread.

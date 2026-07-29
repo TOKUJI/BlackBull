@@ -43,7 +43,7 @@ ASGIServer                        (one per process; owns the listening socket)
 └── ConnectionActor               (one per accepted TCP connection)
       │
       ├── HTTP1Actor              (HTTP/1.1 driver)
-      │     └── RequestActor      (one per HTTP/1.1 request, short-lived)
+      │     └── RequestActor      (one per connection, rebound per request)
       │
       ├── HTTP2Actor              (HTTP/2 connection driver)
       │     └── StreamActor       (one per HTTP/2 stream)
@@ -109,8 +109,12 @@ server and under external ASGI hosts.
 ### `HTTP1Actor`
 
 - Drives the HTTP/1.1 request/response cycle.
-- For each request: spawns a `RequestActor`, awaits its
-  completion, then loops for keep-alive.
+- For each request: points its `RequestActor` at the request and
+  awaits completion, then loops for keep-alive.  The actor, the
+  sender, and the body recipient are built once per *connection*
+  and rebound per request — a connection dispatches one request at
+  a time, so rebinding is indistinguishable from rebuilding except
+  for the allocation.
 - On `Connection: Upgrade` (WebSocket): hands the reader /
   writer to a new `WebSocketActor` and exits.
 - Supervisor strategy: **isolate** — an error in one request
@@ -118,7 +122,10 @@ server and under external ASGI hosts.
 
 ### `RequestActor`
 
-- Owns one HTTP/1.1 request lifetime.
+- Owns one HTTP/1.1 request lifetime.  Under HTTP/1.1 one instance
+  serves the whole connection, rebound to each request in turn
+  (`bind`); HTTP/2 builds one per stream, because streams are
+  concurrent and would otherwise interleave their state.
 - Receives the parsed headers and body from `HTTP1Actor`.
 - Calls the ASGI app, collects the response, writes it back
   via the connection's writer.

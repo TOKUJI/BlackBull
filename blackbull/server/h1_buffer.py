@@ -31,7 +31,7 @@ cost **zero suspensions**, against one loop turn per line today.
 """
 from __future__ import annotations
 
-from .recipient import IncompleteReadError
+from .recipient import AbstractReader, IncompleteReadError
 
 __all__ = ('BufferedH1Reader', 'LIMIT_EXCEEDED')
 
@@ -174,3 +174,14 @@ class BufferedH1Reader:
         # Anything else the underlying reader offers (feed_eof, transport
         # pokes in tests) passes through unchanged.
         return getattr(self._reader, name)
+
+
+# Registered rather than subclassed.  ``RecipientFactory`` wraps any reader
+# that fails this check in an ``AsyncioReader``, and it builds a recipient per
+# request — so without registration the front end whose whole purpose is to
+# remove per-request work would add an allocation to every request.  The class
+# already implements the full surface (including ``at_eof``), so inheritance
+# would contribute nothing but a ``__dict__``: ``AbstractReader`` declares no
+# ``__slots__``, and a base without them makes a subclass's ``__slots__`` a
+# silent no-op.
+AbstractReader.register(BufferedH1Reader)

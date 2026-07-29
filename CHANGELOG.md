@@ -55,6 +55,11 @@ so the editable install's metadata catches up.
   be removed once that lands.  Both paths pass the same HTTP/1.1 conformance
   suite; the flag changes how bytes arrive, never what a request means.
 
+  `BufferedH1Reader` is registered as an `AbstractReader`.  Without that,
+  `RecipientFactory.http1` re-wrapped it in an `AsyncioReader` on **every**
+  request — the front end whose whole purpose is to remove per-request work was
+  adding an allocation to every request of every keep-alive connection.
+
 ### Removed
 
 - **The `scope` simplified-handler parameter alias.**  Naming a simplified
@@ -97,6 +102,28 @@ so the editable install's metadata catches up.
   the tests had drifted from it.
 
 ### Changed
+
+- **HTTP/1.1 keep-alive builds one recipient and one `RequestActor` per
+  connection, not per request.**  Both were rebuilt on every request even
+  though everything they hold that is expensive — the reader, the body
+  timeout, the connection deadline, the app, the aggregator — belongs to the
+  connection, not the request.  They are now rebound (`HTTP1Recipient.bind`,
+  `RequestActor.bind`), which is the trade the sender already made with
+  `reset_per_request_state`.  Safe for HTTP/1.1 specifically because a
+  connection dispatches one request at a time; HTTP/2 keeps building one
+  `RequestActor` per stream, since concurrent streams sharing an instance
+  would interleave their fields.
+
+  Measured on a same-session A/B over 400 serialized keep-alive requests:
+  **17.46 → 16.25 µs/req (−6.9%)** through `HTTP1Actor.run`, with every "after"
+  minimum below every "before" minimum across five runs each.  Rebinding turns
+  out to save more than the two constructors do, because it also skips
+  `RecipientFactory.http1`'s dispatch and the function-level
+  `from ..env import get_settings` that ran inside `__init__` on every request.
+  The 213-vector Http11Probe suite returns an identical per-test verdict before
+  and after (0 failed, 0 errors), which is the check that matters here: the
+  framing state a rebind must reset is exactly what request smuggling exploits
+  when it leaks between requests.
 
 - **The integration tier now gates pull requests.**  `tests/integration` and
   `tests/conformance` run under `--run-integration` on every push and PR

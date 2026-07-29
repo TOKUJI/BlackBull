@@ -22,7 +22,8 @@ from ..connection import (
 from ..headers import Headers
 from .deadline import ConnectionDeadline
 from .h1_buffer import LIMIT_EXCEEDED, BufferedH1Reader
-from .recipient import AbstractReader, IncompleteReadError, RecipientFactory, _WS_EVENT_QUEUE_DEPTH
+from .recipient import (AbstractReader, HTTP1Recipient, IncompleteReadError,
+                        RecipientFactory, _WS_EVENT_QUEUE_DEPTH)
 from .sender import AbstractWriter, SenderFactory
 from .access_log import (AccessLogRecord as _AccessLogRecord,
                          _make_disconnect_detecting_receive,
@@ -307,6 +308,23 @@ class RequestActor(Actor):
         self._app = app
         self._aggregator = aggregator
 
+    def bind(self, conn, receive, send) -> 'RequestActor':
+        """Point this actor at the next request on the same connection.
+
+        HTTP/1.1 dispatches one request at a time per connection, so the
+        instance is free between requests and rebinding it is indistinguishable
+        from building a new one — except for the allocation, which the keep-alive
+        loop would otherwise pay on every request.  ``app`` and ``aggregator``
+        are per-connection and stay put.
+
+        Deliberately **not** available to HTTP/2, whose streams are concurrent:
+        two live requests sharing one actor would interleave their fields.
+        """
+        self._conn = conn
+        self._receive = receive
+        self._send = send
+        return self
+
     async def run(self) -> None:  # override: single-shot, no inbox loop
         try:
             await self._app(self._conn, self._receive, self._send)
@@ -370,6 +388,9 @@ class HTTP1Actor(Actor):
         self._sockname = sockname
         self._ssl = ssl
         self._ws_queue_depth = ws_queue_depth
+        # Built on the first request, rebound on every later one — see
+        # ``RequestActor.bind``.
+        self._request_actor: RequestActor | None = None
         # Accept-time connection id (ConnectionActor's) — the one id for the
         # whole connection.  The WS upgrade path reuses it in the scope
         # instead of minting a second one; empty when the actor is
@@ -404,6 +425,8 @@ class HTTP1Actor(Actor):
         # below once the record exists.
         _loop_start_perf: float = 0.0
         _loop_start_cpu: float = 0.0
+        # Built on the first request that needs one, rebound thereafter.
+        inner_receive: HTTP1Recipient | None = None
         try:
             while True:
                 if _PHASE_TRACE:
@@ -596,11 +619,19 @@ class HTTP1Actor(Actor):
                     # ``method`` back from ``conn`` (now 'GET'), so no separate
                     # ``scope['method']`` write (which would force materialization).
                     conn.method = 'GET'
-                inner_receive = RecipientFactory.http1(
-                    self._reader, conn,
-                    body_timeout=cfg.body_timeout,
-                    deadline=dl,
-                )
+                # One recipient per connection, rebound per request — the same
+                # trade as ``send.reset_per_request_state()`` above, and for the
+                # same reason: the reader, body timeout, and deadline are
+                # connection properties, so rebuilding them per request bought
+                # nothing.  ``bind`` re-derives the framing from the new head.
+                if inner_receive is None:
+                    inner_receive = RecipientFactory.http1(
+                        self._reader, conn,
+                        body_timeout=cfg.body_timeout,
+                        deadline=dl,
+                    )
+                else:
+                    inner_receive.bind(conn)
 
                 if conn._asterisk_form:
                     # RFC 9112 §3.2.4 — ``OPTIONS *`` is a server-wide request
@@ -1140,10 +1171,14 @@ class HTTP1Actor(Actor):
                     inner_receive, conn, self._aggregator)
             else:
                 detecting_receive = inner_receive
-            request_actor = RequestActor(
-                conn, detecting_receive, capturing_send,
-                self._app, self._aggregator,
-            )
+            request_actor = self._request_actor
+            if request_actor is None:
+                request_actor = self._request_actor = RequestActor(
+                    conn, detecting_receive, capturing_send,
+                    self._app, self._aggregator,
+                )
+            else:
+                request_actor.bind(conn, detecting_receive, capturing_send)
             try:
                 await request_actor.run()
             except asyncio.CancelledError:
