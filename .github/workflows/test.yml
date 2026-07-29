@@ -243,9 +243,15 @@ jobs:
             --description 'Scheduled Full tier is red' --force
           existing=$(gh issue list --state open --label ci-full-tier \
             --json number --jq '.[0].number')
-          body="Scheduled Full tier failed on \`${GITHUB_SHA}\`.
-          Run: ${RUN_URL}
-          Logs age out after 90 days — triage before then."
+          # printf, not a quoted multi-line string: YAML block indentation
+          # would otherwise land in the body and Markdown would render the
+          # continuation lines as a code block.
+          body=$(printf '%s\n' \
+            "Scheduled Full tier failed on \`${GITHUB_SHA}\`." \
+            "" \
+            "Run: ${RUN_URL}" \
+            "" \
+            "Logs age out after 90 days — triage before then.")
           if [ -n "$existing" ]; then
             gh issue comment "$existing" --body "$body"
           else
