@@ -291,9 +291,14 @@ the protocol stack:
   (RFC 6455 framing) + `blackbull/server/websocket_actor.py`
   (fragment reassembly, RFC 7692 `permessage-deflate`).
 - **Deadline subsystem** — per-process tick scanner tracking
-  every connection's idle timer; arming and disarming a
-  deadline are attribute writes + set operations rather than
-  per-arm `loop.call_later` calls.
+  every connection's idle timer *and* the write timeout that
+  bounds a single `drain()`; arming and disarming a deadline
+  are attribute writes + set operations rather than per-arm
+  `loop.call_later` calls.  Every configurable timeout goes
+  through it, so turning one on costs no per-request timer.
+  The write deadline binds its task when it is armed rather
+  than when it is built, because HTTP/2 drains one
+  connection-level writer from per-stream tasks.
 - **Sender / Recipient** — `blackbull/server/sender.py`,
   `blackbull/server/recipient.py`.  Buffer responses on the way
   out, parse incoming frames on the way in.  Cache headers

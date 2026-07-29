@@ -11,6 +11,7 @@ failure as a peer disconnect.
 from __future__ import annotations
 
 import asyncio
+from collections import Counter
 
 import pytest
 
@@ -120,6 +121,158 @@ async def test_write_timeout_constructor_arg_stored():
 
     w_default = AsyncioWriter(sw)
     assert w_default._write_timeout == 0.0
+
+
+# ---------------------------------------------------------------------------
+# The write timeout must cost no per-write loop touch
+# ---------------------------------------------------------------------------
+
+def _count_loop_touches(loop, monkeypatch) -> Counter:
+    """Wrap the scheduling primitives on *loop* and count calls.
+
+    Same four primitives ``bench/loop_touches.py`` counts:
+    ``call_soon`` + ``call_at`` + ``call_later`` + ``create_future``.
+    A count, not a duration — so this asserts the same quantity on any
+    machine.
+    """
+    counts: Counter = Counter()
+
+    def wrap(name):
+        original = getattr(loop, name)
+
+        def counted(*args, **kwargs):
+            counts[name] += 1
+            return original(*args, **kwargs)
+
+        monkeypatch.setattr(loop, name, counted)
+
+    for primitive in ('call_soon', 'call_at', 'call_later', 'create_future'):
+        wrap(primitive)
+    return counts
+
+
+@pytest.mark.asyncio
+async def test_write_timeout_arms_no_timer_per_write(monkeypatch):
+    """A configured write timeout must not schedule anything per write.
+
+    ``asyncio.wait_for`` arms one ``loop.call_at`` per call — at the
+    default ``BB_WRITE_TIMEOUT=30`` that is exactly one timer per
+    response, which the loop-touch instrument reads as ``call_at=1.00``
+    /req.  The timeout is now carried by the per-process deadline
+    scanner, whose cost is one shared handle for the whole process
+    regardless of how many writes happen.
+    """
+    loop = asyncio.get_running_loop()
+    sw = _FakeStreamWriter(drain_behaviour='immediate')
+    w = AsyncioWriter(sw, write_timeout=30.0)
+
+    # Arm once before counting so the scanner's own singleton handle and
+    # any first-use setup are outside the measured window.
+    await w.write(b'warm')
+
+    counts = _count_loop_touches(loop, monkeypatch)
+    for _ in range(50):
+        await w.write(b'x')
+
+    assert sw.drain_calls == 51
+    assert counts['call_at'] == 0, f'per-write timer still armed: {counts}'
+    assert counts['call_later'] == 0, f'per-write timer still armed: {counts}'
+    assert counts['create_future'] == 0, f'per-write future: {counts}'
+
+
+@pytest.mark.asyncio
+async def test_write_deadline_deregisters_when_not_draining():
+    """The writer must not sit in the scanner registry between writes.
+
+    The scanner walks its registry every tick; leaving an idle
+    connection armed would make that walk proportional to open
+    connections rather than to connections actually blocked in a drain.
+    """
+    from blackbull.server import deadline as deadline_mod
+
+    sw = _FakeStreamWriter(drain_behaviour='immediate')
+    w = AsyncioWriter(sw, write_timeout=30.0)
+    await w.write(b'ok')
+
+    assert w._deadline is not None
+    assert w._deadline not in deadline_mod._Scanner._REGISTRY
+
+
+@pytest.mark.asyncio
+async def test_write_timeout_fires_from_a_task_that_did_not_build_the_writer():
+    """HTTP/2 drains the one connection-level writer from per-stream tasks.
+
+    A deadline that bound its task at construction time would cancel
+    whichever task happened to build the writer — here, the test's own
+    task — instead of the one parked in ``drain()``.  Binding happens
+    per-arm, so the stream task is the one that gets the timeout.
+    """
+    sw = _FakeStreamWriter(drain_behaviour='slow')
+    w = AsyncioWriter(sw, write_timeout=0.05)
+
+    async def stream_task():
+        with pytest.raises(ConnectionResetError, match='write timeout'):
+            await w.write(b'from another task')
+        return 'timed out'
+
+    result = await asyncio.wait_for(asyncio.create_task(stream_task()),
+                                    timeout=5.0)
+    assert result == 'timed out'
+    assert sw.closed is True
+
+
+class _PausedWriter:
+    """Drain parks until the transport is closed.
+
+    Models the real pause: ``StreamWriter.drain()`` waits on the
+    protocol's drain waiter, and ``connection_lost`` — which
+    ``close()`` leads to — is what resolves it.
+    """
+
+    def __init__(self):
+        self.resume = asyncio.Event()
+        self.closed = False
+        self.drain_calls = 0
+
+    def write(self, data: bytes) -> None:
+        pass
+
+    async def drain(self) -> None:
+        self.drain_calls += 1
+        await self.resume.wait()
+
+    def close(self) -> None:
+        self.closed = True
+        self.resume.set()
+
+
+@pytest.mark.asyncio
+async def test_concurrent_drains_share_one_window_and_one_verdict():
+    """Two tasks paused in ``drain()`` are concurrent, not nested.
+
+    Only the task that armed the deadline interprets its firing.  The
+    second task rides along on the same window — it must not re-arm
+    (which would let a peer dribbling acknowledgements push the deadline
+    out forever) and must not collect a spurious timeout of its own.
+    What resolves it is the transport close the owner performs.
+    """
+    sw = _PausedWriter()
+    w = AsyncioWriter(sw, write_timeout=0.05)
+
+    owner = asyncio.create_task(w.write(b'first'))
+    await asyncio.sleep(0.01)          # let the owner arm and park
+    rider = asyncio.create_task(w.write(b'second'))
+    await asyncio.sleep(0.01)
+
+    owner_result, rider_result = await asyncio.wait_for(
+        asyncio.gather(owner, rider, return_exceptions=True), timeout=5.0)
+
+    assert isinstance(owner_result, ConnectionResetError)
+    assert 'write timeout' in str(owner_result)
+    assert rider_result is None, (
+        f'rider should complete on the close, not raise: {rider_result!r}')
+    assert sw.closed is True
+    assert sw.drain_calls == 2
 
 
 # ---------------------------------------------------------------------------

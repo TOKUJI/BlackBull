@@ -31,6 +31,37 @@ so the editable install's metadata catches up.
 
 ## [Unreleased]
 
+### Changed
+
+- **`BB_WRITE_TIMEOUT` no longer arms a timer per response.**  It defaults to
+  `30.0`, so every write took `asyncio.wait_for` — exactly one `loop.call_at`
+  per response, which the loop-touch instrument read as `call_at=1.00`/req.
+  The bound now rides the per-process deadline scanner that already enforces
+  `BB_HEADER_TIMEOUT`, `BB_BODY_TIMEOUT`, and `BB_KEEP_ALIVE_TIMEOUT`.  The
+  defence is unchanged — a slow-read peer still gets its transport closed and
+  a `ConnectionResetError` still surfaces to the sender's existing error path
+  — but the timeout now fires within `BB_DEADLINE_TICK_MS` of the requested
+  instant instead of exactly on it (~1 % slop at the 30 s default).  BlackBull
+  falls from 3.06 to 2.06 event-loop touches per request, which is the bare
+  `asyncio.start_server` floor: all remaining per-request loop exposure is now
+  the streams layer itself.
+
+### Added
+
+- **`bench/loop_ab.py` and `bench/loop_touches.py`** — permanent forms of the
+  two-arm event-loop A/B and the loop-touch counter.  `loop_ab.py` runs both
+  `BB_UVLOOP` arms of the same build in one session on pinned disjoint cores
+  and reports stock/uvloop/gap against the previous run of the same harness;
+  `--repo` points it at a git worktree so a previous commit can be baselined
+  with the identical harness.  `loop_touches.py` counts `call_soon` +
+  `call_at` + `call_later` + `create_future` per request for HTTP/1.1,
+  HTTP/2, and WebSocket against a per-protocol budget, and `--check` fails on
+  a rise.  It emits a count, not a duration, so unlike req/s it is
+  machine-independent and can gate CI.
+- **Loop-touch budget lane in `test.yml`.**  `bench/loop_touches.py --check`
+  now runs on every push/PR.  Current budgets: HTTP/1.1 2.20, HTTP/2 5.40,
+  WebSocket 4.30 touches per request.
+
 ## [0.65.0] — 2026-07-29
 
 ### Added
