@@ -61,6 +61,12 @@ first-hit-then-summary rate-limit model.
 | `BB_SOCKET_SNDBUF` | `0` (kernel default) | `SO_SNDBUF` (bytes) on each accepted socket.  `0` leaves the kernel default unchanged.  Linux doubles the requested value internally; larger values help throughput for responses ≥ 64 kB. |
 | `BB_SOCKET_RCVBUF` | `0` (kernel default) | `SO_RCVBUF` (bytes) on each accepted socket.  `0` leaves the kernel default unchanged.  Same doubling rule as `BB_SOCKET_SNDBUF`. |
 
+## HTTP/1.1 internals
+
+| Variable | Default | Controls |
+|---|---|---|
+| `BB_H1_PROTOCOL` | `0` | Read request heads through the buffer-owning front end: one `find(b'\r\n\r\n')` scan over an accumulated buffer instead of one `readuntil(b'\r\n')` per header line, keeping any surplus so a keep-alive or pipelined peer's next head is usually already in hand.  **Experimental measurement gate**, not a supported switch — it exists so the two read paths can be A/B'd on identical builds, and will either become the default or be removed once that measurement lands.  Both paths pass the same HTTP/1.1 conformance suite; enabling it changes how bytes arrive, never what a request means. |
+
 ## Logging
 
 | Variable | Default | Controls |

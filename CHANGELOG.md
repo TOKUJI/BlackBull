@@ -31,6 +31,30 @@ so the editable install's metadata catches up.
 
 ## [Unreleased]
 
+### Added
+
+- **`BB_H1_PROTOCOL` — buffer-owning HTTP/1.1 read front end (experimental,
+  default off).**  Phase 1a of the H/1.1 fast path.  The header block is
+  located with a single `find(b'\r\n\r\n')` scan over an accumulated buffer
+  instead of one `readuntil(b'\r\n')` per header line, and any bytes read past
+  the delimiter are kept rather than discarded — so a keep-alive or pipelined
+  peer's next head is usually already in hand, and an await that resolves from
+  the buffer never yields to the loop.
+
+  The buffer is not an optimisation detail, it is what makes the scan possible
+  at all.  Two things block the obvious `readuntil(b'\r\n\r\n')` version: a
+  stream `readuntil` cannot see the bytes protocol detection already consumed
+  (a minimal `GET / HTTP/1.0\r\n\r\n` leaves only `\r\n` on the wire, and the
+  search blocks until the peer closes — the deadlock the line-by-line loop was
+  written to avoid), and any chunked scan over-reads into the body or the next
+  pipelined request.  Owning the buffer answers both: the scan starts from the
+  already-consumed prefix, and the surplus has somewhere to live.
+
+  This is a **measurement gate, not a supported switch** — it exists so both
+  read paths can be A/B'd on identical builds, and will become the default or
+  be removed once that lands.  Both paths pass the same HTTP/1.1 conformance
+  suite; the flag changes how bytes arrive, never what a request means.
+
 ### Removed
 
 - **The `scope` simplified-handler parameter alias.**  Naming a simplified

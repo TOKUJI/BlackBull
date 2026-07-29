@@ -21,6 +21,7 @@ from ..connection import (
     Connection, bind_receive_channel, disconnected, mark_disconnected)
 from ..headers import Headers
 from .deadline import ConnectionDeadline
+from .h1_buffer import LIMIT_EXCEEDED, BufferedH1Reader
 from .recipient import AbstractReader, IncompleteReadError, RecipientFactory, _WS_EVENT_QUEUE_DEPTH
 from .sender import AbstractWriter, SenderFactory
 from .access_log import (AccessLogRecord as _AccessLogRecord,
@@ -353,6 +354,13 @@ class HTTP1Actor(Actor):
         connection_id: str = '',
     ) -> None:
         super().__init__()
+        # ``BB_H1_PROTOCOL`` swaps in the buffer-owning reader.  It is wrapped
+        # here rather than at the transport so the actor above is identical on
+        # both front ends — the flag must change how bytes arrive, never what
+        # the request means.
+        from ..env import get_settings as _get_settings  # noqa: PLC0415
+        if _get_settings().h1_protocol and not isinstance(reader, BufferedH1Reader):
+            reader = BufferedH1Reader(reader)
         self._reader = reader
         self._writer = writer
         self._app = app
@@ -1191,6 +1199,9 @@ class HTTP1Actor(Actor):
         exception class regardless of which side caught the overflow.
         """
         import asyncio  # noqa: PLC0415
+        if isinstance(self._reader, BufferedH1Reader):
+            await self._read_headers_scan(max_total)
+            return
         # Accumulate into a bytearray (amortised O(1) append) instead of the
         # O(n²) bytes ``+=`` growth, then publish back as bytes.  The loop
         # condition and size check are byte-for-byte equivalent to the prior
@@ -1211,6 +1222,54 @@ class HTTP1Actor(Actor):
                     f'header block {len(buf)} bytes > '
                     f'BB_HEADER_MAX_TOTAL={max_total}')
         self._request = bytes(buf)
+
+    async def _read_headers_scan(self, max_total: int) -> None:
+        """``BB_H1_PROTOCOL`` header read — one scan, surplus retained.
+
+        Same contract as :meth:`_read_headers`: on return ``self._request``
+        holds exactly the header block, ending in ``\\r\\n\\r\\n``, and raises
+        the same three exceptions so every 400/408/431 path in ``run()`` is
+        shared between the two front ends.
+
+        The scan starts from the bytes protocol detection already consumed
+        (``self._request``), which is what makes a single ``find`` safe here
+        where ``readuntil(b'\\r\\n\\r\\n')`` on the raw stream deadlocks — see
+        ``h1_buffer`` for the two failure modes this avoids.  Anything read
+        past the delimiter is pushed back, so the body reader and the next
+        pipelined request see it untouched.
+        """
+        reader = self._reader
+        prefix = self._request
+        if prefix:
+            # Bytes already consumed upstream sit in front of everything the
+            # reader holds, so the buffer's own offsets stay meaningful.
+            reader.unread(prefix)
+            self._request = b''
+
+        # A delimiter may straddle a chunk join; fill_until rescans the tail
+        # rather than the whole buffer, so this stays linear.  The limit is
+        # what stops a peer that never sends the terminator from growing the
+        # buffer without bound.
+        idx = await reader.fill_until(_REQ_END, limit=max_total)
+        if idx == LIMIT_EXCEEDED:
+            self._request = reader.peek()
+            raise HeaderTooLargeError(
+                f'header block {reader.buffered} bytes > '
+                f'BB_HEADER_MAX_TOTAL={max_total}')
+        if idx == -1:
+            # EOF with no complete head. ``run()`` distinguishes idle EOF from
+            # mid-header EOF by whether ``self._request`` is non-empty, so hand
+            # back what arrived before deciding.
+            self._request = await reader.read(-1)
+            raise IncompleteReadError(self._request)
+
+        end = idx + len(_REQ_END)
+        if max_total > 0 and end > max_total:
+            self._request = reader.peek()[:end]
+            raise HeaderTooLargeError(
+                f'header block {end} bytes > BB_HEADER_MAX_TOTAL={max_total}')
+
+        self._request = await reader.readexactly(end)
 
     def _should_keep_alive(self, conn) -> bool:
         """Return True if the connection should persist after this request.
