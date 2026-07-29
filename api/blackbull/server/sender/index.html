@@ -5649,6 +5649,13 @@ response 1 byte/sec fills the send buffer and our drain blocks
 indefinitely waiting for the peer's TCP window to reopen.  On
 timeout we close the transport and raise <code>ConnectionResetError</code>
 so the sender treats the failure the same as a peer-side reset.</p>
+<p>The bound is carried by the per-process deadline scanner rather than
+an <code>asyncio</code> timer, because with the timeout enabled <em>every</em>
+response takes this path — one <code>loop.call_at</code> per write is a
+per-request cost paid to defend against a case that essentially
+never happens.  The scanner's granularity (<code>BB_DEADLINE_TICK_MS</code>)
+becomes the slop on when the timeout fires; at the 30 s default that
+is ~1 %.</p>
 
 
 

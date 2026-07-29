@@ -4031,6 +4031,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#blackbull.server.deadline.WriteDeadline" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WriteDeadline
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -4974,6 +4985,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#blackbull.server.deadline.WriteDeadline" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WriteDeadline
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -5173,6 +5195,69 @@ and uses it sequentially from a single task.</p>
     </div>
 
 </div>
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="blackbull.server.deadline.WriteDeadline" class="doc doc-heading">
+            <code>WriteDeadline</code>
+
+
+<a href="#blackbull.server.deadline.WriteDeadline" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+
+
+        <p>Bounds a drain on a connection's writer, via the same scanner.</p>
+<p>Rides in :data:<code>_Scanner._REGISTRY</code> alongside
+:class:<code>ConnectionDeadline</code> — the scanner only needs
+<code>_deadline_at</code> and <code>_fire_from_scanner</code>.  Two differences from
+that class, both forced by the write path:</p>
+<p><em>Binding is per-arm, not per-construction.</em>  HTTP/2 drains the one
+connection-level writer from per-stream tasks, so the task to cancel
+is whichever one is parked in <code>drain()</code> right now — not whichever
+one happened to build the writer.</p>
+<p><em>One owner at a time.</em>  Concurrent drains are not nested drains, so
+a second entrant does not re-arm and does not interpret a firing —
+it simply rides along.  Two tasks can only be inside <code>drain()</code>
+simultaneously when the transport is paused, which is precisely the
+slow-read shape the timeout defends against; letting a later drain
+push the deadline out would let a peer that dribbles
+acknowledgements hold the connection open indefinitely.  When the
+owner's deadline fires it closes the transport, which is what
+resolves the riders.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
 
 
 

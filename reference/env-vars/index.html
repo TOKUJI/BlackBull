@@ -5222,7 +5222,7 @@ first-hit-then-summary rate-limit model.</p>
 <tr>
 <td><code>BB_WRITE_TIMEOUT</code></td>
 <td><code>30.0</code></td>
-<td>Seconds the server will wait for a single response write to flush to the peer (via <code>StreamWriter.drain()</code>).  Defends against the <em>slow-read</em> shape of slowloris: a client that reads the response 1 byte/sec eventually fills the kernel send buffer and our drain blocks indefinitely.  On timeout the transport is force-closed and the failure surfaces as a peer-side <code>ConnectionResetError</code> for the sender's existing error path.  <code>0</code> disables.</td>
+<td>Seconds the server will wait for a single response write to flush to the peer (via <code>StreamWriter.drain()</code>).  Defends against the <em>slow-read</em> shape of slowloris: a client that reads the response 1 byte/sec eventually fills the kernel send buffer and our drain blocks indefinitely.  On timeout the transport is force-closed and the failure surfaces as a peer-side <code>ConnectionResetError</code> for the sender's existing error path.  Enforced by the shared deadline scanner, so the timeout fires within <code>BB_DEADLINE_TICK_MS</code> of the requested instant rather than exactly on it — ~1 % slop at the 30 s default, and no per-response timer on the hot path.  <code>0</code> disables.</td>
 </tr>
 <tr>
 <td><code>BB_KEEP_ALIVE_TIMEOUT</code></td>
@@ -5475,7 +5475,7 @@ or drop to <code>INFO</code> to surface the rate-limit summary records.</p>
 <tr>
 <td><code>BB_DEADLINE_TICK_MS</code></td>
 <td><code>300</code></td>
-<td>Polling interval (milliseconds) for the per-process deadline scanner that enforces connection timeouts.  Smaller = tighter timeout granularity at a small CPU cost; larger = more slack but cheaper.</td>
+<td>Polling interval (milliseconds) for the per-process deadline scanner that enforces <code>BB_HEADER_TIMEOUT</code>, <code>BB_BODY_TIMEOUT</code>, <code>BB_WRITE_TIMEOUT</code>, and <code>BB_KEEP_ALIVE_TIMEOUT</code>.  One shared timer for the whole process instead of one per request, which is why enabling those timeouts costs nothing per request.  Smaller = tighter timeout granularity at a small CPU cost; larger = more slack but cheaper.</td>
 </tr>
 </tbody>
 </table>
