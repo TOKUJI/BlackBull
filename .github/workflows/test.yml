@@ -1,6 +1,6 @@
 name: pytest
 
-# Four-lane pytest CI.
+# Five-lane pytest CI.
 #
 # Fast tier   — runs on every push/PR across the full supported interpreter
 #               matrix; no Docker, beartype enabled.  Catches regressions in
@@ -12,6 +12,11 @@ name: pytest
 #               from the weekly Full tier, which is gated on schedule /
 #               workflow_dispatch and therefore gates nothing: 33 tests rotted
 #               red behind that gap before anyone noticed.
+# Loop-touch  — runs on every push/PR; counts event-loop scheduling calls per
+#               request for HTTP/1.1, HTTP/2, and WebSocket against a fixed
+#               per-protocol budget.  A count rather than a duration, so it is
+#               reproducible on a shared runner where throughput is not —
+#               which makes it the only hot-path metric CI can honestly gate.
 # Dual-path   — runs on every push/PR; the same Docker-free suites under
 #               BB_FORCE_ASGI_SCOPE=1, forcing Connection.as_scope()+from_scope()
 #               on every request so the ASGI compat conversion can't bitrot
@@ -135,6 +140,36 @@ jobs:
         run: |
           python -m pytest tests/integration tests/conformance \
             --run-integration --timeout=120 -q --beartype-packages=blackbull
+
+  loop-touches:
+    name: Loop-touch budget (hot-path exposure)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97   # v7.0.0
+        with:
+          python-version: '3.12'
+
+      - name: Install BlackBull
+        run: pip install -e .
+
+      - name: Count event-loop touches per request
+        # Counts call_soon + call_at + call_later + create_future per request
+        # for HTTP/1.1, HTTP/2, and WebSocket against the budgets in the
+        # script.  This is the one hot-path metric a shared runner can police:
+        # it emits a *count*, so unlike req/s it does not move with whatever
+        # else the runner is doing.  A phase may trade throughput for clarity;
+        # it may not trade the count upward.
+        #
+        # Stock loop deliberately — uvloop does not route through
+        # BaseEventLoop, so the counters would read zero and pass vacuously.
+        env:
+          BB_UVLOOP: '0'
+        run: python bench/loop_touches.py --check
 
   dual-path:
     name: Dual-path lane (BB_FORCE_ASGI_SCOPE=1)

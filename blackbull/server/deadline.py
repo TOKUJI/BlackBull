@@ -185,3 +185,91 @@ class ConnectionDeadline:
                 task.uncancel()
             raise TimeoutError
         return False
+
+
+class WriteDeadline:
+    """Bounds a drain on a connection's writer, via the same scanner.
+
+    Rides in :data:`_Scanner._REGISTRY` alongside
+    :class:`ConnectionDeadline` — the scanner only needs
+    ``_deadline_at`` and ``_fire_from_scanner``.  Two differences from
+    that class, both forced by the write path:
+
+    *Binding is per-arm, not per-construction.*  HTTP/2 drains the one
+    connection-level writer from per-stream tasks, so the task to cancel
+    is whichever one is parked in ``drain()`` right now — not whichever
+    one happened to build the writer.
+
+    *One owner at a time.*  Concurrent drains are not nested drains, so
+    a second entrant does not re-arm and does not interpret a firing —
+    it simply rides along.  Two tasks can only be inside ``drain()``
+    simultaneously when the transport is paused, which is precisely the
+    slow-read shape the timeout defends against; letting a later drain
+    push the deadline out would let a peer that dribbles
+    acknowledgements hold the connection open indefinitely.  When the
+    owner's deadline fires it closes the transport, which is what
+    resolves the riders.
+    """
+
+    __slots__ = ('_loop', '_owner', '_deadline_at', '_fired',
+                 '_seconds', '_registered')
+
+    def __init__(self, seconds: float) -> None:
+        # Left unannotated deliberately: beartype instruments annotated
+        # attribute assignments with ``die_if_unbearable``, and it cannot
+        # resolve a quoted forward reference from that call site.
+        self._loop = None
+        self._owner = None
+        self._deadline_at: float = _INF
+        self._fired = False
+        self._seconds = seconds
+        self._registered = False
+
+    @property
+    def fired(self) -> bool:
+        return self._fired
+
+    def _fire_from_scanner(self) -> None:
+        """Invoked by :func:`_tick` when ``_deadline_at`` has passed."""
+        self._fired = True
+        self._deadline_at = _INF
+        self._registered = False
+        _Scanner._REGISTRY.discard(self)
+        if self._owner is not None and not self._owner.done():
+            self._owner.cancel()
+
+    def __enter__(self) -> 'WriteDeadline':
+        if self._owner is None:
+            loop = self._loop
+            if loop is None or loop is not _Scanner._LOOP:
+                # First arm, or the writer outlived the loop it was built
+                # under (worker fork, test isolation).
+                loop = self._loop = asyncio.get_running_loop()
+            self._fired = False
+            self._owner = asyncio.current_task()
+            self._deadline_at = loop.time() + self._seconds
+            if not self._registered:
+                _ensure_scanner_running(loop)
+                _Scanner._REGISTRY.add(self)
+                self._registered = True
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> bool:
+        task = asyncio.current_task()
+        if self._owner is not task:
+            # A concurrent drain that rode along on someone else's window.
+            return False
+        self._owner = None
+        self._deadline_at = _INF
+        if self._registered:
+            _Scanner._REGISTRY.discard(self)
+            self._registered = False
+        if self._fired and (exc_type is None or exc_type is asyncio.CancelledError):
+            if task is not None:
+                # Clear the cancel ``_fire_from_scanner`` requested; the
+                # drain either raised CancelledError (suppressed here) or
+                # completed in the same tick the scanner fired.  Either
+                # way the surrounding task must not stay cancelled.
+                task.uncancel()
+            raise TimeoutError
+        return False

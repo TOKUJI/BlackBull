@@ -12,6 +12,7 @@ from ..protocol.frame_types import (FrameTypes, HeaderFrameFlags, DataFrameFlags
                                     DEFAULT_INITIAL_WINDOW_SIZE, DEFAULT_MAX_FRAME_SIZE)
 from .cap_log import log_cap_hit
 from .constants import WSCloseCode
+from .deadline import WriteDeadline
 from .ws_codec import WSOpcode, encode_frame, encode_frame_header
 import logging
 from ..asgi import (ASGIEvent, ASGISendEvent, HTTPDisconnectEvent,
@@ -194,6 +195,14 @@ class AsyncioWriter(AbstractWriter):
     indefinitely waiting for the peer's TCP window to reopen.  On
     timeout we close the transport and raise ``ConnectionResetError``
     so the sender treats the failure the same as a peer-side reset.
+
+    The bound is carried by the per-process deadline scanner rather than
+    an ``asyncio`` timer, because with the timeout enabled *every*
+    response takes this path — one ``loop.call_at`` per write is a
+    per-request cost paid to defend against a case that essentially
+    never happens.  The scanner's granularity (``BB_DEADLINE_TICK_MS``)
+    becomes the slop on when the timeout fires; at the 30 s default that
+    is ~1 %.
     """
 
     def __init__(self, stream_writer, write_timeout: float = 0.0):
@@ -204,6 +213,8 @@ class AsyncioWriter(AbstractWriter):
             )
         self._sw = stream_writer
         self._write_timeout = write_timeout
+        self._deadline = (WriteDeadline(write_timeout)
+                          if write_timeout > 0 else None)
 
     async def _drain_with_timeout(self) -> None:
         """Drain the underlying StreamWriter, bounded by ``_write_timeout``.
@@ -214,13 +225,14 @@ class AsyncioWriter(AbstractWriter):
         handling runs uniformly.  When no timeout is configured this is a
         plain ``drain()``.
         """
-        if self._write_timeout <= 0:
+        dl = self._deadline
+        if dl is None:
             await self._sw.drain()
             return
         try:
-            await asyncio.wait_for(self._sw.drain(),
-                                   timeout=self._write_timeout)
-        except (asyncio.TimeoutError, TimeoutError):
+            with dl:
+                await self._sw.drain()
+        except TimeoutError:
             logger.warning(
                 'write timeout (%.1fs) exceeded — closing connection',
                 self._write_timeout)
