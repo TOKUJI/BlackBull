@@ -31,6 +31,8 @@ so the editable install's metadata catches up.
 
 ## [Unreleased]
 
+## [0.65.0] — 2026-07-29
+
 ### Added
 
 - **`BB_H1_PROTOCOL` — buffer-owning HTTP/1.1 read front end (experimental,
