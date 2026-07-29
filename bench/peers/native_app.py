@@ -8,10 +8,20 @@ Loaded by BlackBull's own server:
 """
 import os
 from http import HTTPMethod
+from urllib.parse import parse_qs
 
-from blackbull import BlackBull, Response
+from blackbull import BlackBull, Connection, Response
 
 app = BlackBull()
+
+# PEER_MW=httparena reproduces the middleware stack bench/httparena/app.py
+# registers, so a local A/B can ask whether the leaderboard gap lives in the
+# framework or in what the leaderboard entry mounts on top of it.  Off by
+# default: the bare app is the framework floor.
+if os.environ.get("PEER_MW") == "httparena":
+    from blackbull.middleware.compression import Compression
+    app.use(Compression())
+    app.static("/static", os.path.dirname(os.path.abspath(__file__)))
 
 # -- pre-encoded bodies (same as asgi_app.py) -------------------------------
 _PLAINTEXT = b"Hello, World!"
@@ -68,6 +78,30 @@ async def echo(body: bytes):
     return Response(body, content_type=_OCTET_CT)
 
 
+# HttpArena's `baseline` profile endpoint, copied from bench/httparena/app.py
+# so a local A/B exercises the same handler as the leaderboard run.  /ping
+# measures the framework floor; this measures the floor plus query parsing
+# and a dynamically built body, which is where the leaderboard gap shows up.
+@app.route(path="/baseline11", methods=[HTTPMethod.GET, HTTPMethod.POST])
+async def baseline11(conn: Connection):
+    total = 0
+    raw = conn.query_string or b""
+    for vals in parse_qs(raw.decode("latin-1"), keep_blank_values=True).values():
+        for v in vals:
+            try:
+                total += int(v)
+            except ValueError:
+                pass
+    if conn.method == "POST":
+        body = await conn.body()
+        if body:
+            try:
+                total += int(body.strip())
+            except ValueError:
+                pass
+    return Response(str(total).encode(), content_type=_PLAIN_CT)
+
+
 @app.route(path="/ws", methods=[HTTPMethod.GET])
 async def ws_echo(conn, receive, send):
     """WebSocket echo — full-form handler (conn, receive, send)."""
@@ -88,3 +122,11 @@ async def ws_echo(conn, receive, send):
         else:
             await send({"type": "websocket.send",
                         "bytes": event.get("bytes") or b""})
+
+
+# Registered LAST on purpose.  Paired with /ping — the first route — this
+# measures what the router costs as the table grows: BlackBull resolves a
+# static path with one dict probe, so the pair should cost the same.
+@app.route(path="/pingz", methods=[HTTPMethod.GET])
+async def pingz():
+    return Response(_PONG, content_type=_HTML_CT)

@@ -151,8 +151,11 @@ case "$base" in
         # *same* shared peer app (bench.peers.asgi_app:app) that uvicorn /
         # hypercorn / granian / daphne load — no BlackBull-only bench/app.py
         # path any more.
+        # Honour BB_UVLOOP env if already set; default to 1 for apples-to-
+        # apples with uvicorn/ hypercorn/ granian (all uvloop by default).
+        bb_uvloop="${BB_UVLOOP:-1}"
         LAUNCH_CMD=(
-            env BB_UVLOOP=1 "BB_WORKERS=$workers"
+            env BB_UVLOOP="$bb_uvloop" "BB_WORKERS=$workers"
                 BB_H2_INITIAL_WINDOW_SIZE=65535
                 BB_H2_CONNECTION_WINDOW_SIZE=65535
                 BB_H2_MAX_CONCURRENT_STREAMS=100
@@ -176,6 +179,23 @@ case "$base" in
         fi
         LAUNCH_CMD=(
             uvicorn bench.peers.asgi_app:app
+                --host "$BIND_HOST" --port "$upstream_port"
+                "${uv_tls_args[@]}"
+                --loop auto --http "$uv_http" --workers 1
+                --log-level warning --no-access-log
+        )
+        finalize
+        ;;
+    fastapi)
+        # FastAPI on uvicorn — same engine as the uvicorn stack but serving
+        # bench.peers.fastapi_app:app (FastAPI routing layer on top).
+        if [ "$variant" = "h11" ]; then
+            uv_http=h11
+        else
+            uv_http=auto
+        fi
+        LAUNCH_CMD=(
+            uvicorn bench.peers.fastapi_app:app
                 --host "$BIND_HOST" --port "$upstream_port"
                 "${uv_tls_args[@]}"
                 --loop auto --http "$uv_http" --workers 1
