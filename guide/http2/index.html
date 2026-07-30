@@ -5398,7 +5398,7 @@ move as the response body streams.  Applications that need
 live readings (e.g. gRPC server-streaming back-pressure) can
 re-read the dict, though they will see the snapshot value unless
 they keep a reference and the populate site re-fetches it — which
-v0.31 does not do.  Live properties are a future-sprint
+v0.31 does not do.  Live properties are a future
 consideration.</p>
 <p>Peer-side receive-window is intentionally absent: BlackBull sends
 <code>WINDOW_UPDATE</code> per consumed DATA frame, so there is no scalar to

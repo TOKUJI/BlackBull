@@ -5474,7 +5474,7 @@
 
     <div class="doc doc-contents first">
 
-        <p>The high-level WebSocket handler object (Sprint 82).</p>
+        <p>The high-level WebSocket handler object.</p>
 <p>A :class:<code>WebSocket</code> wraps the raw <code>(conn, receive, send)</code> triplet so a
 handler works in <strong>data and methods</strong> instead of event dicts::</p>
 <pre><code>@app.route(path='/chat', scheme=Scheme.websocket)
@@ -5494,7 +5494,7 @@ a year (see <code>docs/guide/websockets.md</code>); this object is additive, and
 forms run over the same actor, codec, and sender.  Nothing about the wire
 changes — a handler that uses this object produces byte-identical frames to
 one that sends the dicts by hand.</p>
-<p>Naming follows the Sprint 80 rule: this is a <em>native</em> surface, so it is
+<p>Naming follows the native-surface rule: this is a <em>native</em> surface, so it is
 unprefixed and lives outside <code>asgi.py</code>.  The <code>ASGIEvent</code> dicts it builds
 are the boundary representation, and stay there.</p>
 

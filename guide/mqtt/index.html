@@ -5096,7 +5096,7 @@ delivery or the broker. The <code>TapActor</code>'s inbox is bounded; if taps fa
 the newest messages are dropped (best-effort observability) and a running
 dropped-count is logged. Taps are therefore <em>not</em> a reliable delivery path — use
 a real MQTT subscription for that. (<code>MQTTExtension(tap_mode='inline')</code> runs taps
-inline on the receiving connection instead — the pre-Sprint-54 behaviour, kept
+inline on the receiving connection instead — the original behaviour, kept
 mainly so the <code>bench/mqtt/tap_throughput.py</code> comparison stays reproducible.)</p>
 <p>The broker also runs without any handler at all: <code>on_message</code> is just how an
 application observes traffic. <code>app.add_extension(MQTTExtension())</code> on its own

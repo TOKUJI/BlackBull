@@ -5074,7 +5074,7 @@
 app's :class:<code>~blackbull.server.protocol_registry.ProtocolRegistry</code>.</p>
 <p>The shared HTTP listener detects HTTP/1.1 vs HTTP/2 (and upgrades to
 WebSocket); port-bound non-ASGI protocols registered via
-:meth:<code>BlackBull.raw_handler</code> get their own listening socket (Sprint 50).
+:meth:<code>BlackBull.raw_handler</code> get their own listening socket.
 When ssl_context or certfile is set, the HTTP listener runs as HTTPS.</p>
 <p>Formerly <code>ASGIServer</code> — that name remains as a backward-compat alias.</p>
 

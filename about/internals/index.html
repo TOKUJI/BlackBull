@@ -4896,6 +4896,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#parse-path-invariant" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Parse-path invariant
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#the-pieces-around-the-actor-core" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5230,6 +5241,17 @@
     <span class="md-ellipsis">
       
         Send-path invariant
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#parse-path-invariant" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Parse-path invariant
       
     </span>
   </a>
@@ -5612,6 +5634,59 @@ decides the path:</p>
 <p>Callers must never call <code>transport.writelines</code> directly with
 small parts.  The gate is the single decision point, and the
 invariant keeps performance predictable across payload sizes.</p>
+<h2 id="parse-path-invariant">Parse-path invariant<a class="headerlink" href="#parse-path-invariant" title="Permanent link">&para;</a></h2>
+<p>The HTTP/1.1 parser validates bytes with <strong>C-level bulk operations</strong>,
+never with Python-level loops or index arithmetic.  In practice that
+means <code>bytes.translate</code>, <code>bytes.find</code>, <code>bytes.split</code>, <code>bytes.strip</code>,
+<code>bytes.count</code>, and precompiled regexes — and it means resisting the
+intuition that fewer allocations or fewer passes must be faster.</p>
+<p>The idiom used throughout <code>_parse</code> is a <strong>delete-the-allowed table</strong>:</p>
+<div class="highlight"><pre><span></span><code><span class="n">_TCHAR_OCTETS</span> <span class="o">=</span> <span class="sa">b</span><span class="s2">&quot;!#$%&amp;&#39;*+-.^_`|~0123456789ABC...xyz&quot;</span>
+
+<span class="k">if</span> <span class="n">key</span><span class="o">.</span><span class="n">translate</span><span class="p">(</span><span class="kc">None</span><span class="p">,</span> <span class="n">_TCHAR_OCTETS</span><span class="p">):</span>   <span class="c1"># non-empty ⇒ a non-token octet</span>
+    <span class="k">raise</span> <span class="n">BadRequestError</span><span class="p">(</span><span class="o">...</span><span class="p">)</span>
+</code></pre></div>
+<p>Deleting every permitted octet leaves the empty string for valid
+input, so a non-empty result <em>is</em> the rejection — one pass in C, and
+no allocation in the accept case (CPython returns the shared empty
+<code>bytes</code>).  Which direction to use depends on the set's size: a large
+allowed set (request-target, tchar) is cheapest as a <code>translate</code>
+delete table, a small forbidden set (the Host authority delimiters) as
+a regex character class.</p>
+<p>Field values are checked <strong>once for the whole header block</strong> rather
+than once per header.  Deleting everything a block may contain leaves
+only CR, LF and the CTLs a value may not carry; if what remains tiles
+exactly into CRLF pairs, no field value can hold a forbidden octet and
+the per-header check is skipped.  A block that fails the pre-scan
+falls back to the per-header regex, so error messages never change —
+the bulk pass is a fast path, never a rejection.</p>
+<p>Three plausible-sounding alternatives were measured and <strong>rejected</strong>;
+do not reintroduce them without new numbers:</p>
+<table>
+<thead>
+<tr>
+<th>Idea</th>
+<th>Why it loses</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>while</code> + <code>find()</code> line loop instead of <code>split(b'\r\n')</code></td>
+<td>1.5–2.2× slower. <code>split</code> does the finding <em>and</em> the slicing in C; the loop moves the iteration back into Python.</td>
+</tr>
+<tr>
+<td>Interning pool for well-known header names</td>
+<td>Slower than <code>key.lower()</code>. The lookup key is a fresh slice every request, so its hash is never cached and hashing costs more than lowercasing.</td>
+</tr>
+<tr>
+<td>Offset arithmetic instead of <code>value.strip(b' \t')</code></td>
+<td>~1.5× slower. Two Python-level scans lose to one C call.</td>
+</tr>
+</tbody>
+</table>
+<p>The through-line: an optimisation that replaces a C bulk operation
+with Python bytecode pays ~30 ns per byte instead of ~2 ns, and no
+reduction in pass count or allocation count makes that back.</p>
 <h2 id="the-pieces-around-the-actor-core">The pieces around the actor core<a class="headerlink" href="#the-pieces-around-the-actor-core" title="Permanent link">&para;</a></h2>
 <p>The actor hierarchy is the <em>control</em> side.  The <em>data</em> side is
 the protocol stack:</p>

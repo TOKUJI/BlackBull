@@ -5170,7 +5170,7 @@ leaving a zombie async-generator that asyncio tries to finalize on loop close.</
 app's :class:<code>~blackbull.server.protocol_registry.ProtocolRegistry</code>.</p>
 <p>The shared HTTP listener detects HTTP/1.1 vs HTTP/2 (and upgrades to
 WebSocket); port-bound non-ASGI protocols registered via
-:meth:<code>BlackBull.raw_handler</code> get their own listening socket (Sprint 50).
+:meth:<code>BlackBull.raw_handler</code> get their own listening socket.
 When ssl_context or certfile is set, the HTTP listener runs as HTTPS.</p>
 <p>Formerly <code>ASGIServer</code> — that name remains as a backward-compat alias.</p>
 
@@ -5314,7 +5314,7 @@ shutdown() can deliver 'lifespan.shutdown' to the same task.</p>
         <p>Async context manager that creates asyncio servers from already-bound sockets.</p>
 <p><em>socket_cb_pairs</em> is an iterable of <code>(sock, callback)</code> — each socket is
 served by its own accept callback.  The shared HTTP listener uses
-:meth:<code>Server.client_connected_cb</code>; port-bound non-ASGI protocols (Sprint 50)
+:meth:<code>Server.client_connected_cb</code>; port-bound non-ASGI protocols
 use a per-binding raw callback.</p>
 <p>On enter: wraps each socket in asyncio.start_server (TCP) or
 asyncio.start_unix_server (AF_UNIX) and yields the list.
@@ -5322,8 +5322,8 @@ On exit: closes all asyncio servers.</p>
 <p>Dispatches by <code>sock.family</code>: AF_INET / AF_INET6 take the TCP
 server, AF_UNIX takes the unix server.  Both honour the configured
 <code>socket_backlog</code> (asyncio's default of 100 is silently re-applied
-via <code>sock.listen(backlog)</code> otherwise — caused wrk c=1024 connect
-errors in Sprint 9c).</p>
+via <code>sock.listen(backlog)</code> otherwise, which produces wrk c=1024
+connect errors).</p>
 
 
     </div>

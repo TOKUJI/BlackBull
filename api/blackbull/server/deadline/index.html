@@ -5036,16 +5036,15 @@
 
     <div class="doc doc-contents first">
 
-        <p>Per-connection rescheduled deadline (Sprint 26 Phase B — scanner form).</p>
+        <p>Per-connection rescheduled deadline.</p>
 <p>Replaces <code>async with asyncio.timeout(...)</code> on the per-request hot
-path.  Sprint 23 used one <code>loop.call_later</code> <code>TimerHandle</code> per
-connection, cancelled and rescheduled at every phase transition.
-Sprint 26 Phase B replaces the per-arm <code>call_later</code> with a
-per-process tick scanner: one singleton <code>TimerHandle</code> re-arms itself
+path, and the per-connection <code>loop.call_later</code> <code>TimerHandle</code> that
+had to be cancelled and rescheduled at every phase transition.
+Instead, a per-process tick scanner: one singleton <code>TimerHandle</code>
+re-arms itself
 every :data:<code>_TICK_S</code> and walks the registry of armed
 :class:<code>ConnectionDeadline</code> instances for expirations.  Per-arm cost
-drops from ~1.7 µs to ~0.34 µs (WSL2 microbench, Sprint 26 Phase B
-spike).</p>
+is ~0.34 µs rather than ~1.7 µs.</p>
 <p>Trade-off: a fired deadline lands within <code>[now, now + _TICK_S]</code>
 rather than at the exact requested instant.  At the default
 <code>_TICK_S = 0.3 s</code> this is ~3 % slop on the tightest configurable
@@ -5104,8 +5103,7 @@ by checking :attr:<code>fired</code>.</p>
 saturation the per-arm path costs ~1.7 µs (TimerHandle + heap
 push + cancel).  The scanner replaces that with one
 <code>loop.time()</code> call + one comparison + one set membership check
-on the registry (~0.34 µs).  Sprint 26 Phase B microbench: 80 %
-per-call reduction; cascade-multiplied estimate ~15–25 % B1.</p>
+on the registry (~0.34 µs) — an ~80 % per-call reduction.</p>
 
 
 

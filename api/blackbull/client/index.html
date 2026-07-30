@@ -7713,8 +7713,8 @@ or :class:<code>TimeoutError</code> if no response arrives within
         <p>Frame-level WebSocket session over one HTTP/2 stream.</p>
 <p>Outgoing frames are masked (RFC 6455 §5.1) and wrapped in H2 DATA
 frames.  Incoming DATA payloads feed the shared
-<code>WebSocketRecipient</code> stack through :class:<code>_H2QueueReader</code>
-(Sprint 72, audit 1.20b) — fragmentation reassembly, FIN/RSV/mask
+<code>WebSocketRecipient</code> stack through :class:<code>_H2QueueReader</code> —
+fragmentation reassembly, FIN/RSV/mask
 validation, UTF-8 checks, and auto-PONG all come from the same
 codec the server and the H1 client use.</p>
 
@@ -7757,7 +7757,7 @@ codec the server and the H1 client use.</p>
         <p>Send a WebSocket close frame (END_STREAM on the carrying DATA
 frame), await the peer's echoed CLOSE bounded by <em>drain_timeout</em>,
 and stop the recipient's reader task.  Idempotent.</p>
-<p>Sprint 72 (audit 1.20c) — same close discipline as the H1
+<p>Same close discipline as the H1
 client's :meth:<code>WebSocketSession.close</code>.</p>
 
 
@@ -7859,7 +7859,7 @@ mask their outgoing frames.</p>
 
         <p>Send a CLOSE frame, await the peer's echoed CLOSE (bounded by
 <em>drain_timeout</em>), and stop the background reader task.</p>
-<p>Sprint 72 (audit 1.20c) — RFC 6455 §7.1.2: the closing handshake
+<p>RFC 6455 §7.1.2 — the closing handshake
 is complete once both endpoints have sent and received a Close
 frame.  A silent peer cannot hang <code>close()</code>: after
 <em>drain_timeout</em> the reader is shut down regardless.  Data frames

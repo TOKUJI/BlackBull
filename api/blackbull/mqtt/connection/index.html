@@ -5064,7 +5064,7 @@ the two together.</p>
         <p>One per MQTT 5.0 connection; the sole writer to its socket.</p>
 <p>Tap dispatch is selected at construction: pass a running :class:<code>TapActor</code>
 as <em>tap</em> for decoupled (actor-mode) dispatch, or <em>app_handlers</em> for inline
-dispatch on this connection (the Sprint 53 contract).</p>
+dispatch on this connection.</p>
 
 
 
@@ -5145,7 +5145,7 @@ framing/resync state machine lives here rather than inline in the read loop:</p>
 <li>a <strong>hard decode error</strong> (reserved flag bits, unknown type — the junk a
   desynchronised stream produces) drops one byte and resyncs.</li>
 </ul>
-<p>This replaces Sprint 53's <code>stalled_len</code> bookkeeping.  The <code>bytes(...)</code>
+<p>This replaces explicit <code>stalled_len</code> bookkeeping.  The <code>bytes(...)</code>
 snapshot at the decode boundary stays because the codec's input contract is
 deliberately <code>bytes</code>; a zero-copy framer would mean widening that contract
 to the buffer protocol (deferred).</p>

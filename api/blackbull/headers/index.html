@@ -2844,6 +2844,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.headers.Headers.from_lowered" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        from_lowered
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.headers.Headers.get" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5045,6 +5056,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.headers.Headers.from_lowered" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        from_lowered
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.headers.Headers.get" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5194,8 +5216,8 @@ while also providing O(1) dict-like lookup.</p>
 <li>Header names and values are always <code>bytes</code> (per ASGI spec).</li>
 <li>Lookups are case-insensitive: the internal index is keyed on
   <code>name.lower()</code> (RFC 7230 §3.2 — header field names are case-insensitive).
-  <code>__contains__</code>, <code>__getitem__</code>, <code>getlist</code>, and <code>get</code> all lowercase
-  the requested name; iteration preserves the original casing of the input.</li>
+  <code>__contains__</code>, <code>__getitem__</code>, <code>getlist</code>, and <code>get</code> accept any
+  casing; iteration preserves the original casing of the input.</li>
 <li>Insertion order of duplicate names is preserved (RFC 7230 §3.2.2).</li>
 </ul>
 <p>Examples::</p>
@@ -5267,7 +5289,7 @@ headers.get(b'host')          # first value, or default
         <p>Value equality on the ordered <code>(name, value)</code> pair list.</p>
 <p>Two <code>Headers</code> are equal when they carry the same fields in the same
 order (RFC 7230 §3.2.2 — order is significant for repeated fields).
-Enables <code>Connection</code> round-trip equality (Sprint 79).</p>
+Enables <code>Connection</code> round-trip equality.</p>
 
 
     </div>
@@ -5306,6 +5328,41 @@ Enables <code>Connection</code> round-trip equality (Sprint 79).</p>
         <p>Append header(s) to the end of the list.</p>
 <p>Two-argument form: <code>append(name, value)</code> — adds a single pair.
 One-argument form: <code>append(pairs)</code> — adds every pair in the iterable.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.headers.Headers.from_lowered" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">from_lowered</span><span class="p">(</span><span class="n">pairs</span><span class="p">)</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-classmethod"><code>classmethod</code></small>
+  </span>
+
+<a href="#blackbull.headers.Headers.from_lowered" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Build from pairs whose names are <strong>already lowercase</strong>.</p>
+<p>The caller must guarantee that; nothing here checks it, and a name
+containing uppercase would be indexed unreachably (every accessor
+lowercases before its fallback probe, so the field would be
+invisible to lookup while still appearing in iteration).</p>
+<p>Two callers can guarantee it.  <code>http1_actor._parse</code> lowercases
+each name while validating it, so re-lowercasing in <code>__init__</code>
+recomputes a known answer.  HTTP/2 field names are lowercase by
+protocol — RFC 9113 §8.2.1 makes an uppercase name malformed, and
+<code>HeadersFrame.parse_payload</code> rejects the frame before any pair
+reaches the header list.</p>
+<p>Takes ownership of <em>pairs</em> rather than copying it; the parser
+builds a throwaway list per request, and the copy is the point of
+the shortcut.  Do not pass a list you intend to keep mutating.</p>
 
 
     </div>

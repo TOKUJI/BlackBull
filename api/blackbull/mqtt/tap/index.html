@@ -5194,7 +5194,7 @@ or not any tap is registered.</p>
   <em>newest</em> message is dropped and a running dropped-count is logged (taps are
   best-effort, but silent loss is unacceptable).</li>
 <li><strong>inline</strong> — the connection actor awaits the callbacks itself.  This is the
-  Sprint 53 contract, retained as an internal option so the perf comparison
+  original contract, retained as an internal option so the perf comparison
   (<code>bench/mqtt/tap_throughput.py</code>) stays reproducible.</li>
 </ul>
 <p>A topic filter may carry <code>{name}</code> capture segments

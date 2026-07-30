@@ -5138,7 +5138,7 @@ self-contained and importable from a future <code>blackbull-mqtt</code> package
 without touching the core.</p>
 <p><code>tap_mode</code> selects how taps are dispatched: <code>'actor'</code> (default) runs
 them on the decoupled :class:<code>TapActor</code> so a slow tap never back-pressures
-delivery; <code>'inline'</code> reproduces the Sprint 53 connection-actor dispatch
+delivery; <code>'inline'</code> uses the connection-actor dispatch directly
 and exists mainly so <code>bench/mqtt/tap_throughput.py</code> can compare the two on
 one build.  <code>tap_queue_size</code> bounds the actor-mode inbox (drop-newest on
 overflow).</p>

@@ -5078,7 +5078,7 @@
   callers that hold a scope dict.</li>
 </ul>
 <p>The opt-in HTTP context object formerly named <code>Request</code> moved to
-:class:<code>blackbull.connection.Connection</code> (Sprint 79 Phase 5); <code>Request</code> is now
+:class:<code>blackbull.connection.Connection</code>; <code>Request</code> is now
 a deprecated alias of <code>Connection</code> (see <code>blackbull.__getattr__</code>). This
 module holds only the transport-agnostic free functions, which
 :class:<code>Connection</code> builds on.</p>
@@ -5232,7 +5232,7 @@ parsing, so both wire formats produce the same result.</p>
         <p>Read the complete request body from the ASGI receive channel.</p>
 <p>Collects chunks in a list and joins once, rather than the O(n²) <code>+=</code>
 growth.  A single-chunk body (the common case) is returned directly with
-no intermediate copy at all (copy-reduction-http1 P1).</p>
+no intermediate copy at all.</p>
 <p>Raises :class:<code>ClientDisconnected</code> if an <code>http.disconnect</code> arrives
 before the body is complete, so a truncated upload is never silently
 returned as if whole.</p>

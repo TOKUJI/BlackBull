@@ -5277,7 +5277,7 @@
     <div class="doc doc-contents first">
 
         <p>The native <code>Connection</code> interface — BlackBull's single internal request
-representation (Sprint 79, proposal <code>native-connection-interface.md</code>).</p>
+representation.</p>
 <p>BlackBull is a multi-protocol server that owns both sides of the wire on its
 self-hosted path; the ASGI <code>scope</code> dict is therefore an <em>internal
 data-format choice</em>, not an interoperability contract — and a poor one
@@ -5646,7 +5646,7 @@ partial or empty body.  A mid-body disconnect raises
         <p>Materialize the ASGI scope the dispatch pipeline consumes, with this
 typed :class:<code>Connection</code> stashed on it for zero-reconversion reads.</p>
 <p>The single canonical <em>Connection → dispatch-ready scope</em> bridge shared
-by the H/1.1 <code>run()</code> and H/2 <code>_conn_to_scope</code> seams (Sprint 79) —
+by the H/1.1 <code>run()</code> and H/2 <code>_conn_to_scope</code> seams —
 they used to hand-roll the same five steps:</p>
 <ol>
 <li>derive the ASGI scope via :meth:<code>as_scope</code> (the one native→ASGI point);</li>
@@ -5664,7 +5664,7 @@ they used to hand-roll the same five steps:</p>
 <p>Protocol-specific augmentation (the websocket-only <code>subprotocols</code> key)
 is layered on by the caller <em>after</em> this returns — it is not a
 :class:<code>Connection</code> field (proposal §2.1).</p>
-<p>Sprint 80 Tier-1: the default (<code>force_asgi=False</code>) native path builds
+<p>The default (<code>force_asgi=False</code>) native path builds
 the scope by <strong>direct attribute access</strong>, placing the rich <code>Headers</code>
 object straight in (no <code>list(headers)</code> that the old code computed via
 the registry and then immediately discarded), and skips the per-field
@@ -5773,7 +5773,7 @@ was freshly built.</p>
 <p><em>target</em> is the threaded dispatch object — a :class:<code>Connection</code> on the
 native path, or an ASGI scope dict on the external/compat lane.</p>
 <p>The one <em>ASGI-scope → Connection</em> accessor shared by the dispatcher
-(<code>app._connection_of</code>) and the router (<code>router._conn_of</code>), Sprint 79.
+(<code>app._connection_of</code>) and the router (<code>router._conn_of</code>).
 BlackBull's own protocol actors stash the <code>Connection</code> they parsed on the
 scope envelope under :data:<code>CONNECTION_STASH_KEY</code>, so the self-hosted path
 reads it back with <strong>no</strong> re-conversion. Under an external ASGI server

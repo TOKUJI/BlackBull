@@ -5814,7 +5814,7 @@ logic is decoupled from asyncio internals.</p>
         <p>Shared HTTP/2 connection-level (stream 0) send flow-control window.</p>
 <p>One instance per connection, referenced by every stream's
 :class:<code>HTTP2Sender</code>, so all senders debit and await a single budget.</p>
-<p>Without sharing (bug 1.2) each sender held a <em>private copy</em> of the
+<p>Without sharing each sender held a <em>private copy</em> of the
 connection window and debited only that copy, while the actor-level total
 was only ever incremented — so N concurrent streams could each spend a
 full 65535-byte window and the server could emit N×65535 bytes with zero
@@ -6012,7 +6012,7 @@ bodies raise <code>TypeError</code>.</p>
 
     <div class="doc doc-contents ">
 
-        <p>The shared connection-level send window (bug 1.2).</p>
+        <p>The shared connection-level send window.</p>
 <p>Proxies :attr:<code>ConnectionWindow.size</code> so existing call sites — the
 experimental client's per-sender crediting and flow-control tests —
 keep reading/writing <code>sender.connection_window_size</code> while the real

@@ -5987,8 +5987,7 @@ hiding the concurrency from both sides.</p>
 invokes :meth:<code>mark_end_of_stream_on_headers</code> instead of pre-queuing an empty
 <code>http.request</code> event.  The Queue is then never allocated — the empty event
 is synthesized lazily in :meth:<code>__call__</code> only if the handler reads it.</p>
-<p><strong>Consume-based inbound flow control</strong> (the Sprint 62 deferral,
-<code>proposals/consume-based-inbound-flow-control.md</code>): when constructed with
+<p><strong>Consume-based inbound flow control</strong>: when constructed with
 a <code>credit_callback</code>, WINDOW_UPDATE credit for a DATA frame is replayed
 through the callback when the app <em>pops</em> the event — not when the frame is
 enqueued.  A stalled handler then stops crediting, the peer's window
@@ -6409,8 +6408,8 @@ writer is stored alongside the reader.</p>
     <div class="doc doc-contents ">
 
         <p>Cancel and await the background read-loop task.</p>
-<p>Sprint 72 (audit 1.20c) — client sessions call this from
-<code>close()</code> so no reader task outlives the session (a leaked task
+<p>Client sessions call this from <code>close()</code> so no reader task
+outlives the session (a leaked task
 warns at event-loop shutdown and keeps reading a dead transport).
 Idempotent, and safe to call before the first <code>__call__</code> ever
 started the loop.</p>

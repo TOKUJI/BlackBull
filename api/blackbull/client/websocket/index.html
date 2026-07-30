@@ -5219,7 +5219,7 @@ mask their outgoing frames.</p>
 
         <p>Send a CLOSE frame, await the peer's echoed CLOSE (bounded by
 <em>drain_timeout</em>), and stop the background reader task.</p>
-<p>Sprint 72 (audit 1.20c) — RFC 6455 §7.1.2: the closing handshake
+<p>RFC 6455 §7.1.2 — the closing handshake
 is complete once both endpoints have sent and received a Close
 frame.  A silent peer cannot hang <code>close()</code>: after
 <em>drain_timeout</em> the reader is shut down regardless.  Data frames

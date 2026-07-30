@@ -5180,10 +5180,10 @@
 
 
 <h1 id="static-files">Static files<a class="headerlink" href="#static-files" title="Permanent link">&para;</a></h1>
-<p><code>app.static(url_prefix, root_dir)</code> registers a <code>StaticFiles</code>
-middleware that serves files from <code>root_dir</code> for paths starting
-with <code>url_prefix</code>.  Useful for CSS, JS, images, fonts, and other
-file-system assets that don't change on every request.</p>
+<p><code>app.static(url_prefix, root_dir)</code> registers a <strong>route</strong> that serves
+files from <code>root_dir</code> under <code>url_prefix</code>, with a <code>StaticFiles</code>
+middleware attached to it.  Useful for CSS, JS, images, fonts, and
+other file-system assets that don't change on every request.</p>
 <h2 id="quick-start">Quick start<a class="headerlink" href="#quick-start" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">blackbull</span><span class="w"> </span><span class="kn">import</span> <span class="n">BlackBull</span>
 
@@ -5195,10 +5195,23 @@ file-system assets that don't change on every request.</p>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">index</span><span class="p">(</span><span class="n">scope</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
     <span class="o">...</span>
 </code></pre></div>
-<p>A request to <code>/assets/style.css</code> is intercepted by the global
-middleware before routing and served from
-<code>public/assets/style.css</code>.  Requests that don't match the prefix
-fall through to the route handlers normally.</p>
+<p>A request to <code>/assets/style.css</code> is routed to the static route and
+served from <code>public/assets/style.css</code>.  Requests that don't match the
+prefix are routed normally and never enter <code>StaticFiles</code> at all —
+static serving costs a non-static request nothing, because the router
+resolves it without ever consulting the static route.</p>
+<p>Each call registers three entries: <code>&lt;prefix&gt;/{filepath:path}</code> for
+files, plus <code>&lt;prefix&gt;</code> and <code>&lt;prefix&gt;/</code> so the <a href="#directory-index">directory
+index</a> can answer the mount root.  An explicit route
+you registered yourself always wins — <code>app.static()</code> never replaces a
+path you already claimed.</p>
+<div class="admonition note">
+<p class="admonition-title">A miss under the prefix is a 404</p>
+<p>Because the static route has matched, <code>/assets/missing.css</code> is
+answered with 404 rather than continuing on to another route that
+might also match <code>/assets/...</code>.  The 404 goes through the normal
+error path, so <code>@app.on_error(HTTPStatus.NOT_FOUND)</code> still applies.</p>
+</div>
 <h2 id="standalone-usage">Standalone usage<a class="headerlink" href="#standalone-usage" title="Permanent link">&para;</a></h2>
 <p><code>StaticFiles</code> is also a standalone ASGI app — useful in tests
 or when mounting without BlackBull:</p>
@@ -5224,7 +5237,7 @@ blackbull<span class="w"> </span>serve<span class="w"> </span>./public<span clas
 </code></pre></div>
 <p>It wires <code>StaticFiles</code> with <code>index='index.html'</code>; ETag / <code>304</code>
 conditional responses are served natively by <code>StaticFiles</code> (see
-<a href="#conditional-requests-etag--last-modified">Conditional requests</a> below)
+<a href="#conditional-requests-etag-last-modified">Conditional requests</a> below)
 and can be turned off with <code>--no-etag</code>.  See
 <a href="../configuration/#serving-static-files-with-blackbull-serve">Configuration → blackbull serve</a>
 for the full flag list.</p>

@@ -4982,8 +4982,8 @@ defined (the only entries eligible for single-byte encoding):</p>
 </ul>
 <p>All other static-table entries are name-only (e.g. <code>content-type</code> at
 index 31 has no static value), so they cannot use the single-byte
-indexed encoding.  Sprint 24 confirmed the table is exhausted at this
-encoding tier — any further fastpath work would need to handle the
+indexed encoding.  The table is exhausted at this encoding tier — any
+further fastpath work would need to handle the
 literal-with-indexed-name encoding (RFC 7541 §6.2), which involves
 encoder choices (Huffman vs raw, incremental indexing vs not) that we
 cannot pre-decide without coupling to encoder configuration.</p>
@@ -5044,8 +5044,7 @@ pseudo-headers (<code>:method</code>, <code>:scheme</code>, <code>:path</code>).
         <p>Return the precomputed wire bytes for <code>:status &lt;value&gt;</code> when the
 value matches a static-table entry, else <code>None</code>.</p>
 <p>Accepts <code>str</code> (the ASGI shape, e.g. <code>'200'</code>) or <code>bytes</code>.
-Kept as a separate function for backwards compatibility with the
-Sprint 21 Phase C <code>Headers.save()</code> call site.</p>
+Kept as a separate function for the <code>Headers.save()</code> call site.</p>
 
 
     </div>

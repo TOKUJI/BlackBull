@@ -6242,7 +6242,7 @@ is shared with every adapted handler by reference.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Register a handler for a non-ASGI (raw) protocol (Sprint 50).</p>
+        <p>Register a handler for a non-ASGI (raw) protocol.</p>
 <p>The handler is an async callable <code>(reader, writer, ctx) -&gt; None</code> that
 owns the connection for its whole lifetime.  When <em>port</em> is set, the
 server binds an additional listening socket on it; connections there
@@ -6301,8 +6301,8 @@ skip HTTP detection and go straight to <em>handler</em>.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Reserved for first-byte sniffing on shared ports
-(Sprint 51); unused today.</p>
+                <p>Reserved for first-byte sniffing on shared ports;
+unused today.</p>
               </div>
             </td>
             <td>
@@ -6336,7 +6336,7 @@ skip HTTP detection and go straight to <em>handler</em>.</p>
               <div class="doc-md-description">
                 <p>Serve this port through the server's TLS machinery (e.g.
 <code>mqtts://</code>).  Requires the server to be configured with a
-certificate; startup fails fast otherwise (Sprint 75).</p>
+certificate; startup fails fast otherwise.</p>
               </div>
             </td>
             <td>
@@ -6441,7 +6441,7 @@ app.run(unix_path='/run/blackbull.sock')
 
     <div class="doc doc-contents ">
 
-        <p>Serve static files from <em>root_dir</em> under <em>url_prefix</em> via global middleware.</p>
+        <p>Serve static files from <em>root_dir</em> under <em>url_prefix</em> as a route.</p>
 <p><code>cache</code> (default <code>False</code>): when <code>True</code>, file bodies are
 held in-memory for fast cache-hit serving.  Useful for
 standalone deployments where BlackBull terminates static
@@ -6455,6 +6455,11 @@ full discussion.</p>
 <p><code>conditional</code> (default <code>True</code>): emit <code>ETag</code> / <code>Last-Modified</code>
 validators and answer <code>If-None-Match</code> / <code>If-Modified-Since</code> with
 a 304.  Set <code>False</code> to disable conditional responses.</p>
+<p>Registered as a <strong>route</strong>, not global middleware, so a request that
+is not for a static path never enters this code: it resolves in the
+router's exact-match dict and never reaches the parametrised scan.
+This is also what every peer framework does — Starlette, Sanic,
+aiohttp, Flask and Django all mount static as a route.</p>
 
 
     </div>

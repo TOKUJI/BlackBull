@@ -5446,7 +5446,7 @@
 
     <div class="doc doc-contents first">
 
-        <p>Unified protocol registry — Sprint 50.</p>
+        <p>Unified protocol registry.</p>
 <p>BlackBull dispatches every accepted connection through a single
 :class:<code>ProtocolRegistry</code>.  <code>http1</code> and <code>http2</code> are built-in <em>bindings</em>;
 non-HTTP protocols (raw TCP, and later MQTT/Redis) register their own bindings
@@ -6108,7 +6108,7 @@ HTTP-only app pays no per-connection allocation for it.</p>
 :class:<code>ProtocolDetector</code>).  When several registered detectors could
 match the same first bytes, dispatch picks the <strong>first registered</strong>
 one — <code>raw_bindings</code> preserves insertion order.  <code>tls=True</code> serves
-the binding's own port through the server's TLS machinery (Sprint 75).</p>
+the binding's own port through the server's TLS machinery.</p>
 
 
     </div>
