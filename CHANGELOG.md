@@ -106,6 +106,32 @@ so the editable install's metadata catches up.
   now runs on every push/PR.  Current budgets: HTTP/1.1 2.20, HTTP/2 5.40,
   WebSocket 4.30 touches per request.
 
+### Docs
+
+- **Sprint numbers and private defect IDs removed from comments and
+  docstrings** across 249 files.  A docstring is read by users, who cannot
+  resolve `Sprint 79` or `bug 1.16` — and `git log`, this changelog and the
+  sprint logs already own the timeline.  Migration narration was rewritten as
+  present-tense fact ("Sprint 64 moved emission from the server layer" →
+  "Emission is consolidated into `_dispatch`").  Externally resolvable
+  references are kept: RFC and CVE citations, Http11Probe/Autobahn vector
+  names, and GitHub issue numbers.  Excluded deliberately: `bench/results/**`,
+  `bench/CHARACTERIZATION.md` and `docs/about/grpc-assessment.md`, which *are*
+  the record.
+- **`docs/about/internals.md` gains a §Parse-path invariant** documenting the
+  delete-the-allowed-table idiom, the whole-block value pre-scan, and a table
+  of three plausible optimisations that were measured and rejected, so they
+  are not retried blind.
+- **`KNOWN_LIMITATIONS.md` static-file section corrected.**  It claimed
+  `StaticFiles` emits no `ETag` and had to be paired with the `Cache`
+  middleware; `StaticFiles` has emitted a strong `ETag` + `Last-Modified` and
+  answered `If-None-Match` / `If-Modified-Since` by default since
+  `conditional=True` became the default.  The section now also states the
+  route-dispatch consequence for a miss under the prefix.
+- **`Headers` class docstring corrected** — it still said every accessor
+  lowercases the requested name, which stopped being true with the
+  probe-first lookup fast path.
+
 ## [0.65.0] — 2026-07-29
 
 ### Added

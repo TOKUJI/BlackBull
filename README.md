@@ -282,7 +282,7 @@ Compose via `app.use(...)` or per-route `middlewares=[...]`:
 | Middleware       | What it does |
 |------------------|---|
 | `Compression`    | Negotiates `br` / `zstd` / `gzip` from `Accept-Encoding` |
-| `StaticFiles`    | Serves files from a directory under a URL prefix |
+| `StaticFiles`    | Serves files from a directory under a URL prefix — register with `app.static(prefix, root)`, which attaches it to a route |
 | `Cache`          | Per-worker LRU + ETag / `Cache-Control` honouring |
 | `CORS`           | Preflight + actual-request header injection |
 | `TrustedProxy`   | Rewrites `scope['client']` / `scope['scheme']` from proxy headers |
