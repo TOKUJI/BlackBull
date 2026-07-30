@@ -38,6 +38,49 @@ _PATHSEND_FALLBACK_CHUNK = 64 * 1024
 _VECTORED_JOIN_THRESHOLD = 32 * 1024
 
 
+# Status line and Content-Length are the two per-response values that are
+# rebuilt from scratch on every single request and drawn from a small, known
+# domain.  Both tables are built once at import; both fall back to the original
+# expression for an input outside the domain, so an unregistered status code or
+# a large body renders exactly as before rather than raising.
+
+#: ``status -> b'HTTP/1.1 <code> <phrase>\r\n'``, the full first line.  The CRLF
+#: is baked in so the renderer appends one list item instead of two.
+_STATUS_LINES: dict[HTTPStatus, bytes] = {
+    s: f'HTTP/1.1 {s} {s.phrase}'.encode() + _CRLF for s in HTTPStatus
+}
+
+
+def _status_line(status) -> bytes:
+    """The full ``HTTP/1.1 <code> <phrase>\\r\\n`` line for *status*."""
+    line = _STATUS_LINES.get(status)
+    if line is None:
+        # Not an ``HTTPStatus`` member — an application answering with a code
+        # IANA has not registered.  Render it the long way; ``phrase`` is only
+        # available on the enum, so an unknown code has an empty reason phrase
+        # (legal: RFC 9112 §4 makes the reason phrase optional).
+        phrase = getattr(status, 'phrase', '')
+        return f'HTTP/1.1 {int(status)} {phrase}'.encode() + _CRLF
+    return line
+
+
+#: Content-Length values below this are answered from a table.  Covers every
+#: response whose body fits in a few pages — the ``/ping``-shaped traffic that
+#: dominates request *count* — while keeping the table itself small.
+_CONTENT_LENGTH_CACHE_MAX = 8192
+
+_CONTENT_LENGTHS: tuple[bytes, ...] = tuple(
+    str(n).encode() for n in range(_CONTENT_LENGTH_CACHE_MAX + 1)
+)
+
+
+def _content_length_bytes(n: int) -> bytes:
+    """Decimal ASCII for *n*, from the table when it is small enough."""
+    if 0 <= n <= _CONTENT_LENGTH_CACHE_MAX:
+        return _CONTENT_LENGTHS[n]
+    return str(n).encode()
+
+
 # RFC 7231 Date header is whole-second resolution, so re-formatting it
 # per response is wasted work — email.utils.formatdate shows ~2.6% of
 # CPU on a B2r profile.  Cache for the current integer second.
@@ -612,7 +655,7 @@ class HTTP1Sender(BaseSender):
                 headers.append(b'transfer-encoding', b'chunked')
             self._chunked = True
         elif b'content-length' not in headers:
-            headers.append(b'content-length', str(body_len).encode())
+            headers.append(b'content-length', _content_length_bytes(body_len))
 
     @staticmethod
     def _ensure_date_header(headers: Headers) -> None:
@@ -663,7 +706,7 @@ class HTTP1Sender(BaseSender):
 
     def _render_start(self, status: HTTPStatus, headers: HeaderList) -> bytes:
         """Build the status line + headers + blank-line as a single bytes blob."""
-        parts: list[bytes] = [f'HTTP/1.1 {status} {status.phrase}'.encode(), _CRLF]
+        parts: list[bytes] = [_status_line(status)]
         for k, v in headers:
             parts.append(k)
             parts.append(b': ')

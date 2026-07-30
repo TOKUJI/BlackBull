@@ -119,6 +119,139 @@ def _block_values_are_clean(data: bytes) -> bool:
     residue = data.translate(None, _BLOCK_ALLOWED_OCTETS)
     return residue.count(b'\r\n') * 2 == len(residue)
 
+
+# Bounds on one connection's validated header-line cache.  A keep-alive peer
+# resends byte-identical lines (``User-Agent``, ``Accept``, ``Cookie`` — real
+# browsers do this), so the split/lower/validate work for each is done once per
+# connection instead of once per request.
+#
+# All three bounds exist because **the cache key is attacker-controlled**, and
+# the resource a peer can force us to spend is *bytes*, not entries.  A captured
+# Chromium page load needs 26 distinct lines totalling 988 B, longest 145 B —
+# so these leave real traffic entirely uncapped while denying the adversarial
+# shape (7 x 8 KiB never-repeating lines per request, which an entry-count-only
+# bound would let grow to ~1 MiB per connection, held for as long as the peer
+# keeps the connection alive).
+
+#: Entries.  Bounds the dict itself.
+_LINE_CACHE_MAX = 64
+
+#: Longest line admitted.  A line above this skips the cache **entirely** — no
+#: lookup either, so a huge line never pays a hash it cannot benefit from.
+#: 1 KiB clears the largest thing a browser really repeats (a ~145 B
+#: ``User-Agent``, a session ``Cookie``) by a wide margin.
+_LINE_CACHE_MAX_LINE = 1024
+
+#: Total key bytes admitted per connection.  The binding constraint, and the
+#: one that multiplies by concurrent connections: ~8 KiB/conn worst case
+#: (~16 KiB counting the retained name/value slices) against 988 B of real
+#: need.
+_LINE_CACHE_MAX_BYTES = 8192
+
+
+# ---------------------------------------------------------------------------
+# Shared default line table
+# ---------------------------------------------------------------------------
+# The per-connection cache cannot help the *first* request on a connection —
+# there is nothing in it yet — which is the whole of the interaction for a
+# ``Connection: close`` client.  This table closes that gap: header lines whose
+# value set is fixed by a specification are the same bytes for every client on
+# every deployment, so they can be validated once at import and shared.
+#
+# **The admission rule is what keeps this honest**: a line belongs here only if
+# its value set is enumerated by a spec — Fetch Metadata's ``Sec-Fetch-*``,
+# the UA client hints' boolean/platform forms, and the fixed tokens of RFC 9110
+# — plus a handful of genuinely universal idioms.  Values *observed in a packet
+# capture* do not qualify, however frequent: seeding the table from a capture
+# would be tuning the server to the browser that happened to be measured.
+# That is why no ``User-Agent``, ``Accept-Language``, ``sec-ch-ua``, ``Host``,
+# ``Referer`` or ``Cookie`` line appears below, though all are frequent.
+#
+# Framing-relevant names (``Content-Length``, ``Transfer-Encoding``, ``Host``,
+# ``Connection`` values that change framing semantics beyond the two tokens
+# below) are deliberately absent: a shared table is the last place a framing
+# decision should come from.  ``tests/unit/test_default_line_table.py`` pins
+# both rules.
+_SPEC_ENUMERATED_LINES: tuple[bytes, ...] = (
+    # Fetch Metadata Request Headers (W3C) — closed value sets.
+    *(b'Sec-Fetch-Site: ' + v for v in
+      (b'cross-site', b'same-origin', b'same-site', b'none')),
+    *(b'Sec-Fetch-Mode: ' + v for v in
+      (b'cors', b'navigate', b'no-cors', b'same-origin', b'websocket')),
+    *(b'Sec-Fetch-Dest: ' + v for v in
+      (b'audio', b'audioworklet', b'document', b'embed', b'empty', b'font',
+       b'frame', b'iframe', b'image', b'manifest', b'object', b'paintworklet',
+       b'report', b'script', b'serviceworker', b'sharedworker', b'style',
+       b'track', b'video', b'worker', b'xslt')),
+    b'Sec-Fetch-User: ?1',
+    # UA client hints (RFC 8942 / W3C) — booleans and the platform enum.
+    b'sec-ch-ua-mobile: ?0',
+    b'sec-ch-ua-mobile: ?1',
+    *(b'sec-ch-ua-platform: "' + v + b'"' for v in
+      (b'Android', b'Chrome OS', b'Chromium OS', b'iOS', b'Linux', b'macOS',
+       b'Windows', b'Unknown')),
+    # Fixed tokens (RFC 9110 / RFC 9112 / RFC 6797 / DNT).
+    b'Upgrade-Insecure-Requests: 1',
+    b'DNT: 0',
+    b'DNT: 1',
+    b'TE: trailers',
+    b'Pragma: no-cache',
+    b'Connection: keep-alive',
+    b'Connection: Keep-Alive',
+    b'Connection: close',
+    *(b'Cache-Control: ' + v for v in
+      (b'no-cache', b'no-store', b'max-age=0')),
+    # Universal idioms rather than spec enums, and few on purpose: ``*/*`` is
+    # what every non-browser client sends, and the gzip/deflate/br/zstd
+    # progression is the content-coding registry in the order it grew.
+    b'Accept: */*',
+    b'Accept-Encoding: gzip',
+    b'Accept-Encoding: gzip, deflate',
+    b'Accept-Encoding: gzip, deflate, br',
+    b'Accept-Encoding: gzip, deflate, br, zstd',
+    b'Accept-Encoding: identity',
+)
+
+
+def _build_default_lines() -> dict[bytes, tuple[bytes, bytes]]:
+    """Validate every default line and map it to the pair ``_parse`` produces.
+
+    The pair is derived with the *same* expressions the parse loop uses and
+    checked with the *same* rules, so a hand-written entry cannot disagree with
+    what parsing that line would have yielded.  A violation raises at import
+    rather than serving a wrong pair at runtime.
+    """
+    table: dict[bytes, tuple[bytes, bytes]] = {}
+    for line in _SPEC_ENUMERATED_LINES:
+        colon = line.find(b':')
+        if colon < 1 or line[0] in (0x20, 0x09):
+            raise ValueError(f'malformed default header line: {line!r}')
+        key = line[:colon]
+        if key.translate(None, _TCHAR_OCTETS):
+            raise ValueError(f'invalid name in default header line: {line!r}')
+        lkey = key.lower()
+        if lkey in _UNDERSCORE_FRAMING_NAMES or lkey in _FRAMING_NAMES:
+            raise ValueError(
+                f'framing header must not be pre-seeded: {line!r}')
+        value = line[colon + 1:].strip(b' \t')
+        if _FIELD_VALUE_INVALID_RE.search(value):
+            raise ValueError(f'CTL in default header value: {line!r}')
+        if len(line) > _LINE_CACHE_MAX_LINE:
+            raise ValueError(f'default header line too long: {line!r}')
+        table[line] = (lkey, value)
+    return table
+
+
+#: Names a shared table must never carry, because they decide message framing
+#: or routing and must be read from the request every time.
+_FRAMING_NAMES = frozenset({
+    b'content-length', b'transfer-encoding', b'host', b'expect', b'upgrade',
+    b'trailer', b'te-framing',
+})
+
+# Built at the bottom of this constant block: ``_build_default_lines`` runs the
+# real validation rules, and ``_UNDERSCORE_FRAMING_NAMES`` is defined below.
+
 # RFC 9110 §8.6 — strict Content-Length: at most one canonical leading SP
 # (the byte after the colon), then ``0`` or a no-leading-zero decimal.
 # Matched against the *raw* post-colon bytes, before the generic OWS strip
@@ -134,6 +267,12 @@ _CL_STRICT_RE = re.compile(rb'\A ?(?:0|[1-9][0-9]*)\Z')
 # (CGI-style); nginx drops them by default, we reject.
 _UNDERSCORE_FRAMING_NAMES = frozenset((
     b'content_length', b'transfer_encoding'))
+
+#: Built here rather than beside its literals because validating an entry needs
+#: every rule above, ``_UNDERSCORE_FRAMING_NAMES`` included.  An invalid or
+#: framing-relevant entry raises at import — the table can never be wrong at
+#: runtime, only absent.
+_DEFAULT_LINES = _build_default_lines()
 
 
 class BadRequestError(Exception):
@@ -405,6 +544,16 @@ class HTTP1Actor(Actor):
     # exercise ``_parse`` in isolation) see a cleartext scope by default.
     _ssl: bool = False
 
+    # Both are per-connection state that ``_parse`` memoises on first use.
+    # They are declared here as immutable ``None`` rather than initialised in
+    # ``__init__`` for two reasons: the ``__new__`` test doubles above never
+    # run ``__init__``, and a mutable class-level default would be *shared by
+    # every connection* — which for the line cache is precisely the
+    # cross-connection bleed its design forbids.
+    _line_cache: 'dict[bytes, tuple[bytes, bytes]] | None' = None
+    _line_cache_bytes: int = 0
+    _max_line: int | None = None
+
     def __init__(
         self,
         reader: AbstractReader,
@@ -591,11 +740,6 @@ class HTTP1Actor(Actor):
                 # ``app(scope, …)`` is used *iff* the flag is set. The actor's own
                 # plumbing (RecipientFactory, access log, keep-alive) always reads
                 # ``conn``.
-                if cfg.force_asgi_scope:
-                    app_arg = conn.to_asgi_scope(force_asgi=True)  # pure scope
-                else:
-                    app_arg = conn                                     # native Connection
-
                 if conn.type == 'websocket':
                     # WebSocket is native too: the upgrade path
                     # threads the typed Connection — the WS-only extras
@@ -668,6 +812,18 @@ class HTTP1Actor(Actor):
                     # ``method`` back from ``conn`` (now 'GET'), so no separate
                     # ``scope['method']`` write (which would force materialization).
                     conn.method = 'GET'
+
+                # The app's argument is built *here*, after every pre-dispatch
+                # mutation of ``conn`` — the HEAD→GET rewrite above being the one
+                # that matters.  The native lane passes the Connection itself and
+                # so would tolerate an earlier binding, but the compat lane emits
+                # a *snapshot*: taken any earlier it freezes ``method='HEAD'``,
+                # the router finds no HEAD route, and the dual-path lane answers
+                # 405 where the native lane answers 200 (COMP-HEAD-NO-BODY).
+                if cfg.force_asgi_scope:
+                    app_arg = conn.to_asgi_scope(force_asgi=True)  # pure scope
+                else:
+                    app_arg = conn                                     # native Connection
                 # One recipient per connection, rebound per request — the same
                 # trade as ``send.reset_per_request_state()`` above, and for the
                 # same reason: the reader, body timeout, and deadline are
@@ -828,8 +984,14 @@ class HTTP1Actor(Actor):
         ``run()`` because it sees the accumulating buffer; per-line is
         cheaper to check here, post-split.
         """
-        from ..env import get_settings as _get_settings  # noqa: PLC0415
-        max_line = _get_settings().header_max_line
+        # Connection-scoped, so it is read once per connection rather than
+        # once per request.  The cost being removed is not ``get_settings()``
+        # itself (it is ``functools.cache``d) but the ``from ..env import``
+        # statement that has to run ahead of it on every single parse.
+        max_line = self._max_line
+        if max_line is None:
+            from ..env import get_settings as _get_settings  # noqa: PLC0415
+            max_line = self._max_line = _get_settings().header_max_line
         lines = data.split(b'\r\n')
         # No line can be longer than the block that contains it, so the
         # per-line walk is only reachable for a block that is itself over the
@@ -946,12 +1108,52 @@ class HTTP1Actor(Actor):
         # and still raises, so the diagnostic never changes.
         values_need_checking = not _block_values_are_clean(data)
 
+        # Per-connection cache of lines that have already passed every check
+        # below.  The key is the *exact* line bytes, so any changed byte is a
+        # miss and gets validated from scratch; only a line that reached the
+        # bottom of the loop without raising is ever admitted.  Both facts
+        # together are what make this a replay of validated work rather than a
+        # way to skip validation.  Created per instance on first use — see the
+        # class-level ``None`` for why it is not a class attribute.
+        cache = self._line_cache
+        if cache is None:
+            cache = self._line_cache = {}
+        # Hashing a line to probe a cache that is known to be empty buys
+        # nothing, and on the first request of a connection that is every
+        # probe.  Skipping them is what keeps the connection-per-request shape
+        # (``Connection: close``, HTTP/1.0, health checks) close to the cost of
+        # not having a cache at all: that client pays for admissions it never
+        # reads, but not for lookups that cannot hit.  Decided once per
+        # request, not once per line.
+        do_lookup = len(cache) > 0
+
         raw: list[tuple[bytes, bytes]] = []
         for line in lines[idx + 1:]:
             if not line:
                 # Empty line = end of headers; anything after is body (already
                 # split off upstream because we read until CRLFCRLF).
                 continue
+            # A line too long to ever be admitted skips the cache completely —
+            # including the lookup, because hashing 8 KiB to answer a question
+            # whose answer is always "no" is the adversary's cheapest way to
+            # spend our CPU.  ``len`` on bytes is O(1).
+            cacheable = len(line) <= _LINE_CACHE_MAX_LINE
+            if cacheable:
+                # The per-connection cache first — it holds this peer's long,
+                # expensive lines — then the shared spec table, which is the
+                # only thing that can help the *first* request on a connection.
+                hit = cache.get(line) if do_lookup else None
+                if hit is None:
+                    hit = _DEFAULT_LINES.get(line)
+                if hit is not None:
+                    # Identical bytes, already validated — on this connection
+                    # when it came from ``cache``, at import when it came from
+                    # ``_DEFAULT_LINES``.  Safe even when
+                    # ``values_need_checking`` is True for *this* block: the
+                    # hit was proved clean when it was admitted and its bytes
+                    # have not changed since.
+                    raw.append(hit)
+                    continue
             # RFC 9112 §5.2 — obs-fold (leading SP/HTAB on a header line)
             # MUST be rejected in requests.  Indexing yields an int and skips
             # the one-byte slice a `line[:1]` comparison would allocate; the
@@ -993,7 +1195,18 @@ class HTTP1Actor(Actor):
                 raise BadRequestError(
                     f'CTL in header value (smuggling / log-injection): '
                     f'{key!r}: {value!r}')
-            raw.append((lkey, value))
+            pair = (lkey, value)
+            raw.append(pair)
+            # Admission is the last statement in the loop body on purpose:
+            # every ``raise`` above is a line that never enters the cache.
+            # Bytes are the bound that matters — see the constants above.
+            # Tested against the *resulting* size, not the current one, so the
+            # budget is a real ceiling rather than one a final line can step over.
+            if (cacheable
+                    and len(cache) < _LINE_CACHE_MAX
+                    and self._line_cache_bytes + len(line) <= _LINE_CACHE_MAX_BYTES):
+                cache[line] = pair
+                self._line_cache_bytes += len(line)
 
         # RFC 9112 §3.2.2 — for an absolute-form target the request's own
         # authority is definitive; replace any client Host so a mismatched or

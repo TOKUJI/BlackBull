@@ -273,3 +273,58 @@ async def test_blocking_observer_counts_as_a_listener():
     assert d.has_listeners('test') is False
     d.on('test', cleanup, blocking=True)
     assert d.has_listeners('test') is True
+
+# ---------------------------------------------------------------------------
+# has_listeners — the per-request guard on every lifecycle emit site
+# ---------------------------------------------------------------------------
+
+def _has_listeners_reference(d: EventDispatcher, name: str) -> bool:
+    """The predicate as it stood before the registration index."""
+    return (bool(d._interceptors.get(name))
+            or bool(d._blocking_observers.get(name))
+            or bool(d._observers.get(name)))
+
+
+@pytest.mark.parametrize('kind', ['intercept', 'observe', 'blocking'])
+def test_has_listeners_agrees_with_the_three_dict_predicate(kind):
+    """The index must answer exactly what scanning the three dicts answers."""
+    d = EventDispatcher()
+
+    async def handler(event):
+        pass
+
+    assert d.has_listeners('e') is _has_listeners_reference(d, 'e')
+    if kind == 'intercept':
+        d.intercept('e', handler)
+    elif kind == 'observe':
+        d.on('e', handler)
+    else:
+        d.on('e', handler, blocking=True)
+    assert d.has_listeners('e') is _has_listeners_reference(d, 'e') is True
+    # A name nobody registered stays False.
+    assert d.has_listeners('other') is _has_listeners_reference(d, 'other')
+
+
+def test_has_listeners_does_not_create_empty_entries():
+    """Asking about an unknown event must not grow the defaultdicts."""
+    d = EventDispatcher()
+    for _ in range(3):
+        assert d.has_listeners('never-registered') is False
+    assert 'never-registered' not in d._observers
+    assert 'never-registered' not in d._interceptors
+    assert 'never-registered' not in d._blocking_observers
+
+
+def test_registration_bumps_generation_so_cached_guards_invalidate():
+    """EventAggregator caches derived booleans against this counter."""
+    d = EventDispatcher()
+
+    async def handler(event):
+        pass
+
+    before = d.generation
+    d.on('e', handler)
+    assert d.generation > before
+    mid = d.generation
+    d.intercept('e', handler)
+    assert d.generation > mid
