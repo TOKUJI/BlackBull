@@ -5324,8 +5324,11 @@ cancelled.</p>
 
         <p>Return True if any interceptor or observer is registered for <code>event_name</code>.</p>
 <p>Hot path: callers use this to skip detail-dict / <code>Event</code> construction
-when no one will receive the event.  <code>defaultdict.get</code> returns <code>None</code>
-for missing keys without inserting an empty list.</p>
+when no one will receive the event, and there is one such call site per
+lifecycle event per request.  Answered from the registration index, so
+the common "nobody is listening" verdict costs one set lookup instead
+of three dict probes — and, like the <code>defaultdict.get</code> form it
+replaces, it never inserts an empty list for an unknown name.</p>
 
 
     </div>

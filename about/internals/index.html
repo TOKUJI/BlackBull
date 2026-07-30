@@ -4893,6 +4893,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Send-path invariant">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#response-values-that-come-from-tables" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Response values that come from tables
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -4903,6 +4920,45 @@
       
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="Parse-path invariant">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#validated-header-line-cache" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Validated header-line cache
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-shared-spec-table" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The shared spec table
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-worst-case-stated" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The worst case, stated
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -5245,6 +5301,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Send-path invariant">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#response-values-that-come-from-tables" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Response values that come from tables
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -5255,6 +5328,45 @@
       
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="Parse-path invariant">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#validated-header-line-cache" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Validated header-line cache
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-shared-spec-table" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The shared spec table
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-worst-case-stated" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The worst case, stated
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -5634,6 +5746,23 @@ decides the path:</p>
 <p>Callers must never call <code>transport.writelines</code> directly with
 small parts.  The gate is the single decision point, and the
 invariant keeps performance predictable across payload sizes.</p>
+<h3 id="response-values-that-come-from-tables">Response values that come from tables<a class="headerlink" href="#response-values-that-come-from-tables" title="Permanent link">&para;</a></h3>
+<p>Two values are rebuilt on every single response and drawn from a
+small, known domain, so both are precomputed once at import:</p>
+<ul>
+<li><strong>The status line.</strong>  <code>_STATUS_LINES</code> maps every <code>HTTPStatus</code> member
+  to the complete <code>HTTP/1.1 &lt;code&gt; &lt;phrase&gt;\r\n</code> line, CRLF included.</li>
+<li><strong>Small Content-Length values.</strong>  <code>_CONTENT_LENGTHS</code> holds the
+  decimal ASCII for <code>0…8192</code>, which covers the body sizes that
+  dominate request <em>count</em>.</li>
+</ul>
+<p>Both fall back to the original expression for an input outside the
+table's domain — a status code IANA has not registered renders with an
+empty reason phrase (legal: RFC 9112 §4 makes it optional) rather than
+raising <code>KeyError</code>, and a large body formats with <code>str(n).encode()</code>.
+Tests assert the tables agree with the expressions they replaced across
+the whole domain, because a table that disagrees anywhere is a wire
+bug that no amount of speed pays for.</p>
 <h2 id="parse-path-invariant">Parse-path invariant<a class="headerlink" href="#parse-path-invariant" title="Permanent link">&para;</a></h2>
 <p>The HTTP/1.1 parser validates bytes with <strong>C-level bulk operations</strong>,
 never with Python-level loops or index arithmetic.  In practice that
@@ -5687,6 +5816,263 @@ do not reintroduce them without new numbers:</p>
 <p>The through-line: an optimisation that replaces a C bulk operation
 with Python bytecode pays ~30 ns per byte instead of ~2 ns, and no
 reduction in pass count or allocation count makes that back.</p>
+<h3 id="validated-header-line-cache">Validated header-line cache<a class="headerlink" href="#validated-header-line-cache" title="Permanent link">&para;</a></h3>
+<p>The cheapest validation is the one already done.  A keep-alive peer
+resends byte-identical header lines on every request — <code>User-Agent</code>,
+<code>Accept</code>, <code>Accept-Language</code>, <code>Cookie</code> — so each connection keeps a
+bounded dict mapping <strong>the exact raw line bytes</strong> to the
+<code>(lowercased-name, stripped-value)</code> pair that line produced the first
+time it was seen and fully validated.  A hit replaces the colon split,
+the token check, the lowercase, the OWS strip and the value scan with
+one dict lookup.</p>
+<p>Four properties are what make this a replay of validated work rather
+than a way to skip validation, and none of them is optional:</p>
+<ul>
+<li><strong>The key is the exact line bytes.</strong> One changed byte is a miss, and
+  a miss is validated from scratch.  There is no normalisation, no
+  case-folding and no prefix matching on the lookup path.</li>
+<li><strong>Only a line that reached the bottom of the loop is admitted.</strong>
+  Admission is the last statement in the body, after every <code>raise</code>, so
+  a rejected line can never enter.</li>
+<li><strong>The cache is per connection.</strong>  It lives on the <code>HTTP1Actor</code>
+  instance, so validated lines never cross a connection — and
+  therefore never cross a tenant.</li>
+<li><strong>It is bounded</strong> (64 entries).  The key can be attacker-controlled, so a
+  peer cycling unique header names must not be able to grow it;
+  admission simply stops at the limit rather than evicting.</li>
+</ul>
+<p>The precedent is HPACK's dynamic table, which is this same idea blessed
+at protocol level — HTTP/1.1 merely lacks the wire form for it.</p>
+<h3 id="the-shared-spec-table">The shared spec table<a class="headerlink" href="#the-shared-spec-table" title="Permanent link">&para;</a></h3>
+<p>A per-connection cache cannot help the <strong>first</strong> request on a
+connection — there is nothing in it yet — and for a
+<code>Connection: close</code> client that first request is the entire
+interaction.  Populating a cache it will never read made that shape
+<strong>21 % slower</strong> than having no cache at all.</p>
+<p>So the cache has a second tier that needs no warming: a process-wide
+table of header lines whose value set is <em>fixed by a specification</em>,
+validated once at import and shared by every connection.  Fetch
+Metadata's <code>Sec-Fetch-Site</code> / <code>-Mode</code> / <code>-Dest</code> / <code>-User</code>, the client
+hints' boolean and platform forms, and the fixed tokens of RFC 9110
+(<code>Connection</code>, <code>TE</code>, <code>Pragma</code>, <code>Upgrade-Insecure-Requests</code>, <code>DNT</code>)
+are the same bytes for every client on every deployment.  On captured
+browser traffic they are <strong>56 % of all header lines</strong>, and that share
+does not decay with connection churn.</p>
+<p>HPACK's <em>static</em> table is the same idea, again — and again HTTP/1.1
+lacks the wire form, so the table lives in the parser instead.</p>
+<p>Three rules keep it from being an over-fit:</p>
+<ul>
+<li><strong>Specification, not observation.</strong>  A line qualifies because a spec
+  enumerates its values, not because it was frequent in a capture.
+  That is why no <code>User-Agent</code>, <code>sec-ch-ua</code>, <code>Accept-Language</code>,
+  <code>Cookie</code>, <code>Referer</code> or <code>Host</code> line is seeded, though every one of
+  them is more frequent than most entries that <em>are</em>.</li>
+<li><strong>No framing header, ever.</strong>  <code>Content-Length</code>,
+  <code>Transfer-Encoding</code>, <code>Host</code>, <code>Expect</code> and <code>Upgrade</code> are excluded by
+  an explicit check that raises at import.  A shared table is the last
+  place a framing decision should come from.</li>
+<li><strong>Built through the real rules.</strong>  Each entry is validated at import
+  with the same octet checks the parse loop applies, and a test
+  asserts every entry equals what parsing that line actually produces
+  — so a hand-written pair cannot drift from the parser.</li>
+</ul>
+<p>The table is immutable and never written to at runtime; learning goes
+to the per-connection dict alone, so nothing a peer sends can affect
+another connection.</p>
+<p><strong>Why it is not a benchmark artefact.</strong>  A load generator resends one
+byte-identical request, which is the cache's best case and not what a
+real client does.  The numbers below therefore come from <strong>captured
+traffic</strong>, not from a model of it: a real Chromium loading a real page
+(document, 2 stylesheets, 3 scripts, 12 images, 2 XHRs), with every
+request head recorded exactly as it arrived
+(<code>bench/hotpath/capture_browser_headers.py</code>).</p>
+<p>That capture is what makes the mechanism legible.  21 requests carried
+<strong>275 header lines drawn from only 26 distinct ones</strong> — 8 of which
+(<code>Host</code>, <code>Connection</code>, <code>User-Agent</code>, <code>Accept-Encoding</code>,
+<code>Accept-Language</code>, three client hints) appeared on every single
+request, while <code>Accept</code>, <code>Referer</code> and the <code>Sec-Fetch-*</code> family varied
+by destination.  Because the cache is keyed per <strong>line</strong>, a request
+that changes four of its thirteen lines still hits on the other nine;
+what governs the hit rate is the <em>variety</em> of distinct lines on a
+connection, not whether requests are identical.  Chromium also emits
+its headers <strong>in different orders</strong> for navigations and subresources —
+which a whole-block cache would be defeated by and a per-line one does
+not notice.</p>
+<p>A cache that can only <em>learn</em> has a ceiling of
+<code>(lines − distinct) / lines</code> — every distinct line must miss once —
+which is <strong>90.5 %</strong> on this capture.  The shared table exceeds it,
+because a pre-seeded line never misses at all.</p>
+<p>The one thing a single capture cannot settle is how far a page spreads
+across connections: Chromium opens up to six per origin, and the
+learned tier sees fewer repeats the wider the spread.  The seeded tier
+does not care.  Re-dealing the same requests across N connections
+shows which half is which:</p>
+<table>
+<thead>
+<tr>
+<th style="text-align: right;">connections</th>
+<th style="text-align: right;">hit rate</th>
+<th style="text-align: right;">seeded</th>
+<th style="text-align: right;">learned</th>
+<th style="text-align: right;">parse cost</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: right;">1 (as captured, no latency)</td>
+<td style="text-align: right;">96.7 %</td>
+<td style="text-align: right;">56.0 %</td>
+<td style="text-align: right;">40.7 %</td>
+<td style="text-align: right;">8.96 → 5.85 µs (<strong>−35 %</strong>)</td>
+</tr>
+<tr>
+<td style="text-align: right;">2</td>
+<td style="text-align: right;">94.2 %</td>
+<td style="text-align: right;">56.0 %</td>
+<td style="text-align: right;">38.2 %</td>
+<td style="text-align: right;">8.93 → 6.17 µs (−31 %)</td>
+</tr>
+<tr>
+<td style="text-align: right;">4</td>
+<td style="text-align: right;">89.8 %</td>
+<td style="text-align: right;">56.0 %</td>
+<td style="text-align: right;">33.8 %</td>
+<td style="text-align: right;">8.95 → 6.28 µs (−30 %)</td>
+</tr>
+<tr>
+<td style="text-align: right;">6 (Chromium's per-origin max)</td>
+<td style="text-align: right;">85.5 %</td>
+<td style="text-align: right;">56.0 %</td>
+<td style="text-align: right;">29.5 %</td>
+<td style="text-align: right;">8.90 → 6.51 µs (<strong>−27 %</strong>)</td>
+</tr>
+<tr>
+<td style="text-align: right;">12</td>
+<td style="text-align: right;">72.7 %</td>
+<td style="text-align: right;">56.0 %</td>
+<td style="text-align: right;">16.7 %</td>
+<td style="text-align: right;">9.00 → 7.27 µs (−19 %)</td>
+</tr>
+</tbody>
+</table>
+<p>Read the two middle columns rather than the total.  That the seeded
+column is <em>flat</em> is structural — the table does not depend on
+connections, so churn cannot erode it.  That it sits at <em>56 %</em> is a
+property of this client's header mix, and another client's would put
+it somewhere else.  The shape generalises; the level does not.</p>
+<div class="admonition note">
+<p class="admonition-title">Where these numbers come from</p>
+<p>AMD Ryzen 5 7600X (6C/12T, Zen 4), Ubuntu 24.04 on <strong>WSL2</strong> — a
+desktop VM, not an isolated benchmark host.  CPython <strong>3.14.6</strong>,
+stock <code>asyncio</code> (<code>BB_UVLOOP=0</code>).  Both arms in one session: the
+"before" column is <code>v0.66.0</code> (<code>450df4a</code>) in a <code>git worktree</code>,
+the "after" column the same commit plus this work.  <code>min</code> of 7
+for the µs-scale parser figures, medians of 5–7 interleaved
+sweeps for anything driven by <code>wrk</code> (whose run-to-run spread on
+this host is ~10 %).  Browser capture: Edge/Chromium 150 headless.</p>
+<p>Two caveats that bound how far these generalise. The capture is
+<strong>n = 1</strong> — one page load in one browser, whose requests are
+intra-correlated by construction, so it is a point estimate with
+no variance estimate. And <strong>localhost has no latency</strong>, which is
+why Chromium used a single connection; over a real RTT it opens
+up to six per origin, so <strong>−17 % is the figure to quote for WAN
+traffic</strong>, not −30 %.</p>
+<p>Full record, including how to size a proper multi-site sample from
+the HTTP Archive corpus:
+<code>bench/results/sprint87-frontend-spike-20260730/ENVIRONMENT.md</code>.
+Every harness under <code>bench/hotpath/</code> prints its own environment
+stamp (<code>bench/hotpath/provenance.py</code>) as its first output.</p>
+</div>
+<p>So on traffic shaped like this capture, <strong>−27 % to −35 %</strong> is what one
+can expect — the lower figure over a real network.  Not a guarantee:
+the hit rate follows how much of a client's header set has
+spec-enumerated values and how many requests share a connection, and
+both vary by client and by deployment.  A client sending mostly
+bespoke headers on connections it closes immediately gets close to
+nothing; it does not get less than nothing, which is the part that is
+guaranteed.</p>
+<p><strong>Short-lived connections.</strong>  The seeded tier needs no warming, so
+reconnection costs only the learned half.  Replaying the same capture while
+closing the connection every K requests — HttpArena's <code>limited-conn</code>
+profile is K = 10, and <code>Connection: close</code> is K = 1:</p>
+<table>
+<thead>
+<tr>
+<th style="text-align: right;">requests per connection</th>
+<th style="text-align: right;">parse cost</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: right;">1 (<code>Connection: close</code>)</td>
+<td style="text-align: right;">8.75 → 8.21 µs (<strong>−6 %</strong>)</td>
+</tr>
+<tr>
+<td style="text-align: right;">2</td>
+<td style="text-align: right;">8.96 → 7.23 µs (−19 %)</td>
+</tr>
+<tr>
+<td style="text-align: right;">10 (<code>limited-conn</code>)</td>
+<td style="text-align: right;">8.90 → 6.21 µs (<strong>−30 %</strong>)</td>
+</tr>
+<tr>
+<td style="text-align: right;">keep-alive</td>
+<td style="text-align: right;">8.77 → 6.27 µs (−29 %)</td>
+</tr>
+</tbody>
+</table>
+<p>Without the seeded tier the K = 1 row was <strong>+21 %</strong> — a real regression
+on connection-churn traffic, and the reason the tier exists.</p>
+<p>On ordinary traffic that merely fails to repeat — every header value
+unique, or the cache already full — the path is still <strong>5 % faster</strong>
+than not having the cache, because the same change hoisted the
+per-request settings read out of <code>_parse</code> to connection setup.  A
+connection whose headers carry a per-request unique value (a request
+id, a timestamp, a rotating token) misses on those lines and still hits
+on the rest.</p>
+<h3 id="the-worst-case-stated">The worst case, stated<a class="headerlink" href="#the-worst-case-stated" title="Permanent link">&para;</a></h3>
+<p>The cache key is attacker-controlled, so the bounds above are not
+tuning — they are the security argument, and the resource that needs
+bounding is <strong>bytes, not entries</strong>.  With an entry-count bound alone,
+64 entries × <code>BB_HEADER_MAX_LINE</code> (8 KiB) retains <strong>~1 MiB per
+connection</strong>, which a peer pins by sending each line once and then
+idling on keep-alive — 9.6 GiB across 10k connections, against 988 B
+of real need.</p>
+<p>Hence the per-line cap and the byte budget.  A peer choosing the line
+length to maximise damage (<code>bench/hotpath/line_cache_worst_case.py</code>
+sweeps it, because a per-line cap moves the worst case <em>down</em> to just
+under itself rather than up to the limit):</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th style="text-align: right;">worst case</th>
+<th>at</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>CPU</td>
+<td style="text-align: right;"><strong>+19.2 %</strong> vs no cache</td>
+<td>64 never-repeating 128 B lines/request</td>
+</tr>
+<tr>
+<td>memory</td>
+<td style="text-align: right;"><strong>16 KiB/connection</strong> (153 MiB at 10k)</td>
+<td>same</td>
+</tr>
+</tbody>
+</table>
+<p>(Same host and toolchain as above; the memory figure is accounted
+bytes — key plus the retained name/value slices — which is what
+multiplies by concurrent connections.)</p>
+<p>Both are bounded, and the CPU figure sits on top of a request the peer
+chose to make expensive — 40.7 µs against ~6 µs for an ordinary one.
+Above the per-line cap the cache is skipped entirely, lookup included,
+so a peer sending 8 KiB lines makes the parse <em>faster</em> than the
+no-cache build rather than slower.</p>
+<p>None of this applies to HTTP/2: HPACK already does it on the wire, and
+better.  This is the HTTP/1.1 path recovering what H/2 gets for free.</p>
 <h2 id="the-pieces-around-the-actor-core">The pieces around the actor core<a class="headerlink" href="#the-pieces-around-the-actor-core" title="Permanent link">&para;</a></h2>
 <p>The actor hierarchy is the <em>control</em> side.  The <em>data</em> side is
 the protocol stack:</p>
