@@ -102,7 +102,7 @@ async def test_ping_responder_sends_ack():
 @pytest.mark.asyncio
 async def test_window_update_connection_level_credits_shared_window():
     """Connection-level WINDOW_UPDATE credits the ONE shared connection window
-    (bug 1.2) — not a private copy per sender — and wakes every stream sender."""
+    — not a private copy per sender — and wakes every stream sender."""
     from blackbull.server.sender import ConnectionWindow
     frame = MagicMock()
     frame.stream_id = 0

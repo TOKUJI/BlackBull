@@ -127,7 +127,7 @@ class _RouteTrie:
                     # {name:path} consumes all remaining segments, so it must be
                     # the final segment.  A route like ``/a/{p:path}/b`` used to
                     # silently register as ``/a/{p:path}`` — dropping ``/b`` — so
-                    # reject it at registration (bug 1.13).
+                    # reject it at registration.
                     if i != len(segments) - 1:
                         raise ConfigurationError(
                             f"path converter {seg!r} must be the last segment of "
@@ -561,7 +561,7 @@ def _instantiate_dataclass(cls: Any, data: dict) -> Any:
 
 def _decode_json_body(cls: Any, raw: bytes, handler_name: str) -> Any:
     """Parse *raw* JSON and instantiate the dataclass *cls*, mapping any
-    client-input error to a 400 (bug 1.12).
+    client-input error to a 400.
 
     Malformed JSON, a wrong top-level shape, unknown/missing fields, or a
     field that fails type coercion are all *client* errors — they must surface

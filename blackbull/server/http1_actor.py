@@ -44,7 +44,7 @@ _HTTP_PORT  = 80
 _HTTPS_PORT = 443
 
 # Upper bound on request-body bytes drained to recover keep-alive framing
-# when a handler leaves the body unread (bug 1.6).  A larger unread body
+# when a handler leaves the body unread.  A larger unread body
 # closes the connection rather than spending bandwidth draining it — nginx's
 # lingering-close does the same.
 _MAX_KEEPALIVE_DRAIN = 64 * 1024
@@ -1306,7 +1306,7 @@ class HTTP1Actor(Actor):
         # Accumulate into a bytearray (amortised O(1) append) instead of the
         # O(n²) bytes ``+=`` growth, then publish back as bytes.  The loop
         # condition and size check are byte-for-byte equivalent to the prior
-        # form (copy-reduction-http1 P2).
+        # form.
         buf = bytearray(self._request)
         while not buf.endswith(_REQ_END):
             try:

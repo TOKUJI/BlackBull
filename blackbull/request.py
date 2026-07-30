@@ -43,7 +43,7 @@ async def read_body(receive: ASGIReceiveCallable) -> bytes:
 
     Collects chunks in a list and joins once, rather than the O(n²) ``+=``
     growth.  A single-chunk body (the common case) is returned directly with
-    no intermediate copy at all (copy-reduction-http1 P1).
+    no intermediate copy at all.
 
     Raises :class:`ClientDisconnected` if an ``http.disconnect`` arrives
     before the body is complete, so a truncated upload is never silently

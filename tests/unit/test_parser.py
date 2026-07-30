@@ -146,7 +146,7 @@ class TestParse:
 
     @given(prefix=st.from_regex(r'/[a-zA-Z0-9/_-]{0,40}', fullmatch=True))
     def test_root_path_ignores_x_forwarded_prefix_off_the_wire(self, prefix):
-        # Spec change (audit bug 1.16): a client-controlled
+        # Spec change: a client-controlled
         # X-Forwarded-Prefix must NOT set root_path at the parser layer —
         # it is only honoured behind TrustedProxy (see
         # tests/unit/test_audit_sprint63.py::TestXForwardedPrefixTrust).
@@ -364,7 +364,7 @@ class TestHTTP2ScopeFields:
 
     @given(prefix=st.from_regex(r'/[a-zA-Z0-9/_-]{0,40}', fullmatch=True))
     def test_x_forwarded_prefix_ignored_off_the_wire(self, prefix):
-        # Bug 1.16: same contract on the H2 path — the frame-level
+        # Same contract on the H2 path — the frame-level
         # parser must not trust a client-supplied X-Forwarded-Prefix.  Only
         # the TrustedProxy middleware may set root_path, after verifying the
         # peer (see tests/unit/test_audit_sprint63.py::TestXForwardedPrefixTrust).

@@ -432,7 +432,7 @@ async def test_dispatch_websocket_calls_handler():
 async def test_raising_shutdown_hook_sends_lifespan_shutdown_failed():
     """ASGI lifespan spec: a raising shutdown hook must answer
     lifespan.shutdown with lifespan.shutdown.failed (+ message), not
-    lifespan.shutdown.complete (bug 1.18)."""
+    lifespan.shutdown.complete."""
     app_ = BlackBull()
 
     @app_.on_shutdown

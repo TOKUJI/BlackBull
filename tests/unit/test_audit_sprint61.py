@@ -14,7 +14,7 @@ Each test pins a specific bug from the 2026-07-07 comprehensive audit
 - 1.22a fault-injection production guard keyed on the wrong env var
 - 1.22b ``make_self_signed_h2_context`` leaks the private key on disk
 
-(Bug 1.12 — malformed dataclass body → 400 — is covered in
+(A malformed dataclass body → 400 is covered in
 ``tests/unit/test_router.py::TestDataclassBodyDeserialization``.)
 """
 import asyncio
@@ -45,7 +45,7 @@ class _DribbleReader(AbstractReader):
     ``AbstractReader`` base loops over ``read`` to satisfy those.  This is the
     fragmented-delivery case that the conformance ``_FakeReader`` (whole wire in
     one buffer) can never exercise: with the old ``read(chunk_size)`` the
-    recipient would take a one-byte short read as the whole chunk (bug 1.1).
+    recipient would take a one-byte short read as the whole chunk.
     """
 
     def __init__(self, data: bytes) -> None:
@@ -255,7 +255,7 @@ def test_upgrade_h2c_is_ignored_not_fatal():
                b'Upgrade: h2c\r\n\r\n')
     scope = actor._parse(request)
     # A non-websocket Upgrade token is ignored: the request stays plain HTTP
-    # rather than becoming scope['type']='h2c' and crashing dispatch (bug 1.5).
+    # rather than becoming scope['type']='h2c' and crashing dispatch.
     assert scope.type == 'http'
 
 

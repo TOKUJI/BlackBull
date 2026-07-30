@@ -236,7 +236,7 @@ def parse_headers(frame) -> Connection | None:
         raw_headers = _request_headers_with_host(frame, require_present=False)
         if raw_headers is None:
             return None  # frame already marked malformed by the helper
-        # Bug 1.16 — root_path is NOT taken from the client-controlled
+        # ``root_path`` is NOT taken from the client-controlled
         # X-Forwarded-Prefix; only TrustedProxy sets it after verifying the
         # peer.  Left at the field default ('') — the RFC-safe empty mount.
         # ``subprotocols`` is derived from the request headers by the actor
@@ -281,7 +281,7 @@ def parse_headers(frame) -> Connection | None:
     # change, not a cleanup.
     effective_method = method or 'HEAD'
 
-    # Bug 1.16 — root_path is NOT taken from the client-controlled
+    # ``root_path`` is NOT taken from the client-controlled
     # X-Forwarded-Prefix; only TrustedProxy sets it after verifying the peer.
     # Left at the field default ('').
     return _build_h2_connection(effective_method, path, raw_path,

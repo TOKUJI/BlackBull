@@ -1106,7 +1106,7 @@ class TestDataclassBodyDeserialization:
 
     @pytest.mark.asyncio
     async def test_missing_required_field_raises(self):
-        """A body missing a required field is a client error → 400 (bug 1.12)."""
+        """A body missing a required field is a client error → 400."""
         async def fn(body: _Item): pass
         wrapper = _adapt_handler(fn, '/items')
         with pytest.raises(HTTPException) as exc_info:
@@ -1115,7 +1115,7 @@ class TestDataclassBodyDeserialization:
 
     @pytest.mark.asyncio
     async def test_unknown_field_raises(self):
-        """An unknown body field is a client error → 400 (bug 1.12)."""
+        """An unknown body field is a client error → 400."""
         async def fn(body: _Item): pass
         wrapper = _adapt_handler(fn, '/items')
         with pytest.raises(HTTPException, match='Unknown field') as exc_info:
@@ -1176,7 +1176,7 @@ class TestDataclassBodyDeserialization:
 
     @pytest.mark.asyncio
     async def test_invalid_json_raises(self):
-        """Malformed JSON in the body is a client error → 400 (bug 1.12),
+        """Malformed JSON in the body is a client error → 400,
         not the raw JSONDecodeError that used to surface as a 500."""
         async def fn(body: _Item): pass
         wrapper = _adapt_handler(fn, '/items')

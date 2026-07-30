@@ -101,7 +101,7 @@ def _validate_chunk_ext(ext: bytes) -> None:
                 raise _bad_request(f'invalid chunk-ext-val {val!r}')
 
 
-# Bug 1.24 (MAL-CHUNK-EXT-64K, CVE-2023-39326 class) — hard bound on any
+# MAL-CHUNK-EXT-64K (CVE-2023-39326 class) — hard bound on any
 # single chunk-framing line (chunk-size + chunk-ext, or one trailer field
 # line).  Mirrors the BB_HEADER_MAX_LINE default: extensions and trailers
 # are ignored on receipt, so nothing legitimate needs more.  Without the
@@ -453,7 +453,7 @@ class HTTP1Recipient(BaseRecipient):
                  deadline: ConnectionDeadline | None = None,
                  chunk_size: int | None = None):
         super().__init__(reader)
-        # P4: deliver a Content-Length body in fixed-size chunks instead of one
+        # Deliver a Content-Length body in fixed-size chunks instead of one
         # giant ``readexactly(content_length)`` allocation.  Falls back to the
         # ``BB_BODY_CHUNK_SIZE`` setting when not injected (direct-instantiation
         # tests pass it explicitly).
@@ -580,7 +580,7 @@ class HTTP1Recipient(BaseRecipient):
         rejections, before this).  Length violations — whether detected by
         our own bound or pre-empted by ``asyncio.StreamReader``'s buffer
         limit (``LimitOverrunError``) — surface as 400 with the stream
-        marked unframeable (bug 1.24, MAL-CHUNK-EXT-64K).
+        marked unframeable (MAL-CHUNK-EXT-64K).
         """
         try:
             line = await self._read_with_timeout(self._reader.readuntil(b'\n'))
@@ -663,7 +663,7 @@ class HTTP1Recipient(BaseRecipient):
                         f'chunk-data not CRLF-terminated: {term!r}')
                 return {'type': ASGIEvent.HTTP_REQUEST, 'body': data, 'more_body': True}
             else:
-                # P4: stream the Content-Length body in ``chunk_size`` slices so
+                # Stream the Content-Length body in ``chunk_size`` slices so
                 # a large upload is delivered as several ``http.request`` events
                 # (``more_body: True`` until exhausted) rather than one giant
                 # allocation.  ``readexactly`` keeps the exact-bytes contract —

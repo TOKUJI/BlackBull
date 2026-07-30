@@ -867,7 +867,7 @@ def _decode_connect(body: bytes, flags: int) -> MQTTConnect:
     # Remaining Length stops short of them must be rejected as a Malformed
     # Packet (§1.5.5, §4.13) — a raw ``body[pos]`` here would raise IndexError,
     # which the framer's ``except`` does not catch, unwinding ``read_loop``
-    # and dropping the connection instead of resyncing (audit 1.19g).
+    # and dropping the connection instead of resyncing.
     if pos + 4 > len(body):
         raise MQTTDecodeError('CONNECT truncated before the fixed header fields')
     proto_level = body[pos]

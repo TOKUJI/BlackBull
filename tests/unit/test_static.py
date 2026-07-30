@@ -614,7 +614,7 @@ def _headers_of(start: dict) -> dict[bytes, bytes]:
 class TestStaticFilesMalformedRange:
     """A crafted Range header must be ignored (200) or answered 416 — never 500.
 
-    Bug 1.21c: bare ``int()`` on the range bounds raised ``ValueError`` out
+    Bare ``int()`` on the range bounds raised ``ValueError`` out
     of ``_serve`` on inputs like ``bytes=abc-def``.
     """
 

@@ -307,7 +307,7 @@ async def test_make_sender_uses_current_connection_window(fake_writer, mock_app)
 
     sender = actor.make_sender(stream_id=7)
 
-    # The sender shares the actor's connection window (bug 1.2), so it reads
+    # The sender shares the actor's connection window, so it reads
     # the current budget from the one object rather than a stale copy.
     assert sender.connection_window_size == 4194304, (
         f'Expected connection window 4194304, got {sender.connection_window_size}'

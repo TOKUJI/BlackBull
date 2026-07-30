@@ -121,7 +121,7 @@ class TestRstStreamDuringGrpc:
         # An immediate http.disconnect (RST_STREAM before any DATA) makes
         # read_body raise ClientDisconnected, which the bridge maps to the
         # canonical gRPC CANCELLED — not a fabricated INTERNAL over an empty
-        # body (bug 1.11).
+        # body.
         trailers = _trailers_of(events)
         assert trailers.get(b'grpc-status') == str(int(GrpcStatus.CANCELLED)).encode()
 

@@ -51,7 +51,7 @@ def _wrap_send(raw_send: ASGISendCallable):
     inside :meth:`_dispatch` — never at :meth:`__call__` around the whole
     middleware chain.  Wrapping outward leaks ``Response`` objects into
     middleware ``send`` wrappers, which reasonably assume ASGI dicts and
-    crash on ``msg['type']`` (the 0.43.2 regression; locked by
+    crash on ``msg['type']`` (locked by
     ``tests/unit/test_middleware_decorator.py``).  Keep it innermost so
     everything above the route handler observes plain ASGI dicts.
 
@@ -561,7 +561,7 @@ class BlackBull:
                     # A raising @app.on_startup / @app.intercept('app_startup')
                     # hook must fail startup, not kill the lifespan task before
                     # it acks — otherwise LifespanManager.__aenter__ blocks
-                    # forever and the server never starts (bug 1.3).  Sending
+                    # forever and the server never starts.  Sending
                     # lifespan.startup.failed is also the ASGI-correct signal
                     # under external servers (uvicorn/hypercorn).
                     self._logger.error('app_startup hook failed:\n%s',
@@ -578,7 +578,7 @@ class BlackBull:
                     # ASGI lifespan spec — a raising @app.on_shutdown /
                     # @app.intercept('app_shutdown') hook must answer with
                     # lifespan.shutdown.failed, not unwind the lifespan task
-                    # silently (bug 1.18); external servers (uvicorn,
+                    # silently; external servers (uvicorn,
                     # hypercorn) log the failure and exit non-zero.
                     self._logger.error('app_shutdown hook failed:\n%s',
                                        traceback.format_exc())

@@ -100,7 +100,7 @@ class FrameBase:
         self.flags = flags
         self.stream_id = stream_id
         # Guarded: __init__ runs on every frame in both directions, so the
-        # f-string must not be built when DEBUG is off (Tier 1).
+        # f-string must not be built when DEBUG is off.
         if logger.isEnabledFor(logging.DEBUG):
             logger.debug('type=%s, flag=%s, stream_id=%s and payload size=%s',
                          self.type_, self.flags, self.stream_id, self.length)
@@ -443,7 +443,7 @@ class Headers(FrameBase):
 
         base = super().save()
         # Guarded: fires on every HEADERS write; the unguarded form also
-        # allocated `base + payload` purely to log it (Tier 1).
+        # allocated `base + payload` purely to log it.
         if logger.isEnabledFor(logging.DEBUG):
             logger.debug('Headers.save: %r', base + payload)
         return base + payload
@@ -590,7 +590,7 @@ class Data(FrameBase):
             self.payload = payload.read(data_length)
         else:
             # Non-padded is the common case: the payload IS the frame data, so
-            # skip the BytesIO wrap + read copy (copy-reduction-http2 P2).
+            # skip the BytesIO wrap + read copy.
             # FrameFactory.load already sliced data to exactly ``length``; the
             # conditional preserves BytesIO.read(length) semantics for the rare
             # over-long input without copying when it already fits.

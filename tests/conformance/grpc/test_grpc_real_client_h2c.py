@@ -559,7 +559,7 @@ class TestRealClientConcurrency:
     @pytest.mark.asyncio
     async def test_concurrent_large_responses_share_connection_window(
             self, grpc_server_port):
-        """Bug 1.2's wire-level gate (the missing concurrency test):
+        """The wire-level gate (the missing concurrency test):
         N concurrent streams × 100 KB responses multiplexed on ONE connection.
 
         Cumulative response bytes (10 × 100 KB) dwarf the 65535-byte

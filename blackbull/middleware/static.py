@@ -47,7 +47,7 @@ def _parse_byte_range(range_hdr: str, size: int) -> tuple[int, int] | None:
     RFC 9110 §14.2 an unparseable/ignored Range is served as a normal 200,
     so the caller treats ``None`` as "serve the whole file".  Never raises:
     a bare ``int()`` here 500s on
-    ``Range: bytes=abc-def`` (bug 1.21c).  *Satisfiability* against ``size``
+    ``Range: bytes=abc-def``.  *Satisfiability* against ``size``
     is still checked by the caller (so an out-of-range spec stays a 416).
     """
     if not range_hdr.startswith('bytes='):
@@ -447,7 +447,7 @@ class StaticFiles:
         if self._conditional:
             # Validators: a strong ETag over (mtime, size) plus Last-Modified,
             # so ``If-None-Match`` / ``If-Modified-Since`` can produce a 304
-            # instead of a full re-transfer (bug 1.21d).  Cheap; emitted on
+            # instead of a full re-transfer.  Cheap; emitted on
             # every response, including the streaming path.
             etag = f'"{mtime_ns:x}-{size:x}"'.encode()
             last_modified = formatdate(mtime_ns / 1_000_000_000, usegmt=True).encode()

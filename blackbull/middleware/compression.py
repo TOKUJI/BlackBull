@@ -95,7 +95,7 @@ def _merge_vary(headers: list[tuple[bytes, bytes]],
 
     A compressed response's body depends on the request ``Accept-Encoding``;
     without ``Vary: Accept-Encoding`` a shared cache may replay the encoded
-    body to a client that sent ``identity``/no ``Accept-Encoding`` (bug 1.21a).
+    body to a client that sent ``identity``/no ``Accept-Encoding``.
     Folds *field* into an existing ``Vary`` (no duplicate token; a pre-existing
     ``Vary: *`` already covers everything and is left untouched); otherwise
     appends ``Vary: Accept-Encoding``.  Mutates *headers* in place.
@@ -205,7 +205,7 @@ class Compression:
         """Wrap *send* so a compressible, not-yet-encoded ``ResponseStart`` gains
         ``Vary: Accept-Encoding`` — used on the no-matching-codec path where the
         body is forwarded verbatim but must still be cache-keyed on the encoding
-        (bug 1.21f, Branch 1).  Same predicate as the compress path's decision
+        Same predicate as the compress path's decision
         point: compressible Content-Type AND no pre-existing Content-Encoding.
         """
         # Unannotated on purpose: rebuilt per request (see _wrap_send in
@@ -241,7 +241,7 @@ class Compression:
             # We won't compress, but the response may still be *compressible*,
             # so a downstream shared cache needs Vary: Accept-Encoding — else it
             # stores this identity variant under the bare key and replays it to a
-            # later client that does accept an encoding (bug 1.21f, Branch 1).
+            # later client that does accept an encoding.
             await call_next(conn, receive, self._vary_ensuring_send(send))
             return
 
@@ -282,7 +282,7 @@ class Compression:
                         # varies by Accept-Encoding on *every* exit path
                         # (compressed, too-small, executor-at-cap), so stamp
                         # Vary now — at the decision point — instead of only
-                        # after a successful compress (bug 1.21f).  Later paths
+                        # after a successful compress.  Later paths
                         # inherit it via start_event; the compress path's own
                         # _merge_vary then no-ops.
                         hdrs = list(start_event.get('headers', []))

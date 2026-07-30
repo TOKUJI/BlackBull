@@ -1,5 +1,5 @@
 """Unit tests for the Compression middleware's ``Vary: Accept-Encoding``
-emission (bug 1.21a).
+emission.
 
 A compressed response's body depends on the request ``Accept-Encoding``;
 without ``Vary: Accept-Encoding`` a shared cache may replay the encoded

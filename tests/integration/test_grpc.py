@@ -13,7 +13,7 @@ through the whole app (``BlackBull.__call__`` → ``_dispatch`` →
    response — success *and* error — reports its status in **trailing
    headers** (the framing real gRPC clients require).  httpx therefore never
    observed response completion and its transport asserted
-   (``response_complete.is_set()``) on all gRPC calls — bug 1.23 in the
+   (``response_complete.is_set()``) on all gRPC calls — in the
    2026-07-07 audit.  ``HTTP2Client`` handles trailers natively, and folds
    them into ``res.headers``.
 

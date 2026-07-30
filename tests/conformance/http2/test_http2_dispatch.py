@@ -127,7 +127,7 @@ class TestHTTP2FlowControl:
         await handler.run()
 
         # _senders is pruned on stream completion (memory-leak fix); assert the
-        # shared connection window (bug 1.2) that seeds new senders instead.
+        # shared connection window that seeds new senders instead.
         assert handler._conn_window.size >= 65535, (
             f'Expected handler._conn_window.size >= 65535 after WINDOW_UPDATE, '
             f'got {handler._conn_window.size}'
@@ -473,7 +473,7 @@ class TestHTTP2MaxConcurrentStreams:
             'stream task map not cleaned up after inbound RST_STREAM'
 
     async def test_refused_multiframe_headers_consumes_continuation(self):
-        """Bug 1.14 #2 — refusing a HEADERS with END_HEADERS=0 must not turn
+        """Refusing a HEADERS with END_HEADERS=0 must not turn
         the peer's legal CONTINUATION into a bogus connection error.
 
         RFC 9113 §6.10: after HEADERS without END_HEADERS the peer MUST send

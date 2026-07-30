@@ -366,7 +366,7 @@ async def _read_unary_request(receive, encoding: bytes) -> bytes:
     except ClientDisconnected as exc:
         # RST_STREAM / client disconnect before the request finished — the
         # canonical gRPC mapping is CANCELLED, not a fabricated INTERNAL over
-        # a truncated body (bug 1.11).
+        # a truncated body.
         raise GrpcError(
             GrpcStatus.CANCELLED,
             'client disconnected before sending the request') from exc
