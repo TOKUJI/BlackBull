@@ -4,7 +4,7 @@ from ..protocol.frame_types import PseudoHeaders
 import logging
 from ..connection import Connection
 from ..headers import Headers
-from .http1_actor import _HOST_FORBIDDEN_BYTES
+from .http1_actor import _HOST_FORBIDDEN_RE
 
 logger = logging.getLogger(__name__)
 
@@ -119,7 +119,7 @@ def _request_headers_with_host(frame, *, require_present: bool) -> list | None:
         if not value:
             frame._mark_malformed('empty :authority')
             return None
-        if any(b in _HOST_FORBIDDEN_BYTES for b in value):
+        if _HOST_FORBIDDEN_RE.search(value):
             frame._mark_malformed(
                 f'invalid :authority {authority!r}: contains userinfo, '
                 f'delimiter, or whitespace forbidden by RFC 3986 §3.2')
@@ -141,7 +141,7 @@ def _request_headers_with_host(frame, *, require_present: bool) -> list | None:
     if not value:
         frame._mark_malformed('empty Host header value')
         return None
-    if any(b in _HOST_FORBIDDEN_BYTES for b in value):
+    if _HOST_FORBIDDEN_RE.search(value):
         frame._mark_malformed(
             f'invalid Host authority {value!r}: contains delimiter / '
             f'whitespace forbidden by RFC 3986 §3.2')
@@ -256,7 +256,7 @@ def parse_headers(frame) -> Connection | None:
             type='websocket', method=method,
             scheme='wss' if scheme_pseudo == 'https' else 'ws',
             path=path, raw_path=raw_path, query_string=query_string,
-            headers=Headers(raw_headers), http_version='2',
+            headers=Headers.from_lowered(raw_headers), http_version='2',
         )
 
     path, raw_path, query_string = '', b'', b''
@@ -272,14 +272,19 @@ def parse_headers(frame) -> Connection | None:
     # ``:authority`` as the ``host`` header (ASGI).  Plain CONNECT is
     # excluded: §8.5 gives its ``:authority`` tunnel semantics, and the
     # presence rule only binds http/https requests.
+    #
+    # ``from_lowered`` is safe on every H/2 path: §8.2.1 makes an uppercase
+    # field name malformed and ``HeadersFrame.parse_payload`` rejects the
+    # frame before the pair reaches ``frame.headers``, so the list is
+    # lowercase by protocol.  The injected ``host`` is a lowercase literal.
     if method == 'CONNECT':
-        headers = Headers(frame.headers)
+        headers = Headers.from_lowered(frame.headers)
     else:
         raw_headers = _request_headers_with_host(
             frame, require_present=scheme in ('http', 'https'))
         if raw_headers is None:
             return None  # frame already marked malformed by the helper
-        headers = Headers(raw_headers)
+        headers = Headers.from_lowered(raw_headers)
 
     # The previous version's ``if method: conn.method = method`` silently kept
     # the 'HEAD' placeholder for a (spec-illegal, never observed in practice)

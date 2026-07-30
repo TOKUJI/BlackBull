@@ -82,6 +82,43 @@ _HTTP_VERSION_RE = re.compile(rb'^HTTP/\d\.\d$')
 _FIELD_NAME_INVALID_RE = re.compile(rb"[^!#$%&'*+\-.^_`|~0-9A-Za-z]")
 _FIELD_VALUE_INVALID_RE = re.compile(rb"[\x00-\x08\x0a-\x1f\x7f]")
 
+# RFC 9110 §5.6.2 tchar, spelled out.  Deleting every allowed octet leaves
+# the empty string for a valid token, so a non-empty result is the rejection
+# — the same trick as `_TARGET_ALLOWED_OCTETS`, and measurably cheaper than
+# `_FIELD_NAME_INVALID_RE` (which stays as the source of truth this table is
+# tested against, octet for octet).
+_TCHAR_OCTETS = (b"!#$%&'*+-.^_`|~"
+                 b'0123456789'
+                 b'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
+                 b'abcdefghijklmnopqrstuvwxyz')
+
+# Everything a header *block* may contain, so that deleting it leaves only
+# CR, LF, and the CTLs a field value may not carry (`_FIELD_VALUE_INVALID_RE`).
+# A clean block therefore reduces to a run of CRLFs — which is what
+# `_block_values_are_clean` checks, in one C-level pass for the whole request
+# instead of one regex per header.
+_BLOCK_ALLOWED_OCTETS = bytes(
+    c for c in range(256)
+    if not (c < 0x09 or 0x0B <= c <= 0x0C or 0x0E <= c <= 0x1F or c == 0x7F)
+    and c not in (0x0A, 0x0D)
+)
+
+
+def _block_values_are_clean(data: bytes) -> bool:
+    """True when no field value in *data* can contain a forbidden octet.
+
+    Deleting every permitted octet leaves only CR, LF and forbidden CTLs.
+    If what remains tiles exactly into CRLF pairs, then every CR and LF in
+    the block is a line terminator and no forbidden CTL appears anywhere —
+    so the per-header field-value check cannot fire, and is skipped.
+
+    A ``False`` result proves nothing about *which* line is at fault (it can
+    even be the request line, which has its own checks), so it only turns the
+    per-header regex back on.  The caller's error messages are unchanged.
+    """
+    residue = data.translate(None, _BLOCK_ALLOWED_OCTETS)
+    return residue.count(b'\r\n') * 2 == len(residue)
+
 # RFC 9110 §8.6 — strict Content-Length: at most one canonical leading SP
 # (the byte after the colon), then ``0`` or a no-leading-zero decimal.
 # Matched against the *raw* post-colon bytes, before the generic OWS strip
@@ -216,6 +253,18 @@ def _validate_message_framing(headers: 'Headers') -> None:
 # included (Sprint 63, COMP-HOST-WITH-USERINFO): the deprecated userinfo
 # component has no place in a Host header and enables credential-spoofing.
 _HOST_FORBIDDEN_BYTES = frozenset(b'/?# \t@')
+# Derived from the set above so the two cannot drift.  A small forbidden
+# class scans faster as a regex than as a `translate` delete table (the
+# opposite of the request-target case below, where the allowed set is large).
+_HOST_FORBIDDEN_RE = re.compile(
+    b'[' + re.escape(bytes(sorted(_HOST_FORBIDDEN_BYTES))) + b']')
+
+# RFC 9112 §2.1 / RFC 3986 — a request-target may carry only visible ASCII.
+# Deleting every allowed octet leaves the empty string for a valid target, so
+# a non-empty result *is* the rejection: one C-level pass instead of a Python
+# generator over each byte, and no allocation in the accept case (CPython
+# returns the shared empty bytes).
+_TARGET_ALLOWED_OCTETS = bytes(range(0x21, 0x7F))
 
 
 def _parse_host_header(value: bytes, default_port: int) -> tuple[str, int]:
@@ -271,7 +320,7 @@ def _validate_host(headers: 'Headers') -> None:
     value = hosts[0][1].strip(b' \t')
     if not value:
         raise BadRequestError('empty Host header value')
-    if any(b in _HOST_FORBIDDEN_BYTES for b in value):
+    if _HOST_FORBIDDEN_RE.search(value):
         raise BadRequestError(
             f'invalid Host authority {value!r}: contains '
             f'delimiter / whitespace forbidden by RFC 3986 §3.2')
@@ -782,7 +831,10 @@ class HTTP1Actor(Actor):
         from ..env import get_settings as _get_settings  # noqa: PLC0415
         max_line = _get_settings().header_max_line
         lines = data.split(b'\r\n')
-        if max_line > 0:
+        # No line can be longer than the block that contains it, so the
+        # per-line walk is only reachable for a block that is itself over the
+        # limit — one comparison retires it for every request under 8 KiB.
+        if max_line > 0 and len(data) > max_line:
             for ln in lines:
                 if len(ln) > max_line:
                     raise HeaderTooLargeError(
@@ -805,7 +857,7 @@ class HTTP1Actor(Actor):
         method, path, version = parts
 
         # Method (§4 / RFC 9110 §9.1) — case-sensitive token of 1+ tchar.
-        if not method or _FIELD_NAME_INVALID_RE.search(method):
+        if not method or method.translate(None, _TCHAR_OCTETS):
             raise BadRequestError(f'invalid method {method!r}')
 
         # HTTP-version (§2.5) — exactly ``HTTP/d.d``.
@@ -860,7 +912,7 @@ class HTTP1Actor(Actor):
         # smuggling vector, MAL-NON-ASCII-URL).  Skipped for asterisk-form
         # (the literal ``*`` is validated above).
         if not asterisk_form and (
-                not path or any(b < 0x21 or b == 0x7F or b >= 0x80 for b in path)):
+                not path or path.translate(None, _TARGET_ALLOWED_OCTETS)):
             raise BadRequestError(f'invalid request-target {path!r}')
 
         if asterisk_form:
@@ -888,6 +940,12 @@ class HTTP1Actor(Actor):
         else:
             _decoded_path = _raw_path_b.decode('utf-8')
 
+        # One C-level pass decides whether any field value *could* hold a
+        # forbidden octet.  When it says no, the per-header regex below is
+        # dead weight and is skipped; when it says yes, that regex still runs
+        # and still raises, so the diagnostic never changes.
+        values_need_checking = not _block_values_are_clean(data)
+
         raw: list[tuple[bytes, bytes]] = []
         for line in lines[idx + 1:]:
             if not line:
@@ -895,8 +953,10 @@ class HTTP1Actor(Actor):
                 # split off upstream because we read until CRLFCRLF).
                 continue
             # RFC 9112 §5.2 — obs-fold (leading SP/HTAB on a header line)
-            # MUST be rejected in requests.
-            if line[:1] in (b' ', b'\t'):
+            # MUST be rejected in requests.  Indexing yields an int and skips
+            # the one-byte slice a `line[:1]` comparison would allocate; the
+            # empty-line case is retired by the `continue` above.
+            if line[0] in (0x20, 0x09):
                 raise BadRequestError(
                     f'obsolete line folding rejected: {line!r}')
             colon = line.find(b':')
@@ -904,12 +964,16 @@ class HTTP1Actor(Actor):
                 raise BadRequestError(f'malformed header line: {line!r}')
             key = line[:colon]
             value = line[colon + 1:]
-            # §5.1 — no whitespace between field-name and ':'.
-            if key[-1:] in (b' ', b'\t'):
-                raise BadRequestError(
-                    f'whitespace before colon (smuggling vector): {line!r}')
             # field-name must be a valid token (§5.1 / RFC 9110 §5.6.2).
-            if _FIELD_NAME_INVALID_RE.search(key):
+            # SP and HTAB are not tchar, so this one test also decides §5.1
+            # (no whitespace between field-name and ':') — a well-formed name
+            # answers both questions at once, and only a rejected name pays
+            # for telling the two apart.  `colon < 1` above guarantees a
+            # non-empty key, so indexing is safe.
+            if key.translate(None, _TCHAR_OCTETS):
+                if key[-1] in (0x20, 0x09):
+                    raise BadRequestError(
+                        f'whitespace before colon (smuggling vector): {line!r}')
                 raise BadRequestError(f'invalid header name {key!r}')
             lkey = key.lower()
             if lkey in _UNDERSCORE_FRAMING_NAMES:
@@ -925,7 +989,7 @@ class HTTP1Actor(Actor):
             # Strip the OWS surrounding the value (§5).
             value = value.strip(b' \t')
             # field-value MUST NOT contain CTLs except HTAB.
-            if _FIELD_VALUE_INVALID_RE.search(value):
+            if values_need_checking and _FIELD_VALUE_INVALID_RE.search(value):
                 raise BadRequestError(
                     f'CTL in header value (smuggling / log-injection): '
                     f'{key!r}: {value!r}')
@@ -938,7 +1002,9 @@ class HTTP1Actor(Actor):
         if authority_override is not None:
             raw = [(k, v) for k, v in raw if k != b'host']
             raw.append((b'host', authority_override))
-        headers = Headers(raw)
+        # Names were lowercased in the loop above while being validated;
+        # `Headers.__init__` would lowercase them a second time.
+        headers = Headers.from_lowered(raw)
 
         # RFC 9110 §8.3 — Content-Type is a singleton; multiple values are
         # ambiguous and a request-smuggling surface (COMP-DUPLICATE-CT).

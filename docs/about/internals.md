@@ -274,6 +274,52 @@ Callers must never call `transport.writelines` directly with
 small parts.  The gate is the single decision point, and the
 invariant keeps performance predictable across payload sizes.
 
+## Parse-path invariant
+
+The HTTP/1.1 parser validates bytes with **C-level bulk operations**,
+never with Python-level loops or index arithmetic.  In practice that
+means `bytes.translate`, `bytes.find`, `bytes.split`, `bytes.strip`,
+`bytes.count`, and precompiled regexes — and it means resisting the
+intuition that fewer allocations or fewer passes must be faster.
+
+The idiom used throughout `_parse` is a **delete-the-allowed table**:
+
+```python
+_TCHAR_OCTETS = b"!#$%&'*+-.^_`|~0123456789ABC...xyz"
+
+if key.translate(None, _TCHAR_OCTETS):   # non-empty ⇒ a non-token octet
+    raise BadRequestError(...)
+```
+
+Deleting every permitted octet leaves the empty string for valid
+input, so a non-empty result *is* the rejection — one pass in C, and
+no allocation in the accept case (CPython returns the shared empty
+`bytes`).  Which direction to use depends on the set's size: a large
+allowed set (request-target, tchar) is cheapest as a `translate`
+delete table, a small forbidden set (the Host authority delimiters) as
+a regex character class.
+
+Field values are checked **once for the whole header block** rather
+than once per header.  Deleting everything a block may contain leaves
+only CR, LF and the CTLs a value may not carry; if what remains tiles
+exactly into CRLF pairs, no field value can hold a forbidden octet and
+the per-header check is skipped.  A block that fails the pre-scan
+falls back to the per-header regex, so error messages never change —
+the bulk pass is a fast path, never a rejection.
+
+Three plausible-sounding alternatives were measured and **rejected**;
+do not reintroduce them without new numbers:
+
+| Idea | Why it loses |
+|---|---|
+| `while` + `find()` line loop instead of `split(b'\r\n')` | 1.5–2.2× slower. `split` does the finding *and* the slicing in C; the loop moves the iteration back into Python. |
+| Interning pool for well-known header names | Slower than `key.lower()`. The lookup key is a fresh slice every request, so its hash is never cached and hashing costs more than lowercasing. |
+| Offset arithmetic instead of `value.strip(b' \t')` | ~1.5× slower. Two Python-level scans lose to one C call. |
+
+The through-line: an optimisation that replaces a C bulk operation
+with Python bytecode pays ~30 ns per byte instead of ~2 ns, and no
+reduction in pass count or allocation count makes that back.
+
 ## The pieces around the actor core
 
 The actor hierarchy is the *control* side.  The *data* side is

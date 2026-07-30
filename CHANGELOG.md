@@ -33,6 +33,31 @@ so the editable install's metadata catches up.
 
 ### Changed
 
+- **The HTTP/1.1 parser validates octets with C-level bulk operations.**  The
+  request-target scan, the Host authority scan, and the field-name token check
+  were per-byte Python generator expressions or regexes; each is now a single
+  `bytes.translate` delete-table pass or a precompiled character class,
+  whichever the set size favours.  Field values are checked **once for the
+  whole header block** instead of once per header: deleting every permitted
+  octet leaves only CR, LF and forbidden CTLs, and a residue that tiles into
+  CRLF pairs proves no value can carry a forbidden octet.  A block that fails
+  the pre-scan falls back to the per-header regex, so every error message and
+  status code is unchanged — Http11Probe re-scores 159/159 with a
+  **per-test verdict diff that is empty across all 213 vectors**.  Measured on
+  a Zen 4 box: per-header cost **0.510 → 0.346 µs**, fixed cost **4.53 → 3.57
+  µs**, and a 32-header request **20.33 → 14.25 µs (−30 %)**.
+- **Header names are lowercased once instead of twice.**  `_parse` already
+  lowercases each name while validating it, then handed the list to
+  `Headers.__init__`, which lowercased every name again; `Headers.from_lowered`
+  is the alternate constructor for callers that can guarantee pre-lowered
+  input.  HTTP/2 qualifies by protocol — RFC 9113 §8.2.1 makes an uppercase
+  field name malformed and the frame is rejected before any pair reaches the
+  header list.  `Headers` lookups (`get`, `getlist`, `__contains__`,
+  `__getitem__`, and the Structured Fields accessors) now probe with the
+  caller's bytes before lowercasing.  The index is keyed lowercased, so the
+  probe can only hit on a key the old path would also have found — a
+  lowercase literal, which is what essentially every internal call site
+  passes, drops from 47 to 25 ns.
 - **`BB_WRITE_TIMEOUT` no longer arms a timer per response.**  It defaults to
   `30.0`, so every write took `asyncio.wait_for` — exactly one `loop.call_at`
   per response, which the loop-touch instrument read as `call_at=1.00`/req.

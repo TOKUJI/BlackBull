@@ -136,3 +136,79 @@ def test_get_sf_item_multiple_lines_of_single_item_is_malformed():
     # Joining two lines of an Item-typed field cannot parse as one Item.
     h = Headers([(b'x-thing', b'1'), (b'x-thing', b'2')])
     assert h.get_sf_item(b'x-thing') is None
+
+
+# ---- probe-first lookup fast path -------------------------------------------
+#
+# `_index` is keyed on lowercased names, so a probe with the caller's bytes
+# can only hit on a key the `.lower()` path would also have found.  These
+# tests pin that equivalence rather than the optimisation: every accessor
+# must answer identically whatever case the caller passes.
+
+@pytest.mark.parametrize('name', [b'content-type', b'Content-Type',
+                                  b'CONTENT-TYPE', b'cOnTeNt-TyPe'])
+def test_lookup_is_case_insensitive_on_every_accessor(h, name):
+    assert (name in h) is True
+    assert h[name] == [(b'content-type', b'text/html')]
+    assert h.getlist(name) == [(b'content-type', b'text/html')]
+    assert h.get(name) == b'text/html'
+
+
+@pytest.mark.parametrize('name', [b'x-absent', b'X-Absent'])
+def test_absent_name_answers_identically_in_any_case(h, name):
+    assert (name in h) is False
+    assert h.getlist(name) == []
+    assert h.get(name) == b''
+    assert h.get(name, b'fallback') == b'fallback'
+    with pytest.raises(KeyError):
+        _ = h[name]
+
+
+def test_mixed_case_lookup_returns_the_same_object_as_lowercase(h):
+    # The cold path must reach the identical bucket, not a copy of it.
+    assert h.getlist(b'Content-Type') is h.getlist(b'content-type')
+    assert h[b'CONTENT-TYPE'] is h[b'content-type']
+
+
+def test_stored_mixed_case_name_is_found_by_lowercase_probe():
+    # Input casing is preserved on iteration but indexed lowercased, so the
+    # hot probe (a lowercase literal) must still find a mixed-case field.
+    h = Headers([(b'Content-Type', b'text/plain')])
+    assert h.get(b'content-type') == b'text/plain'
+    assert list(h) == [(b'Content-Type', b'text/plain')]
+
+
+def test_sf_accessors_are_case_insensitive():
+    h = Headers([(b'Priority', b'u=2, i')])
+    assert h.get_sf_dict(b'priority') == {'u': (2, {}), 'i': (True, {})}
+    assert h.get_sf_dict(b'PRIORITY') == {'u': (2, {}), 'i': (True, {})}
+
+
+# ---- from_lowered -----------------------------------------------------------
+
+def test_from_lowered_matches_the_normal_constructor():
+    pairs = [(b'host', b'a'), (b'set-cookie', b'x=1'), (b'set-cookie', b'y=2')]
+    fast = Headers.from_lowered(list(pairs))
+    slow = Headers(pairs)
+    assert fast == slow
+    assert list(fast) == list(slow)
+    assert fast.getlist(b'set-cookie') == slow.getlist(b'set-cookie')
+    assert fast.get(b'host') == slow.get(b'host')
+
+
+def test_from_lowered_preserves_duplicate_order():
+    h = Headers.from_lowered([(b'set-cookie', b'a=1'), (b'set-cookie', b'b=2')])
+    assert h.getlist(b'set-cookie') == [(b'set-cookie', b'a=1'),
+                                        (b'set-cookie', b'b=2')]
+
+
+def test_from_lowered_stays_case_insensitive_for_callers():
+    h = Headers.from_lowered([(b'content-type', b'text/html')])
+    assert h.get(b'Content-Type') == b'text/html'
+    assert b'CONTENT-TYPE' in h
+
+
+def test_from_lowered_empty():
+    h = Headers.from_lowered([])
+    assert len(h) == 0
+    assert h.get(b'host') == b''
