@@ -342,24 +342,24 @@ class TestBlackBullStaticRegistration:
         app.static('/b', str(other))
         assert len(app._static_roots) == 2
 
-    async def test_static_injects_staticfiles_into_global_chain(self, static_dir):
+    async def test_static_adds_no_global_middleware(self, static_dir):
+        # `app.static()` registers a route, so requests that are not for a
+        # static path never run this middleware at all.  Nothing global.
         from blackbull import BlackBull
-        from blackbull.middleware.static import StaticFiles
         app = BlackBull()
         app.static('/assets', str(static_dir))
-        assert len(app._global_middlewares) == 1
-        assert isinstance(app._global_middlewares[0], StaticFiles)
+        assert app._global_middlewares == []
 
     async def test_prefix_file_served_end_to_end(self, static_dir):
-        """Global middleware serves /assets/hello.txt when registered via app.static()."""
+        """/assets/hello.txt is served through the route registered by static()."""
         from blackbull import BlackBull
+        from blackbull.testing import TestClient
         app = BlackBull()
         app.static('/assets', str(static_dir))
-        # Exercise the StaticFiles middleware directly (avoids _wrap_send adapter)
-        mw = app._global_middlewares[0]
-        start, body = await _collect(mw, _scope(path='/assets/hello.txt'))
-        assert start['status'] == 200
-        assert body == b'Hello, static world!'
+        with TestClient(app) as client:
+            response = client.get('/assets/hello.txt')
+        assert response.status_code == 200
+        assert response.content == b'Hello, static world!'
 
 
 # ---------------------------------------------------------------------------

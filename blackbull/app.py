@@ -1004,10 +1004,41 @@ class BlackBull:
         self._global_middlewares.append(mw)
         self._chain = None  # invalidate cached chain
 
+    def _is_route_free(self, path: str, methods) -> bool:
+        """True when *path* has no route registered for any of *methods*.
+
+        Used by :meth:`static` before it claims the bare mount prefix, since
+        registering an already-registered path replaces it silently.
+        """
+        for method in methods:
+            try:
+                self._router[(path, method, Scheme.http)]
+            except (PathNotRegistered, MethodNotApplicable):
+                continue
+            return False
+        return True
+
+    def _static_miss(self):
+        """Terminal handler for a static route whose target is not a file.
+
+        Routes the miss through the app's own 404 path so a static miss is
+        answered exactly as any unmatched path is, including a user's
+        ``@app.on_error(HTTPStatus.NOT_FOUND)`` override.  A static route
+        must end in a real handler: ``_register_chain`` binds the last
+        function's ``call_next`` to ``do_nothing``, which sends no response
+        at all.
+        """
+        async def _static_not_found(conn, receive, send):
+            conn.state['error_status'] = HTTPStatus.NOT_FOUND
+            handler = self._error_router[HTTPStatus.NOT_FOUND]
+            if handler is not None:
+                await handler(conn, receive, send)
+        return _static_not_found
+
     def static(self, url_prefix: str, root_dir: str | Path, *,
                cache: bool = False, index: str | None = None,
                conditional: bool = True) -> None:
-        """Serve static files from *root_dir* under *url_prefix* via global middleware.
+        """Serve static files from *root_dir* under *url_prefix* as a route.
 
         ``cache`` (default ``False``): when ``True``, file bodies are
         held in-memory for fast cache-hit serving.  Useful for
@@ -1024,14 +1055,37 @@ class BlackBull:
         ``conditional`` (default ``True``): emit ``ETag`` / ``Last-Modified``
         validators and answer ``If-None-Match`` / ``If-Modified-Since`` with
         a 304.  Set ``False`` to disable conditional responses.
+
+        Registered as a **route**, not global middleware, so a request that
+        is not for a static path never enters this code: it resolves in the
+        router's exact-match dict and never reaches the parametrised scan.
+        This is also what every peer framework does — Starlette, Sanic,
+        aiohttp, Flask and Django all mount static as a route.
         """
         from blackbull.middleware.static import StaticFiles
         root = Path(root_dir).resolve()
         self._static_roots.append((url_prefix, root))
-        self._global_middlewares.append(
-            StaticFiles(url_prefix=url_prefix, root_dir=root, cache=cache,
-                        index=index, conditional=conditional))
-        self._chain = None  # invalidate cached chain
+        mw = StaticFiles(url_prefix=url_prefix, root_dir=root, cache=cache,
+                         index=index, conditional=conditional)
+        prefix = url_prefix.rstrip('/')
+        methods = [HTTPMethod.GET, HTTPMethod.HEAD]
+        chain = [mw, self._static_miss()]
+        self._router.route(methods=methods,
+                           path=f'{prefix}/{{filepath:path}}',
+                           functions=list(chain))
+        # The ``path`` converter is ``r'.+'`` — it needs at least one
+        # character, so neither ``/assets`` nor ``/assets/`` matches the
+        # route above.  Both must resolve for ``index=`` to serve the mount
+        # root (and ``blackbull serve``, which mounts at ``/``, depends on
+        # it), so each gets its own exact-match entry.
+        #
+        # Registering the same path twice silently replaces the first entry,
+        # so an explicit route always wins: a mount at ``/`` must not quietly
+        # eat the app's own root handler.
+        for bare in ((prefix, f'{prefix}/') if prefix else ('/',)):
+            if self._is_route_free(bare, methods):
+                self._router.route(methods=methods, path=bare,
+                                   functions=list(chain))
 
     def on_error(self, key):
         """Register a custom error handler for an HTTPStatus or exception class.

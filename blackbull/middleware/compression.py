@@ -211,13 +211,18 @@ class Compression:
         # Unannotated on purpose: rebuilt per request (see _wrap_send in
         # app.py).  ``event`` is an ASGISendEvent.
         async def vary_send(event):
-            parsed = parse_response_event(event)
-            if isinstance(parsed, ResponseStart) and \
-                    _is_compressible_content_type(parsed.headers) and \
-                    not parsed.headers.get(b'content-encoding'):
-                hdrs = list(event.get('headers', []))
-                _merge_vary(hdrs)
-                event = {**event, 'headers': hdrs}
+            # Discriminate on the raw type before building anything.  Going
+            # through `parse_response_event` allocated a `ResponseBody` copy
+            # of every body event just to have the next line's `isinstance`
+            # reject it — a per-chunk cost on a streamed response, for a
+            # wrapper that only ever cares about the start event.
+            if event.get('type') == ASGIEvent.HTTP_RESPONSE_START:
+                headers = Headers(event.get('headers', []))
+                if _is_compressible_content_type(headers) and \
+                        not headers.get(b'content-encoding'):
+                    hdrs = list(event.get('headers', []))
+                    _merge_vary(hdrs)
+                    event = {**event, 'headers': hdrs}
             await send(event)
         return vary_send
 

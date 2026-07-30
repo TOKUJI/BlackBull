@@ -1,9 +1,9 @@
 # Static files
 
-`app.static(url_prefix, root_dir)` registers a `StaticFiles`
-middleware that serves files from `root_dir` for paths starting
-with `url_prefix`.  Useful for CSS, JS, images, fonts, and other
-file-system assets that don't change on every request.
+`app.static(url_prefix, root_dir)` registers a **route** that serves
+files from `root_dir` under `url_prefix`, with a `StaticFiles`
+middleware attached to it.  Useful for CSS, JS, images, fonts, and
+other file-system assets that don't change on every request.
 
 ## Quick start
 
@@ -19,10 +19,23 @@ async def index(scope, receive, send):
     ...
 ```
 
-A request to `/assets/style.css` is intercepted by the global
-middleware before routing and served from
-`public/assets/style.css`.  Requests that don't match the prefix
-fall through to the route handlers normally.
+A request to `/assets/style.css` is routed to the static route and
+served from `public/assets/style.css`.  Requests that don't match the
+prefix are routed normally and never enter `StaticFiles` at all —
+static serving costs a non-static request nothing, because the router
+resolves it without ever consulting the static route.
+
+Each call registers three entries: `<prefix>/{filepath:path}` for
+files, plus `<prefix>` and `<prefix>/` so the [directory
+index](#directory-index) can answer the mount root.  An explicit route
+you registered yourself always wins — `app.static()` never replaces a
+path you already claimed.
+
+!!! note "A miss under the prefix is a 404"
+    Because the static route has matched, `/assets/missing.css` is
+    answered with 404 rather than continuing on to another route that
+    might also match `/assets/...`.  The 404 goes through the normal
+    error path, so `@app.on_error(HTTPStatus.NOT_FOUND)` still applies.
 
 ## Standalone usage
 
@@ -62,7 +75,7 @@ blackbull serve ./public --certfile cert.pem --keyfile key.pem  # HTTPS + HTTP/2
 
 It wires `StaticFiles` with `index='index.html'`; ETag / `304`
 conditional responses are served natively by `StaticFiles` (see
-[Conditional requests](#conditional-requests-etag--last-modified) below)
+[Conditional requests](#conditional-requests-etag-last-modified) below)
 and can be turned off with `--no-etag`.  See
 [Configuration → blackbull serve](configuration.md#serving-static-files-with-blackbull-serve)
 for the full flag list.

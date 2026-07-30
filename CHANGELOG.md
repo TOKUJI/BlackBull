@@ -58,6 +58,25 @@ so the editable install's metadata catches up.
   probe can only hit on a key the old path would also have found — a
   lowercase literal, which is what essentially every internal call site
   passes, drops from 47 to 25 ns.
+- **`app.static()` registers a route instead of global middleware.**  Static
+  serving no longer runs on every request: `<prefix>/{filepath:path}` (plus
+  `<prefix>` and `<prefix>/`, so `index=` can still answer the mount root)
+  resolves in the router, and a non-static request never enters `StaticFiles`
+  at all.  This is also what Starlette, Sanic, aiohttp, Flask and Django all
+  do.  The production gate is resolved once and memoised rather than calling
+  `get_settings()` per request.  **Behaviour change**: a miss under the prefix
+  is now answered 404 by the static route rather than falling through to
+  another route that also matches the prefix; the 404 takes the normal error
+  path, so `@app.on_error(HTTPStatus.NOT_FOUND)` still applies.  An explicit
+  route on the bare prefix always wins — `app.static()` never replaces a path
+  you registered yourself.
+- **`Compression` no longer parses body events on its no-codec path.**  When
+  the client accepts nothing the server can produce, the response is forwarded
+  verbatim through a wrapper that stamps `Vary: Accept-Encoding` on the
+  response start (bug 1.21f).  That wrapper ran `parse_response_event` on
+  every event, allocating a `ResponseBody` copy of each body chunk only for
+  the next line's `isinstance` to reject it.  It now discriminates on the raw
+  event type first, so a streamed body costs one dict lookup per chunk.
 - **`BB_WRITE_TIMEOUT` no longer arms a timer per response.**  It defaults to
   `30.0`, so every write took `asyncio.wait_for` — exactly one `loop.call_at`
   per response, which the loop-touch instrument read as `call_at=1.00`/req.

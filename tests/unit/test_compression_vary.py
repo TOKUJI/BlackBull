@@ -171,3 +171,53 @@ class TestMergeVaryHelper:
         hdrs = [(b'vary', b'*')]
         _merge_vary(hdrs)
         assert hdrs == [(b'vary', b'*')]
+
+
+class TestNoCodecPathForwardsBodiesUntouched:
+    """The no-codec send wrapper exists to stamp ``Vary`` on the response
+    start.  It must be transparent to everything else — in particular a
+    streamed body, whose chunks pass through the wrapper one by one."""
+
+    @pytest.mark.asyncio
+    async def test_streamed_body_chunks_are_forwarded_verbatim(self):
+        events: list[dict] = []
+
+        async def send(event):
+            events.append(event)
+
+        chunks = [b'alpha', b'beta', b'gamma']
+
+        async def call_next(scope, receive, send):
+            await send({'type': 'http.response.start', 'status': 200,
+                        'headers': [(b'content-type', b'text/plain')]})
+            for i, chunk in enumerate(chunks):
+                await send({'type': 'http.response.body', 'body': chunk,
+                            'more_body': i < len(chunks) - 1})
+
+        # accept=b'' → no codec overlap, so the Vary-only wrapper is in play.
+        await Compression()(_scope(b''), _noop_receive, send, call_next)
+
+        bodies = [e for e in events if e['type'] == 'http.response.body']
+        assert [e['body'] for e in bodies] == chunks
+        assert [e['more_body'] for e in bodies] == [True, True, False]
+        # The start event still carries Vary — the wrapper's actual job.
+        start = next(e for e in events if e['type'] == 'http.response.start')
+        assert _has_vary_accept_encoding(start['headers'])
+
+    @pytest.mark.asyncio
+    async def test_unknown_event_types_pass_through(self):
+        events: list[dict] = []
+
+        async def send(event):
+            events.append(event)
+
+        async def call_next(scope, receive, send):
+            await send({'type': 'http.response.start', 'status': 200,
+                        'headers': [(b'content-type', b'text/plain')]})
+            await send({'type': 'http.response.trailers', 'headers': [(b'x-t', b'1')]})
+            await send({'type': 'http.response.body', 'body': b'x', 'more_body': False})
+
+        await Compression()(_scope(b''), _noop_receive, send, call_next)
+        trailers = [e for e in events if e['type'] == 'http.response.trailers']
+        assert trailers == [{'type': 'http.response.trailers',
+                             'headers': [(b'x-t', b'1')]}]

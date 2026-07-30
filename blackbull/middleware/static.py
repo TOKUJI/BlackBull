@@ -187,6 +187,8 @@ class StaticFiles:
         # ``<root>/...`` exactly, reject ``<root>x/...``.
         self._root_sep: str = self._root_str + os.sep
         self._url_prefix = url_prefix.rstrip('/')
+        # None until the first request resolves it; see `__call__`.
+        self._enabled: bool | None = None
         self._cache_enabled: bool = cache
         self._index: str | None = index
         self._conditional: bool = conditional
@@ -225,6 +227,10 @@ class StaticFiles:
         # BlackBull threads a native Connection for HTTP and WebSocket alike;
         # the guard is defensive against a raw ASGI scope dict (only reachable
         # if this middleware runs outside BlackBull's own dispatch).
+        #
+        # Registered as a route middleware, the route table has already
+        # decided scheme and method before this runs; the checks stay because
+        # `StaticFiles` is also usable stand-alone as a plain ASGI app.
         if (not isinstance(conn, Connection) or conn.type != 'http'
                 or conn.method not in ('GET', 'HEAD')):
             if call_next:
@@ -233,7 +239,13 @@ class StaticFiles:
                 await self._respond(send, HTTPStatus.NOT_FOUND)
             return
 
-        if get_settings().env == Environment.PRODUCTION:
+        # Resolved once, not per request.  Hoisting it into `__init__` would
+        # be wrong — settings may be loaded after the app is constructed —
+        # so it is memoised on first use instead, which keeps late-loaded
+        # settings working while charging one attribute test thereafter.
+        if self._enabled is None:
+            self._enabled = get_settings().env != Environment.PRODUCTION
+        if not self._enabled:
             if call_next:
                 await call_next(conn, receive, send)
             else:
