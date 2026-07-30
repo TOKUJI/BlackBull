@@ -1,6 +1,6 @@
 """Slow-read attack: complete request, then read response 1 byte/sec.
 
-Hits the slow-read defence gap noted in Sprint 30's peer audit —
+Hits the slow-read defence gap noted in the peer audit —
 BlackBull does NOT have a `BB_WRITE_TIMEOUT` today (planned in
 Tier 1.1).  Without it, a slow-reading client holds the server's
 write coroutine in `drain()` indefinitely as the kernel send buffer

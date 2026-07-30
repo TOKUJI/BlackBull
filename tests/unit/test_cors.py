@@ -14,7 +14,7 @@ def _make_scope(method='GET', origin=None, headers=None, type_='http'):
         'method': method,
         'headers': Headers(raw),
     }
-    # Sprint 80: HTTP is dispatched as a native Connection; non-HTTP (websocket)
+    # HTTP is dispatched as a native Connection; non-HTTP (websocket)
     # still travels as an ASGI scope dict, exactly as the middleware sees it.
     if type_ == 'http':
         from blackbull.connection import Connection

@@ -1,4 +1,4 @@
-"""Sprint 72 audit follow-up — protocol-uniformity contracts.
+"""Up — protocol-uniformity contracts.
 
 F.1b: the same authority must reach the application identically whether it
 arrives as an HTTP/1.1 absolute-form request-target (RFC 9112 §3.2.2) or as
@@ -56,7 +56,7 @@ def _h2_scope(fields: list[tuple[bytes, bytes]]):
     raw = (len(block).to_bytes(3, 'big') + FrameTypes.HEADERS
            + bytes([flags]) + (1).to_bytes(4, 'big') + block)
     frame = FrameFactory().load(raw)
-    conn = parse_headers(frame)          # Sprint 79 Phase 4 — native Connection
+    conn = parse_headers(frame)          # native Connection
     assert not frame.malformed
     return conn
 

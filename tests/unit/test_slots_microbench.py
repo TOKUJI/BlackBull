@@ -10,7 +10,7 @@ regression hits a benchmark.
 
 The printed sizes are informational only: ``sys.getsizeof`` reports the
 base object size, not the recursive footprint of the slot values, but
-that's the dimension this sprint set out to compress.
+that's the dimension this work set out to compress.
 """
 import sys
 
@@ -106,7 +106,7 @@ def test_print_per_instance_sizes(capsys):
         'WebSocketSender':  _sizeof(WebSocketSender(_FakeWriter())),
     }
     # Print under pytest -s (or always — captured otherwise) so the values
-    # land in the test log when the sprint-close measurement is taken.
+    # land in the test log when the measurement is taken.
     print('\nPer-instance sizes (sys.getsizeof, bytes):')
     for name, size in sizes.items():
         print(f'  {name:<20s} {size:>4d}')

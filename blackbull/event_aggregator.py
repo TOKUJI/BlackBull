@@ -18,7 +18,7 @@ def _request_fields(conn):
 
 def _ws_fields(conn):
     """Read ``(client, connection_id, path)`` for a WebSocket event detail from
-    a native :class:`~blackbull.connection.Connection` (Sprint 80) or, on a
+    a native :class:`~blackbull.connection.Connection` or, on a
     direct test drive, an ASGI scope dict."""
     from blackbull.connection import Connection  # noqa: PLC0415 — avoid import cycle
     if isinstance(conn, Connection):
@@ -67,7 +67,7 @@ class EventAggregator:
     # ------------------------------------------------------------------
     # The request-lifecycle events are emitted by the application layer —
     # request_received / before_handler / after_handler by BlackBull._dispatch
-    # (Sprint 64), request_completed by BlackBull.__call__ after the global
+    # emits it; request_completed is emitted by BlackBull.__call__ after the global
     # middleware chain returns (issue #145) — so they fire under external
     # ASGI hosts (uvicorn, TestClient) too, exactly once per request.  Only
     # wire-level events remain here.

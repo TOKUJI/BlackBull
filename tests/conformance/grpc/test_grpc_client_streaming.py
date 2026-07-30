@@ -1,4 +1,4 @@
-"""Conformance: client-streaming gRPC over the ASGI bridge (Sprint 60 G1a).
+"""Conformance: client-streaming gRPC over the ASGI bridge.
 
 Client-streaming = the *request* is a stream of messages, the *response* is a
 single message.  The handler takes an async iterator (``request_iter``) instead

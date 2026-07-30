@@ -213,7 +213,7 @@ def _validating_ssl_context() -> ssl.SSLContext:
 # listener binds '::' — a runner-network quirk that does not reproduce locally.
 # The test cert's IP:127.0.0.1 SAN lets _validating_ssl_context() verify the
 # chain against the loopback IP, so using '127.0.0.1' matches every other test
-# in this module and keeps the suite green in CI.  See Sprint 52 R8.
+# in this module and keeps the suite green in CI.
 @pytest.mark.asyncio
 async def test_response_200(app):
     async with httpx.AsyncClient(http2=True, verify=_validating_ssl_context()) as c:
@@ -432,7 +432,7 @@ async def test_dispatch_websocket_calls_handler():
 async def test_raising_shutdown_hook_sends_lifespan_shutdown_failed():
     """ASGI lifespan spec: a raising shutdown hook must answer
     lifespan.shutdown with lifespan.shutdown.failed (+ message), not
-    lifespan.shutdown.complete (bug 1.18)."""
+    lifespan.shutdown.complete."""
     app_ = BlackBull()
 
     @app_.on_shutdown

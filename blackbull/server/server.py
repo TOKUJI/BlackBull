@@ -29,7 +29,7 @@ async def _run_with_log(coro, record: AccessLogRecord) -> None:
     cancel sibling streams through the TaskGroup.
 
     Request-lifecycle Level B events are emitted by ``BlackBull._dispatch``
-    (Sprint 64 consolidation), not here.
+    not here.
     """
     try:
         await coro
@@ -69,7 +69,7 @@ class LifespanManager:
         # app that dies before acking — e.g. a startup hook that raises and
         # takes the task down with it — would otherwise strand __aenter__ on
         # an empty send queue forever and the server would neither start nor
-        # error (bug 1.3).  Mirrors the FIRST_COMPLETED race in __aexit__.
+        # error.  Mirrors the FIRST_COMPLETED race in __aexit__.
         getter = asyncio.ensure_future(self._send_q.get())
         try:
             await asyncio.wait(
@@ -87,8 +87,8 @@ class LifespanManager:
             exc = self._task.exception()
             if exc is not None:
                 # The lifespan app raised before acking — a real startup
-                # failure (bug 1.3: previously this stranded __aenter__ on an
-                # empty send queue and the server never started).
+                # failure.  Without this raise, __aenter__ strands on an
+                # empty send queue and the server never starts.
                 raise RuntimeError(f'Lifespan startup failed: {exc!r}') from exc
             # The app returned without implementing the lifespan protocol — a
             # bare ASGI app that ignores the lifespan scope.  ASGI treats this
@@ -133,7 +133,7 @@ async def SocketManager(socket_cb_pairs, ssl_context):
 
     *socket_cb_pairs* is an iterable of ``(sock, callback)`` — each socket is
     served by its own accept callback.  The shared HTTP listener uses
-    :meth:`Server.client_connected_cb`; port-bound non-ASGI protocols (Sprint 50)
+    :meth:`Server.client_connected_cb`; port-bound non-ASGI protocols
     use a per-binding raw callback.
 
     On enter: wraps each socket in asyncio.start_server (TCP) or
@@ -143,8 +143,8 @@ async def SocketManager(socket_cb_pairs, ssl_context):
     Dispatches by ``sock.family``: AF_INET / AF_INET6 take the TCP
     server, AF_UNIX takes the unix server.  Both honour the configured
     ``socket_backlog`` (asyncio's default of 100 is silently re-applied
-    via ``sock.listen(backlog)`` otherwise — caused wrk c=1024 connect
-    errors in Sprint 9c).
+    via ``sock.listen(backlog)`` otherwise, which produces wrk c=1024
+    connect errors).
     """
     import socket as _socket  # noqa: PLC0415
     from ..env import get_settings as _get_settings  # noqa: PLC0415
@@ -180,7 +180,7 @@ class Server:
 
     The shared HTTP listener detects HTTP/1.1 vs HTTP/2 (and upgrades to
     WebSocket); port-bound non-ASGI protocols registered via
-    :meth:`BlackBull.raw_handler` get their own listening socket (Sprint 50).
+    :meth:`BlackBull.raw_handler` get their own listening socket.
     When ssl_context or certfile is set, the HTTP listener runs as HTTPS.
 
     Formerly ``ASGIServer`` — that name remains as a backward-compat alias.
@@ -294,7 +294,7 @@ class Server:
         return _cb
 
     def _raw_tls_context(self):
-        """TLS context for ``tls=True`` raw bindings (Sprint 75).
+        """TLS context for ``tls=True`` raw bindings.
 
         When cert/key paths are available a dedicated context is built without
         the HTTP listener's ``h2``/``http/1.1`` ALPN list — a raw-protocol
@@ -315,7 +315,7 @@ class Server:
     async def _serve_connection(self, reader, writer, *, bound_binding=None):
         """Wrap the transport and run one :class:`ConnectionActor`.
 
-        *bound_binding* is set for port-bound non-ASGI protocols (Sprint 50) —
+        *bound_binding* is set for port-bound non-ASGI protocols —
         the connection skips HTTP detection and is handed straight to the
         binding's raw handler.
         """
@@ -532,13 +532,13 @@ class Server:
         self._bind_protocol_sockets(_cfg)
 
     def _bind_protocol_sockets(self, _cfg):
-        """Bind a listening socket per port-bound non-ASGI protocol (Sprint 50).
+        """Bind a listening socket per port-bound non-ASGI protocol.
 
         Each :class:`RawBinding` registered with a ``port`` gets its own
         dual-stack socket set.  ``port=0`` lets the OS pick a free port (used by
         tests); the bound port is recorded in :attr:`protocol_ports`.  Sockets
         are bound bare here; :meth:`run` layers TLS onto the listeners whose
-        binding set ``tls=True`` (Sprint 75), cleartext otherwise.
+        binding set ``tls=True``, cleartext otherwise.
         """
         # Iterate the bindings themselves, not the port-keyed view — several
         # bindings may all ask for port=0 (OS-assigned, common in tests), and
@@ -594,7 +594,7 @@ class Server:
         # servers on exit.  The shared HTTP listener uses client_connected_cb;
         # each port-bound non-ASGI protocol uses its own raw callback.  Raw
         # sockets are cleartext unless the binding was registered with
-        # ``tls=True`` (Sprint 75), which serves them through the same TLS
+        # ``tls=True``, which serves them through the same TLS
         # machinery as the HTTPS listener.
         # LifespanManager drives the ASGI lifespan protocol; nesting it inside
         # SocketManager guarantees: startup completes before serve_forever() is
@@ -673,7 +673,7 @@ class Server:
         self.close_socket()
 
 
-# Backward-compat alias — ``ASGIServer`` was renamed to ``Server`` in Sprint 50
-# when the class gained non-ASGI (raw protocol) listeners.  Existing imports
+# Backward-compat alias: the class was named ``ASGIServer`` before it gained
+# non-ASGI (raw protocol) listeners.  Existing imports
 # (``from blackbull.server import ASGIServer``) keep working.
 ASGIServer = Server

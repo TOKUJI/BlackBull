@@ -24,9 +24,9 @@ OUTDIR="${OUTDIR:-bench/results}"
 LABEL="${LABEL:-}"
 LABEL_PREFIX="${LABEL_PREFIX:-}"   # filename prefix so per-stack runs don't overwrite
 D="${DURATION:-30}"
-# Sprint 24 : RUNS_WRK > 1 enables multi-run aggregation —
+# RUNS_WRK > 1 enables multi-run aggregation —
 # median req/s with MAD / min / max / noise% columns.  RUNS_WRK=1 keeps
-# Sprint 13–23 single-run behaviour (the report just emits the wrk numbers
+# the older single-run behaviour (the report just emits the wrk numbers
 # directly and the noise columns read `—`).
 RUNS_WRK="${RUNS_WRK:-3}"
 
@@ -46,7 +46,7 @@ run_one() {
         cmd="$cmd -- $pipe_args"
     fi
 
-    # Sprint 24: loop RUNS_WRK times, capture each run's req/s + the
+    # Loop RUNS_WRK times, capture each run's req/s + the
     # latency stats from the LAST run (the latency distribution is
     # already a per-run percentile; aggregating it across runs would
     # be misleading, while aggregating throughput is straightforward).
@@ -119,7 +119,7 @@ run_one() {
     fi
 }
 
-# Header — Sprint 24 added the trailing "noise (MAD)" column.  Rows
+# Header — the trailing "noise (MAD)" column is optional.  Rows
 # where MAD/median > 10 % carry a 🌫 marker; older RUNS_WRK=1 reports
 # leave the column blank.
 echo "| Scenario | req/s | mean lat | p50 | p99 | max | socket errors | noise (MAD) |"

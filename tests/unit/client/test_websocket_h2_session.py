@@ -1,4 +1,4 @@
-"""Sprint 72 — WebSocketH2Session on the shared WS codec (1.20b / F.2, 1.20c).
+"""WebSocketH2Session on the shared WS codec (1.20b / F.2, 1.20c).
 
 The session previously rolled a third, private WebSocket frame parser that
 ignored FIN, RSV, and MASK bits entirely — no fragmentation reassembly, no

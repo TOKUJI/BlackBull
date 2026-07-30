@@ -1,7 +1,7 @@
 """Unit tests for :class:`blackbull.server.deadline.ConnectionDeadline`.
 
 The deadline replaces ``asyncio.timeout`` on the per-request hot path
-(Sprint 23).  These tests pin down the behaviours the server stack
+These tests pin down the behaviours the server stack
 relies on:
 
 * a fired deadline surfaces as ``TimeoutError`` via :meth:`guard`
@@ -119,7 +119,7 @@ async def test_guard_does_not_leak_cancel_after_timeout():
 @pytest.mark.asyncio
 async def test_guard_propagates_non_cancel_exception():
     """If the body raises a non-CancelledError exception, ``guard`` must
-    propagate it unchanged and still disarm the pending timer (Sprint 26
+    propagate it unchanged and still disarm the pending timer (the
     Phase A — parity case 2 from the contextmanager-era implementation)."""
     dl = ConnectionDeadline()
     with pytest.raises(ValueError, match='boom'):
@@ -134,7 +134,7 @@ async def test_guard_propagates_non_cancel_exception():
 @pytest.mark.asyncio
 async def test_guard_same_tick_race_raises_timeout():
     """Same-tick race: the body completes normally but ``_fired`` is set
-    in the same loop iteration (Sprint 26 Phase A — parity case 5).
+    in the same loop iteration.
     This is the convention ``asyncio.timeout`` uses: a deadline that
     fired wins even if the awaited read also produced a value."""
     dl = ConnectionDeadline()
@@ -174,7 +174,7 @@ async def test_arm_cancels_previous_handle():
     dl.disarm()
 
 
-# --- Scanner-architecture-specific tests (Sprint 26 Phase B) ---
+# --- Scanner-architecture-specific tests ---
 
 
 @pytest.mark.asyncio
@@ -218,7 +218,7 @@ async def test_scanner_handles_multiple_independent_deadlines():
 async def test_scanner_fires_short_deadline_within_tick_window():
     """End-to-end: a deadline armed past ``_TICK_S`` must fire through
     the scanner.  Uses guard() which translates the cancellation into
-    ``TimeoutError`` — same observable shape as Sprint 23."""
+    ``TimeoutError`` — the same observable shape as the per-connection timer."""
     dl = ConnectionDeadline()
     with pytest.raises(TimeoutError):
         with dl.guard(0.05):

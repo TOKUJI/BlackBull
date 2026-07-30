@@ -1,4 +1,4 @@
-"""Sprint 72 (1.20c) — H1 client close discipline + recipient shutdown.
+"""H1 client close discipline + recipient shutdown.
 
 ``WebSocketSession.close()`` previously sent a best-effort CLOSE frame and
 returned: the peer's echoed CLOSE was never drained and the recipient's

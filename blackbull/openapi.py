@@ -106,7 +106,7 @@ def _path_parameters(param_specs: dict[str, str]) -> list[dict]:
 def _query_parameters(handler, param_specs: dict[str, str]) -> list[dict]:
     """Build ``in: query`` parameter entries for a simplified handler.
 
-    Minimal tier (Sprint 74): name, schema from the annotation's scalar type,
+    Minimal tier: name, schema from the annotation's scalar type,
     ``required`` from default-presence.  Reuses the router's registration-time
     classifier so this walk can never disagree with what the wrapper actually
     resolves; ``Depends`` params are not request inputs and carry no entry.

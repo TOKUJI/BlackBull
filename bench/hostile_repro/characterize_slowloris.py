@@ -1,4 +1,4 @@
-"""Slowloris quantitative characterisation (Sprint 77).
+"""Slowloris quantitative characterisation.
 
 Turns the qualitative "the three deadline timeouts work" claim in
 `KNOWN_LIMITATIONS.md` into a defendable curve:

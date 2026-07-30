@@ -1,4 +1,4 @@
-"""Connection Actor — Phase 6 Step 5."""
+"""Connection Actor — owns one transport and spawns its protocol actor."""
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable
@@ -188,7 +188,7 @@ class ConnectionActor(Actor):
         # both halves.
         deadline = cfg.header_timeout if cfg.header_timeout > 0 else None
 
-        # Sprint 23: one rescheduled TimerHandle per connection replaces
+        # One rescheduled TimerHandle per connection replaces
         # the per-phase ``async with asyncio.timeout(d):`` allocations.
         # The deadline binds to *this* task — the per-connection dispatch
         # task — and gets passed down into HTTP1Actor / HTTP1Recipient so
@@ -196,7 +196,7 @@ class ConnectionActor(Actor):
         # re-arms the same handle.
         dl = ConnectionDeadline()
 
-        # Port-bound non-ASGI protocol (Sprint 50): the listening socket already
+        # Port-bound non-ASGI protocol: the listening socket already
         # identifies the protocol, so skip detection and the deadline machinery
         # entirely — the handler owns the connection lifetime and the raw reader.
         if self._bound_binding is not None:

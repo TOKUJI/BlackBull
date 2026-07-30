@@ -1,7 +1,6 @@
 """Local substitute for the .NET Http11Probe — fires the exact Cluster A/B/C
 vectors from the baseline proposal at a live BlackBull server and reports the
-actual status / behaviour, so we can see the post-Sprint-61 delta and what
-Sprint 63 still needs to fix.  Not a pytest file; run directly."""
+actual status / behaviour, so the remaining gaps are visible.  Not a pytest file; run directly."""
 import asyncio
 import socket
 from http import HTTPMethod

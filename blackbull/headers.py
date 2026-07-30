@@ -25,8 +25,8 @@ class Headers:
     - Header names and values are always ``bytes`` (per ASGI spec).
     - Lookups are case-insensitive: the internal index is keyed on
       ``name.lower()`` (RFC 7230 §3.2 — header field names are case-insensitive).
-      ``__contains__``, ``__getitem__``, ``getlist``, and ``get`` all lowercase
-      the requested name; iteration preserves the original casing of the input.
+      ``__contains__``, ``__getitem__``, ``getlist``, and ``get`` accept any
+      casing; iteration preserves the original casing of the input.
     - Insertion order of duplicate names is preserved (RFC 7230 §3.2.2).
 
     Examples::
@@ -52,6 +52,34 @@ class Headers:
         for pair in self._list:
             self._index.setdefault(pair[0].lower(), []).append(pair)
 
+    @classmethod
+    def from_lowered(cls, pairs: list[tuple[bytes, bytes]]) -> 'Headers':
+        """Build from pairs whose names are **already lowercase**.
+
+        The caller must guarantee that; nothing here checks it, and a name
+        containing uppercase would be indexed unreachably (every accessor
+        lowercases before its fallback probe, so the field would be
+        invisible to lookup while still appearing in iteration).
+
+        Two callers can guarantee it.  ``http1_actor._parse`` lowercases
+        each name while validating it, so re-lowercasing in ``__init__``
+        recomputes a known answer.  HTTP/2 field names are lowercase by
+        protocol — RFC 9113 §8.2.1 makes an uppercase name malformed, and
+        ``HeadersFrame.parse_payload`` rejects the frame before any pair
+        reaches the header list.
+
+        Takes ownership of *pairs* rather than copying it; the parser
+        builds a throwaway list per request, and the copy is the point of
+        the shortcut.  Do not pass a list you intend to keep mutating.
+        """
+        self = cls.__new__(cls)
+        self._list = pairs
+        index: dict[bytes, list[tuple[bytes, bytes]]] = {}
+        for pair in pairs:
+            index.setdefault(pair[0], []).append(pair)
+        self._index = index
+        return self
+
     # ---- ASGI-compliant iterable ----------------------------------------
 
     def __iter__(self):
@@ -65,7 +93,7 @@ class Headers:
 
         Two ``Headers`` are equal when they carry the same fields in the same
         order (RFC 7230 §3.2.2 — order is significant for repeated fields).
-        Enables ``Connection`` round-trip equality (Sprint 79)."""
+        Enables ``Connection`` round-trip equality."""
         if isinstance(other, Headers):
             return self._list == other._list
         return NotImplemented
@@ -76,16 +104,30 @@ class Headers:
 
     # ---- dict-like lookup (returns list of pairs) -----------------------
 
+    # Every accessor probes with the caller's bytes before lowercasing.
+    # `_index` is keyed lowercased, so a probe can only hit on a key the
+    # `.lower()` path would also have found — the fast path is exactly
+    # semantics-preserving, not a heuristic.  It pays off because callers
+    # overwhelmingly pass a lowercase literal (`headers.get(b'content-type')`),
+    # for which `bytes.lower()` costs more than the dict lookup it precedes.
+    # A mixed-case caller pays one extra failed probe.
+
     def __contains__(self, name: bytes) -> bool:
-        return name.lower() in self._index
+        return name in self._index or name.lower() in self._index
 
     def __getitem__(self, name: bytes) -> list[tuple[bytes, bytes]]:
         """Return all pairs for *name*.  Raises ``KeyError`` if absent."""
-        return self._index[name.lower()]
+        pairs = self._index.get(name)
+        if pairs is None:
+            return self._index[name.lower()]
+        return pairs
 
     def getlist(self, name: bytes) -> list[tuple[bytes, bytes]]:
         """Return all pairs for *name*, or ``[]`` if the header is absent."""
-        return self._index.get(name.lower(), [])
+        pairs = self._index.get(name)
+        if pairs is None:
+            pairs = self._index.get(name.lower())
+        return pairs if pairs is not None else []
 
     def get(self, name: bytes, default: bytes = b'') -> bytes:
         """Return the first value for *name*, or *default* if absent.
@@ -93,7 +135,9 @@ class Headers:
         Mirrors ``dict.get(key, default)``: single value, optional default.
         For headers that may repeat use ``getlist(name)``.
         """
-        pairs = self._index.get(name.lower())
+        pairs = self._index.get(name)
+        if pairs is None:
+            pairs = self._index.get(name.lower())
         return pairs[0][1] if pairs else default
 
     def append(self, name_or_pairs, value: bytes | None = None) -> None:
@@ -124,7 +168,9 @@ class Headers:
         Multiple field lines are joined with ``b', '`` before parsing, as
         the RFC requires for List- and Dictionary-typed fields.
         """
-        pairs = self._index.get(name.lower())
+        pairs = self._index.get(name)
+        if pairs is None:
+            pairs = self._index.get(name.lower())
         if not pairs:
             return None
         if len(pairs) == 1:

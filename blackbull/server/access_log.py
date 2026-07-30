@@ -17,7 +17,7 @@ from ..logger import enqueue_access_log  # O4 fast path (no import cycle: logger
 
 _access_logger = logging.getLogger('blackbull.access')
 
-# Sprint 33 investigation knob: capture per-request phase wall + CPU
+# Capture per-request phase wall + CPU
 # checkpoints into AccessLogRecord.phases.  Off by default — the
 # extra time.perf_counter() + time.process_time() calls would otherwise
 # show up in benchmark numbers.  Set ``BB_PHASE_TRACE=1`` to turn on
@@ -112,7 +112,7 @@ class AccessLogRecord:
     status:         int | str = '-'
     response_bytes: int       = 0
     close_code:     int | None = None
-    # Sprint 35 phase-trace diagnostic — request/response headers we want
+    # Request/response headers we want
     # to correlate against per-phase timing.  Empty bytes are interpreted
     # as "header absent" in ``format()``.  Populated only when
     # ``PHASE_TRACE=1`` so production responses don't pay the bytes
@@ -161,7 +161,7 @@ class AccessLogRecord:
     @classmethod
     def from_conn(cls, conn) -> 'AccessLogRecord':
         """Build directly from a :class:`~blackbull.connection.Connection`
-        (Sprint 80 Tier-2) so the self-hosted actor never materializes the ASGI
+        so the self-hosted actor never materializes the ASGI
         scope just to record the access line."""
         client = conn.client or ('-',)
         ae = b''

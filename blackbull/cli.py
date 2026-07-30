@@ -31,7 +31,7 @@ from .app import serve as _serve
 
 
 # ---------------------------------------------------------------------------
-# TOML config loading — Sprint 12c
+# TOML config loading
 # ---------------------------------------------------------------------------
 
 # Mapping: (section, key) → BB_* environment variable name.
@@ -302,7 +302,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 # ---------------------------------------------------------------------------
-# ``blackbull serve`` — zero-code static file server (Sprint 49, B4)
+# ``blackbull serve`` — zero-code static file server
 # ---------------------------------------------------------------------------
 
 def _build_serve_parser() -> argparse.ArgumentParser:
@@ -368,7 +368,7 @@ def _build_static_app(directory: str, *, etag: bool, cache: bool,
 
     app = BlackBull()
     # StaticFiles emits ETag / Last-Modified and honours If-None-Match /
-    # If-Modified-Since natively (Sprint 69, bug 1.21d); ``--no-etag``
+    # If-Modified-Since natively; ``--no-etag``
     # (``etag=False``) turns that off.
     app.static('/', directory, cache=cache, index=index or None,
                conditional=etag)

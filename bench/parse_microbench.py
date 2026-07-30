@@ -1,4 +1,4 @@
-"""HTTP/1.1 `_parse` microbenchmark — Sprint 77 (zero-copy P3 go/no-go).
+"""HTTP/1.1 `_parse` microbenchmark — the zero-copy go/no-go.
 
 `zero-copy-native-interface.md` phase 2 gates the single-normalized-buffer
 parser on a **+10 % RPS** EC2 result, and notes the prototype "is expected
@@ -68,7 +68,7 @@ def main() -> None:
 
     h = _make_handler()
     # Sanity: each request parses without raising.
-    # Sprint 79: ``_parse`` now returns a ``Connection`` dataclass, not a dict.
+    # ``_parse`` now returns a ``Connection`` dataclass, not a dict.
     for name, data in REQUESTS.items():
         conn = h._parse(data)
         assert conn.type == 'http', name

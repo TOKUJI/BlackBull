@@ -12,13 +12,13 @@
 #   daphne      daphne    (HTTP/1.1 + WS)             — no HTTP/2
 #   nginx       reference floor (static GETs, HTTP/2, no upstream)
 #
-# Sprint 14 — topology / parser variants (blackbull, uvicorn, granian only):
+# Topology / parser variants (blackbull, uvicorn, granian only):
 #   <base>-cleartext   plain HTTP on $port (no TLS); isolates TLS cost
 #   <base>-nginx       nginx HTTPS on $port + base on $((port+1)) cleartext
 #                      via nginx_proxy.conf; isolates TLS+accept-loop offload
 #   uvicorn-h11        TLS as default but force the pure-Python h11 parser
 #
-# Sprint 16 — multi-worker variants (blackbull only):
+# Multi-worker variants (blackbull only):
 #   blackbull-w<N>     N worker processes (BB_WORKERS=N), SO_REUSEPORT
 #                      single TLS port.  e.g. blackbull-w2, blackbull-w4.
 #
@@ -35,7 +35,7 @@ cert="${3:-tests/cert.pem}"
 key="${4:-tests/key.pem}"
 
 # Bind interface for every peer's listen socket.  Defaults to 127.0.0.1 so
-# the legacy single-host benchmark path is byte-identical.  Sprint 20 split
+# the legacy single-host benchmark path is byte-identical.  The split
 # topology sets BIND_HOST=0.0.0.0 so the load generator on a second
 # instance can reach the server over the VPC private network.
 BIND_HOST="${BIND_HOST:-127.0.0.1}"
@@ -43,8 +43,8 @@ BIND_HOST="${BIND_HOST:-127.0.0.1}"
 if [ -z "$stack" ]; then
     echo "Usage: $0 <stack> [port] [cert] [key]" >&2
     echo "Bases: blackbull, uvicorn, hypercorn, granian, daphne, nginx, sanic" >&2
-    echo "Variants (Sprint 14): <base>-cleartext, <base>-nginx, uvicorn-h11" >&2
-    echo "Variants (Sprint 16): blackbull-w<N> (N workers, e.g. blackbull-w4)" >&2
+    echo "Variants: <base>-cleartext, <base>-nginx, uvicorn-h11" >&2
+    echo "Variants: blackbull-w<N> (N workers, e.g. blackbull-w4)" >&2
     exit 1
 fi
 
@@ -147,12 +147,15 @@ case "$base" in
         # Production defaults (BB_ACCESS_LOG=1, BB_ASYNC_LOGGING=1)
         # remain unchanged in env.py — only this harness overrides.
         #
-        # Sprint 11: the BlackBull console-script CLI lets us point at the
+        # The BlackBull console-script CLI lets us point at the
         # *same* shared peer app (bench.peers.asgi_app:app) that uvicorn /
         # hypercorn / granian / daphne load — no BlackBull-only bench/app.py
         # path any more.
+        # Honour BB_UVLOOP env if already set; default to 1 for apples-to-
+        # apples with uvicorn/ hypercorn/ granian (all uvloop by default).
+        bb_uvloop="${BB_UVLOOP:-1}"
         LAUNCH_CMD=(
-            env BB_UVLOOP=1 "BB_WORKERS=$workers"
+            env BB_UVLOOP="$bb_uvloop" "BB_WORKERS=$workers"
                 BB_H2_INITIAL_WINDOW_SIZE=65535
                 BB_H2_CONNECTION_WINDOW_SIZE=65535
                 BB_H2_MAX_CONCURRENT_STREAMS=100
@@ -167,7 +170,7 @@ case "$base" in
         # --http auto picks httptools if installed, else h11.
         # --loop auto picks uvloop if installed, else asyncio.
         # For best numbers install uvicorn[standard] (httptools + uvloop).
-        # Sprint 14: uvicorn-h11 forces the pure-Python h11 parser to
+        # Uvicorn-h11 forces the pure-Python h11 parser to
         # isolate the C-parser advantage.
         if [ "$variant" = "h11" ]; then
             uv_http=h11
@@ -183,11 +186,28 @@ case "$base" in
         )
         finalize
         ;;
+    fastapi)
+        # FastAPI on uvicorn — same engine as the uvicorn stack but serving
+        # bench.peers.fastapi_app:app (FastAPI routing layer on top).
+        if [ "$variant" = "h11" ]; then
+            uv_http=h11
+        else
+            uv_http=auto
+        fi
+        LAUNCH_CMD=(
+            uvicorn bench.peers.fastapi_app:app
+                --host "$BIND_HOST" --port "$upstream_port"
+                "${uv_tls_args[@]}"
+                --loop auto --http "$uv_http" --workers 1
+                --log-level warning --no-access-log
+        )
+        finalize
+        ;;
     hypercorn)
         # bench/peers/hypercorn.toml carries the tuning; --bind on the CLI
         # overrides the toml's bind so we share $port with the other peers.
-        # Sprint 14: hypercorn intentionally has no cleartext/nginx variants
-        # (Sprint 13 ranked it well behind the matrix; the layer-attribution
+        # Hypercorn intentionally has no cleartext/nginx variants
+        # (it ranked well behind the matrix; the layer-attribution
         # A/B would not be informative).
         LAUNCH_CMD=(
             hypercorn --config bench/peers/hypercorn.toml
@@ -247,7 +267,7 @@ json.dump(cfg, open(sys.argv[2], 'w'))
         ;;
     daphne)
         # daphne endpoint spec: ssl:<port>:privateKey=<key>:certKey=<cert>
-        # Sprint 14: daphne intentionally has no cleartext/nginx variants
+        # Daphne intentionally has no cleartext/nginx variants
         # (same rationale as hypercorn).
         LAUNCH_CMD=(
             daphne --bind "$BIND_HOST"
@@ -259,7 +279,7 @@ json.dump(cfg, open(sys.argv[2], 'w'))
         ;;
     nginx)
         # Reference floor — pure C, static content only.  This is the
-        # standalone-nginx peer (Sprint 13).  Sprint 14's nginx-fronted
+        # standalone-nginx peer.  The nginx-fronted
         # variants use the same nginx binary but a different config
         # (nginx_proxy.conf) via the *-nginx suffix on other base stacks.
         if [ "$port" != "8443" ]; then

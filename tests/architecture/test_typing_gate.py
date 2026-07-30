@@ -202,7 +202,7 @@ def test_pyright_scope_is_narrow():
     it is not.
 
     Growing by a *named module written against the declarations* is the
-    intended way for this list to change — `blackbull/websocket.py` (Sprint
+    intended way for this list to change — `blackbull/websocket.py` (the
     82) constructs the WebSocket event shapes, so type-checking it proves the
     declarations hold where they are actually used.  Each addition is a
     reviewed decision, which is exactly what an assertion on the literal set

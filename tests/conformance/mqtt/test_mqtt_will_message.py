@@ -1,5 +1,5 @@
 """
-MQTT 5.0 Will Message (Last-Will Testament) conformance tests — Sprint 52.
+MQTT 5.0 Will Message (Last-Will Testament) conformance tests.
 
 Verifies LWT behaviour against the MQTT 5.0 OASIS Standard.
 

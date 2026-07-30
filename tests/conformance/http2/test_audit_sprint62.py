@@ -1,4 +1,4 @@
-"""Regression tests for the Sprint 62 HTTP/2 flow-control + lifecycle batch.
+"""Regression tests for an HTTP/2 flow-control + lifecycle audit batch.
 
 Pins the bugs from the 2026-07-07 comprehensive audit:
 
@@ -10,7 +10,7 @@ Pins the bugs from the 2026-07-07 comprehensive audit:
 - 1.14 (#3) 16 MiB allocation before frame-size validation
 - 2.5  stream_window_size dict-of-one → int
 
-Plus the Sprint 62 deferral landed later: consume-based inbound flow control
+Plus the deferral that landed later: consume-based inbound flow control
 (proposals/consume-based-inbound-flow-control.md) — WINDOW_UPDATE credit for a
 DATA frame is replayed when the app pops the event off the recipient queue,
 not when the frame is enqueued, so a stalled handler closes the window and
@@ -68,7 +68,7 @@ def test_senders_share_one_connection_window():
     conn = ConnectionWindow(1000)
     a = _new_sender(factory, 1, conn)
     b = _new_sender(factory, 3, conn)
-    # Both senders point at the same window object (bug 1.2 — not private copies).
+    # Both senders point at the same window object (not private copies).
     assert a._conn_window is conn and b._conn_window is conn
     # A debit through one sender is visible to the other immediately.
     a._conn_window.size -= 400
@@ -156,7 +156,7 @@ async def test_goaway_early_return_signals_recipients():
     handler._recipients = {1: recipient}
     handler._goaway_sent = True  # a prior frame already triggered a conn error
     # A queued frame arrives after the error; the goaway early-return must
-    # inject http.disconnect into blocked recipients (bug 1.8) rather than
+    # inject http.disconnect into blocked recipients rather than
     # returning and leaving a stream task waiting on receive() forever.
     handler.receive = AsyncMock(side_effect=[
         _make_h2_frame(FrameTypes.PING, 0, 0, b'\x00' * 8), None])
@@ -179,7 +179,7 @@ async def test_priority_unknown_dependency_does_not_crash():
     frame.exclusion = False
     frame.weight = 16
     # Must not raise AttributeError (find_child(99) → None); the stream is
-    # parented under the root instead (bug 1.10).
+    # parented under the root instead.
     await PriorityResponder(frame).respond(handler)
     assert handler.root_stream.find_child(7) is not None
 
@@ -191,7 +191,7 @@ async def test_priority_unknown_dependency_does_not_crash():
 @pytest.mark.asyncio
 async def test_receive_refuses_to_buffer_oversized_frame():
     """receive() detects an over-sized frame from its 9-byte header and returns
-    without ever reading (buffering) the declared payload (bug 1.14 #3)."""
+    without ever reading (buffering) the declared payload.  (#3)."""
     from blackbull.server.recipient import AbstractReader
     declared = DEFAULT_MAX_FRAME_SIZE + 1_000_000
     header = (declared.to_bytes(3, 'big') + FrameTypes.DATA
@@ -220,7 +220,7 @@ async def test_receive_refuses_to_buffer_oversized_frame():
 @pytest.mark.asyncio
 async def test_oversized_frame_len_drives_frame_size_error():
     """When receive() flags an over-sized frame, the frame loop raises a
-    connection FRAME_SIZE_ERROR (bug 1.14 #3)."""
+    connection FRAME_SIZE_ERROR."""
     handler = _make_actor()
     settings = _make_h2_frame(FrameTypes.SETTINGS, 0, 0, b'')
     header = ((DEFAULT_MAX_FRAME_SIZE + 1_000_000).to_bytes(3, 'big')
@@ -282,7 +282,7 @@ async def test_trailers_do_not_respawn_request():
         side_effect=[settings, headers, body, trailers, None])
     await handler.run()
     # The app was dispatched exactly once — the trailers HEADERS did not spawn
-    # a second request over the live stream (bug 1.14).
+    # a second request over the live stream.
     assert calls == ['/x']
     # No PROTOCOL_ERROR was raised for the (valid, END_STREAM-carrying) trailers.
     assert not [c.args[0] for c in handler.send_frame.call_args_list
@@ -290,7 +290,7 @@ async def test_trailers_do_not_respawn_request():
 
 
 # ---------------------------------------------------------------------------
-# Consume-based inbound flow control (the Sprint 62 deferral) — credit is
+# Consume-based inbound flow control — credit is
 # replayed when the app pops the event, not when the DATA frame is enqueued.
 # ---------------------------------------------------------------------------
 

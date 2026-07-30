@@ -17,31 +17,31 @@
 #   STACKS    space-separated subset (default: all five)
 #   LANES     space-separated subset of {A, B-wrk, B-oha, C, D} (default: all)
 #   PORT      bind port (default 8443)
-#   DURATION  per-scenario seconds for wrk/oha (default 60 from Sprint 24;
-#             was 30 in Sprints 13–23 — set DURATION=30 to reproduce older
+#   DURATION  per-scenario seconds for wrk/oha (default 60;
+#             older rows used 30 — set DURATION=30 to reproduce
 #             numbers)
 #   WARMUP    server warmup seconds before any measured run (default 15);
 #             one wrk pass at /plaintext c=64, output discarded.  Set to 0
-#             to skip — older Sprint 13–23 numbers were captured without
+#             to skip — the oldest numbers were captured without
 #             this pass.
 #   RUNS      h2load runs per scenario (median picked; default 3)
 
 set -e
 
 BASE_PORT="${PORT:-8443}"
-# Sprint 20: $BENCH_TARGET_HOST replaces the hard-coded `localhost` in every
+# $BENCH_TARGET_HOST replaces the hard-coded `localhost` in every
 # $BASE URL the load tools see.  Default keeps loopback semantics for the
 # single-instance harness; split-topology sets BENCH_TARGET_HOST to a name
 # that resolves to the server instance's VPC private IP (with cert SAN +
 # /etc/hosts entry in place so TLS verification keeps working).
 BENCH_TARGET_HOST="${BENCH_TARGET_HOST:-localhost}"
 # BASE is now per-stack — set inside bench_stack() via compute_base() so
-# the Sprint 14 *-cleartext stacks target http:// and *-nginx / *-h11 stacks
+# the *-cleartext stacks target http:// and *-nginx / *-h11 stacks
 # stay on https://.  Initial value is the standalone-TLS default so the
 # pre-loop health check / report header still work.
 BASE="https://${BENCH_TARGET_HOST}:${BASE_PORT}"
 
-# Sprint 20: when BENCH_REMOTE_LIFECYCLE=1 the launcher / kill / readiness
+# When BENCH_REMOTE_LIFECYCLE=1 the launcher / kill / readiness
 # checks dispatch over SSH to a second instance instead of running locally.
 # BENCH_REMOTE_SSH is the ssh prefix (e.g. `ssh -i ~/.ssh/server.pem ... ubuntu@10.0.0.5`).
 # BENCH_REMOTE_REPO is the absolute path of the BlackBull checkout on the
@@ -59,41 +59,41 @@ fi
 CERT="tests/cert.pem"
 KEY="tests/key.pem"
 RUNS="${RUNS:-3}"
-# Sprint 24: default duration raised from 30 s to 60 s for the
+# Default duration raised from 30 s to 60 s for the
 # wrk/oha lanes.  30 s left allocator-state,
 # kernel-pacing, and TLS-session-cache transients in the measured
 # window.  Older numbers in CHARACTERIZATION.md were captured at 30 s;
-# Sprint 24+ rows are 60 s.  Override via env to reproduce.
+# Recent rows are 60 s.  Override via env to reproduce.
 DURATION="${DURATION:-60}"
-# Sprint 24: explicit server warmup pass before any lane runs.  One
+# Explicit server warmup pass before any lane runs.  One
 # 15 s wrk burst against /plaintext c=64 — discards output, just nudges
 # Python allocator + kernel TCP autotune + TLS session-cache to
 # steady-state before the measured runs start.
 WARMUP="${WARMUP:-15}"
 
 STACKS_ALL="blackbull uvicorn hypercorn granian daphne nginx sanic"
-# Sprint 24 added Lane E (connection churn).  Defaulting it off in the
+# Lane E is connection churn.  Defaulting it off in the
 # all-lanes set so existing AWS runs (and the cost envelope they assume)
 # don't grow without intent — opt in with LANES="A B-wrk B-oha C D E-wrk".
 LANES_ALL="A B-wrk B-oha C D"
 STACKS="${STACKS:-$STACKS_ALL}"
 LANES="${LANES:-$LANES_ALL}"
 
-# Servers that support HTTP/2 (lane A applies).  Sprint 14 variants
+# Servers that support HTTP/2 (lane A applies).  The variants
 # (*-cleartext, *-nginx, *-h11) are intentionally NOT listed — Lane A
 # would either not negotiate (cleartext) or measure nginx-frontend H2
 # (which isn't apples-to-apples with the standalone H2 numbers).
-# Sprint 16 *-w<N> variants are checked against the base name via
+# The *-w<N> variants are checked against the base name via
 # strip_worker_suffix() below, so multi-worker stacks inherit capabilities.
 SUPPORTS_H2="blackbull hypercorn granian nginx"
 # Servers that DO NOT support /echo POST or /ws — those scenarios are skipped
 # automatically by the orchestrator's health check (server returns 405 / no WS).
 NO_POST_NO_WS="nginx"
 
-# Sprint 16: strip the -w<N> worker-count suffix so blackbull-w2 etc. match
+# Strip the -w<N> worker-count suffix so blackbull-w2 etc. match
 # the SUPPORTS_H2 / NO_POST_NO_WS lists exactly like plain "blackbull".
 # Other suffixes (-cleartext, -nginx, -h11) are intentionally NOT stripped —
-# those variants have different capability semantics by design (Sprint 14).
+# those variants have different capability semantics by design.
 strip_worker_suffix() {
     case "$1" in
         *-w[0-9]|*-w[0-9][0-9]) echo "${1%-w*}" ;;
@@ -101,8 +101,8 @@ strip_worker_suffix() {
     esac
 }
 
-# Per-stack BASE URL.  Sprint 14 introduces three suffix conventions;
-# Sprint 16 adds a fourth (multi-worker):
+# Per-stack BASE URL.  Three suffix conventions, plus
+# a fourth (multi-worker):
 #   *-cleartext     → http  on $BASE_PORT (no TLS on the server)
 #   *-nginx         → https on $BASE_PORT (TLS terminated by nginx, HTTP upstream)
 #   *-h11           → https on $BASE_PORT (uvicorn with --http h11)
@@ -186,7 +186,7 @@ kill_existing() {
 # In remote-lifecycle mode the local orchestrator cannot see the server's
 # process tree, so we drop the PID-descendant check and trust that the
 # preceding kill_existing left the port clean.  The HTTP probe is the only
-# remaining readiness signal — same shape as Sprint 16's between-lane
+# remaining readiness signal — same shape as the between-lane
 # health_check, just used at startup instead of between lanes.
 wait_ready() {
     local expected_pid="$1"
@@ -327,7 +327,7 @@ run_lane_c_k6() {
     local json_c2="$SCRATCH/k6_${label}_c2.json"
 
     # C1 — 200 VU.  BASE is exported so the k6 script picks up the
-    # actual benchmark target (Sprint 20 split topology points BASE at
+    # actual benchmark target (the split topology points BASE at
     # bench-server.internal rather than localhost).
     K6_VUS=200 K6_DURATION=60s BASE="$BASE" \
         k6 run --quiet --summary-export="$json_c1" \
@@ -427,7 +427,7 @@ PYEOF
 bench_stack() {
     local stack="$1"
 
-    # Sprint 14: per-stack BASE.  *-cleartext stacks target http://, the
+    # Per-stack BASE.  *-cleartext stacks target http://, the
     # rest stay on https://.  All downstream helpers (health_check, the
     # lane runners) read $BASE from the outer scope.
     BASE="$(compute_base "$stack")"
@@ -454,7 +454,7 @@ bench_stack() {
         # remote log on failure so the orchestrator output is useful.
         local granian_log_env_remote=""
         [ "$stack" = "granian" ] && granian_log_env_remote="GRANIAN_LOG_TARGET=$BENCH_REMOTE_REPO/$SCRATCH/server_granian.log"
-        # Sprint 21 Phase B: propagate BB_BENCH_TASKSET so per-stack runs
+        # Propagate BB_BENCH_TASKSET so per-stack runs
         # can pin workers to specific CPUs.  Empty (the default) means no
         # pinning on the server side.
         local taskset_env_remote=""
@@ -477,7 +477,7 @@ bench_stack() {
         # buffering question altogether); other stacks use the shell pipe.
         local granian_log_env=""
         [ "$stack" = "granian" ] && granian_log_env="GRANIAN_LOG_TARGET=$(pwd)/$SCRATCH/server_granian.log"
-        # Sprint 21 Phase B: optional CPU pinning, same env var as remote mode.
+        # Optional CPU pinning, same env var as remote mode.
         local taskset_prefix=()
         [ -n "${BB_BENCH_TASKSET:-}" ] && taskset_prefix=(taskset -c "$BB_BENCH_TASKSET")
         env $granian_log_env \
@@ -505,11 +505,11 @@ bench_stack() {
     fi
     echo "$stack ready (spawn pid=$server_pid)."
 
-    # Sprint 24: short warmup burst to settle Python allocator, kernel
+    # Short warmup burst to settle Python allocator, kernel
     # TCP autotune, and TLS session-cache before any measured run.
     # Output is discarded — this exists to remove transients, not to
     # produce a number.  WARMUP=0 disables (back-compat with the
-    # Sprint 13–23 protocol).
+    # the older protocol).
     if [ "${WARMUP:-15}" -gt 0 ]; then
         echo "  warmup ${WARMUP}s ..."
         wrk -t2 -c64 -d"${WARMUP}s" "$BASE/plaintext" >/dev/null 2>&1 || true
@@ -529,7 +529,7 @@ bench_stack() {
 
     # Capability checks against SUPPORTS_H2 / NO_POST_NO_WS use the
     # worker-suffix-stripped base name so blackbull-w<N> inherits from
-    # blackbull.  Sprint 14 suffixes (-cleartext / -nginx / -h11) are NOT
+    # blackbull.  The suffixes (-cleartext / -nginx / -h11) are NOT
     # stripped — their capability semantics differ from the base by design.
     local stack_base
     stack_base="$(strip_worker_suffix "$stack")"
@@ -583,7 +583,7 @@ bench_stack() {
     echo "Methodology: bench/CHARACTERIZATION.md"
     echo "App:         bench/peers/asgi_app.py (shared minimal ASGI)"
     echo "             — BlackBull uses bench/app.py for parity at the wire level"
-    echo "Target:      $BASE  (default; Sprint 14 *-cleartext stacks use http:// instead)"
+    echo "Target:      $BASE  (default; *-cleartext stacks use http:// instead)"
     echo ""
     echo "Hardware:    $(uname -a | cut -d' ' -f1-3)"
     echo "CPU:         $(grep -m1 'model name' /proc/cpuinfo | sed 's/.*: //')"

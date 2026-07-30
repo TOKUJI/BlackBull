@@ -1,4 +1,4 @@
-"""Wire-equivalence tests for the Sprint 21 Phase C HPACK fast path.
+"""Wire-equivalence tests for the HPACK fast path.
 
 The fast path in ``blackbull/protocol/hpack_fastpath.py`` precomputes the
 single-byte ``Indexed Header Field`` encoding for RFC 7541 Appendix A
@@ -151,7 +151,7 @@ def test_status_only_response_is_single_byte():
 
 
 # ---------------------------------------------------------------------------
-# Sprint 24 — request-side fastpath (PUSH_PROMISE pseudo-headers)
+# Request-side fastpath (PUSH_PROMISE pseudo-headers)
 # ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize("name,value,expected_byte", [
@@ -163,7 +163,7 @@ def test_status_only_response_is_single_byte():
     (b":scheme", b"https",       0x80 | 7),
 ])
 def test_pseudo_fast_bytes_static_entries(name: bytes, value: bytes, expected_byte: int):
-    """Sprint 24 — every static-table entry with both name and value
+    """Every static-table entry with both name and value
     defined returns the expected single-byte Indexed Header Field."""
     wire = hpack_fastpath.pseudo_fast_bytes(name, value)
     assert wire == bytes((expected_byte,))

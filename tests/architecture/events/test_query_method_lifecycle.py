@@ -1,4 +1,4 @@
-"""Request-lifecycle events for HTTP QUERY requests (RFC 10008, Sprint 78).
+"""Request-lifecycle events for HTTP QUERY requests (RFC 10008).
 
 The four lifecycle events (`request_received`, `before_handler`,
 `after_handler`, `request_completed`) must fire exactly once per QUERY

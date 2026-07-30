@@ -1,6 +1,6 @@
 # tests/conformance/http1/test_http1_differential.py
 #
-# Sprint 17 — Differential fuzzing: BlackBull vs nginx as oracle.
+# Differential fuzzing: BlackBull vs nginx as oracle.
 #
 # nginx (running in a Docker container via testcontainers) is the
 # reference implementation.  Hypothesis generates HTTP/1.1 requests,
@@ -76,8 +76,8 @@ from blackbull.fault_injection import (  # noqa: E402
 # BlackBull side: differential-specific h1_app whose `/` route mirrors the
 # nginx oracle's `return 200 "ok"` for ANY method.  The shared h1_app in
 # conftest.py registers `/` for GET only — that mismatch is what the
-# Sprint 17 Phase 1 minimisation surfaced as the headline status_mismatch.
-# Sprint 17 Phase 3 widens just the differential test's app instead of
+# Minimisation surfaced this as the headline status_mismatch.
+# Widen just the differential test's app instead of
 # touching the shared fixture (which other tests rely on for 405-on-PATCH).
 # ---------------------------------------------------------------------------
 
@@ -248,10 +248,10 @@ def nginx_server(echo_server, docker_network):
 import time as _time  # noqa: E402
 from dataclasses import dataclass, field  # noqa: E402
 
-# Sprint 18 Phase 3 — Category, ACCEPTED_CATEGORIES, SideOutcome,
+# Category, ACCEPTED_CATEGORIES, SideOutcome,
 # normalize_response, categorize, and run_scenario moved out of this
 # pytest module so the atheris fuzz harness could reuse them without
-# importing pytest.  Sprint 46 re-homed them at
+# importing pytest.  They are re-homed at
 # blackbull.fault_injection alongside the new HTTP/2 server surface;
 # imports at the top of the file pull them back in.
 
@@ -260,7 +260,7 @@ from dataclasses import dataclass, field  # noqa: E402
 class DiffContext:
     """A failure-diagnosis snapshot for one Hypothesis example.
 
-    Sprint 17 Phase 5 — ``scenario`` replaces the prior dict-shaped
+    ``scenario`` replaces the prior dict-shaped
     ``req`` field as the source of truth for what went on the wire.
     ``wire_request`` continues to hold the actual bytes captured from
     the *BlackBull* side's :attr:`HTTP1Client.wire_buffer` (the nginx
@@ -311,7 +311,7 @@ def reconstruct_wire_request(req: dict) -> bytes:
 
 # ---------------------------------------------------------------------------
 # Hypothesis strategy — only fields that the helper actually uses
-# (Sprint 17 Phase 0: dropped unused 'query' and 'version' fields.
+# (Unused 'query' and 'version' fields were dropped.
 #  Phase 7 will add a malformed_request_strategy alongside.)
 # ---------------------------------------------------------------------------
 
@@ -352,7 +352,7 @@ http_request_strategy = st.fixed_dictionaries({
 
 
 # ---------------------------------------------------------------------------
-# Sprint 17 Phase 5 — scenario-level strategies
+# Scenario-level strategies
 #
 # A Scenario is the unified shape both this differential test and
 # tests/conformance/http1/fuzz/fuzz_http1.py drive against the server.
@@ -416,7 +416,7 @@ slowloris_scenario_strategy = st.builds(
 
 
 # ---------------------------------------------------------------------------
-# Sprint 17 Phase 7 — malformed_scenario_strategy.
+# Malformed_scenario_strategy.
 #
 # These strategies emit wire bytes that the high-level HTTP1Client.request()
 # would reject up front — garbage request lines, RFC-invalid header values,
@@ -586,7 +586,7 @@ def dump(ctx: DiffContext) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Sprint 17 Phase 8 — JSONL corpus capture + regression replay.
+# JSONL corpus capture + regression replay.
 #
 # When the Hypothesis sweep finds an example that lands outside
 # ACCEPTED_CATEGORIES, we serialise the scenario (`diff_*.jsonl`) and
@@ -599,7 +599,7 @@ def dump(ctx: DiffContext) -> str:
 
 import hashlib  # noqa: E402
 
-# Sprint 17 epilogue — the user-curated regression corpus lives under
+# The user-curated regression corpus lives under
 # ``fuzz/user-corpus/``, separate from ``fuzz/corpus/`` which atheris
 # uses as its working directory.  Keeping the two apart means atheris's
 # auto-generated seeds don't pollute the replay set and our curated
@@ -619,9 +619,9 @@ def _maybe_dump_corpus(ctx: DiffContext) -> None:
     """Write ``diff_<hash>.jsonl`` + sidecar metadata when the example
     landed outside ACCEPTED_CATEGORIES.
 
-    Sprint 18 — filename is now hash-only (no timestamp prefix) so
+    Filename is now hash-only (no timestamp prefix) so
     re-captures of the same scenario overwrite rather than create new
-    files.  Pre-Sprint-18 the timestamp prefix meant every run added
+    files.  A timestamp prefix would mean every run added
     another copy under a different ``diff_<ts>_<hash>.jsonl`` name.
     The ``captured_at_unix`` field in the sidecar still records when
     the divergence was last observed.
@@ -647,7 +647,7 @@ def _maybe_dump_corpus(ctx: DiffContext) -> None:
 
 @pytest.mark.docker
 @pytest.mark.xfail(
-    reason='Sprint 17: known divergences from nginx remain (e.g. host: \':\' '
+    reason='Known divergences from nginx remain (e.g. host: \':\' '
            'closes the connection on BlackBull).  Phase 4 categorises them '
            'as BB_TRANSPORT_FAIL; widening ACCEPTED_CATEGORIES is a future '
            'decision once the underlying causes are understood.',

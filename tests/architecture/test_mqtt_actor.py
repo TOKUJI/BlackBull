@@ -1,6 +1,6 @@
 """Architecture tests for MQTT protocol detection on the Non-ASGI bridge.
 
-Sprint 53 replaced the procedural ``MQTTActor`` with the ``BrokerActor`` +
+The procedural ``MQTTActor`` was replaced by the ``BrokerActor`` +
 ``MQTT5Actor`` topology; the actor-level behaviour those tests used to
 cover now lives in ``tests/unit/test_mqtt_broker_actor.py`` and
 ``tests/unit/test_mqtt_connection_actor.py``, with the full wire contract in

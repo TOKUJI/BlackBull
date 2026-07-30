@@ -1,6 +1,6 @@
 """Deprecation shim — moved to :mod:`blackbull.fault_injection`.
 
-Sprint 46 grouped the HTTP/1.1 client-side scenario model and the new
+Groups the HTTP/1.1 client-side scenario model and the
 HTTP/2 server-side fault-injection surface under
 :mod:`blackbull.fault_injection`.  Import from there going forward::
 

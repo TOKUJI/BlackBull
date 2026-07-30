@@ -376,7 +376,7 @@ class TestHandlerIntrospection:
 
 
 # ---------------------------------------------------------------------------
-# OpenAPIExtension — the reference implementation of the Sprint 40
+# OpenAPIExtension — the reference implementation of the
 # init_app(app) extension convention.
 # ---------------------------------------------------------------------------
 
@@ -496,7 +496,7 @@ def test_extension_emits_spec_that_validates(_spec_validator):
 
 
 class TestQueryParamEmission:
-    """Sprint 74: query params of simplified handlers appear in the minimal
+    """Query params of simplified handlers appear in the minimal
     tier — ``in: query``, schema from the annotation, ``required`` from
     default-presence.  ``Depends`` params are not request inputs and are
     excluded."""

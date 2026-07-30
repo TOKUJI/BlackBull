@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# bench/wrk/lane_e.sh — Sprint 24 Lane E: connection-churn / short-lived
+# bench/wrk/lane_e.sh — Lane E: connection-churn / short-lived
 # connections.  Mirrors bench/wrk/run.sh's contract (same env, same row
 # format including the trailing "noise (MAD)" column) but only runs E1
 # and E2 with the no_keepalive.lua script forcing `Connection: close`.

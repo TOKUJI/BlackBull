@@ -51,7 +51,7 @@ def _wrap_send(raw_send: ASGISendCallable):
     inside :meth:`_dispatch` — never at :meth:`__call__` around the whole
     middleware chain.  Wrapping outward leaks ``Response`` objects into
     middleware ``send`` wrappers, which reasonably assume ASGI dicts and
-    crash on ``msg['type']`` (the 0.43.2 regression; locked by
+    crash on ``msg['type']`` (locked by
     ``tests/unit/test_middleware_decorator.py``).  Keep it innermost so
     everything above the route handler observes plain ASGI dicts.
 
@@ -277,7 +277,7 @@ class BlackBull:
         # docs/guide/extensions.md.
         self.extensions: dict[str, object] = {}
 
-        # Non-ASGI protocol registry (Sprint 50) — lazily built on the first
+        # Non-ASGI protocol registry — lazily built on the first
         # raw_handler / register_protocol_handler so importing BlackBull does
         # not drag in the server package.  None means "HTTP-only" (the bridge
         # is fully dormant).
@@ -561,7 +561,7 @@ class BlackBull:
                     # A raising @app.on_startup / @app.intercept('app_startup')
                     # hook must fail startup, not kill the lifespan task before
                     # it acks — otherwise LifespanManager.__aenter__ blocks
-                    # forever and the server never starts (bug 1.3).  Sending
+                    # forever and the server never starts.  Sending
                     # lifespan.startup.failed is also the ASGI-correct signal
                     # under external servers (uvicorn/hypercorn).
                     self._logger.error('app_startup hook failed:\n%s',
@@ -578,7 +578,7 @@ class BlackBull:
                     # ASGI lifespan spec — a raising @app.on_shutdown /
                     # @app.intercept('app_shutdown') hook must answer with
                     # lifespan.shutdown.failed, not unwind the lifespan task
-                    # silently (bug 1.18); external servers (uvicorn,
+                    # silently; external servers (uvicorn,
                     # hypercorn) log the failure and exit non-zero.
                     self._logger.error('app_shutdown hook failed:\n%s',
                                        traceback.format_exc())
@@ -594,7 +594,7 @@ class BlackBull:
 
         Single emission point for the in-request Level B lifecycle events
         (``request_received`` / ``before_handler`` / ``after_handler``) —
-        Sprint 64 consolidated them here, the one choke point every
+        this is the one choke point every
         transport passes (BlackBull's own HTTP/1.1 and HTTP/2 actors,
         uvicorn/hypercorn, TestClient), so each fires exactly once per
         request regardless of how the app is served.  ``request_completed``
@@ -612,7 +612,7 @@ class BlackBull:
         """
         self._logger.debug((conn, receive, send))
 
-        # WebSocket is native too (Sprint 80): ``conn`` is a Connection here as
+        # WebSocket is native too: ``conn`` is a Connection here as
         # well. Route it by its ``path`` to the registered WS handler, which
         # receives ``(conn, receive, send)``. WS has its own lifecycle events
         # (websocket_connected/message/disconnected), so it skips the HTTP
@@ -650,7 +650,7 @@ class BlackBull:
                              send: ASGISendCallable, scheme):
         """Route and run one HTTP request (the non-WebSocket half of _dispatch).
 
-        Sprint 80: BlackBull is a native-Connection framework — the dispatch
+        BlackBull is a native-Connection framework — the dispatch
         pipeline threads the typed :class:`Connection` end to end (routing,
         handler, error handlers, gRPC, and events all read ``conn.*``). The ASGI
         ``scope`` dict exists only at the external/``BB_FORCE_ASGI_SCOPE`` boundary,
@@ -835,7 +835,7 @@ class BlackBull:
             return
         elif conn.get('type') == 'websocket':
             # External ASGI host (uvicorn) delivered a websocket scope dict.
-            # WebSocket is native too (Sprint 80): convert it to a Connection at
+            # WebSocket is native too: convert it to a Connection at
             # the boundary — the WS extras are derived (``conn.subprotocols``
             # reads the request header) or actor-set (``conn._ws``), so no scope
             # dict is threaded past here. BlackBull's own server already hands us
@@ -1004,10 +1004,41 @@ class BlackBull:
         self._global_middlewares.append(mw)
         self._chain = None  # invalidate cached chain
 
+    def _is_route_free(self, path: str, methods) -> bool:
+        """True when *path* has no route registered for any of *methods*.
+
+        Used by :meth:`static` before it claims the bare mount prefix, since
+        registering an already-registered path replaces it silently.
+        """
+        for method in methods:
+            try:
+                self._router[(path, method, Scheme.http)]
+            except (PathNotRegistered, MethodNotApplicable):
+                continue
+            return False
+        return True
+
+    def _static_miss(self):
+        """Terminal handler for a static route whose target is not a file.
+
+        Routes the miss through the app's own 404 path so a static miss is
+        answered exactly as any unmatched path is, including a user's
+        ``@app.on_error(HTTPStatus.NOT_FOUND)`` override.  A static route
+        must end in a real handler: ``_register_chain`` binds the last
+        function's ``call_next`` to ``do_nothing``, which sends no response
+        at all.
+        """
+        async def _static_not_found(conn, receive, send):
+            conn.state['error_status'] = HTTPStatus.NOT_FOUND
+            handler = self._error_router[HTTPStatus.NOT_FOUND]
+            if handler is not None:
+                await handler(conn, receive, send)
+        return _static_not_found
+
     def static(self, url_prefix: str, root_dir: str | Path, *,
                cache: bool = False, index: str | None = None,
                conditional: bool = True) -> None:
-        """Serve static files from *root_dir* under *url_prefix* via global middleware.
+        """Serve static files from *root_dir* under *url_prefix* as a route.
 
         ``cache`` (default ``False``): when ``True``, file bodies are
         held in-memory for fast cache-hit serving.  Useful for
@@ -1024,14 +1055,37 @@ class BlackBull:
         ``conditional`` (default ``True``): emit ``ETag`` / ``Last-Modified``
         validators and answer ``If-None-Match`` / ``If-Modified-Since`` with
         a 304.  Set ``False`` to disable conditional responses.
+
+        Registered as a **route**, not global middleware, so a request that
+        is not for a static path never enters this code: it resolves in the
+        router's exact-match dict and never reaches the parametrised scan.
+        This is also what every peer framework does — Starlette, Sanic,
+        aiohttp, Flask and Django all mount static as a route.
         """
         from blackbull.middleware.static import StaticFiles
         root = Path(root_dir).resolve()
         self._static_roots.append((url_prefix, root))
-        self._global_middlewares.append(
-            StaticFiles(url_prefix=url_prefix, root_dir=root, cache=cache,
-                        index=index, conditional=conditional))
-        self._chain = None  # invalidate cached chain
+        mw = StaticFiles(url_prefix=url_prefix, root_dir=root, cache=cache,
+                         index=index, conditional=conditional)
+        prefix = url_prefix.rstrip('/')
+        methods = [HTTPMethod.GET, HTTPMethod.HEAD]
+        chain = [mw, self._static_miss()]
+        self._router.route(methods=methods,
+                           path=f'{prefix}/{{filepath:path}}',
+                           functions=list(chain))
+        # The ``path`` converter is ``r'.+'`` — it needs at least one
+        # character, so neither ``/assets`` nor ``/assets/`` matches the
+        # route above.  Both must resolve for ``index=`` to serve the mount
+        # root (and ``blackbull serve``, which mounts at ``/``, depends on
+        # it), so each gets its own exact-match entry.
+        #
+        # Registering the same path twice silently replaces the first entry,
+        # so an explicit route always wins: a mount at ``/`` must not quietly
+        # eat the app's own root handler.
+        for bare in ((prefix, f'{prefix}/') if prefix else ('/',)):
+            if self._is_route_free(bare, methods):
+                self._router.route(methods=methods, path=bare,
+                                   functions=list(chain))
 
     def on_error(self, key):
         """Register a custom error handler for an HTTPStatus or exception class.
@@ -1146,7 +1200,7 @@ class BlackBull:
         port: int | None = None,
         tls: bool = False,
     ) -> None:
-        """Register a handler for a non-ASGI (raw) protocol (Sprint 50).
+        """Register a handler for a non-ASGI (raw) protocol.
 
         The handler is an async callable ``(reader, writer, ctx) -> None`` that
         owns the connection for its whole lifetime.  When *port* is set, the
@@ -1156,12 +1210,12 @@ class BlackBull:
         Args:
             name: Protocol name (e.g. ``'echo'``, ``'mqtt'``); must be unique.
             handler: Async ``(reader, writer, ctx)`` coroutine.
-            detector: Reserved for first-byte sniffing on shared ports
-                (Sprint 51); unused today.
+            detector: Reserved for first-byte sniffing on shared ports;
+                unused today.
             port: Dedicated listening port for this protocol.
             tls: Serve this port through the server's TLS machinery (e.g.
                 ``mqtts://``).  Requires the server to be configured with a
-                certificate; startup fails fast otherwise (Sprint 75).
+                certificate; startup fails fast otherwise.
         """
         if self._protocol_registry is None:
             from .server.protocol_registry import ProtocolRegistry  # noqa: PLC0415

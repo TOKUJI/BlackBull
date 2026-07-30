@@ -20,7 +20,7 @@ source "$(dirname "$0")/config.sh"
 _bench_aws_check_env || exit 1
 _bench_aws_load_state || exit 1
 
-# Backward-compat: pre-Sprint-20 state files only have INSTANCE_ID/PUBLIC_IP.
+# Backward-compat: legacy state files only have INSTANCE_ID/PUBLIC_IP.
 SERVER_INSTANCE_ID="${SERVER_INSTANCE_ID:-${INSTANCE_ID:-}}"
 LOADGEN_INSTANCE_ID="${LOADGEN_INSTANCE_ID:-}"
 TOPO="${TOPO:-single}"

@@ -1,4 +1,4 @@
-"""Sprint 72 — client-side H2 window seeding (audit bugs 1.20a + 2.11).
+"""Client-side H2 window seeding.
 
 RFC 9113 §6.9.2: SETTINGS_INITIAL_WINDOW_SIZE governs the *initial* send
 window of streams the peer has not yet opened; existing streams are
@@ -29,7 +29,7 @@ def _client() -> HTTP2Client:
 
 class TestClientWindowSeeding:
     def test_sender_created_after_settings_is_seeded(self):
-        """Bug 1.20a — a sender made after the SETTINGS exchange must start
+        """A sender made after the SETTINGS exchange must start
         at the peer's announced initial window, not the RFC default."""
         c = _client()
         c._on_initial_window_size(123456)

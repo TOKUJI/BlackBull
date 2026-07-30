@@ -100,7 +100,7 @@ class FrameBase:
         self.flags = flags
         self.stream_id = stream_id
         # Guarded: __init__ runs on every frame in both directions, so the
-        # f-string must not be built when DEBUG is off (Tier 1).
+        # f-string must not be built when DEBUG is off.
         if logger.isEnabledFor(logging.DEBUG):
             logger.debug('type=%s, flag=%s, stream_id=%s and payload size=%s',
                          self.type_, self.flags, self.stream_id, self.length)
@@ -421,7 +421,7 @@ class Headers(FrameBase):
     def save(self):
         encoder = self.encoder if self.encoder is not None else Encoder()
         # Pseudo-headers MUST come before regular headers (RFC 7540 §8.1.2.1)
-        # Sprint 21 Phase C — fast-path :status when its value is one of the
+        # Fast-path :status when its value is one of the
         # static-table entries (RFC 7541 App A indices 8-14).  The encoder
         # would emit the same single byte, but at the cost of dict lookups
         # and a generator iteration we can sidestep.  Static-indexed fields
@@ -443,7 +443,7 @@ class Headers(FrameBase):
 
         base = super().save()
         # Guarded: fires on every HEADERS write; the unguarded form also
-        # allocated `base + payload` purely to log it (Tier 1).
+        # allocated `base + payload` purely to log it.
         if logger.isEnabledFor(logging.DEBUG):
             logger.debug('Headers.save: %r', base + payload)
         return base + payload
@@ -489,11 +489,10 @@ class PushPromise(FrameBase):
 
     def save(self) -> bytes:
         encoder = self.encoder if self.encoder is not None else Encoder()
-        # Sprint 24: extend the HPACK static fastpath to the request-side
+        # Extend the HPACK static fastpath to the request-side
         # pseudo-headers that PUSH_PROMISE emits (``:method``, ``:scheme``,
         # ``:path``).  Same wire-equivalence + dynamic-table-neutrality
-        # invariants as the Sprint 21 Phase C ``:status`` fast-path on
-        # ``Headers.save``.
+        # invariants as the ``:status`` fast-path on ``Headers.save``.
         fast_bytes = b''
         remaining_pseudo = []
         for k, v in self.pseudo_headers.items():
@@ -591,7 +590,7 @@ class Data(FrameBase):
             self.payload = payload.read(data_length)
         else:
             # Non-padded is the common case: the payload IS the frame data, so
-            # skip the BytesIO wrap + read copy (copy-reduction-http2 P2).
+            # skip the BytesIO wrap + read copy.
             # FrameFactory.load already sliced data to exactly ``length``; the
             # conditional preserves BytesIO.read(length) semantics for the rare
             # over-long input without copying when it already fits.

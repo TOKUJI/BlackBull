@@ -1,5 +1,5 @@
 """
-MQTT 5.0 message dataclass unit tests — Sprint 52.
+MQTT 5.0 message dataclass unit tests.
 
 Tests individual MQTT message dataclasses in isolation (no I/O, no Actor).
 Verifies that message objects behave correctly (construction, equality,

@@ -212,7 +212,7 @@ class TestOpenSocket:
 )
 class TestOpenSocketReusePort:
     """open_socket() must plumb BB_SOCKET_REUSEPORT through to the HTTP
-    listener so forked workers can co-bind the port (Sprint 55 G1, step 1).
+    listener so forked workers can co-bind the port.
 
     Regression: the setting existed but was never passed to
     create_dual_stack_sockets() from open_socket(), so it was silently

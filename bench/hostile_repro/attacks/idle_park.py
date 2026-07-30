@@ -5,7 +5,7 @@ This is the *benign* variant of the same shape as the HttpArena
 burst-close cliff: lots of suspended-on-readuntil tasks parked in
 the event loop, each holding a slot.
 
-Defence: shorter ``BB_KEEP_ALIVE_TIMEOUT`` (Sprint 30 lowers
+Defence: shorter ``BB_KEEP_ALIVE_TIMEOUT`` (BlackBull lowers
 default from 60 s to 5 s) and ``BB_MAX_CONNECTIONS`` cap.
 
 Note: unlike the other attack scripts, this one DELIBERATELY does

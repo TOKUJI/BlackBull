@@ -1,4 +1,4 @@
-"""Integration test for the Non-ASGI bridge — Raw TCP echo (Sprint 50).
+"""Integration test for the Non-ASGI bridge — Raw TCP echo.
 
 Spins up a single BlackBull ``Server`` that serves HTTP on one port and a raw
 TCP echo protocol on another, then exercises both to prove coexistence

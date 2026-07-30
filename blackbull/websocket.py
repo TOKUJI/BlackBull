@@ -1,4 +1,4 @@
-"""The high-level WebSocket handler object (Sprint 82).
+"""The high-level WebSocket handler object.
 
 A :class:`WebSocket` wraps the raw ``(conn, receive, send)`` triplet so a
 handler works in **data and methods** instead of event dicts::
@@ -22,7 +22,7 @@ forms run over the same actor, codec, and sender.  Nothing about the wire
 changes — a handler that uses this object produces byte-identical frames to
 one that sends the dicts by hand.
 
-Naming follows the Sprint 80 rule: this is a *native* surface, so it is
+Naming follows the native-surface rule: this is a *native* surface, so it is
 unprefixed and lives outside ``asgi.py``.  The ``ASGIEvent`` dicts it builds
 are the boundary representation, and stay there.
 """

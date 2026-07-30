@@ -25,8 +25,8 @@ defined (the only entries eligible for single-byte encoding):
 
 All other static-table entries are name-only (e.g. ``content-type`` at
 index 31 has no static value), so they cannot use the single-byte
-indexed encoding.  Sprint 24 confirmed the table is exhausted at this
-encoding tier — any further fastpath work would need to handle the
+indexed encoding.  The table is exhausted at this encoding tier — any
+further fastpath work would need to handle the
 literal-with-indexed-name encoding (RFC 7541 §6.2), which involves
 encoder choices (Huffman vs raw, incremental indexing vs not) that we
 cannot pre-decide without coupling to encoder configuration.
@@ -70,8 +70,7 @@ def status_fast_bytes(status_value) -> bytes | None:
     value matches a static-table entry, else ``None``.
 
     Accepts ``str`` (the ASGI shape, e.g. ``'200'``) or ``bytes``.
-    Kept as a separate function for backwards compatibility with the
-    Sprint 21 Phase C ``Headers.save()`` call site.
+    Kept as a separate function for the ``Headers.save()`` call site.
     """
     return _STATIC_INDEXED.get((b':status', _coerce_bytes(status_value)))
 

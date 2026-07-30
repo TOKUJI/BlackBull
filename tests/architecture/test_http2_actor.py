@@ -128,7 +128,7 @@ def mock_app():
 # ---------------------------------------------------------------------------
 # Test 1: single stream → the app is dispatched once; no error event.
 # (Request-lifecycle Level B events are emitted by BlackBull._dispatch since
-# Sprint 64 — the actor layer only calls the app and reports errors.)
+# The actor layer only calls the app and reports errors.)
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
@@ -231,7 +231,7 @@ async def test_handshake_sends_settings_initial_window_size(
     """HTTP2Actor.run() must advertise the configured
     ``BB_H2_INITIAL_WINDOW_SIZE`` in the server's SETTINGS frame.
 
-    Sprint 37 lowered BlackBull's default to the RFC 7540 §6.9.2
+    BlackBull's default is the RFC 7540 §6.9.2
     baseline (65535).  This test sets a non-default value via env so
     the emitted frame is unambiguously distinguishable from the RFC
     default and the test asserts the actor honours the configured
@@ -262,7 +262,7 @@ async def test_handshake_sends_connection_window_update(
     """HTTP2Actor.run() must send WINDOW_UPDATE(stream_id=0) when the
     configured connection window exceeds the RFC 7540 default (65535).
 
-    Sprint 37 lowered BlackBull's default to 65535 (no
+    BlackBull's default is 65535 (no
     WINDOW_UPDATE needed at handshake — peer's connection window
     already starts there).  This test sets a non-default to assert
     the actor emits the expansion frame when one is required.
@@ -307,7 +307,7 @@ async def test_make_sender_uses_current_connection_window(fake_writer, mock_app)
 
     sender = actor.make_sender(stream_id=7)
 
-    # The sender shares the actor's connection window (bug 1.2), so it reads
+    # The sender shares the actor's connection window, so it reads
     # the current budget from the one object rather than a stale copy.
     assert sender.connection_window_size == 4194304, (
         f'Expected connection window 4194304, got {sender.connection_window_size}'
@@ -481,7 +481,7 @@ async def test_stream_semaphore_caps_active_handlers():
 
 
 # ---------------------------------------------------------------------------
-# Alloc-reduction (P2 / Sprint 80): the H2 HEADERS dispatch path skips the
+# Alloc-reduction: the H2 HEADERS dispatch path skips the
 # per-request AccessLogRecord (and the capturing-send wrapper) when nothing
 # consumes it — mirrors the HTTP/1.1 gate (P3). A real EventAggregator is
 # required so has_request_completed_listeners() reports true registration

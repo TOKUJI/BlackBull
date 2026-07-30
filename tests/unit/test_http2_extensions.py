@@ -1,4 +1,4 @@
-"""Sprint 32 — HTTP/2 scope extensions surface.
+"""HTTP/2 scope extensions surface.
 
 Covers:
 
@@ -47,7 +47,7 @@ class TestBuildExtensions:
 
     def test_push_marker_is_empty_dict(self, default_extensions):
         """Push is signalled by the *presence* of the key, not by
-        contents — matches BlackBull's pre-Sprint-32 behaviour."""
+        contents — matches BlackBull's older behaviour."""
         assert default_extensions[ASGIEvent.HTTP_RESPONSE_PUSH] == {}
 
     def test_priority_contents_match_rfc_9218_default(self, default_extensions):

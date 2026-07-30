@@ -1,5 +1,5 @@
 """Unit tests for AsyncioWriter — focused on the ``write_timeout``
-slow-read defence introduced in Sprint 30 Tier 1.1.
+slow-read defence.
 
 The defence: a peer that reads the response 1 byte/sec eventually fills
 the kernel send buffer; ``StreamWriter.drain()`` then blocks indefinitely
@@ -276,7 +276,7 @@ async def test_concurrent_drains_share_one_window_and_one_verdict():
 
 
 # ---------------------------------------------------------------------------
-# Sprint 31 — ``http.response.pathsend`` / sendfile path
+# ``http.response.pathsend`` / sendfile path
 # ---------------------------------------------------------------------------
 
 class _SendfileLoopProxy:

@@ -170,10 +170,18 @@ next request with no staleness window.  Default is `cache=False`;
 standalone deployments serving static traffic directly should opt
 in to keep prior performance.
 
-`StaticFiles` itself emits no `ETag`; pair it with the `Cache`
-middleware for ETag / `If-None-Match` revalidation (`blackbull serve`
-does this for you).  Byte-range-multipart responses are not
-implemented across any of the three paths.
+`StaticFiles` emits a strong `ETag` (over mtime + size) and
+`Last-Modified`, and answers `If-None-Match` / `If-Modified-Since`
+with a `304`, on by default via `conditional=True`.  Pass
+`conditional=False` to suppress the validators.  Byte-range-multipart
+responses are not implemented across any of the three paths.
+
+`app.static()` registers a route rather than global middleware, so a
+request that is not for a static path never enters `StaticFiles`.  The
+consequence to plan around: a miss *under* the prefix is answered `404`
+by the static route rather than falling through to another route that
+also matches the prefix.  Fully-static routes still resolve first, so
+only an overlapping *parametrised* route is affected.
 
 ### `Depends` is deliberately minimal; query params are scalars only
 

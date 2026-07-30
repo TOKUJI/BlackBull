@@ -1,4 +1,4 @@
-"""Conformance: the fuller GrpcContext (Sprint 60 G3).
+"""Conformance: the fuller GrpcContext.
 
 Adds the parts of grpcio's ``ServicerContext`` a raw-bytes transport can honour:
 ``time_remaining()`` (from ``grpc-timeout``), ``peer()`` (from the ASGI

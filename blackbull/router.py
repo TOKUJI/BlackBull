@@ -127,7 +127,7 @@ class _RouteTrie:
                     # {name:path} consumes all remaining segments, so it must be
                     # the final segment.  A route like ``/a/{p:path}/b`` used to
                     # silently register as ``/a/{p:path}`` — dropping ``/b`` — so
-                    # reject it at registration (bug 1.13).
+                    # reject it at registration.
                     if i != len(segments) - 1:
                         raise ConfigurationError(
                             f"path converter {seg!r} must be the last segment of "
@@ -424,7 +424,7 @@ has_inner = has_middleware_param  # backward-compat alias
 
 #: A full-form handler is identified by carrying **both** transport channels
 #: (``receive`` and ``send``); its first positional param is the request context
-#: — the native ``conn``/``connection`` (Sprint 80), the deprecated ``scope``
+#: — the native ``conn``/``connection``, the deprecated ``scope``
 #: alias, or a WS handler's ``websocket``. The context name is not part of the
 #: test: a simplified handler never takes ``receive``/``send`` (those are the
 #: framework's channels, not request data), so their presence alone is decisive.
@@ -561,7 +561,7 @@ def _instantiate_dataclass(cls: Any, data: dict) -> Any:
 
 def _decode_json_body(cls: Any, raw: bytes, handler_name: str) -> Any:
     """Parse *raw* JSON and instantiate the dataclass *cls*, mapping any
-    client-input error to a 400 (bug 1.12).
+    client-input error to a 400.
 
     Malformed JSON, a wrong top-level shape, unknown/missing fields, or a
     field that fails type coercion are all *client* errors — they must surface
@@ -691,7 +691,7 @@ async def _finish_result(result, conn, receive, send, converters, fn_name: str) 
 
 
 # ---------------------------------------------------------------------------
-# Simplified-handler parameter classification (Sprint 74)
+# Simplified-handler parameter classification
 # ---------------------------------------------------------------------------
 
 # RFC-agnostic textual boolean forms accepted for ``param: bool`` query params.
@@ -765,7 +765,7 @@ def _handler_param_plan(fn, path_param_names: set) -> tuple:
     body-consuming parameter, or a leftover parameter whose annotation is not a
     supported query scalar.
     """
-    from .connection import Connection as _Conn  # Sprint 79: Request is now a Connection alias
+    from .connection import Connection as _Conn  # ``Request`` is an alias of it
 
     params = inspect.signature(fn).parameters
     annotations = {n: p.annotation for n, p in params.items()}
@@ -874,7 +874,7 @@ def _conn_of(target, receive):
     inbound ASGI scope via :meth:`Connection.from_scope` before dispatch), or a
     hand-built ASGI scope dict on a direct unit-test drive of a wrapper.
 
-    Sprint 79 Phase 5 (consumer switch): the protocol actor builds the
+    The protocol actor builds the
     ``Connection`` in its parser and stashes it on the ASGI scope envelope
     under :data:`~blackbull.connection.CONNECTION_STASH_KEY`, so the self-hosted
     path reuses that object with
@@ -911,11 +911,11 @@ def _conn_of(target, receive):
 def _set_path_params(target, receive, params: dict) -> None:
     """Record matched URL path params on the request's :class:`Connection`.
 
-    Sprint 79 Phase 5: replaces the old ``scope.setdefault('path_params', {})``
+    Replaces the old ``scope.setdefault('path_params', {})``
     closure. The handler reads them back via ``conn.path_params`` (see
     :func:`_conn_of`).
 
-    Sprint 80 Tier-1b: no-op fast-return when there are no matched params, so a
+    No-op fast-return when there are no matched params, so a
     no-param route never touches ``conn.path_params`` and its lazy backing dict
     is never allocated.
     """
@@ -1037,7 +1037,7 @@ def _websocket_param_plan(fn, path_param_names: set = frozenset()) -> tuple[tupl
             # are rare and the reserved-name space makes bare names genuinely
             # ambiguous — `async def chat(socket)` means the socket, not a query
             # param named "socket".  Requiring the annotation costs one word and
-            # keeps the Sprint 82 property that a typo fails at registration
+            # keeps the property that a typo fails at registration
             # instead of rejecting every connection at runtime.
             target = None if bare else _unwrap_optional(ann)
             coercer = _QUERY_COERCERS.get(target) if isinstance(target, type) else None
@@ -1089,7 +1089,7 @@ def _adapt_websocket_handler(fn, path: str = ''):
     plan = _websocket_param_plan(fn, _path_param_names(path))
 
     # The overwhelmingly common shape — a lone ``ws`` — gets a wrapper with no
-    # per-connection argument assembly at all.  Unchanged since Sprint 82.
+    # per-connection argument assembly at all.
     if len(plan) == 1 and plan[0][1] == 'ws':
         @wraps(fn)
         async def _ws_wrapper(conn, receive, send):
@@ -1211,7 +1211,7 @@ def _adapt_handler(fn, path: str, converters: dict | None = None):
       TypeError at registration time (fail fast).
 
     Handlers using neither query params nor ``Depends`` compile to the same
-    basic wrapper as before Sprint 74 — the zero-overhead pin.
+    basic wrapper as a handler that uses neither — the zero-overhead pin.
 
     Return values: Response → send(result); bytes → send(Response(result));
     str → send(Response(result.encode())); dict → send(JSONResponse(result));
@@ -1298,7 +1298,7 @@ def _adapt_handler(fn, path: str, converters: dict | None = None):
 
     if not has_query and not depends_plan:
         # Zero-overhead pin: neither new parameter category is in play, so
-        # this handler gets the exact wrapper it got before Sprint 74.
+        # this handler gets the plain wrapper.
         return _wrapper
 
     # Extended wrapper — query params and/or Depends.  The plan below was
@@ -1727,8 +1727,8 @@ class Router:
         """Core route lookup — trie first, regex fallback.  Raises on miss.
 
         No logging on the hit path: even a disabled ``logger.debug`` costs
-        ~100 ns/call, a measurable slice of the <1000 ns ``_resolve`` budget
-        (Sprint 77).  Miss-path logging is retained below.
+        ~100 ns/call, a measurable slice of the <1000 ns ``_resolve`` budget.
+        Miss-path logging is retained below.
         """
         key_path, key_method, key_scheme = key
 

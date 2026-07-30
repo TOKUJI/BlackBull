@@ -1,5 +1,5 @@
 """Conformance test: H2 flow-control for payloads above the 65535-byte
-initial window (Sprint 57).
+initial window.
 
 Four sequential RFC-compliance checks in one test function — each
 step gates the next.  Steps 1-3 pin the three fixed bugs at the window
@@ -12,7 +12,6 @@ teardown).  **However, the scenario logic lives in plain async
 functions in this file — no embedded script strings.**
 
 Full analysis: ``.claude/planning/archives/h2-flow-control-deadlock.md``
-Sprint log: ``bench/sprint-logs/sprint-57.md``
 """
 from __future__ import annotations
 

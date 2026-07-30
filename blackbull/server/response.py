@@ -240,7 +240,7 @@ class PriorityResponder(Responder):
             # stream is treated as a dependency on stream 0.  Previously
             # find_child returned None and .add_child() raised AttributeError,
             # unwinding the frame loop and killing every stream on the
-            # connection without a GOAWAY (bug 1.10).
+            # connection without a GOAWAY.
             parent = handler.root_stream.find_child(self.frame.dependent_stream)
             if parent is None:
                 parent = handler.root_stream

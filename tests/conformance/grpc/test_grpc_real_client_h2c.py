@@ -1,5 +1,5 @@
 """Interop conformance: a **real third-party gRPC client** (grpcio) driving
-BlackBull's unary gRPC over a real h2c socket (Sprint 58).
+BlackBull's unary gRPC over a real h2c socket.
 
 Every other gRPC test in the suite drives the server with BlackBull's own
 ``HTTP2Client`` or the in-process ``serve_grpc`` harness — both of which are
@@ -7,7 +7,7 @@ lenient about the exact HEADERS/DATA/TRAILERS framing.  This module is the only
 one that puts an *external, spec-strict* client (``grpcio``) on the wire, so it
 is what catches interop bugs BlackBull's own client tolerates.
 
-It caught the Trailers-Only framing bug (Sprint 58): the error path emitted
+It caught the Trailers-Only framing bug: the error path emitted
 ``grpc-status`` in a non-terminal HEADERS frame followed by an empty
 END_STREAM DATA frame, which grpcio decoded as UNKNOWN /
 "Stream removed (Data frame with END_STREAM flag received)".  The fix routes
@@ -386,7 +386,7 @@ class TestRealClientContext:
 
 class TestRealClientErrorStatus:
     """A strict client must decode every error class as its gRPC status —
-    not UNKNOWN.  This is the regression the Sprint 58 Trailers-Only fix closes."""
+    not UNKNOWN.  This is the regression the Trailers-Only fix closes."""
 
     @pytest.mark.asyncio
     async def test_handler_crash_is_internal(self, grpc_server_port):
@@ -452,7 +452,7 @@ class TestRealClientServerStreaming:
 
 
 # ---------------------------------------------------------------------------
-# Client-streaming — a real grpcio stream_unary call (Sprint 60 G1a).
+# Client-streaming — a real grpcio stream_unary call.
 # ---------------------------------------------------------------------------
 
 class TestRealClientClientStreaming:
@@ -485,7 +485,7 @@ class TestRealClientClientStreaming:
     async def test_large_request_stream_over_window(self, grpc_server_port):
         # 200 × 1 KiB (~200 KiB) crosses the initial 65535-byte window on the
         # request direction.  Gate for consume-based inbound flow control
-        # (the Sprint 62 deferral): the server credits WINDOW_UPDATE as the
+        #: the server credits WINDOW_UPDATE as the
         # handler consumes, so a slow drain closes the window and
         # back-pressures grpcio instead of overflowing the recipient queue
         # into RST_STREAM(ENHANCE_YOUR_CALM) — the pre-fix failure mode under
@@ -498,7 +498,7 @@ class TestRealClientClientStreaming:
 
 
 # ---------------------------------------------------------------------------
-# Bidirectional streaming — a real grpcio stream_stream call (Sprint 60 G1b).
+# Bidirectional streaming — a real grpcio stream_stream call.
 # ---------------------------------------------------------------------------
 
 class TestRealClientBidiStreaming:
@@ -530,7 +530,7 @@ class TestRealClientBidiStreaming:
     async def test_large_both_directions_over_window(self, grpc_server_port):
         # 200 × 1 KiB echoed back — BOTH directions cross the initial
         # 65535-byte window concurrently.  Gate for consume-based inbound
-        # flow control (the Sprint 62 deferral): when the handler stalls
+        # flow control: when the handler stalls
         # reading (blocked on yield under response back-pressure) it stops
         # crediting, the request-direction window closes, and grpcio
         # back-pressures — pre-fix this overflowed the 64-deep recipient
@@ -559,7 +559,7 @@ class TestRealClientConcurrency:
     @pytest.mark.asyncio
     async def test_concurrent_large_responses_share_connection_window(
             self, grpc_server_port):
-        """Bug 1.2's wire-level gate (the missing Sprint 62 concurrency test):
+        """The wire-level gate (the missing concurrency test):
         N concurrent streams × 100 KB responses multiplexed on ONE connection.
 
         Cumulative response bytes (10 × 100 KB) dwarf the 65535-byte

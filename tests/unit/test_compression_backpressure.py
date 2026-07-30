@@ -1,5 +1,5 @@
 """Unit tests for the Compression middleware's executor backpressure
-(Sprint 29 #3).
+Backpressure on the compression path.
 
 When the asyncio executor already has ``executor_max_inflight`` compressions
 running, the middleware skips compression on additional eligible responses
@@ -157,7 +157,7 @@ async def test_skip_path_emits_exactly_one_start_event():
     serving a precompressed sibling), the middleware must emit **one**
     response.start event and **one** body event — not duplicate them.
 
-    Regression for the Sprint 29 bug where the outer code path forwarded a
+    Regression for the bug where the outer code path forwarded a
     second start+empty-body pair after the skip-path had already inline-
     forwarded the real response, producing two start events on the same
     response and causing the HTTP/1.1 sender to close the connection after
@@ -171,7 +171,7 @@ async def test_skip_path_emits_exactly_one_start_event():
 
     async def upstream(scope, receive, send_):
         # Upstream sets Content-Encoding itself — typical precompressed
-        # static-file serving (Sprint 29 #1).
+        # static-file serving.
         await send_({
             'type': 'http.response.start',
             'status': 200,
@@ -213,7 +213,7 @@ async def test_small_body_under_threshold_ignores_inflight_cap():
 
 
 # ---------------------------------------------------------------------------
-# Sprint 33 — pass-through fast path + Accept-Encoding selection cache
+# Pass-through fast path + Accept-Encoding selection cache
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
@@ -223,7 +223,7 @@ async def test_passthrough_skips_event_reparsing(monkeypatch):
     ``intercepting_send`` must forward subsequent body events verbatim —
     no second ``parse_response_event`` call.
 
-    This is what gives the static-file cache-hit path its Sprint 33 win.
+    This is what gives the static-file cache-hit path its win.
     Without the fast path, ``parse_response_event`` runs once per ASGI
     event; the precompressed-sibling response is 2 events so the cost
     doubles for no useful work."""

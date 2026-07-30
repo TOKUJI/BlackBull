@@ -133,6 +133,22 @@ bench/results/baselines/*
 !bench/results/baselines/pre_sprint9d/
 bench/results/baselines/pre_sprint9d/*
 !bench/results/baselines/pre_sprint9d/README.md
+
+# Bench output that landed at the repo root instead of under
+# bench/results/<run>/.  The harness itself anchors every artifact to its
+# result dir (`httparena_compare.sh` writes `$LOCAL_DEST/…`, `compare_table.py`
+# joins onto `result_dir`), so this only happens when one of those scripts is
+# invoked by hand with the repo root as its result dir — and then the rsync of
+# the remote HttpArena checkout drops ~480 files here, which is enough to bury
+# a real diff in `git status`.
+#
+# Anchored with a leading slash so it matches only the root: the legitimate
+# copies inside bench/results/ are already covered above, and a future
+# docs/COMPARISON.md or a nested provenance.md stays trackable.
+/httparena-tree/
+/COMPARISON.md
+/provenance.md
+/driver.log
 # bench/aws — runtime state and SSH private keys created by up.sh
 bench/aws/.state
 bench/aws/.known_hosts

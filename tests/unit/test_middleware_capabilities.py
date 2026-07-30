@@ -46,7 +46,7 @@ async def test_post_processing_runs_after_handler(app):
 
 @pytest.mark.asyncio
 async def test_state_mutation_visible_in_handler(app):
-    # Sprint 80: BlackBull threads a native Connection, so middleware share
+    # BlackBull threads a native Connection, so middleware share
     # per-request data with the handler via ``conn.state`` (the ASGI
     # ``scope['key'] = ...`` grab-bag idiom is gone).
     async def inject_user(scope, receive, send, call_next):

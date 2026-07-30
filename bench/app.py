@@ -41,7 +41,7 @@ from blackbull import BlackBull, Connection, Response
 from blackbull.utils import Scheme
 from bench.lag_monitor import LoopLagMonitor
 
-# Sprint 28 Task 2 — soak harness hook.  Set BB_TRACEMALLOC=1 to start
+# Soak harness hook.  Set BB_TRACEMALLOC=1 to start
 # tracemalloc at import (before any allocation we care about happens
 # in BlackBull's own setup) and expose a /tracemalloc endpoint that
 # returns the current top-N allocation snapshot as JSON.  Bench-only
@@ -210,7 +210,7 @@ def _parse_args():
     p.add_argument('--cert', default='cert.pem')
     p.add_argument('--key',  default='key.pem')
     p.add_argument('--no-tls', action='store_true',
-                   help='Listen on plain HTTP (no TLS).  Used by Sprint 27 profile '
+                   help='Listen on plain HTTP (no TLS).  Used by the profile '
                         'lanes to isolate framework cost from TLS-stack cost; mirrors '
                         'the common production topology where TLS is offloaded to '
                         'nginx.  See bench/aws/profile_lanes.sh BB_TLS=0.')
@@ -218,7 +218,7 @@ def _parse_args():
                    help='Enable the benchmark.BenchmarkService/GetSum unary gRPC '
                         'method (bench/httparena/grpc_bench.py) alongside the HTTP '
                         'routes.  Used by the coalescer G1 fan-out experiment '
-                        '(Sprint 77): a single connection carrying many concurrent '
+                        'a single connection carrying many concurrent '
                         'unary RPCs is the ConnCoalescer killer case.')
     p.add_argument('--workers', type=int, default=None,
                    help='Worker processes (default BB_WORKERS env or 1; 0 = cpu_count)')

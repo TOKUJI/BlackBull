@@ -24,8 +24,8 @@ def _normalize_send(inner_send: ASGISendCallable | None):
 
     ASGI ``send`` is always called with a single positional event — no
     ``*args/**kwargs`` form needs to be preserved here, and dropping it
-    shaves a per-event call-frame setup that showed in the Sprint 33
-    py-spy profile on the static path.
+    shaves a per-event call-frame setup that shows in py-spy profiles of
+    the static path.
 
     The Response→ASGI expansion is delegated to :meth:`Response.__call__` so
     there is a single source of truth for the start/body event shape (shared

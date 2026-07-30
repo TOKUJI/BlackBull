@@ -1,5 +1,5 @@
 """
-MQTT 5.0 integration scenario tests — Sprint 52.
+MQTT 5.0 integration scenario tests.
 
 End-to-end tests that exercise multiple MQTT features together in realistic
 usage patterns.  These verify that the broker correctly handles complex

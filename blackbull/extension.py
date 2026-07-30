@@ -1,4 +1,4 @@
-"""Extension mechanism — the single, generic plugin contract (Sprint 53).
+"""Extension mechanism — the single, generic plugin contract.
 
 An :class:`Extension` wires itself into a :class:`~blackbull.app.BlackBull`
 application through the public ``app.*`` API: routes, middleware, event

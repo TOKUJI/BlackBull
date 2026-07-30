@@ -43,8 +43,7 @@ def make_self_signed_h2_context() -> ssl.SSLContext:
     # (including the *unencrypted* private key) are written to a tempdir.  A
     # weakref.finalize on the returned context removes that tempdir when the
     # context is garbage-collected — or, failing that, at interpreter exit —
-    # so the key material doesn't accumulate in /tmp (bug 1.22b: the old code
-    # promised this cleanup but never registered it).
+    # so the key material doesn't accumulate in /tmp.
     tmp = Path(tempfile.mkdtemp(prefix='blackbull-fault-tls-'))
     cert_path = tmp / 'cert.pem'
     key_path = tmp / 'key.pem'

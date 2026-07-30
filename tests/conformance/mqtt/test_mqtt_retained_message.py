@@ -1,5 +1,5 @@
 """
-MQTT 5.0 Retained Message conformance tests — Sprint 52.
+MQTT 5.0 Retained Message conformance tests.
 
 Verifies retained message behaviour against the MQTT 5.0 OASIS Standard.
 

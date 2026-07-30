@@ -52,7 +52,7 @@ class PacketFramer:
     * a **hard decode error** (reserved flag bits, unknown type — the junk a
       desynchronised stream produces) drops one byte and resyncs.
 
-    This replaces Sprint 53's ``stalled_len`` bookkeeping.  The ``bytes(...)``
+    This replaces explicit ``stalled_len`` bookkeeping.  The ``bytes(...)``
     snapshot at the decode boundary stays because the codec's input contract is
     deliberately ``bytes``; a zero-copy framer would mean widening that contract
     to the buffer protocol (deferred).
@@ -83,7 +83,7 @@ class MQTT5Actor(Actor):
 
     Tap dispatch is selected at construction: pass a running :class:`TapActor`
     as *tap* for decoupled (actor-mode) dispatch, or *app_handlers* for inline
-    dispatch on this connection (the Sprint 53 contract).
+    dispatch on this connection.
     """
 
     def __init__(self, writer: AbstractWriter, broker: BrokerActor,
@@ -213,7 +213,7 @@ class MQTT5Actor(Actor):
         In actor mode the :class:`Message` is *offered* to the shared
         :class:`TapActor` and we return at once (a slow tap never back-pressures
         this connection or the broker).  In inline mode the matching callbacks
-        run here, sequentially, with isolated exceptions (the Sprint 53 contract).
+        run here, sequentially, with isolated exceptions.
         """
         if self._tap is None and not self._inline_taps:
             return

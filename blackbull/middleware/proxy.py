@@ -16,7 +16,7 @@ def _parse_forwarded(value: str) -> dict[str, str]:
     client) and return its parameters, e.g.
     ``{'for': '203.0.113.1', 'proto': 'https'}``.
 
-    Splitting on ``;`` alone (the pre-Sprint-69 behaviour) folded the
+    Splitting on ``;`` alone folds the
     second element's ``for=`` into the first value, poisoning
     ``conn['client']``.
     """
@@ -120,7 +120,7 @@ class TrustedProxy:
 
         # X-Forwarded-Prefix — the reverse-proxy mount prefix, honoured only
         # here (behind the trusted-peer gate).  The parser layer deliberately
-        # ignores it off the wire (bug 1.16); a spoofed prefix from an
+        # ignores it off the wire; a spoofed prefix from an
         # untrusted client would otherwise poison URL generation / routing.
         xf_prefix = headers.get(b'x-forwarded-prefix', b'').decode()
         if xf_prefix:

@@ -1,5 +1,5 @@
 """Unit tests for the opt-in HTTP handler context object — now
-:class:`blackbull.connection.Connection` (Sprint 79 Phase 5; ``Request`` is a
+:class:`blackbull.connection.Connection` (``Request`` is a
 deprecated alias of it).
 
 Pure-unit layer: hand-built scope dicts and fake receive callables, no I/O.

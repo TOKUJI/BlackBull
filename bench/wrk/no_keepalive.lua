@@ -1,4 +1,4 @@
--- bench/wrk/no_keepalive.lua — short-lived connections, Sprint 24 Lane E.
+-- bench/wrk/no_keepalive.lua — short-lived connections, Lane E.
 --
 -- wrk holds connections open across requests by default; with this
 -- script every request adds `Connection: close` so the server is

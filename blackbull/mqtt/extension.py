@@ -69,7 +69,7 @@ class MQTTExtension(Extension):
 
     ``tap_mode`` selects how taps are dispatched: ``'actor'`` (default) runs
     them on the decoupled :class:`TapActor` so a slow tap never back-pressures
-    delivery; ``'inline'`` reproduces the Sprint 53 connection-actor dispatch
+    delivery; ``'inline'`` uses the connection-actor dispatch directly
     and exists mainly so ``bench/mqtt/tap_throughput.py`` can compare the two on
     one build.  ``tap_queue_size`` bounds the actor-mode inbox (drop-newest on
     overflow).
@@ -82,7 +82,7 @@ class MQTTExtension(Extension):
         if tap_mode not in ('actor', 'inline'):
             raise ValueError(f"tap_mode must be 'actor' or 'inline', got {tap_mode!r}")
         self.port = port
-        # Sprint 75 — serve the broker port over TLS (mqtts://, conventionally
+        # Serve the broker port over TLS (mqtts://, conventionally
         # port 8883).  Requires the server to have a certificate configured.
         self.tls = tls
         self.tap_mode = tap_mode

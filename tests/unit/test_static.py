@@ -19,7 +19,7 @@ from blackbull.headers import Headers
 
 def _scope(method: str = 'GET', path: str = '/',
            headers: dict[str, str] | None = None) -> 'Connection':
-    # Sprint 80: BlackBull threads a native Connection (not an ASGI scope dict)
+    # BlackBull threads a native Connection (not an ASGI scope dict)
     # through the middleware/handler pipeline for HTTP.
     from blackbull.connection import Connection
     raw = [(k.lower().encode(), v.encode())
@@ -122,7 +122,7 @@ class TestStaticFilesBasic:
             self, static_dir, filename, expected_ct):
         """Common web asset MIME types must resolve correctly even when
         the host's ``/etc/mime.types`` is missing or sparse (e.g.
-        ``python:3.13-slim`` containers).  Sprint 35 phase-trace traced
+        ``python:3.13-slim`` containers).  A phase trace attributed
         a 30-60 ms per-request CPU tail on woff2 files to this case:
         no mime entry → ``application/octet-stream`` Content-Type →
         Compression middleware brotli-encoded already-compressed bytes.
@@ -342,28 +342,28 @@ class TestBlackBullStaticRegistration:
         app.static('/b', str(other))
         assert len(app._static_roots) == 2
 
-    async def test_static_injects_staticfiles_into_global_chain(self, static_dir):
+    async def test_static_adds_no_global_middleware(self, static_dir):
+        # `app.static()` registers a route, so requests that are not for a
+        # static path never run this middleware at all.  Nothing global.
         from blackbull import BlackBull
-        from blackbull.middleware.static import StaticFiles
         app = BlackBull()
         app.static('/assets', str(static_dir))
-        assert len(app._global_middlewares) == 1
-        assert isinstance(app._global_middlewares[0], StaticFiles)
+        assert app._global_middlewares == []
 
     async def test_prefix_file_served_end_to_end(self, static_dir):
-        """Global middleware serves /assets/hello.txt when registered via app.static()."""
+        """/assets/hello.txt is served through the route registered by static()."""
         from blackbull import BlackBull
+        from blackbull.testing import TestClient
         app = BlackBull()
         app.static('/assets', str(static_dir))
-        # Exercise the StaticFiles middleware directly (avoids _wrap_send adapter)
-        mw = app._global_middlewares[0]
-        start, body = await _collect(mw, _scope(path='/assets/hello.txt'))
-        assert start['status'] == 200
-        assert body == b'Hello, static world!'
+        with TestClient(app) as client:
+            response = client.get('/assets/hello.txt')
+        assert response.status_code == 200
+        assert response.content == b'Hello, static world!'
 
 
 # ---------------------------------------------------------------------------
-# Precompressed-variant serving (Sprint 29 #1)
+# Precompressed-variant serving
 # ---------------------------------------------------------------------------
 
 @pytest.fixture
@@ -515,7 +515,7 @@ class TestPrecompressedVariant:
 
 
 # ---------------------------------------------------------------------------
-# Sprint 31 — ``http.response.pathsend`` extension wiring
+# ``http.response.pathsend`` extension wiring
 # ---------------------------------------------------------------------------
 
 @pytest.fixture
@@ -614,7 +614,7 @@ def _headers_of(start: dict) -> dict[bytes, bytes]:
 class TestStaticFilesMalformedRange:
     """A crafted Range header must be ignored (200) or answered 416 — never 500.
 
-    Bug 1.21c: bare ``int()`` on the range bounds raised ``ValueError`` out
+    Bare ``int()`` on the range bounds raised ``ValueError`` out
     of ``_serve`` on inputs like ``bytes=abc-def``.
     """
 

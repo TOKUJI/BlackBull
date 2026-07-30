@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Sprint 30 Tier 2 — DIRECT LATENCY PROBE.
+# DIRECT LATENCY PROBE.
 #
 # Methodology (per the user's correction):
 #   - r/s is an indirect metric; Tier 2 was designed to shorten

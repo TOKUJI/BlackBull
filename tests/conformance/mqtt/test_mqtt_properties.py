@@ -1,5 +1,5 @@
 """
-MQTT 5.0 Properties and AUTH exchange conformance tests — Sprint 52.
+MQTT 5.0 Properties and AUTH exchange conformance tests.
 
 Verifies the MQTT 5.0 enhanced authentication and property system
 against the OASIS Standard.

@@ -1,6 +1,6 @@
 """Hypothesis property tests for H2 field validation and frame parsing.
 
-Covers patterns discovered during Sprint 57 fuzz testing and RFC 9113 audit:
+Covers patterns discovered during fuzz testing and the RFC 9113 audit:
   - Field value character validation (CR, LF, NUL — G13 failures)
   - Frame header parsing robustness (truncated headers, invalid lengths)
   - Flow-control window edge cases
@@ -149,7 +149,7 @@ class TestFieldValidationProperties:
 
 class TestFlowControlInvariants:
     """RFC 9113 §6.9: Flow-control window invariants discovered during
-    Sprint 57 bug hunting."""
+    fuzz-driven bug hunting."""
 
     @given(
         initial=st.integers(min_value=65535, max_value=65535),

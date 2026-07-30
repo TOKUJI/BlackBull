@@ -1,4 +1,4 @@
-"""Integration tests for TLS on raw protocol bindings (Sprint 75).
+"""Integration tests for TLS on raw protocol bindings.
 
 A raw binding registered with ``tls=True`` is served through the same TLS
 machinery as the HTTPS listener (``mqtts://``-style deployments).  Bindings

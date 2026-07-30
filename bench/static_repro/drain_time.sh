@@ -2,7 +2,7 @@
 # Drain-time probe — measures how long the server holds FDs after a
 # burst of wrk connections all FIN simultaneously.
 #
-# Sprint 30 Tier 1.5 Step 5 — answers the question:
+# Answers the question:
 # "Does the custom protocol actually shorten connection-close time?"
 #
 # Methodology:

@@ -166,7 +166,7 @@ def _sse_encode(event: dict) -> bytes:
 # Signed-cookie session (native Connection)
 # ---------------------------------------------------------------------------
 # A self-contained, native replacement for the external ``blackbull-session``
-# package: BlackBull threads a typed :class:`Connection` (Sprint 80), so a
+# package: BlackBull threads a typed :class:`Connection`, so a
 # middleware receives ``conn`` and shares per-request data through ``conn.state``
 # — not by mutating an ASGI scope dict. The session payload is HMAC-SHA256
 # signed so a client cannot forge it.

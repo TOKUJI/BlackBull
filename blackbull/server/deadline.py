@@ -1,14 +1,13 @@
-"""Per-connection rescheduled deadline (Sprint 26 Phase B — scanner form).
+"""Per-connection rescheduled deadline.
 
 Replaces ``async with asyncio.timeout(...)`` on the per-request hot
-path.  Sprint 23 used one ``loop.call_later`` ``TimerHandle`` per
-connection, cancelled and rescheduled at every phase transition.
-Sprint 26 Phase B replaces the per-arm ``call_later`` with a
-per-process tick scanner: one singleton ``TimerHandle`` re-arms itself
+path, and the per-connection ``loop.call_later`` ``TimerHandle`` that
+had to be cancelled and rescheduled at every phase transition.
+Instead, a per-process tick scanner: one singleton ``TimerHandle``
+re-arms itself
 every :data:`_TICK_S` and walks the registry of armed
 :class:`ConnectionDeadline` instances for expirations.  Per-arm cost
-drops from ~1.7 µs to ~0.34 µs (WSL2 microbench, Sprint 26 Phase B
-spike).
+is ~0.34 µs rather than ~1.7 µs.
 
 Trade-off: a fired deadline lands within ``[now, now + _TICK_S]``
 rather than at the exact requested instant.  At the default
@@ -93,8 +92,7 @@ class ConnectionDeadline:
     saturation the per-arm path costs ~1.7 µs (TimerHandle + heap
     push + cancel).  The scanner replaces that with one
     ``loop.time()`` call + one comparison + one set membership check
-    on the registry (~0.34 µs).  Sprint 26 Phase B microbench: 80 %
-    per-call reduction; cascade-multiplied estimate ~15–25 % B1.
+    on the registry (~0.34 µs) — an ~80 % per-call reduction.
     """
 
     __slots__ = ('_loop', '_task', '_deadline_at', '_fired',

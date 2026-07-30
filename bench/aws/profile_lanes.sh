@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# bench/aws/profile_lanes.sh — Sprint 27 Phase 1: wrk-driven per-lane
+# bench/aws/profile_lanes.sh — wrk-driven per-lane
 # py-spy capture on EC2 split topology.
 #
 # For each lane in $LANES (default "B1 B2 B3"), starts BlackBull on the
@@ -7,9 +7,9 @@
 # loadgen host, then pulls the speedscope JSON + wrk output back.
 #
 # Methodology pin: re-profile on the SAME EC2 instance type used for
-# the sprint cumulative measurement (c7i.xlarge server, c7i.2xlarge
+# the cumulative measurement (c7i.xlarge server, c7i.2xlarge
 # loadgen) — WSL2 profile shape diverges materially at high
-# concurrency.  Sprint 21 Phase B finding.
+# concurrency.
 #
 # Prereqs:
 #   - bench/aws/.state populated by up.sh (TOPO=split)
@@ -114,7 +114,7 @@ _run_one_lane() {
     echo ">>> $lane: profile_secs=${profile_secs}s, wrk_cmd=$wrk_cmd"
 
     # 1. Kill any lingering BlackBull on the server.  Use the bracket
-    #    trick so pkill -f doesn't self-match (Sprint 25 close-out
+    #    trick so pkill -f doesn't self-match (a close-out
     #    lesson).
     ssh "${SSH_OPTS[@]}" "$SERVER_REMOTE" \
         "pkill -f '[b]ench/app.py' 2>/dev/null || true
@@ -127,7 +127,7 @@ _run_one_lane() {
     #    process to init BEFORE the outer SSH bash exits.  Without the
     #    explicit subshell (e.g. plain `cmd & ` form), the backgrounded
     #    process remains a child of the SSH bash and dies via SIGHUP
-    #    when SSH disconnects (Sprint 27 Phase 1 finding — cleartext-v1
+    #    when SSH disconnects (measured — cleartext-v1
     #    attempt without the subshell broke server startup on B1).
     #
     #    B2 (c=1024 + pipeline=16) wants `ulimit -n` raised, but applying
@@ -171,7 +171,7 @@ _run_one_lane() {
     # 4. Warmup — discarded.  Settles wrk loadgen state + accept queue
     #    BEFORE the measured wrk pass, so the first lane in a run
     #    doesn't pay the cold-cache + connection-storm tax that lane-N
-    #    runs don't see (Sprint 27 Phase 1 finding: B3-first throughput
+    #    runs don't see (measured: B3-first throughput
     #    was ~21 % lower than B3-last on the same code).
     echo "  warmup (${WARMUP}s) ..."
     ssh "${SSH_OPTS[@]}" "$LOADGEN_REMOTE" \

@@ -360,7 +360,7 @@ class TestMessageFramingAttacks:
     async def test_compressed_message_without_encoding_rejected(self):
         """A message with the Compressed-Flag set but no (or an unsupported)
         ``grpc-encoding`` must be rejected with UNIMPLEMENTED.  gzip itself is
-        supported since Sprint 60 G2 (see test_grpc_compression.py); this pins
+        supported (see test_grpc_compression.py); this pins
         the flag-set-but-no-negotiated-codec case."""
         reg = GrpcServiceRegistry()
 

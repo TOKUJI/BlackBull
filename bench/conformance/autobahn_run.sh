@@ -15,7 +15,7 @@
 # CASES is a comma-separated list of Autobahn case patterns (default '*').
 # The static autobahn_fuzzingclient.json is a template: a per-run copy with
 # "cases" substituted is rendered into the results dir and mounted instead
-# (P.2, Sprint 72 — previously CASES was documented but ignored and subset
+# (P.2 — CASES was once documented but ignored, and subset
 # runs silently ran all 517 cases).
 #
 # Reports land in bench/conformance/results/autobahn_<timestamp>/.

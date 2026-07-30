@@ -1,6 +1,6 @@
 """The shipped WebSocket examples must actually complete a handshake.
 
-Sprint 82 changed who may drive the WebSocket handshake and how that is
+Covers who may drive the WebSocket handshake and how that is
 recorded, which is precisely the part of an example that an import check
 cannot see: `examples/…` modules import fine while their handlers hang or
 mis-sequence the connect event.

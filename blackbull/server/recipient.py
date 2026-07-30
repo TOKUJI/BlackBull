@@ -22,7 +22,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 # Per-stream and per-connection event queue depth limits.
-# These cap memory growth under overload; see Phase 0 in bench/README.md.
+# These cap memory growth under overload; see bench/README.md.
 _HTTP2_STREAM_QUEUE_DEPTH = 64
 _WS_EVENT_QUEUE_DEPTH = 256
 
@@ -101,7 +101,7 @@ def _validate_chunk_ext(ext: bytes) -> None:
                 raise _bad_request(f'invalid chunk-ext-val {val!r}')
 
 
-# Bug 1.24 (MAL-CHUNK-EXT-64K, CVE-2023-39326 class) — hard bound on any
+# MAL-CHUNK-EXT-64K (CVE-2023-39326 class) — hard bound on any
 # single chunk-framing line (chunk-size + chunk-ext, or one trailer field
 # line).  Mirrors the BB_HEADER_MAX_LINE default: extensions and trailers
 # are ignored on receipt, so nothing legitimate needs more.  Without the
@@ -453,7 +453,7 @@ class HTTP1Recipient(BaseRecipient):
                  deadline: ConnectionDeadline | None = None,
                  chunk_size: int | None = None):
         super().__init__(reader)
-        # P4: deliver a Content-Length body in fixed-size chunks instead of one
+        # Deliver a Content-Length body in fixed-size chunks instead of one
         # giant ``readexactly(content_length)`` allocation.  Falls back to the
         # ``BB_BODY_CHUNK_SIZE`` setting when not injected (direct-instantiation
         # tests pass it explicitly).
@@ -461,12 +461,12 @@ class HTTP1Recipient(BaseRecipient):
             from ..env import get_settings as _get_settings  # noqa: PLC0415
             chunk_size = _get_settings().body_chunk_size
         self._chunk_size = chunk_size
-        # Sprint 17 Phase 3 — body-read deadline.  0 = disabled.  Applied
+        # Body-read deadline.  0 = disabled.  Applied
         # per ``_read_with_timeout`` call (i.e. per chunk for chunked
         # bodies, single window for Content-Length).  Mirrors nginx
         # ``client_body_timeout`` semantics: each read has the same bound.
         #
-        # Sprint 23 — the deadline is rescheduled on the shared
+        # The deadline is rescheduled on the shared
         # :class:`ConnectionDeadline` rather than allocating a fresh
         # ``asyncio.wait_for`` Timeout per chunk.  Per-chunk semantics
         # preserved.
@@ -491,7 +491,7 @@ class HTTP1Recipient(BaseRecipient):
         here, not in ``__init__``.
         """
         # BlackBull's own actor passes the native :class:`Connection` directly
-        # (Sprint 80 native-Connection entry); read its ``headers`` with no
+        # on the native-Connection entry; read its ``headers`` with no
         # conversion. A stashed Connection, or an external/hand-built ASGI scope
         # dict, are the other two shapes.
         #
@@ -580,7 +580,7 @@ class HTTP1Recipient(BaseRecipient):
         rejections, before this).  Length violations — whether detected by
         our own bound or pre-empted by ``asyncio.StreamReader``'s buffer
         limit (``LimitOverrunError``) — surface as 400 with the stream
-        marked unframeable (bug 1.24, MAL-CHUNK-EXT-64K).
+        marked unframeable (MAL-CHUNK-EXT-64K).
         """
         try:
             line = await self._read_with_timeout(self._reader.readuntil(b'\n'))
@@ -663,7 +663,7 @@ class HTTP1Recipient(BaseRecipient):
                         f'chunk-data not CRLF-terminated: {term!r}')
                 return {'type': ASGIEvent.HTTP_REQUEST, 'body': data, 'more_body': True}
             else:
-                # P4: stream the Content-Length body in ``chunk_size`` slices so
+                # Stream the Content-Length body in ``chunk_size`` slices so
                 # a large upload is delivered as several ``http.request`` events
                 # (``more_body: True`` until exhausted) rather than one giant
                 # allocation.  ``readexactly`` keeps the exact-bytes contract —
@@ -695,7 +695,7 @@ class HTTP1Recipient(BaseRecipient):
         except IncompleteReadError:
             # EOF mid-body — not a cap hit (peer disappeared).  Surface
             # disconnect so the handler can clean up; server closes on
-            # return (no synthetic 408, see Sprint 17 plan note).
+            # return; no synthetic 408.
             self._done = True
             return {'type': ASGIEvent.HTTP_DISCONNECT}
 
@@ -712,8 +712,7 @@ class HTTP2Recipient(BaseRecipient):
     ``http.request`` event.  The Queue is then never allocated — the empty event
     is synthesized lazily in :meth:`__call__` only if the handler reads it.
 
-    **Consume-based inbound flow control** (the Sprint 62 deferral,
-    ``proposals/consume-based-inbound-flow-control.md``): when constructed with
+    **Consume-based inbound flow control**: when constructed with
     a ``credit_callback``, WINDOW_UPDATE credit for a DATA frame is replayed
     through the callback when the app *pops* the event — not when the frame is
     enqueued.  A stalled handler then stops crediting, the peer's window
@@ -927,10 +926,8 @@ class WebSocketRecipient(BaseRecipient):
     #
     # Default: 64 MiB — large enough to pass the Autobahn|Testsuite
     # 9.x large-message cases (up to 9.1.6 = 64 MiB text) while still
-    # bounding per-connection memory.  Sprint 39 (v0.35.0) introduced
-    # this cap at 1 MiB; Sprint 43 raised the default to 64 MiB and
-    # exposed it via ``BB_WS_MAX_FRAME_PAYLOAD`` after the conformance
-    # CI lane discovered the 1 MiB cap was regressing Autobahn 9.x.
+    # bounding per-connection memory.  A 1 MiB cap regresses the
+    # Autobahn 9.x cases, which is why the default is this high.
     # Override per-deployment via ``BB_WS_MAX_FRAME_PAYLOAD`` for
     # stricter (or looser) exposure than the default.
     _MAX_FRAME_PAYLOAD: int = 64 * 1024 * 1024
@@ -1211,8 +1208,8 @@ class WebSocketRecipient(BaseRecipient):
     async def shutdown(self) -> None:
         """Cancel and await the background read-loop task.
 
-        Sprint 72 (audit 1.20c) — client sessions call this from
-        ``close()`` so no reader task outlives the session (a leaked task
+        Client sessions call this from ``close()`` so no reader task
+        outlives the session (a leaked task
         warns at event-loop shutdown and keeps reading a dead transport).
         Idempotent, and safe to call before the first ``__call__`` ever
         started the loop.

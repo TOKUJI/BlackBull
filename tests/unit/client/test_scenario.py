@@ -1,4 +1,4 @@
-"""Sprint 17 Phase 5 — unit tests for the Scenario abstraction.
+"""Unit tests for the Scenario abstraction.
 
 Covers:
   * ``Scenario.to_json`` / ``from_json`` round-trip for every step type

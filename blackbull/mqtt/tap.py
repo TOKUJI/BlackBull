@@ -14,7 +14,7 @@ Two dispatch engines share one code path (:func:`run_taps`):
   *newest* message is dropped and a running dropped-count is logged (taps are
   best-effort, but silent loss is unacceptable).
 * **inline** — the connection actor awaits the callbacks itself.  This is the
-  Sprint 53 contract, retained as an internal option so the perf comparison
+  original contract, retained as an internal option so the perf comparison
   (``bench/mqtt/tap_throughput.py``) stays reproducible.
 
 A topic filter may carry ``{name}`` capture segments

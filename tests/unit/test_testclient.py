@@ -121,7 +121,7 @@ def test_post_body_round_trip_via_simplified_handler() -> None:
 
 def test_request_object_end_to_end() -> None:
     """A handler taking the opt-in Request sees method/headers/cookies/body."""
-    from blackbull import Connection as Request  # Sprint 79 alias
+    from blackbull import Connection as Request  # deprecated alias
 
     app = BlackBull()
 
@@ -181,9 +181,9 @@ def test_websocket_text_round_trip() -> None:
 
 
 def test_ws_testclient_conn_matches_server_decoding() -> None:
-    """Sprint 68 — the WS test client must build the same request fields the
+    """The WS test client must build the same request fields the
     real server would: percent-decoded ``path``, undecoded UTF-8 ``raw_path``,
-    query excluded from both. WebSocket is native (Sprint 80), so the session
+    query excluded from both. WebSocket is native, so the session
     threads a Connection — assert on ``conn.*``, not a scope dict."""
     session = WebSocketTestSession(app=None, path='/chat/caf%C3%A9?x=%41')
     assert session._conn.path == '/chat/café'
@@ -199,7 +199,7 @@ def test_ws_testclient_plain_path_unchanged() -> None:
 
 def test_ws_testclient_non_ascii_query_string_utf8() -> None:
     """query_string is UTF-8 encoded, for parity with raw_path and the real
-    server — a non-ASCII query must not raise (was latin-1, Sprint 68 follow-up)."""
+    server — a non-ASCII query must not raise (it was latin-1)."""
     session = WebSocketTestSession(app=None, path='/search?q=café')
     assert session._conn.query_string == 'q=café'.encode('utf-8')
 

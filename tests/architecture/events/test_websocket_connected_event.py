@@ -79,7 +79,7 @@ def _make_client_frame(payload: bytes, opcode: int = 0x1, fin: bool = True) -> b
 
 
 def _make_ws_conn(path: str) -> Connection:
-    """The native WebSocket Connection the upgrade path threads (Sprint 80)."""
+    """The native WebSocket Connection the upgrade path threads."""
     return Connection(
         type='websocket',
         http_version='1.1',

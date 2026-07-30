@@ -893,7 +893,7 @@ class TestFramePayloadSizeGuard:
     async def test_oversize_declared_length_triggers_close_1009(self):
         from blackbull.server.constants import WSCloseCode
         # Pin an explicit 64 KiB cap for the test — the global default
-        # is 64 MiB (Sprint 43, BB_WS_MAX_FRAME_PAYLOAD).  Asserting the
+        # is 64 MiB.  Asserting the
         # rejection mechanism doesn't need the default to be small; pinning
         # in-test keeps this assertion stable across default changes.
         # Declare 1 MiB payload but supply only 16 actual bytes — the cap

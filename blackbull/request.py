@@ -11,7 +11,7 @@ Provides:
   callers that hold a scope dict.
 
 The opt-in HTTP context object formerly named ``Request`` moved to
-:class:`blackbull.connection.Connection` (Sprint 79 Phase 5); ``Request`` is now
+:class:`blackbull.connection.Connection`; ``Request`` is now
 a deprecated alias of ``Connection`` (see ``blackbull.__getattr__``). This
 module holds only the transport-agnostic free functions, which
 :class:`Connection` builds on.
@@ -43,7 +43,7 @@ async def read_body(receive: ASGIReceiveCallable) -> bytes:
 
     Collects chunks in a list and joins once, rather than the O(n²) ``+=``
     growth.  A single-chunk body (the common case) is returned directly with
-    no intermediate copy at all (copy-reduction-http1 P1).
+    no intermediate copy at all.
 
     Raises :class:`ClientDisconnected` if an ``http.disconnect`` arrives
     before the body is complete, so a truncated upload is never silently

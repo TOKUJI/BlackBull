@@ -1,7 +1,7 @@
 """Parse a BlackBull access log and compute latency percentiles for
 a measurement window (skipping warmup).
 
-Sprint 30 Tier 2 probe.  The access log format is:
+Access-log probe.  The format is:
 
     YYYY-MM-DDTHH:MM:SS.mmm {ip} "{method} {path} HTTP/{ver}" {status} {bytes} {ms}ms
 

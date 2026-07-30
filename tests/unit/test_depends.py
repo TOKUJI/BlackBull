@@ -1,4 +1,4 @@
-"""``Depends`` provider injection for simplified handlers (Sprint 74).
+"""``Depends`` provider injection for simplified handlers.
 
 Registration-time resolution on the ``_adapt_handler`` seam: a parameter
 whose *default value* is a ``Depends`` instance receives the provider's

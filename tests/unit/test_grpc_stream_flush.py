@@ -1,7 +1,7 @@
 """Interactive server-streaming must not withhold yielded messages.
 
-The write-coalescing batcher (Sprint 63's streaming-collapse fix) buffers
-consecutive messages into one DATA frame.  Sprint 66's health ``Watch``
+The write-coalescing batcher buffers
+consecutive messages into one DATA frame.  The health ``Watch``
 interop exposed the gap: a producer that *blocks indefinitely* between yields
 (a status watch, a chat stream, a notification feed) had its buffered
 message(s) withheld until the next message completed — for ``Watch``, i.e.

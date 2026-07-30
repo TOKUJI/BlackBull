@@ -1,4 +1,4 @@
-"""MQTT 5 §4.8.2 Shared Subscriptions — BrokerActor unit tests (Sprint 75).
+"""MQTT 5 §4.8.2 Shared Subscriptions — BrokerActor unit tests.
 
 Drives ``BrokerActor._handle`` directly with recording connection actors, same
 harness as ``test_mqtt_broker_actor.py``.  Covers the load-balanced fan-out
@@ -75,7 +75,7 @@ async def _group(broker, n, filter_='$share/pool/t', qos=0):
 
 
 # ===========================================================================
-# SUBACK contract — the 0x9E fence is gone (spec change vs Sprint 70)
+# SUBACK contract — the 0x9E fence is gone (spec change)
 # ===========================================================================
 
 class TestSharedSubscribeAccepted:

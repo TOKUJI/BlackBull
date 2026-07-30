@@ -1,5 +1,5 @@
 """Interop conformance for the **protobuf layer** (`blackbull-protobuf`,
-Sprint 66): a real grpcio client + the official grpcio client-side packages
+A real grpcio client + the official grpcio client-side packages
 driving BlackBull's reflection, health, and rich-error services over a real
 h2c socket.
 
@@ -146,7 +146,7 @@ async def test_reflection_lists_and_invokes_without_proto(grpc_server):
     services, message = await asyncio.to_thread(_reflection_flow, port)
     assert 'bbinterop.Greeter' in services
     assert 'grpc.health.v1.Health' in services
-    # Both reflection package versions are served (Sprint 68): v1alpha for
+    # Both reflection package versions are served: v1alpha for
     # older clients, v1 for the newer ones that probe it first.
     assert 'grpc.reflection.v1alpha.ServerReflection' in services
     assert 'grpc.reflection.v1.ServerReflection' in services

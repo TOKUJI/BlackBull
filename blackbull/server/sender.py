@@ -68,7 +68,7 @@ def _has_header(items, name: bytes) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Response-HEADERS fast-path builders (frame-assembly-fast-path Tier 2)
+# Response-HEADERS fast-path builders
 # ---------------------------------------------------------------------------
 #
 # These encode a HEADERS frame straight to wire bytes, skipping
@@ -448,7 +448,7 @@ class HTTP1Sender(BaseSender):
         # Set True once a complete response has been written for this request
         # (a full ``bytes`` response, a body event with ``more_body=False``,
         # trailers, or a pathsend).  Further response events are then dropped
-        # (bug 1.4) so a handler that raises *after* completing its response
+        # so a handler that raises *after* completing its response
         # can't write a second one onto the same keep-alive connection —
         # mirrors the H2 sender's post-END_STREAM drop.
         self._completed: bool = False
@@ -486,7 +486,7 @@ class HTTP1Sender(BaseSender):
         bodies raise ``TypeError``.
         """
         if self._completed:
-            # bug 1.4 — a complete response has already gone out for this
+            # A complete response has already gone out for this
             # request; drop any further response events so a handler that
             # raises after completing (→ the error handler emits a second
             # response) can't splice two responses onto one connection.
@@ -510,7 +510,7 @@ class HTTP1Sender(BaseSender):
                 self._expect_trailers = bool(body.get('trailers', False))
                 if self._log_record is not None:
                     self._log_record.status = body.get('status', '-')
-                    # Sprint 35 phase-trace: capture response headers
+                    # Capture response headers
                     # inline (same pattern as response_bytes capture) so
                     # we can correlate per-phase µs against negotiated
                     # Content-Type / Content-Encoding without re-walking
@@ -532,7 +532,7 @@ class HTTP1Sender(BaseSender):
                 more_body = body.get('more_body', False)
                 if self._log_record is not None and content:
                     self._log_record.response_bytes += len(content)
-                # Sprint 35 phase trace: bracket the actual transport
+                # Bracket the actual transport
                 # write for the last body event so we can see whether the
                 # 30-60 ms woff2 tail lives in middleware/handler work
                 # before the write (``start_arm_out → body_arm_in``) or
@@ -593,10 +593,10 @@ class HTTP1Sender(BaseSender):
                 raise TypeError(f'HTTP1Sender expected bytes or dict, got {type(body)!r}')
 
     def reset_per_request_state(self) -> None:
-        # Sprint 38 lesson — HTTP1Sender is shared across keep-alive requests;
+        # HTTP1Sender is shared across keep-alive requests;
         # forgetting a reset silently breaks the next request's framing
         # (`_started` skipped 408 emission on the second request).  See
-        # `.claude/patterns/cautions.md` — Sprint 38 section.
+        # `.claude/patterns/cautions.md`.
         self._buffered_status = None
         self._buffered_headers = None
         self._chunked = False
@@ -730,7 +730,7 @@ class ConnectionWindow:
     One instance per connection, referenced by every stream's
     :class:`HTTP2Sender`, so all senders debit and await a single budget.
 
-    Without sharing (bug 1.2) each sender held a *private copy* of the
+    Without sharing each sender held a *private copy* of the
     connection window and debited only that copy, while the actor-level total
     was only ever incremented — so N concurrent streams could each spend a
     full 65535-byte window and the server could emit N×65535 bytes with zero
@@ -782,10 +782,10 @@ class HTTP2Sender(BaseSender):
         self._factory = factory
         self._stream_id = stream_id
         self._push_callback = push_callback
-        # Shared connection-level send window (bug 1.2).  The server passes one
+        # Shared connection-level send window.  The server passes one
         # ``ConnectionWindow`` instance to every stream sender so they debit a
         # single budget; when omitted (the experimental client, whose per-sender
-        # windowing is bug 1.20a and deferred) each sender gets a private one,
+        # windowing is deferred) each sender gets a private one,
         # preserving today's behaviour there.
         self._conn_window = conn_window if conn_window is not None else ConnectionWindow()
         # Per-stream send window.  Refactor 2.5 — a plain int (this was a
@@ -816,7 +816,7 @@ class HTTP2Sender(BaseSender):
 
     @property
     def connection_window_size(self) -> int:
-        """The shared connection-level send window (bug 1.2).
+        """The shared connection-level send window.
 
         Proxies :attr:`ConnectionWindow.size` so existing call sites — the
         experimental client's per-sender crediting and flow-control tests —

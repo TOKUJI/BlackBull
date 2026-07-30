@@ -16,7 +16,7 @@
 : "${VOLUME_SIZE_GB:=20}"     # /dev/sda1 root volume — generous for venv + apt
 
 # --- Topology -------------------------------------------------------------
-# Sprint 20: TOPO=single keeps the historical one-host loopback bench
+# TOPO=single keeps the historical one-host loopback bench
 # unchanged (server and load generator share the c7i.xlarge); TOPO=split
 # launches a second LOADGEN instance in a cluster placement group and
 # drives the bench over VPC private networking.  Numbers from the two

@@ -87,7 +87,7 @@ def _refuse_in_production() -> None:
     ``BLACKBULL_ENV=production`` (surfaced as ``Settings.env``); the previous
     check keyed on ``BB_PRODUCTION`` alone — a var read nowhere else in the
     codebase — so a standard production process did **not** trip the guard
-    (bug 1.22a).  ``BB_PRODUCTION`` is still honoured as an explicit override
+    ``BB_PRODUCTION`` is still honoured as an explicit override
     so the guard also trips outside the Settings machinery.
     """
     override = os.environ.get('BB_PRODUCTION', '').strip().lower() in (

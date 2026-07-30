@@ -5,7 +5,7 @@ timeouts, connection cap, WS frame cap, WS queue depth, H/2 stream
 caps, compression in-flight) is silent by default when it rejects
 traffic.  Operators see the consequence — a 503, a CLOSE 1009, a
 dropped event — but no record naming the cap.  Regressions like the
-1 MiB WS frame default that shipped in v0.35.0 (caught by the Sprint
+1 MiB WS frame default that shipped in v0.35.0 (caught by the
 43 conformance lane in v0.39.0) can hide across releases.
 
 This module emits one ``WARNING``-level record per cap rejection on

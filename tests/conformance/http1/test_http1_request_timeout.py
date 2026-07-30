@@ -1,9 +1,9 @@
-"""Sprint 38 Task B — ``BB_REQUEST_TIMEOUT`` on the HTTP/1.1 path.
+"""``BB_REQUEST_TIMEOUT`` on the HTTP/1.1 path.
 
-Before Sprint 38, ``BB_REQUEST_TIMEOUT`` only applied to HTTP/2
+``BB_REQUEST_TIMEOUT`` once applied to HTTP/2
 streams (``HTTP2Actor._spawn_stream_task`` wrapped each stream's
 coroutine with ``asyncio.wait_for``).  The HTTP/1.1 path had no
-equivalent — the handler ran unbounded.  Sprint 38 adds the
+equivalent — the handler ran unbounded.  It now applies the
 same ``asyncio.wait_for`` guard to the HTTP/1.1 request path
 (``RequestActor.run`` / ``_dispatch_request``), returning
 ``408 Request Timeout`` and closing the connection when the
@@ -16,7 +16,7 @@ These tests verify:
 * A fast handler that finishes within the timeout window is
   unaffected (normal response, connection stays open for
   keep-alive).
-* ``BB_REQUEST_TIMEOUT=0`` (the default) preserves the pre-Sprint-38
+* ``BB_REQUEST_TIMEOUT=0`` (the default) preserves the older
   unbounded behaviour — no artificial deadline is imposed.
 * The timeout guard does not leak exceptions into the event loop
   or crash sibling connections.
@@ -180,7 +180,7 @@ def timeout_server():
     server.open_socket(0)
 
     def _child():
-        # Sprint 10 caution: `get_settings()` is `@functools.cache`-d
+        # `get_settings()` is `@functools.cache`-d
         # and inherited across fork.  Reset in the child so the
         # BB_REQUEST_TIMEOUT override takes effect.
         from blackbull.env import reset_settings_cache
@@ -332,7 +332,7 @@ class TestRequestTimeoutFastHandlerUnaffected:
 
 @pytest.mark.integration
 class TestRequestTimeoutDisabled:
-    """``BB_REQUEST_TIMEOUT=0`` (or unset) must preserve the pre-Sprint-38
+    """``BB_REQUEST_TIMEOUT=0`` (or unset) must preserve the older
     behaviour: handlers run to completion regardless of duration."""
 
     @pytest.fixture(scope='module')

@@ -2,10 +2,10 @@
 # bench/aws/up.sh — provision EC2 instance(s) for an AWS bench pass.
 #
 # TOPO=single (default): one $INSTANCE_TYPE host runs both the server
-#   under test and the load tools (legacy Sprint-13–16 topology).
+#   under test and the load tools (legacy single-host topology).
 # TOPO=split:            two hosts in a cluster placement group — a
 #   $INSTANCE_TYPE server and a $LOADGEN_INSTANCE_TYPE load generator
-#   talking over VPC private networking (Sprint 20).
+#   talking over VPC private networking.
 #
 # Idempotent: existing key pair / security group / placement group are
 # reused if their names already match.  The only blocking failure is

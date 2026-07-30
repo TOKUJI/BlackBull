@@ -29,10 +29,54 @@ so the editable install's metadata catches up.
 
 ---
 
-## [Unreleased]
+## [0.66.0] — 2026-07-30
 
 ### Changed
 
+- **The HTTP/1.1 parser validates octets with C-level bulk operations.**  The
+  request-target scan, the Host authority scan, and the field-name token check
+  were per-byte Python generator expressions or regexes; each is now a single
+  `bytes.translate` delete-table pass or a precompiled character class,
+  whichever the set size favours.  Field values are checked **once for the
+  whole header block** instead of once per header: deleting every permitted
+  octet leaves only CR, LF and forbidden CTLs, and a residue that tiles into
+  CRLF pairs proves no value can carry a forbidden octet.  A block that fails
+  the pre-scan falls back to the per-header regex, so every error message and
+  status code is unchanged — Http11Probe re-scores 159/159 with a
+  **per-test verdict diff that is empty across all 213 vectors**.  Measured on
+  a Zen 4 box: per-header cost **0.510 → 0.346 µs**, fixed cost **4.53 → 3.57
+  µs**, and a 32-header request **20.33 → 14.25 µs (−30 %)**.
+- **Header names are lowercased once instead of twice.**  `_parse` already
+  lowercases each name while validating it, then handed the list to
+  `Headers.__init__`, which lowercased every name again; `Headers.from_lowered`
+  is the alternate constructor for callers that can guarantee pre-lowered
+  input.  HTTP/2 qualifies by protocol — RFC 9113 §8.2.1 makes an uppercase
+  field name malformed and the frame is rejected before any pair reaches the
+  header list.  `Headers` lookups (`get`, `getlist`, `__contains__`,
+  `__getitem__`, and the Structured Fields accessors) now probe with the
+  caller's bytes before lowercasing.  The index is keyed lowercased, so the
+  probe can only hit on a key the old path would also have found — a
+  lowercase literal, which is what essentially every internal call site
+  passes, drops from 47 to 25 ns.
+- **`app.static()` registers a route instead of global middleware.**  Static
+  serving no longer runs on every request: `<prefix>/{filepath:path}` (plus
+  `<prefix>` and `<prefix>/`, so `index=` can still answer the mount root)
+  resolves in the router, and a non-static request never enters `StaticFiles`
+  at all.  This is also what Starlette, Sanic, aiohttp, Flask and Django all
+  do.  The production gate is resolved once and memoised rather than calling
+  `get_settings()` per request.  **Behaviour change**: a miss under the prefix
+  is now answered 404 by the static route rather than falling through to
+  another route that also matches the prefix; the 404 takes the normal error
+  path, so `@app.on_error(HTTPStatus.NOT_FOUND)` still applies.  An explicit
+  route on the bare prefix always wins — `app.static()` never replaces a path
+  you registered yourself.
+- **`Compression` no longer parses body events on its no-codec path.**  When
+  the client accepts nothing the server can produce, the response is forwarded
+  verbatim through a wrapper that stamps `Vary: Accept-Encoding` on the
+  response start (bug 1.21f).  That wrapper ran `parse_response_event` on
+  every event, allocating a `ResponseBody` copy of each body chunk only for
+  the next line's `isinstance` to reject it.  It now discriminates on the raw
+  event type first, so a streamed body costs one dict lookup per chunk.
 - **`BB_WRITE_TIMEOUT` no longer arms a timer per response.**  It defaults to
   `30.0`, so every write took `asyncio.wait_for` — exactly one `loop.call_at`
   per response, which the loop-touch instrument read as `call_at=1.00`/req.
@@ -61,6 +105,32 @@ so the editable install's metadata catches up.
 - **Loop-touch budget lane in `test.yml`.**  `bench/loop_touches.py --check`
   now runs on every push/PR.  Current budgets: HTTP/1.1 2.20, HTTP/2 5.40,
   WebSocket 4.30 touches per request.
+
+### Docs
+
+- **Sprint numbers and private defect IDs removed from comments and
+  docstrings** across 249 files.  A docstring is read by users, who cannot
+  resolve `Sprint 79` or `bug 1.16` — and `git log`, this changelog and the
+  sprint logs already own the timeline.  Migration narration was rewritten as
+  present-tense fact ("Sprint 64 moved emission from the server layer" →
+  "Emission is consolidated into `_dispatch`").  Externally resolvable
+  references are kept: RFC and CVE citations, Http11Probe/Autobahn vector
+  names, and GitHub issue numbers.  Excluded deliberately: `bench/results/**`,
+  `bench/CHARACTERIZATION.md` and `docs/about/grpc-assessment.md`, which *are*
+  the record.
+- **`docs/about/internals.md` gains a §Parse-path invariant** documenting the
+  delete-the-allowed-table idiom, the whole-block value pre-scan, and a table
+  of three plausible optimisations that were measured and rejected, so they
+  are not retried blind.
+- **`KNOWN_LIMITATIONS.md` static-file section corrected.**  It claimed
+  `StaticFiles` emits no `ETag` and had to be paired with the `Cache`
+  middleware; `StaticFiles` has emitted a strong `ETag` + `Last-Modified` and
+  answered `If-None-Match` / `If-Modified-Since` by default since
+  `conditional=True` became the default.  The section now also states the
+  route-dispatch consequence for a miss under the prefix.
+- **`Headers` class docstring corrected** — it still said every accessor
+  lowercases the requested name, which stopped being true with the
+  probe-first lookup fast path.
 
 ## [0.65.0] — 2026-07-29
 

@@ -1,4 +1,4 @@
-"""Router `_resolve` microbenchmark — Sprint 77 (router-cache Phase 2/3).
+"""Router `_resolve` microbenchmark — the router-cache go/no-go.
 
 Measures the per-call cost of ``Router._resolve`` (cache bypassed) and
 ``Router.__getitem__`` (cache path) across the regimes the proposal names:
@@ -29,7 +29,7 @@ async def _h(scope, receive, send):
 
 
 def build_router(n_fixed: int = 30, n_param: int = 10) -> Router:
-    """A route table shaped like a realistic small API (like Sprint 68 W2)."""
+    """A route table shaped like a realistic small API."""
     r = Router()
     for i in range(n_fixed):
         r[(f'/api/resource{i}/list', HTTPMethod.GET)] = _h

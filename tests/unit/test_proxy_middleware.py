@@ -125,7 +125,7 @@ async def test_forwarded_header_for_only():
 async def test_forwarded_multi_element_uses_leftmost():
     """RFC 7239 §4 — elements are comma-separated; parse the leftmost only.
 
-    Bug 1.21e: splitting on ';' alone folded the second element's ``for=``
+    Splitting on ';' alone folded the second element's ``for=``
     into the first value, poisoning ``scope['client']``.
     """
     mw = TrustedProxy('127.0.0.1')

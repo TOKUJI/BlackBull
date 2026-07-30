@@ -212,7 +212,7 @@ async def test_request_received_exactly_once():
 async def test_request_received_fires_per_http2_stream():
     """On HTTP/2, request_received fires once per stream (one dispatch each).
 
-    Sprint 64 moved emission from the server layer into BlackBull._dispatch,
+    Emission moved from the server layer into BlackBull._dispatch,
     so per-stream firing is now per-app-call firing.
     """
     app = BlackBull()
@@ -297,7 +297,7 @@ async def test_request_received_not_fired_for_websocket():
 async def test_request_received_exactly_once_with_aggregator():
     """Exactly one request_received per request under the production actor path.
 
-    Sprint 64 moved emission from the actor layer into BlackBull._dispatch;
+    Emission moved from the actor layer into BlackBull._dispatch;
     this pins the no-double-fire property when an EventAggregator is wired
     (the production server configuration).
     """

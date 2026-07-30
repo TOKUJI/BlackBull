@@ -36,7 +36,7 @@ _SERVER_PREFERENCE = ['br', 'zstd', 'gzip']  # server-side priority order
 # re-compressing them is the worst case (high-entropy input; under the
 # brotli library's bare-call default of quality 11 — BlackBull's own
 # default is q=4 via ``BB_BROTLI_QUALITY``) and contributes a measurable
-# per-request CPU tail in Sprint 35's HttpArena static-rotate probe.
+# per-request CPU tail on a static-asset workload.
 _SKIP_CONTENT_TYPES = (
     'image/',
     'audio/',
@@ -95,7 +95,7 @@ def _merge_vary(headers: list[tuple[bytes, bytes]],
 
     A compressed response's body depends on the request ``Accept-Encoding``;
     without ``Vary: Accept-Encoding`` a shared cache may replay the encoded
-    body to a client that sent ``identity``/no ``Accept-Encoding`` (bug 1.21a).
+    body to a client that sent ``identity``/no ``Accept-Encoding``.
     Folds *field* into an existing ``Vary`` (no duplicate token; a pre-existing
     ``Vary: *`` already covers everything and is left untouched); otherwise
     appends ``Vary: Accept-Encoding``.  Mutates *headers* in place.
@@ -143,7 +143,7 @@ class Compression:
         # Concurrency cap on executor offloads.  When at cap, fall back to
         # uncompressed rather than queueing — keeps the asyncio default
         # thread pool from growing an unbounded backlog under burst load
-        # (the HttpArena `static` profile collapse mode, Sprint 29).
+        # (the collapse mode a static-asset workload triggers).
         self._executor_max_inflight = executor_max_inflight
         self._executor_inflight: int = 0
         self._brotli_quality = brotli_quality
@@ -152,7 +152,7 @@ class Compression:
         # has very few distinct Accept-Encoding values (browsers send a
         # constant string; benchmark generators send one); parsing the
         # q-values + iterating the server-preference list on every request
-        # showed up in the Sprint 33 py-spy profile.  Bounded so a hostile
+        # showed up in py-spy profiles.  Bounded so a hostile
         # peer can't grow it unboundedly.
         self._codec_cache: dict[bytes, tuple[str, Callable[[bytes], bytes]] | None] = {}
 
@@ -205,19 +205,24 @@ class Compression:
         """Wrap *send* so a compressible, not-yet-encoded ``ResponseStart`` gains
         ``Vary: Accept-Encoding`` — used on the no-matching-codec path where the
         body is forwarded verbatim but must still be cache-keyed on the encoding
-        (bug 1.21f, Branch 1).  Same predicate as the compress path's decision
+        Same predicate as the compress path's decision
         point: compressible Content-Type AND no pre-existing Content-Encoding.
         """
         # Unannotated on purpose: rebuilt per request (see _wrap_send in
         # app.py).  ``event`` is an ASGISendEvent.
         async def vary_send(event):
-            parsed = parse_response_event(event)
-            if isinstance(parsed, ResponseStart) and \
-                    _is_compressible_content_type(parsed.headers) and \
-                    not parsed.headers.get(b'content-encoding'):
-                hdrs = list(event.get('headers', []))
-                _merge_vary(hdrs)
-                event = {**event, 'headers': hdrs}
+            # Discriminate on the raw type before building anything.  Going
+            # through `parse_response_event` allocated a `ResponseBody` copy
+            # of every body event just to have the next line's `isinstance`
+            # reject it — a per-chunk cost on a streamed response, for a
+            # wrapper that only ever cares about the start event.
+            if event.get('type') == ASGIEvent.HTTP_RESPONSE_START:
+                headers = Headers(event.get('headers', []))
+                if _is_compressible_content_type(headers) and \
+                        not headers.get(b'content-encoding'):
+                    hdrs = list(event.get('headers', []))
+                    _merge_vary(hdrs)
+                    event = {**event, 'headers': hdrs}
             await send(event)
         return vary_send
 
@@ -236,7 +241,7 @@ class Compression:
             # We won't compress, but the response may still be *compressible*,
             # so a downstream shared cache needs Vary: Accept-Encoding — else it
             # stores this identity variant under the bare key and replays it to a
-            # later client that does accept an encoding (bug 1.21f, Branch 1).
+            # later client that does accept an encoding.
             await call_next(conn, receive, self._vary_ensuring_send(send))
             return
 
@@ -255,7 +260,7 @@ class Compression:
             # pass-through decision (already-encoded response, non-
             # compressible Content-Type, or streaming chunks), subsequent
             # events are forwarded verbatim — no parse, no re-wrap, no
-            # match.  Sprint 33 py-spy showed this overhead at ~35 % of
+            # match.  py-spy put this overhead at ~35 % of
             # the static-path CPU on responses StaticFiles already
             # encoded via a precompressed sibling.
             if start_forwarded and (skip_compression or streaming):
@@ -277,7 +282,7 @@ class Compression:
                         # varies by Accept-Encoding on *every* exit path
                         # (compressed, too-small, executor-at-cap), so stamp
                         # Vary now — at the decision point — instead of only
-                        # after a successful compress (bug 1.21f).  Later paths
+                        # after a successful compress.  Later paths
                         # inherit it via start_event; the compress path's own
                         # _merge_vary then no-ops.
                         hdrs = list(start_event.get('headers', []))
@@ -322,7 +327,7 @@ class Compression:
         # as the end of the first response — causing the connection to
         # be closed after every successful response.  Detected via the
         # 1:1 success/read-error ratio under wrk keep-alive load
-        # (Sprint 29).
+        # workload.
         if start_forwarded:
             return
 
@@ -339,7 +344,7 @@ class Compression:
             # compressions running, skip this one and serve uncompressed
             # rather than queueing.  Prevents the unbounded executor backlog
             # that caused the HttpArena `static` profile to collapse to 0 r/s
-            # on run 2 under c=1024 (Sprint 29).  Counter increment / decrement
+            # on run 2 under c=1024.  Counter increment / decrement
             # is safe without a lock — asyncio is single-threaded.
             if (self._executor_max_inflight > 0
                     and self._executor_inflight >= self._executor_max_inflight):

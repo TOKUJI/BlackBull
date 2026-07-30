@@ -1,6 +1,6 @@
 """Server-Sent Events token-streaming example.
 
-Demonstrates the Sprint 45 streaming surface end-to-end:
+Demonstrates the streaming surface end-to-end:
 
 * A simplified handler returns an :class:`EventSourceResponse` whose
   async generator yields one event per fake LLM token.

@@ -1,4 +1,4 @@
-"""Conformance: gRPC message compression (Sprint 60 G2).
+"""Conformance: gRPC message compression.
 
 gRPC carries a per-message Compressed-Flag in the 5-byte LPM prefix; a set flag
 means the body is compressed with the algorithm named in ``grpc-encoding``.

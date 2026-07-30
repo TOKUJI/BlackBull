@@ -1,4 +1,4 @@
-"""HTTP/2 Actor classes for the BlackBull Actor model (Phase 6 Step 4).
+"""HTTP/2 Actor classes for the BlackBull actor model.
 
 HTTP2Actor drives the HTTP/2 connection state machine for one TCP connection.
 StreamActor owns the lifetime of a single HTTP/2 stream.
@@ -92,8 +92,8 @@ def _signal_recipients(recipients: dict[int, _StreamRecipient]) -> None:
 def _make_log_record(conn: Connection):
     # Publish the record for the app layer: BlackBull._dispatch sources the
     # request_completed detail's wire fields (status / response_bytes /
-    # duration_ms) from the request's ``conn.state['access_log']`` (Sprint 64
-    # event consolidation) — same contract as the HTTP/1.1 actor. The actor
+    # duration_ms) from the request's ``conn.state['access_log']`` — same
+    # contract as the HTTP/1.1 actor. The actor
     # always has the parsed Connection, even on the BB_FORCE_ASGI_SCOPE lane
     # (where the emitted scope shares ``conn.state`` by identity, so the app's
     # rebuilt Connection sees the same record) — so the log record is always
@@ -104,7 +104,7 @@ def _make_log_record(conn: Connection):
 
 _DEFAULT_PRIORITY: dict[str, int | bool] = {'urgency': 3, 'incremental': False}
 
-# Upper bound on the per-connection closed-stream record (bug 1.9).  Streams
+# Upper bound on the per-connection closed-stream record.  Streams
 # closed beyond this many back fall off the exact cache and are recognised as
 # CLOSED via the high-water mark instead, defaulting to the lenient
 # (non-RST-close) §5.1 treatment.
@@ -119,7 +119,7 @@ def _build_h2_extensions(
 ) -> dict:
     """Return a freshly-built ``scope['extensions']`` dict for one HTTP/2 request.
 
-    The shape Sprint 32 introduces:
+    The shape:
 
     - ``http.response.push`` — empty marker; signals the application can
       send ``http.response.push`` events on this scope (existing behaviour).
@@ -363,7 +363,7 @@ class HTTP2Actor(Actor):
         # Flow-control state — updated by SettingsResponder / WindowUpdateResponder
         # so that new stream senders start with the current peer-granted windows.
         self._peer_initial_window_size: int = DEFAULT_INITIAL_WINDOW_SIZE
-        # Shared connection-level send window (bug 1.2).  Every stream sender
+        # Shared connection-level send window.  Every stream sender
         # created by ``make_sender`` references this one object, so N concurrent
         # streams debit a single stream-0 budget instead of N private copies.
         self._conn_window = ConnectionWindow(DEFAULT_INITIAL_WINDOW_SIZE)
@@ -443,14 +443,14 @@ class HTTP2Actor(Actor):
         # already-closed identifiers and choosing the right error code.
         # Bounded record of recently-closed stream ids → closed-via-RST bool,
         # for §5.1 late-frame validation.  Capped so a long-lived connection
-        # cycling millions of streams (gRPC) does not grow it without bound
-        # (bug 1.9).  Ids below _closed_high_water that have fallen off the cap
+        # cycling millions of streams (gRPC) does not grow it without bound.
+        # Ids below _closed_high_water that have fallen off the cap
         # are still recognised as CLOSED via the watermark.
         self._closed_streams: dict[int, bool] = {}
         self._closed_high_water: int = 0
         # Set by receive() when a frame declares a payload larger than the
         # SETTINGS_MAX_FRAME_SIZE we advertise; the frame loop raises a
-        # FRAME_SIZE_ERROR without the payload ever being buffered (bug 1.14).
+        # FRAME_SIZE_ERROR without the payload ever being buffered.
         self._oversize_frame_len: int = 0
 
     # ------------------------------------------------------------------
@@ -472,7 +472,7 @@ class HTTP2Actor(Actor):
             sender = SenderFactory.http2(
                 self._writer, self.factory, stream_id,
                 push_callback=self._handle_push,
-                conn_window=self._conn_window,  # shared stream-0 budget (bug 1.2)
+                conn_window=self._conn_window,  # shared stream-0 budget
                 # Seed the per-stream window from what the peer has currently
                 # granted us, rather than the RFC default, which may already
                 # have been changed by SETTINGS frames received before this
@@ -485,8 +485,7 @@ class HTTP2Actor(Actor):
     def _make_stream_recipient(self, stream_id: int) -> HTTP2Recipient:
         """Recipient with consume-time WINDOW_UPDATE crediting.
 
-        Consume-based inbound flow control (the Sprint 62 deferral,
-        ``proposals/consume-based-inbound-flow-control.md``): credit is
+        Consume-based inbound flow control: credit is
         replayed when the app pops the event off the queue, not when the
         DATA frame is enqueued, so a stalled handler closes the window and
         back-pressures the peer instead of overflowing the recipient queue
@@ -567,7 +566,7 @@ class HTTP2Actor(Actor):
         """Materialize an ASGI scope dict for the **compat lanes only**.
 
         The native HTTP/2 dispatch path never calls this — it threads the
-        :class:`Connection` itself (WebSocket included, Sprint 80). The one
+        :class:`Connection` itself, WebSocket included. The one
         boundary that still needs an ASGI scope is **``BB_FORCE_ASGI_SCOPE``**
         (§4.3): a pure ASGI scope round-tripped back through ``from_scope`` at
         the app boundary. Also used to synthesize the pushed-request scope for
@@ -688,7 +687,7 @@ class HTTP2Actor(Actor):
     def _mark_closed(self, stream_id: int, via_rst: bool) -> None:
         """Record *stream_id* as closed for §5.1 late-frame validation.
 
-        Bounded (bug 1.9): only the most recent ``_CLOSED_STREAMS_CAP`` streams
+        Bounded: only the most recent ``_CLOSED_STREAMS_CAP`` streams
         keep their exact closed-via-RST bool; older ids are evicted (oldest
         first) but stay recognisable as CLOSED through ``_closed_high_water``.
         """
@@ -708,7 +707,7 @@ class HTTP2Actor(Actor):
             return b''
         size = int.from_bytes(data[:3], 'big', signed=False)
         if size > DEFAULT_MAX_FRAME_SIZE:
-            # RFC 9113 §4.2 (bug 1.14) — a frame larger than the
+            # RFC 9113 §4.2 — a frame larger than the
             # SETTINGS_MAX_FRAME_SIZE we advertise is a FRAME_SIZE_ERROR.
             # Refuse to buffer its (attacker-declared, up to 16 MiB) payload:
             # hand back the 9-byte header and let the frame loop raise the
@@ -772,7 +771,7 @@ class HTTP2Actor(Actor):
         while data := await self.receive():
             if self._goaway_sent:
                 # A previous frame triggered a connection error and the GOAWAY
-                # has been flushed.  Signal recipients before exiting (bug 1.8):
+                # has been flushed.  Signal recipients before exiting:
                 # stream tasks blocked in receive() awaiting body would
                 # otherwise never get http.disconnect, so the enclosing
                 # TaskGroup waits on them forever and the connection wedges.
@@ -781,7 +780,7 @@ class HTTP2Actor(Actor):
                 return
             if self._oversize_frame_len:
                 # receive() refused to buffer an over-sized frame's payload
-                # (bug 1.14).  Raise the FRAME_SIZE_ERROR and close without
+                # Raise the FRAME_SIZE_ERROR and close without
                 # ever loading the frame — the un-read payload bytes stay in
                 # the socket buffer and are discarded on close.
                 n = self._oversize_frame_len
@@ -897,7 +896,7 @@ class HTTP2Actor(Actor):
                 is_closed = closed_via_rst is not None
                 if not is_closed and 0 < frame.stream_id <= self._closed_high_water:
                     # Recorded as closed but evicted from the bounded cache
-                    # (bug 1.9) — still CLOSED, not IDLE.  Default to the lenient
+                    # — still CLOSED, not IDLE.  Default to the lenient
                     # (non-RST) treatment so a late WINDOW_UPDATE/RST_STREAM is
                     # ignored rather than answered.
                     is_closed = True
@@ -979,7 +978,7 @@ class HTTP2Actor(Actor):
                         # already-open request stream is *trailers*, not a new
                         # request.  Previously _validate_stream_state permitted
                         # HEADERS in OPEN and this respawned a second request
-                        # over the live recipient/task (bug 1.14).  We don't
+                        # over the live recipient/task.  We don't
                         # surface request trailers to the ASGI app, so we mark a
                         # clean end-of-stream instead.  Trailers MUST carry
                         # END_STREAM; without it the request is malformed.
@@ -1135,7 +1134,7 @@ class HTTP2Actor(Actor):
         """Handle a HEADERS frame; return True if stream task spawned, False if awaiting CONTINUATION."""
         if self._active_stream_count >= self.max_concurrent_streams:
             if not frame.end_headers:
-                # Bug 1.14 #2 — the header block legally continues in
+                # The header block legally continues in
                 # CONTINUATION frames (RFC 9113 §6.10); refusing here would
                 # leave run() not expecting them and escalate the peer's
                 # legal CONTINUATION into a bogus connection error.  Keep
@@ -1173,7 +1172,7 @@ class HTTP2Actor(Actor):
 
         if conn.type == 'websocket':
             # RFC 8441 — Extended CONNECT bootstrapping WebSocket over HTTP/2.
-            # WebSocket is native too (Sprint 80): thread the Connection — its
+            # WebSocket is native too: thread the Connection — its
             # WS extras (subprotocols / the deferred 200 responder) live on it,
             # so there is no scope dict even under BB_FORCE_ASGI_SCOPE (the
             # force-asgi lane only round-trips the HTTP app boundary).
@@ -1210,7 +1209,7 @@ class HTTP2Actor(Actor):
         # Build the access-log record (and wrap send to capture status/bytes)
         # only when something consumes it: access log, phase trace, or a
         # request_completed listener. The legacy (aggregator=None) path always
-        # builds it — _run_with_log emits unconditionally. See P3 (HTTP/1.1).
+        # builds it — _run_with_log emits unconditionally.
         if self._aggregator is None or _request_record_needed(self._aggregator):
             log_record = _make_log_record(conn)
             dispatch_send = _make_capturing_send(send, log_record)
@@ -1239,7 +1238,7 @@ class HTTP2Actor(Actor):
                 'unexpected CONTINUATION without preceding HEADERS')
             return True
 
-        # copy-reduction-http2 P3 — accumulate into a bytearray so each
+        # Accumulate into a bytearray so each
         # CONTINUATION is an amortised-O(1) in-place extend rather than the
         # O(n²) ``bytes += bytes`` that reallocates the whole block per frame.
         # parse_payload() wraps raw_block in BytesIO, which accepts bytearray.
@@ -1308,7 +1307,7 @@ class HTTP2Actor(Actor):
         stream.conn = target
         stream_recipient = self._make_stream_recipient(stream.stream_id)
         self._recipients[stream.stream_id] = stream_recipient
-        # Same consumer-gate as the HEADERS path (P3): skip the record + capturing
+        # Same consumer-gate as the HEADERS path: skip the record + capturing
         # send wrapper when nothing reads them.
         if self._aggregator is None or _request_record_needed(self._aggregator):
             log_record = _make_log_record(conn)

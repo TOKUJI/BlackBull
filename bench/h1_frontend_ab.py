@@ -8,7 +8,7 @@ Each underlying ``read``/``readuntil`` is one trip, i.e. at minimum one chance
 for the loop to suspend, and fewer of them is the whole claim behind
 ``BB_H1_PROTOCOL``.
 
-What it established (Sprint 84): the per-line header loop runs only for the
+What it established: the per-line header loop runs only for the
 *first* request on a connection — ``run()`` already reads each subsequent head
 with a single ``readuntil(b'\r\n\r\n')`` — so the buffered front end wins on
 pipelined arrival (~1.1 → ~0.04 trips/req) and not on serialized keep-alive

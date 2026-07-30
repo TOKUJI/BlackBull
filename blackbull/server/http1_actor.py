@@ -1,4 +1,4 @@
-"""HTTP/1.1 Actor classes for the BlackBull Actor model (Phase 6 Step 3).
+"""HTTP/1.1 Actor classes for the BlackBull actor model.
 
 HTTP1Actor drives the keep-alive loop for one TCP connection.
 RequestActor owns the lifetime of a single HTTP request.
@@ -44,7 +44,7 @@ _HTTP_PORT  = 80
 _HTTPS_PORT = 443
 
 # Upper bound on request-body bytes drained to recover keep-alive framing
-# when a handler leaves the body unread (bug 1.6).  A larger unread body
+# when a handler leaves the body unread.  A larger unread body
 # closes the connection rather than spending bandwidth draining it — nginx's
 # lingering-close does the same.
 _MAX_KEEPALIVE_DRAIN = 64 * 1024
@@ -70,7 +70,7 @@ _TOKEN_CHARS = (
 _TOKEN_SET = frozenset(_TOKEN_CHARS)
 _HTTP_VERSION_RE = re.compile(rb'^HTTP/\d\.\d$')
 
-# Sprint 25 Phase B — compiled-regex validators replace per-byte
+# Compiled-regex validators replace per-byte
 # `any(c not in _TOKEN_SET for c in …)` and `any((b < 0x20 or
 # b == 0x7F) and b != 0x09 for b in …)` scans in `_parse`.  The
 # character classes below are the exact negation of the RFC 9110
@@ -81,6 +81,43 @@ _HTTP_VERSION_RE = re.compile(rb'^HTTP/\d\.\d$')
 # on it.
 _FIELD_NAME_INVALID_RE = re.compile(rb"[^!#$%&'*+\-.^_`|~0-9A-Za-z]")
 _FIELD_VALUE_INVALID_RE = re.compile(rb"[\x00-\x08\x0a-\x1f\x7f]")
+
+# RFC 9110 §5.6.2 tchar, spelled out.  Deleting every allowed octet leaves
+# the empty string for a valid token, so a non-empty result is the rejection
+# — the same trick as `_TARGET_ALLOWED_OCTETS`, and measurably cheaper than
+# `_FIELD_NAME_INVALID_RE` (which stays as the source of truth this table is
+# tested against, octet for octet).
+_TCHAR_OCTETS = (b"!#$%&'*+-.^_`|~"
+                 b'0123456789'
+                 b'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
+                 b'abcdefghijklmnopqrstuvwxyz')
+
+# Everything a header *block* may contain, so that deleting it leaves only
+# CR, LF, and the CTLs a field value may not carry (`_FIELD_VALUE_INVALID_RE`).
+# A clean block therefore reduces to a run of CRLFs — which is what
+# `_block_values_are_clean` checks, in one C-level pass for the whole request
+# instead of one regex per header.
+_BLOCK_ALLOWED_OCTETS = bytes(
+    c for c in range(256)
+    if not (c < 0x09 or 0x0B <= c <= 0x0C or 0x0E <= c <= 0x1F or c == 0x7F)
+    and c not in (0x0A, 0x0D)
+)
+
+
+def _block_values_are_clean(data: bytes) -> bool:
+    """True when no field value in *data* can contain a forbidden octet.
+
+    Deleting every permitted octet leaves only CR, LF and forbidden CTLs.
+    If what remains tiles exactly into CRLF pairs, then every CR and LF in
+    the block is a line terminator and no forbidden CTL appears anywhere —
+    so the per-header field-value check cannot fire, and is skipped.
+
+    A ``False`` result proves nothing about *which* line is at fault (it can
+    even be the request line, which has its own checks), so it only turns the
+    per-header regex back on.  The caller's error messages are unchanged.
+    """
+    residue = data.translate(None, _BLOCK_ALLOWED_OCTETS)
+    return residue.count(b'\r\n') * 2 == len(residue)
 
 # RFC 9110 §8.6 — strict Content-Length: at most one canonical leading SP
 # (the byte after the colon), then ``0`` or a no-leading-zero decimal.
@@ -150,7 +187,7 @@ def _validate_message_framing(headers: 'Headers') -> None:
       ``identity, chunked`` multi-coding form, etc.) raises
       :class:`NotImplementedFramingError`.  Without this check the
       recipient layer raised ``NotImplementedError`` later and the
-      connection dropped silently (Sprint 17 Finding C).
+      connection dropped silently.
     """
     cls = headers.getlist(b'content-length')
     tes = headers.getlist(b'transfer-encoding')
@@ -174,7 +211,7 @@ def _validate_message_framing(headers: 'Headers') -> None:
             raise BadRequestError(
                 f'conflicting Content-Length values: {sorted(values)!r}')
 
-    # Sprint 18 Phase 2 / Sprint 63 — Transfer-Encoding validation.
+    # Transfer-Encoding validation.
     #
     # RFC 9112 §6.1 distinguishes two failure modes:
     #   * ``chunked`` present but NOT the final coding (``chunked, gzip``,
@@ -212,10 +249,22 @@ def _validate_message_framing(headers: 'Headers') -> None:
 # RFC 3986 §3.2 — authority = [userinfo "@"] host [":" port].  None of
 # these delimiter octets belong in a Host header value; their presence
 # (or an empty value) is a smuggling / SSRF vector that nginx rejects
-# with 400 and BlackBull, pre-Sprint-18, accepted silently.  ``@`` is
-# included (Sprint 63, COMP-HOST-WITH-USERINFO): the deprecated userinfo
+# with 400 and a lenient parser accepts silently.  ``@`` is
+# included: the deprecated userinfo
 # component has no place in a Host header and enables credential-spoofing.
 _HOST_FORBIDDEN_BYTES = frozenset(b'/?# \t@')
+# Derived from the set above so the two cannot drift.  A small forbidden
+# class scans faster as a regex than as a `translate` delete table (the
+# opposite of the request-target case below, where the allowed set is large).
+_HOST_FORBIDDEN_RE = re.compile(
+    b'[' + re.escape(bytes(sorted(_HOST_FORBIDDEN_BYTES))) + b']')
+
+# RFC 9112 §2.1 / RFC 3986 — a request-target may carry only visible ASCII.
+# Deleting every allowed octet leaves the empty string for a valid target, so
+# a non-empty result *is* the rejection: one C-level pass instead of a Python
+# generator over each byte, and no allocation in the accept case (CPython
+# returns the shared empty bytes).
+_TARGET_ALLOWED_OCTETS = bytes(range(0x21, 0x7F))
 
 
 def _parse_host_header(value: bytes, default_port: int) -> tuple[str, int]:
@@ -248,9 +297,9 @@ def _parse_host_header(value: bytes, default_port: int) -> tuple[str, int]:
 
 def _validate_host(headers: 'Headers') -> None:
     """RFC 9112 §3.2 / §7.2 — Host MUST be present and contain a valid
-    URI-authority component.  Sprint 17 Finding B captured several
-    inputs (``host: 0/0``, empty host) where BlackBull answered 200 and
-    nginx answered 400.  This check brings BlackBull into RFC alignment.
+    URI-authority component.  Inputs such as ``host: 0/0`` and an empty
+    host are accepted by a lenient parser and rejected with 400 by nginx;
+    this check keeps BlackBull on the RFC side of that split.
 
     Rules enforced:
       * at most one Host header (§7.2; multiple is a smuggling vector);
@@ -271,7 +320,7 @@ def _validate_host(headers: 'Headers') -> None:
     value = hosts[0][1].strip(b' \t')
     if not value:
         raise BadRequestError('empty Host header value')
-    if any(b in _HOST_FORBIDDEN_BYTES for b in value):
+    if _HOST_FORBIDDEN_RE.search(value):
         raise BadRequestError(
             f'invalid Host authority {value!r}: contains '
             f'delimiter / whitespace forbidden by RFC 3986 §3.2')
@@ -287,7 +336,7 @@ class RequestActor(Actor):
     Spawned by HTTP1Actor, awaited to completion.  Calls the ASGI app.
 
     The request-lifecycle Level B events are emitted by the application
-    layer (``BlackBull._dispatch`` / ``__call__``, Sprint 64 + issue #145) —
+    layer (``BlackBull._dispatch`` / ``__call__``) —
     the cross-transport emission points — not here.  The
     actor layer emits only the Level B ``error`` event, for exceptions that
     escape the app call (e.g. a raising global middleware).
@@ -410,7 +459,7 @@ class HTTP1Actor(Actor):
         from ..env import get_settings as _get_settings  # noqa: PLC0415
         from .access_log import PHASE_TRACE as _PHASE_TRACE  # noqa: PLC0415
         cfg = _get_settings()
-        # Sprint 23: one rescheduled TimerHandle per connection drives
+        # One rescheduled TimerHandle per connection drives
         # all phase deadlines (headers / body / keep-alive).  Created
         # lazily so tests that instantiate HTTP1Actor without a wrapping
         # ConnectionActor still work — same task either way.
@@ -418,7 +467,7 @@ class HTTP1Actor(Actor):
             self._deadline = ConnectionDeadline()
         dl = self._deadline
         send = SenderFactory.http1(self._writer)
-        # Sprint 33 investigation: capture loop_start at the very top
+        # Capture loop_start at the very top
         # of each iteration so we can quantify the between-request gap
         # (dispatch_done(N) → loop_start(N+1)) on a keep-alive
         # connection.  Plain locals — assigned to log_record.phases
@@ -445,7 +494,7 @@ class HTTP1Actor(Actor):
                     else:
                         await self._read_headers(cfg.header_max_total)
                 except IncompleteReadError:
-                    # Sprint 17 Phase 3 — distinguish idle EOF from
+                    # Distinguish idle EOF from
                     # mid-headers EOF.  ``self._request`` is empty in
                     # the idle case (just-after keep-alive reset or
                     # fresh connection with no preamble); peer closed
@@ -513,8 +562,8 @@ class HTTP1Actor(Actor):
                         send, b'400 Bad Request', HTTPStatus.BAD_REQUEST)
                     return
                 except NotImplementedFramingError as exc:
-                    # Sprint 18 Phase 2 — RFC 9112 §6.1: server received a
-                    # Transfer-Encoding it does not implement.  Pre-Sprint-18
+                    # RFC 9112 §6.1: server received a
+                    # Transfer-Encoding it does not implement.  A lenient
                     # this raised inside HTTP1Recipient and the connection
                     # dropped silently (Finding C in user-corpus).  Match
                     # nginx and answer with 501 then close.
@@ -533,7 +582,7 @@ class HTTP1Actor(Actor):
                     return
                 self._fill_connection_info(conn)
 
-                # Sprint 80 Tier-2 / native-Connection entry: BlackBull's own
+                # Native-Connection entry: BlackBull's own
                 # server dispatches the typed ``Connection`` directly — the app
                 # is ``app(conn, receive, send)``, no ASGI scope object at all.
                 # Only ``BB_FORCE_ASGI_SCOPE=1`` takes the compat lane: the server
@@ -548,7 +597,7 @@ class HTTP1Actor(Actor):
                     app_arg = conn                                     # native Connection
 
                 if conn.type == 'websocket':
-                    # WebSocket is native too (Sprint 80): the upgrade path
+                    # WebSocket is native too: the upgrade path
                     # threads the typed Connection — the WS-only extras
                     # (subprotocols, the deferred 101 responder, deflate params)
                     # live on it (``conn.subprotocols`` / ``conn._ws``), so there
@@ -568,8 +617,8 @@ class HTTP1Actor(Actor):
                 # (access log / phase trace / request_completed listener). On the
                 # baseline hot path — no logging, no listeners — skipping it drops
                 # a per-request allocation and the ``conn.state`` dict it forces
-                # (Sprint 80 alloc-reduction; the Connection graph's per-request
-                # objects are what the cyclic GC scans under concurrency). The
+                # (the Connection graph's per-request objects are what the
+                # cyclic GC scans under concurrency). The
                 # legacy (no-aggregator) branch of ``_dispatch_request`` reads the
                 # record unconditionally, so keep building it when there is no
                 # aggregator. Consumers below are all None-tolerant (the sender
@@ -586,7 +635,7 @@ class HTTP1Actor(Actor):
                     conn.state['access_log'] = log_record
                 else:
                     log_record = None
-                # Sprint 38 Task B — reset per-request sender state.  The
+                # Reset per-request sender state.  The
                 # HTTP1Sender instance is shared across keep-alive
                 # requests on this connection; without this reset
                 # ``_started`` stays True after the first response and
@@ -657,7 +706,7 @@ class HTTP1Actor(Actor):
                     self._request = next_chunk
                     continue
 
-                # Sprint 38 Task B — BB_REQUEST_TIMEOUT parity with the
+                # BB_REQUEST_TIMEOUT parity with the
                 # HTTP/2 path.  ``HTTP2Actor._spawn_stream_task`` wraps each
                 # stream coroutine with ``asyncio.wait_for``; the HTTP/1.1
                 # path mirrors that here.  On expiry: synthesise 408 if
@@ -759,9 +808,9 @@ class HTTP1Actor(Actor):
     def _parse(self, data: bytes) -> Connection:
         """Parse raw HTTP/1.1 request bytes into a native :class:`Connection`.
 
-        (Sprint 79 Phase 3 — the parser now produces the typed native model;
-        the ASGI scope is a derived view obtained via ``conn.as_scope()`` at
-        the dispatch boundary.)
+        The parser produces the typed native model; the ASGI scope is a
+        derived view obtained via ``conn.as_scope()`` at the dispatch
+        boundary.
 
         Raises :class:`BadRequestError` on any RFC 9112 framing violation
         the caller should answer with 400.  Validation rules:
@@ -782,7 +831,10 @@ class HTTP1Actor(Actor):
         from ..env import get_settings as _get_settings  # noqa: PLC0415
         max_line = _get_settings().header_max_line
         lines = data.split(b'\r\n')
-        if max_line > 0:
+        # No line can be longer than the block that contains it, so the
+        # per-line walk is only reachable for a block that is itself over the
+        # limit — one comparison retires it for every request under 8 KiB.
+        if max_line > 0 and len(data) > max_line:
             for ln in lines:
                 if len(ln) > max_line:
                     raise HeaderTooLargeError(
@@ -805,7 +857,7 @@ class HTTP1Actor(Actor):
         method, path, version = parts
 
         # Method (§4 / RFC 9110 §9.1) — case-sensitive token of 1+ tchar.
-        if not method or _FIELD_NAME_INVALID_RE.search(method):
+        if not method or method.translate(None, _TCHAR_OCTETS):
             raise BadRequestError(f'invalid method {method!r}')
 
         # HTTP-version (§2.5) — exactly ``HTTP/d.d``.
@@ -860,15 +912,15 @@ class HTTP1Actor(Actor):
         # smuggling vector, MAL-NON-ASCII-URL).  Skipped for asterisk-form
         # (the literal ``*`` is validated above).
         if not asterisk_form and (
-                not path or any(b < 0x21 or b == 0x7F or b >= 0x80 for b in path)):
+                not path or path.translate(None, _TARGET_ALLOWED_OCTETS)):
             raise BadRequestError(f'invalid request-target {path!r}')
 
         if asterisk_form:
             _raw_path_b, _query_string = b'*', b''
         else:
-            # Sprint 25 Phase A — split the bytes request-target with C-level
+            # Split the bytes request-target with C-level
             # partition calls (~12× faster than urlparse): strip #fragment,
-            # then split ?query.  Sprint 68 — ';' is NOT split off: RFC 3986
+            # then split ?query.  ';' is NOT split off: RFC 3986
             # treats it as an ordinary path sub-delimiter (the ;params grammar
             # is obsolete RFC 2396), so it stays in the path component.  The
             # path component (raw_path) and its decoded form (path) are now
@@ -876,7 +928,7 @@ class HTTP1Actor(Actor):
             _no_frag, _, _ = path.partition(b'#')
             _raw_path_b, _, _query_string = _no_frag.partition(b'?')
 
-        # Sprint 68 W1 — ASGI: scope['path'] is the percent-decoded (UTF-8)
+        # ASGI: scope['path'] is the percent-decoded (UTF-8)
         # path component.  The b'%' guard keeps the no-escape common case on
         # the plain-decode fast path; the target was already rejected above
         # if it contains bytes >= 0x80, so .decode('ascii') cannot fail.
@@ -888,6 +940,12 @@ class HTTP1Actor(Actor):
         else:
             _decoded_path = _raw_path_b.decode('utf-8')
 
+        # One C-level pass decides whether any field value *could* hold a
+        # forbidden octet.  When it says no, the per-header regex below is
+        # dead weight and is skipped; when it says yes, that regex still runs
+        # and still raises, so the diagnostic never changes.
+        values_need_checking = not _block_values_are_clean(data)
+
         raw: list[tuple[bytes, bytes]] = []
         for line in lines[idx + 1:]:
             if not line:
@@ -895,8 +953,10 @@ class HTTP1Actor(Actor):
                 # split off upstream because we read until CRLFCRLF).
                 continue
             # RFC 9112 §5.2 — obs-fold (leading SP/HTAB on a header line)
-            # MUST be rejected in requests.
-            if line[:1] in (b' ', b'\t'):
+            # MUST be rejected in requests.  Indexing yields an int and skips
+            # the one-byte slice a `line[:1]` comparison would allocate; the
+            # empty-line case is retired by the `continue` above.
+            if line[0] in (0x20, 0x09):
                 raise BadRequestError(
                     f'obsolete line folding rejected: {line!r}')
             colon = line.find(b':')
@@ -904,12 +964,16 @@ class HTTP1Actor(Actor):
                 raise BadRequestError(f'malformed header line: {line!r}')
             key = line[:colon]
             value = line[colon + 1:]
-            # §5.1 — no whitespace between field-name and ':'.
-            if key[-1:] in (b' ', b'\t'):
-                raise BadRequestError(
-                    f'whitespace before colon (smuggling vector): {line!r}')
             # field-name must be a valid token (§5.1 / RFC 9110 §5.6.2).
-            if _FIELD_NAME_INVALID_RE.search(key):
+            # SP and HTAB are not tchar, so this one test also decides §5.1
+            # (no whitespace between field-name and ':') — a well-formed name
+            # answers both questions at once, and only a rejected name pays
+            # for telling the two apart.  `colon < 1` above guarantees a
+            # non-empty key, so indexing is safe.
+            if key.translate(None, _TCHAR_OCTETS):
+                if key[-1] in (0x20, 0x09):
+                    raise BadRequestError(
+                        f'whitespace before colon (smuggling vector): {line!r}')
                 raise BadRequestError(f'invalid header name {key!r}')
             lkey = key.lower()
             if lkey in _UNDERSCORE_FRAMING_NAMES:
@@ -925,7 +989,7 @@ class HTTP1Actor(Actor):
             # Strip the OWS surrounding the value (§5).
             value = value.strip(b' \t')
             # field-value MUST NOT contain CTLs except HTAB.
-            if _FIELD_VALUE_INVALID_RE.search(value):
+            if values_need_checking and _FIELD_VALUE_INVALID_RE.search(value):
                 raise BadRequestError(
                     f'CTL in header value (smuggling / log-injection): '
                     f'{key!r}: {value!r}')
@@ -938,7 +1002,9 @@ class HTTP1Actor(Actor):
         if authority_override is not None:
             raw = [(k, v) for k, v in raw if k != b'host']
             raw.append((b'host', authority_override))
-        headers = Headers(raw)
+        # Names were lowercased in the loop above while being validated;
+        # `Headers.__init__` would lowercase them a second time.
+        headers = Headers.from_lowered(raw)
 
         # RFC 9110 §8.3 — Content-Type is a singleton; multiple values are
         # ambiguous and a request-smuggling surface (COMP-DUPLICATE-CT).
@@ -947,7 +1013,7 @@ class HTTP1Actor(Actor):
 
         # RFC 9112 §6 — message framing validation.  Done here so a bad
         # framing header is rejected before any body bytes are read.
-        # Sprint 18 — also validates Host (§3.2 / §7.2) and the
+        # Also validates Host (§3.2 / §7.2) and the
         # transfer-coding registry (§6.1 → 501 on unknown coding).
         _validate_message_framing(headers)
         _validate_host(headers)
@@ -1017,7 +1083,7 @@ class HTTP1Actor(Actor):
             conn.scheme = 'wss' if conn.type == 'websocket' else 'https'
 
     async def _handle_upgrade(self, conn: Connection) -> None:
-        """Handle WebSocket upgrade (native Connection, Sprint 80)."""
+        """Handle WebSocket upgrade, threading the native Connection."""
         from .conn_id import new_connection_id  # noqa: PLC0415
         from .websocket_actor import WebSocketActor  # noqa: PLC0415
         aggregator = self._aggregator
@@ -1182,7 +1248,7 @@ class HTTP1Actor(Actor):
             try:
                 await request_actor.run()
             except asyncio.CancelledError:
-                # Sprint 38 Task B — let BB_REQUEST_TIMEOUT's wait_for see
+                # Let BB_REQUEST_TIMEOUT's wait_for see
                 # the cancellation; swallowing it here would convert a
                 # timeout into a normal close without the 408 synthesis.
                 raise
@@ -1214,8 +1280,8 @@ class HTTP1Actor(Actor):
         raises :class:`HeaderTooLargeError` when the buffer overshoots.
 
         Read **one CRLF-terminated line per iteration** rather than scanning
-        for the contiguous ``\\r\\n\\r\\n`` delimiter.  Sprint 19 — the
-        ``readuntil(b'\\r\\n\\r\\n')`` shape deadlocked when
+        for the contiguous ``\\r\\n\\r\\n`` delimiter.  A
+        ``readuntil(b'\\r\\n\\r\\n')`` shape deadlocks when
         :class:`ConnectionActor` had already consumed the first line's
         ``\\r\\n`` via its protocol-detect ``readuntil(b'\\r\\n')`` and the
         remaining buffer contained only the terminating empty line's
@@ -1240,7 +1306,7 @@ class HTTP1Actor(Actor):
         # Accumulate into a bytearray (amortised O(1) append) instead of the
         # O(n²) bytes ``+=`` growth, then publish back as bytes.  The loop
         # condition and size check are byte-for-byte equivalent to the prior
-        # form (copy-reduction-http1 P2).
+        # form.
         buf = bytearray(self._request)
         while not buf.endswith(_REQ_END):
             try:
@@ -1309,7 +1375,7 @@ class HTTP1Actor(Actor):
     def _should_keep_alive(self, conn) -> bool:
         """Return True if the connection should persist after this request.
 
-        Reads the :class:`Connection` directly (Sprint 80 Tier-2) so the
+        Reads the :class:`Connection` directly so the
         per-request keep-alive decision never materializes the lazy scope."""
         http_version = conn.http_version
         connection = conn.headers.get(b'connection', b'').lower()

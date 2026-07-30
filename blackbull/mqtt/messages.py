@@ -1,4 +1,4 @@
-"""MQTT 5.0 control-packet codec — Sprint 52.
+"""MQTT 5.0 control-packet codec.
 
 Level-A (pure-data) layer for the ``blackbull-mqtt`` broker sidecar: the 15
 MQTT 5.0 control packets as frozen dataclasses, a wire encoder/decoder, the
@@ -867,7 +867,7 @@ def _decode_connect(body: bytes, flags: int) -> MQTTConnect:
     # Remaining Length stops short of them must be rejected as a Malformed
     # Packet (§1.5.5, §4.13) — a raw ``body[pos]`` here would raise IndexError,
     # which the framer's ``except`` does not catch, unwinding ``read_loop``
-    # and dropping the connection instead of resyncing (audit 1.19g).
+    # and dropping the connection instead of resyncing.
     if pos + 4 > len(body):
         raise MQTTDecodeError('CONNECT truncated before the fixed header fields')
     proto_level = body[pos]

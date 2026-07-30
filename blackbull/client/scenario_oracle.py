@@ -1,6 +1,6 @@
 """Deprecation shim — moved to :mod:`blackbull.fault_injection`.
 
-Sprint 46 grouped the HTTP/1.1 differential oracle alongside the
+Groups the HTTP/1.1 differential oracle alongside the
 scenario model under :mod:`blackbull.fault_injection`.  Import from
 there going forward::
 

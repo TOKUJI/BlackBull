@@ -12,7 +12,7 @@
 #   4. install tests/cert.pem into the system CA store
 #   5. smoke test: pytest -q tests/unit/
 #
-# TOPO=split (Sprint 20):
+# TOPO=split:
 #   1. same as above on the SERVER, **plus** regenerate tests/cert.pem
 #      with bench-server.internal + server private IP as SANs and reinstall
 #      in the server's CA store.
@@ -30,7 +30,7 @@ source "$(dirname "$0")/config.sh"
 _bench_aws_check_env
 _bench_aws_load_state
 
-# Backward-compat with pre-Sprint-20 state files.
+# Backward-compat with legacy state files.
 SERVER_INSTANCE_ID="${SERVER_INSTANCE_ID:-${INSTANCE_ID:-}}"
 SERVER_PUBLIC_IP="${SERVER_PUBLIC_IP:-${PUBLIC_IP:-}}"
 SERVER_PRIVATE_IP="${SERVER_PRIVATE_IP:-}"
@@ -172,7 +172,7 @@ sudo sysctl --quiet -p /etc/sysctl.d/99-blackbull-bench.conf
 echo "=== Smoke test ==="
 .venv/bin/python -m pytest -q tests/unit/ --timeout=30 -x 2>&1 | tail -5
 
-echo "=== Server CPU topology (Sprint 21 Phase B) ==="
+echo "=== Server CPU topology ==="
 mkdir -p bench/results
 {
     echo "# Server CPU topology — captured at bench install time."
