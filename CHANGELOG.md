@@ -29,7 +29,7 @@ so the editable install's metadata catches up.
 
 ---
 
-## [Unreleased]
+## [0.67.0] — 2026-07-31
 
 ### Changed
 
