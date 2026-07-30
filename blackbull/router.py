@@ -1127,29 +1127,32 @@ def _adapt_websocket_handler(fn, path: str = ''):
                     try:
                         kwargs[name] = payload(raw)
                     except (ValueError, TypeError):
-                        return await _ws_reject(
+                        await _ws_reject(
                             _WS(conn, receive, send) if ws is None else ws,
                             f'path param {name!r}: cannot coerce {raw!r} to '
                             f'{payload.__name__}')
+                        return
                 else:
                     kwargs[name] = raw
             else:  # 'query'
                 raw = query_values.get(name, _QUERY_MISSING)
                 if raw is _QUERY_MISSING:
                     if payload.required:
-                        return await _ws_reject(
+                        await _ws_reject(
                             _WS(conn, receive, send) if ws is None else ws,
                             f'missing required query parameter {name!r} for '
                             f'handler {fn_name!r}')
+                        return
                     kwargs[name] = payload.default
                 else:
                     try:
                         kwargs[name] = payload.coercer(raw)
                     except (ValueError, TypeError):
-                        return await _ws_reject(
+                        await _ws_reject(
                             _WS(conn, receive, send) if ws is None else ws,
                             f'query parameter {name!r}: cannot coerce {raw!r} '
                             f'to {payload.type.__name__}')
+                        return
 
         if not depends_plan:
             await fn(**kwargs)

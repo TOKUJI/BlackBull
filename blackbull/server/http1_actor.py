@@ -10,7 +10,6 @@ from binascii import Error as BinasciiError
 from collections.abc import Awaitable, Callable
 from hashlib import sha1
 from http import HTTPStatus
-from typing import Any
 from urllib.parse import unquote
 
 from ..actor import Actor, Message
@@ -61,24 +60,18 @@ _H1_PATHSEND_EXTENSIONS = {'http.response.pathsend': {}}
 # RFC 9110 §5.6.2 — token = 1*tchar
 # RFC 9110 §5.5  — field-value disallows CTLs (0x00-0x1F, 0x7F) except HTAB
 # RFC 9112 §4   — method = token, HTTP-version = "HTTP/" DIGIT "." DIGIT
-_TOKEN_CHARS = (
-    b"!#$%&'*+-.^_`|~"
-    + bytes(range(0x30, 0x3A))   # 0-9
-    + bytes(range(0x41, 0x5B))   # A-Z
-    + bytes(range(0x61, 0x7B))   # a-z
-)
-_TOKEN_SET = frozenset(_TOKEN_CHARS)
 _HTTP_VERSION_RE = re.compile(rb'^HTTP/\d\.\d$')
 
-# Compiled-regex validators replace per-byte
-# `any(c not in _TOKEN_SET for c in …)` and `any((b < 0x20 or
-# b == 0x7F) and b != 0x09 for b in …)` scans in `_parse`.  The
-# character classes below are the exact negation of the RFC 9110
-# §5.6.2 tchar set and the RFC 9110 §5.5 CTL-except-HTAB allow-list
-# respectively; `re.search` returns a Match on the first invalid
-# byte (3–4× faster than the equivalent Python loop per pyperf).
-# `_TOKEN_SET` is retained for any external callers that may rely
-# on it.
+# Compiled-regex validators replace the per-byte membership scans this parser
+# used to run.  The character classes below are the exact negation of the RFC
+# 9110 §5.6.2 tchar set and the RFC 9110 §5.5 CTL-except-HTAB allow-list
+# respectively; `re.search` returns a Match on the first invalid byte (3–4×
+# faster than the equivalent Python loop per pyperf).
+#
+# `_FIELD_NAME_INVALID_RE` has no call site in this module — `_TCHAR_OCTETS`
+# below is what `_parse` uses — but it is **not** dead: it is the reference
+# `tests/unit/test_parse_octet_tables.py` validates that table against, octet
+# for octet, so the fast form cannot drift from the RFC without a test failing.
 _FIELD_NAME_INVALID_RE = re.compile(rb"[^!#$%&'*+\-.^_`|~0-9A-Za-z]")
 _FIELD_VALUE_INVALID_RE = re.compile(rb"[\x00-\x08\x0a-\x1f\x7f]")
 

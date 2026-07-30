@@ -1,5 +1,3 @@
-from typing import Any
-
 from blackbull.asgi import WebSocketReceiveEvent
 from blackbull.event import Event, EventDispatcher
 
