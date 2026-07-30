@@ -19,7 +19,7 @@ from blackbull.headers import Headers
 
 def _scope(method: str = 'GET', path: str = '/',
            headers: dict[str, str] | None = None) -> 'Connection':
-    # Sprint 80: BlackBull threads a native Connection (not an ASGI scope dict)
+    # BlackBull threads a native Connection (not an ASGI scope dict)
     # through the middleware/handler pipeline for HTTP.
     from blackbull.connection import Connection
     raw = [(k.lower().encode(), v.encode())
@@ -122,7 +122,7 @@ class TestStaticFilesBasic:
             self, static_dir, filename, expected_ct):
         """Common web asset MIME types must resolve correctly even when
         the host's ``/etc/mime.types`` is missing or sparse (e.g.
-        ``python:3.13-slim`` containers).  Sprint 35 phase-trace traced
+        ``python:3.13-slim`` containers).  A phase trace attributed
         a 30-60 ms per-request CPU tail on woff2 files to this case:
         no mime entry → ``application/octet-stream`` Content-Type →
         Compression middleware brotli-encoded already-compressed bytes.
@@ -363,7 +363,7 @@ class TestBlackBullStaticRegistration:
 
 
 # ---------------------------------------------------------------------------
-# Precompressed-variant serving (Sprint 29 #1)
+# Precompressed-variant serving
 # ---------------------------------------------------------------------------
 
 @pytest.fixture
@@ -515,7 +515,7 @@ class TestPrecompressedVariant:
 
 
 # ---------------------------------------------------------------------------
-# Sprint 31 — ``http.response.pathsend`` extension wiring
+# ``http.response.pathsend`` extension wiring
 # ---------------------------------------------------------------------------
 
 @pytest.fixture

@@ -1,4 +1,4 @@
-"""WebSocket Actor — Phase 6 Step 5."""
+"""WebSocket Actor — owns one upgraded connection's frame loop."""
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable

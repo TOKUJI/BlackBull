@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# bench/aws/profile.sh — Sprint 15: capture two py-spy flame graphs on EC2,
+# bench/aws/profile.sh — capture two py-spy flame graphs on EC2,
 # one at low concurrency (B1-like, K6_VUS=200) and one at high concurrency
 # (C2, K6_VUS=500).  The goal is to find what shifts in the profile under
 # 500 VU — the suspected cause of the BlackBull→uvicorn gap widening from
-# 1.8× (B1 c=256) to 2.4× (C2 500 VU) observed in Sprint 13/14.
+# 1.8× (B1 c=256) to 2.4× (C2 500 VU) observed on the peer matrix.
 #
 # Expects bench/aws/.state from up.sh + a remote box prepared by install.sh
 # (which now installs the .[profiling] extra → py-spy).  Re-runnable.

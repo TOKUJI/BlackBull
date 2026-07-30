@@ -15,12 +15,12 @@ from blackbull.server.parser import parse_headers as _real_parse_headers
 def _parse_headers(frame) -> dict:
     """Parse an HTTP/2 HEADERS frame and return the derived ASGI scope.
 
-    Sprint 79 Phase 4 — ``parse_headers`` now returns a native ``Connection``;
+    ``parse_headers`` now returns a native ``Connection``;
     this suite asserts on the derived ASGI scope shape (the H/2 actor bridge
     materializes the same view), so convert via the single ``as_scope()``
     builder (headers therefore appear in the ASGI ``list[tuple]`` form).
 
-    ``parse_headers`` returns ``None`` on malformed input (Sprint 79 — no
+    ``parse_headers`` returns ``None`` on malformed input (no
     throwaway Connection on the error path); this wrapper is only fed
     well-formed frames, so a ``None`` here is a test-setup error.
     """
@@ -32,7 +32,7 @@ def _parse_headers(frame) -> dict:
 def _get_scope(raw_request: bytes) -> dict:
     """Parse raw HTTP/1.1 request bytes and return the derived ASGI scope.
 
-    Sprint 79 Phase 3 — ``_parse`` now returns a native ``Connection``; this
+    ``_parse`` now returns a native ``Connection``; this
     suite asserts on the derived ASGI scope shape, so materialize it via the
     single ``as_scope()`` builder (headers therefore appear in the ASGI
     ``list[tuple]`` form, not as a ``Headers`` object).
@@ -146,7 +146,7 @@ class TestParse:
 
     @given(prefix=st.from_regex(r'/[a-zA-Z0-9/_-]{0,40}', fullmatch=True))
     def test_root_path_ignores_x_forwarded_prefix_off_the_wire(self, prefix):
-        # Spec change (audit bug 1.16, Sprint 63): a client-controlled
+        # Spec change (audit bug 1.16): a client-controlled
         # X-Forwarded-Prefix must NOT set root_path at the parser layer —
         # it is only honoured behind TrustedProxy (see
         # tests/unit/test_audit_sprint63.py::TestXForwardedPrefixTrust).
@@ -169,10 +169,10 @@ class TestParse:
         assert _get_scope(_http_request(path='/tasks'))['query_string'] == b''
 
     # ------------------------------------------------------------------
-    # Sprint 25 Phase A / Sprint 68 — _parse URL splitter boundary cases.
+    # _parse URL splitter boundary cases.
     #
     # http1_actor._parse splits the byte request-target with a partition
-    # chain: strip #fragment, separate ?query.  Sprint 68 stopped dropping
+    # chain: strip #fragment, separate ?query.  It does not drop
     # ;params — RFC 3986 treats ';' as an ordinary path sub-delimiter (the
     # ;params grammar is obsolete RFC 2396), so both `path` and `raw_path`
     # now preserve it (uvicorn parity; the two fields must be the same
@@ -182,13 +182,13 @@ class TestParse:
 
     def test_path_strips_fragment(self):
         """RFC 7230 §5.3 — fragment must not appear in request-target;
-        it is silently stripped.  Pre-Sprint-25 behaviour preserved."""
+        it is silently stripped."""
         scope = _get_scope(_http_request(path='/api#frag'))
         assert scope['path'] == '/api'
         assert scope['query_string'] == b''
 
     def test_path_keeps_semicolon_params(self):
-        """Sprint 68 — ';' is an RFC 3986 path sub-delimiter, not a params
+        """';' is an RFC 3986 path sub-delimiter, not a params
         separator; it stays in the path (and in raw_path)."""
         scope = _get_scope(_http_request(path='/cart;sid=abc'))
         assert scope['path'] == '/cart;sid=abc'
@@ -230,7 +230,7 @@ class TestParse:
 
     def test_raw_path_is_undecoded_path_component(self):
         """ASGI: raw_path is the path component only — undecoded bytes,
-        query string excluded, ;params kept (spec change, Sprint 68 W1;
+        query string excluded, ;params kept (spec change;
         previously the full request target including the query)."""
         scope = _get_scope(_http_request(path='/cart;sid=abc?x=1'))
         assert scope['raw_path'] == b'/cart;sid=abc'
@@ -242,7 +242,7 @@ class TestParse:
         assert _get_scope(_http_request(version='HTTP/1.1'))['http_version'] == '1.1'
 
     # ------------------------------------------------------------------
-    # Sprint 25 Phase B — compiled-regex header validators.
+    # Compiled-regex header validators.
     #
     # Replaced per-byte `any(...)` scans in _parse with compiled
     # `_FIELD_NAME_INVALID_RE.search(...)` and
@@ -266,7 +266,7 @@ class TestParse:
         0x22,  # " — separator
         0x28,  # ( — separator
         0x40,  # @ — separator
-        0x7B,  # { — separator (Sprint 25 Phase B boundary)
+        0x7B,  # { — separator
         0x7F,  # DEL — CTL
     ])
     def test_non_tchar_rejected_in_method(self, bad_byte):
@@ -364,7 +364,7 @@ class TestHTTP2ScopeFields:
 
     @given(prefix=st.from_regex(r'/[a-zA-Z0-9/_-]{0,40}', fullmatch=True))
     def test_x_forwarded_prefix_ignored_off_the_wire(self, prefix):
-        # Bug 1.16 (Sprint 63): same contract on the H2 path — the frame-level
+        # Bug 1.16: same contract on the H2 path — the frame-level
         # parser must not trust a client-supplied X-Forwarded-Prefix.  Only
         # the TrustedProxy middleware may set root_path, after verifying the
         # peer (see tests/unit/test_audit_sprint63.py::TestXForwardedPrefixTrust).
@@ -376,8 +376,7 @@ class TestHTTP2ScopeFields:
 
 
 class TestParseHeadersNoneContract:
-    """Sprint 80 alloc hygiene (`connection-alloc-hygiene.md` Phase 1,
-    2026-07-24): ``parse_headers`` returns ``None`` on every path that marks
+    """Alloc hygiene: ``parse_headers`` returns ``None`` on every path that marks
     the frame malformed, uniformly — including host-authority validation
     failure, which the pre-refactor version answered with a half-built
     ``Connection`` instead (never observed by the real actor, which checks
@@ -421,7 +420,7 @@ class TestParseHeadersNoneContract:
 
 
 class TestPathPercentDecodingH1:
-    """Sprint 68 W1 — ASGI conformance: ``scope['path']`` carries the
+    """ASGI conformance: ``scope['path']`` carries the
     percent-decoded (UTF-8) path component; ``scope['raw_path']`` carries
     the undecoded path-component bytes (query excluded); the query string
     stays raw on the wire encoding.
@@ -508,7 +507,7 @@ class TestPathPercentDecodingH2:
         assert self._scope('/a%41b?x=1')['raw_path'] == b'/a%41b'
 
     def test_semicolon_params_preserved(self):
-        # Sprint 68 — urlsplit (not urlparse) keeps ';params' in the path,
+        # Urlsplit (not urlparse) keeps ';params' in the path,
         # so both path and raw_path carry the sub-delimiter (the latent H2
         # raw_path-stripping bug is fixed).
         scope = self._scope('/cart;sid=abc?x=1')

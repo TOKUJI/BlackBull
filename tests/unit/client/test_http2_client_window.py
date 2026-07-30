@@ -1,4 +1,4 @@
-"""Sprint 72 — client-side H2 window seeding (audit bugs 1.20a + 2.11).
+"""Client-side H2 window seeding (audit bugs 1.20a + 2.11).
 
 RFC 9113 §6.9.2: SETTINGS_INITIAL_WINDOW_SIZE governs the *initial* send
 window of streams the peer has not yet opened; existing streams are

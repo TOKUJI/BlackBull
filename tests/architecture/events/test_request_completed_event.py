@@ -324,7 +324,7 @@ async def test_wire_fields_populated_with_global_buffering_middleware():
 async def test_event_fires_per_stream_on_http2():
     """On HTTP/2, the event fires once per stream (one ASGI dispatch each).
 
-    Sprint 64 moved emission from the server layer (_run_with_log) into
+    Emission moved from the server layer (_run_with_log) into
     BlackBull._dispatch, so per-stream firing is now per-app-call firing.
     The detail's wire fields (status/response_bytes) are sourced from the
     AccessLogRecord the server places in scope['state']['access_log'].

@@ -294,7 +294,7 @@ hypothetical advice.
 
 ### Pick a `dependencies` floor that matches what you import
 
-`app.extensions` landed in BlackBull 0.36.0 (the Sprint 40 work).
+`app.extensions` landed in BlackBull 0.36.0.
 An extension that touches it must pin at least that floor:
 
 ```toml

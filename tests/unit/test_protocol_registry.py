@@ -1,4 +1,4 @@
-"""Unit tests for the unified protocol registry (Sprint 50/51)."""
+"""Unit tests for the unified protocol registry."""
 import pytest
 
 from blackbull.server.protocol_registry import (

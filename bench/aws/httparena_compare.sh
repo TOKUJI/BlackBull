@@ -261,7 +261,7 @@ ssh "${SSH_OPTS[@]}" "$SERVER_REMOTE" \
 
 # ---------------------------------------------------------------------------
 # Step 2 — install Docker + HttpArena load-generator tooling (gcannon,
-# wrk, h2load, ghz).  Sprint 28 Task 4: the Task 3 first pass skipped these
+# wrk, h2load, ghz).  An earlier pass skipped these
 # and HttpArena's benchmark.sh reported 0 req/s for every run.
 #
 # liburing 2.9 + gcannon build from source (HttpArena's docs as of

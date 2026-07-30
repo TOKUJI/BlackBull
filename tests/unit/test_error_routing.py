@@ -281,7 +281,7 @@ class TestDevErrorPageTraceback:
 class TestDevClientErrorPage:
     """DEV mode, 4xx HTTPException: the framework already diagnosed the
     client's mistake, so the page carries the status + detail line but no
-    Python traceback (Sprint 74).  Tracebacks are for *unexpected* server
+    Python traceback.  Tracebacks are for *unexpected* server
     faults — 5xx and non-HTTPException — which keep the full frames."""
 
     @staticmethod

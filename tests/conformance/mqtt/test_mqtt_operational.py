@@ -1,5 +1,5 @@
 """
-MQTT 5.0 Flow Control, Message Ordering, and QoS limiting tests — Sprint 52.
+MQTT 5.0 Flow Control, Message Ordering, and QoS limiting tests.
 
 Covers operational behaviours not in the per-packet tests.
 

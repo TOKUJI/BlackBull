@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# bench/soak/soak.sh — Sprint 28 Task 2 soak orchestrator.
+# bench/soak/soak.sh
 #
 # Starts bench/app.py with BB_TRACEMALLOC=1, kicks off bench/soak/
 # sample.py to capture RSS / FD / connection / tracemalloc snapshots

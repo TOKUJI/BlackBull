@@ -1,5 +1,5 @@
 """
-MQTT 5.0 SUBSCRIBE / SUBACK / UNSUBSCRIBE / UNSUBACK conformance tests — Sprint 52.
+MQTT 5.0 SUBSCRIBE / SUBACK / UNSUBSCRIBE / UNSUBACK conformance tests.
 
 Verifies subscription management against the MQTT 5.0 OASIS Standard.
 

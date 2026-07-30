@@ -1,4 +1,4 @@
-"""Sprint 45 — Server-Sent Events / streaming surface.
+"""Server-Sent Events / streaming surface.
 
 Three things to gate:
 

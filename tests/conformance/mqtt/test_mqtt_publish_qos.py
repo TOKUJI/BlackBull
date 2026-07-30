@@ -1,5 +1,5 @@
 """
-MQTT 5.0 PUBLISH QoS 0/1/2 conformance tests — Sprint 52.
+MQTT 5.0 PUBLISH QoS 0/1/2 conformance tests.
 
 Verifies PUBLISH delivery at all three QoS levels against the MQTT 5.0
 OASIS Standard.

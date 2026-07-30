@@ -1,5 +1,5 @@
 """
-MQTT 5.0 edge cases and server capability tests — Sprint 52.
+MQTT 5.0 edge cases and server capability tests.
 
 Covers remaining spec areas not in other test files.
 

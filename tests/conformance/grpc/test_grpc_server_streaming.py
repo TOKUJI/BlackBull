@@ -1,4 +1,4 @@
-"""Conformance: server-streaming gRPC over the ASGI bridge (Sprint 58).
+"""Conformance: server-streaming gRPC over the ASGI bridge.
 
 Drives ``serve_grpc`` with the in-process ``_collector`` harness (no socket) to
 assert the ASGI event shape of a server-streaming response and its edge cases:

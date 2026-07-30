@@ -151,7 +151,7 @@ class BrokerActor(Actor):
 
     Connection actors ``send`` it client events; it ``send``s ``Send``/``Close``
     back to them.  Serial inbox processing means no locks and no shared mutable
-    state — the design goal of the Sprint 53 refactor.
+    state — the design goal of the actor split.
     """
 
     def __init__(self) -> None:

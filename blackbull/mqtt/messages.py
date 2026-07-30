@@ -1,4 +1,4 @@
-"""MQTT 5.0 control-packet codec — Sprint 52.
+"""MQTT 5.0 control-packet codec.
 
 Level-A (pure-data) layer for the ``blackbull-mqtt`` broker sidecar: the 15
 MQTT 5.0 control packets as frozen dataclasses, a wire encoder/decoder, the

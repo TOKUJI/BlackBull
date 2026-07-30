@@ -124,7 +124,7 @@ async def _baseline_handler(conn: Connection):
     the semantics are identical: sum integer query params, add posted
     body if integer, return as text/plain.
 
-    Sprint 79: uses ``Connection`` instead of the raw ASGI triplet.
+    Uses ``Connection`` instead of the raw ASGI triplet.
     """
     total = 0
     for vals in _qs(conn).values():
@@ -193,7 +193,7 @@ async def json_comp_endpoint(count: int, conn: Connection):
 
 @app.route(path='/upload', methods=[HTTPMethod.POST])
 async def upload_endpoint(conn: Connection):
-    # Sprint 80: stream the body with ``Connection.stream()`` — the profile only
+    # Stream the body with ``Connection.stream()`` — the profile only
     # needs the byte count, so we never materialize the (up to 20 MB) payload.
     # ``conn.body()`` would ``b''.join`` the whole upload (~4-12x the CPU and a
     # multiple of the throughput under load); streaming keeps a one-chunk working
@@ -249,7 +249,7 @@ def _int_qs(conn: Connection, name, default):
 
 @app.route(path='/async-db', methods=[HTTPMethod.GET])
 async def async_db_endpoint(req: Connection, db_conn=Depends(db.get_db_conn)):
-    # Sprint 79: ``req`` is the BlackBull Connection; ``conn`` is the db handle.
+    # ``req`` is the BlackBull Connection; ``conn`` is the db handle.
     min_price = _int_qs(req, 'min', 10)
     max_price = _int_qs(req, 'max', 50)
     limit = max(1, min(_int_qs(req, 'limit', 50), 50))
@@ -263,7 +263,7 @@ async def async_db_endpoint(req: Connection, db_conn=Depends(db.get_db_conn)):
 
 @app.route(path='/crud/items', methods=[HTTPMethod.GET])
 async def crud_items_list(req: Connection, db_conn=Depends(db.get_db_conn)):
-    # Sprint 79: ``req`` is the BlackBull Connection; ``conn`` is the db handle.
+    # ``req`` is the BlackBull Connection; ``conn`` is the db handle.
     qs = _qs(req)
     category = qs.get('category', [None])[0]
     page = _int_qs(req, 'page', 1)

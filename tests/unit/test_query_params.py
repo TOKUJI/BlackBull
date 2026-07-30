@@ -1,4 +1,4 @@
-"""Query-param resolution in the simplified handler model (Sprint 74).
+"""Query-param resolution in the simplified handler model.
 
 Handler parameters that are neither path params, ``body``, ``scope``,
 ``Request``, a dataclass body, nor ``Depends(...)`` resolve from
@@ -218,7 +218,7 @@ class TestQueryParamRegistration:
 
     @pytest.mark.asyncio
     async def test_request_name_with_scalar_annotation_is_query_param(self):
-        # Spec change (Sprint 74): a param named 'request' with a scalar
+        # Spec change: a param named 'request' with a scalar
         # annotation used to be a registration-time TypeError; it is now an
         # ordinary query param.  Request injection still requires the Request
         # annotation or the bare name 'request' (unannotated).

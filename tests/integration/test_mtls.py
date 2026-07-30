@@ -140,7 +140,7 @@ def mtls_server(pki):
 
     Uses ASGIServer directly so the SSL context can be overridden to
     set ``verify_mode = CERT_REQUIRED`` before the worker forks.  The
-    pre-Sprint-22 form mutated ``app.server.ssl_context``; the
+    older form mutated ``app.server.ssl_context``; the
     ``app.server`` attribute no longer exists, so this fixture holds
     the server reference itself.
     """

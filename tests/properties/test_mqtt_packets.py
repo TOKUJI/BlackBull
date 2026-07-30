@@ -1,5 +1,5 @@
 """
-Property-based tests for MQTT 5.0 packet serialization — Sprint 52.
+Property-based tests for MQTT 5.0 packet serialization.
 
 Uses Hypothesis to verify invariants across a wide range of inputs,
 complementing the example-based conformance tests.

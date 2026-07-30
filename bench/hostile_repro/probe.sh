@@ -2,7 +2,7 @@
 # Drive one hostile attack against a fresh BlackBull server, capturing
 # event-loop health metrics.
 #
-# Sprint 30 Tier 1 verification harness.
+# Tier 1 verification harness.
 #
 # Usage:
 #   bash bench/hostile_repro/probe.sh slowloris_headers

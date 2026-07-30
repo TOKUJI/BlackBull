@@ -1,9 +1,9 @@
-"""Sprint 38 Task A — HTTP/2 response trailers (``http.response.trailers``) emit-path tests.
+"""HTTP/2 response trailers (``http.response.trailers``) emit-path tests.
 
-Per the sprint plan, the HTTP/2 sender at
+The HTTP/2 sender at
 ``blackbull/server/sender.py`` lacked a case for
 ``ASGIEvent.HTTP_RESPONSE_TRAILERS`` — it logged "unhandled event
-type".  Sprint 38 adds the emit path: a HEADERS frame carrying
+type".  The emit path sends a HEADERS frame carrying
 regular (non-pseudo) header fields with the END_STREAM flag set,
 sent after the final DATA frame which carries ``END_STREAM`` clear.
 
@@ -434,7 +434,7 @@ class TestH2TrailersSenderContract:
 
 @pytest.mark.asyncio
 class TestH2TrailersCrossProtocolSymmetry:
-    """Sprint 38 Task A is driven by the asymmetry where HTTP/1.1 trailers
+    """Driven by the asymmetry where HTTP/1.1 trailers
     are fully wired but HTTP/2 trailers logged "unhandled event type".
     These tests verify the H2 path now handles the same event types that
     the H1 path accepts, matching the field name shape."""
@@ -459,7 +459,7 @@ class TestH2TrailersCrossProtocolSymmetry:
 
 @pytest.mark.asyncio
 class TestH2TrailersNoLongerUnhandled:
-    """Before Sprint 38 Task A, the H2 sender fell through to the default
+    """The H2 sender once fell through to the default
     ``else`` branch and logged ``HTTP2Sender: unhandled event type
     'http.response.trailers'``.  After the fix, the event must be
     dispatched to the trailers emit path — no log warning emitted."""
@@ -512,7 +512,7 @@ class TestH2TrailersNoLongerUnhandled:
 @pytest.mark.asyncio
 class TestH2EndStreamGuardBytesPath:
     """RFC 9113 §8.1 — frames after END_STREAM are a protocol error.
-    The guard added in Sprint 38 covered the dict-event branch; this
+    The guard covers the dict-event branch; this
     section locks in the symmetric coverage on the bytes branch so a
     misbehaving ASGI app that bytes-sends after stream end gets a
     logged warning instead of a wire violation."""

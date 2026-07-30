@@ -282,11 +282,11 @@ class TestCreateDualStackSockets:
 
 
 # ---------------------------------------------------------------------------
-# create_unix_socket — Sprint 12a
+# create_unix_socket
 # ---------------------------------------------------------------------------
 
 class TestCreateUnixSocket:
-    """Tests for the AF_UNIX bind helper added in Sprint 12a."""
+    """Tests for the AF_UNIX bind helper."""
 
     def test_binds_listens_and_returns_socket(self, tmp_path):
         path = str(tmp_path / 'bb.sock')
@@ -355,11 +355,11 @@ class TestCreateUnixSocket:
 
 
 # ---------------------------------------------------------------------------
-# adopt_listening_fd — Sprint 12b
+# adopt_listening_fd
 # ---------------------------------------------------------------------------
 
 class TestAdoptListeningFd:
-    """Tests for adopt_listening_fd() added in Sprint 12b."""
+    """Tests for adopt_listening_fd()."""
 
     @pytest.fixture()
     def listening_sock(self):

@@ -28,7 +28,7 @@ Connection location (BlackBull v0.31+):
   conn.extensions['http.response.priority'] → {'urgency': int, 'incremental': bool}
 
 The legacy top-level ``conn['http2_priority']`` key does not survive the
-native ``Connection`` model (Sprint 80) — only ``conn.extensions`` is
+native ``Connection`` model — only ``conn.extensions`` is
 carried across the boundary. Read the extension key.
 
 Endpoints

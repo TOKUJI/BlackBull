@@ -1,13 +1,13 @@
 """Unit tests for the BB_MAX_CONNECTIONS cap behaviour.
 
-Sprint 30 Tier 1.3 + 1.4: when the per-worker cap is hit, new
+When the per-worker cap is hit, new
 connections receive HTTP/1.1 ``503 Service Unavailable`` with
 ``Retry-After: 1`` (well-formed response, not a silent reset).
 
 These tests exercise ``ASGIServer.client_connected_cb`` directly with
 mocked reader/writer pairs so we can assert on the wire bytes.
 
-Sprint 44 (cap-hit observability): the test that drives the cap also
+Cap-hit observability: the test that drives the cap also
 asserts the ``blackbull.caps`` WARNING record fires.
 """
 from __future__ import annotations
@@ -79,7 +79,7 @@ async def _noop_app(scope, receive, send):
 @pytest.mark.asyncio
 async def test_below_cap_no_cap_hit_log(caplog):
     """When _active_connections < max, the connection proceeds normally
-    and no cap-hit log is emitted.  (Sanity + Sprint 44 negative test.)"""
+    and no cap-hit log is emitted.  (Sanity + cap-hit-observability negative test.)"""
     caplog.set_level(logging.WARNING, logger='blackbull.caps')
 
     srv = ASGIServer(_noop_app, max_connections=2)
@@ -98,7 +98,7 @@ async def test_at_cap_sends_503_with_retry_after_and_closes(caplog):
     constructed (verified by the writer's recording — only the 503
     bytes appear, no protocol-specific output).
 
-    Sprint 44: also asserts the cap-hit log fires on blackbull.caps."""
+    Also asserts the cap-hit log fires on blackbull.caps."""
     caplog.set_level(logging.WARNING, logger='blackbull.caps')
 
     srv = ASGIServer(_noop_app, max_connections=1)
@@ -132,7 +132,7 @@ async def test_at_cap_sends_503_with_retry_after_and_closes(caplog):
     # for the rejected connection.
     assert srv._active_connections == 1
 
-    # Sprint 44: cap-hit log must fire.
+    # Cap-hit log must fire.
     caps_records = [
         r for r in caplog.records
         if r.name == 'blackbull.caps' and getattr(r, 'cap', None) == 'max_connections'

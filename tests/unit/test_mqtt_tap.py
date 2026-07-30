@@ -1,4 +1,4 @@
-"""Unit tests for the MQTT tap layer (Sprint 54).
+"""Unit tests for the MQTT tap layer.
 
 Covers the ``{name}`` capture compilation/binding, the shared ``run_taps``
 dispatch path, and the decoupled bounded :class:`TapActor` (drop-newest).
@@ -144,7 +144,7 @@ async def test_tap_actor_drops_newest_on_overflow_and_counts():
 
 @asyncio_test
 async def test_extension_tap_registered_after_construction_fires():
-    """Regression (Sprint 73): MQTTExtension builds its TapActor in
+    """Regression: MQTTExtension builds its TapActor in
     __init__, but ``@mqtt.on_message`` registrations happen afterwards —
     the actor must pick them up, not act on a snapshot of the (empty)
     handler list taken at construction time."""

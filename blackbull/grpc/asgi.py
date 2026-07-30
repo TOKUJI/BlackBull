@@ -564,7 +564,7 @@ async def _serve_server_streaming(handler, request, context, send, content_type,
     # on input — the loop runs this task and everything already yielded goes
     # out.  Without it, a partial batch was withheld until the *next* message
     # completed, which for an indefinitely-parked producer meant never
-    # (Sprint 66: grpc.health Watch clients never received their initial
+    # (grpc.health Watch clients otherwise never receive their initial
     # status).
     flush_wanted = asyncio.Event()
     finished = False

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# bench/peers/server_lifecycle_remote.sh — Sprint 20.
+# bench/peers/server_lifecycle_remote.sh
 #
 # Server-side launch / kill helper invoked over SSH by compare_servers.sh
 # when BENCH_REMOTE_LIFECYCLE=1.  Runs on the server instance.  The peer
@@ -57,7 +57,7 @@ case "$cmd" in
             source .venv/bin/activate
         fi
 
-        # Optional CPU pinning for Sprint 21 Phase B (w=2→w=4 scaling
+        # Optional CPU pinning (w=2→w=4 scaling
         # diagnosis).  When BB_BENCH_TASKSET is set, prefix the launch
         # with `taskset -c $BB_BENCH_TASKSET` so the worker pool inherits
         # the CPU mask.  Defaults to no pinning, matching prior behaviour.
@@ -68,7 +68,7 @@ case "$cmd" in
 
         # Detach so the SSH session can return immediately; orchestrator's
         # wait_ready does the actual readiness probe.  Redirect stdin from
-        # /dev/null per Sprint 10/11 caution: pipe stdin to a non-reader
+        # /dev/null per a known caution: pipe stdin to a non-reader
         # is a known deadlock shape.
         nohup env $granian_env BIND_HOST="$bind_host" PATH="$PATH" \
             "${taskset_prefix[@]}" \

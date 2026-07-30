@@ -1,5 +1,5 @@
 """
-MQTT 5.0 Session State persistence conformance tests — Sprint 52.
+MQTT 5.0 Session State persistence conformance tests.
 
 Verifies session management against the MQTT 5.0 OASIS Standard.
 

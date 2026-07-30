@@ -187,7 +187,7 @@ class TestInitAppConvention:
                "exception that becomes 500). A handler that explicitly "
                "returns Response(status=403) is an emission, not an error "
                "event — wiring status-code matching to handler-returned "
-               "responses requires intercepting send and is out of Sprint 40 "
+               "responses requires intercepting send and is out of "
                "scope.",
         strict=True,
     )

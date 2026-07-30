@@ -1,4 +1,4 @@
-"""Regression tests for the Sprint 62 HTTP/2 flow-control + lifecycle batch.
+"""Regression tests for an HTTP/2 flow-control + lifecycle audit batch.
 
 Pins the bugs from the 2026-07-07 comprehensive audit:
 
@@ -10,7 +10,7 @@ Pins the bugs from the 2026-07-07 comprehensive audit:
 - 1.14 (#3) 16 MiB allocation before frame-size validation
 - 2.5  stream_window_size dict-of-one → int
 
-Plus the Sprint 62 deferral landed later: consume-based inbound flow control
+Plus the deferral that landed later: consume-based inbound flow control
 (proposals/consume-based-inbound-flow-control.md) — WINDOW_UPDATE credit for a
 DATA frame is replayed when the app pops the event off the recipient queue,
 not when the frame is enqueued, so a stalled handler closes the window and
@@ -290,7 +290,7 @@ async def test_trailers_do_not_respawn_request():
 
 
 # ---------------------------------------------------------------------------
-# Consume-based inbound flow control (the Sprint 62 deferral) — credit is
+# Consume-based inbound flow control — credit is
 # replayed when the app pops the event, not when the DATA frame is enqueued.
 # ---------------------------------------------------------------------------
 

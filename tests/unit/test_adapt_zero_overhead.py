@@ -1,15 +1,15 @@
-"""The Sprint 74 zero-overhead pin for ``_adapt_handler``.
+"""The zero-overhead pin for ``_adapt_handler``.
 
 The anti-FastAPI design point: query params and ``Depends`` are resolved at
 registration time, so a handler using *neither* feature compiles to exactly
-the wrapper it compiled to before Sprint 74 — the same (shared) code object,
+the plain wrapper — the same (shared) code object,
 with no reference to the DI or query machinery.  FastAPI, by contrast, runs
 ``solve_dependencies()`` + two ``AsyncExitStack``s per request even with no
 dependencies declared.
 """
 from dataclasses import dataclass
 
-from blackbull import Depends, Connection as Request  # Sprint 79 alias
+from blackbull import Depends, Connection as Request  # deprecated alias
 from blackbull.router import _adapt_handler
 
 

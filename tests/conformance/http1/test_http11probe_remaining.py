@@ -1,4 +1,4 @@
-"""Sprint 63 remainder — wire-level round-trips for the last Http11Probe FAILs.
+"""Wire-level round-trips for the last Http11Probe FAILs.
 
 Each test replays the exact probe vector against a live BlackBull server:
 

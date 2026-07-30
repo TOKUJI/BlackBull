@@ -187,7 +187,7 @@ def test_master_stops_on_sigterm(plain_app, bound_sockets):
 
 
 # ---------------------------------------------------------------------------
-# Sprint 55 G1 — HTTP scales across workers while a stateful protocol
+# HTTP scales across workers while a stateful protocol
 # (here: a raw echo, standing in for MQTT) is owned by worker 0 only.
 # ---------------------------------------------------------------------------
 
@@ -288,7 +288,7 @@ def test_multiworker_http_scales_while_raw_stays_on_worker0(http_and_raw_app):
 
 
 # ---------------------------------------------------------------------------
-# Sprint 55 G1 — serve() no longer forces workers=1 for stateful protocols
+# Serve() no longer forces workers=1 for stateful protocols
 # (except under auto-reload, whose exec handoff does not carry them yet).
 # ---------------------------------------------------------------------------
 

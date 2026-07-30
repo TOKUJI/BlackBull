@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Patch HttpArena to honour Sprint-34 env knobs.
+"""Patch HttpArena to honour BlackBull env knobs.
 
 Run on the EC2 instance after the HttpArena clone, before
 `docker build` / `validate.sh` / `benchmark.sh`.  Reads the HttpArena

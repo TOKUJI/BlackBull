@@ -99,7 +99,7 @@ def mock_app():
 # ---------------------------------------------------------------------------
 # Test 1: single request → the app is dispatched once; no error event.
 # (Request-lifecycle Level B events are emitted by BlackBull._dispatch since
-# Sprint 64 — the actor layer only calls the app and reports errors.)
+# The actor layer only calls the app and reports errors.)
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
@@ -367,7 +367,7 @@ class TestScopePopulation:
 
     @pytest.mark.asyncio
     async def test_cleartext_advertises_pathsend_extension(self):
-        """Sprint 31 — cleartext H1 scope advertises the
+        """Cleartext H1 scope advertises the
         ``http.response.pathsend`` ASGI extension so the static-file
         middleware can hand the file path to the sender (zero-copy
         via ``loop.sendfile``)."""
@@ -407,7 +407,7 @@ class TestScopePopulation:
 
 class TestFillConnectionInfo:
     """HTTP1Actor._fill_connection_info must populate the Connection from
-    constructor args (Sprint 79 Phase 3 — client/server are tuples now)."""
+    constructor args."""
 
     def _make_actor(self, peername=None, sockname=None, ssl=False):
         return HTTP1Actor(
@@ -652,7 +652,7 @@ async def test_ws_upgrade_without_accept_id_generates_unified_format():
 
 
 # ---------------------------------------------------------------------------
-# Alloc-reduction (Sprint 80): the baseline hot path skips the per-request
+# Alloc-reduction: the baseline hot path skips the per-request
 # AccessLogRecord when nothing consumes it. Pins the optimization so a future
 # change can't silently make the record unconditional again.
 # ---------------------------------------------------------------------------

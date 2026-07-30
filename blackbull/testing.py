@@ -41,7 +41,7 @@ from .websocket import WebSocketDisconnect
 
 import httpx
 
-# ``WebSocketDisconnect`` is re-exported, not redefined.  Sprint 82 gave the
+# ``WebSocketDisconnect`` is re-exported, not redefined.  The
 # server side a handler object that raises the same "the other end closed"
 # exception, and two identically-named classes would mean an ``except``
 # written against one silently missing the other.  One class, both sides:
@@ -230,13 +230,13 @@ class WebSocketTestSession:
             encoded_headers.append((b'cookie', cookie_str.encode('latin-1')))
         # Offer the requested subprotocols the way a real client does — via the
         # Sec-WebSocket-Protocol request header. WebSocket is native now
-        # (Sprint 80): ``conn.subprotocols`` derives from this header, so the
+        #: ``conn.subprotocols`` derives from this header, so the
         # header (not a scope key) is what the server reads.
         if subprotocols:
             encoded_headers.append(
                 (b'sec-websocket-protocol',
                  ', '.join(subprotocols).encode('latin-1')))
-        # WebSocket is native (Sprint 80): drive the app the way BlackBull's own
+        # WebSocket is native: drive the app the way BlackBull's own
         # server does — ``app(conn, receive, send)`` with a typed Connection — so
         # the test path never round-trips through an ASGI scope dict (no
         # ``as_scope`` → ``from_scope`` bounce; that conversion is the external
@@ -247,7 +247,7 @@ class WebSocketTestSession:
         from .headers import Headers  # noqa: PLC0415
         self._conn = Connection(
             method='GET',
-            # Parity with the real server (Sprint 68): ``conn.path`` is the
+            # Parity with the real server: ``conn.path`` is the
             # percent-decoded path component; ``raw_path`` is the undecoded
             # bytes (UTF-8, not latin-1, so a caller-supplied non-ASCII path
             # round-trips as the server would have received it).

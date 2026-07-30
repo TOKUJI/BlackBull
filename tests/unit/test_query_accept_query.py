@@ -1,4 +1,4 @@
-"""RFC 10008 §2.2 / §3 — QUERY normative response semantics (Sprint 78 P2).
+"""RFC 10008 §2.2 / §3 — QUERY normative response semantics.
 
 A QUERY route may declare the request media types it accepts via the
 ``accept_query=[...]`` route option.  That drives two behaviours:

@@ -1,6 +1,6 @@
 """Shared helpers for integration tests.
 
-Sprint 22 collapsed the per-instance ``app.create_server`` / ``app.run`` /
+The per-instance ``app.create_server`` / ``app.run`` /
 ``app.wait_for_port`` / ``app.stop`` API into a single sync ``app.run()``
 on :class:`BlackBull`, plus a dedicated :class:`ASGIServer` for embedded
 use (pre-binding sockets, mTLS configuration, integration tests).

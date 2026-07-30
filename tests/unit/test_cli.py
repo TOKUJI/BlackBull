@@ -198,7 +198,7 @@ def test_main_warns_on_specific_host(capsys, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# _load_config — Sprint 12c
+# _load_config
 # ---------------------------------------------------------------------------
 
 def test_load_config_maps_server_workers(tmp_path):

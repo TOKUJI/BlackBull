@@ -342,8 +342,8 @@ class Settings:
     #: correctly).  ``0`` disables the cap entirely — relies on the OS
     #: file-descriptor limit instead.
     #:
-    #: Default raised from 0 (disabled) to 1024 in Sprint 30 (event-loop
-    #: integrity).  Unbounded per-worker concurrency lets a single
+    #: Capped rather than unbounded, for event-loop integrity:
+    #: unbounded per-worker concurrency lets a single
     #: client (or burst, or slowloris-class workload) park thousands of
     #: suspended-readuntil tasks on the event loop, amplifying drain
     #: time on burst-close and inflating worst-case latency.  Set
@@ -423,8 +423,8 @@ class Settings:
     #: ``TCP_USER_TIMEOUT`` on the listening socket (inherits to accepted)
     #: which handles the *active-but-stuck* case.  0 disables the timer.
     #:
-    #: Default lowered from 60 s to 5 s in Sprint 30 (event-loop
-    #: integrity).  60 s parks ghost / idle connections in the loop's
+    #: Kept short for event-loop integrity: a conventional 60 s
+    #: parks ghost / idle connections in the loop's
     #: ``readuntil`` for far longer than necessary, inflating the
     #: suspended-task count and amplifying burst-close drain time.
     #: 5 s is a common short-idle value for request-pipeline keep-alive.
@@ -483,7 +483,7 @@ class Settings:
     #: typical reverse-proxy defaults.
     header_max_total: int = 65536
 
-    #: Dual-path conformance lane (Sprint 79 §4.3).  When true, every request
+    #: Dual-path conformance lane.  When true, every request
     #: round-trips the native :class:`~blackbull.connection.Connection` through
     #: ``as_scope()`` + ``from_scope()`` before dispatch, so the ASGI compat
     #: conversion is exercised on the self-hosted path and cannot silently

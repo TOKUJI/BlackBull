@@ -13,8 +13,8 @@ Public API exports:
 - `QUERY`: the HTTP QUERY method (RFC 10008) as a plain string — ``http.HTTPMethod`` lacks the member until Python ≥3.16.
 - `UnprocessableQuery`: raise from a QUERY handler for ``422`` when the (accepted) request media type carries a semantically unprocessable query (RFC 10008).
 - `Headers`: case-insensitive, ordered, multi-valued HTTP header store.
-- `Connection`: the typed internal request representation (Sprint 79); the handler context object exposing ``method``/``path``/``headers``/``cookies``/``body()``/``json()``/``text()``. The ASGI ``scope`` is a derived view (``Connection.as_scope()``).
-- `Request`: **deprecated** alias of ``Connection`` (Sprint 79 Phase 5). Accessing ``blackbull.Request`` emits a ``DeprecationWarning``; replace ``request: Request`` handler params with ``conn: Connection`` (identical API). Removal no earlier than 2027-08-01.
+- `Connection`: the typed internal request representation; the handler context object exposing ``method``/``path``/``headers``/``cookies``/``body()``/``json()``/``text()``. The ASGI ``scope`` is a derived view (``Connection.as_scope()``).
+- `Request`: **deprecated** alias of ``Connection``. Accessing ``blackbull.Request`` emits a ``DeprecationWarning``; replace ``request: Request`` handler params with ``conn: Connection`` (identical API). Removal no earlier than 2027-08-01.
 - `WebSocket`: the high-level WebSocket handler object — ``await ws.accept()``, ``async for message in ws``, ``ws.send_text()``/``send_bytes()``/``send_json()``, ``await ws.close()``. Declare ``async def handler(ws: WebSocket)`` on a ``Scheme.websocket`` route to receive it; the raw ``(conn, receive, send)`` form keeps working unchanged.
 - `WebSocketDisconnect`: raised by ``ws.receive()`` when the peer closes; carries ``code`` and ``reason``. ``async for`` ends the loop instead of raising.
 - `Depends`: per-request provider injection for simplified handlers (async-generator providers get teardown after the response is sent).
@@ -75,8 +75,8 @@ from .middleware.proxy import TrustedProxy
 def __getattr__(name):
     """Lazy, deprecated attribute access — ``blackbull.Request``.
 
-    ``Request`` was the opt-in HTTP context object; Sprint 79 Phase 5 merged
-    it into :class:`Connection` and demoted the name to an alias. Resolving it
+    ``Request`` was the opt-in HTTP context object; it has been merged
+    into :class:`Connection` and the name demoted to an alias. Resolving it
     through the module ``__getattr__`` (PEP 562) means the ``DeprecationWarning``
     fires only if code actually touches ``Request`` — importing the package
     stays warning-free — and the alias still evaluates to ``Connection`` so

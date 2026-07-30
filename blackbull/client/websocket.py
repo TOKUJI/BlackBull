@@ -109,7 +109,7 @@ class WebSocketSession:
         """Send a CLOSE frame, await the peer's echoed CLOSE (bounded by
         *drain_timeout*), and stop the background reader task.
 
-        Sprint 72 (audit 1.20c) — RFC 6455 §7.1.2: the closing handshake
+        RFC 6455 §7.1.2 — the closing handshake
         is complete once both endpoints have sent and received a Close
         frame.  A silent peer cannot hang ``close()``: after
         *drain_timeout* the reader is shut down regardless.  Data frames

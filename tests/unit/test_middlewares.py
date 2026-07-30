@@ -431,7 +431,7 @@ class TestHTTPCompression:
     async def test_woff_font_types_not_recompressed(self, content_type):
         """WOFF (zlib-wrapped) and WOFF2 (brotli-wrapped) are pre-compressed —
         re-running brotli on them is high-entropy worst-case CPU work for ~zero
-        size gain.  Sprint 35 phase trace traced a 30-60 ms per-request CPU tail
+        size gain.  A phase trace attributed a 30-60 ms per-request CPU tail
         on HttpArena's regular.woff2 / bold.woff2 to this case.  ``font/ttf``
         and ``font/otf`` stay OFF the skip list — those are uncompressed font
         tables and DO benefit from gzip/brotli."""

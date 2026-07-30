@@ -1,5 +1,5 @@
 """
-MQTT 5.0 Control Packet structure tests — Sprint 52.
+MQTT 5.0 Control Packet structure tests.
 
 Tests for MQTT 5.0 packet encoding/decoding at the wire-format level.
 Verifies compliance with MQTT Version 5.0 OASIS Standard.

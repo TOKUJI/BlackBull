@@ -510,7 +510,7 @@ class HTTP1Sender(BaseSender):
                 self._expect_trailers = bool(body.get('trailers', False))
                 if self._log_record is not None:
                     self._log_record.status = body.get('status', '-')
-                    # Sprint 35 phase-trace: capture response headers
+                    # Capture response headers
                     # inline (same pattern as response_bytes capture) so
                     # we can correlate per-phase µs against negotiated
                     # Content-Type / Content-Encoding without re-walking
@@ -532,7 +532,7 @@ class HTTP1Sender(BaseSender):
                 more_body = body.get('more_body', False)
                 if self._log_record is not None and content:
                     self._log_record.response_bytes += len(content)
-                # Sprint 35 phase trace: bracket the actual transport
+                # Bracket the actual transport
                 # write for the last body event so we can see whether the
                 # 30-60 ms woff2 tail lives in middleware/handler work
                 # before the write (``start_arm_out → body_arm_in``) or
@@ -593,10 +593,10 @@ class HTTP1Sender(BaseSender):
                 raise TypeError(f'HTTP1Sender expected bytes or dict, got {type(body)!r}')
 
     def reset_per_request_state(self) -> None:
-        # Sprint 38 lesson — HTTP1Sender is shared across keep-alive requests;
+        # HTTP1Sender is shared across keep-alive requests;
         # forgetting a reset silently breaks the next request's framing
         # (`_started` skipped 408 emission on the second request).  See
-        # `.claude/patterns/cautions.md` — Sprint 38 section.
+        # `.claude/patterns/cautions.md`.
         self._buffered_status = None
         self._buffered_headers = None
         self._chunked = False

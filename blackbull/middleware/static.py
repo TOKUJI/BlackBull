@@ -19,8 +19,7 @@ from blackbull.asgi import ASGIEvent
 # ``mimetypes.guess_type('foo.woff2')`` return ``None``; StaticFiles
 # falls back to ``application/octet-stream``; downstream Compression
 # middleware then runs brotli on already-compressed font/image bytes —
-# Sprint 35 phase-trace traced this to a 30-60 ms per-request CPU tail
-# on HttpArena's ``regular.woff2`` and ``bold.woff2`` files.
+# a 30-60 ms per-request CPU tail on ``.woff2`` files.
 #
 # ``mimetypes.add_type`` is idempotent, runs once at module import, and
 # integrates with the standard machinery so ``mimetypes.guess_type``
@@ -47,7 +46,7 @@ def _parse_byte_range(range_hdr: str, size: int) -> tuple[int, int] | None:
     ``multipart/byteranges``), or a syntactically malformed range.  Per
     RFC 9110 §14.2 an unparseable/ignored Range is served as a normal 200,
     so the caller treats ``None`` as "serve the whole file".  Never raises:
-    the pre-Sprint-69 code ran bare ``int()`` here and 500'd on
+    a bare ``int()`` here 500s on
     ``Range: bytes=abc-def`` (bug 1.21c).  *Satisfiability* against ``size``
     is still checked by the caller (so an out-of-range spec stays a 416).
     """
@@ -132,7 +131,7 @@ class StaticFiles:
     # edit-on-disk visibility under a second while removing the per-
     # request stat from the cache-hit hot path.  Override via
     # ``BB_STATIC_STAT_TTL_S`` (env var, float seconds); set to ``0`` to
-    # restore the pre-Sprint-33 every-request behaviour.
+    # stat on every request.
     _STAT_TTL_S = float(os.environ.get('BB_STATIC_STAT_TTL_S', '1.0'))
 
     # Server preference order for precompressed variant selection.
@@ -180,8 +179,8 @@ class StaticFiles:
         # Internal hot path uses ``str`` + ``os.path`` rather than
         # ``pathlib.Path``: each request previously allocated several
         # PurePath / Path objects for the same traversal-safety check
-        # and showed up under ``mw_static_in → static_pre_send`` in the
-        # Sprint 33 phase trace.  ``os.path`` is a thin C wrapper.
+        # showed up under ``mw_static_in → static_pre_send`` in profiles.
+        # ``os.path`` is a thin C wrapper.
         self._root_str: str = os.path.realpath(os.fspath(resolved))
         # Pre-computed prefix for the traversal check — accept
         # ``<root>/...`` exactly, reject ``<root>x/...``.
@@ -218,7 +217,7 @@ class StaticFiles:
 
     @property
     def _root(self) -> Path:
-        """Backwards-compat: pre-Sprint-33 callers and tests may inspect
+        """Backwards-compat: callers and tests may inspect
         ``staticfiles._root`` as a :class:`Path`.  Built on demand so
         the hot path keeps its plain-string representation."""
         return Path(self._root_str)

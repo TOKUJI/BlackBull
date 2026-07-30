@@ -8,10 +8,10 @@ WEB_NOFILE="${4:-65536}"
 LOADGEN_CPUS="${5:-}"
 LOADGEN_NOFILE="${6:-65536}"
 
-# Sprint 34: native-mode wrk inherits the parent shell's RLIMIT_NOFILE
+# Native-mode wrk inherits the parent shell's RLIMIT_NOFILE
 # (HttpArena defaults LOADGEN_DOCKER=false so wrk runs via
 # `taskset -c $GCANNON_CPUS wrk ...` directly).  Set the shell limit to
-# LOADGEN_NOFILE so the wrk-FD-cap hypothesis (Sprint 33) is directly
+# LOADGEN_NOFILE so the wrk-FD-cap hypothesis is directly
 # controllable from the harness.  Framework container's ulimit is set
 # separately via the HARD_NOFILE override below.
 ulimit -n "${LOADGEN_NOFILE}"
@@ -25,7 +25,7 @@ ulimit -n "${LOADGEN_NOFILE}"
 # (added to args[] in the matching framework.sh sed-patch).
 export HARD_NOFILE="${WEB_NOFILE}"
 export WEB_WORKERS WEB_NOFILE LOADGEN_NOFILE
-# Sprint 34 Cell B: forwarded to launcher.py via -e in framework.sh
+# Forwarded to launcher.py via -e in framework.sh
 # (patched by patch_httparena.py).  Comma-list of listeners to spawn;
 # default = all three (back-compat).  For static-profile sweeps we
 # pass only "http" so :8081/:8443 don't fork idle worker pools.

@@ -1,4 +1,4 @@
-"""Isolated unit tests for the MQTT ``BrokerActor`` (Sprint 53, Phase 1).
+"""Isolated unit tests for the MQTT ``BrokerActor``.
 
 These drive ``BrokerActor._handle`` directly with recording connection actors,
 so the broker's routing/session/retained/Will logic is verified without sockets,

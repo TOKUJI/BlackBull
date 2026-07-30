@@ -27,7 +27,7 @@ from blackbull.router import (
     PathNotRegistered, MethodNotApplicable, ConfigurationError, HTTPException,
 )
 from blackbull import BlackBull, Response, JSONResponse
-from blackbull import Connection as Request  # Sprint 79: Request is a deprecated Connection alias
+from blackbull import Connection as Request  # ``Request`` is a deprecated Connection alias
 from blackbull.router import RouteGroup
 
 logger = getLogger(__name__)
@@ -142,7 +142,7 @@ def test_router_regex(router):
 async def test_router_regex_with_group_name1(router):
     # Custom regex routes take a compiled re.Pattern (the documented
     # contract).  A raw regex *string* is rejected at registration since
-    # Sprint 64 — see test_router_regex_source_string_rejected.
+    # See test_router_regex_source_string_rejected.
     path = re.compile(r'^test/(?P<id_>\d+)$')
     scheme = Scheme.http
 
@@ -573,7 +573,7 @@ class TestSimplifiedHandlerDetection:
 
 
 class TestSimplifiedHandlerFailFast:
-    # Spec change (Sprint 74): a scalar param that matches no path
+    # Spec change: a scalar param that matches no path
     # placeholder is now a *query param*, not a registration error — the
     # fail-fast contract holds only for annotations no category can resolve.
     def test_unresolvable_annotation_raises_at_registration(self):
@@ -756,7 +756,7 @@ class TestSimplifiedHandlerBodyInjection:
 
 
 class TestSimplifiedHandlerRequestInjection:
-    """Injection matrix for the opt-in Request context object (Sprint 65)."""
+    """Injection matrix for the opt-in Request context object."""
 
     @staticmethod
     def _counting_receive(body: bytes = b'hello'):
@@ -853,7 +853,7 @@ class TestSimplifiedHandlerRequestInjection:
         assert len(calls) == 1
 
     def test_request_name_with_foreign_annotation_is_not_request_injected(self):
-        # Spec change (Sprint 74): 'request' with a scalar annotation used to
+        # Spec change: 'request' with a scalar annotation used to
         # be a registration TypeError; it is now an ordinary query param
         # (asserted in test_query_params.py).  An unresolvable annotation on
         # the name still fails fast — proving no Request fallback kicks in.
@@ -1285,7 +1285,7 @@ class TestRouterEdgeCases:
     def test_route_fn_invalid_method_token_raises(self):
         """Method strings must be valid RFC 9110 §5.6.2 tokens.
 
-        Valid str methods like 'BREW' are accepted (Sprint 47).
+        Valid str methods like 'BREW' are accepted.
         Strings containing spaces, control characters, or separator
         characters are not valid tokens and must raise ValueError.
         """

@@ -1,4 +1,4 @@
-"""The :class:`~blackbull.WebSocket` object over the real stack (Sprint 82).
+"""The :class:`~blackbull.WebSocket` object over the real stack.
 
 ``test_websocket_object.py`` pins the wrapper against a scripted channel.
 This file drives it through :class:`~blackbull.testing.TestClient` — the
@@ -6,7 +6,7 @@ router, the WebSocket actor, the recipient, the codec, and the sender — so
 the object's events are proven to be the ones the actor actually accepts.
 
 The load-bearing pair is :func:`test_object_and_raw_forms_are_indistinguishable_on_the_wire`
-and its neighbours: the whole premise of the sprint is that this is a
+and its neighbours: the whole premise of the feature is that this is a
 *handler-side* convenience with no protocol consequence.
 """
 import pytest

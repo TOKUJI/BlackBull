@@ -1,4 +1,4 @@
-"""Error paths carry handler-set trailing metadata (Sprint 66 core hook).
+"""Error paths carry handler-set trailing metadata.
 
 grpcio delivers ``set_trailing_metadata`` even when the call ends non-OK —
 that is what the rich-error model rides on: ``google.rpc.Status`` bytes in a

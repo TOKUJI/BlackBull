@@ -9,10 +9,10 @@ BlackBull's defences are three timeouts in :mod:`blackbull.env`,
 overridden short here so the suite stays fast:
 
   * ``BB_HEADER_TIMEOUT`` — deadline for the header block.
-  * ``BB_BODY_TIMEOUT``   — deadline for the body (Sprint 17 Phase 3).
+  * ``BB_BODY_TIMEOUT``   — deadline for the body.
   * ``BB_KEEP_ALIVE_TIMEOUT`` — deadline for idle persistent connections.
 
-Sprint 17 Phase 5 merged the previous ``test_http1_slowloris.py`` into
+This module absorbed the former ``test_http1_slowloris.py`` into
 this file and rewrote every test on top of the
 :class:`blackbull.client.Scenario` abstraction — the same shape the
 Hypothesis-driven differential test and the atheris fuzz harness
@@ -232,7 +232,7 @@ class TestIncrementalRequest:
 
 
 # ---------------------------------------------------------------------------
-# Sprint 17 Phase 5 additions — body-timeout, keep-alive timeout, and
+# Body-timeout, keep-alive timeout, and
 # CL.CL / CL+TE smuggling defences.
 # ---------------------------------------------------------------------------
 

@@ -69,7 +69,7 @@ _WINDOW_UPDATE_THRESHOLD = 32768
 class _H2QueueReader(AbstractReader):
     """``AbstractReader`` over a raw-stream DATA-frame queue.
 
-    Sprint 72 (audit 1.20b / F.2) — lets the H2 client session reuse the
+    Lets the H2 client session reuse the
     shared ``ws_codec`` + ``WebSocketRecipient`` stack (whose read path
     calls only ``readexactly``) instead of a third, private WS frame
     parser.  DATA payloads are buffered as a byte stream; flow-control
@@ -123,8 +123,8 @@ class WebSocketH2Session:
 
     Outgoing frames are masked (RFC 6455 §5.1) and wrapped in H2 DATA
     frames.  Incoming DATA payloads feed the shared
-    ``WebSocketRecipient`` stack through :class:`_H2QueueReader`
-    (Sprint 72, audit 1.20b) — fragmentation reassembly, FIN/RSV/mask
+    ``WebSocketRecipient`` stack through :class:`_H2QueueReader` —
+    fragmentation reassembly, FIN/RSV/mask
     validation, UTF-8 checks, and auto-PONG all come from the same
     codec the server and the H1 client use.
     """
@@ -199,7 +199,7 @@ class WebSocketH2Session:
         frame), await the peer's echoed CLOSE bounded by *drain_timeout*,
         and stop the recipient's reader task.  Idempotent.
 
-        Sprint 72 (audit 1.20c) — same close discipline as the H1
+        Same close discipline as the H1
         client's :meth:`WebSocketSession.close`.
         """
         if self._closed:

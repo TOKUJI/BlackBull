@@ -421,7 +421,7 @@ class Headers(FrameBase):
     def save(self):
         encoder = self.encoder if self.encoder is not None else Encoder()
         # Pseudo-headers MUST come before regular headers (RFC 7540 §8.1.2.1)
-        # Sprint 21 Phase C — fast-path :status when its value is one of the
+        # Fast-path :status when its value is one of the
         # static-table entries (RFC 7541 App A indices 8-14).  The encoder
         # would emit the same single byte, but at the cost of dict lookups
         # and a generator iteration we can sidestep.  Static-indexed fields
@@ -489,11 +489,10 @@ class PushPromise(FrameBase):
 
     def save(self) -> bytes:
         encoder = self.encoder if self.encoder is not None else Encoder()
-        # Sprint 24: extend the HPACK static fastpath to the request-side
+        # Extend the HPACK static fastpath to the request-side
         # pseudo-headers that PUSH_PROMISE emits (``:method``, ``:scheme``,
         # ``:path``).  Same wire-equivalence + dynamic-table-neutrality
-        # invariants as the Sprint 21 Phase C ``:status`` fast-path on
-        # ``Headers.save``.
+        # invariants as the ``:status`` fast-path on ``Headers.save``.
         fast_bytes = b''
         remaining_pseudo = []
         for k, v in self.pseudo_headers.items():

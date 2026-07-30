@@ -1,5 +1,5 @@
 """
-MQTT 5.0 Keep-Alive (PINGREQ/PINGRESP) conformance tests — Sprint 52.
+MQTT 5.0 Keep-Alive (PINGREQ/PINGRESP) conformance tests.
 
 Verifies heartbeat mechanism against the MQTT 5.0 OASIS Standard.
 

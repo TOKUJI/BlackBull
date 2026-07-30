@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Generate atheris seed scenarios in :class:`Scenario.from_bytes` opcode form.
 
-Sprint 18 epilogue — the pre-Sprint-17 ``l[1-5]_*.txt`` corpus contains
+The legacy ``l[1-5]_*.txt`` corpus contains
 raw HTTP/1.1 wire bytes, but ``fuzz_http1.py``'s ``TestOneInput`` now
 decodes bytes via :meth:`Scenario.from_bytes` (opcode-tagged
 1 byte per step).  Without re-encoding, most existing seeds decode

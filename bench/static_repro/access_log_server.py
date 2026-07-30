@@ -1,6 +1,6 @@
 """Server wrapper that enables the access log and writes it to a file.
 
-Sprint 30 Tier 2 probe — measures **per-request server-side
+Measures **per-request server-side
 duration** directly from the access log, so we can compare
 latencies (not throughput) with and without watermarks.
 
@@ -64,7 +64,7 @@ def _setup_access_log(path: str) -> None:
 def _patch_access_log_format() -> None:
     """Monkeypatch ``AccessLogRecord.format`` to print sub-ms precision.
 
-    Sprint 30 Tier 2 probe — the production format
+    The production format
     ``f'{self.duration_ms():.0f}ms'`` integer-rounds, which wipes the
     signal on static-file workloads where each request takes <1 ms.
     Local-probe-only override; production format stays integer-ms.

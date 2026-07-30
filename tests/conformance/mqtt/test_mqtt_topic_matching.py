@@ -1,5 +1,5 @@
 """
-MQTT 5.0 Topic Name and Topic Filter matching conformance tests — Sprint 52.
+MQTT 5.0 Topic Name and Topic Filter matching conformance tests.
 
 Verifies topic matching rules against the MQTT 5.0 OASIS Standard.
 

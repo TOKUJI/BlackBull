@@ -6,7 +6,7 @@ ASGI scope dict literal. All scope construction must go through
 ``Connection`` and hand-rolling a scope dict (the drift hazard §4 exists to
 prevent).
 
-The guard is a source scan. During the Sprint 79 migration (phases 3–5) the
+The guard is a source scan. During the native-Connection migration the
 actors still build scope dicts; those sites are listed in
 ``_MIGRATION_ALLOWLIST`` and removed from it as each phase lands, so the
 allowlist shrinks to empty by Phase 5. An empty allowlist with the scan
@@ -78,7 +78,7 @@ def test_migration_allowlist_entries_exist():
 
 
 def test_native_baseline_request_never_materializes_scope_dict():
-    """Sprint 80 exit invariant: a baseline request served by BlackBull's own
+    """Exit invariant: a baseline request served by BlackBull's own
     dispatch — a bare :class:`Connection` handed to ``app`` (native path), no
     user ``app.use`` middleware, a handler taking neither ``scope`` nor
     ``Request`` — must never build an ASGI scope dict at all. BlackBull is a
@@ -132,7 +132,7 @@ def test_native_baseline_request_never_materializes_scope_dict():
             setattr(Connection, name, orig)
 
     assert built == [], (
-        'Sprint 80 regression: a native baseline request derived an ASGI scope '
+        'Regression: a native baseline request derived an ASGI scope '
         f'dict via {built!r}. Some framework-internal code built a scope instead '
         'of reading the Connection on the hot path.')
     start = [e for e in sent if e.get('type') == 'http.response.start']

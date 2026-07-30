@@ -1,4 +1,4 @@
-"""HTTP QUERY method support (RFC 10008) — Sprint 78 P1.
+"""HTTP QUERY method support (RFC 10008).
 
 QUERY (RFC 10008, June 2026) is the first new standard HTTP method since
 PATCH: safe + idempotent + cacheable, **with a request body**.  The stdlib
@@ -16,7 +16,7 @@ from http import HTTPMethod
 
 import pytest
 
-from blackbull import BlackBull, Connection as Request, QUERY  # Sprint 79 alias
+from blackbull import BlackBull, Connection as Request, QUERY  # deprecated alias
 from blackbull.router import Router, MethodNotApplicable
 from blackbull.utils import Scheme
 from blackbull.testing import TestClient
@@ -143,7 +143,7 @@ class TestQueryDispatch:
 
 
 # ---------------------------------------------------------------------------
-# OpenAPI: QUERY routes are excluded under the 3.1 emitter (Sprint 78 P3)
+# OpenAPI: QUERY routes are excluded under the 3.1 emitter
 # ---------------------------------------------------------------------------
 
 class TestQueryOpenAPI:

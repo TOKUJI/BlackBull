@@ -272,7 +272,7 @@ class TestRequiredCompressionNegotiation:
         await serve_grpc(reg, _grpc_scope('/svc/Ok'),
                          _receive_with(encode_message(b'')), send)
         start = next(e for e in events if e['type'] == 'http.response.start')
-        # Since Sprint 60 G2 the server decodes gzip as well as identity.
+        # The server decodes gzip as well as identity.
         assert dict(start['headers'])[b'grpc-accept-encoding'] == b'identity,gzip'
 
     @pytest.mark.asyncio

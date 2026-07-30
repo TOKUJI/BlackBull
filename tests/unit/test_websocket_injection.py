@@ -1,6 +1,6 @@
-"""Signature injection into WebSocket handlers (Sprint 83).
+"""Signature injection into WebSocket handlers.
 
-Sprint 82 gave a WebSocket handler its object; this covers what the *signature*
+A WebSocket handler gets its object; this covers what the *signature*
 may declare alongside it — path params, query params, and ``Depends`` — plus
 the registration-time errors that keep an unresolvable parameter loud.
 
@@ -143,7 +143,7 @@ def test_unresolvable_parameter_still_fails_at_registration_through_the_router()
 
 
 # ---------------------------------------------------------------------------
-# The ws-only fast path is untouched (Sprint 83 gate)
+# The ws-only fast path is untouched
 # ---------------------------------------------------------------------------
 
 def test_lone_ws_still_compiles_to_the_fast_path_wrapper():
@@ -278,7 +278,7 @@ async def test_depends_teardown_runs_on_clean_return():
 
 @pytest.mark.asyncio
 async def test_depends_teardown_runs_on_abrupt_disconnect():
-    """The sprint gate: teardown must not be tied to a *clean* close.
+    """The gate: teardown must not be tied to a *clean* close.
 
     ``WebSocketDisconnect`` propagating out of the handler is what an abrupt
     peer loss looks like from inside one. Note the ``try/finally`` — see
@@ -360,7 +360,7 @@ async def test_bare_yield_provider_does_not_tear_down_on_an_exception():
 
 @pytest.mark.asyncio
 async def test_dependency_is_resolved_once_per_connection_not_per_message():
-    """The Sprint 82 rule — object per connection — governs dependencies too."""
+    """The rule — object per connection — governs dependencies too."""
     setups = []
 
     async def provider():
@@ -402,7 +402,7 @@ async def test_cached_dependency_is_shared_between_parameters():
 
 @pytest.mark.asyncio
 async def test_everything_together():
-    """The signature the sprint set out to make work."""
+    """The signature the feature set out to make work."""
     seen = {}
 
     async def get_db():

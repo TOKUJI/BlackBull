@@ -1,4 +1,4 @@
-"""Phase 2 — `Connection` core + the drift-prevention harness (Sprint 79).
+"""Phase 2 — `Connection` core + the drift-prevention harness.
 
 `Connection` (blackbull/connection.py) is the single internal request
 representation; the ASGI scope dict is a *derived* view produced by

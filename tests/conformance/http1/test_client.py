@@ -52,7 +52,7 @@ async def _echo_app(scope, receive, send):
 
     Also accepts WebSocket scopes — echoes every received frame back to the client.
 
-    Sprint 80: BlackBull threads a native ``Connection`` for HTTP requests (the
+    BlackBull threads a native ``Connection`` for HTTP requests (the
     WebSocket path stays ASGI-scope-shaped), so request fields are read via
     :func:`_rget`, which works against either representation.
     """
@@ -279,7 +279,7 @@ class TestHTTP1Client:
 class TestQueryMethod:
     """``request()`` accepts ``str | HTTPMethod``; QUERY (no enum member
     before Python 3.16) exercises the plain-string path with a body over
-    both protocol clients (Sprint 78 P4 pin — no dedicated sugar, the
+    both protocol clients (pinned — no dedicated sugar, the
     clients expose no per-verb helpers)."""
 
     @pytest.mark.asyncio
@@ -397,7 +397,7 @@ class TestWebSocketClient:
 
     @pytest.mark.asyncio
     async def test_close_drains_peer_close_and_stops_reader(self, server_port):
-        # Sprint 72 (1.20c) — close() completes the RFC 6455 §7.1.2 closing
+        # close() completes the RFC 6455 §7.1.2 closing
         # handshake and cancels the background reader task, so nothing
         # outlives the session (no pending-task warning at loop shutdown).
         async with WebSocketClient('127.0.0.1', server_port) as c:

@@ -86,7 +86,7 @@ def rfc8441_server_port():
     server.open_socket(0)
 
     def _child():
-        # Sprint 10 caution — settings cache is `@functools.cache`-d on
+        # Settings cache is `@functools.cache`-d on
         # `get_settings()`; without this reset the child would inherit
         # the parent's cache and BB_H2_ENABLE_WEBSOCKET=1 would silently
         # no-op.

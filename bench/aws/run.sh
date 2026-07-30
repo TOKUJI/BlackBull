@@ -11,7 +11,7 @@
 #   LANES="A B-wrk" bash bench/aws/run.sh
 #
 # Knobs consumed by bench/peers/compare_servers.sh:
-#   RUNS      h2load median-of-N (default 3 — Sprint 13 plan defaults to 5)
+#   RUNS      h2load median-of-N (default 3 — the plan defaults to 5)
 #   LANES     subset of {A, B-wrk, B-oha, C, D}
 #   STACKS    subset of {blackbull, uvicorn, hypercorn, granian, daphne, nginx}
 #   DURATION  per-scenario seconds for wrk/oha (default 30)
@@ -29,7 +29,7 @@ source "$(dirname "$0")/config.sh"
 _bench_aws_check_env
 _bench_aws_load_state
 
-# Backward-compat shims for state files written before Sprint 20.
+# Backward-compat shims for legacy state files.
 SERVER_PUBLIC_IP="${SERVER_PUBLIC_IP:-${PUBLIC_IP:-}}"
 SERVER_PRIVATE_IP="${SERVER_PRIVATE_IP:-}"
 LOADGEN_PUBLIC_IP="${LOADGEN_PUBLIC_IP:-}"
@@ -54,7 +54,7 @@ echo "  LANES=$LANES"
 echo "  STACKS=$STACKS"
 echo
 
-# Sprint 21 Phase B: BB_BENCH_TASKSET is optional and threaded through to the
+# BB_BENCH_TASKSET is optional and threaded through to the
 # server's launch path.  Empty means no pinning.
 BB_BENCH_TASKSET="${BB_BENCH_TASKSET:-}"
 

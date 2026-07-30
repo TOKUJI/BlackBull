@@ -1,12 +1,12 @@
 #!/usr/bin/python3
 """Atheris coverage-guided fuzz harness for BlackBull's HTTP/1.1 server.
 
-Sprint 17 Phase 5 — switched from the previous ``decode_to_request`` +
+Switched from the previous ``decode_to_request`` +
 ``HTTP1Client.request()`` pipeline to the shared :class:`Scenario`
 abstraction.  Atheris's byte-level mutations now reach the wire
 verbatim via :meth:`Scenario.from_bytes`.
 
-Sprint 18 Phase 3 — when the env vars ``BB_FUZZ_NGINX_HOST`` and
+When the env vars ``BB_FUZZ_NGINX_HOST`` and
 ``BB_FUZZ_NGINX_PORT`` are set, ``TestOneInput`` runs the same
 scenario against nginx and BlackBull and *fails* (raises
 ``AssertionError``) on any non-accepted category — exactly the
@@ -19,7 +19,7 @@ Run::
     # single-server (legacy):
     python fuzz_http1.py -max_total_time=60 corpus/
 
-    # differential (Sprint 18):
+    # differential:
     BB_FUZZ_NGINX_HOST=127.0.0.1 BB_FUZZ_NGINX_PORT=8080 \\
         python fuzz_http1.py -max_total_time=60 corpus/
 
@@ -131,7 +131,7 @@ async def _single_server(scenario: Scenario) -> None:
 
 
 async def _differential(scenario: Scenario) -> Category:
-    """Sprint 18 Phase 3 path — feed *scenario* to both servers,
+    """Feed *scenario* to both servers,
     return the categoriser verdict.  Raises is delegated to
     :func:`TestOneInput`; this helper itself never raises."""
     # _DIFFERENTIAL gates the caller, so both are populated here.

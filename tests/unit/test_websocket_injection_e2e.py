@@ -1,4 +1,4 @@
-"""Signature injection over the real stack (Sprint 83).
+"""Signature injection over the real stack.
 
 ``test_websocket_injection.py`` pins the plan and the wrapper against a
 scripted channel. This file drives the same signatures through
@@ -117,7 +117,7 @@ def test_dependency_is_live_for_the_whole_socket_and_torn_down_after_it():
     """One resolution serves every message, and release happens on disconnect.
 
     The teardown assertion sits *outside* the client block: the handler only
-    exits when the peer goes away, which is exactly the lifetime this sprint
+    exits when the peer goes away, which is exactly the lifetime the feature
     documents.
     """
     app = _make_app()

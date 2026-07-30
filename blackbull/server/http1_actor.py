@@ -1,4 +1,4 @@
-"""HTTP/1.1 Actor classes for the BlackBull Actor model (Phase 6 Step 3).
+"""HTTP/1.1 Actor classes for the BlackBull actor model.
 
 HTTP1Actor drives the keep-alive loop for one TCP connection.
 RequestActor owns the lifetime of a single HTTP request.
@@ -70,7 +70,7 @@ _TOKEN_CHARS = (
 _TOKEN_SET = frozenset(_TOKEN_CHARS)
 _HTTP_VERSION_RE = re.compile(rb'^HTTP/\d\.\d$')
 
-# Sprint 25 Phase B — compiled-regex validators replace per-byte
+# Compiled-regex validators replace per-byte
 # `any(c not in _TOKEN_SET for c in …)` and `any((b < 0x20 or
 # b == 0x7F) and b != 0x09 for b in …)` scans in `_parse`.  The
 # character classes below are the exact negation of the RFC 9110
@@ -187,7 +187,7 @@ def _validate_message_framing(headers: 'Headers') -> None:
       ``identity, chunked`` multi-coding form, etc.) raises
       :class:`NotImplementedFramingError`.  Without this check the
       recipient layer raised ``NotImplementedError`` later and the
-      connection dropped silently (Sprint 17 Finding C).
+      connection dropped silently.
     """
     cls = headers.getlist(b'content-length')
     tes = headers.getlist(b'transfer-encoding')
@@ -211,7 +211,7 @@ def _validate_message_framing(headers: 'Headers') -> None:
             raise BadRequestError(
                 f'conflicting Content-Length values: {sorted(values)!r}')
 
-    # Sprint 18 Phase 2 / Sprint 63 — Transfer-Encoding validation.
+    # Transfer-Encoding validation.
     #
     # RFC 9112 §6.1 distinguishes two failure modes:
     #   * ``chunked`` present but NOT the final coding (``chunked, gzip``,
@@ -249,8 +249,8 @@ def _validate_message_framing(headers: 'Headers') -> None:
 # RFC 3986 §3.2 — authority = [userinfo "@"] host [":" port].  None of
 # these delimiter octets belong in a Host header value; their presence
 # (or an empty value) is a smuggling / SSRF vector that nginx rejects
-# with 400 and BlackBull, pre-Sprint-18, accepted silently.  ``@`` is
-# included (Sprint 63, COMP-HOST-WITH-USERINFO): the deprecated userinfo
+# with 400 and a lenient parser accepts silently.  ``@`` is
+# included: the deprecated userinfo
 # component has no place in a Host header and enables credential-spoofing.
 _HOST_FORBIDDEN_BYTES = frozenset(b'/?# \t@')
 # Derived from the set above so the two cannot drift.  A small forbidden
@@ -297,9 +297,9 @@ def _parse_host_header(value: bytes, default_port: int) -> tuple[str, int]:
 
 def _validate_host(headers: 'Headers') -> None:
     """RFC 9112 §3.2 / §7.2 — Host MUST be present and contain a valid
-    URI-authority component.  Sprint 17 Finding B captured several
-    inputs (``host: 0/0``, empty host) where BlackBull answered 200 and
-    nginx answered 400.  This check brings BlackBull into RFC alignment.
+    URI-authority component.  Inputs such as ``host: 0/0`` and an empty
+    host are accepted by a lenient parser and rejected with 400 by nginx;
+    this check keeps BlackBull on the RFC side of that split.
 
     Rules enforced:
       * at most one Host header (§7.2; multiple is a smuggling vector);
@@ -336,7 +336,7 @@ class RequestActor(Actor):
     Spawned by HTTP1Actor, awaited to completion.  Calls the ASGI app.
 
     The request-lifecycle Level B events are emitted by the application
-    layer (``BlackBull._dispatch`` / ``__call__``, Sprint 64 + issue #145) —
+    layer (``BlackBull._dispatch`` / ``__call__``) —
     the cross-transport emission points — not here.  The
     actor layer emits only the Level B ``error`` event, for exceptions that
     escape the app call (e.g. a raising global middleware).
@@ -459,7 +459,7 @@ class HTTP1Actor(Actor):
         from ..env import get_settings as _get_settings  # noqa: PLC0415
         from .access_log import PHASE_TRACE as _PHASE_TRACE  # noqa: PLC0415
         cfg = _get_settings()
-        # Sprint 23: one rescheduled TimerHandle per connection drives
+        # One rescheduled TimerHandle per connection drives
         # all phase deadlines (headers / body / keep-alive).  Created
         # lazily so tests that instantiate HTTP1Actor without a wrapping
         # ConnectionActor still work — same task either way.
@@ -467,7 +467,7 @@ class HTTP1Actor(Actor):
             self._deadline = ConnectionDeadline()
         dl = self._deadline
         send = SenderFactory.http1(self._writer)
-        # Sprint 33 investigation: capture loop_start at the very top
+        # Capture loop_start at the very top
         # of each iteration so we can quantify the between-request gap
         # (dispatch_done(N) → loop_start(N+1)) on a keep-alive
         # connection.  Plain locals — assigned to log_record.phases
@@ -494,7 +494,7 @@ class HTTP1Actor(Actor):
                     else:
                         await self._read_headers(cfg.header_max_total)
                 except IncompleteReadError:
-                    # Sprint 17 Phase 3 — distinguish idle EOF from
+                    # Distinguish idle EOF from
                     # mid-headers EOF.  ``self._request`` is empty in
                     # the idle case (just-after keep-alive reset or
                     # fresh connection with no preamble); peer closed
@@ -562,8 +562,8 @@ class HTTP1Actor(Actor):
                         send, b'400 Bad Request', HTTPStatus.BAD_REQUEST)
                     return
                 except NotImplementedFramingError as exc:
-                    # Sprint 18 Phase 2 — RFC 9112 §6.1: server received a
-                    # Transfer-Encoding it does not implement.  Pre-Sprint-18
+                    # RFC 9112 §6.1: server received a
+                    # Transfer-Encoding it does not implement.  A lenient
                     # this raised inside HTTP1Recipient and the connection
                     # dropped silently (Finding C in user-corpus).  Match
                     # nginx and answer with 501 then close.
@@ -582,7 +582,7 @@ class HTTP1Actor(Actor):
                     return
                 self._fill_connection_info(conn)
 
-                # Sprint 80 Tier-2 / native-Connection entry: BlackBull's own
+                # Native-Connection entry: BlackBull's own
                 # server dispatches the typed ``Connection`` directly — the app
                 # is ``app(conn, receive, send)``, no ASGI scope object at all.
                 # Only ``BB_FORCE_ASGI_SCOPE=1`` takes the compat lane: the server
@@ -597,7 +597,7 @@ class HTTP1Actor(Actor):
                     app_arg = conn                                     # native Connection
 
                 if conn.type == 'websocket':
-                    # WebSocket is native too (Sprint 80): the upgrade path
+                    # WebSocket is native too: the upgrade path
                     # threads the typed Connection — the WS-only extras
                     # (subprotocols, the deferred 101 responder, deflate params)
                     # live on it (``conn.subprotocols`` / ``conn._ws``), so there
@@ -617,8 +617,8 @@ class HTTP1Actor(Actor):
                 # (access log / phase trace / request_completed listener). On the
                 # baseline hot path — no logging, no listeners — skipping it drops
                 # a per-request allocation and the ``conn.state`` dict it forces
-                # (Sprint 80 alloc-reduction; the Connection graph's per-request
-                # objects are what the cyclic GC scans under concurrency). The
+                # (the Connection graph's per-request objects are what the
+                # cyclic GC scans under concurrency). The
                 # legacy (no-aggregator) branch of ``_dispatch_request`` reads the
                 # record unconditionally, so keep building it when there is no
                 # aggregator. Consumers below are all None-tolerant (the sender
@@ -635,7 +635,7 @@ class HTTP1Actor(Actor):
                     conn.state['access_log'] = log_record
                 else:
                     log_record = None
-                # Sprint 38 Task B — reset per-request sender state.  The
+                # Reset per-request sender state.  The
                 # HTTP1Sender instance is shared across keep-alive
                 # requests on this connection; without this reset
                 # ``_started`` stays True after the first response and
@@ -706,7 +706,7 @@ class HTTP1Actor(Actor):
                     self._request = next_chunk
                     continue
 
-                # Sprint 38 Task B — BB_REQUEST_TIMEOUT parity with the
+                # BB_REQUEST_TIMEOUT parity with the
                 # HTTP/2 path.  ``HTTP2Actor._spawn_stream_task`` wraps each
                 # stream coroutine with ``asyncio.wait_for``; the HTTP/1.1
                 # path mirrors that here.  On expiry: synthesise 408 if
@@ -808,9 +808,9 @@ class HTTP1Actor(Actor):
     def _parse(self, data: bytes) -> Connection:
         """Parse raw HTTP/1.1 request bytes into a native :class:`Connection`.
 
-        (Sprint 79 Phase 3 — the parser now produces the typed native model;
-        the ASGI scope is a derived view obtained via ``conn.as_scope()`` at
-        the dispatch boundary.)
+        The parser produces the typed native model; the ASGI scope is a
+        derived view obtained via ``conn.as_scope()`` at the dispatch
+        boundary.
 
         Raises :class:`BadRequestError` on any RFC 9112 framing violation
         the caller should answer with 400.  Validation rules:
@@ -918,9 +918,9 @@ class HTTP1Actor(Actor):
         if asterisk_form:
             _raw_path_b, _query_string = b'*', b''
         else:
-            # Sprint 25 Phase A — split the bytes request-target with C-level
+            # Split the bytes request-target with C-level
             # partition calls (~12× faster than urlparse): strip #fragment,
-            # then split ?query.  Sprint 68 — ';' is NOT split off: RFC 3986
+            # then split ?query.  ';' is NOT split off: RFC 3986
             # treats it as an ordinary path sub-delimiter (the ;params grammar
             # is obsolete RFC 2396), so it stays in the path component.  The
             # path component (raw_path) and its decoded form (path) are now
@@ -928,7 +928,7 @@ class HTTP1Actor(Actor):
             _no_frag, _, _ = path.partition(b'#')
             _raw_path_b, _, _query_string = _no_frag.partition(b'?')
 
-        # Sprint 68 W1 — ASGI: scope['path'] is the percent-decoded (UTF-8)
+        # ASGI: scope['path'] is the percent-decoded (UTF-8)
         # path component.  The b'%' guard keeps the no-escape common case on
         # the plain-decode fast path; the target was already rejected above
         # if it contains bytes >= 0x80, so .decode('ascii') cannot fail.
@@ -1013,7 +1013,7 @@ class HTTP1Actor(Actor):
 
         # RFC 9112 §6 — message framing validation.  Done here so a bad
         # framing header is rejected before any body bytes are read.
-        # Sprint 18 — also validates Host (§3.2 / §7.2) and the
+        # Also validates Host (§3.2 / §7.2) and the
         # transfer-coding registry (§6.1 → 501 on unknown coding).
         _validate_message_framing(headers)
         _validate_host(headers)
@@ -1083,7 +1083,7 @@ class HTTP1Actor(Actor):
             conn.scheme = 'wss' if conn.type == 'websocket' else 'https'
 
     async def _handle_upgrade(self, conn: Connection) -> None:
-        """Handle WebSocket upgrade (native Connection, Sprint 80)."""
+        """Handle WebSocket upgrade, threading the native Connection."""
         from .conn_id import new_connection_id  # noqa: PLC0415
         from .websocket_actor import WebSocketActor  # noqa: PLC0415
         aggregator = self._aggregator
@@ -1248,7 +1248,7 @@ class HTTP1Actor(Actor):
             try:
                 await request_actor.run()
             except asyncio.CancelledError:
-                # Sprint 38 Task B — let BB_REQUEST_TIMEOUT's wait_for see
+                # Let BB_REQUEST_TIMEOUT's wait_for see
                 # the cancellation; swallowing it here would convert a
                 # timeout into a normal close without the 408 synthesis.
                 raise
@@ -1280,8 +1280,8 @@ class HTTP1Actor(Actor):
         raises :class:`HeaderTooLargeError` when the buffer overshoots.
 
         Read **one CRLF-terminated line per iteration** rather than scanning
-        for the contiguous ``\\r\\n\\r\\n`` delimiter.  Sprint 19 — the
-        ``readuntil(b'\\r\\n\\r\\n')`` shape deadlocked when
+        for the contiguous ``\\r\\n\\r\\n`` delimiter.  A
+        ``readuntil(b'\\r\\n\\r\\n')`` shape deadlocks when
         :class:`ConnectionActor` had already consumed the first line's
         ``\\r\\n`` via its protocol-detect ``readuntil(b'\\r\\n')`` and the
         remaining buffer contained only the terminating empty line's
@@ -1375,7 +1375,7 @@ class HTTP1Actor(Actor):
     def _should_keep_alive(self, conn) -> bool:
         """Return True if the connection should persist after this request.
 
-        Reads the :class:`Connection` directly (Sprint 80 Tier-2) so the
+        Reads the :class:`Connection` directly so the
         per-request keep-alive decision never materializes the lazy scope."""
         http_version = conn.http_version
         connection = conn.headers.get(b'connection', b'').lower()

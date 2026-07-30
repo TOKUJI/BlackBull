@@ -272,10 +272,10 @@ async def test_before_handler_not_fired_for_websocket():
 async def test_before_handler_exactly_once_with_aggregator():
     """Exactly one before_handler per request under the production actor path.
 
-    Regression for the Sprint 40 candidate-3 double fire: both the actor
+    Regression for the candidate-3 double fire: both the actor
     layer (EventAggregator.on_before_handler) and BlackBull._dispatch used
     to emit before_handler, so a request served by BlackBull's own HTTP/1.1
-    server fired it twice.  Sprint 64 consolidated emission into _dispatch.
+    server fired it twice.  Emission is consolidated into _dispatch.
     """
     from blackbull.event_aggregator import EventAggregator
 

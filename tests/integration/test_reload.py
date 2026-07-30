@@ -1,4 +1,4 @@
-"""End-to-end test for auto-reload (Sprint 10).
+"""End-to-end test for auto-reload.
 
 What this test exercises:
   1. ``app.run(reload=True)`` is launched as a subprocess against a

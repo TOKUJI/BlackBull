@@ -1,11 +1,11 @@
 """RFC 9113 §8.3.1 — ``:authority`` validation and ASGI ``host`` mapping.
 
-Sprint 72 F.1 (audit follow-up 2026-07-14): HTTP/2 requests must carry a
+HTTP/2 requests must carry a
 host authority — either the ``:authority`` pseudo-header or a literal
 ``Host`` field — and ``:authority`` must be surfaced to the application
 as the ``host`` header in ``scope.headers`` (ASGI HTTP spec), mirroring
 HTTP/1.1's absolute-form-overrides-Host semantics (RFC 9112 §3.2.2) and
-its userinfo/grammar rejection (the 1.25 fix, Sprint 63).
+its userinfo/grammar rejection (the 1.25 fix).
 
 Raw-frame tests drive ``HTTP2Actor`` directly via in-process fakes (same
 helpers as ``test_rfc9113_gaps.py``); scope-mapping tests call

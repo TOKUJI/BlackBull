@@ -1,4 +1,4 @@
-"""Unified protocol registry — Sprint 50.
+"""Unified protocol registry.
 
 BlackBull dispatches every accepted connection through a single
 :class:`ProtocolRegistry`.  ``http1`` and ``http2`` are built-in *bindings*;
@@ -97,7 +97,7 @@ class ConnectionView:
 
 
 # ---------------------------------------------------------------------------
-# Detection (Sprint 51 — wired into ConnectionActor._dispatch())
+# Detection — wired into ConnectionActor._dispatch()
 # ---------------------------------------------------------------------------
 
 class ProtocolDetector(ABC):
@@ -280,7 +280,7 @@ class RawBinding(ProtocolBinding):
         self.handler = handler
         self.detector = detector
         self.port = port
-        # Sprint 75 — serve this binding's port through the server's TLS
+        # Serve this binding's port through the server's TLS
         # machinery (mqtts:// and friends).  Cleartext remains the default.
         self.tls = tls
 
@@ -352,7 +352,7 @@ class ProtocolRegistry:
         :class:`ProtocolDetector`).  When several registered detectors could
         match the same first bytes, dispatch picks the **first registered**
         one — ``raw_bindings`` preserves insertion order.  ``tls=True`` serves
-        the binding's own port through the server's TLS machinery (Sprint 75).
+        the binding's own port through the server's TLS machinery.
         """
         if name in self._ports or name in {b.name for b in self._cleartext}:
             raise ValueError(f'Protocol {name!r} already registered')

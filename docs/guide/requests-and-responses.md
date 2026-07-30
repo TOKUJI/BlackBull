@@ -49,7 +49,7 @@ is registered, and the raw `(scope, receive, send)` form is
 unaffected.
 
 !!! warning "`Request` is deprecated — use `Connection` (since v0.60.0)"
-    `Connection` replaces the old `Request` context object (Sprint 79).
+    `Connection` replaces the old `Request` context object.
     `blackbull.Request` is now a **deprecated alias** of `Connection`
     that emits a `DeprecationWarning` on first use and will be removed
     **no earlier than 2027-08-01**.  Migrate by renaming the import and

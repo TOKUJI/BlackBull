@@ -1,4 +1,4 @@
-"""Protocol-agnostic Level B events (Sprint 50).
+"""Protocol-agnostic Level B events.
 
 Uses a real EventDispatcher with *interceptor* handlers (awaited inline by
 emit) so emission is deterministic without draining fire-and-forget tasks.

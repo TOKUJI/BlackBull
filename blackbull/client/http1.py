@@ -41,7 +41,7 @@ RequestBody = Union[bytes, bytearray, memoryview, AsyncIterable[bytes]]
 # CRLF as used throughout RFC 7230.
 _CRLF = b'\r\n'
 
-# Sprint 17 Phase 3 — methods for which an empty body still warrants an
+# Methods for which an empty body still warrants an
 # explicit ``Content-Length: 0`` on the wire.  RFC 9110 §8.6 makes the
 # header optional in this case, but always emitting it removes ambiguity
 # for upstreams (notably reverse proxies that treat absent CL on POST as
@@ -86,7 +86,7 @@ class HTTP1RequestSender:
                                   body: bytes) -> None:
         """Emit / validate the ``Content-Length`` header for the request.
 
-        Sprint 17 Phase 3 — replaces the previous "add CL only if body is
+        Replaces the previous "add CL only if body is
         truthy and no CL already present" rule, which let an empty POST go
         out without any framing header at all (RFC-legal but confuses
         reverse proxies) and silently sent inconsistent framing if the
@@ -141,8 +141,8 @@ class HTTP1RequestSender:
         if method_upper in _BODY_LESS_METHODS:
             # GET/HEAD/etc. with no body — skip the header by design.
             return
-        # Unknown method: forwards-compatible fallback identical to the
-        # pre-Sprint-17 behaviour (omit CL on empty body).
+        # Unknown method: forwards-compatible fallback — omit CL on an
+        # empty body.
         return
 
     async def _send_chunked(self, method: str, path: str, headers: Headers,
@@ -274,15 +274,15 @@ class HTTP1Client:
         self._reader: AbstractReader | None = None
         self._writer: AbstractWriter | None = None
         self._raw_writer: asyncio.StreamWriter | None = None
-        # Sprint 17 Phase 2 — opt-in wire-bytes capture for the low-level
+        # Opt-in wire-bytes capture for the low-level
         # primitives (send_raw, send_request_line, send_header_line, ...).
         # When True, every byte sent through those methods is also appended
         # to ``self._wire_buffer`` for later inspection by failing tests.
-        # request() does NOT populate this buffer in Sprint 17; capture
-        # there is a Phase 8 concern.
+        # request() does NOT populate this buffer; only the low-level
+        # primitives record.
         self._record_wire_bytes = record_wire_bytes
         self._wire_buffer: bytearray = bytearray()
-        # Sprint 17 Phase 5 — bound the connect() so a hung accept can't
+        # Bound the connect() so a hung accept can't
         # stall the scenario executor before any step runs.  atheris in
         # particular cannot afford an unbounded wait per TestOneInput.
         # None = no timeout (preserves pre-Phase-5 behaviour).
@@ -367,7 +367,7 @@ class HTTP1Client:
             h.append(b'host', f'{self._host}:{self._port}'.encode())
         return h
 
-    # ---- Sprint 17 Phase 2 — low-level test-instrument primitives ----
+    # ---- Low-level test-instrument primitives ----------------------------
     #
     # These methods bypass HTTP1RequestSender's safety net (no Host
     # injection, no Content-Length, no validation).  They exist so tests
@@ -479,11 +479,11 @@ class HTTP1Client:
             return await coro
         return await asyncio.wait_for(coro, timeout=timeout)
 
-    # ---- Sprint 17 Phase 5 — scenario executor ----------------------------
+    # ---- Scenario executor -----------------------------------------------
     #
     # A :class:`Scenario` is a tagged sequence of steps (SendBytes / Sleep /
     # ReadResponse / Abort) shared by the differential test and the atheris
-    # fuzz harness.  The executor below is glue over the Phase 2 primitives:
+    # fuzz harness.  The executor below is glue over the low-level primitives:
     # it walks the steps, dispatches each to the appropriate primitive, and
     # folds the outcome into a :class:`ScenarioResult` without raising.
 

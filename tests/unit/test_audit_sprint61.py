@@ -1,4 +1,4 @@
-"""Regression tests for the Sprint 61 HTTP/1.1 correctness batch.
+"""Regression tests for an HTTP/1.1 correctness audit batch.
 
 Each test pins a specific bug from the 2026-07-07 comprehensive audit
 (``.claude/planning/recommendations/comprehensive-audit-2026-07-07.md``):

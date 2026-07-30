@@ -1,5 +1,5 @@
 """
-MQTT 5.0 CONNECT / CONNACK / DISCONNECT conformance tests — Sprint 52.
+MQTT 5.0 CONNECT / CONNACK / DISCONNECT conformance tests.
 
 Verifies session establishment and graceful teardown against the MQTT 5.0
 OASIS Standard.

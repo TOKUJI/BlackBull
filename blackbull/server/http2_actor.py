@@ -1,4 +1,4 @@
-"""HTTP/2 Actor classes for the BlackBull Actor model (Phase 6 Step 4).
+"""HTTP/2 Actor classes for the BlackBull actor model.
 
 HTTP2Actor drives the HTTP/2 connection state machine for one TCP connection.
 StreamActor owns the lifetime of a single HTTP/2 stream.
@@ -92,8 +92,8 @@ def _signal_recipients(recipients: dict[int, _StreamRecipient]) -> None:
 def _make_log_record(conn: Connection):
     # Publish the record for the app layer: BlackBull._dispatch sources the
     # request_completed detail's wire fields (status / response_bytes /
-    # duration_ms) from the request's ``conn.state['access_log']`` (Sprint 64
-    # event consolidation) — same contract as the HTTP/1.1 actor. The actor
+    # duration_ms) from the request's ``conn.state['access_log']`` — same
+    # contract as the HTTP/1.1 actor. The actor
     # always has the parsed Connection, even on the BB_FORCE_ASGI_SCOPE lane
     # (where the emitted scope shares ``conn.state`` by identity, so the app's
     # rebuilt Connection sees the same record) — so the log record is always
@@ -119,7 +119,7 @@ def _build_h2_extensions(
 ) -> dict:
     """Return a freshly-built ``scope['extensions']`` dict for one HTTP/2 request.
 
-    The shape Sprint 32 introduces:
+    The shape:
 
     - ``http.response.push`` — empty marker; signals the application can
       send ``http.response.push`` events on this scope (existing behaviour).
@@ -485,8 +485,7 @@ class HTTP2Actor(Actor):
     def _make_stream_recipient(self, stream_id: int) -> HTTP2Recipient:
         """Recipient with consume-time WINDOW_UPDATE crediting.
 
-        Consume-based inbound flow control (the Sprint 62 deferral,
-        ``proposals/consume-based-inbound-flow-control.md``): credit is
+        Consume-based inbound flow control: credit is
         replayed when the app pops the event off the queue, not when the
         DATA frame is enqueued, so a stalled handler closes the window and
         back-pressures the peer instead of overflowing the recipient queue
@@ -567,7 +566,7 @@ class HTTP2Actor(Actor):
         """Materialize an ASGI scope dict for the **compat lanes only**.
 
         The native HTTP/2 dispatch path never calls this — it threads the
-        :class:`Connection` itself (WebSocket included, Sprint 80). The one
+        :class:`Connection` itself, WebSocket included. The one
         boundary that still needs an ASGI scope is **``BB_FORCE_ASGI_SCOPE``**
         (§4.3): a pure ASGI scope round-tripped back through ``from_scope`` at
         the app boundary. Also used to synthesize the pushed-request scope for
@@ -1173,7 +1172,7 @@ class HTTP2Actor(Actor):
 
         if conn.type == 'websocket':
             # RFC 8441 — Extended CONNECT bootstrapping WebSocket over HTTP/2.
-            # WebSocket is native too (Sprint 80): thread the Connection — its
+            # WebSocket is native too: thread the Connection — its
             # WS extras (subprotocols / the deferred 200 responder) live on it,
             # so there is no scope dict even under BB_FORCE_ASGI_SCOPE (the
             # force-asgi lane only round-trips the HTTP app boundary).

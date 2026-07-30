@@ -112,7 +112,7 @@ def test_trie_multiple_params():
 
 
 # ---------------------------------------------------------------------------
-# Backtracking pins (Sprint 77) — behaviours the lookup fast path must keep
+# Backtracking pins — behaviours the lookup fast path must keep
 # ---------------------------------------------------------------------------
 
 def test_trie_backtracks_to_param_when_static_dead_ends_deeper():
@@ -365,7 +365,7 @@ async def test_lookup_cache_parametrized_route_injects_correct_params():
     fn = router[key]
     assert key in router._cache
 
-    # Cached closure injects params correctly (Sprint 79: onto conn.path_params)
+    # Cached closure injects params correctly
     scope: dict = {}
     await fn(scope, None, None)
     assert scope['_connection'].path_params == {'task_id': '42'}
@@ -379,7 +379,7 @@ async def test_lookup_cache_parametrized_route_injects_correct_params():
 
 
 # ---------------------------------------------------------------------------
-# _LookupCache — swappable cache-strategy extraction (Sprint 68 follow-up)
+# _LookupCache — swappable cache-strategy extraction
 # ---------------------------------------------------------------------------
 
 def test_router_uses_lookupcache_instance():

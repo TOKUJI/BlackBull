@@ -1,4 +1,4 @@
-"""Raw TCP echo server riding BlackBull's Non-ASGI bridge (Sprint 50).
+"""Raw TCP echo server riding BlackBull's Non-ASGI bridge.
 
 One BlackBull process serves HTTP on :8000 *and* a raw TCP echo protocol on
 :9000 — the echo handler bypasses ASGI entirely and speaks the socket directly.

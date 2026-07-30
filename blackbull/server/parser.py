@@ -8,17 +8,17 @@ from .http1_actor import _HOST_FORBIDDEN_RE
 
 logger = logging.getLogger(__name__)
 
-# Sprint 80 alloc hygiene (`proposals/connection-alloc-hygiene.md` Phase 2,
-# 2026-07-24) — a shared empty extensions dict for the plain-HTTP/2 dispatch
-# path. ``HTTP2Actor._apply_priority_and_extensions`` unconditionally replaces
-# ``conn.extensions`` with a fresh per-stream dict *before* the app or any
-# middleware sees the Connection (``_on_headers_frame`` / ``_on_continuation_
-# frame``, both call it ahead of ``_spawn_stream_task``), so this sentinel is
-# never read or mutated by user code — same convention as
-# ``http1_actor._H1_PATHSEND_EXTENSIONS``. The RFC 8441 WebSocket branch of
-# ``parse_headers`` does NOT go through ``_apply_priority_and_extensions``, so
-# it must NOT use this sentinel — it keeps a fresh ``{}`` (the dataclass
-# default) for the connection's lifetime.
+# Shared empty extensions dict for the plain-HTTP/2 dispatch path — safe to
+# share because ``HTTP2Actor._apply_priority_and_extensions`` unconditionally
+# replaces ``conn.extensions`` with a fresh per-stream dict *before* the app or
+# any middleware sees the Connection (``_on_headers_frame`` /
+# ``_on_continuation_frame`` both call it ahead of ``_spawn_stream_task``), so
+# this sentinel is never read or mutated by user code.  Same convention as
+# ``http1_actor._H1_PATHSEND_EXTENSIONS``.
+#
+# The RFC 8441 WebSocket branch of ``parse_headers`` does NOT go through
+# ``_apply_priority_and_extensions``, so it must NOT use this sentinel — it
+# keeps a fresh ``{}`` for the connection's lifetime.
 _EMPTY_H2_EXTENSIONS: dict = {}
 
 
@@ -27,13 +27,11 @@ def _build_h2_connection(method: str, path: str, raw_path: bytes,
                          scheme: str) -> Connection:
     """Lean constructor for the plain-HTTP/2 :func:`parse_headers` return.
 
-    Sprint 80 alloc hygiene Phase 2: bypasses the dataclass-generated
-    ``Connection.__init__`` (type-call + default-binding machinery, ~200 ns/req
-    measured in `bench/results/h2-alloc-cpu-ab/20260723-161201Z-conn-decomp/`)
-    via ``object.__new__`` + explicit slot stores. Behaviourally identical to
-    ``Connection(method=method, path=path, raw_path=raw_path,
-    query_string=query_string, headers=headers, http_version='2',
-    scheme=scheme)`` — pinned field-for-field by
+    Bypasses the dataclass-generated ``Connection.__init__`` (type-call +
+    default-binding machinery, ~200 ns/req) via ``object.__new__`` + explicit
+    slot stores.  Behaviourally identical to ``Connection(method=method,
+    path=path, raw_path=raw_path, query_string=query_string, headers=headers,
+    http_version='2', scheme=scheme)`` — pinned field-for-field by
     ``tests/architecture/test_h2_connection_builder.py``, which must be kept
     in sync with any change to :class:`Connection`'s field set.
 
@@ -80,13 +78,12 @@ def _split_h2_path(raw: str):
     ``str`` when the HEADERS frame is parsed (``frame_types`` decodes them),
     and the server-push caller passes the ASGI event's ``str`` path.
 
-    Sprint 68 — ``urlsplit`` (not ``urlparse``) so an RFC 3986 ``;`` path
-    sub-delimiter is kept in the path component rather than split off as
-    obsolete RFC 2396 ``;params`` (``urlparse`` would strip it from both
-    ``path`` and ``raw_path``).  The ``'%' in path`` guard keeps escape-free
-    targets on the plain fast path; unquote semantics match uvicorn ('+'
-    stays literal, malformed escapes pass through, ``errors='replace'`` can
-    never raise).
+    ``urlsplit`` (not ``urlparse``) so an RFC 3986 ``;`` path sub-delimiter is
+    kept in the path component rather than split off as obsolete RFC 2396
+    ``;params`` (``urlparse`` would strip it from both ``path`` and
+    ``raw_path``).  The ``'%' in path`` guard keeps escape-free targets on the
+    plain fast path; unquote semantics match uvicorn ('+' stays literal,
+    malformed escapes pass through, ``errors='replace'`` can never raise).
     """
     parsed = urlsplit(raw)
     path = parsed.path
@@ -157,30 +154,22 @@ def parse_headers(frame) -> Connection | None:
     callers avoid the dict-lookup + parser allocation that ``ParserFactory``
     requires.
 
-    Sprint 79 Phase 4: yields a :class:`Connection` rather than an ASGI scope
-    dict (the H/2 analogue of :meth:`HTTP1Actor._parse`).  The actor derives
-    the compat scope via :meth:`Connection.as_scope` at the dispatch boundary
-    until Phase 5 switches the consumers onto ``conn`` directly; the
-    websocket-only ``subprotocols`` scope key is likewise attached there (it is
-    not a :class:`Connection` field — see the proposal §2.1 field set), the
-    same way :meth:`HTTP1Actor._handle_upgrade` augments the derived scope.
+    Yields a :class:`Connection`, not an ASGI scope dict — the H/2 analogue of
+    :meth:`HTTP1Actor._parse`.  The actor derives the compat scope via
+    :meth:`Connection.as_scope` at the dispatch boundary; the websocket-only
+    ``subprotocols`` scope key is attached there too, since it is not a
+    :class:`Connection` field, the same way
+    :meth:`HTTP1Actor._handle_upgrade` augments the derived scope.
 
-    Sprint 80 alloc hygiene (`proposals/connection-alloc-hygiene.md`,
-    2026-07-24): builds the :class:`Connection` **once**, at the very end, from
-    locals accumulated while walking the pseudo-headers — the same
-    single-construction idiom :meth:`HTTP1Actor._parse` already uses (Phase 1).
-    The previous version built a placeholder via a removed
-    ``_default_connection`` helper (with a throwaway ``Headers([])``, discarded
-    ~154 ns/req) and mutated it field by field. Every early-out below now
-    returns ``None`` instead of a half-built ``Connection`` — including the
-    (previously reachable but never-observed) host-validation-failure path,
-    since ``_request_headers_with_host`` already marks ``frame.malformed``
-    before returning ``None``, and every caller checks ``frame.malformed``
-    before reading this function's result. The contract is now uniformly
-    ``result is None ⟺ frame.malformed``. The plain-HTTP branch's final
-    construction goes through ``_build_h2_connection`` (Phase 2 — an
-    ``object.__new__`` lean builder), not the dataclass constructor; see that
-    function's docstring.
+    The :class:`Connection` is built **once**, at the very end, from locals
+    accumulated while walking the pseudo-headers — the same
+    single-construction idiom :meth:`HTTP1Actor._parse` uses.  Every early-out
+    returns ``None`` rather than a half-built ``Connection``, so the contract
+    is uniformly ``result is None ⟺ frame.malformed``: callers check
+    ``frame.malformed`` before reading the result, and
+    ``_request_headers_with_host`` marks it before returning ``None``.  The
+    plain-HTTP branch constructs through ``_build_h2_connection`` rather than
+    the dataclass constructor; see that function's docstring.
 
     Also performs request-level pseudo-header presence checks (RFC 9113
     §8.3.1).  Field-level checks already happened in ``parse_payload``.  On any
@@ -263,9 +252,9 @@ def parse_headers(frame) -> Connection | None:
     if p := frame.pseudo_headers.get(PseudoHeaders.PATH):
         path, raw_path, query_string = _split_h2_path(p)
 
-    # The previous version's ``if scheme := …: conn.scheme = scheme`` left the
-    # ``_default_connection`` placeholder ('https') in place when ``:scheme``
-    # was absent or empty; ``or 'https'`` reproduces that exactly.
+    # An absent or empty ``:scheme`` falls back to 'https'.  Absence is
+    # already rejected above for non-CONNECT requests, so this only covers
+    # CONNECT and the empty-value case.
     scheme = frame.pseudo_headers.get(PseudoHeaders.SCHEME) or 'https'
 
     # RFC 9113 §8.3.1 — validate the host authority and surface
@@ -286,13 +275,10 @@ def parse_headers(frame) -> Connection | None:
             return None  # frame already marked malformed by the helper
         headers = Headers.from_lowered(raw_headers)
 
-    # The previous version's ``if method: conn.method = method`` silently kept
-    # the 'HEAD' placeholder for a (spec-illegal, never observed in practice)
-    # empty ``:method`` value; ``or 'HEAD'`` reproduces that pre-existing
-    # quirk exactly rather than silently changing it as a refactor side
-    # effect. Fixing this latent gap (empty ``:method`` isn't rejected the
-    # way empty ``:path`` is, above) is a conformance question, out of scope
-    # here.
+    # A spec-illegal empty ``:method`` falls back to 'HEAD' instead of being
+    # rejected the way an empty ``:path`` is.  That asymmetry is a known
+    # conformance gap, deliberately left alone — closing it is a behaviour
+    # change, not a cleanup.
     effective_method = method or 'HEAD'
 
     # Bug 1.16 — root_path is NOT taken from the client-controlled

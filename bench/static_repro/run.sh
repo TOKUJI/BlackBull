@@ -2,7 +2,7 @@
 # Reproduces the HttpArena static-profile run-2/3 degradation shape
 # locally on a single-process BlackBull, with per-run instrumentation.
 #
-# Sprint 30 Task 1 — local reproduction harness.
+# Local reproduction harness.
 #
 # Usage:
 #   bash bench/static_repro/run.sh

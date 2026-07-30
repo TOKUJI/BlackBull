@@ -277,7 +277,7 @@ class BlackBull:
         # docs/guide/extensions.md.
         self.extensions: dict[str, object] = {}
 
-        # Non-ASGI protocol registry (Sprint 50) — lazily built on the first
+        # Non-ASGI protocol registry — lazily built on the first
         # raw_handler / register_protocol_handler so importing BlackBull does
         # not drag in the server package.  None means "HTTP-only" (the bridge
         # is fully dormant).
@@ -594,7 +594,7 @@ class BlackBull:
 
         Single emission point for the in-request Level B lifecycle events
         (``request_received`` / ``before_handler`` / ``after_handler``) —
-        Sprint 64 consolidated them here, the one choke point every
+        this is the one choke point every
         transport passes (BlackBull's own HTTP/1.1 and HTTP/2 actors,
         uvicorn/hypercorn, TestClient), so each fires exactly once per
         request regardless of how the app is served.  ``request_completed``
@@ -612,7 +612,7 @@ class BlackBull:
         """
         self._logger.debug((conn, receive, send))
 
-        # WebSocket is native too (Sprint 80): ``conn`` is a Connection here as
+        # WebSocket is native too: ``conn`` is a Connection here as
         # well. Route it by its ``path`` to the registered WS handler, which
         # receives ``(conn, receive, send)``. WS has its own lifecycle events
         # (websocket_connected/message/disconnected), so it skips the HTTP
@@ -650,7 +650,7 @@ class BlackBull:
                              send: ASGISendCallable, scheme):
         """Route and run one HTTP request (the non-WebSocket half of _dispatch).
 
-        Sprint 80: BlackBull is a native-Connection framework — the dispatch
+        BlackBull is a native-Connection framework — the dispatch
         pipeline threads the typed :class:`Connection` end to end (routing,
         handler, error handlers, gRPC, and events all read ``conn.*``). The ASGI
         ``scope`` dict exists only at the external/``BB_FORCE_ASGI_SCOPE`` boundary,
@@ -835,7 +835,7 @@ class BlackBull:
             return
         elif conn.get('type') == 'websocket':
             # External ASGI host (uvicorn) delivered a websocket scope dict.
-            # WebSocket is native too (Sprint 80): convert it to a Connection at
+            # WebSocket is native too: convert it to a Connection at
             # the boundary — the WS extras are derived (``conn.subprotocols``
             # reads the request header) or actor-set (``conn._ws``), so no scope
             # dict is threaded past here. BlackBull's own server already hands us
@@ -1200,7 +1200,7 @@ class BlackBull:
         port: int | None = None,
         tls: bool = False,
     ) -> None:
-        """Register a handler for a non-ASGI (raw) protocol (Sprint 50).
+        """Register a handler for a non-ASGI (raw) protocol.
 
         The handler is an async callable ``(reader, writer, ctx) -> None`` that
         owns the connection for its whole lifetime.  When *port* is set, the
@@ -1210,12 +1210,12 @@ class BlackBull:
         Args:
             name: Protocol name (e.g. ``'echo'``, ``'mqtt'``); must be unique.
             handler: Async ``(reader, writer, ctx)`` coroutine.
-            detector: Reserved for first-byte sniffing on shared ports
-                (Sprint 51); unused today.
+            detector: Reserved for first-byte sniffing on shared ports;
+                unused today.
             port: Dedicated listening port for this protocol.
             tls: Serve this port through the server's TLS machinery (e.g.
                 ``mqtts://``).  Requires the server to be configured with a
-                certificate; startup fails fast otherwise (Sprint 75).
+                certificate; startup fails fast otherwise.
         """
         if self._protocol_registry is None:
             from .server.protocol_registry import ProtocolRegistry  # noqa: PLC0415

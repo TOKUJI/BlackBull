@@ -171,7 +171,7 @@ def _decode_h2_headers(written: bytes, factory: FrameFactory) -> list[tuple[byte
 
 # ---------------------------------------------------------------------------
 # RFC 9110 §6.6.1 — Date SHOULD be present in HTTP responses.
-# Sprint 11 brought HTTP/2 to parity with HTTP/1.1 here; the cache lives
+# HTTP/2 is at parity with HTTP/1.1 here; the cache lives
 # in _http_date() so the per-response cost is one int comparison.
 # ---------------------------------------------------------------------------
 
@@ -228,7 +228,7 @@ async def test_http2_sender_auto_emits_date_on_asgi_event_path():
 
 
 # ---------------------------------------------------------------------------
-# Trailers-coalesced auto-flush (v0.59.1 #173; Sprint 79 single-hop rework).
+# Trailers-coalesced auto-flush (v0.59.1 #173; single-hop rework).
 # The trailers-coalescing fast path holds the first body chunk so HEADERS +
 # DATA + trailing HEADERS coalesce into one write for a unary RPC.  A
 # server-streaming handler that sets ``trailers: True`` then PARKS after the
@@ -241,7 +241,7 @@ async def test_http2_sender_auto_emits_date_on_asgi_event_path():
 @pytest.mark.asyncio
 async def test_http2_sender_auto_flushes_buffered_body_when_producer_parks():
     """Deadlock-fix: a buffered first chunk flushes unprompted when the producer
-    parks (no trailers arrive).  Sprint 79 collapsed the former
+    parks (no trailers arrive).  This collapsed the former
     ``call_soon`` → ``ensure_future`` two-hop to a single ``ensure_future``, so
     the flush now lands after exactly **one** event-loop turn."""
     from blackbull.server.sender import HTTP2Sender, AsyncioWriter

@@ -1,4 +1,4 @@
-"""bench/soak/sample.py — Sprint 28 Task 2 soak-harness sampler.
+"""bench/soak/sample.py — soak-harness sampler.
 
 Polls server-process metrics every INTERVAL seconds and appends one
 row per sample to sample.csv:

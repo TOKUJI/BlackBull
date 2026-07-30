@@ -1,5 +1,5 @@
 """The native `Connection` interface — BlackBull's single internal request
-representation (Sprint 79, proposal `native-connection-interface.md`).
+representation.
 
 BlackBull is a multi-protocol server that owns both sides of the wire on its
 self-hosted path; the ASGI ``scope`` dict is therefore an *internal
@@ -48,7 +48,7 @@ def mark_disconnected(target) -> None:
 
 #: Envelope key under which a protocol actor stashes the typed :class:`Connection`
 #: it parsed, so the self-hosted dispatch path (dispatcher, router, handlers, and
-#: ``TrustedProxy``) reads it back with **zero** re-conversion (Sprint 79 Phase 5).
+#: ``TrustedProxy``) reads it back with **zero** re-conversion.
 #: A single named constant instead of a bare ``'_connection'`` literal repeated
 #: across the actors, app, router, and proxy: one typo on a write-side would
 #: otherwise silently miss the stash and force a redundant ``from_scope`` on the
@@ -56,7 +56,7 @@ def mark_disconnected(target) -> None:
 CONNECTION_STASH_KEY = '_connection'
 
 #: Shared, never-mutated ASGI info sub-dict for the native dispatch scope
-#: (Sprint 80 Tier-1b). ``as_scope()`` still emits a fresh copy for the external
+#: ``as_scope()`` still emits a fresh copy for the external
 #: compat boundary; only the self-hosted ``to_asgi_scope`` fast path reuses
 #: this constant to save one dict allocation per request. ASGI consumers read
 #: ``scope['asgi']['version']`` but never mutate the sub-dict.
@@ -133,7 +133,7 @@ _CONNECTION_FIELDS: list[_FieldSpec] = [
 #: The scope-mapped registry entries, computed **once** at module load — the
 #: ASGI round-trip subset of ``_CONNECTION_FIELDS``. Rebuilding this filtered
 #: list on every ``as_scope()``/``from_scope()`` call was a measurable per-request
-#: cost on the self-hosted hot path (Sprint 80 Tier-1), so it is a constant.
+#: cost on the self-hosted hot path, so it is a constant.
 _SCOPE_FIELDS: list[_FieldSpec] = [s for s in _CONNECTION_FIELDS if s.scope_key is not None]
 
 
@@ -150,7 +150,7 @@ def stashed_connection(target, receive) -> tuple['Connection', bool]:
     native path, or an ASGI scope dict on the external/compat lane.
 
     The one *ASGI-scope → Connection* accessor shared by the dispatcher
-    (``app._connection_of``) and the router (``router._conn_of``), Sprint 79.
+    (``app._connection_of``) and the router (``router._conn_of``).
     BlackBull's own protocol actors stash the ``Connection`` they parsed on the
     scope envelope under :data:`CONNECTION_STASH_KEY`, so the self-hosted path
     reads it back with **no** re-conversion. Under an external ASGI server
@@ -164,7 +164,7 @@ def stashed_connection(target, receive) -> tuple['Connection', bool]:
     router seeds ``path_params`` from an input scope key — because those needs
     differ by call site.
     """
-    # Native path (Sprint 80): the actor/app hands the typed Connection straight
+    # Native path: the actor/app hands the typed Connection straight
     # through, so ``target`` *is* the Connection — return it, nothing to build.
     if isinstance(target, Connection):
         return target, False
@@ -236,7 +236,7 @@ class Connection:
     # -- mutable per-request state ----------------------------------------
     state: dict[str, Any] = field(default_factory=dict)
     # Lazy: no dict is allocated until the router actually matches path params
-    # (Sprint 80 Tier-1b). No-param routes — the framework-bound hot profiles
+    # No-param routes — the framework-bound hot profiles
     # (baseline/pipelined/limited-conn) — never touch it, saving one dict per
     # request. Exposed via the ``path_params`` property below; excluded from
     # equality (a transient routing detail, never an identity input).
@@ -345,7 +345,7 @@ class Connection:
         typed :class:`Connection` stashed on it for zero-reconversion reads.
 
         The single canonical *Connection → dispatch-ready scope* bridge shared
-        by the H/1.1 ``run()`` and H/2 ``_conn_to_scope`` seams (Sprint 79) —
+        by the H/1.1 ``run()`` and H/2 ``_conn_to_scope`` seams —
         they used to hand-roll the same five steps:
 
         1. derive the ASGI scope via :meth:`as_scope` (the one native→ASGI point);
@@ -364,7 +364,7 @@ class Connection:
         is layered on by the caller *after* this returns — it is not a
         :class:`Connection` field (proposal §2.1).
 
-        Sprint 80 Tier-1: the default (``force_asgi=False``) native path builds
+        The default (``force_asgi=False``) native path builds
         the scope by **direct attribute access**, placing the rich ``Headers``
         object straight in (no ``list(headers)`` that the old code computed via
         the registry and then immediately discarded), and skips the per-field

@@ -1,4 +1,4 @@
-"""Behaviour-level tests for the Sprint 70 MQTT-broker hardening cluster (1.19).
+"""Behaviour-level tests for the MQTT-broker hardening cluster (1.19).
 
 The pre-existing MQTT suite asserted mostly *codec round-trips* — which is
 exactly why the broker-behaviour gaps in this cluster (keep-alive enforcement,
@@ -312,7 +312,7 @@ class TestSubscriptionOptions:
         assert delivered.retain is False
 
     async def test_shared_subscription_granted(self):
-        """Spec change (Sprint 75): §4.8.2 shared subscriptions are now
+        """Spec change: §4.8.2 shared subscriptions are now
         implemented — a well-formed ``$share`` filter is granted, never 0x9E.
         Full behaviour matrix: ``test_mqtt_shared_subscriptions.py``."""
         broker, conn = BrokerActor(), RecordingConn()

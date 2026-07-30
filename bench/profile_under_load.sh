@@ -18,8 +18,8 @@ RESULT_DIR="bench/results"
 mkdir -p "$RESULT_DIR"
 TS="$(date +%Y%m%d-%H%M%S)"
 
-# Default to 500 VU / 60 s — these match the C2 lane in Sprint 13's matrix.
-# Sprint 15 calls this script twice with K6_VUS=200 (B1-like) and K6_VUS=500
+# Default to 500 VU / 60 s — these match the C2 lane in the peer matrix.
+# Callers run this script twice with K6_VUS=200 (B1-like) and K6_VUS=500
 # (C2) to capture the high-vs-low concurrency comparison.
 K6_VUS="${K6_VUS:-500}"
 K6_DURATION="${K6_DURATION:-60s}"

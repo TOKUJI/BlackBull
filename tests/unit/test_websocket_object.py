@@ -1,4 +1,4 @@
-"""The high-level :class:`~blackbull.websocket.WebSocket` handler object (Sprint 82).
+"""The high-level :class:`~blackbull.websocket.WebSocket` handler object.
 
 Two layers are covered here:
 

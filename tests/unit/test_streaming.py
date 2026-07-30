@@ -123,7 +123,7 @@ class TestHTTP1SenderChunked:
 
 
 # ---------------------------------------------------------------------------
-# TestHTTP1SenderPathsend  (Sprint 31)
+# TestHTTP1SenderPathsend 
 # ---------------------------------------------------------------------------
 
 class TestHTTP1SenderPathsend:
@@ -381,7 +381,7 @@ class TestUseWarning:
 
 
 # ---------------------------------------------------------------------------
-# TestHTTP1SenderRenderStart  (Sprint refactor — lock the wire format)
+# TestHTTP1SenderRenderStart  (lock the wire format)
 # ---------------------------------------------------------------------------
 
 class TestHTTP1SenderRenderStart:
@@ -406,8 +406,8 @@ class TestHTTP1SenderRenderStart:
         assert out == b'HTTP/1.1 204 No Content\r\n\r\n'
 
     def test_reset_per_request_state_clears_all_slots(self):
-        # Sprint refactor — guard against the "I added a slot and forgot to
-        # reset it" regression that bit Sprint 38 (BB_REQUEST_TIMEOUT 408
+        # Guard against the "I added a slot and forgot to
+        # reset it" regression (BB_REQUEST_TIMEOUT 408
         # skipped on the second keep-alive request because `_started`
         # stayed True).
         from http import HTTPStatus

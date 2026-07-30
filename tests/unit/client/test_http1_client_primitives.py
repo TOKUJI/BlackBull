@@ -1,4 +1,4 @@
-"""Sprint 17 Phase 2 — unit tests for ``HTTP1Client``'s low-level primitives.
+"""Unit tests for ``HTTP1Client``'s low-level primitives.
 
 These methods bypass HTTP1RequestSender's framing safeguards and exist so
 differential tests can put deliberately malformed or trickled bytes on the
@@ -212,7 +212,7 @@ class TestSendRequestLine:
 
     @pytest.mark.asyncio
     async def test_method_with_leading_space_emitted_verbatim(self):
-        # Sprint 17 deliberately allows malformed request lines — the
+        # The client deliberately allows malformed request lines — the
         # differential test uses this to probe how nginx and BlackBull
         # diverge on RFC-invalid input.
         c, w = _client_with_fakes()
@@ -334,7 +334,7 @@ class TestReadResponse:
         # has produced enough bytes.  Use Content-Length: 0 explicitly —
         # HTTP1ResponseRecipient currently mis-handles absent
         # Content-Length (Headers.get returns b'', the `cl_raw is not
-        # None` check then fires int(b'') → ValueError).  That pre-Sprint-17
+        # None` check then fires int(b'') → ValueError).  That older
         # bug is logged for a separate fix; it's not in Phase 2 scope.
         reader = _CannedReader(
             b'HTTP/1.1 204 No Content\r\n'

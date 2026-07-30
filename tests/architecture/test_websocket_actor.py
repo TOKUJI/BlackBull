@@ -13,7 +13,7 @@ from blackbull.server.ws_codec import encode_frame
 
 
 def _ws_conn(connection_id: str = 'test-id') -> Connection:
-    """A native WebSocket Connection — the arg the WS path threads (Sprint 80)."""
+    """A native WebSocket Connection — the arg the WS path threads."""
     return Connection(method='GET', path='/', raw_path=b'/',
                       headers=Headers([]), type='websocket',
                       connection_id=connection_id)

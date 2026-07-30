@@ -32,7 +32,7 @@ def mqtt_ctx():
 
 
 # ---------------------------------------------------------------------------
-# Broker oracle seam (Sprint 53)
+# Broker oracle seam
 # ---------------------------------------------------------------------------
 #
 # The broker-driving conformance tests assert on the *packets the broker emits*
@@ -41,7 +41,7 @@ def mqtt_ctx():
 # poking module globals, which couples them to the broker's internal structure.
 #
 # This harness is the single seam between those tests and the broker.  Today it
-# wraps the procedural broker; after the Sprint 53 actor refactor only this class
+# wraps the procedural broker; after the actor refactor only this class
 # changes (to spin up a ``BrokerActor`` + per-connection actor) — the call sites
 # and their assertions are untouched, so the same suite proves the refactor
 # preserved wire behaviour.  That is what makes it a regression oracle rather

@@ -32,7 +32,7 @@ from blackbull.middleware.cache import (
 
 def _scope(method: str = 'GET', path: str = '/', query: bytes = b'',
            headers: list[tuple[bytes, bytes]] | None = None):
-    # Sprint 80: HTTP is dispatched as a native Connection, not an ASGI scope.
+    # HTTP is dispatched as a native Connection, not an ASGI scope.
     from blackbull.connection import Connection
     return Connection.from_scope({
         'type': 'http',

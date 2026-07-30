@@ -9,11 +9,11 @@ the real ``BrokerActor`` + ``serve_connection`` over in-memory pipes:
 Two dispatch modes, selected with ``--tap-mode`` (the **only** variable between
 runs — same load generator, same machine, same build):
 
-* ``inline``  — the tap runs inline on the publisher's connection (Sprint 53
+* ``inline``  — the tap runs inline on the publisher's connection (the
   contract), so a slow tap serialises that connection's reads.  Throughput
   falls and p99 rises as ``tap_delay`` grows, while coverage stays 100 %.
 * ``actor``   — the publish is *offered* to a decoupled bounded ``TapActor``
-  (Sprint 54, drop-newest overflow).  A slow tap no longer back-pressures
+  (decoupled, drop-newest overflow).  A slow tap does not back-pressure
   delivery; throughput/p99 stay ~flat, the cost surfacing as coverage < 100 %
   and a non-zero drop count.
 
@@ -22,7 +22,6 @@ Run both back-to-back in one session for the controlled side-by-side:
   python bench/mqtt/tap_throughput.py --tap-mode inline [--messages N]
   python bench/mqtt/tap_throughput.py --tap-mode actor [--messages N]
 
-(see bench/sprint-logs/sprint-54.md).
 """
 from __future__ import annotations
 
@@ -227,8 +226,8 @@ if __name__ == '__main__':
                     help='messages per tap_delay (default 500; '
                          'kept modest because inline taps serialise at 1/tap_delay)')
     ap.add_argument('--tap-mode', choices=('inline', 'actor'), default='actor',
-                    help="tap dispatch: 'inline' (Sprint 53) or 'actor' "
-                         "(Sprint 54, decoupled + drop-newest; default)")
+                    help="tap dispatch: 'inline' or 'actor' "
+                         "(decoupled + drop-newest; default)")
     ap.add_argument('--tap-queue', type=int, default=256,
                     help='actor-mode TapActor inbox bound (default 256; '
                          'overflow drops newest)')

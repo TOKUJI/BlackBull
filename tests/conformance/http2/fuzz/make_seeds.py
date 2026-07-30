@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Generate Atheris seed corpus for HTTP/2 fuzz harness — expanded with
-known attacks, CVE patterns, and Sprint 57 test failures.
+known attacks, CVE patterns, and observed test failures.
 
 Categories:
   A. Valid baseline (GET, POST, multi-stream)
-  B. Sprint 57 flow-control deadlock patterns (bug #2 boundary)
+  B. Flow-control deadlock patterns (bug #2 boundary)
   C. RFC 9113 gap test failures (G13 — CR/LF/NUL in field values)
   D. Known CVE patterns (Rapid Reset, CONTINUATION flood, SETTINGS flood)
   E. Protocol edge cases (WU=0, RST on 0, GOAWAY on 1, DATA after RST)
@@ -55,7 +55,7 @@ _write('a04_five_gets.bin',       b''.join(_h2_frame(0x01,0x05,s,_GET_HD) for s 
 _write('a05_large_body.bin',      _h2_frame(0x01,0x04,1,_POST_HD)+_h2_frame(0x00,0x01,1,b'\x42'*16384))
 _write('a06_empty_body.bin',      _h2_frame(0x01,0x04,1,_POST_HD)+_h2_frame(0x00,0x01,1,b''))
 
-# ── B. Sprint 57 flow-control boundary ──
+# ── B. Flow-control boundary ──
 for sz,label in [(65530,'65530'),(65531,'65531'),(65535,'65535'),(131070,'131070')]:
     _write(f'b{["30","31","35","70"][[65530,65531,65535,131070].index(sz)]}_window_{label}.bin',
            _h2_frame(0x01,0x04,1,_POST_HD)+_h2_frame(0x00,0x01,1,b'\x00'*sz))

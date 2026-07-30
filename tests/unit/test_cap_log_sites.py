@@ -1,4 +1,4 @@
-"""Sprint 44 coverage gate — each cap in the inventory has a unit test
+"""Each cap in the inventory has a unit test
 asserting it logs at the rejection site.
 
 If a future PR adds a new cap (``BB_*`` env var that rejects traffic)

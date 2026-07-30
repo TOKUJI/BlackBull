@@ -1,6 +1,6 @@
 """RFC 9112 §3.2 — request-target forms + §7.1 chunk framing, on the wire.
 
-Sprint 63 (Http11Probe hardening).  These drive a live BlackBull server with
+Http11Probe hardening.  These drive a live BlackBull server with
 byte-exact requests — the probe vectors that higher-level clients refuse to
 send — and assert the status BlackBull actually returns.
 """

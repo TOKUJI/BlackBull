@@ -9,7 +9,7 @@ through the whole app (``BlackBull.__call__`` → ``_dispatch`` →
 
    These tests originally ran in-process over ``TestClient``
    (``httpx.ASGITransport``).  That transport has no support for the
-   ``http.response.trailers`` ASGI event, and since Sprint 58 every gRPC
+   ``http.response.trailers`` ASGI event, and every gRPC
    response — success *and* error — reports its status in **trailing
    headers** (the framing real gRPC clients require).  httpx therefore never
    observed response completion and its transport asserted

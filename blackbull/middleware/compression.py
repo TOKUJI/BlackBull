@@ -36,7 +36,7 @@ _SERVER_PREFERENCE = ['br', 'zstd', 'gzip']  # server-side priority order
 # re-compressing them is the worst case (high-entropy input; under the
 # brotli library's bare-call default of quality 11 — BlackBull's own
 # default is q=4 via ``BB_BROTLI_QUALITY``) and contributes a measurable
-# per-request CPU tail in Sprint 35's HttpArena static-rotate probe.
+# per-request CPU tail on a static-asset workload.
 _SKIP_CONTENT_TYPES = (
     'image/',
     'audio/',
@@ -143,7 +143,7 @@ class Compression:
         # Concurrency cap on executor offloads.  When at cap, fall back to
         # uncompressed rather than queueing — keeps the asyncio default
         # thread pool from growing an unbounded backlog under burst load
-        # (the HttpArena `static` profile collapse mode, Sprint 29).
+        # (the collapse mode a static-asset workload triggers).
         self._executor_max_inflight = executor_max_inflight
         self._executor_inflight: int = 0
         self._brotli_quality = brotli_quality
@@ -152,7 +152,7 @@ class Compression:
         # has very few distinct Accept-Encoding values (browsers send a
         # constant string; benchmark generators send one); parsing the
         # q-values + iterating the server-preference list on every request
-        # showed up in the Sprint 33 py-spy profile.  Bounded so a hostile
+        # showed up in py-spy profiles.  Bounded so a hostile
         # peer can't grow it unboundedly.
         self._codec_cache: dict[bytes, tuple[str, Callable[[bytes], bytes]] | None] = {}
 
@@ -260,7 +260,7 @@ class Compression:
             # pass-through decision (already-encoded response, non-
             # compressible Content-Type, or streaming chunks), subsequent
             # events are forwarded verbatim — no parse, no re-wrap, no
-            # match.  Sprint 33 py-spy showed this overhead at ~35 % of
+            # match.  py-spy put this overhead at ~35 % of
             # the static-path CPU on responses StaticFiles already
             # encoded via a precompressed sibling.
             if start_forwarded and (skip_compression or streaming):
@@ -327,7 +327,7 @@ class Compression:
         # as the end of the first response — causing the connection to
         # be closed after every successful response.  Detected via the
         # 1:1 success/read-error ratio under wrk keep-alive load
-        # (Sprint 29).
+        # workload.
         if start_forwarded:
             return
 
@@ -344,7 +344,7 @@ class Compression:
             # compressions running, skip this one and serve uncompressed
             # rather than queueing.  Prevents the unbounded executor backlog
             # that caused the HttpArena `static` profile to collapse to 0 r/s
-            # on run 2 under c=1024 (Sprint 29).  Counter increment / decrement
+            # on run 2 under c=1024.  Counter increment / decrement
             # is safe without a lock — asyncio is single-threaded.
             if (self._executor_max_inflight > 0
                     and self._executor_inflight >= self._executor_max_inflight):

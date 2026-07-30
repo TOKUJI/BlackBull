@@ -25,8 +25,8 @@ class Headers:
     - Header names and values are always ``bytes`` (per ASGI spec).
     - Lookups are case-insensitive: the internal index is keyed on
       ``name.lower()`` (RFC 7230 §3.2 — header field names are case-insensitive).
-      ``__contains__``, ``__getitem__``, ``getlist``, and ``get`` all lowercase
-      the requested name; iteration preserves the original casing of the input.
+      ``__contains__``, ``__getitem__``, ``getlist``, and ``get`` accept any
+      casing; iteration preserves the original casing of the input.
     - Insertion order of duplicate names is preserved (RFC 7230 §3.2.2).
 
     Examples::
@@ -93,7 +93,7 @@ class Headers:
 
         Two ``Headers`` are equal when they carry the same fields in the same
         order (RFC 7230 §3.2.2 — order is significant for repeated fields).
-        Enables ``Connection`` round-trip equality (Sprint 79)."""
+        Enables ``Connection`` round-trip equality."""
         if isinstance(other, Headers):
             return self._list == other._list
         return NotImplemented

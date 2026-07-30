@@ -1,4 +1,4 @@
-"""Conformance: bidirectional-streaming gRPC over the ASGI bridge (Sprint 60 G1b).
+"""Conformance: bidirectional-streaming gRPC over the ASGI bridge.
 
 Bidi = the request is a stream of messages *and* the response is a stream.  The
 handler is an async generator taking an async iterator (``request_iter``) and

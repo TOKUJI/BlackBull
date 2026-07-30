@@ -1,4 +1,4 @@
-"""Sprint 63 regression tests — Http11Probe hardening + audit bug 1.16.
+"""Http11Probe hardening + audit bug 1.16.
 
 Covers:
 
@@ -358,7 +358,7 @@ class TestXForwardedPrefixTrust:
 
 
 # ---------------------------------------------------------------------------
-# Sprint 63 remainder — chunk-line length bound (bug 1.24, MAL-CHUNK-EXT-64K)
+# Chunk-line length bound (bug 1.24, MAL-CHUNK-EXT-64K)
 # ---------------------------------------------------------------------------
 
 class TestChunkLineLengthBound:
@@ -410,7 +410,7 @@ class TestChunkLineLengthBound:
 
 
 # ---------------------------------------------------------------------------
-# Sprint 63 remainder — trailer-section strictness (SMUG-CHUNK-LF-TRAILER,
+# Trailer-section strictness (SMUG-CHUNK-LF-TRAILER,
 # prohibited trailer fields per RFC 9110 §6.5.1)
 # ---------------------------------------------------------------------------
 
@@ -464,7 +464,7 @@ class TestChunkedTrailerSection:
 
 
 # ---------------------------------------------------------------------------
-# Sprint 63 remainder — request-line / header validation (bugs 1.25, WARN
+# Request-line / header validation (bugs 1.25, WARN
 # hardening: strict Content-Length, underscore framing-header names)
 # ---------------------------------------------------------------------------
 

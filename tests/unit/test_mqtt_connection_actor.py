@@ -1,4 +1,4 @@
-"""End-to-end wiring tests for the two-actor MQTT topology (Sprint 53, Phase 2).
+"""End-to-end wiring tests for the two-actor MQTT topology.
 
 These drive ``serve_connection`` against a live ``BrokerActor`` task using fake
 reader/writer pairs — proving the per-connection actor, its reader loop, and the

@@ -1,4 +1,4 @@
-"""Unit tests for the generic Extension mechanism (Sprint 53).
+"""Unit tests for the generic Extension mechanism.
 
 Covers the core `Extension` ABC + `BlackBull.add_extension`: registration,
 return-for-chaining, duplicate-key guard, duck-typing of legacy extensions,

@@ -115,7 +115,7 @@ def test_cli_serves_blackbull_app(tmp_path: Path):
 def test_cli_serves_over_unix_domain_socket(tmp_path: Path):
     """``blackbull module:app --bind unix:/path`` serves traffic through AF_UNIX.
 
-    Sprint 12a — nginx → BlackBull deployments use UDS to avoid exposing
+    Nginx → BlackBull deployments use UDS to avoid exposing
     a TCP port.  Verify the CLI parses the spec, ASGIServer binds AF_UNIX,
     and a client can complete a request through the socket file.
     """
@@ -197,7 +197,7 @@ def test_cli_serves_over_unix_domain_socket(tmp_path: Path):
 def test_cli_serves_raw_asgi_callable(tmp_path: Path):
     """``blackbull`` can serve a plain ASGI callable (no BlackBull instance).
 
-    This is the path the benchmark harness will take after Sprint 11 —
+    This is the path the benchmark harness takes —
     pointing the CLI at ``bench.peers.asgi_app:app`` (a raw ASGI app)
     just like every other peer server.
     """
@@ -224,7 +224,7 @@ def test_cli_serves_raw_asgi_callable(tmp_path: Path):
     env = os.environ.copy()
     env['BB_ACCESS_LOG'] = '0'
     env['PYTHONUNBUFFERED'] = '1'
-    # Sprint 80: BlackBull is a native-Connection framework — its server hands
+    # BlackBull is a native-Connection framework — its server hands
     # the app a typed ``Connection`` by default. A *raw* ASGI callable (no
     # BlackBull instance) reads ``scope['type']``/``scope['path']``, so it must
     # opt into the ASGI-scope compat lane via ``BB_FORCE_ASGI_SCOPE=1``.

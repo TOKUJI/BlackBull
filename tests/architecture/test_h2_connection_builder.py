@@ -1,4 +1,4 @@
-"""Sprint 80 alloc hygiene (`.claude/planning/proposals/connection-alloc-hygiene.md`
+"""Alloc hygiene (`.claude/planning/proposals/connection-alloc-hygiene.md`
 Phase 2, 2026-07-24) — architecture guards for the H/2 lean ``Connection``
 builder.
 
@@ -172,7 +172,7 @@ async def test_extensions_sentinel_replaced_before_app_sees_connection():
 def _make_split_get_frames(stream_id: int = 1) -> bytes:
     """A single logical GET request whose HPACK header block is split across
     a HEADERS frame (no END_HEADERS) and a CONTINUATION frame (END_HEADERS) —
-    the sprint-80 follow-up: the single-frame test above only exercises
+    a follow-up: the single-frame test above only exercises
     ``_on_headers_frame``'s complete-in-one-frame branch, but
     ``_apply_priority_and_extensions`` (the thing that makes the shared
     sentinel safe) is called independently from ``_on_continuation_frame``

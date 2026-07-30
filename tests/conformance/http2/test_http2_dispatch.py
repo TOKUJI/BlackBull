@@ -230,7 +230,7 @@ class TestHTTP2FlowControl:
 
     # ----- RFC 9113 §6.9.1 connection-level credit (regression lock) ------
     #
-    # Before Sprint 39, the server only emitted stream-level WINDOW_UPDATE
+    # The server once emitted only stream-level WINDOW_UPDATE
     # on inbound DATA.  The connection-level window depleted toward zero
     # across requests, and any single body — or cumulative inbound across
     # a keep-alive H2 connection — past 65,535 bytes stalled waiting for
