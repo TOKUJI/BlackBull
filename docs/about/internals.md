@@ -274,6 +274,25 @@ Callers must never call `transport.writelines` directly with
 small parts.  The gate is the single decision point, and the
 invariant keeps performance predictable across payload sizes.
 
+### Response values that come from tables
+
+Two values are rebuilt on every single response and drawn from a
+small, known domain, so both are precomputed once at import:
+
+- **The status line.**  `_STATUS_LINES` maps every `HTTPStatus` member
+  to the complete `HTTP/1.1 <code> <phrase>\r\n` line, CRLF included.
+- **Small Content-Length values.**  `_CONTENT_LENGTHS` holds the
+  decimal ASCII for `0…8192`, which covers the body sizes that
+  dominate request *count*.
+
+Both fall back to the original expression for an input outside the
+table's domain — a status code IANA has not registered renders with an
+empty reason phrase (legal: RFC 9112 §4 makes it optional) rather than
+raising `KeyError`, and a large body formats with `str(n).encode()`.
+Tests assert the tables agree with the expressions they replaced across
+the whole domain, because a table that disagrees anywhere is a wire
+bug that no amount of speed pays for.
+
 ## Parse-path invariant
 
 The HTTP/1.1 parser validates bytes with **C-level bulk operations**,
@@ -319,6 +338,213 @@ do not reintroduce them without new numbers:
 The through-line: an optimisation that replaces a C bulk operation
 with Python bytecode pays ~30 ns per byte instead of ~2 ns, and no
 reduction in pass count or allocation count makes that back.
+
+### Validated header-line cache
+
+The cheapest validation is the one already done.  A keep-alive peer
+resends byte-identical header lines on every request — `User-Agent`,
+`Accept`, `Accept-Language`, `Cookie` — so each connection keeps a
+bounded dict mapping **the exact raw line bytes** to the
+`(lowercased-name, stripped-value)` pair that line produced the first
+time it was seen and fully validated.  A hit replaces the colon split,
+the token check, the lowercase, the OWS strip and the value scan with
+one dict lookup.
+
+Four properties are what make this a replay of validated work rather
+than a way to skip validation, and none of them is optional:
+
+- **The key is the exact line bytes.** One changed byte is a miss, and
+  a miss is validated from scratch.  There is no normalisation, no
+  case-folding and no prefix matching on the lookup path.
+- **Only a line that reached the bottom of the loop is admitted.**
+  Admission is the last statement in the body, after every `raise`, so
+  a rejected line can never enter.
+- **The cache is per connection.**  It lives on the `HTTP1Actor`
+  instance, so validated lines never cross a connection — and
+  therefore never cross a tenant.
+- **It is bounded** (64 entries).  The key can be attacker-controlled, so a
+  peer cycling unique header names must not be able to grow it;
+  admission simply stops at the limit rather than evicting.
+
+The precedent is HPACK's dynamic table, which is this same idea blessed
+at protocol level — HTTP/1.1 merely lacks the wire form for it.
+
+### The shared spec table
+
+A per-connection cache cannot help the **first** request on a
+connection — there is nothing in it yet — and for a
+`Connection: close` client that first request is the entire
+interaction.  Populating a cache it will never read made that shape
+**21 % slower** than having no cache at all.
+
+So the cache has a second tier that needs no warming: a process-wide
+table of header lines whose value set is *fixed by a specification*,
+validated once at import and shared by every connection.  Fetch
+Metadata's `Sec-Fetch-Site` / `-Mode` / `-Dest` / `-User`, the client
+hints' boolean and platform forms, and the fixed tokens of RFC 9110
+(`Connection`, `TE`, `Pragma`, `Upgrade-Insecure-Requests`, `DNT`)
+are the same bytes for every client on every deployment.  On captured
+browser traffic they are **56 % of all header lines**, and that share
+does not decay with connection churn.
+
+HPACK's *static* table is the same idea, again — and again HTTP/1.1
+lacks the wire form, so the table lives in the parser instead.
+
+Three rules keep it from being an over-fit:
+
+- **Specification, not observation.**  A line qualifies because a spec
+  enumerates its values, not because it was frequent in a capture.
+  That is why no `User-Agent`, `sec-ch-ua`, `Accept-Language`,
+  `Cookie`, `Referer` or `Host` line is seeded, though every one of
+  them is more frequent than most entries that *are*.
+- **No framing header, ever.**  `Content-Length`,
+  `Transfer-Encoding`, `Host`, `Expect` and `Upgrade` are excluded by
+  an explicit check that raises at import.  A shared table is the last
+  place a framing decision should come from.
+- **Built through the real rules.**  Each entry is validated at import
+  with the same octet checks the parse loop applies, and a test
+  asserts every entry equals what parsing that line actually produces
+  — so a hand-written pair cannot drift from the parser.
+
+The table is immutable and never written to at runtime; learning goes
+to the per-connection dict alone, so nothing a peer sends can affect
+another connection.
+
+**Why it is not a benchmark artefact.**  A load generator resends one
+byte-identical request, which is the cache's best case and not what a
+real client does.  The numbers below therefore come from **captured
+traffic**, not from a model of it: a real Chromium loading a real page
+(document, 2 stylesheets, 3 scripts, 12 images, 2 XHRs), with every
+request head recorded exactly as it arrived
+(`bench/hotpath/capture_browser_headers.py`).
+
+That capture is what makes the mechanism legible.  21 requests carried
+**275 header lines drawn from only 26 distinct ones** — 8 of which
+(`Host`, `Connection`, `User-Agent`, `Accept-Encoding`,
+`Accept-Language`, three client hints) appeared on every single
+request, while `Accept`, `Referer` and the `Sec-Fetch-*` family varied
+by destination.  Because the cache is keyed per **line**, a request
+that changes four of its thirteen lines still hits on the other nine;
+what governs the hit rate is the *variety* of distinct lines on a
+connection, not whether requests are identical.  Chromium also emits
+its headers **in different orders** for navigations and subresources —
+which a whole-block cache would be defeated by and a per-line one does
+not notice.
+
+A cache that can only *learn* has a ceiling of
+`(lines − distinct) / lines` — every distinct line must miss once —
+which is **90.5 %** on this capture.  The shared table exceeds it,
+because a pre-seeded line never misses at all.
+
+The one thing a single capture cannot settle is how far a page spreads
+across connections: Chromium opens up to six per origin, and the
+learned tier sees fewer repeats the wider the spread.  The seeded tier
+does not care.  Re-dealing the same requests across N connections
+shows which half is which:
+
+| connections | hit rate | seeded | learned | parse cost |
+|---:|---:|---:|---:|---:|
+| 1 (as captured, no latency) | 96.7 % | 56.0 % | 40.7 % | 8.96 → 5.85 µs (**−35 %**) |
+| 2 | 94.2 % | 56.0 % | 38.2 % | 8.93 → 6.17 µs (−31 %) |
+| 4 | 89.8 % | 56.0 % | 33.8 % | 8.95 → 6.28 µs (−30 %) |
+| 6 (Chromium's per-origin max) | 85.5 % | 56.0 % | 29.5 % | 8.90 → 6.51 µs (**−27 %**) |
+| 12 | 72.7 % | 56.0 % | 16.7 % | 9.00 → 7.27 µs (−19 %) |
+
+Read the two middle columns rather than the total.  That the seeded
+column is *flat* is structural — the table does not depend on
+connections, so churn cannot erode it.  That it sits at *56 %* is a
+property of this client's header mix, and another client's would put
+it somewhere else.  The shape generalises; the level does not.
+
+!!! note "Where these numbers come from"
+
+    AMD Ryzen 5 7600X (6C/12T, Zen 4), Ubuntu 24.04 on **WSL2** — a
+    desktop VM, not an isolated benchmark host.  CPython **3.14.6**,
+    stock `asyncio` (`BB_UVLOOP=0`).  Both arms in one session: the
+    "before" column is `v0.66.0` (`450df4a`) in a `git worktree`,
+    the "after" column the same commit plus this work.  `min` of 7
+    for the µs-scale parser figures, medians of 5–7 interleaved
+    sweeps for anything driven by `wrk` (whose run-to-run spread on
+    this host is ~10 %).  Browser capture: Edge/Chromium 150 headless.
+
+    Two caveats that bound how far these generalise. The capture is
+    **n = 1** — one page load in one browser, whose requests are
+    intra-correlated by construction, so it is a point estimate with
+    no variance estimate. And **localhost has no latency**, which is
+    why Chromium used a single connection; over a real RTT it opens
+    up to six per origin, so **−17 % is the figure to quote for WAN
+    traffic**, not −30 %.
+
+    Full record, including how to size a proper multi-site sample from
+    the HTTP Archive corpus:
+    `bench/results/sprint87-frontend-spike-20260730/ENVIRONMENT.md`.
+    Every harness under `bench/hotpath/` prints its own environment
+    stamp (`bench/hotpath/provenance.py`) as its first output.
+
+So on traffic shaped like this capture, **−27 % to −35 %** is what one
+can expect — the lower figure over a real network.  Not a guarantee:
+the hit rate follows how much of a client's header set has
+spec-enumerated values and how many requests share a connection, and
+both vary by client and by deployment.  A client sending mostly
+bespoke headers on connections it closes immediately gets close to
+nothing; it does not get less than nothing, which is the part that is
+guaranteed.
+
+**Short-lived connections.**  The seeded tier needs no warming, so
+reconnection costs only the learned half.  Replaying the same capture while
+closing the connection every K requests — HttpArena's `limited-conn`
+profile is K = 10, and `Connection: close` is K = 1:
+
+| requests per connection | parse cost |
+|---:|---:|
+| 1 (`Connection: close`) | 8.75 → 8.21 µs (**−6 %**) |
+| 2 | 8.96 → 7.23 µs (−19 %) |
+| 10 (`limited-conn`) | 8.90 → 6.21 µs (**−30 %**) |
+| keep-alive | 8.77 → 6.27 µs (−29 %) |
+
+Without the seeded tier the K = 1 row was **+21 %** — a real regression
+on connection-churn traffic, and the reason the tier exists.
+
+On ordinary traffic that merely fails to repeat — every header value
+unique, or the cache already full — the path is still **5 % faster**
+than not having the cache, because the same change hoisted the
+per-request settings read out of `_parse` to connection setup.  A
+connection whose headers carry a per-request unique value (a request
+id, a timestamp, a rotating token) misses on those lines and still hits
+on the rest.
+
+### The worst case, stated
+
+The cache key is attacker-controlled, so the bounds above are not
+tuning — they are the security argument, and the resource that needs
+bounding is **bytes, not entries**.  With an entry-count bound alone,
+64 entries × `BB_HEADER_MAX_LINE` (8 KiB) retains **~1 MiB per
+connection**, which a peer pins by sending each line once and then
+idling on keep-alive — 9.6 GiB across 10k connections, against 988 B
+of real need.
+
+Hence the per-line cap and the byte budget.  A peer choosing the line
+length to maximise damage (`bench/hotpath/line_cache_worst_case.py`
+sweeps it, because a per-line cap moves the worst case *down* to just
+under itself rather than up to the limit):
+
+| | worst case | at |
+|---|---:|---|
+| CPU | **+19.2 %** vs no cache | 64 never-repeating 128 B lines/request |
+| memory | **16 KiB/connection** (153 MiB at 10k) | same |
+
+(Same host and toolchain as above; the memory figure is accounted
+bytes — key plus the retained name/value slices — which is what
+multiplies by concurrent connections.)
+
+Both are bounded, and the CPU figure sits on top of a request the peer
+chose to make expensive — 40.7 µs against ~6 µs for an ordinary one.
+Above the per-line cap the cache is skipped entirely, lookup included,
+so a peer sending 8 KiB lines makes the parse *faster* than the
+no-cache build rather than slower.
+
+None of this applies to HTTP/2: HPACK already does it on the wire, and
+better.  This is the HTTP/1.1 path recovering what H/2 gets for free.
 
 ## The pieces around the actor core
 

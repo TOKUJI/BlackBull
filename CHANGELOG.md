@@ -29,6 +29,81 @@ so the editable install's metadata catches up.
 
 ---
 
+## [0.67.0] — 2026-07-31
+
+### Changed
+
+- **Header lines whose values a specification enumerates are validated once at
+  import, not once per request.**  A process-wide table seeds Fetch Metadata's
+  `Sec-Fetch-*`, the UA client hints' boolean/platform forms and RFC 9110's
+  fixed tokens (`Connection`, `TE`, `Pragma`, `Upgrade-Insecure-Requests`,
+  `DNT`) — **56 % of all header lines** on captured browser traffic, and a
+  share that does not decay with connection churn.  It is the HPACK *static*
+  table's idea, which HTTP/1.1 has no wire form for.  Entries are admitted
+  only because a spec fixes their value set, never because they were frequent
+  in a capture; framing names (`Content-Length`, `Transfer-Encoding`, `Host`,
+  `Expect`, `Upgrade`) are excluded by a check that raises at import; and each
+  entry is asserted equal to what parsing that line actually produces.  This is
+  what makes the win survive short-lived connections: at one request per
+  connection the per-connection cache alone was **21 % slower** than no cache,
+  and with the shared table it is **6 % faster**.
+- **Keep-alive connections stop re-validating header lines they have already
+  validated.**  A peer that resends a byte-identical header line — which every
+  browser does for `User-Agent`, `Accept`, `Accept-Language` and `Cookie` —
+  now gets that line answered from a per-connection cache of
+  `raw line bytes → (name, value)` pairs, replacing the colon split, token
+  check, lowercase, OWS strip and value scan with one dict lookup.  Scored on
+  **captured** traffic — a real Chromium loading a real page, every request
+  head recorded as it arrived — 21 requests carried 275 header lines drawn from
+  only 26 distinct ones, and parse cost falls **8.96 → 5.85 µs (−35 %)** at the
+  observed single connection, **−27 %** when the same requests are re-dealt
+  across the six connections Chromium opens per origin.  The cache is keyed per
+  *line*, so a request that changes four of its thirteen lines still hits on
+  the other nine, and header **order** changing between navigations and
+  subresources costs it nothing.  Against an adversarial peer whose every
+  header value is unique it is still **5 %** faster, so no input shape
+  regresses.  Because the key is attacker-controlled the cache is bounded by
+  **bytes, not entries** — lines over 1 KiB skip it entirely (lookup included)
+  and a per-connection 8 KiB budget caps admission — which holds the worst case
+  to **16 KiB/connection and +19.2 % CPU** under a peer sending 64
+  never-repeating 128-byte headers per request.  An entry-count bound alone
+  would have retained ~1 MiB per connection (9.6 GiB across 10k connections)
+  against 988 B of real need.  The per-header slope falls
+  **0.413 → 0.174 µs** (−58 %) and a 32-header request **17.06 → 8.78 µs**.
+  Nothing enters the
+  cache unvalidated, the key is the exact line bytes so one changed byte is a
+  miss, the cache is per connection so validated lines never cross a tenant,
+  and it is bounded at 64 entries so an attacker cycling unique names cannot
+  grow it.  Requests parse to exactly what they parsed to before — asserted by
+  a differential test, and by an unchanged 213-test Http11Probe verdict.
+- **The HTTP/1.1 header-size limit is read once per connection, not once per
+  request.**  `_parse` ran a `from ..env import get_settings` statement on
+  every call; the limit is connection-scoped, so it is memoised on the actor.
+  This is what makes the cache-miss path faster too.
+- **The status line and small Content-Length values come from tables.**  Both
+  were rebuilt per response (`f'HTTP/1.1 {status} {status.phrase}'.encode()`
+  and `str(n).encode()`); they are now precomputed at import for every
+  `HTTPStatus` member and for lengths `0…8192`, each falling back to the
+  original expression outside that domain.
+- **`EventDispatcher.has_listeners` answers from a registration index.**  It
+  probed three dicts, once per lifecycle emit site per request; it is now one
+  set lookup.
+
+Measured end to end on one box in one session, one worker, medians of five
+interleaved sweeps: **+6.7 % to +10.9 %** req/s, the larger figure on
+browser-shaped header sets.
+
+### Fixed
+
+- **`HEAD` requests were answered `405 Method Not Allowed` under
+  `BB_FORCE_ASGI_SCOPE=1`.**  BlackBull synthesises a HEAD response by
+  rewriting the method to `GET` and stripping the body, but the compat lane
+  materialised its scope *snapshot* before that rewrite, so the router saw
+  `HEAD`, found no HEAD route, and answered 405 where the native lane answered
+  200 (`COMP-HEAD-NO-BODY`, RFC 9110 §9.3.2).  The app argument is now built
+  after every pre-dispatch mutation of the `Connection`.  Both lanes now score
+  an identical 159/159.
+
 ## [0.66.0] — 2026-07-30
 
 ### Changed

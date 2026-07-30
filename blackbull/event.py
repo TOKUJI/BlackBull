@@ -73,6 +73,11 @@ class EventDispatcher:
         # listeners are almost always registered before serving, so the
         # per-request cost collapses to one int read + compare.
         self.generation: int = 0
+        # Names with at least one handler of any kind.  ``has_listeners`` is
+        # called several times per request — once per lifecycle emit site — so
+        # it answers from this set rather than probing three dicts.  Handlers
+        # are only ever added, so the set never needs to shrink.
+        self._registered: set[str] = set()
 
     def on(self, event_name: str, handler: EventHandler,
            blocking: bool = False) -> None:
@@ -89,23 +94,26 @@ class EventDispatcher:
             self._blocking_observers[event_name].append(handler)
         else:
             self._observers[event_name].append(handler)
+        self._registered.add(event_name)
         self.generation += 1
 
     def intercept(self, event_name: str, handler: EventHandler) -> None:
         """Register an interception handler for ``event_name``."""
         self._interceptors[event_name].append(handler)
+        self._registered.add(event_name)
         self.generation += 1
 
     def has_listeners(self, event_name: str) -> bool:
         """Return True if any interceptor or observer is registered for ``event_name``.
 
         Hot path: callers use this to skip detail-dict / ``Event`` construction
-        when no one will receive the event.  ``defaultdict.get`` returns ``None``
-        for missing keys without inserting an empty list.
+        when no one will receive the event, and there is one such call site per
+        lifecycle event per request.  Answered from the registration index, so
+        the common "nobody is listening" verdict costs one set lookup instead
+        of three dict probes — and, like the ``defaultdict.get`` form it
+        replaces, it never inserts an empty list for an unknown name.
         """
-        return (bool(self._interceptors.get(event_name))
-                or bool(self._blocking_observers.get(event_name))
-                or bool(self._observers.get(event_name)))
+        return event_name in self._registered
 
     async def emit(self, event: Event) -> None:
         """Dispatch ``event`` to all registered handlers.
