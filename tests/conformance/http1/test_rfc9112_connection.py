@@ -16,7 +16,7 @@ import socket
 
 import pytest
 
-from .conftest import open_socket, parse_response
+from .conftest import open_socket, parse_response, read_until_eof
 
 
 @pytest.mark.integration
@@ -127,25 +127,6 @@ class TestPipelining:
             s.close()
 
 
-def _drain(s: socket.socket, seconds: float = 2.0) -> bytes:
-    """Read until EOF or *seconds* elapse, whichever comes first.
-
-    The asterisk-form cases below need to observe *absence* — that no second
-    response follows — so they cannot stop at a response boundary.
-    """
-    s.settimeout(seconds)
-    buf = b''
-    while True:
-        try:
-            chunk = s.recv(4096)
-        except (socket.timeout, TimeoutError):
-            break
-        if not chunk:
-            break
-        buf += chunk
-    return buf
-
-
 @pytest.mark.integration
 class TestAsteriskFormKeepAlive:
     """RFC 9112 §3.2.4 + §9.1 — ``OPTIONS *`` is answered at the server level
@@ -167,7 +148,7 @@ class TestAsteriskFormKeepAlive:
                 b'GET / HTTP/1.1\r\nHost: localhost\r\n'
                 b'Connection: close\r\n\r\n'
             )
-            buf = _drain(s)
+            buf = read_until_eof(s)
         finally:
             s.close()
 
@@ -203,7 +184,7 @@ class TestAsteriskFormKeepAlive:
                 b'GET / HTTP/1.1\r\nHost: localhost\r\n'
                 b'Connection: close\r\n\r\n'
             )
-            buf = _drain(s)
+            buf = read_until_eof(s)
         finally:
             s.close()
 
@@ -224,7 +205,7 @@ class TestAsteriskFormKeepAlive:
                 b'OPTIONS * HTTP/1.1\r\nHost: localhost\r\n\r\n'
                 b'\r\n'
             )
-            buf = _drain(s)
+            buf = read_until_eof(s)
         finally:
             s.close()
 
@@ -241,7 +222,7 @@ class TestAsteriskFormKeepAlive:
                 b'OPTIONS * HTTP/1.1\r\nHost: localhost\r\n'
                 b'Connection: close\r\n\r\n'
             )
-            buf = _drain(s)
+            buf = read_until_eof(s)
         finally:
             s.close()
 
