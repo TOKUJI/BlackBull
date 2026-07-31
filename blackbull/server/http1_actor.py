@@ -838,67 +838,51 @@ class HTTP1Actor(Actor):
                     # advertising the methods the origin implements.
                     await capturing_send(b'', HTTPStatus.NO_CONTENT,
                                          [(b'allow', _SERVER_WIDE_ALLOW)])
-                    ok = True
-                    if not self._should_keep_alive(conn):
-                        break
-                    self._request = b''
+                else:
+                    # BB_REQUEST_TIMEOUT parity with the
+                    # HTTP/2 path.  ``HTTP2Actor._spawn_stream_task`` wraps each
+                    # stream coroutine with ``asyncio.wait_for``; the HTTP/1.1
+                    # path mirrors that here.  On expiry: synthesise 408 if
+                    # headers haven't shipped yet, then close the connection
+                    # (no keep-alive across a timed-out request).
                     try:
-                        if cfg.keep_alive_timeout > 0:
-                            with dl.guard(cfg.keep_alive_timeout):
-                                next_chunk = await self._reader.readuntil(_REQ_END)
+                        if cfg.request_timeout > 0:
+                            ok = await asyncio.wait_for(
+                                self._dispatch_request(
+                                    app_arg, inner_receive, capturing_send, log_record),
+                                timeout=cfg.request_timeout,
+                            )
                         else:
-                            next_chunk = await self._reader.readuntil(_REQ_END)
-                    except (TimeoutError, IncompleteReadError):
-                        break
-                    if next_chunk == _REQ_END:
-                        break
-                    self._request = next_chunk
-                    continue
-
-                # BB_REQUEST_TIMEOUT parity with the
-                # HTTP/2 path.  ``HTTP2Actor._spawn_stream_task`` wraps each
-                # stream coroutine with ``asyncio.wait_for``; the HTTP/1.1
-                # path mirrors that here.  On expiry: synthesise 408 if
-                # headers haven't shipped yet, then close the connection
-                # (no keep-alive across a timed-out request).
-                try:
-                    if cfg.request_timeout > 0:
-                        ok = await asyncio.wait_for(
-                            self._dispatch_request(
-                                app_arg, inner_receive, capturing_send, log_record),
-                            timeout=cfg.request_timeout,
+                            ok = await self._dispatch_request(
+                                app_arg, inner_receive, capturing_send, log_record)
+                    except (asyncio.TimeoutError, TimeoutError):
+                        logger.warning(
+                            '408 Request Timeout — handler on %s %s exceeded '
+                            'BB_REQUEST_TIMEOUT=%.1fs; closing connection',
+                            conn.method, conn.path,
+                            cfg.request_timeout,
                         )
-                    else:
-                        ok = await self._dispatch_request(
-                            app_arg, inner_receive, capturing_send, log_record)
-                except (asyncio.TimeoutError, TimeoutError):
-                    logger.warning(
-                        '408 Request Timeout — handler on %s %s exceeded '
-                        'BB_REQUEST_TIMEOUT=%.1fs; closing connection',
-                        conn.method, conn.path,
-                        cfg.request_timeout,
-                    )
-                    log_cap_hit('request_timeout',
-                                requested=cfg.request_timeout,
-                                limit=cfg.request_timeout,
-                                peer=self._peername,
-                                scope_path=conn.path,
-                                protocol='http1')
-                    if not send._started:
-                        await self._send_error_and_close(
-                            send, b'408 Request Timeout', HTTPStatus.REQUEST_TIMEOUT)
-                    break
-                if not ok:
-                    break  # unhandled error — close connection
-
-                # Drain any request body the handler left unread (e.g. a POST
-                # that 404s, or any handler that ignores ``receive``).  Without
-                # this the leftover body bytes are parsed as the next pipelined
-                # request line — a classic keep-alive framing desync.  A body
-                # larger than the drain bound closes the connection instead.
-                if inner_receive.needs_drain():
-                    if not await inner_receive.drain(_MAX_KEEPALIVE_DRAIN):
+                        log_cap_hit('request_timeout',
+                                    requested=cfg.request_timeout,
+                                    limit=cfg.request_timeout,
+                                    peer=self._peername,
+                                    scope_path=conn.path,
+                                    protocol='http1')
+                        if not send._started:
+                            await self._send_error_and_close(
+                                send, b'408 Request Timeout', HTTPStatus.REQUEST_TIMEOUT)
                         break
+                    if not ok:
+                        break  # unhandled error — close connection
+
+                    # Drain any request body the handler left unread (e.g. a POST
+                    # that 404s, or any handler that ignores ``receive``).  Without
+                    # this the leftover body bytes are parsed as the next pipelined
+                    # request line — a classic keep-alive framing desync.  A body
+                    # larger than the drain bound closes the connection instead.
+                    if inner_receive.needs_drain():
+                        if not await inner_receive.drain(_MAX_KEEPALIVE_DRAIN):
+                            break
 
                 # RFC 9112 §9.1 — honour Connection: close.  HTTP/1.0
                 # connections without ``Connection: keep-alive`` likewise

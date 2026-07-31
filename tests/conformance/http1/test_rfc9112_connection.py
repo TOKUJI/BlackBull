@@ -16,7 +16,7 @@ import socket
 
 import pytest
 
-from .conftest import open_socket, parse_response
+from .conftest import open_socket, parse_response, read_until_eof
 
 
 @pytest.mark.integration
@@ -125,3 +125,107 @@ class TestPipelining:
             assert b'hello' in rest.body
         finally:
             s.close()
+
+
+@pytest.mark.integration
+class TestAsteriskFormKeepAlive:
+    """RFC 9112 §3.2.4 + §9.1 — ``OPTIONS *`` is answered at the server level
+    without routing, and the connection stays under the ordinary keep-alive
+    contract afterwards.
+
+    The server-wide answer is a separate branch of the keep-alive loop from
+    the routed one, so the persistent-connection contract has to be asserted
+    for it independently: a request that never reaches a handler must still
+    leave the connection able to serve the next one.
+    """
+
+    def test_asterisk_then_pipelined_get(self, h1_app):
+        # Server-wide OPTIONS must not consume the pipelined request behind it.
+        s = open_socket('127.0.0.1', h1_app.port, timeout=5)
+        try:
+            s.sendall(
+                b'OPTIONS * HTTP/1.1\r\nHost: localhost\r\n\r\n'
+                b'GET / HTTP/1.1\r\nHost: localhost\r\n'
+                b'Connection: close\r\n\r\n'
+            )
+            buf = read_until_eof(s)
+        finally:
+            s.close()
+
+        second = buf.find(b'HTTP/1.1 ', 8)
+        assert second > 0, (
+            f'no second response — keep-alive broken after OPTIONS *; {buf!r}')
+        first = parse_response(buf[:second])
+        rest = parse_response(buf[second:], closed=True)
+        assert first.status == 204
+        assert first.header(b'allow') is not None
+        assert rest.status == 200, f'GET after OPTIONS * failed: {rest!r}'
+        assert rest.body.startswith(b'ok')
+
+    def test_asterisk_with_body_leaves_body_undrained_known_gap(self, h1_app):
+        """KNOWN GAP — 405 here is *not* correct behaviour, it is today's.
+
+        The server-wide answer replies without reading the request body, and
+        nothing drains it, so the leftover bytes are parsed as the start of the
+        next request: ``body`` + ``GET / HTTP/1.1`` becomes the method
+        ``bodyGET``, which no route allows.  A drained path would answer 200.
+
+        This asserts the status quo so that the surrounding keep-alive loop can
+        be restructured without silently changing it.  When the drain gap is
+        fixed, this test is *expected* to fail — update it deliberately rather
+        than reading 405 as the contract.
+        """
+        s = open_socket('127.0.0.1', h1_app.port, timeout=5)
+        try:
+            s.sendall(
+                b'OPTIONS * HTTP/1.1\r\nHost: localhost\r\n'
+                b'Content-Length: 4\r\n\r\n'
+                b'body'
+                b'GET / HTTP/1.1\r\nHost: localhost\r\n'
+                b'Connection: close\r\n\r\n'
+            )
+            buf = read_until_eof(s)
+        finally:
+            s.close()
+
+        second = buf.find(b'HTTP/1.1 ', 8)
+        assert second > 0, f'no second response; got {buf!r}'
+        first = parse_response(buf[:second])
+        rest = parse_response(buf[second:], closed=True)
+        assert first.status == 204
+        assert rest.status == 405, (
+            f'undrained-body framing changed (was 405); got {rest.status}')
+
+    def test_asterisk_then_bare_crlf_closes(self, h1_app):
+        # A bare CRLF where the next request-line belongs terminates the
+        # connection — one response, then close.
+        s = open_socket('127.0.0.1', h1_app.port, timeout=5)
+        try:
+            s.sendall(
+                b'OPTIONS * HTTP/1.1\r\nHost: localhost\r\n\r\n'
+                b'\r\n'
+            )
+            buf = read_until_eof(s)
+        finally:
+            s.close()
+
+        assert buf.count(b'HTTP/1.1 ') == 1, (
+            f'expected exactly one response before close; got {buf!r}')
+        assert parse_response(buf, closed=True).status == 204
+
+    def test_asterisk_with_connection_close(self, h1_app):
+        # §9.1 — Connection: close on the OPTIONS * itself ends the connection
+        # after the server-wide answer.
+        s = open_socket('127.0.0.1', h1_app.port, timeout=5)
+        try:
+            s.sendall(
+                b'OPTIONS * HTTP/1.1\r\nHost: localhost\r\n'
+                b'Connection: close\r\n\r\n'
+            )
+            buf = read_until_eof(s)
+        finally:
+            s.close()
+
+        assert buf.count(b'HTTP/1.1 ') == 1, (
+            f'expected exactly one response; got {buf!r}')
+        assert parse_response(buf, closed=True).status == 204
