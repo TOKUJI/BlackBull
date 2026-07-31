@@ -73,11 +73,11 @@ class CORS:
         return hdrs
 
     def _preflight_headers(self, origin: str) -> list[tuple[bytes, bytes]]:
-        """The base CORS set plus the three headers only a preflight answers.
+        """The base CORS set plus the headers only a preflight answers.
 
-        Extends the fresh list ``_cors_headers`` returns, so the two header
-        sets stay described in one place rather than half here, half at the
-        dispatch site.
+        Extends the fresh list ``_cors_headers`` returns, keeping both header
+        sets described next to each other.  ``max-age`` is emitted only when
+        configured, so a preflight carries two or three extra headers.
         """
         hdrs = self._cors_headers(origin)
         hdrs.append((b'access-control-allow-methods', self._methods.encode()))
