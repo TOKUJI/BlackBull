@@ -86,6 +86,24 @@ class CORS:
             hdrs.append((b'access-control-max-age', self._max_age.encode()))
         return hdrs
 
+    @staticmethod
+    def _injecting_send(send, cors_hdrs):
+        """Wrap *send* so the ``ResponseStart`` event gains *cors_hdrs*.
+
+        The headers are appended to a copy of the event's own list — the
+        downstream handler's headers are never mutated in place.
+        """
+        # Unannotated on purpose: rebuilt per request (see _wrap_send in
+        # app.py).  ``event`` is an ASGISendEvent.
+        async def cors_send(event):
+            if event.get('type') == ASGIEvent.HTTP_RESPONSE_START:
+                existing = list(event.get('headers', []))
+                existing.extend(cors_hdrs)
+                event = {**event, 'headers': existing}
+            await send(event)
+
+        return cors_send
+
     async def __call__(self, conn, receive, send, call_next) -> None:
         # BlackBull threads a native ``Connection`` for HTTP and WebSocket; the
         # guard is defensive against a raw ASGI scope dict (only reachable if
@@ -111,12 +129,4 @@ class CORS:
 
         # Actual cross-origin request: inject CORS headers into the response start event
         cors_hdrs = self._cors_headers(origin)
-
-        async def cors_send(event):
-            if event.get('type') == ASGIEvent.HTTP_RESPONSE_START:
-                existing = list(event.get('headers', []))
-                existing.extend(cors_hdrs)
-                event = {**event, 'headers': existing}
-            await send(event)
-
-        await call_next(conn, receive, cors_send)
+        await call_next(conn, receive, self._injecting_send(send, cors_hdrs))
