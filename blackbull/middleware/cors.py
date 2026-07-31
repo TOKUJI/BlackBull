@@ -72,6 +72,38 @@ class CORS:
             hdrs.append((b'vary', b'Origin'))
         return hdrs
 
+    def _preflight_headers(self, origin: str) -> list[tuple[bytes, bytes]]:
+        """The base CORS set plus the headers only a preflight answers.
+
+        Extends the fresh list ``_cors_headers`` returns, keeping both header
+        sets described next to each other.  ``max-age`` is emitted only when
+        configured, so a preflight carries two or three extra headers.
+        """
+        hdrs = self._cors_headers(origin)
+        hdrs.append((b'access-control-allow-methods', self._methods.encode()))
+        hdrs.append((b'access-control-allow-headers', self._allow_hdrs.encode()))
+        if self._max_age:
+            hdrs.append((b'access-control-max-age', self._max_age.encode()))
+        return hdrs
+
+    @staticmethod
+    def _injecting_send(send, cors_hdrs):
+        """Wrap *send* so the ``ResponseStart`` event gains *cors_hdrs*.
+
+        The headers are appended to a copy of the event's own list — the
+        downstream handler's headers are never mutated in place.
+        """
+        # Unannotated on purpose: rebuilt per request (see _wrap_send in
+        # app.py).  ``event`` is an ASGISendEvent.
+        async def cors_send(event):
+            if event.get('type') == ASGIEvent.HTTP_RESPONSE_START:
+                existing = list(event.get('headers', []))
+                existing.extend(cors_hdrs)
+                event = {**event, 'headers': existing}
+            await send(event)
+
+        return cors_send
+
     async def __call__(self, conn, receive, send, call_next) -> None:
         # BlackBull threads a native ``Connection`` for HTTP and WebSocket; the
         # guard is defensive against a raw ASGI scope dict (only reachable if
@@ -90,23 +122,11 @@ class CORS:
         # Preflight: respond directly, never call call_next
         acr_method = headers.get(b'access-control-request-method', b'')
         if conn.method == 'OPTIONS' and acr_method:
-            cors_hdrs = self._cors_headers(origin)
-            cors_hdrs.append((b'access-control-allow-methods', self._methods.encode()))
-            cors_hdrs.append((b'access-control-allow-headers', self._allow_hdrs.encode()))
-            if self._max_age:
-                cors_hdrs.append((b'access-control-max-age', self._max_age.encode()))
+            cors_hdrs = self._preflight_headers(origin)
             await send({'type': ASGIEvent.HTTP_RESPONSE_START, 'status': 200, 'headers': cors_hdrs})
             await send({'type': ASGIEvent.HTTP_RESPONSE_BODY, 'body': b'', 'more_body': False})
             return
 
         # Actual cross-origin request: inject CORS headers into the response start event
         cors_hdrs = self._cors_headers(origin)
-
-        async def cors_send(event):
-            if event.get('type') == ASGIEvent.HTTP_RESPONSE_START:
-                existing = list(event.get('headers', []))
-                existing.extend(cors_hdrs)
-                event = {**event, 'headers': existing}
-            await send(event)
-
-        await call_next(conn, receive, cors_send)
+        await call_next(conn, receive, self._injecting_send(send, cors_hdrs))
