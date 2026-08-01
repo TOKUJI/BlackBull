@@ -1,22 +1,23 @@
 # Testing
 
-BlackBull's `app` is a plain ASGI 3.0 callable, so most application
-tests can drive it in-memory through a synchronous client and never
-touch a TCP socket.  Four useful shapes exist:
+BlackBull threads a typed `Connection` end to end and keeps the ASGI
+`scope` dict at two boundaries only.  That shapes the test tooling:
+there is more than one client here, each drives a different layer,
+and **a defect on one layer is invisible to the others**.
 
-- **`blackbull.testing.TestClient`** — synchronous, in-memory,
-  lifespan-aware.  The default starting point: ordinary
-  `pytest` style, no `async def`, no fixture overhead.
-- **End-to-end with BlackBull's own clients** — start the server
-  on an ephemeral port, drive it through real sockets via
-  `HTTP1Client` / `HTTP2Client` / `Client` / `WebSocketClient`.
-  Best fidelity: exercises the wire, ALPN, TLS, framing.
-- **In-process integration via `httpx.ASGITransport`** — async
-  variant of `TestClient` for tests that want full control over
-  the loop or the underlying `httpx.AsyncClient`.
-- **Direct handler / middleware unit tests** — hand-rolled
-  scope dict + stub callables.  For asserting a single
-  function's behaviour without involving routing or transport.
+Start from what you are asserting:
+
+| You are asserting… | Reach for | Why |
+|---|---|---|
+| Routing, middleware, handlers, DI, events | `blackbull.testing.native` | Calls `app(conn, receive, send)` — the entry point every production request takes.  No socket, no protocol actor. |
+| Anything the wire decides — framing, keep-alive, `HEAD`, chunking, connection close | `NativeTestServer` | BlackBull's own server on a loopback port.  Accept → parse → `Connection` → dispatch → bytes. |
+| That ASGI compatibility still works | `blackbull.testing.TestClient` | The `as_scope()` / `from_scope()` round-trip, driven the way uvicorn drives it. |
+| Cross-protocol behaviour — TLS, ALPN, HTTP/2 framing, WebSocket fragments | BlackBull's own clients + an ephemeral port | Full protocol negotiation against a real server. |
+| One function, no framework | Direct handler / middleware calls | Stub `receive` / `send`, no routing, no transport. |
+
+`TestClient` used to be the default recommendation.  It is now the
+**ASGI-boundary instrument**, not the everyday one — the reasoning is in
+[Choosing between `native` and `TestClient`](#choosing-between-native-and-testclient).
 
 ## Setup
 
@@ -37,10 +38,201 @@ asyncio_mode = strict
 Strict mode requires every async test to carry
 `@pytest.mark.asyncio` explicitly — matching BlackBull's own
 suite — so tests don't accidentally run in the wrong loop
-shape.  Tests written against `TestClient` are synchronous and
-don't need this mark.
+shape.  Tests written against the synchronous clients
+(`TestClient`, `NativeClient`) don't need this mark.
 
-## Quick start with `TestClient`
+## Quick start with `native`
+
+`blackbull.testing.native` builds a `Connection` and calls
+`app(conn, receive, send)` — the same call BlackBull's protocol
+actors make.  Everything from `Connection` inward runs for real:
+the dispatcher, the middleware chain, the router, dependency
+injection, events, and response serialisation.
+
+```python
+import pytest
+from blackbull import BlackBull
+from blackbull.testing import native
+
+app = BlackBull()
+
+
+@app.route(path='/hello')
+async def hello():
+    return 'hi'
+
+
+@pytest.mark.asyncio
+async def test_hello():
+    resp = await native.get(app, '/hello')
+    assert resp.status == 200
+    assert resp.body == b'hi'
+```
+
+The helpers are `get` / `head` / `options` / `post` / `put` /
+`patch` / `delete`, plus `request` for full control.  A response is
+a `NativeResponse` — `status`, `headers` (a `Headers`), `body`, and
+`.json()` / `.text()` convenience readers:
+
+```python
+resp = await native.post(app, '/tasks', json={'name': 'write tests'})
+assert resp.status == 201
+assert resp.json()['id']
+
+resp = await native.post(app, '/upload', body=b'\x00\x01',
+                         headers={b'content-type': b'application/octet-stream'})
+```
+
+Headers accept `str` or `bytes` in either position and are lowercased
+for you.  A `host` header is supplied when you give none, and
+`content-length` is derived from the body — both because a real
+request carries them, and code that branches on them should behave
+the same under test as on the wire.
+
+For a request the helpers can't express, build the `Connection`
+yourself:
+
+```python
+from blackbull import Connection
+from blackbull.headers import Headers
+
+conn = Connection(
+    method='POST', path='/tasks', raw_path=b'/tasks',
+    headers=Headers([(b'content-type', b'application/json')]),
+)
+conn.state['tenant'] = 'acme'          # pre-seed what a middleware would set
+resp = await native.request(app, conn, body=b'{"name":"x"}')
+```
+
+`build_connection()` is the same constructor the helpers use, if you
+want the parser-faithful defaults and then a tweak.
+
+### Synchronous tests
+
+`NativeClient` wraps the same functions for tests written as plain
+`def`.  It owns one background event loop for the whole session — not
+one per request — and runs the ASGI `lifespan` protocol around the
+block:
+
+```python
+from blackbull.testing import NativeClient
+
+
+def test_hello_sync():
+    with NativeClient(app) as client:
+        resp = client.get('/hello')
+        assert resp.status == 200
+```
+
+Prefer the coroutines from an `async def` test: they call the app on
+the test's own loop, with no thread hand-off at all.
+
+### What `native` does not see
+
+Tier 1 collects the events the **application** emitted, not the bytes
+a server would write.  Framing headers (`Content-Length`,
+`Transfer-Encoding`) are injected by the protocol sender, below this
+tier, so they are absent here.  `HEAD` reaches your handler as `HEAD`
+— the rewrite to `GET` (RFC 9110 §9.3.2) is the HTTP/1.1 actor's job.
+
+Those are `NativeTestServer` questions.
+
+## Full stack with `NativeTestServer`
+
+`NativeTestServer` binds a real loopback socket and runs BlackBull's
+own server, so a request travels the entire production path: TCP
+accept → `ConnectionActor` → `HTTP1Actor` parsing → `Connection` →
+native dispatch → the bytes the sender writes.
+
+```python
+import pytest
+from blackbull.testing import NativeTestServer
+
+
+@pytest.mark.asyncio
+async def test_head_has_get_headers_and_no_body():
+    async with NativeTestServer(app) as server:
+        get_resp = await server.client.get('/hello')
+        head_resp = await server.client.head('/hello')
+
+    assert head_resp.content == b''
+    assert head_resp.headers['content-length'] == get_resp.headers['content-length']
+```
+
+`server.client` is an `httpx.AsyncClient` bound to `server.url`, so
+the full httpx API is available — cookies, redirects, streaming,
+custom timeouts.  `server.port` is the OS-assigned port.
+
+The server starts once per context manager and serves as many requests
+as you make, so keep-alive reuse, connection close semantics, and
+pipelining are all observable:
+
+```python
+@pytest.mark.asyncio
+async def test_keep_alive():
+    async with NativeTestServer(app) as server:
+        for _ in range(10):
+            assert (await server.client.get('/hello')).status_code == 200
+        assert server.connections_served == 1
+```
+
+`server.connections_served` counts TCP **accepts**, not requests, so ten
+keep-alive requests on one connection leave it at `1`.  It is the honest
+way to assert connection reuse: `Connection: close` is a header the
+server *may* send, so its absence proves nothing on its own.
+
+The synchronous form runs the server on one background loop for the
+session:
+
+```python
+def test_full_stack_sync():
+    with NativeTestServer(app) as server:
+        assert server.client.get('/hello').status_code == 200
+```
+
+Scope and limits:
+
+- **Loopback only.** The listener binds `127.0.0.1`, so a test never
+  publishes a port beyond the machine.
+- **Plaintext HTTP/1.1 and WebSocket.** TLS and HTTP/2 are out of
+  scope for this tier — use the BlackBull clients + ephemeral port
+  pattern below, which negotiates ALPN against a real certificate.
+- **Startup cost is a single `asyncio.start_server`** — no subprocess,
+  no fork.  Per-request cost is loopback TCP, well under a
+  millisecond.
+
+## Choosing between `native` and `TestClient`
+
+Both run in-process and neither needs a port, so the difference is not
+speed — it is *which code runs*.
+
+```text
+native.get(app, '/x')                TestClient(app).get('/x')
+  → Connection                         → httpx.ASGITransport
+  → app(conn, receive, send)           → builds an ASGI scope dict
+  → isinstance(conn, Connection)       → app(scope, receive, send)
+      → True   ← production branch     → isinstance(conn, Connection)
+  → dispatch                               → False
+                                       → Connection.from_scope(scope)
+                                       → dispatch
+```
+
+`TestClient` therefore never takes the branch every production request
+takes.  What it *uniquely* covers is the conversion chain itself: a
+missing `_CONNECTION_FIELDS` entry, or a coercion bug in
+`from_scope()`, shows up there and nowhere else — which is exactly why
+it stays, and why BlackBull keeps a CI lane that runs the whole suite
+under `BB_FORCE_ASGI_SCOPE=1`.
+
+So:
+
+- **Writing an application test?** Use `native` (or `NativeTestServer`
+  when the wire matters).
+- **Deploying under uvicorn, hypercorn, or another ASGI host?** Keep a
+  handful of `TestClient` tests — they are what proves the boundary
+  still works.
+
+## `TestClient` — the ASGI boundary
 
 `blackbull.testing.TestClient` is a synchronous in-memory client
 modelled on `httpx.Client`: GET / POST / PUT / DELETE all work
@@ -49,6 +241,12 @@ dispatched directly into the ASGI app — no socket, no port.
 The ASGI `lifespan` protocol runs around the `with` block, so
 `@app.on_startup` / `@app.on_shutdown` handlers fire in the
 expected order.
+
+Its job is the **compatibility boundary**: it drives the app the way
+an external ASGI host does, through a scope dict and `from_scope()`.
+Everything below still works as documented — it is the recommendation
+that changed, not the API.  For application-logic tests, reach for
+[`native`](#quick-start-with-native) instead.
 
 ```python
 from blackbull import BlackBull
@@ -487,12 +685,14 @@ path through the same in-process adapter.
 
 When to pick which:
 
-- **BlackBull clients + ephemeral port** when the test cares
-  about the wire — TLS, ALPN, HTTP/2 framing, fragmented WS
-  messages, keep-alive, chunked encoding boundaries.
-- **`httpx.ASGITransport`** when you want fast, hermetic
-  request/response assertions and don't care about transport
-  detail.
+- **`NativeTestServer`** for HTTP/1.1 and WebSocket wire behaviour
+  in-process — framing, keep-alive, `HEAD`, chunking.  No
+  subprocess, no certificate.
+- **BlackBull clients + ephemeral port** when the test needs what
+  `NativeTestServer` leaves out: TLS, ALPN, HTTP/2 framing,
+  fragmented WS messages.
+- **`httpx.ASGITransport`** when you are asserting on the ASGI
+  boundary and want the async equivalent of `TestClient`.
 
 ## Direct handler tests
 
@@ -545,9 +745,10 @@ async def test_ping_handler():
 ```
 
 Useful when you want to assert on the raw ASGI event sequence.
-Prefer the `TestClient` pattern above for anything routing-
-shaped — it costs almost nothing more and exercises more of the
-framework.
+For anything routing-shaped, prefer `native` — it costs almost
+nothing more, exercises the whole dispatch pipeline, and hands the
+handler the same `Connection` the server would.  `NativeResponse.events`
+keeps the raw event list if that is what you were reaching for here.
 
 ## Middleware in isolation
 
@@ -596,9 +797,9 @@ BlackBull's test suite (`tests/`) splits into four layers:
 
 You don't need this much structure for an application suite;
 the layers exist because BlackBull also vets protocol behaviour.
-A typical app project gets by with a `tests/` directory of
-integration tests using either the BlackBull client + ephemeral
-port pattern or the `httpx.ASGITransport` pattern from above.
+A typical app project gets by with a `tests/` directory using
+`native` for application logic and `NativeTestServer` for the
+handful of cases where the wire is the point.
 
 ## Next
 

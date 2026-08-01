@@ -15,7 +15,6 @@ that mutates the Connection between parse and dispatch can reintroduce that
 class of divergence; this asserts the whole corpus rather than one method.
 """
 import asyncio
-import re
 
 import pytest
 
@@ -23,58 +22,8 @@ from blackbull import BlackBull
 from blackbull.env import reset_settings_cache
 from blackbull.server.http1_actor import HTTP1Actor
 
+from ._dual_path_corpus import CORPUS, normalise as _normalise
 from .test_http1_dispatch import _FakeReader, _FakeWriter
-
-# The Date header is whole-second wall clock, so it may legitimately differ
-# between two runs of the same request.  Nothing else may.
-_DATE_RE = re.compile(rb'^date:.*$', re.IGNORECASE | re.MULTILINE)
-
-
-def _normalise(raw: bytes) -> bytes:
-    return _DATE_RE.sub(b'date: <normalised>', raw)
-
-
-def _req(line: bytes, *headers: bytes, body: bytes = b'') -> bytes:
-    parts = [line, b'Host: localhost', *headers]
-    if body:
-        parts.append(b'Content-Length: %d' % len(body))
-    return b'\r\n'.join(parts) + b'\r\n\r\n' + body
-
-
-CORPUS = {
-    # --- ordinary routing ------------------------------------------------
-    'get': _req(b'GET / HTTP/1.1'),
-    'get-query': _req(b'GET /?a=1&b=2 HTTP/1.1'),
-    'get-encoded-path': _req(b'GET /caf%C3%A9 HTTP/1.1'),
-    'get-1.0': _req(b'GET / HTTP/1.0'),
-    'post-body': _req(b'POST /echo HTTP/1.1', body=b'hello'),
-    'post-empty-body': _req(b'POST /echo HTTP/1.1', body=b''),
-    # --- the method rewrite that broke ------------------------------------
-    'head': _req(b'HEAD / HTTP/1.1'),
-    'head-with-headers': _req(b'HEAD / HTTP/1.1', b'Accept: */*',
-                              b'User-Agent: probe'),
-    # --- server-level answers, not routed ---------------------------------
-    'options-asterisk': _req(b'OPTIONS * HTTP/1.1'),
-    'absolute-form': _req(b'GET http://real.example/ HTTP/1.1'),
-    # --- misses and rejections --------------------------------------------
-    'not-found': _req(b'GET /nope HTTP/1.1'),
-    'method-not-allowed': _req(b'DELETE / HTTP/1.1'),
-    'bad-header-name': _req(b'GET / HTTP/1.1', b'Bad Name: v'),
-    'obs-fold': _req(b'GET / HTTP/1.1', b' folded: v'),
-    'bad-content-length': _req(b'POST /echo HTTP/1.1', b'Content-Length: 007'),
-    'unsupported-version': _req(b'GET / HTTP/9.9'),
-    # --- header shapes ----------------------------------------------------
-    'many-headers': _req(
-        b'GET / HTTP/1.1',
-        b'User-Agent: Mozilla/5.0 (X11; Linux x86_64)',
-        b'Accept: text/html,application/xhtml+xml',
-        b'Accept-Encoding: gzip, deflate, br',
-        b'Accept-Language: en-US,en;q=0.9',
-        b'Cookie: session=8f14e45fceea167a5a36dedd4bea2543',
-        b'Referer: http://localhost/index.html'),
-    'repeated-header': _req(b'GET / HTTP/1.1', b'Accept: a', b'Accept: b'),
-    'ows-padded-value': _req(b'GET / HTTP/1.1', b'Accept:    */*   '),
-}
 
 
 @pytest.fixture
@@ -111,7 +60,7 @@ async def _drive(app, request: bytes) -> bytes:
 @pytest.mark.parametrize('name', sorted(CORPUS))
 async def test_both_lanes_produce_identical_bytes(app, name, monkeypatch):
     """Native and BB_FORCE_ASGI_SCOPE=1 must agree byte for byte."""
-    request = CORPUS[name]
+    request = CORPUS[name].raw
 
     reset_settings_cache()
     native = await _drive(app, request)
@@ -139,7 +88,7 @@ async def test_both_lanes_agree_on_status(app, name, monkeypatch):
     fails wholesale if a response body is ever deliberately changed.  This one
     keeps the status-code half of the guarantee legible on its own.
     """
-    request = CORPUS[name]
+    request = CORPUS[name].raw
 
     def status_of(raw: bytes) -> bytes:
         return raw.split(b'\r\n', 1)[0] if raw else b'<no response>'

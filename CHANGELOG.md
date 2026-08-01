@@ -29,6 +29,74 @@ so the editable install's metadata catches up.
 
 ---
 
+## [Unreleased]
+
+## [0.68.0] — 2026-08-01
+
+### Added
+
+- **A test client that drives the path a request actually takes.**  BlackBull
+  threads a typed `Connection` end to end, but the only test client drove the
+  app through `httpx.ASGITransport` → ASGI scope → `from_scope()` — so the
+  `isinstance(conn, Connection)` branch of `BlackBull.__call__`, the branch
+  every production request takes, was never exercised by a `TestClient` test.
+  A defect could live on the native path with the whole suite green, and one
+  did: Sprint 87's `HEAD`-answers-405.  Two tiers close it.
+  **`blackbull.testing.native`** builds a `Connection` and calls
+  `app(conn, receive, send)` directly — everything from `Connection` inward
+  (dispatcher, middleware chain, router, dependency injection, events,
+  response serialisation), no socket and no protocol actor.
+  **`NativeTestServer`** binds a loopback socket and runs BlackBull's own
+  server, so a request travels accept → `HTTP1Actor` parse → `Connection` →
+  dispatch → wire bytes, which is the only place framing headers, keep-alive
+  reuse, and the RFC 9110 §9.3.2 `HEAD` body strip are observable.
+- **Both tiers are async-first with synchronous façades.**  The core is
+  coroutines — the app entry point *is* a coroutine, and a handler runs on the
+  caller's event loop exactly as it does in production.  `NativeClient` and
+  `NativeTestServer`'s `with` form wrap them for tests written as plain `def`,
+  each owning one background event loop for the whole session rather than one
+  per request.
+- **`NativeTestServer.connections_served`** — a TCP *accept* counter, so a
+  test can assert keep-alive reuse as a fact (`== 1` after ten requests)
+  instead of inferring it from the absence of a `Connection: close` header
+  that a server is never obliged to send.
+
+### Changed
+
+- **`TestClient`'s documented role is narrowed to what it uniquely covers.**
+  Its behaviour and API are unchanged; what changed is the recommendation.  It
+  is the **ASGI compatibility boundary** instrument — the `as_scope()` /
+  `from_scope()` round-trip driven the way an external ASGI host drives it —
+  and it stays precisely because a missing `_CONNECTION_FIELDS` entry or a
+  coercion bug in `from_scope()` surfaces there and nowhere else.  For
+  application-logic tests, `blackbull.testing.native` is now the default.
+- `blackbull/testing.py` is now the package `blackbull/testing/`.  Every
+  existing import (`from blackbull.testing import TestClient`,
+  `WebSocketTestSession`, `WebSocketDisconnect`) resolves unchanged.
+
+### Docs
+
+- `docs/guide/testing.md` rewritten around which instrument answers which
+  question, with the two dispatch paths shown side by side so the choice
+  between `native` and `TestClient` is a structural one rather than taste.
+- `KNOWN_LIMITATIONS.md` records Tier 2's scope: HTTP/1.1 and WebSocket,
+  cleartext only — TLS, ALPN, and HTTP/2 stay with the BlackBull clients +
+  ephemeral-port pattern.
+
+### Internal
+
+- The dual-path corpus moved to `tests/conformance/http1/_dual_path_corpus.py`
+  as a single definition of the request shapes the compat lane must be
+  invisible for.  For the vectors a conformant client can issue, the client
+  spec is the definition and the raw bytes are derived from it, so the two
+  drives cannot drift; the malformed and raw-form vectors (`OPTIONS *`,
+  obs-fold, HTTP/9.9, …) stay raw-drive-only.  Byte identity is still asserted
+  over all 19; the client-expressible subset is now also replayed through a
+  real socket on both lanes.
+- Http11Probe re-scored at **159/159 scored, 0 failed, 0 errors**, with a
+  per-test verdict diff **empty** against the v0.67.0 baseline on both the
+  native and `BB_FORCE_ASGI_SCOPE=1` lanes.
+
 ## [0.67.0] — 2026-07-31
 
 ### Changed

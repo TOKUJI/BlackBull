@@ -1,12 +1,37 @@
-"""In-memory test client for ASGI 3.0 applications.
+"""Test clients for BlackBull applications — three instruments, three layers.
 
-Lets you exercise a BlackBull (or any ASGI 3.0) app from a synchronous
-pytest test without binding a TCP socket.  Built on
-``httpx.ASGITransport`` for HTTP; uses a background-thread event loop
-to bridge sync calls to the (async-only) ASGI transport, to drive the
-``lifespan`` protocol, and to host WebSocket sessions.
+BlackBull threads a typed :class:`~blackbull.connection.Connection` end to
+end and keeps the ASGI ``scope`` dict at two boundaries only.  That is why
+there is more than one test client here, and why picking the right one
+matters: each drives a different layer, and a defect on one is invisible to
+the others.
 
-Typical usage::
+============================  =============================================
+Instrument                    What it exercises
+============================  =============================================
+:mod:`blackbull.testing.native`   Application logic — routing, middleware,
+                              handlers, DI, events — through the *native*
+                              ``app(conn, receive, send)`` entry point that
+                              every production request takes.  The default
+                              choice for everyday tests.
+:class:`~blackbull.testing.native.NativeTestServer`
+                              The full stack on a real loopback socket:
+                              protocol parsing, framing, keep-alive,
+                              connection lifecycle, wire bytes.
+:class:`TestClient`           The **ASGI compatibility boundary** — the
+                              ``as_scope()`` / ``from_scope()`` round-trip,
+                              driven the way an external ASGI host
+                              (uvicorn, ``httpx.ASGITransport``) drives it.
+============================  =============================================
+
+:class:`TestClient` is deliberately *not* the default.  It reaches the app
+through ``httpx.ASGITransport`` → ASGI scope dict → ``from_scope()``, so the
+``isinstance(conn, Connection)`` branch of ``BlackBull.__call__`` is never
+taken by it.  What it uniquely covers is the conversion chain itself: a
+missing ``_CONNECTION_FIELDS`` entry or a ``from_scope`` coercion bug shows
+up here and nowhere else in the suite, which is exactly why it stays.
+
+``TestClient`` usage — a boundary-conformance instrument::
 
     from blackbull import BlackBull
     from blackbull.testing import TestClient
@@ -17,7 +42,7 @@ Typical usage::
     async def hello():
         return "hi"
 
-    def test_hello():
+    def test_asgi_boundary():
         with TestClient(app) as client:
             response = client.get('/')
             assert response.status_code == 200
@@ -26,6 +51,8 @@ Typical usage::
 The client is a context manager so that ASGI ``lifespan.startup`` runs
 before any request and ``lifespan.shutdown`` runs on exit.  Apps that
 don't implement the lifespan protocol are tolerated silently.
+
+For everything else, start from ``docs/guide/testing.md``.
 """
 
 from __future__ import annotations
@@ -36,8 +63,8 @@ import threading
 from typing import Any
 from urllib.parse import unquote
 
-from .asgi import ASGIReceiveEvent
-from .websocket import WebSocketDisconnect
+from ..asgi import ASGIReceiveEvent
+from ..websocket import WebSocketDisconnect
 
 import httpx
 
@@ -47,6 +74,9 @@ import httpx
 # written against one silently missing the other.  One class, both sides:
 # ``from blackbull.testing import WebSocketDisconnect`` keeps working, and it
 # is the same object as ``blackbull.WebSocketDisconnect``.
+#
+# The native-tier names are appended at the bottom of this module, after
+# ``_LoopThread`` and ``_LifespanManager`` exist — ``native`` builds on both.
 __all__ = ['TestClient', 'WebSocketTestSession', 'WebSocketDisconnect']
 
 
@@ -243,8 +273,8 @@ class WebSocketTestSession:
         # ASGI boundary's job, exercised by the HTTP TestClient's httpx transport).
         # ``subprotocols`` are derived from the request header (added above),
         # matching how a real client offers them over the wire.
-        from .connection import Connection  # noqa: PLC0415
-        from .headers import Headers  # noqa: PLC0415
+        from ..connection import Connection  # noqa: PLC0415
+        from ..headers import Headers  # noqa: PLC0415
         self._conn = Connection(
             method='GET',
             # Parity with the real server: ``conn.path`` is the
@@ -569,4 +599,16 @@ class TestClient:
         )
 
 
-__all__ = ['TestClient', 'WebSocketTestSession', 'WebSocketDisconnect']
+# Imported last: ``native`` reaches back for ``_LoopThread`` /
+# ``_LifespanManager`` (lazily, inside its own methods), so both must already
+# be defined.  ``native`` stays importable as a submodule too — the
+# ``from blackbull.testing import native`` form is the documented one, because
+# ``native.get(app, '/')`` reads better at a call site than a bare ``get``.
+from . import native                                        # noqa: E402
+from .native import (                                        # noqa: E402
+    NativeClient, NativeResponse, NativeTestServer, build_connection,
+)
+
+__all__ = ['TestClient', 'WebSocketTestSession', 'WebSocketDisconnect',
+           'native', 'NativeClient', 'NativeResponse', 'NativeTestServer',
+           'build_connection']
