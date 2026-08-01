@@ -250,6 +250,24 @@ on **all** interfaces, so `--bind 127.0.0.1:8000` still listens on
 every interface.  Use a `unix:` bind, `fd://` socket activation, or a
 fronting proxy when interface filtering matters.
 
+### `NativeTestServer` is HTTP/1.1 and WebSocket, cleartext only
+
+[`blackbull/testing/native.py`](blackbull/testing/native.py)'s Tier 2
+runs BlackBull's own server on a loopback port and exercises the whole
+request path — accept, parse, dispatch, wire bytes.  It does **not**
+serve TLS or HTTP/2: both need a certificate and ALPN negotiation
+(plus the `h2c` upgrade path), which is disproportionate to the tier's
+job and would make every test that uses it depend on cert fixtures.
+
+Tests that need TLS, ALPN, HTTP/2 framing, or fragmented WebSocket
+messages use the BlackBull clients against an ephemeral-port
+`ASGIServer`, which is the pattern the conformance suites already
+follow — see `docs/guide/testing.md`.  Tier 1
+(`blackbull.testing.native`) is transport-free by design and sits
+*below* the protocol actor, so it cannot observe framing headers or
+the RFC 9110 §9.3.2 `HEAD` body strip either; those are Tier 2
+questions.
+
 ---
 
 ## Deliberate non-goals — not limitations

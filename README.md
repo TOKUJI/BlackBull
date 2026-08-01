@@ -65,6 +65,12 @@ Hello, world!
   real traffic can drive a programmable misbehaving client or
   server.  Test your own HTTP/2 client against half-closed streams,
   exhausted windows, and illegal SETTINGS — in CI.
+- **Test the path your requests actually take.** `blackbull.testing.native`
+  calls your app the way the server does — a typed `Connection`, no ASGI
+  scope round-trip — and `NativeTestServer` runs the whole stack on a
+  loopback port when the answer depends on the wire (keep-alive, `HEAD`,
+  chunked framing).  Neither needs a subprocess.  See
+  [`docs/guide/testing.md`](https://github.com/TOKUJI/BlackBull/blob/master/docs/guide/testing.md).
 - **Multi-protocol, one process.** A pure-Python MQTT 5 broker and
   gRPC ride beside HTTP/2 and WebSocket on the same runtime;
   extensions add new protocols without touching the core — still no

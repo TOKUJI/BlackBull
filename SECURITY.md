@@ -12,9 +12,9 @@ critical vulnerabilities.
 
 | Version | Supported          |
 | ------- | ------------------ |
+| 0.68.x  | :white_check_mark: |
 | 0.67.x  | :white_check_mark: |
-| 0.66.x  | :white_check_mark: |
-| < 0.66  | :x:                |
+| < 0.67  | :x:                |
 
 This table updates with each minor release.
 
@@ -87,6 +87,11 @@ The following are in scope for security reports:
   those locks are by design; a bypass that lets the module run in a
   production process or bind to a non-loopback interface without
   `allow_remote=True` is a security report.
+- The loopback-only bind on `NativeTestServer`
+  (`blackbull/testing/native.py`).  It exists so a test never publishes
+  the application under test to the network; a defect that lets it
+  listen on a non-loopback interface is a security report, on the same
+  reasoning as the `H2FaultServer` guard above.
 
 The following are typically **out of scope**:
 
