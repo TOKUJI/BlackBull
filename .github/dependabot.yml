@@ -39,3 +39,13 @@ updates:
     commit-message:
       prefix: "ci"
       include: "scope"
+    # All ``github/codeql-action/*`` steps (init/autobuild/analyze) must be the
+    # SAME version when a ``config-file`` is in play — the config is written by
+    # ``init`` and read by ``analyze``, and a mismatch fails the analysis with
+    # "Loaded a configuration file for version X, but running version Y".
+    # Dependabot updates each ``uses:`` line as its own PR by default, which
+    # would ship exactly that mismatch.  Group them so one PR bumps all steps.
+    groups:
+      codeql-action:
+        patterns:
+          - "github/codeql-action/*"
