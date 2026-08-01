@@ -1184,6 +1184,91 @@ async def _ws_reject(ws, detail: str) -> None:
     await ws.close(code=_WS_POLICY_VIOLATION, reason=_truncate_close_reason(detail))
 
 
+def _make_extended_wrapper(fn, annotations: dict, plan: tuple, depends_plan: tuple,
+                           converters: dict | None):
+    """Build the per-request closure for handlers that use query params and/or Depends.
+
+    Registration-time only (called once per route from ``_adapt_handler``), so
+    this factory adds zero per-request calls; the closure it returns runs per
+    request and is intentionally NOT extracted further (hot-path policy).
+    """
+    has_query = any(kind == 'query' for _, kind, _ in plan)
+    fn_name = fn.__name__
+    is_async = inspect.iscoroutinefunction(fn)
+
+    @wraps(fn)
+    async def _extended_wrapper(conn, receive, send):
+        conn = _conn_of(conn, receive)
+        kwargs: dict = {}
+        if has_query:
+            raw_qs = conn.query_string or b''
+            query_values = (
+                dict(parse_qsl(raw_qs.decode('latin-1'), keep_blank_values=True))
+                if raw_qs else {})
+        for name, kind, payload in plan:
+            if kind == 'query':
+                raw = query_values.get(name, _QUERY_MISSING)
+                if raw is _QUERY_MISSING:
+                    if payload.required:
+                        raise HTTPException(
+                            HTTPStatus.BAD_REQUEST,
+                            f'missing required query parameter {name!r} '
+                            f'for handler {fn_name!r}')
+                    kwargs[name] = payload.default
+                else:
+                    try:
+                        kwargs[name] = payload.coercer(raw)
+                    except (ValueError, TypeError) as exc:
+                        raise HTTPException(
+                            HTTPStatus.BAD_REQUEST,
+                            f'query parameter {name!r}: cannot coerce {raw!r} '
+                            f'to {payload.type.__name__}',
+                        ) from exc
+            elif kind == 'conn':
+                kwargs[name] = conn
+            elif kind == 'body':
+                raw = await conn.body()
+                ann = annotations.get(name, inspect.Parameter.empty)
+                if _is_body_dataclass_annotation(ann):
+                    kwargs[name] = _decode_json_body(ann, raw, fn_name)
+                else:
+                    kwargs[name] = raw
+            elif kind == 'request':
+                kwargs[name] = conn
+            elif kind == 'dataclass':
+                raw = await conn.body()
+                kwargs[name] = _decode_json_body(annotations[name], raw, fn_name)
+            else:  # 'path'
+                raw = conn.path_params.get(name, '')
+                ann = annotations.get(name, inspect.Parameter.empty)
+                if (ann is not inspect.Parameter.empty and isinstance(ann, type)
+                        and not isinstance(raw, ann)):
+                    try:
+                        kwargs[name] = ann(raw)
+                    except (ValueError, TypeError) as exc:
+                        raise TypeError(
+                            f"Path param {name!r}: cannot coerce {raw!r} to {ann.__name__}"
+                        ) from exc
+                else:
+                    kwargs[name] = raw
+
+        if not depends_plan:
+            result = (await fn(**kwargs)) if is_async else fn(**kwargs)
+            await _finish_result(result, conn, receive, send, converters, fn_name)
+            return
+
+        async with AsyncExitStack() as stack:
+            cache: dict = {}
+            for name, dep in depends_plan:
+                kwargs[name] = await _resolve_depends(dep, stack, cache)
+            result = (await fn(**kwargs)) if is_async else fn(**kwargs)
+            # Send inside the stack's scope so provider teardown runs after
+            # the client has the response (LIFO on the stack).
+            await _finish_result(result, conn, receive, send, converters, fn_name)
+
+    return _extended_wrapper
+
+
 def _adapt_handler(fn, path: str, converters: dict | None = None):
     """Wrap a simplified handler in an ASGI (scope, receive, send) coroutine.
 
@@ -1309,79 +1394,7 @@ def _adapt_handler(fn, path: str, converters: dict | None = None):
     # declared parameters require.
     plan = tuple((n, kind, payload) for n, (kind, payload) in categories.items()
                  if kind != 'depends')
-    fn_name = fn.__name__
-
-    @wraps(fn)
-    async def _extended_wrapper(conn, receive, send):
-        conn = _conn_of(conn, receive)
-        kwargs: dict = {}
-        if has_query:
-            raw_qs = conn.query_string or b''
-            query_values = (
-                dict(parse_qsl(raw_qs.decode('latin-1'), keep_blank_values=True))
-                if raw_qs else {})
-        for name, kind, payload in plan:
-            if kind == 'query':
-                raw = query_values.get(name, _QUERY_MISSING)
-                if raw is _QUERY_MISSING:
-                    if payload.required:
-                        raise HTTPException(
-                            HTTPStatus.BAD_REQUEST,
-                            f'missing required query parameter {name!r} '
-                            f'for handler {fn_name!r}')
-                    kwargs[name] = payload.default
-                else:
-                    try:
-                        kwargs[name] = payload.coercer(raw)
-                    except (ValueError, TypeError) as exc:
-                        raise HTTPException(
-                            HTTPStatus.BAD_REQUEST,
-                            f'query parameter {name!r}: cannot coerce {raw!r} '
-                            f'to {payload.type.__name__}',
-                        ) from exc
-            elif kind == 'conn':
-                kwargs[name] = conn
-            elif kind == 'body':
-                raw = await conn.body()
-                ann = annotations.get(name, inspect.Parameter.empty)
-                if _is_body_dataclass_annotation(ann):
-                    kwargs[name] = _decode_json_body(ann, raw, fn_name)
-                else:
-                    kwargs[name] = raw
-            elif kind == 'request':
-                kwargs[name] = conn
-            elif kind == 'dataclass':
-                raw = await conn.body()
-                kwargs[name] = _decode_json_body(annotations[name], raw, fn_name)
-            else:  # 'path'
-                raw = conn.path_params.get(name, '')
-                ann = annotations.get(name, inspect.Parameter.empty)
-                if (ann is not inspect.Parameter.empty and isinstance(ann, type)
-                        and not isinstance(raw, ann)):
-                    try:
-                        kwargs[name] = ann(raw)
-                    except (ValueError, TypeError) as exc:
-                        raise TypeError(
-                            f"Path param {name!r}: cannot coerce {raw!r} to {ann.__name__}"
-                        ) from exc
-                else:
-                    kwargs[name] = raw
-
-        if not depends_plan:
-            result = (await fn(**kwargs)) if is_async else fn(**kwargs)
-            await _finish_result(result, conn, receive, send, converters, fn_name)
-            return
-
-        async with AsyncExitStack() as stack:
-            cache: dict = {}
-            for name, dep in depends_plan:
-                kwargs[name] = await _resolve_depends(dep, stack, cache)
-            result = (await fn(**kwargs)) if is_async else fn(**kwargs)
-            # Send inside the stack's scope so provider teardown runs after
-            # the client has the response (LIFO on the stack).
-            await _finish_result(result, conn, receive, send, converters, fn_name)
-
-    return _extended_wrapper
+    return _make_extended_wrapper(fn, annotations, plan, depends_plan, converters)
 
 
 # RFC 9110 §5.6.2: token = 1*tchar (visible US-ASCII, no separators)
