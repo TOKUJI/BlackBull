@@ -74,6 +74,31 @@ survives.  If the *null* phase fails only because of one outlier, the floor
 is fine; if the *real* phase fails at every trim level, it is not an outlier
 problem — it needs more samples.
 
+### 2.5 Local (WSL2) = screener, EC2 = verdict — the asymmetry
+
+The two boxes do not play the same role.  The local WSL2 box's null floor
+is at or above the ±1 % bound — within-mode ±1.3 % on a good day
+(2026-07-31, 4 rounds), ±2.4 % combined on a bad day (2026-08-01) — and no
+local null pass at ±1 % has ever been recorded.  A box whose null cannot
+clear the bound can never certify equivalence: **local cannot produce an
+OK.**
+
+Local CAN flag a large regression — a delta larger than 2–3× that day's
+floor shows up in the mean — but even the flag is not always conclusive:
+the 2026-08-01 extraction read −4.85 % ± 2.71 pooled on local (95 % CI
+[−10.2 %, +0.5 %], still crossing 0) and only EC2 (−3.03 % ± 0.31) made
+the verdict.
+
+Use the harness asymmetrically:
+
+- **Local WSL2** — cheap early screen.  A clear NG (> 2–3× the session's
+  null floor) → revert consideration immediately.  Everything else (an OK
+  candidate, a borderline NG) is inconclusive by construction: do not burn
+  rounds waiting for a local OK, and never trust a local OK at ±1 %.
+- **EC2 (m7a.2xlarge)** — the authority for both OK and NG.  Its null has
+  passed ±1 % in every EC2 session so far (2026-07-31, 2026-08-01), so a
+  verdict from this box is meaningful.
+
 ## 3. Statistics — what "no regression" actually means
 
 ### 3.1 Framing
