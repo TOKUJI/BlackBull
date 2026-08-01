@@ -8,9 +8,18 @@ that lets you *claim* no meaningful difference on a specific box.
 
 Method
 ------
-The box is bimodal: each server restart lands the process in a fast or a
-slow state (~15 % apart) and holds it.  Comparing base vs treat *across*
-modes therefore measures the coin toss, not the commits.  So:
+The LOCAL desktop box is bimodal: each server restart lands the process in
+a fast or a slow state (~15 % apart) and holds it.  Comparing base vs
+treat *across* modes therefore measures the coin toss, not the commits.
+So:
+
+0. **Monomodal boxes (EC2) — use a POOLED two-sample TOST instead.**  This
+   script's split/combined estimator is only valid when `hi-mode` (from
+   `ab_report.py`) shows true ~15 % separated clusters.  On EC2 it misleads:
+   the 2026-08-01 keep-alive verification had it shift the real Δ to +0.11 %
+   and falsely claim ±0.5 % equivalence (correct pooled verdict: ±1 % only).
+   Pooled: Δ = mean(base) − mean(treat) over ALL samples per arm, Welch SE.
+   See `bench/peers/AB-HIGH-PRECISION.md` §2.2 / §6.1.
 
 1. Per phase, split samples into slow/fast using the midpoint of the
    observed range (the same diagnostic ab_report.py uses for `hi-mode`).

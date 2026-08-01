@@ -67,6 +67,15 @@ priority order:
 Never use regex to match language syntax (function signatures, class defs,
 call expressions). Use `ast-grep` for those.
 
+### 9. Questions end the turn — never auto-continue past a decision gate
+
+When a question or decision gate is presented (go/revise/abort, a choice
+between options, a gate awaiting approval) and the answer is not an explicit
+user choice, **END the turn**: restate the pending question and stop.  Do not
+treat a "user unavailable / work autonomously" response as approval.  Pause
+any background step that depends on the decision.  This applies in Autopilot
+mode too — the agent must explicitly stop and wait; resume only on an
+explicit user answer.
 
 ## Task-to-skill mapping
 
@@ -75,6 +84,7 @@ Before acting on a request, read the corresponding skill file first.
 | Request type | Read first |
 |---|---|
 | Benchmark / performance comparison | `.github/skills/bench-compare/SKILL.md` |
+| A/B regression check / rule out regression / equivalence within ±Δ% | `.claude/skills/ab-verify/SKILL.md` [private] + `bench/peers/AB-HIGH-PRECISION.md` |
 | HttpArena (EC2 / local) | `.github/skills/httparena-bench/SKILL.md` |
 | HttpArena local run details | `/memories/repo/httparena-local-run.md` |
 | Type checking | `.github/skills/type-check/SKILL.md` |
