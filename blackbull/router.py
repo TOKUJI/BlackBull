@@ -1134,45 +1134,48 @@ def _adapt_websocket_handler(fn, path: str = ''):
         # Bind everything that cannot fail on a resource *before* resolving any
         # Depends: a connection we are about to reject should never acquire one.
         for name, kind, payload in bind_plan:
-            if kind is _ParamKind.WS:
-                if ws is None:
-                    ws = _WS(conn, receive, send)
-                kwargs[name] = ws
-            elif kind is _ParamKind.CONN:
-                kwargs[name] = conn
-            elif kind is _ParamKind.PATH:
-                raw = conn.path_params.get(name, '')
-                if (payload is not None and isinstance(payload, type)
-                        and not isinstance(raw, payload)):
-                    try:
-                        kwargs[name] = payload(raw)
-                    except (ValueError, TypeError):
-                        await _ws_reject(
-                            _WS(conn, receive, send) if ws is None else ws,
-                            f'path param {name!r}: cannot coerce {raw!r} to '
-                            f'{payload.__name__}')
-                        return
-                else:
-                    kwargs[name] = raw
-            else:  # 'query'
-                raw = query_values.get(name, _QUERY_MISSING)
-                if raw is _QUERY_MISSING:
-                    if payload.required:
-                        await _ws_reject(
-                            _WS(conn, receive, send) if ws is None else ws,
-                            f'missing required query parameter {name!r} for '
-                            f'handler {fn_name!r}')
-                        return
-                    kwargs[name] = payload.default
-                else:
-                    try:
-                        kwargs[name] = payload.coercer(raw)
-                    except (ValueError, TypeError):
-                        await _ws_reject(
-                            _WS(conn, receive, send) if ws is None else ws,
-                            f'query parameter {name!r}: cannot coerce {raw!r} '
-                            f'to {payload.type.__name__}')
-                        return
+            match kind:
+                case _ParamKind.WS:
+                    if ws is None:
+                        ws = _WS(conn, receive, send)
+                    kwargs[name] = ws
+                case _ParamKind.CONN:
+                    kwargs[name] = conn
+                case _ParamKind.PATH:
+                    raw = conn.path_params.get(name, '')
+                    if (payload is not None and isinstance(payload, type)
+                            and not isinstance(raw, payload)):
+                        try:
+                            kwargs[name] = payload(raw)
+                        except (ValueError, TypeError):
+                            await _ws_reject(
+                                _WS(conn, receive, send) if ws is None else ws,
+                                f'path param {name!r}: cannot coerce {raw!r} to '
+                                f'{payload.__name__}')
+                            return
+                    else:
+                        kwargs[name] = raw
+                case _ParamKind.QUERY:
+                    raw = query_values.get(name, _QUERY_MISSING)
+                    if raw is _QUERY_MISSING:
+                        if payload.required:
+                            await _ws_reject(
+                                _WS(conn, receive, send) if ws is None else ws,
+                                f'missing required query parameter {name!r} for '
+                                f'handler {fn_name!r}')
+                            return
+                        kwargs[name] = payload.default
+                    else:
+                        try:
+                            kwargs[name] = payload.coercer(raw)
+                        except (ValueError, TypeError):
+                            await _ws_reject(
+                                _WS(conn, receive, send) if ws is None else ws,
+                                f'query parameter {name!r}: cannot coerce {raw!r} '
+                                f'to {payload.type.__name__}')
+                            return
+                case _:  # unreachable: bind_plan excludes DEPENDS
+                    raise AssertionError(f'unexpected param kind {kind!r} for {name!r}')
 
         if not depends_plan:
             await fn(**kwargs)
@@ -1226,51 +1229,52 @@ def _make_extended_wrapper(fn, annotations: dict, plan: tuple, depends_plan: tup
                 dict(parse_qsl(raw_qs.decode('latin-1'), keep_blank_values=True))
                 if raw_qs else {})
         for name, kind, payload in plan:
-            if kind is _ParamKind.QUERY:
-                raw = query_values.get(name, _QUERY_MISSING)
-                if raw is _QUERY_MISSING:
-                    if payload.required:
-                        raise HTTPException(
-                            HTTPStatus.BAD_REQUEST,
-                            f'missing required query parameter {name!r} '
-                            f'for handler {fn_name!r}')
-                    kwargs[name] = payload.default
-                else:
-                    try:
-                        kwargs[name] = payload.coercer(raw)
-                    except (ValueError, TypeError) as exc:
-                        raise HTTPException(
-                            HTTPStatus.BAD_REQUEST,
-                            f'query parameter {name!r}: cannot coerce {raw!r} '
-                            f'to {payload.type.__name__}',
-                        ) from exc
-            elif kind is _ParamKind.CONN:
-                kwargs[name] = conn
-            elif kind is _ParamKind.BODY:
-                raw = await conn.body()
-                ann = annotations.get(name, inspect.Parameter.empty)
-                if _is_body_dataclass_annotation(ann):
-                    kwargs[name] = _decode_json_body(ann, raw, fn_name)
-                else:
-                    kwargs[name] = raw
-            elif kind is _ParamKind.REQUEST:
-                kwargs[name] = conn
-            elif kind is _ParamKind.DATACLASS:
-                raw = await conn.body()
-                kwargs[name] = _decode_json_body(annotations[name], raw, fn_name)
-            else:  # 'path'
-                raw = conn.path_params.get(name, '')
-                ann = annotations.get(name, inspect.Parameter.empty)
-                if (ann is not inspect.Parameter.empty and isinstance(ann, type)
-                        and not isinstance(raw, ann)):
-                    try:
-                        kwargs[name] = ann(raw)
-                    except (ValueError, TypeError) as exc:
-                        raise TypeError(
-                            f"Path param {name!r}: cannot coerce {raw!r} to {ann.__name__}"
-                        ) from exc
-                else:
-                    kwargs[name] = raw
+            match kind:
+                case _ParamKind.QUERY:
+                    raw = query_values.get(name, _QUERY_MISSING)
+                    if raw is _QUERY_MISSING:
+                        if payload.required:
+                            raise HTTPException(
+                                HTTPStatus.BAD_REQUEST,
+                                f'missing required query parameter {name!r} '
+                                f'for handler {fn_name!r}')
+                        kwargs[name] = payload.default
+                    else:
+                        try:
+                            kwargs[name] = payload.coercer(raw)
+                        except (ValueError, TypeError) as exc:
+                            raise HTTPException(
+                                HTTPStatus.BAD_REQUEST,
+                                f'query parameter {name!r}: cannot coerce {raw!r} '
+                                f'to {payload.type.__name__}',
+                            ) from exc
+                case _ParamKind.CONN | _ParamKind.REQUEST:
+                    kwargs[name] = conn
+                case _ParamKind.BODY:
+                    raw = await conn.body()
+                    ann = annotations.get(name, inspect.Parameter.empty)
+                    if _is_body_dataclass_annotation(ann):
+                        kwargs[name] = _decode_json_body(ann, raw, fn_name)
+                    else:
+                        kwargs[name] = raw
+                case _ParamKind.DATACLASS:
+                    raw = await conn.body()
+                    kwargs[name] = _decode_json_body(annotations[name], raw, fn_name)
+                case _ParamKind.PATH:
+                    raw = conn.path_params.get(name, '')
+                    ann = annotations.get(name, inspect.Parameter.empty)
+                    if (ann is not inspect.Parameter.empty and isinstance(ann, type)
+                            and not isinstance(raw, ann)):
+                        try:
+                            kwargs[name] = ann(raw)
+                        except (ValueError, TypeError) as exc:
+                            raise TypeError(
+                                f"Path param {name!r}: cannot coerce {raw!r} to {ann.__name__}"
+                            ) from exc
+                    else:
+                        kwargs[name] = raw
+                case _:  # unreachable: plan excludes DEPENDS; only the 6 kinds above occur
+                    raise AssertionError(f'unexpected param kind {kind!r} for {name!r}')
 
         if not depends_plan:
             result = (await fn(**kwargs)) if is_async else fn(**kwargs)
@@ -1355,31 +1359,32 @@ def _adapt_handler(fn, path: str, converters: dict | None = None):
         for name in params:
             ann = annotations.get(name, inspect.Parameter.empty)
             kind = categories[name][0]
-            if kind is _ParamKind.CONN:
-                kwargs[name] = conn
-            elif kind is _ParamKind.BODY:
-                raw = await conn.body()
-                if _is_body_dataclass_annotation(ann):
+            match kind:
+                case _ParamKind.CONN | _ParamKind.REQUEST:
+                    kwargs[name] = conn
+                case _ParamKind.BODY:
+                    raw = await conn.body()
+                    if _is_body_dataclass_annotation(ann):
+                        kwargs[name] = _decode_json_body(ann, raw, fn.__name__)
+                    else:
+                        kwargs[name] = raw
+                case _ParamKind.DATACLASS:
+                    raw = await conn.body()
                     kwargs[name] = _decode_json_body(ann, raw, fn.__name__)
-                else:
-                    kwargs[name] = raw
-            elif kind is _ParamKind.REQUEST:
-                kwargs[name] = conn
-            elif kind is _ParamKind.DATACLASS:
-                raw = await conn.body()
-                kwargs[name] = _decode_json_body(ann, raw, fn.__name__)
-            else:  # 'path'
-                raw = conn.path_params.get(name, '')
-                if (ann is not inspect.Parameter.empty and isinstance(ann, type)
-                        and not isinstance(raw, ann)):
-                    try:
-                        kwargs[name] = ann(raw)
-                    except (ValueError, TypeError) as exc:
-                        raise TypeError(
-                            f"Path param {name!r}: cannot coerce {raw!r} to {ann.__name__}"
-                        ) from exc
-                else:
-                    kwargs[name] = raw
+                case _ParamKind.PATH:
+                    raw = conn.path_params.get(name, '')
+                    if (ann is not inspect.Parameter.empty and isinstance(ann, type)
+                            and not isinstance(raw, ann)):
+                        try:
+                            kwargs[name] = ann(raw)
+                        except (ValueError, TypeError) as exc:
+                            raise TypeError(
+                                f"Path param {name!r}: cannot coerce {raw!r} to {ann.__name__}"
+                            ) from exc
+                    else:
+                        kwargs[name] = raw
+                case _:  # unreachable in _wrapper: no query/depends reach the plain pin
+                    raise AssertionError(f'unexpected param kind {kind!r} for {name!r}')
 
         result = (await fn(**kwargs)) if is_async else fn(**kwargs)
 
