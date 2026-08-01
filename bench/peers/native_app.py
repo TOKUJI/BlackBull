@@ -48,6 +48,16 @@ async def plaintext():
     return Response(_PLAINTEXT, content_type=_PLAIN_CT)
 
 
+@app.route(path="/conn", methods=[HTTPMethod.GET])
+async def conn_route(conn: Connection):
+    # A/B-measurable simplified-handler profile: a ``conn`` parameter makes
+    # the plain pin's per-request dispatch loop execute (the no-arg
+    # /plaintext iterates an empty loop), so ab_commit.sh URL_PATH=/conn
+    # measures the wrapper dispatch itself.  The "Hello" body keeps the
+    # harness's server-ready check passing.
+    return Response(_PLAINTEXT, content_type=_PLAIN_CT)
+
+
 @app.route(path="/json", methods=[HTTPMethod.GET])
 async def json_endpoint():
     return Response(_JSON, content_type=_JSON_CT)

@@ -122,6 +122,22 @@ source .venv/bin/activate
 pip install --upgrade pip
 pip install -e '.[testing,speed,compression,profiling]'
 
+echo "=== uv (required by bench/peers/ab_commit.sh) ==="
+if ! command -v uv >/dev/null 2>&1; then
+    curl -LsSf https://astral.sh/uv/install.sh | sh
+fi
+# The installer drops uv in ~/.local/bin; non-login ssh command shells
+# source neither ~/.bashrc nor /etc/profile, so symlink it onto the
+# system PATH for ab_commit.sh's `uv run` invocations.
+sudo ln -sf "$HOME/.local/bin/uv" /usr/local/bin/uv
+export PATH="$HOME/.local/bin:$PATH"
+export UV_PYTHON="$(command -v python3)"
+# The uv-managed venv must carry the blackbull console script: `uv run
+# python` first (creates/opens the venv), then `uv pip install -e .`
+# adds the CLI that `uv run` would otherwise drop.
+uv run python -c 'import blackbull'
+uv pip install -e .
+
 echo "=== Bench toolchain (h2load, wrk, wrk2, oha, k6, peer ASGI servers) ==="
 bash bench/install.sh
 
@@ -195,8 +211,24 @@ mkdir -p bench/results
 echo "=== Versions ==="
 .venv/bin/python --version
 .venv/bin/python -c 'import blackbull; print("blackbull module OK")'
+uv run blackbull --help >/dev/null 2>&1 && echo "uv run blackbull CLI OK"
 echo "blackbull HEAD (from local rsync source): ${LOCAL_HEAD:-unknown}"
 REMOTE_EOF
+
+# --- Deploy .git when an A/B commit comparison will run -------------------
+# bench/peers/ab_commit.sh swaps files via `git checkout` between two refs,
+# which requires the repo's .git history on the instance.  The main rsync
+# above excludes .git/ (~113 MB) to keep ordinary bench deploys lean; opt
+# in with DEPLOY_GIT=1 when the run is an A/B commit comparison.
+if [ "${DEPLOY_GIT:-0}" = "1" ]; then
+    echo "=== Deploying .git (DEPLOY_GIT=1) for ab_commit.sh ==="
+    rsync -az -e "ssh ${SSH_OPTS[*]}" \
+        "$REPO_ROOT/.git/" "$SERVER_REMOTE:$REMOTE_REPO/.git/"
+    ssh "${SSH_OPTS[@]}" "$SERVER_REMOTE" \
+        "cd $REMOTE_REPO && git rev-parse --short HEAD && \
+         git cat-file -e ${LOCAL_HEAD}^{commit} && echo 'git refs OK (ab_commit.sh ready)'" \
+        2>&1 | tail -3
+fi
 
 # --- TOPO=single ends here ------------------------------------------------
 if [ "$TOPO" = "single" ]; then

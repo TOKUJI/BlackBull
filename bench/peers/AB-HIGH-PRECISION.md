@@ -134,8 +134,8 @@ phase's own |bias| + SE (or its CI sits outside the null CI).
 
 ## 4. EC2 workflow (reproducible + fail-safe)
 
-Instance lifecycle via `bench/aws/up.sh` / `install.sh` / `down.sh`, but
-`ab_commit.sh` needs extra provisioning:
+Instance lifecycle via `bench/aws/up.sh` / `install.sh` / `down.sh`, with
+`bench/aws/ab.sh` orchestrating the `ab_commit.sh` measurement:
 
 1. **Instance:** `INSTANCE_TYPE=m7a.2xlarge TOPO=single bash bench/aws/up.sh`
    (8 vCPU, **no SMT** — each vCPU is a physical core; 8 cores fits 1 worker
@@ -144,23 +144,18 @@ Instance lifecycle via `bench/aws/up.sh` / `install.sh` / `down.sh`, but
    `terminate`, plus a scheduled `sudo shutdown -h +180` on the instance, so
    it self-terminates even if nothing else runs.  The agent is never the sole
    teardown path.
-3. **`bash bench/aws/install.sh`** — deploys repo + venv + wrk + toolchain.
-   Caveats found:
-   - It rsyncs with `--exclude '.git/'` → `ab_commit.sh`'s `git checkout`
-     swap needs the refs: re-rsync the tree **including `.git`**.
-   - Ubuntu 24.04 is PEP-668-externally-managed → install `uv` via the
-     official installer (`~/.local/bin`), not pip.
-   - `uv run` recreates the venv **without** the `blackbull` console script →
-     fix with `uv pip install -e .`; verify the swap works via
-     `blackbull.__file__` in the source tree + the import-hash proof.
-4. **Run:** on the instance,
-   `nohup env REF_BASE=.. REF_TREAT=.. ROUNDS=12 DURATION=15 THREADS=4
-   CONNS=32 SERVER_CPUS=0-1 LOAD_CPUS=2-5 PHASES="null real"
-   bash bench/peers/ab_commit.sh > bench/results/ec2-ab.log 2>&1 &` — nohup
-   so it survives prompt end.
-5. **Finish:** a local nohup'd script polls the remote `raw.tsv` to its
-   expected line count, `scp`s the results dir back, then runs `down.sh`.
-   (Instance self-termination is the backstop.)
+3. **`DEPLOY_GIT=1 bash bench/aws/install.sh`** — deploys repo + venv + wrk +
+   toolchain, installs `uv` (PATH-symlinked to `/usr/local/bin` so
+   `ssh host "uv run …"` works), and deploys the repo's `.git` (the plain
+   rsync excludes it at ~113 MB, but `ab_commit.sh`'s git-checkout swap needs
+   the refs).  Smoke test verifies `uv run blackbull --help`.
+4. **Run:** `REF_BASE=.. REF_TREAT=.. URL_PATH=/conn ROUNDS=8
+   bash bench/aws/ab.sh launch` — starts one or more profiles
+   (`URL_PATHS=/conn,/plaintext`) detached on the instance; the ssh call
+   returns immediately.
+5. **Finish:** `bash bench/aws/ab.sh finish` (run nohup'd locally) polls the
+   remote `raw.tsv` files to their expected line count, scp's the result dirs
+   back, then runs `down.sh`.  (Instance self-termination is the backstop.)
 
 ## 5. Tools
 
