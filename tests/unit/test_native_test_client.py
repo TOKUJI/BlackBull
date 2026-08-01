@@ -320,17 +320,24 @@ async def test_middleware_runs():
 async def test_lifecycle_events_fire_exactly_once():
     a = BlackBull()
     seen = []
+    done = asyncio.Event()
 
     @a.on('scope_completed')
     async def _done(event):
+        # Append on *every* delivery, signal only the first: a genuine
+        # duplicate must still reach ``seen`` and fail the count below.
         seen.append(event)
+        done.set()
 
     @a.route(path='/e')
     async def _e():
         return 'ok'
 
     await native.get(a, '/e')
-    await asyncio.sleep(0.05)   # settle window for a late duplicate
+    # Wait for delivery rather than guessing at it — a fixed sleep is a flake
+    # on a loaded runner.  The timeout is a safety bound, not a race.
+    await asyncio.wait_for(done.wait(), timeout=2.0)
+    await asyncio.sleep(0.2)    # bounded settle window for a late duplicate
     assert len(seen) == 1
 
 

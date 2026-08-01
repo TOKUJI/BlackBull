@@ -173,7 +173,13 @@ async def test_keep_alive():
     async with NativeTestServer(app) as server:
         for _ in range(10):
             assert (await server.client.get('/hello')).status_code == 200
+        assert server.connections_served == 1
 ```
+
+`server.connections_served` counts TCP **accepts**, not requests, so ten
+keep-alive requests on one connection leave it at `1`.  It is the honest
+way to assert connection reuse: `Connection: close` is a header the
+server *may* send, so its absence proves nothing on its own.
 
 The synchronous form runs the server on one background loop for the
 session:

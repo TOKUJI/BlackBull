@@ -111,50 +111,51 @@ async def test_both_lanes_agree_on_head_through_tier2(app):
 
 # --- why Tier 2 is not redundant with the other two instruments -------------
 #
-# The test is not "the other instruments give the wrong answer" — it is that
-# their answer does not *change* when the defect is injected.  An instrument
-# that reports the same thing whether the code is broken or fixed cannot be
-# the one guarding this behaviour, whatever that thing happens to be.
+# The claim is not "the other instruments give the wrong answer" — it is that
+# their answer cannot *move*.  An instrument that reports the same thing
+# whether the code is broken or fixed is not the one guarding this behaviour,
+# whatever that thing happens to be.
 #
-# Both return 405 either way, for the same underlying reason: the HEAD→GET
-# rewrite lives in ``HTTP1Actor``, so an instrument that starts below the
-# actor (Tier 1) or replaces it entirely (``TestClient``) cannot express
-# RFC 9110 §9.3.2 HEAD semantics at all.
+# The reason is structural, so the tests below assert it structurally rather
+# than by a with/without contrast: the HEAD→GET rewrite lives in
+# ``HTTP1Actor.run``, and the injection hangs off ``HTTP1Actor._parse``.  An
+# instrument that starts below the actor (Tier 1) or replaces it entirely
+# (``TestClient``) never runs either one.  Both therefore see a bare ``HEAD``
+# against a GET-only route and answer 405 — on both lanes, injected or not.
+#
+# 405 is pinned rather than left as an equality, because equality alone cannot
+# tell the honest reading ("blind, and the blind answer is 405") apart from a
+# future answer that silently changed to something else on both sides.
+
+_TIER1_BLIND_HEAD_STATUS = 405
+
 
 @pytest.mark.asyncio
 async def test_tier1_is_blind_to_the_regression(app, forced_asgi_lane,
-                                                prefix_ordering, monkeypatch):
-    """Tier 1's answer is identical with and without the defect injected."""
-    with_defect = (await native.head(app, '/')).status
+                                                prefix_ordering):
+    """Tier 1 answers 405 with the ordering injected — it cannot see it."""
+    assert (await native.head(app, '/')).status == _TIER1_BLIND_HEAD_STATUS
 
-    # ``undo`` drops every patch this test's monkeypatch holds, the lane's
-    # env var included — re-set it so the only variable that changed between
-    # the two measurements is the injected ordering.
-    monkeypatch.undo()
-    monkeypatch.setenv('BB_FORCE_ASGI_SCOPE', '1')
-    reset_settings_cache()
-    without_defect = (await native.head(app, '/')).status
 
-    assert with_defect == without_defect, (
-        'Tier 1 distinguished the two, which would make this argument wrong.')
+@pytest.mark.asyncio
+async def test_tier1_answers_the_same_without_the_injection(app, forced_asgi_lane):
+    """…and 405 without it.  Same fixtures minus ``prefix_ordering``, so the
+    two tests differ in exactly the injected variable."""
+    assert (await native.head(app, '/')).status == _TIER1_BLIND_HEAD_STATUS
 
 
 def test_the_asgi_test_client_is_blind_to_the_regression(app, forced_asgi_lane,
-                                                         prefix_ordering,
-                                                         monkeypatch):
+                                                         prefix_ordering):
     """``TestClient`` runs no protocol actor — ``httpx.ASGITransport`` builds
-    the scope itself, so the actor's snapshot ordering is not in the picture
-    and its answer cannot move."""
+    the scope itself, so the actor's snapshot ordering is not in the picture."""
     with TestClient(app) as client:
-        with_defect = client.head('/').status_code
+        assert client.head('/').status_code == _TIER1_BLIND_HEAD_STATUS
 
-    monkeypatch.undo()
-    monkeypatch.setenv('BB_FORCE_ASGI_SCOPE', '1')
-    reset_settings_cache()
+
+def test_the_asgi_test_client_answers_the_same_without_the_injection(
+        app, forced_asgi_lane):
     with TestClient(app) as client:
-        without_defect = client.head('/').status_code
-
-    assert with_defect == without_defect
+        assert client.head('/').status_code == _TIER1_BLIND_HEAD_STATUS
 
 
 # --- the defect class, not just the instance --------------------------------

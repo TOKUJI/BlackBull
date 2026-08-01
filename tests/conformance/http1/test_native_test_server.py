@@ -14,10 +14,14 @@ runs a protocol actor at all).
 import asyncio
 from http import HTTPStatus
 
+import httpx
 import pytest
 
 from blackbull import BlackBull
+from blackbull.env import reset_settings_cache
 from blackbull.testing import NativeTestServer
+
+from ._dual_path_corpus import CLIENT_DRIVABLE
 
 
 @pytest.fixture
@@ -118,14 +122,36 @@ async def test_head_returns_the_get_headers_without_a_body(app):
 
 @pytest.mark.asyncio
 async def test_keep_alive_reuses_one_connection(app):
-    """Four requests, one TCP connection — the actor's keep-alive loop."""
+    """Four requests, exactly one TCP connection — the actor's keep-alive loop.
+
+    Counted at accept, because that is the only place the answer is a fact.
+    ``Connection: close`` is a signal the server *may* send, so its absence
+    proves nothing on its own — a server that silently dropped the socket
+    between requests would pass a header-only check.
+    """
     async with NativeTestServer(app) as server:
         for _ in range(4):
             resp = await server.client.get('/')
             assert resp.status_code == 200
-        # httpx pools by default; a connection-per-request would show up as
-        # a `connection: close` on the responses.
-        assert resp.headers.get('connection', '').lower() != 'close'
+            # Secondary: no response may ask the client to tear down, which is
+            # what would have forced a reconnect for the next request.
+            assert resp.headers.get('connection', '').lower() != 'close'
+        assert server.connections_served == 1
+
+
+@pytest.mark.asyncio
+async def test_the_accept_counter_counts_connections_not_requests(app):
+    """Pin the counter's meaning, so the keep-alive proof above can be read.
+
+    Two explicit connections carrying two requests each must read 2, not 4.
+    """
+    async with NativeTestServer(app) as server:
+        for _ in range(2):
+            # A fresh client is a fresh pool, hence a fresh TCP connection.
+            async with httpx.AsyncClient(base_url=server.url) as client:
+                assert (await client.get('/')).status_code == 200
+                assert (await client.get('/')).status_code == 200
+        assert server.connections_served == 2
 
 
 @pytest.mark.asyncio
@@ -195,10 +221,14 @@ async def test_client_outside_the_context_manager_is_an_error(app):
 async def test_events_fire_exactly_once_per_request():
     a = BlackBull()
     seen = []
+    done = asyncio.Event()
 
     @a.on('scope_completed')
     async def _done(event):
+        # Append on *every* delivery, signal only the first: a genuine
+        # duplicate must still reach ``seen`` and fail the count below.
         seen.append(event)
+        done.set()
 
     @a.route(path='/e')
     async def _e():
@@ -206,7 +236,10 @@ async def test_events_fire_exactly_once_per_request():
 
     async with NativeTestServer(a) as server:
         await server.client.get('/e')
-        await asyncio.sleep(0.1)   # settle window for a late duplicate
+        # Wait for delivery rather than guessing at it — a fixed sleep is a
+        # flake on a loaded runner.  The timeout is a safety bound, not a race.
+        await asyncio.wait_for(done.wait(), timeout=2.0)
+        await asyncio.sleep(0.2)   # bounded settle window for a late duplicate
     assert len(seen) == 1
 
 
@@ -224,3 +257,83 @@ def test_sync_form_serves_many_requests(app):
         assert server.client.get('/').text == 'hello'
         assert server.client.post('/echo', content=b'x').content == b'x'
         assert server.client.get('/nope').status_code == 404
+
+
+# --- the two lanes agree, over the shared corpus ----------------------------
+#
+# ``_dual_path_corpus`` is the single definition of "the request shapes the
+# compat lane must be invisible for".  ``test_dual_path_identity`` asserts
+# byte identity over all of it by driving the actor directly; this asserts the
+# same claim one layer out — over a real socket, through a real HTTP client —
+# for the subset a conformant client can actually issue.
+
+@pytest.fixture
+def corpus_app():
+    """The routes the shared corpus addresses (mirrors the identity test's)."""
+    a = BlackBull()
+
+    @a.route(path='/')
+    async def _root():
+        return 'hello'
+
+    @a.route(path='/echo', methods=['POST'])
+    async def _echo(conn, receive, send):
+        body = await conn.body()
+        await send(body or b'(empty)', HTTPStatus.OK)
+
+    @a.route(path='/café')
+    async def _unicode_path():
+        return 'cafe'
+
+    return a
+
+
+#: Headers that may legitimately differ between two runs of the same request.
+_VOLATILE_HEADERS = frozenset({'date'})
+
+
+def _observable(resp):
+    """What a client sees, minus what is allowed to vary between runs."""
+    return (
+        resp.status_code,
+        sorted((k.lower(), v) for k, v in resp.headers.multi_items()
+               if k.lower() not in _VOLATILE_HEADERS),
+        resp.content,
+    )
+
+
+async def _drive_through_server(app, spec):
+    async with NativeTestServer(app) as server:
+        return _observable(await server.client.request(
+            spec.method, spec.target,
+            headers=list(spec.headers) or None,
+            content=spec.body or None,
+        ))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('name', sorted(CLIENT_DRIVABLE))
+async def test_both_lanes_agree_over_the_shared_corpus(corpus_app, name,
+                                                       monkeypatch):
+    """Native and ``BB_FORCE_ASGI_SCOPE=1`` agree on what a client observes.
+
+    The vectors come from ``_dual_path_corpus.CLIENT_DRIVABLE`` — the same
+    definition ``test_dual_path_identity`` draws from — so the claim is stated
+    once and asserted at two depths, rather than re-specified here.
+    """
+    spec = CLIENT_DRIVABLE[name]
+
+    reset_settings_cache()
+    native = await _drive_through_server(corpus_app, spec)
+
+    monkeypatch.setenv('BB_FORCE_ASGI_SCOPE', '1')
+    reset_settings_cache()
+    try:
+        forced = await _drive_through_server(corpus_app, spec)
+    finally:
+        monkeypatch.delenv('BB_FORCE_ASGI_SCOPE', raising=False)
+        reset_settings_cache()
+
+    assert forced == native, (
+        f'{name}: the compat lane diverged from the native lane over a real '
+        f'socket.\n  native: {native}\n  forced: {forced}')

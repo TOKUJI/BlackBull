@@ -434,6 +434,10 @@ class NativeTestServer:
         self.app = app
         self.host = host
         self.port = port
+        #: TCP connections accepted since this server started — an *accept*
+        #: count, not a request count, so four keep-alive requests on one
+        #: connection leave it at 1.  Both context-manager forms maintain it.
+        self.connections_served = 0
         self._backlog = backlog
         self._timeout = timeout
         self._server_kwargs = server_kwargs
@@ -453,13 +457,22 @@ class NativeTestServer:
         from ..server.server import LifespanManager, Server  # noqa: PLC0415
 
         self._bb_server = Server(self.app, **self._server_kwargs)
+
+        async def _accept(reader, writer):
+            # The only thing layered over the production callback: count the
+            # accept.  A test asserting keep-alive reuse needs to know how many
+            # TCP connections its requests actually opened, and the honest
+            # place to learn that is the accept path — not a response header
+            # the server merely *may* send, and not httpx's private pool.
+            self.connections_served += 1
+            await self._bb_server.client_connected_cb(reader, writer)
+
         # ``asyncio.start_server`` rather than ``Server.open_socket``: the
         # latter binds 0.0.0.0 + :: (right for a real deployment, wrong for a
-        # test that should never leave the loopback).  The accept callback is
-        # the production one, so everything below accept is identical.
+        # test that should never leave the loopback).  The callback below
+        # accept is the production one, so everything after it is identical.
         self._asyncio_server = await asyncio.start_server(
-            self._bb_server.client_connected_cb, self.host, self.port,
-            backlog=self._backlog)
+            _accept, self.host, self.port, backlog=self._backlog)
         sockets = self._asyncio_server.sockets or ()
         if not sockets:
             raise RuntimeError('NativeTestServer failed to bind a socket.')
