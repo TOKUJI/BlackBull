@@ -37,6 +37,14 @@ A personal learning project — wire correctness over API stability (ZeroVer).
   to capture non-obvious intent, design trade-offs, or invariants the next
   reader would otherwise have to reverse-engineer from the code.
 
+- **Questions end the turn.** A pending decision gate is a stop, not a
+  licence to continue.  If the answer to a gate question is not an explicit
+  user choice, end the turn with the question restated — do not treat a
+  "user unavailable / work autonomously" response as approval, and pause
+  background steps that depend on the decision.  Resume only on explicit
+  user input.  (Applies in Autopilot mode too; the agent must explicitly
+  stop and wait.)
+
 ---
 
 ## Architecture principles
@@ -143,6 +151,7 @@ fallback where one exists.
 | Writing/adjusting tests | `.claude/patterns/testing.md` + `.claude/skills/create-test/SKILL.md` [both private] |
 | Running benchmarks or profiling | `.claude/patterns/benchmarking.md` + `.claude/skills/bench-compare/SKILL.md` [both private] |
 | Running peer server comparisons (FastAPI / Sanic / etc.) locally | `.claude/skills/peer-compare/SKILL.md` [private] |
+| High-precision A/B check (rule out regression / equivalence within ±Δ%) | `bench/peers/AB-HIGH-PRECISION.md` + `.claude/skills/ab-verify/SKILL.md` [skill private] — read the null phase before trusting a real verdict; pooled TOST on EC2 |
 | Tracing a regression across sprints | `.claude/sprint-logs/` [private] — per-sprint bottleneck-attribution logs.  `bench/CHARACTERIZATION.md` is the public summary; sprint-logs hold the raw diagnostic numbers |
 | Cutting a release / sprint close | `.claude/patterns/release.md` + `.claude/skills/sprint-close/SKILL.md` [both private] |
 | Reasoning about actors / events | `.claude/design/actor-model.md` + `.claude/design/event-catalogue.md` [both private] |
@@ -152,9 +161,9 @@ fallback where one exists.
 
 **Skills** (invocable, harness-surfaced; they live in `.claude/skills/` [private] —
 `.github/skills` is an optional local symlink, see `.gitignore`):
-`sprint-close`, `bench-compare`, `peer-compare`, `pre-release-docs`, `update-roadmap`,
-`create-test`, `type-check`, `add-event`, `new-http2-frame`, `protocol-handler`,
-`httparena-bench`, `run-http11probe`.
+`ab-verify`, `refactor`, `sprint-close`, `bench-compare`, `peer-compare`, `pre-release-docs`,
+`update-roadmap`, `create-test`, `type-check`, `add-event`, `new-http2-frame`,
+`protocol-handler`, `httparena-bench`, `run-http11probe`.
 
 ### Doc lifecycle (so docs don't rot)
 

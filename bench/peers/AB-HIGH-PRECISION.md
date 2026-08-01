@@ -160,6 +160,26 @@ Instance lifecycle via `bench/aws/up.sh` / `install.sh` / `down.sh`, but
   the strongest evidence a benchmark could never beat: a strict no-op on the
   measured path.
 
+### 6.1 Calibration — non-no-op refactor (2026-08-01, HTTP1Actor.run extraction)
+
+Contrast to §6: this refactor DID change the measured path, and the A/B
+caught it before merge.
+
+- **Change:** extracted two `async def` methods out of `HTTP1Actor.run`
+  (`_read_and_parse`, `_dispatch_one_request`) — +1 coroutine hop per request
+  each, everything else byte-identical.
+- **EC2 m7a.2xlarge, 8 rounds ABBA, 16 runs/arm:** null (A/A) Δ = −0.24 %,
+  CI [−0.62 %, +0.15 %] → **±1 % equivalent (box resolvable)**.  Real Δ =
+  **−3.03 % ± 0.31** — consistent in every round, zero overlap (base min
+  30481 > treat max 30272), 3× the null floor.  Per-request 32.37 → 33.38 µs
+  (+1.01 µs).
+- **Interpretation:** on the ~30k req/s request-ingest loop each added
+  `await` hop costs **~1.5 %** throughput.  A two-hop async extraction is a
+  measurable regression against BlackBull's "no call, no allocation" bar
+  (commit 88038e0 removed a per-event coroutine wrapper worth 7 % CPU).
+- **Outcome:** reverted (verdict rule 4).  The null phase passing is exactly
+  what made the real −3 % trustworthy instead of box noise.
+
 ## 7. Verdict rules
 
 A regression (the change being *slower*) is essentially ruled out when:
@@ -174,3 +194,12 @@ A ±0.5 % equivalence claim specifically needs the real-phase 95 % CI inside
 ±0.5 % **and** the null phase to also pass (after outlier trim).  If the CI
 upper bound sits at +0.57–0.69 % because the point estimate is +0.3 %, more
 rounds (not outlier removal) are the only path.
+
+4. **Regression vs. no-resolve — read the null phase first.**  When the
+   null (A/A) phase passes equivalence but the real CI **exceeds** the
+   bound, the change is a real regression: revert or fix, do not re-measure
+   (2026-08-01 §6.1: real −3.03 % with a passing null → reverted).  When
+   the null phase *fails* equivalence, the box cannot resolve ±Δ that
+   session — escalate or add rounds before trusting any real-phase verdict
+   (2026-08-01 local WSL2: null combined CI ±2.4 % at 4 rounds made the
+   real reading uninterpretable; EC2 resolved it).
