@@ -15,6 +15,7 @@ from collections.abc import Iterable
 from contextlib import AsyncExitStack
 import dataclasses
 from dataclasses import dataclass, field
+from enum import Enum
 import typing
 from typing import Any, Callable, NamedTuple, Tuple, Type, Optional, Union, get_args, get_origin
 from functools import wraps, partial
@@ -746,6 +747,25 @@ class _QuerySpec(NamedTuple):
 _QUERY_MISSING = object()
 
 
+class _ParamKind(Enum):
+    """Classification of one simplified-handler parameter (registration-time).
+
+    Emitted by :func:`_handler_param_plan` (HTTP) and
+    :func:`_websocket_param_plan` (WS).  Purely internal — derived from the
+    handler's signature, never from request data — so a plain ``Enum`` (not
+    StrEnum) is used: string comparisons like ``kind == 'query'`` must fail
+    loudly rather than silently pass.
+    """
+    PATH = 'path'
+    CONN = 'conn'
+    BODY = 'body'
+    REQUEST = 'request'
+    DATACLASS = 'dataclass'
+    DEPENDS = 'depends'
+    QUERY = 'query'
+    WS = 'ws'
+
+
 def _handler_param_plan(fn, path_param_names: set) -> tuple:
     """Classify every parameter of simplified handler *fn* — once, at
     registration time.
@@ -792,7 +812,7 @@ def _handler_param_plan(fn, path_param_names: set) -> tuple:
                     f"Simplified handler {fn.__name__!r}: parameter {name!r} "
                     f"is a path param of {sorted(path_param_names)!r} and "
                     f"cannot carry a Depends default.")
-            categories[name] = ('path', None)
+            categories[name] = (_ParamKind.PATH, None)
         elif name == 'scope':
             # Rejected, not merely unsupported. ``scope`` was once an alias
             # injecting the Connection, which is backwards: the word means a
@@ -820,16 +840,16 @@ def _handler_param_plan(fn, path_param_names: set) -> tuple:
                     f"is reserved for the request {name} and cannot carry a "
                     f"Depends default — rename the parameter.")
             # ``conn`` / ``connection`` inject the native Connection.
-            categories[name] = ('body' if name == 'body' else 'conn', None)
+            categories[name] = (_ParamKind.BODY if name == 'body' else _ParamKind.CONN, None)
         elif is_dep:
-            categories[name] = ('depends', default)
+            categories[name] = (_ParamKind.DEPENDS, default)
         elif ann is _Conn or (name == 'request' and ann is inspect.Parameter.empty):
             # ``conn: Connection`` (preferred) or the legacy ``request: Request``
             # (``Request`` is a deprecated alias of ``Connection``, so both
             # annotations are the same object here), or the bare name ``request``.
-            categories[name] = ('request', None)
+            categories[name] = (_ParamKind.REQUEST, None)
         elif _is_body_dataclass_annotation(ann):
-            categories[name] = ('dataclass', None)
+            categories[name] = (_ParamKind.DATACLASS, None)
         else:
             # Fallback category: resolve from the query string.
             target = str if ann is inspect.Parameter.empty else _unwrap_optional(ann)
@@ -845,7 +865,7 @@ def _handler_param_plan(fn, path_param_names: set) -> tuple:
                     f"(optionally `| None`)."
                 )
             required = default is inspect.Parameter.empty
-            categories[name] = ('query', _QuerySpec(
+            categories[name] = (_ParamKind.QUERY, _QuerySpec(
                 name=name, type=target, coercer=coercer, required=required,
                 default=None if required else default))
 
@@ -855,7 +875,7 @@ def _handler_param_plan(fn, path_param_names: set) -> tuple:
     # second ``read_body`` call indefinitely.  A ``Request`` param does not
     # count: it drains lazily through the same cache the wrappers use.
     body_param_count = sum(
-        1 for kind, _ in categories.values() if kind in ('body', 'dataclass'))
+        1 for kind, _ in categories.values() if kind in (_ParamKind.BODY, _ParamKind.DATACLASS))
     if body_param_count > 1:
         raise TypeError(
             f"Simplified handler {fn.__name__!r}: more than one parameter would "
@@ -1013,23 +1033,23 @@ def _websocket_param_plan(fn, path_param_names: set = frozenset()) -> tuple[tupl
                     f"WebSocket handler {fn.__name__!r}: parameter {name!r} is "
                     f"reserved for the WebSocket object and cannot carry a "
                     f"Depends default — rename the parameter.")
-            plan.append((name, 'ws', None))
+            plan.append((name, _ParamKind.WS, None))
         elif ann is _Conn or (bare and name in ('conn', 'connection')):
             if is_dep:
                 raise TypeError(
                     f"WebSocket handler {fn.__name__!r}: parameter {name!r} is "
                     f"reserved for the Connection and cannot carry a Depends "
                     f"default — rename the parameter.")
-            plan.append((name, 'conn', None))
+            plan.append((name, _ParamKind.CONN, None))
         elif name in path_param_names:
             if is_dep:
                 raise TypeError(
                     f"WebSocket handler {fn.__name__!r}: parameter {name!r} is "
                     f"a path param of {sorted(path_param_names)!r} and cannot "
                     f"carry a Depends default.")
-            plan.append((name, 'path', None if bare else ann))
+            plan.append((name, _ParamKind.PATH, None if bare else ann))
         elif is_dep:
-            plan.append((name, 'depends', default))
+            plan.append((name, _ParamKind.DEPENDS, default))
         else:
             # Unlike the HTTP plan, a *bare* leftover name is not silently taken
             # as a str query param.  On HTTP that fallback is load-bearing
@@ -1055,7 +1075,7 @@ def _websocket_param_plan(fn, path_param_names: set = frozenset()) -> tuple[tupl
                     f"For full control, declare the raw '(conn, receive, send)' "
                     f"signature instead.")
             required = default is inspect.Parameter.empty
-            plan.append((name, 'query', _QuerySpec(
+            plan.append((name, _ParamKind.QUERY, _QuerySpec(
                 name=name, type=target, coercer=coercer, required=required,
                 default=None if required else default)))
     return tuple(plan)
@@ -1090,15 +1110,15 @@ def _adapt_websocket_handler(fn, path: str = ''):
 
     # The overwhelmingly common shape — a lone ``ws`` — gets a wrapper with no
     # per-connection argument assembly at all.
-    if len(plan) == 1 and plan[0][1] == 'ws':
+    if len(plan) == 1 and plan[0][1] is _ParamKind.WS:
         @wraps(fn)
         async def _ws_wrapper(conn, receive, send):
             await fn(_WS(conn, receive, send))
         return _ws_wrapper
 
-    depends_plan = tuple((n, payload) for n, kind, payload in plan if kind == 'depends')
-    bind_plan = tuple((n, kind, payload) for n, kind, payload in plan if kind != 'depends')
-    has_query = any(kind == 'query' for _, kind, _ in bind_plan)
+    depends_plan = tuple((n, payload) for n, kind, payload in plan if kind is _ParamKind.DEPENDS)
+    bind_plan = tuple((n, kind, payload) for n, kind, payload in plan if kind is not _ParamKind.DEPENDS)
+    has_query = any(kind is _ParamKind.QUERY for _, kind, _ in bind_plan)
     fn_name = fn.__name__
 
     @wraps(fn)
@@ -1114,13 +1134,13 @@ def _adapt_websocket_handler(fn, path: str = ''):
         # Bind everything that cannot fail on a resource *before* resolving any
         # Depends: a connection we are about to reject should never acquire one.
         for name, kind, payload in bind_plan:
-            if kind == 'ws':
+            if kind is _ParamKind.WS:
                 if ws is None:
                     ws = _WS(conn, receive, send)
                 kwargs[name] = ws
-            elif kind == 'conn':
+            elif kind is _ParamKind.CONN:
                 kwargs[name] = conn
-            elif kind == 'path':
+            elif kind is _ParamKind.PATH:
                 raw = conn.path_params.get(name, '')
                 if (payload is not None and isinstance(payload, type)
                         and not isinstance(raw, payload)):
@@ -1192,7 +1212,7 @@ def _make_extended_wrapper(fn, annotations: dict, plan: tuple, depends_plan: tup
     this factory adds zero per-request calls; the closure it returns runs per
     request and is intentionally NOT extracted further (hot-path policy).
     """
-    has_query = any(kind == 'query' for _, kind, _ in plan)
+    has_query = any(kind is _ParamKind.QUERY for _, kind, _ in plan)
     fn_name = fn.__name__
     is_async = inspect.iscoroutinefunction(fn)
 
@@ -1206,7 +1226,7 @@ def _make_extended_wrapper(fn, annotations: dict, plan: tuple, depends_plan: tup
                 dict(parse_qsl(raw_qs.decode('latin-1'), keep_blank_values=True))
                 if raw_qs else {})
         for name, kind, payload in plan:
-            if kind == 'query':
+            if kind is _ParamKind.QUERY:
                 raw = query_values.get(name, _QUERY_MISSING)
                 if raw is _QUERY_MISSING:
                     if payload.required:
@@ -1224,18 +1244,18 @@ def _make_extended_wrapper(fn, annotations: dict, plan: tuple, depends_plan: tup
                             f'query parameter {name!r}: cannot coerce {raw!r} '
                             f'to {payload.type.__name__}',
                         ) from exc
-            elif kind == 'conn':
+            elif kind is _ParamKind.CONN:
                 kwargs[name] = conn
-            elif kind == 'body':
+            elif kind is _ParamKind.BODY:
                 raw = await conn.body()
                 ann = annotations.get(name, inspect.Parameter.empty)
                 if _is_body_dataclass_annotation(ann):
                     kwargs[name] = _decode_json_body(ann, raw, fn_name)
                 else:
                     kwargs[name] = raw
-            elif kind == 'request':
+            elif kind is _ParamKind.REQUEST:
                 kwargs[name] = conn
-            elif kind == 'dataclass':
+            elif kind is _ParamKind.DATACLASS:
                 raw = await conn.body()
                 kwargs[name] = _decode_json_body(annotations[name], raw, fn_name)
             else:  # 'path'
@@ -1315,7 +1335,7 @@ def _adapt_handler(fn, path: str, converters: dict | None = None):
     # default is the one registration-time signal that the author may have
     # meant a query param, so say so now rather than 404-by-surprise later.
     for name, p in params.items():
-        if categories[name][0] == 'path' and p.default is not inspect.Parameter.empty:
+        if categories[name][0] is _ParamKind.PATH and p.default is not inspect.Parameter.empty:
             warnings.warn(
                 f"Simplified handler {fn.__name__!r}: parameter {name!r} matches "
                 f"a path placeholder in {path!r}; its default is never used and "
@@ -1335,17 +1355,17 @@ def _adapt_handler(fn, path: str, converters: dict | None = None):
         for name in params:
             ann = annotations.get(name, inspect.Parameter.empty)
             kind = categories[name][0]
-            if kind == 'conn':
+            if kind is _ParamKind.CONN:
                 kwargs[name] = conn
-            elif kind == 'body':
+            elif kind is _ParamKind.BODY:
                 raw = await conn.body()
                 if _is_body_dataclass_annotation(ann):
                     kwargs[name] = _decode_json_body(ann, raw, fn.__name__)
                 else:
                     kwargs[name] = raw
-            elif kind == 'request':
+            elif kind is _ParamKind.REQUEST:
                 kwargs[name] = conn
-            elif kind == 'dataclass':
+            elif kind is _ParamKind.DATACLASS:
                 raw = await conn.body()
                 kwargs[name] = _decode_json_body(ann, raw, fn.__name__)
             else:  # 'path'
@@ -1378,9 +1398,9 @@ def _adapt_handler(fn, path: str, converters: dict | None = None):
             f"app.register_converter({type(result).__name__}, ...)."
         )
 
-    has_query = any(kind == 'query' for kind, _ in categories.values())
+    has_query = any(kind is _ParamKind.QUERY for kind, _ in categories.values())
     depends_plan = tuple(
-        (n, payload) for n, (kind, payload) in categories.items() if kind == 'depends')
+        (n, payload) for n, (kind, payload) in categories.items() if kind is _ParamKind.DEPENDS)
 
     if not has_query and not depends_plan:
         # Zero-overhead pin: neither new parameter category is in play, so
@@ -1391,7 +1411,7 @@ def _adapt_handler(fn, path: str, converters: dict | None = None):
     # fully computed at registration; the per-request work is only what the
     # declared parameters require.
     plan = tuple((n, kind, payload) for n, (kind, payload) in categories.items()
-                 if kind != 'depends')
+                 if kind is not _ParamKind.DEPENDS)
     return _make_extended_wrapper(fn, annotations, plan, depends_plan, converters)
 
 

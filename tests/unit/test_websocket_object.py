@@ -18,7 +18,8 @@ import pytest
 
 from blackbull import (BlackBull, Connection, Headers, WebSocket,
                        WebSocketDisconnect)
-from blackbull.router import _adapt_websocket_handler, _websocket_param_plan
+from blackbull.router import (_ParamKind, _adapt_websocket_handler,
+                              _websocket_param_plan)
 from blackbull.utils import Scheme
 
 # ``send()`` annotates its parameter, so under the beartype import-hook the
@@ -466,7 +467,7 @@ def test_raw_triplet_handler_is_not_wrapped_at_all():
     assert not hasattr(_registered(app, '/raw2'), '__wrapped__')
 
 
-def _kinds(plan) -> tuple[str, ...]:
+def _kinds(plan) -> tuple[_ParamKind, ...]:
     """Just the categories of a param plan, in signature order."""
     return tuple(kind for _, kind, _ in plan)
 
@@ -474,7 +475,7 @@ def _kinds(plan) -> tuple[str, ...]:
 @pytest.mark.parametrize('name', ['ws', 'websocket'])
 def test_bare_parameter_names_get_the_object(name):
     plan = _websocket_param_plan(eval(f'lambda {name}: None'))
-    assert _kinds(plan) == ('ws',)
+    assert _kinds(plan) == (_ParamKind.WS,)
 
 
 def test_annotation_wins_over_name():
@@ -482,14 +483,14 @@ def test_annotation_wins_over_name():
     async def handler(ws: Connection):
         pass
 
-    assert _kinds(_websocket_param_plan(handler)) == ('conn',)
+    assert _kinds(_websocket_param_plan(handler)) == (_ParamKind.CONN,)
 
 
 def test_object_and_connection_together():
     async def handler(ws: WebSocket, conn: Connection):
         pass
 
-    assert _kinds(_websocket_param_plan(handler)) == ('ws', 'conn')
+    assert _kinds(_websocket_param_plan(handler)) == (_ParamKind.WS, _ParamKind.CONN)
 
 
 def test_unresolvable_parameter_fails_at_registration_not_at_connect_time():
@@ -511,7 +512,7 @@ def test_an_explicit_annotation_works_under_any_parameter_name():
     async def handler(sock: WebSocket):
         pass
 
-    assert _kinds(_websocket_param_plan(handler)) == ('ws',)
+    assert _kinds(_websocket_param_plan(handler)) == (_ParamKind.WS,)
 
 
 def test_http_route_is_unaffected_by_the_websocket_branch():
