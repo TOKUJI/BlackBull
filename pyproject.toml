@@ -144,7 +144,7 @@ testing = [
     # asserts on diagnostic *positions*, so a version bump that re-words or
     # re-anchors a diagnostic must be an explicit, reviewed change rather
     # than something CI picks up on its own.
-    "pyright==1.1.408",
+    "pyright==1.1.411",
 ]
 
 docs = [
