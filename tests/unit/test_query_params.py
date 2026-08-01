@@ -276,3 +276,53 @@ class TestQueryParamsEndToEnd:
         with TestClient(app) as client:
             r = client.get('/search?page=xyz')
             assert r.status_code == 400
+
+
+class TestPathPlaceholderNamedBody:
+    """A ``{body}`` path placeholder wins over the reserved ``body`` name.
+
+    Regression: the plain (zero-overhead-pin) wrapper used to dispatch a
+    parameter literally named ``body`` to the request-body branch even when
+    ``{body}`` was declared as a path placeholder — binding the request body
+    where the extended wrapper (and the path-param classifier, which gives
+    path placeholders top precedence) bound the path value.  The two wrappers
+    must agree: the placeholder wins.
+    """
+
+    def test_body_placeholder_binds_path_value_in_plain_wrapper(self):
+        app = BlackBull()
+
+        @app.route(path='/x/{body}')
+        async def h(body):
+            return f'body={body!r}'
+
+        with TestClient(app) as client:
+            r = client.get('/x/abc', content=b'RAW-BODY')
+            assert r.status_code == 200
+            assert r.text == "body='abc'"
+
+    def test_body_placeholder_binds_path_value_in_extended_wrapper(self):
+        app = BlackBull()
+
+        @app.route(path='/y/{body}')
+        async def h(body, q: str = 'q'):
+            return f'body={body!r} q={q!r}'
+
+        with TestClient(app) as client:
+            r = client.get('/y/abc', params={'q': 'Q'}, content=b'RAW-BODY')
+            assert r.status_code == 200
+            assert r.text == "body='abc' q='Q'"
+
+    def test_bare_body_param_still_binds_request_body(self):
+        """Without a ``{body}`` placeholder the reserved ``body`` name keeps
+        binding the request body — the fix must not disturb the normal case."""
+        app = BlackBull()
+
+        @app.route(path='/normal')
+        async def h(body):
+            return f'body={body!r}'
+
+        with TestClient(app) as client:
+            r = client.get('/normal', content=b'RAW-BODY')
+            assert r.status_code == 200
+            assert r.text == "body=b'RAW-BODY'"

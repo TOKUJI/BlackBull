@@ -1310,9 +1310,6 @@ def _adapt_handler(fn, path: str, converters: dict | None = None):
     path_param_names: set[str] = _path_param_names(path)
     params, annotations, categories = _handler_param_plan(fn, path_param_names)
 
-    request_param_names: frozenset[str] = frozenset(
-        n for n, (kind, _) in categories.items() if kind == 'request')
-
     # A path param always resolves from the path, so a declared default can
     # never apply — and any same-named query-string key is shadowed.  The
     # default is the one registration-time signal that the author may have
@@ -1337,20 +1334,21 @@ def _adapt_handler(fn, path: str, converters: dict | None = None):
         kwargs: dict = {}
         for name in params:
             ann = annotations.get(name, inspect.Parameter.empty)
-            if categories[name][0] == 'conn':
+            kind = categories[name][0]
+            if kind == 'conn':
                 kwargs[name] = conn
-            elif name == 'body':
+            elif kind == 'body':
                 raw = await conn.body()
                 if _is_body_dataclass_annotation(ann):
                     kwargs[name] = _decode_json_body(ann, raw, fn.__name__)
                 else:
                     kwargs[name] = raw
-            elif name in request_param_names:
+            elif kind == 'request':
                 kwargs[name] = conn
-            elif _is_body_dataclass_annotation(ann) and name not in path_param_names:
+            elif kind == 'dataclass':
                 raw = await conn.body()
                 kwargs[name] = _decode_json_body(ann, raw, fn.__name__)
-            else:
+            else:  # 'path'
                 raw = conn.path_params.get(name, '')
                 if (ann is not inspect.Parameter.empty and isinstance(ann, type)
                         and not isinstance(raw, ann)):
