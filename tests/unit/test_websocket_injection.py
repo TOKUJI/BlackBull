@@ -14,7 +14,8 @@ import pytest
 
 from blackbull import (BlackBull, Connection, Depends, Headers, WebSocket,
                        WebSocketDisconnect)
-from blackbull.router import _adapt_websocket_handler, _websocket_param_plan
+from blackbull.router import (_ParamKind, _adapt_websocket_handler,
+                              _websocket_param_plan)
 from blackbull.utils import Scheme
 
 
@@ -49,7 +50,7 @@ def _conn(path='/ws', *, query=b'', path_params=None) -> Connection:
     return conn
 
 
-def _kinds(plan) -> tuple[str, ...]:
+def _kinds(plan) -> tuple[_ParamKind, ...]:
     return tuple(kind for _, kind, _ in plan)
 
 
@@ -65,14 +66,14 @@ def test_path_param_is_classified_by_name():
     async def handler(ws: WebSocket, room: str):
         pass
 
-    assert _kinds(_websocket_param_plan(handler, {'room'})) == ('ws', 'path')
+    assert _kinds(_websocket_param_plan(handler, {'room'})) == (_ParamKind.WS, _ParamKind.PATH)
 
 
 def test_annotated_leftover_is_a_query_param():
     async def handler(ws: WebSocket, since: int):
         pass
 
-    assert _kinds(_websocket_param_plan(handler, set())) == ('ws', 'query')
+    assert _kinds(_websocket_param_plan(handler, set())) == (_ParamKind.WS, _ParamKind.QUERY)
 
 
 def test_query_param_must_be_annotated():
@@ -97,7 +98,7 @@ def test_depends_default_is_classified():
     async def handler(ws: WebSocket, db=Depends(provider)):
         pass
 
-    assert _kinds(_websocket_param_plan(handler, set())) == ('ws', 'depends')
+    assert _kinds(_websocket_param_plan(handler, set())) == (_ParamKind.WS, _ParamKind.DEPENDS)
 
 
 @pytest.mark.parametrize('name', ['ws', 'websocket', 'conn', 'connection'])
