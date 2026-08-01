@@ -31,6 +31,8 @@ so the editable install's metadata catches up.
 
 ## [Unreleased]
 
+## [0.68.0] — 2026-08-01
+
 ### Added
 
 - **A test client that drives the path a request actually takes.**  BlackBull
