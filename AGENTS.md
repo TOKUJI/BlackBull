@@ -124,7 +124,7 @@ Rules that aren't architectural but will cause subtle bugs if you forget them.
 | File finding | `rg --files` or `rg -l` | One tool, less context switching |
 | Python package management | `uv` | Single binary replaces `pip` + `venv`; see `pyproject.toml` `[project.scripts]` |
 | Command runner | `just` | Project-specific commands in `justfile`.  `just typecheck`, `just docs`, etc. — no more memorising long `pytest`/`mkdocs` invocations |
-| CPU profiling | `py-spy` | `py-spy record -o profile.svg -- python app.py` (flamegraph) / `py-spy top -- python app.py` (live).  Run as same user — if ptrace blocked, add `--nonblocking` |
+| CPU profiling | `py-spy` | `py-spy record -f speedscope -o profile.json -- python app.py` — speedscope JSON, **not** SVG: each sample is already a full call-stack (list of frame indices into `shared.frames`), so it opens directly in VS Code / speedscope.app and parses with stdlib `json` (no SVG geometry reconstruction).  `py-spy top -- python app.py` (live).  Run as same user — if ptrace blocked, add `--nonblocking` |
 | JSON filtering | `jq` | `jq '[.cases[] \| select(.state=="failed")]'` on h2spec/http11probe results |
 
 - Prefer `rg` over `grep` / `find` for all text search.
