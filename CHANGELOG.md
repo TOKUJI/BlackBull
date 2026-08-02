@@ -31,6 +31,61 @@ so the editable install's metadata catches up.
 
 ## [Unreleased]
 
+## [0.68.1] — 2026-08-02
+
+Post-Sprint-88 patch — router param-kind classification (which also fixed a
+`{body}`-placeholder regression), a zero-hop dispatch merge, docs, and CI/
+dependency bumps.  Internal refactor + fix only: no new public API, no new
+env vars, no behaviour change beyond the fix below.
+
+### Fixed
+
+- **A `{body}` path placeholder now binds the path value in the plain
+  wrapper too.**  The zero-overhead-pin wrapper dispatched a parameter
+  literally named `body` to the request-body branch regardless of the route,
+  so `@app.route(path='/x/{body}')` with `async def h(body)` bound the raw
+  request body where the extended wrapper — and the path-param classifier,
+  which gives path placeholders top precedence — bound the path segment.  The
+  two wrappers now agree: the placeholder wins, and a bare `body` parameter
+  with no `{body}` placeholder still binds the request body, unchanged.
+  Pinned by three new regression tests covering both wrappers and the normal
+  case.
+
+### Internal
+
+- **Simplified-handler parameters are classified once at registration into a
+  `_ParamKind` enum, and the plain and extended wrappers dispatch on it with
+  `match`.**  The wrappers previously re-derived parameter kinds from string
+  literals (`'conn'`, `'body'`, `'query'`, …), which is how the plain and
+  extended wrappers drifted apart; the classification now lives in one place,
+  produced once per handler at registration.  A plain `Enum` is deliberate —
+  `kind == 'query'` must fail loudly, not string-match.
+- **The extended wrapper is built by a factory extracted at registration
+  time**, so both wrapper shapes share one construction path instead of two
+  independent `_adapt_handler` branches.
+- **Per-request dispatch prep merged into `_dispatch_request` (zero-hop).**
+  The HTTP/1.1 actor's per-request preparation is folded into the dispatch
+  call, removing one call boundary from the request path (no benchmark claim;
+  shipped as structure).
+
+### Docs
+
+- **A/B verdict asymmetry documented.**  `bench/peers/AB-HIGH-PRECISION.md`
+  records why local and EC2 A/B verdicts can disagree, and the ab-verify
+  workflow is wired into the agent docs (`.github/copilot-instructions.md`,
+  `AGENTS.md`) with EC2 calibration and a two-consecutive-polls wait rule for
+  reading check rollups.
+- **ab-verify EC2 launcher added** — `bench/aws/ab.sh` (ABBA measurement +
+  import-hash proof) with `install.sh` uv/.git provisioning and a
+  `native_app` bench target, so high-precision A/Bs can run on EC2 without
+  ad-hoc setup.
+
+### CI
+
+- **Dependabot group and dependency bumps.**  The `python-deps` group gains a
+  `dependabot.yml` entry; pyright → 1.1.411, codeql-action steps → v4.37.4,
+  and `pypa/gh-action-pypi-publish` → 1.14.2.  No runtime dependency changes.
+
 ## [0.68.0] — 2026-08-01
 
 ### Added
