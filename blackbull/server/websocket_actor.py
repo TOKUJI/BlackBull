@@ -86,7 +86,15 @@ class WebSocketActor(Actor):
 
     async def _emit_websocket_message(self, event: dict) -> None:
         """Read-time emit adapter: ``websocket_message`` fires when the
-        recipient reads a message, before the handler consumes it."""
+        recipient reads a message, before the handler consumes it.
+
+        Re-checks the listener set per message (cached predicate) so a
+        listener registered after this connection was built still receives
+        events, while a no-listener throughput workload pays one boolean
+        check instead of the whole ``Event``/``emit`` chain.
+        """
+        if not self._aggregator.has_websocket_message_listeners():
+            return
         await self._aggregator.on_websocket_message(self._conn, event)
 
     async def run(self) -> None:
@@ -130,9 +138,11 @@ class WebSocketActor(Actor):
         await self._ws_send(event)
         # Control-frame watchdog (design A'): service PING/CLOSE frames that
         # arrived while the handler worked, without blocking the send path
-        # (buffered-bytes only).  On a connection where a reader task owns
-        # the wire this is a no-op — the reader services control frames.
-        if self._ws_receive.has_buffered():
+        # (buffered-bytes only, and only when a control frame actually leads
+        # the buffer — with data frames buffered, the app/reader owns them).
+        # On a connection where a reader task owns the wire this is a no-op
+        # — the reader services control frames.
+        if self._ws_receive.has_control_frames_buffered():
             await self._ws_receive.service_available_control_frames()
         self._ws_receive.touch()
 

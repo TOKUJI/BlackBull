@@ -1536,6 +1536,18 @@ class WebSocketRecipient(BaseRecipient):
         """
         return self._reader.has_buffered()
 
+    def has_control_frames_buffered(self) -> bool:
+        """True when a control frame leads the inbound buffer.
+
+        Synchronous, O(1) gate for send-time servicing: with only data
+        frames buffered (a flood), the servicing coroutine's flag churn and
+        ``_frame_bytes_needed`` scan would run per message for nothing — a
+        data frame is owned by the app/reader, not the servicer.
+        """
+        if self._reader.buffered_len() < 2:
+            return False
+        return (self._reader.peek(2)[0] & 0x0F) in _WS_CONTROL_OPS
+
     def _ensure_watchdog(self) -> None:
         if self._watchdog is None:
             self._watchdog = WsIdleWatchdog(self._on_idle_tick)

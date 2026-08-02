@@ -156,7 +156,14 @@ class EventAggregator:
         Canonical detail shape ``{'conn', 'text', 'bytes'}`` — the shape the
         direct-recipient path and docs/guide/events.md use.  (It was briefly
         ``{'conn', 'message'}`` on the server path; unified in Sprint 90.)
+
+        Guarded like the other ``on_*`` methods: with no ``websocket_message``
+        listener, the ``Event`` + detail-dict allocation and the ``emit``
+        indirection are skipped (the cached predicate is the receive path's
+        documented skip mechanism).
         """
+        if not self.has_websocket_message_listeners():
+            return
         await self._dispatcher.emit(
             Event("websocket_message", {
                 'conn':  conn,

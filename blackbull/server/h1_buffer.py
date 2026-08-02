@@ -178,10 +178,17 @@ class BufferedH1Reader:
         ``n=None`` (the pre-existing no-arg contract the H/1 header scan
         uses, e.g. ``http1_actor``) returns the front buffer in full; ``n``
         bounds the peek and also looks into the underlying reader's buffer.
+
+        The bounded form slices the front buffer before converting, so it
+        costs O(n) — never a full copy of a large front buffer (the WS
+        send-time servicing calls this per message while data is buffered).
         """
         if n is None:
             return bytes(self._buf)
-        return (bytes(self._buf) + self._reader.peek(n))[:n]
+        have = len(self._buf)
+        if have >= n:
+            return bytes(self._buf[:n])
+        return bytes(self._buf) + self._reader.peek(n - have)
 
     def __getattr__(self, name):
         # Anything else the underlying reader offers (feed_eof, transport

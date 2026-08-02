@@ -175,6 +175,10 @@ async def test_websocket_message_fires_per_message(
         fake_ws_reader_two_msgs, fake_writer, mock_ws_app_two_msgs,
         mock_aggregator) -> None:
     aggregator = mock_aggregator
+    # This test exercises the read-time emit adapter, so the listener
+    # predicate must be True (the fixture's default False models the
+    # zero-listener hot path, where the adapter skips the emit entirely).
+    aggregator.has_websocket_message_listeners.return_value = True
     conn = _ws_conn()
     actor = WebSocketActor(
         fake_ws_reader_two_msgs, fake_writer, conn, mock_ws_app_two_msgs, aggregator)
