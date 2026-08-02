@@ -47,8 +47,8 @@ from ..protocol.frame_types import (
     DataFrameFlags, FrameTypes, HeaderFrameFlags, PseudoHeaders,
 )
 from ..server.http2_ws import HTTP2WSWriter
-from ..server.recipient import (AbstractReader, IncompleteReadError,
-                                WebSocketRecipient)
+from ..server.recipient import (_WS_EVENT_QUEUE_DEPTH, AbstractReader,
+                                IncompleteReadError, WebSocketRecipient)
 from ..server.ws_codec import WSOpcode, encode_frame
 from .client import Client
 from .exceptions import HandshakeError
@@ -152,10 +152,12 @@ class WebSocketH2Session:
         # PONG / echo-CLOSE frames masked, as a client's must be.
         # Recipient writes ride the per-stream sender via HTTP2WSWriter,
         # inheriting H2 flow control.
+        # Read-ahead stays on for clients — see the note in client/websocket.py.
         self._recipient = WebSocketRecipient(
             _H2QueueReader(frame_queue, self._credit_returned),
             HTTP2WSWriter(self._sender),
-            require_masked=False)
+            require_masked=False,
+            ws_queue_depth=_WS_EVENT_QUEUE_DEPTH)
         # Skip the synthetic 'websocket.connect' first-call event — the
         # Extended CONNECT handshake already established the session.
         self._recipient._connect_sent = True

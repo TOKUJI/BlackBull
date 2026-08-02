@@ -31,6 +31,30 @@ so the editable install's metadata catches up.
 
 ## [Unreleased]
 
+### Changed
+
+- **WebSocket reads inline by default; `BB_WS_QUEUE_DEPTH` now means read-ahead
+  depth and defaults to `0` (was `256`).**  Each connection used to run a
+  background reader task that handed every inbound message to the handler
+  through an `asyncio.Queue`.  That handoff cost one future plus one
+  `call_soon` per message — the whole of WebSocket's event-loop overhead above
+  HTTP/1.1.  Reading inline in the handler's own task drops the per-message
+  loop touches from **4.09 to 2.06**, exactly HTTP/1.1's figure
+  (`python bench/loop_touches.py`); HTTP/1.1 and HTTP/2 are unchanged.
+
+  Control frames are still handled for you in both modes — a `ping` is
+  answered and a `close` echoed per RFC 6455 §5.5 — but inline mode does so
+  when the handler drives the next `receive()` rather than ahead of it
+  (RFC 6455 §5.5.2 permits a delayed `pong`).  Set `BB_WS_QUEUE_DEPTH` to a
+  positive value to restore the background reader and its bounded buffering;
+  that is the right choice for a handler that does slow work between reads.
+
+  Registering a `websocket_message` listener switches read-ahead back on
+  automatically, so the documented contract that the event fires when the
+  *server* reads a message — not when the handler consumes it — is preserved
+  without configuration.  Client sessions are unaffected: they keep read-ahead
+  on by default.
+
 ## [0.68.1] — 2026-08-02
 
 Post-Sprint-88 patch — router param-kind classification (which also fixed a

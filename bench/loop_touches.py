@@ -56,12 +56,17 @@ from asyncio.base_events import BaseEventLoop
 #               ``asyncio.start_server`` row.  BlackBull adds nothing.
 #   HTTP/2      5.20 = call_soon 4.17 + create_future 1.02 — the per-stream
 #               task the frame loop spawns into its TaskGroup dominates.
-#   WebSocket   4.09 = call_soon 2.06 + create_future 2.03 — two futures per
-#               message, the inbound queue being the second.
+#   WebSocket   2.09 = call_soon 1.06 + create_future 1.02 — identical to
+#               HTTP/1.1, i.e. the StreamReader handshake and nothing else.
+#               It read 4.09 while a background reader task handed every
+#               message through an asyncio.Queue; reading inline in the app's
+#               own task removed exactly one future and one call_soon per
+#               message.  Setting BB_WS_QUEUE_DEPTH > 0 restores the reader
+#               task — and the 4.09 — in exchange for read-ahead.
 BUDGETS = {
     'BlackBull HTTP/1.1': 2.20,
     'BlackBull HTTP/2': 5.40,
-    'BlackBull WebSocket': 4.30,
+    'BlackBull WebSocket': 2.20,
 }
 
 COUNTS = {'call_soon': 0, 'call_at': 0, 'call_later': 0, 'create_future': 0}

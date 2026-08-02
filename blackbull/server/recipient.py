@@ -1,5 +1,6 @@
 import asyncio
 from abc import ABC, abstractmethod
+from collections import deque
 from typing import Awaitable, Callable, Optional
 
 from .cap_log import log_cap_hit
@@ -24,7 +25,13 @@ logger = logging.getLogger(__name__)
 # Per-stream and per-connection event queue depth limits.
 # These cap memory growth under overload; see bench/README.md.
 _HTTP2_STREAM_QUEUE_DEPTH = 64
+# Depth used when WebSocket read-ahead is switched on.  It is *not* the
+# default: read-ahead costs a background task plus a queue hop per message
+# (one future + one call_soon), which is the whole of WebSocket's loop-touch
+# excess over HTTP/1.1.  See ``WebSocketRecipient`` for the two modes.
 _WS_EVENT_QUEUE_DEPTH = 256
+# Read inline, in the app's own task — no reader task, no per-message handoff.
+_WS_READ_INLINE = 0
 
 # Consume-crediting mode bounds the HTTP/2 stream queue by BYTES (the
 # advertised inbound window), not frame count — a conformant peer sending
@@ -915,6 +922,31 @@ class WebSocketRecipient(BaseRecipient):
 
     Ping/pong handling requires write access to the transport, so the raw
     writer is stored alongside the reader.
+
+    **Two read modes, selected by ``ws_queue_depth``.**
+
+    ``0`` (default) — *inline*.  Frames are read in the app's own task, only
+    when it calls ``receive()``.  There is no background task and no queue, so
+    a message costs no handoff.  This is the difference between WebSocket's
+    4.09 loop touches/req and HTTP/1.1's 2.06: read-ahead is exactly one extra
+    future plus one extra ``call_soon`` per message.
+
+    ``> 0`` — *eager*.  A background task reads ahead into a bounded queue of
+    that depth.  Costs the handoff, and buys read-ahead: control frames are
+    serviced while the handler is busy, so a PING is answered even between
+    ``receive()`` calls, and up to *depth* messages buffer under a slow app.
+
+    Both modes deliver an identical *ASGI* event sequence to the app; only the
+    timing of control-frame servicing and the existence of buffering differ.
+    Inline mode still answers PING and echoes CLOSE per RFC 6455 §5.5 — it does
+    so when the app drives the next read.  RFC 6455 §5.5.2 permits a delayed
+    PONG, which is what makes inline mode conformant.
+
+    The one thing that *can* tell the modes apart is the ``websocket_message``
+    Level B event, which fires when the server reads a message rather than when
+    the app consumes it — a handler that never calls ``receive()`` must still
+    produce it.  A registered listener therefore forces eager mode; see
+    :meth:`_read_ahead_observed`.
     """
 
     # Hard cap on the declared payload length of a single inbound
@@ -936,7 +968,7 @@ class WebSocketRecipient(BaseRecipient):
                  require_masked: bool = True,
                  dispatcher: EventDispatcher | None = None,
                  conn: dict | Connection | None = None,
-                 ws_queue_depth: int = _WS_EVENT_QUEUE_DEPTH,
+                 ws_queue_depth: int = _WS_READ_INLINE,
                  decompressor=None,
                  max_frame_payload: int | None = None):
         super().__init__(reader)
@@ -969,86 +1001,141 @@ class WebSocketRecipient(BaseRecipient):
         self._ws_queue_depth = ws_queue_depth
         self._event_queue: asyncio.Queue | None = None
         self._reader_task: asyncio.Task | None = None
+        # Inline mode's buffer.  Holds at most one item: the inline driver
+        # stops as soon as a frame produces something to deliver, so this is a
+        # handoff slot rather than a queue — the bounded read-ahead the depth
+        # knob describes only exists in eager mode.
+        self._pending: deque = deque()
+        # Set once the read side is finished (CLOSE, unknown opcode, EOF, or a
+        # protocol error).  Stops the inline driver from touching a dead
+        # transport after the terminal event has been handed to the app.
+        self._read_finished = False
+        # Canonical post-terminal behaviour, identical in both modes: once the
+        # terminal event has been handed to the app, receive() keeps answering
+        # a disconnect (with the last terminal close code) instead of blocking
+        # forever.  ``_terminal_code`` is that code; ``_terminal_delivered``
+        # marks the handoff.
+        self._terminal_code: int | None = None
+        self._terminal_delivered = False
         # When permessage-deflate is negotiated, an
         # :class:`InboundDecompressor` is supplied here.  None means
         # compression is disabled for this connection and any inbound RSV1=1
         # frame is treated as a protocol violation (handled by the read loop).
         self._decompressor = decompressor
 
-    async def _read_loop(self) -> None:
-        """Eagerly read frames from the wire, emit events, and queue ASGI events."""
-        assert self._event_queue is not None
+    async def _emit(self, item) -> None:
+        """Hand one ASGI event (or an exception to re-raise app-side) to the app.
+
+        The only place the two read modes diverge.  Eager mode pushes through
+        the bounded queue, which is what applies backpressure to a fast peer;
+        inline mode drops it in the handoff slot, where the caller one frame up
+        the stack is already waiting for it.
+
+        The terminal code is recorded here — from a disconnect event, a
+        :class:`ProtocolError`, or any other exception — so a receive() past
+        the terminal event can keep answering a disconnect with the same code.
+        """
+        if isinstance(item, dict) and item.get('type') == ASGIEvent.WS_DISCONNECT:
+            self._terminal_code = item.get('code', WSCloseCode.ABNORMAL)
+        elif isinstance(item, ProtocolError):
+            self._terminal_code = item.close_code
+        elif isinstance(item, Exception):
+            self._terminal_code = WSCloseCode.ABNORMAL
+        if self._event_queue is not None:
+            await self._event_queue.put(item)
+        else:
+            self._pending.append(item)
+
+    async def _read_step(self) -> bool:
+        """Read and process exactly one frame.  True ⇒ the read side is done.
+
+        Anything to be delivered goes through :meth:`_emit`; a frame that
+        produces nothing (an incomplete fragment, a PING, an unsolicited PONG)
+        emits nothing and returns False, so whichever driver is running simply
+        reads again.  Keeping every RFC decision here means the two modes
+        cannot drift apart.
+        """
         _CONTROL_OPS = (WSOpcode.CLOSE, WSOpcode.PING, WSOpcode.PONG)
+        h = await read_frame_header(self._reader)
+
+        # RFC 6455 §5.5 — control frames MUST have payload ≤125 and
+        # MUST NOT be fragmented.  Reject without reading the body.
+        if h.opcode in _CONTROL_OPS:
+            if not h.fin:
+                raise ProtocolError('fragmented control frame')
+            if h.length > 125:
+                raise ProtocolError(
+                    f'control frame payload {h.length} > 125')
+
+        # RFC 6455 §5.2 — reserved RSV bits MUST be 0 unless an
+        # extension defining them was negotiated in the handshake.
+        # RSV1 is owned by permessage-deflate (RFC 7692); RSV2 / RSV3
+        # are not defined by any extension we negotiate, so they are
+        # always a protocol error.  RSV1 on a control frame is
+        # likewise always a violation per RFC 7692 §6.
+        if h.rsv2 or h.rsv3:
+            raise ProtocolError(
+                f'RSV2/RSV3 set without negotiated extension '
+                f'(rsv2={h.rsv2} rsv3={h.rsv3})')
+        if h.rsv1 and (self._decompressor is None or h.opcode in _CONTROL_OPS):
+            raise ProtocolError(
+                f'RSV1 set on frame (opcode={h.opcode}) without '
+                f'negotiated permessage-deflate')
+
+        # Hard cap on declared payload length.  ``h.length`` is
+        # the wire indicator (0–125, 126, or 127); the resolved
+        # extended length is read inside read_payload, which
+        # raises FramePayloadTooLarge before any body bytes are
+        # read off the wire.  Defends against post-handshake
+        # OOM where the peer advertises a 2**63 - 1 payload.
         try:
-            while True:
-                h = await read_frame_header(self._reader)
+            payload = await read_payload(
+                self._reader, h.masked, h.length,
+                max_length=self._max_frame_payload)
+        except FramePayloadTooLarge as exc:
+            log_cap_hit('ws_max_frame_payload',
+                        requested=exc.declared,
+                        limit=self._max_frame_payload,
+                        scope_path=(self._conn.path if isinstance(self._conn, Connection)
+                            else self._conn.get('path')) if self._conn else None,
+                        protocol='ws')
+            raise ProtocolError(
+                str(exc),
+                close_code=WSCloseCode.MESSAGE_TOO_BIG,
+            ) from exc
 
-                # RFC 6455 §5.5 — control frames MUST have payload ≤125 and
-                # MUST NOT be fragmented.  Reject without reading the body.
-                if h.opcode in _CONTROL_OPS:
-                    if not h.fin:
-                        raise ProtocolError('fragmented control frame')
-                    if h.length > 125:
-                        raise ProtocolError(
-                            f'control frame payload {h.length} > 125')
+        if self._require_masked and not h.masked:
+            raise ProtocolError('unmasked client frame')
 
-                # RFC 6455 §5.2 — reserved RSV bits MUST be 0 unless an
-                # extension defining them was negotiated in the handshake.
-                # RSV1 is owned by permessage-deflate (RFC 7692); RSV2 / RSV3
-                # are not defined by any extension we negotiate, so they are
-                # always a protocol error.  RSV1 on a control frame is
-                # likewise always a violation per RFC 7692 §6.
-                if h.rsv2 or h.rsv3:
-                    raise ProtocolError(
-                        f'RSV2/RSV3 set without negotiated extension '
-                        f'(rsv2={h.rsv2} rsv3={h.rsv3})')
-                if h.rsv1 and (self._decompressor is None or h.opcode in _CONTROL_OPS):
-                    raise ProtocolError(
-                        f'RSV1 set on frame (opcode={h.opcode}) without '
-                        f'negotiated permessage-deflate')
+        match h.opcode:
+            case WSOpcode.TEXT | WSOpcode.BINARY | WSOpcode.CONTINUATION:
+                # A data frame is never terminal.  A complete message is
+                # emitted via _emit — inline mode's driver then exits on the
+                # non-empty _pending — and an incomplete fragment emits
+                # nothing; either way the driver reads on.
+                await self._handle_data_frame(h.opcode, payload, h.fin, h.rsv1)
+                return False
+            case WSOpcode.CLOSE | WSOpcode.PING | WSOpcode.PONG:
+                return await self._handle_control_frame(h.opcode, payload)
+            case _:
+                await self._handle_unknown_opcode()
+                return True
 
-                # Hard cap on declared payload length.  ``h.length`` is
-                # the wire indicator (0–125, 126, or 127); the resolved
-                # extended length is read inside read_payload, which
-                # raises FramePayloadTooLarge before any body bytes are
-                # read off the wire.  Defends against post-handshake
-                # OOM where the peer advertises a 2**63 - 1 payload.
-                try:
-                    payload = await read_payload(
-                        self._reader, h.masked, h.length,
-                        max_length=self._max_frame_payload)
-                except FramePayloadTooLarge as exc:
-                    log_cap_hit('ws_max_frame_payload',
-                                requested=exc.declared,
-                                limit=self._max_frame_payload,
-                                scope_path=(self._conn.path if isinstance(self._conn, Connection)
-                                    else self._conn.get('path')) if self._conn else None,
-                                protocol='ws')
-                    raise ProtocolError(
-                        str(exc),
-                        close_code=WSCloseCode.MESSAGE_TOO_BIG,
-                    ) from exc
+    async def _drive_once(self) -> bool:
+        """One :meth:`_read_step` under the shared error handling.
 
-                if self._require_masked and not h.masked:
-                    raise ProtocolError('unmasked client frame')
-
-                match h.opcode:
-                    case WSOpcode.TEXT | WSOpcode.BINARY | WSOpcode.CONTINUATION:
-                        done = await self._handle_data_frame(
-                            h.opcode, payload, h.fin, h.rsv1)
-                        if not done:
-                            continue
-                    case WSOpcode.CLOSE | WSOpcode.PING | WSOpcode.PONG:
-                        done = await self._handle_control_frame(h.opcode, payload)
-                        if done:
-                            return
-                    case _:
-                        await self._handle_unknown_opcode()
-                        return
-
+        Every failure path is terminal and emits exactly one thing for the app
+        — a disconnect event or the exception itself — so both drivers can
+        treat a True return as "stop reading" without duplicating any of the
+        RFC 6455 close-frame handling.
+        """
+        try:
+            return await self._read_step()
         except (asyncio.IncompleteReadError, IncompleteReadError):
             await self._emit_disconnected(WSCloseCode.ABNORMAL)
-            await self._event_queue.put({'type': ASGIEvent.WS_DISCONNECT, 'code': WSCloseCode.ABNORMAL})
+            await self._emit({'type': ASGIEvent.WS_DISCONNECT,
+                              'code': WSCloseCode.ABNORMAL})
+            return True
         except ProtocolError as exc:
             close = encode_frame(
                 exc.close_code.to_bytes(2, 'big'),
@@ -1063,7 +1150,8 @@ class WebSocketRecipient(BaseRecipient):
             # Surface the violation on the next app-side receive() (matches
             # the legacy contract that any exception in the read loop is
             # raised back to the app); the close frame has already gone out.
-            await self._event_queue.put(exc)
+            await self._emit(exc)
+            return True
         except Exception as exc:
             close = encode_frame(
                 (1011).to_bytes(2, 'big'),  # INTERNAL_ERROR
@@ -1074,15 +1162,29 @@ class WebSocketRecipient(BaseRecipient):
                 await self._writer.write(close)
             except Exception:
                 pass  # best-effort CLOSE frame; the socket may already be gone.
-            await self._event_queue.put(exc)
+            await self._emit(exc)
+            return True
+
+    async def _read_loop(self) -> None:
+        """Eager driver: read ahead of the app until the read side is done."""
+        while not self._read_finished:
+            self._read_finished = await self._drive_once()
 
     async def _handle_data_frame(self, opcode, payload: bytes, fin: bool,
-                                 rsv1: bool = False) -> bool:
-        """Handle TEXT/BINARY/CONTINUATION frame; returns True if a complete message was queued."""
-        assert self._event_queue is not None
+                                 rsv1: bool = False) -> None:
+        """Handle TEXT/BINARY/CONTINUATION frame.
+
+        Emits a complete message via :meth:`_emit` when the assembler has one
+        (after a ``websocket_message`` event, when a dispatcher is wired).
+        Returns nothing — whether a message was emitted is not a signal the
+        drivers need: inline mode stops via ``_pending`` non-empty, eager mode
+        keeps reading until the read side terminates.  Keeping the return off
+        the method prevents a future reader from mistaking "a message was
+        emitted" for "the read side is done".
+        """
         result = self._assembler.feed(opcode, payload, fin, rsv1)
         if result is None:
-            return False
+            return
         msg_opcode, full_payload, compressed = result
         if compressed:
             assert self._decompressor is not None  # frame loop enforced this
@@ -1123,12 +1225,10 @@ class WebSocketRecipient(BaseRecipient):
                     'bytes': asgi_event['bytes'],
                 },
             ))
-        await self._event_queue.put(asgi_event)
-        return True
+        await self._emit(asgi_event)
 
     async def _handle_control_frame(self, opcode, payload: bytes) -> bool:
         """Handle CLOSE/PING/PONG frame; returns True if the connection should close."""
-        assert self._event_queue is not None
         if opcode == WSOpcode.CLOSE:
             # RFC 6455 §5.5.1 — when an endpoint receives a Close frame and
             # has not yet sent one, it MUST send a Close frame in response,
@@ -1147,7 +1247,7 @@ class WebSocketRecipient(BaseRecipient):
             except Exception:
                 pass  # best-effort CLOSE frame; the socket may already be gone.
             await self._emit_disconnected(event_code)
-            await self._event_queue.put(
+            await self._emit(
                 {'type': ASGIEvent.WS_DISCONNECT, 'code': event_code})
             return True
         if opcode == WSOpcode.PING:
@@ -1159,8 +1259,7 @@ class WebSocketRecipient(BaseRecipient):
         return False
 
     async def _handle_unknown_opcode(self) -> None:
-        """Send a CLOSE frame and queue a disconnect event for an unknown opcode."""
-        assert self._event_queue is not None
+        """Send a CLOSE frame and emit a disconnect event for an unknown opcode."""
         close = encode_frame(
             WSCloseCode.PROTOCOL_ERROR.to_bytes(2, 'big'), opcode=WSOpcode.CLOSE)
         try:
@@ -1168,7 +1267,7 @@ class WebSocketRecipient(BaseRecipient):
         except Exception:
             pass  # best-effort CLOSE frame; the socket may already be gone.
         await self._emit_disconnected(WSCloseCode.PROTOCOL_ERROR)
-        await self._event_queue.put(
+        await self._emit(
             {'type': ASGIEvent.WS_DISCONNECT, 'code': WSCloseCode.PROTOCOL_ERROR})
 
     async def _emit_disconnected(self, code: int) -> None:
@@ -1200,9 +1299,36 @@ class WebSocketRecipient(BaseRecipient):
                 },
             ))
 
+    def _read_ahead_observed(self) -> bool:
+        """Whether anything can tell the difference between the two modes.
+
+        ``websocket_message`` is contractually emitted **when the server reads
+        the message, not when the handler calls receive()** — a handler that
+        never consumes must still produce the event.  Only a reader task
+        running ahead of the app can do that, so a registered listener forces
+        eager mode no matter what the depth says.  With no listener nothing
+        observes the difference and the handoff is pure cost.
+
+        Mirrors ``disconnect_events_observed`` on the HTTP path: pay for the
+        machinery exactly when someone is watching it.
+        """
+        return (self._dispatcher is not None
+                and self._dispatcher.has_listeners('websocket_message'))
+
     def _ensure_reader_started(self) -> None:
-        if self._event_queue is None:
-            self._event_queue = asyncio.Queue(maxsize=self._ws_queue_depth)
+        """Start the read-ahead task, in eager mode only.
+
+        Inline mode has no background reader at all, so this is where the
+        per-message task handoff stops existing rather than being made cheaper.
+        """
+        if self._event_queue is not None:
+            return
+        if self._ws_queue_depth > 0 or self._read_ahead_observed():
+            # A listener can force eager mode with the depth left at 0, so fall
+            # back to the standard depth rather than building a 0-maxsize (i.e.
+            # unbounded) queue, which would drop the backpressure bound.
+            depth = self._ws_queue_depth or _WS_EVENT_QUEUE_DEPTH
+            self._event_queue = asyncio.Queue(maxsize=depth)
             self._reader_task = asyncio.create_task(self._read_loop())
 
     async def shutdown(self) -> None:
@@ -1229,9 +1355,36 @@ class WebSocketRecipient(BaseRecipient):
             self._ensure_reader_started()
             return {'type': ASGIEvent.WS_CONNECT}
         self._ensure_reader_started()
-        item = await self._event_queue.get()  # type: ignore[union-attr]
+        if self._terminal_delivered:
+            # Canonical across both modes: once the terminal event has been
+            # handed to the app, receive() keeps answering a disconnect so a
+            # handler that reads past it can never block on a dead connection.
+            return {'type': ASGIEvent.WS_DISCONNECT,
+                    'code': self._terminal_code or WSCloseCode.ABNORMAL}
+        if self._event_queue is not None:
+            item = await self._event_queue.get()
+        else:
+            # Inline: drive the wire in the app's own task until this read has
+            # something to hand back.  Frames that produce nothing (fragments,
+            # PING, unsolicited PONG) simply loop, so control frames are still
+            # serviced — just at the app's read cadence rather than ahead of it.
+            while not self._pending and not self._read_finished:
+                self._read_finished = await self._drive_once()
+            if not self._pending:
+                # The read side finished without leaving anything: the app is
+                # calling receive() past the terminal event it already got.
+                self._terminal_delivered = True
+                return {'type': ASGIEvent.WS_DISCONNECT,
+                        'code': self._terminal_code or WSCloseCode.ABNORMAL}
+            item = self._pending.popleft()
         if isinstance(item, Exception):
+            self._terminal_delivered = True
             raise item
+        if item.get('type') == ASGIEvent.WS_DISCONNECT:
+            # The terminal event is always the last thing the read side
+            # produces (both drivers stop after emitting it), so handing it
+            # out is the point of no return in eager mode.
+            self._terminal_delivered = True
         return item
 
 
@@ -1269,7 +1422,7 @@ class RecipientFactory:
     def websocket(reader, writer, *,
                   dispatcher: EventDispatcher | None = None,
                   conn: dict | Connection | None = None,
-                  ws_queue_depth: int = _WS_EVENT_QUEUE_DEPTH,
+                  ws_queue_depth: int = _WS_READ_INLINE,
                   decompressor=None) -> WebSocketRecipient:
         if not isinstance(reader, AbstractReader):
             reader = AsyncioReader(reader)

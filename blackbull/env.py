@@ -356,8 +356,11 @@ class Settings:
     #: asyncio.Queue depth for HTTP/2 per-stream request-body events.
     stream_queue_depth: int = 64
 
-    #: asyncio.Queue depth for WebSocket inbound events per connection.
-    ws_queue_depth: int = 256
+    #: WebSocket inbound read-ahead depth.  0 (default) reads inline in the
+    #: app's own task — no reader task, no per-message queue hop.  A positive
+    #: value restores the background reader with a queue of that depth, which
+    #: buys control-frame servicing between the app's receive() calls.
+    ws_queue_depth: int = 0
 
     #: Install QueueHandler on the blackbull logger so event-loop log calls are non-blocking.
     async_logging: bool = True
@@ -627,7 +630,7 @@ def get_settings() -> Settings:
         workers=_int_env('BB_WORKERS', 1),
         max_connections=_int_env_nonneg('BB_MAX_CONNECTIONS', 0),
         stream_queue_depth=_int_env('BB_STREAM_QUEUE_DEPTH', 64),
-        ws_queue_depth=_int_env('BB_WS_QUEUE_DEPTH', 256),
+        ws_queue_depth=_int_env('BB_WS_QUEUE_DEPTH', 0),
         async_logging=_bool_env('BB_ASYNC_LOGGING', True),
         access_log=_bool_env('BB_ACCESS_LOG', True),
         log_format=_str_env('BB_LOG_FORMAT', ''),

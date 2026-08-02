@@ -10,7 +10,7 @@ from .deadline import ConnectionDeadline
 from .protocol_registry import (ConnectionView, ProtocolBinding,
                                 ProtocolRegistry)
 from .recipient import (AbstractReader, PrefixReader,
-                        _HTTP2_STREAM_QUEUE_DEPTH, _WS_EVENT_QUEUE_DEPTH)
+                        _HTTP2_STREAM_QUEUE_DEPTH, _WS_READ_INLINE)
 from .sender import AbstractWriter
 
 logger = logging.getLogger(__name__)
@@ -39,7 +39,7 @@ class ConnectionActor(Actor):
         ssl: bool = False,
         alpn: str | None = None,
         stream_queue_depth: int = _HTTP2_STREAM_QUEUE_DEPTH,
-        ws_queue_depth: int = _WS_EVENT_QUEUE_DEPTH,
+        ws_queue_depth: int = _WS_READ_INLINE,
         registry: ProtocolRegistry | None = None,
         bound_binding: ProtocolBinding | None = None,
         connection_id: str = '',

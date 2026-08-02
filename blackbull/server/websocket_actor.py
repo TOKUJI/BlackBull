@@ -14,7 +14,7 @@ from .constants import WSCloseCode
 from .permessage_deflate import (
     DeflateParams, InboundDecompressor, OutboundCompressor,
 )
-from .recipient import AbstractReader, RecipientFactory, _WS_EVENT_QUEUE_DEPTH
+from .recipient import AbstractReader, RecipientFactory, _WS_READ_INLINE
 from .sender import AbstractWriter, SenderFactory
 
 logger = logging.getLogger(__name__)
@@ -45,7 +45,7 @@ class WebSocketActor(Actor):
         peername: tuple[str, int] | None = None,
         sockname: tuple[str, int] | None = None,
         ssl: bool = False,
-        ws_queue_depth: int = _WS_EVENT_QUEUE_DEPTH,
+        ws_queue_depth: int = _WS_READ_INLINE,
     ) -> None:
         super().__init__()
         self._reader = reader

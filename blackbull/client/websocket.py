@@ -25,8 +25,8 @@ from ..asgi import WebSocketDisconnectEvent, WebSocketReceiveEvent
 
 import logging
 from ..headers import Headers
-from ..server.recipient import (AbstractReader, AsyncioReader,
-                                WebSocketRecipient)
+from ..server.recipient import (_WS_EVENT_QUEUE_DEPTH, AbstractReader,
+                                AsyncioReader, WebSocketRecipient)
 from ..server.sender import AbstractWriter, AsyncioWriter
 from ..server.ws_codec import WSOpcode, encode_frame
 from .exceptions import HandshakeError
@@ -63,9 +63,15 @@ class WebSocketSession:
         self._reader = reader
         self._writer = writer
         self._raw_writer = raw_writer
+        # Read-ahead stays on for clients.  The server default is inline
+        # (no reader task) because a server handler drives receive() in a
+        # tight loop; a client typically awaits an application response
+        # between reads, and read-ahead is what answers a server PING in
+        # that gap.
         self._recipient = WebSocketRecipient(reader,
                                              writer,
-                                             require_masked=False)
+                                             require_masked=False,
+                                             ws_queue_depth=_WS_EVENT_QUEUE_DEPTH)
         # Skip the synthetic 'websocket.connect' first-call event — the
         # handshake (HTTP 101) already established the connection.
         self._recipient._connect_sent = True
