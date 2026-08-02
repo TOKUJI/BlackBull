@@ -41,8 +41,8 @@ class _Scanner:
     type system.
     """
 
-    _LOOP: ClassVar['asyncio.AbstractEventLoop | None'] = None
-    _HANDLE: ClassVar['asyncio.TimerHandle | None'] = None
+    _LOOP: ClassVar[asyncio.AbstractEventLoop | None] = None
+    _HANDLE: ClassVar[asyncio.TimerHandle | None] = None
     _REGISTRY: ClassVar[set] = set()
 
 

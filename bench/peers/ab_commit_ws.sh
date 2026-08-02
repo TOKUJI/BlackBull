@@ -59,7 +59,21 @@ else
     PIN_SERVER=() ; PIN_LOAD=()
 fi
 
+# Python / blackbull entry points resolved ONCE, directly from the repo's
+# venv.  Not `uv run` (ab_commit.sh's historical form): `uv run python`
+# can recreate the venv and drop the `blackbull` console script mid-harness
+# ("Failed to spawn"), which is a silent no-op failure on the very first
+# arm.  Direct .venv paths are deterministic across the whole run.
 REPO="$(git rev-parse --show-toplevel)"
+PY="${PY:-$REPO/.venv/bin/python}"
+BB="${BB:-$REPO/.venv/bin/blackbull}"
+for _bin in "$PY" "$BB"; do
+    if [ ! -x "$_bin" ]; then
+        echo "ab_commit_ws.sh: missing $_bin — is the venv installed?" >&2
+        exit 1
+    fi
+done
+
 cd "$REPO"
 
 TS="$(date -u +%Y%m%d-%H%M%S)"
@@ -123,7 +137,7 @@ swap_to() {
         fi
     done
     [ -n "$proof_file" ] || proof_file="${FILES[0]}"
-    uv run python - "$proof_file" <<'PY'
+    "$PY" - "$proof_file" <<'PY'
 import hashlib, importlib, pathlib, sys
 rel = sys.argv[1]
 mod = importlib.import_module(
@@ -139,7 +153,7 @@ PY
 
 start_server() {
     BB_UVLOOP="$BB_UVLOOP" BB_WORKERS=1 BB_ACCESS_LOG=0 \
-        setsid "${PIN_SERVER[@]}" uv run blackbull bench.peers.native_app:app \
+        setsid "${PIN_SERVER[@]}" "$BB" bench.peers.native_app:app \
             --bind "127.0.0.1:${PORT}" \
             >"$OUTDIR/server.log" 2>&1 &
     SERVER_PID=$!
@@ -164,7 +178,7 @@ measure() {
         --env WS_TICK_MS="$WS_TICK_MS" --env WS_BURST="$WS_BURST" \
         --env WS_LIFETIME_MS="$WS_LIFETIME_MS" \
         bench/k6/websocket_echo_throughput.js >"$OUTDIR/k6_${tag}.log" 2>&1
-    uv run python - "$k6json" <<'PY'
+    "$PY" - "$k6json" <<'PY'
 import json, sys
 d = json.load(open(sys.argv[1]))
 try:
@@ -238,7 +252,7 @@ restore_tree
     echo "| Pinning | server \`$SERVER_CPUS\` / load \`$LOAD_CPUS\` |"
     echo "| Files swapped | \`${FILES[*]}\` |"
     echo ""
-    uv run python bench/peers/ab_report.py "$RAW"
+    "$PY" bench/peers/ab_report.py "$RAW"
 } >"$REPORT"
 
 echo ""

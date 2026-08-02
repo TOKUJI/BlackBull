@@ -46,6 +46,22 @@ from blackbull.protocol.frame import FrameFactory
 from blackbull.protocol.frame_types import FrameTypes, HeaderFrameFlags
 
 
+def _mock_aggregator() -> AsyncMock:
+    """AsyncMock aggregator whose listener predicates return real bools.
+
+    ``request_record_needed`` / ``disconnect_events_observed`` (access_log)
+    are beartype-instrumented on their return type; a bare AsyncMock's
+    predicate methods return MagicMock and trip the bool check under
+    ``--beartype-packages``.  The actor reaches those helpers on the
+    request path.
+    """
+    agg = AsyncMock(spec=EventAggregator)
+    agg.has_request_completed_listeners.return_value = False
+    agg.has_request_disconnected_listeners.return_value = False
+    agg.has_websocket_message_listeners.return_value = False
+    return agg
+
+
 def _dispatched_extensions(target):
     """``extensions`` of what the actor dispatched — a native ``Connection``
     (attribute) on the default lane, or an ASGI scope dict (key) under
@@ -159,7 +175,7 @@ async def test_extensions_sentinel_replaced_before_app_sees_connection():
 
     reader = _Reader(_make_get_headers_frame())
     writer = _Writer()
-    aggregator = AsyncMock(spec=EventAggregator)
+    aggregator = _mock_aggregator()
     actor = HTTP2Actor(reader, writer, capturing_app, aggregator)
     await actor.run()
 
@@ -205,7 +221,7 @@ async def test_extensions_sentinel_replaced_before_app_sees_connection_via_conti
 
     reader = _Reader(_make_split_get_frames())
     writer = _Writer()
-    aggregator = AsyncMock(spec=EventAggregator)
+    aggregator = _mock_aggregator()
     actor = HTTP2Actor(reader, writer, capturing_app, aggregator)
     await actor.run()
 
