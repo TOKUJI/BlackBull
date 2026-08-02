@@ -431,8 +431,7 @@ tightly on `receive()` — the common shape — wants the default.
     conformant, without ever forcing read-ahead on one that is:
 
     - **The PONG-latency contract.**  In inline mode a `ping` is answered
-      when your handler next drives a read — or, if it hasn't, at the
-      next `send()` (send-time servicing), and on every tick of the
+      when your handler next drives a read, or on every tick of the
       internal deadline scanner for a connection idle more than ~0.3 s
       (the idle watchdog).  Worst-case PONG latency is therefore bounded
       to roughly one scanner tick even for a handler that never reads —

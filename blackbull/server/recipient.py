@@ -1108,6 +1108,12 @@ class WebSocketRecipient(BaseRecipient):
         # ``websocket_message`` listener) that work is pure overhead, so an
         # echo workload pays one bool check per message instead.
         self._saw_control_frame = False
+        # Refreshed once per receive cycle from ``read_ahead_needed`` — the
+        # hot path reads this plain attr instead of calling the predicate
+        # per frame (it only changes when listeners are registered, which the
+        # aggregator gen-caches).  ``(ra is None) or ra()``: the direct path
+        # has no predicate, so "listeners present" is vacuously True there.
+        self._listeners = False
         # Design A' (deferred reader): a listener is registered (read-ahead
         # "needed") but the reader task has not been started yet.  Set at
         # connect; cleared when the idle watchdog starts the reader.
@@ -1320,12 +1326,15 @@ class WebSocketRecipient(BaseRecipient):
             }
         # The read-time emit adapter (server path) or the dispatcher (direct
         # path) fires ``websocket_message`` HERE, when the message is read —
-        # before delivery to the app, in every mode.  The adapter is only
-        # called when a listener exists: with none, the zero-listener hot
-        # path skips even the coroutine creation (the adapter's own guard
-        # would otherwise be paid per message).
+        # before delivery to the app, in every mode.  The guard must be
+        # re-evaluated per message, not read from the receive-cycle cache:
+        # a listener registered while the app's ``receive()`` was blocked on
+        # the wire is only visible to a fresh check.  With none, the
+        # zero-listener hot path pays one int compare (the aggregator
+        # gen-caches the lookup) instead of creating a coroutine per message.
         if (self._on_message is not None
-                and (self._read_ahead_needed is None or self._read_ahead_needed())):
+                and (self._read_ahead_needed is None
+                     or self._read_ahead_needed())):
             await self._on_message(asgi_event)
         elif self._dispatcher is not None and self._conn is not None:
             await self._dispatcher.emit(Event(
@@ -1425,7 +1434,7 @@ class WebSocketRecipient(BaseRecipient):
         machinery exactly when someone is watching it.
         """
         if self._read_ahead_needed is not None:
-            return self._read_ahead_needed()
+            return self._listeners      # refreshed once per receive cycle
         return (self._dispatcher is not None
                 and self._dispatcher.has_listeners('websocket_message'))
 
@@ -1564,34 +1573,35 @@ class WebSocketRecipient(BaseRecipient):
             self._saw_control_frame = True
         return is_ctrl
 
-    def _control_frames_matter(self) -> bool:
-        """True when the control-frame machinery is not pure overhead.
-
-        False only on a connection that has never seen a control frame and
-        has no ``websocket_message`` listener — there is nothing to service
-        and no deferred reader to start, so the per-message ``touch()`` and
-        send-time servicing are skipped.
-        """
-        if self._saw_control_frame:
-            return True
-        return (self._read_ahead_needed is not None
-                and self._read_ahead_needed())
-
     def send_touch(self) -> None:
         """Mark send activity for the idle watchdog, at one bool's cost.
 
-        The watchdog is only meaningful once control frames matter; before
-        that, arm it once (so an idle connection with a buffered control
-        frame is still serviced) and skip the per-message ``loop.time()``.
+        The watchdog is only meaningful once control frames matter or a
+        listener needs the deferred reader; before that, arm it once (so an
+        idle connection with a buffered control frame is still serviced) and
+        skip the per-message ``loop.time()``.  The send-time servicing fast
+        path was removed — the watchdog alone bounds PONG latency to ~one
+        scanner tick (the documented contract).
         """
-        if self._control_frames_matter():
+        self._ensure_watchdog_armed()
+        if self._deferred_pending or self._saw_control_frame:
             self.touch()
-        elif self._watchdog is None:
-            self.touch()          # one-time arm; cheap attr check after
 
     def _ensure_watchdog(self) -> None:
         if self._watchdog is None:
             self._watchdog = WsIdleWatchdog(self._on_idle_tick)
+
+    def _ensure_watchdog_armed(self) -> None:
+        """Create + register the watchdog once (requires a running loop).
+
+        Arming must not depend on a touch: the zero-listener echo never
+        touches, yet an idle connection with a buffered control frame must
+        still be serviced.  The ``_watchdog is None`` check is the only
+        per-message cost after the first call.
+        """
+        if self._watchdog is None:
+            self._watchdog = WsIdleWatchdog(self._on_idle_tick)
+            self._watchdog.touch()      # register with the deadline scanner
 
     def touch(self) -> None:
         """Mark connection activity (receive or send) for the idle watchdog.
@@ -1628,10 +1638,14 @@ class WebSocketRecipient(BaseRecipient):
                 pass  # Expected: the task was cancelled intentionally.
 
     async def __call__(self) -> dict:
-        if self._control_frames_matter():
+        # Refresh the listener state once per receive cycle — the hot path
+        # reads the plain attr below instead of calling the predicate per
+        # frame.
+        ra = self._read_ahead_needed
+        self._listeners = (ra is None) or ra()
+        self._ensure_watchdog_armed()
+        if self._deferred_pending or self._saw_control_frame:
             self.touch()
-        elif self._watchdog is None:
-            self.touch()          # one-time arm; cheap attr check after
         if not self._connect_sent:
             self._connect_sent = True
             self._ensure_reader_started()

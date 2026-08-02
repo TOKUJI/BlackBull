@@ -136,16 +136,13 @@ class WebSocketActor(Actor):
             await self._aggregator.on_websocket_connected(
                 self._conn, event.get('subprotocol'))
         await self._ws_send(event)
-        # Control-frame watchdog (design A'): service PING/CLOSE frames that
-        # arrived while the handler worked, without blocking the send path
-        # (buffered-bytes only, and only when a control frame actually leads
-        # the buffer — with data frames buffered, the app/reader owns them).
-        # On a connection where a reader task owns the wire this is a no-op
-        # — the reader services control frames.  ``send_touch`` skips the
-        # per-message watchdog work until a control frame has been observed
-        # or a listener needs read-ahead.
-        if self._ws_receive.has_control_frames_buffered():
-            await self._ws_receive.service_available_control_frames()
+        # Control-frame watchdog (design A'): the idle watchdog services
+        # PING/CLOSE frames on connections quiet for > ~1 scanner tick.  The
+        # send-time servicing fast path was removed — at echo throughput it
+        # cost ~2% per message, and the watchdog alone bounds PONG latency to
+        # ~one tick, the documented contract.  ``send_touch`` keeps the
+        # watchdog armed and marks activity only once control frames matter
+        # or a listener needs the deferred reader.
         self._ws_receive.send_touch()
 
     async def _handle(self, msg: Message) -> None:
