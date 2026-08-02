@@ -1102,6 +1102,12 @@ class WebSocketRecipient(BaseRecipient):
         # frames.  The reader task and the watchdog both yield on these.
         self._reading = False
         self._servicing = False
+        # True once a control frame (CLOSE/PING/PONG) has been observed on
+        # this connection — either read or peeked.  Gates the per-message
+        # send/receive watchdog work: before any control frame (and with no
+        # ``websocket_message`` listener) that work is pure overhead, so an
+        # echo workload pays one bool check per message instead.
+        self._saw_control_frame = False
         # Design A' (deferred reader): a listener is registered (read-ahead
         # "needed") but the reader task has not been started yet.  Set at
         # connect; cleared when the idle watchdog starts the reader.
@@ -1314,8 +1320,12 @@ class WebSocketRecipient(BaseRecipient):
             }
         # The read-time emit adapter (server path) or the dispatcher (direct
         # path) fires ``websocket_message`` HERE, when the message is read —
-        # before delivery to the app, in every mode.
-        if self._on_message is not None:
+        # before delivery to the app, in every mode.  The adapter is only
+        # called when a listener exists: with none, the zero-listener hot
+        # path skips even the coroutine creation (the adapter's own guard
+        # would otherwise be paid per message).
+        if (self._on_message is not None
+                and (self._read_ahead_needed is None or self._read_ahead_needed())):
             await self._on_message(asgi_event)
         elif self._dispatcher is not None and self._conn is not None:
             await self._dispatcher.emit(Event(
@@ -1330,6 +1340,7 @@ class WebSocketRecipient(BaseRecipient):
 
     async def _handle_control_frame(self, opcode, payload: bytes) -> bool:
         """Handle CLOSE/PING/PONG frame; returns True if the connection should close."""
+        self._saw_control_frame = True
         if opcode == WSOpcode.CLOSE:
             # RFC 6455 §5.5.1 — when an endpoint receives a Close frame and
             # has not yet sent one, it MUST send a Close frame in response,
@@ -1524,7 +1535,7 @@ class WebSocketRecipient(BaseRecipient):
             return
         if self._deferred_pending:
             self.start_deferred_reader()
-        elif self._reader.has_buffered():
+        elif self._reader.has_buffered() and self.has_control_frames_buffered():
             asyncio.get_running_loop().create_task(
                 self.service_available_control_frames())
 
@@ -1542,11 +1553,41 @@ class WebSocketRecipient(BaseRecipient):
         Synchronous, O(1) gate for send-time servicing: with only data
         frames buffered (a flood), the servicing coroutine's flag churn and
         ``_frame_bytes_needed`` scan would run per message for nothing — a
-        data frame is owned by the app/reader, not the servicer.
+        data frame is owned by the app/reader, not the servicer.  Also marks
+        the connection as having observed a control frame, which activates
+        the per-message watchdog work.
         """
         if self._reader.buffered_len() < 2:
             return False
-        return (self._reader.peek(2)[0] & 0x0F) in _WS_CONTROL_OPS
+        is_ctrl = (self._reader.peek(2)[0] & 0x0F) in _WS_CONTROL_OPS
+        if is_ctrl:
+            self._saw_control_frame = True
+        return is_ctrl
+
+    def _control_frames_matter(self) -> bool:
+        """True when the control-frame machinery is not pure overhead.
+
+        False only on a connection that has never seen a control frame and
+        has no ``websocket_message`` listener — there is nothing to service
+        and no deferred reader to start, so the per-message ``touch()`` and
+        send-time servicing are skipped.
+        """
+        if self._saw_control_frame:
+            return True
+        return (self._read_ahead_needed is not None
+                and self._read_ahead_needed())
+
+    def send_touch(self) -> None:
+        """Mark send activity for the idle watchdog, at one bool's cost.
+
+        The watchdog is only meaningful once control frames matter; before
+        that, arm it once (so an idle connection with a buffered control
+        frame is still serviced) and skip the per-message ``loop.time()``.
+        """
+        if self._control_frames_matter():
+            self.touch()
+        elif self._watchdog is None:
+            self.touch()          # one-time arm; cheap attr check after
 
     def _ensure_watchdog(self) -> None:
         if self._watchdog is None:
@@ -1587,7 +1628,10 @@ class WebSocketRecipient(BaseRecipient):
                 pass  # Expected: the task was cancelled intentionally.
 
     async def __call__(self) -> dict:
-        self.touch()
+        if self._control_frames_matter():
+            self.touch()
+        elif self._watchdog is None:
+            self.touch()          # one-time arm; cheap attr check after
         if not self._connect_sent:
             self._connect_sent = True
             self._ensure_reader_started()

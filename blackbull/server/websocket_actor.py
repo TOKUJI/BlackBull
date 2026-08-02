@@ -141,10 +141,12 @@ class WebSocketActor(Actor):
         # (buffered-bytes only, and only when a control frame actually leads
         # the buffer — with data frames buffered, the app/reader owns them).
         # On a connection where a reader task owns the wire this is a no-op
-        # — the reader services control frames.
+        # — the reader services control frames.  ``send_touch`` skips the
+        # per-message watchdog work until a control frame has been observed
+        # or a listener needs read-ahead.
         if self._ws_receive.has_control_frames_buffered():
             await self._ws_receive.service_available_control_frames()
-        self._ws_receive.touch()
+        self._ws_receive.send_touch()
 
     async def _handle(self, msg: Message) -> None:
         raise NotImplementedError
