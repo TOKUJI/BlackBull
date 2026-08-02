@@ -1207,6 +1207,10 @@ class WebSocketRecipient(BaseRecipient):
             case _:
                 await self._handle_unknown_opcode()
                 return True
+        # Exhaustiveness fallback: the wildcard arm above covers every
+        # opcode, so this line is unreachable — it exists so every path has
+        # an explicit ``bool`` return (the CodeQL mixed-returns rule).
+        return False
 
     async def _drive_once(self) -> bool:
         """One :meth:`_read_step` under the shared error handling.

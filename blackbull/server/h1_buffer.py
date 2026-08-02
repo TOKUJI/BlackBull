@@ -75,10 +75,6 @@ class BufferedH1Reader:
         """Bytes currently held, unconsumed."""
         return len(self._buf)
 
-    def peek(self) -> bytes:
-        """The buffered bytes, without consuming them."""
-        return bytes(self._buf)
-
     def unread(self, data: bytes) -> None:
         """Push *data* back to the front of the buffer.
 
@@ -176,7 +172,15 @@ class BufferedH1Reader:
     def buffered_len(self) -> int:
         return len(self._buf) + self._reader.buffered_len()
 
-    def peek(self, n: int) -> bytes:
+    def peek(self, n: int | None = None) -> bytes:
+        """Up to *n* buffered bytes without consuming them.
+
+        ``n=None`` (the pre-existing no-arg contract the H/1 header scan
+        uses, e.g. ``http1_actor``) returns the front buffer in full; ``n``
+        bounds the peek and also looks into the underlying reader's buffer.
+        """
+        if n is None:
+            return bytes(self._buf)
         return (bytes(self._buf) + self._reader.peek(n))[:n]
 
     def __getattr__(self, name):
