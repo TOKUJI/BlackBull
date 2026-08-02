@@ -24,6 +24,8 @@
 # Env (ab_commit.sh shared):
 #   REF_BASE / REF_TREAT / PATHSPEC / ROUNDS / PORT / BB_UVLOOP / PHASES
 #   SERVER_CPUS / LOAD_CPUS
+# PATHSPEC defaults to blackbull/ — the bench app is the instrument and is
+# never swapped (both arms serve the working tree's app).
 # WS-specific:
 #   WS_VUS        concurrent WS connections   (default 100)
 #   WS_DURATION   k6 run length               (default 10s)
@@ -37,7 +39,12 @@ set -uo pipefail
 
 REF_BASE="${REF_BASE:-HEAD~1}"
 REF_TREAT="${REF_TREAT:-HEAD}"
-PATHSPEC="${PATHSPEC:-blackbull/ bench/peers/native_app.py}"
+# The bench app is the MEASURING INSTRUMENT, so it must be byte-identical on
+# both arms — exactly like wrk/k6.  Swapping it between refs changes the
+# instrument mid-A/B (the arms differ in more than one variable), and a
+# commit that fixed the app's WS route would otherwise leave the base arm
+# unable to echo at all.  Swap only the framework.
+PATHSPEC="${PATHSPEC:-blackbull/}"
 ROUNDS="${ROUNDS:-3}"
 PORT="${PORT:-8443}"
 BB_UVLOOP="${BB_UVLOOP:-0}"
