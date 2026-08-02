@@ -138,14 +138,29 @@ def mock_ws_app_two_msgs():
     return app
 
 
+@pytest.fixture
+def mock_aggregator():
+    """AsyncMock aggregator whose listener predicate returns a real bool.
+
+    The actor wires ``has_websocket_message_listeners`` into the recipient as
+    the read-ahead predicate (``Callable[[], bool]``).  Under beartype that
+    predicate's return value is type-checked, so the mock must answer a real
+    ``False`` — a bare ``AsyncMock`` returns a ``MagicMock`` and trips the
+    ``bool`` return check on the first receive.
+    """
+    aggregator = AsyncMock(spec_set=EventAggregator)
+    aggregator.has_websocket_message_listeners.return_value = False
+    return aggregator
+
+
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
 async def test_websocket_lifecycle_events(
-        fake_ws_reader, fake_writer, mock_ws_app) -> None:
-    aggregator = AsyncMock(spec_set=EventAggregator)
+        fake_ws_reader, fake_writer, mock_ws_app, mock_aggregator) -> None:
+    aggregator = mock_aggregator
     conn = _ws_conn()
     actor = WebSocketActor(
         fake_ws_reader, fake_writer, conn, mock_ws_app, aggregator)
@@ -157,8 +172,9 @@ async def test_websocket_lifecycle_events(
 
 @pytest.mark.asyncio
 async def test_websocket_message_fires_per_message(
-        fake_ws_reader_two_msgs, fake_writer, mock_ws_app_two_msgs) -> None:
-    aggregator = AsyncMock(spec_set=EventAggregator)
+        fake_ws_reader_two_msgs, fake_writer, mock_ws_app_two_msgs,
+        mock_aggregator) -> None:
+    aggregator = mock_aggregator
     conn = _ws_conn()
     actor = WebSocketActor(
         fake_ws_reader_two_msgs, fake_writer, conn, mock_ws_app_two_msgs, aggregator)
@@ -169,8 +185,8 @@ async def test_websocket_message_fires_per_message(
 
 @pytest.mark.asyncio
 async def test_websocket_protocol_error_isolated(
-        fake_bad_frame_reader, fake_writer) -> None:
-    aggregator = AsyncMock(spec_set=EventAggregator)
+        fake_bad_frame_reader, fake_writer, mock_aggregator) -> None:
+    aggregator = mock_aggregator
     conn = _ws_conn()
 
     async def app(scope, receive, send):
@@ -191,9 +207,9 @@ async def test_websocket_protocol_error_isolated(
 
 @pytest.mark.asyncio
 async def test_protocol_violation_closes_writer(
-        fake_bad_frame_reader, fake_writer) -> None:
+        fake_bad_frame_reader, fake_writer, mock_aggregator) -> None:
     """writer.close() must be called explicitly on protocol violations (P1 §7.2)."""
-    aggregator = AsyncMock(spec_set=EventAggregator)
+    aggregator = mock_aggregator
     conn = _ws_conn()
 
     async def app(scope, receive, send):
@@ -206,12 +222,12 @@ async def test_protocol_violation_closes_writer(
 
 @pytest.mark.asyncio
 async def test_cancellation_propagates_and_is_not_reported_as_error(
-        fake_writer) -> None:
+        fake_writer, mock_aggregator) -> None:
     """Cancelling the actor's task must raise CancelledError (the task really
     cancels instead of completing normally) and must NOT be reported via
     on_error — cancellation is not an error.  Regression: run() used to catch
     BaseException, swallowing CancelledError."""
-    aggregator = AsyncMock(spec_set=EventAggregator)
+    aggregator = mock_aggregator
     conn = _ws_conn()
     accepted = asyncio.Event()
 

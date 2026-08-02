@@ -151,9 +151,18 @@ class EventAggregator:
     async def on_websocket_message(
         self, conn, message: WebSocketReceiveEvent
     ) -> None:
-        """Fire Level B ``websocket_message`` (``conn`` is a Connection)."""
+        """Fire Level B ``websocket_message`` (``conn`` is a Connection).
+
+        Canonical detail shape ``{'conn', 'text', 'bytes'}`` — the shape the
+        direct-recipient path and docs/guide/events.md use.  (It was briefly
+        ``{'conn', 'message'}`` on the server path; unified in Sprint 90.)
+        """
         await self._dispatcher.emit(
-            Event("websocket_message", {'conn': conn, "message": message})
+            Event("websocket_message", {
+                'conn':  conn,
+                'text':  message.get('text'),
+                'bytes': message.get('bytes'),
+            })
         )
 
     async def on_websocket_disconnected(

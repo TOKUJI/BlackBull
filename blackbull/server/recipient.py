@@ -4,7 +4,7 @@ from collections import deque
 from typing import Awaitable, Callable, Optional
 
 from .cap_log import log_cap_hit
-from .deadline import ConnectionDeadline
+from .deadline import ConnectionDeadline, WsIdleWatchdog
 from .sender import AbstractWriter, AsyncioWriter
 from .ws_codec import (
     FramePayloadTooLarge, WSOpcode, encode_frame, read_frame_header,
@@ -40,6 +40,11 @@ _WS_READ_INLINE = 0
 # the byte budget cannot see: queue_depth × 16 (1024 by default) is far above
 # any conformant burst yet keeps per-stream event-dict overhead bounded.
 _EVENT_CAP_MULTIPLIER = 16
+
+# RFC 6455 §5.5 control opcodes — used by the non-blocking control-frame
+# servicing (``WebSocketRecipient.service_available_control_frames``), which
+# must never consume a data frame ahead of the app.
+_WS_CONTROL_OPS = (WSOpcode.CLOSE, WSOpcode.PING, WSOpcode.PONG)
 
 
 # ---------------------------------------------------------------------------
@@ -223,6 +228,25 @@ class AbstractReader(ABC):
     @abstractmethod
     async def read(self, n: int) -> bytes: pass
 
+    def has_buffered(self) -> bool:
+        """True when bytes are already buffered, so a read need not block.
+
+        The WebSocket control-frame watchdog probes this to decide whether it
+        can service a frame without blocking the caller's path.  Default
+        ``False`` — a reader that cannot report buffering is treated as
+        "nothing available", which only disables proactive servicing, never
+        correctness (control frames are still serviced at the next read).
+        """
+        return False
+
+    def buffered_len(self) -> int:
+        """Bytes currently buffered, unconsumed.  Default 0."""
+        return 0
+
+    def peek(self, n: int) -> bytes:
+        """Up to *n* buffered bytes without consuming them.  Default empty."""
+        return b''
+
     def at_eof(self) -> bool:
         """Return True once the peer has closed and the buffer is drained.
 
@@ -293,6 +317,31 @@ class AsyncioReader(AbstractReader):
         except asyncio.IncompleteReadError as exc:
             raise IncompleteReadError(exc.partial) from exc
 
+    def has_buffered(self) -> bool:
+        # asyncio.StreamReader keeps every byte the transport has delivered
+        # in ``_buffer`` until a read consumes it, so "buffer non-empty" is
+        # the honest "a read won't block" probe.  A virtual
+        # ``AbstractReader`` (BufferedH1Reader) exposes ``buffered`` instead.
+        buf = getattr(self._sr, '_buffer', None)
+        if buf is not None:
+            return bool(buf)
+        return getattr(self._sr, 'buffered', 0) > 0
+
+    def buffered_len(self) -> int:
+        buf = getattr(self._sr, '_buffer', None)
+        if buf is not None:
+            return len(buf)
+        return getattr(self._sr, 'buffered', 0)
+
+    def peek(self, n: int) -> bytes:
+        buf = getattr(self._sr, '_buffer', None)
+        if buf is not None:
+            return bytes(buf[:n])
+        peek = getattr(self._sr, 'peek', None)
+        if peek is not None:
+            return bytes(peek()[:n])
+        return b''
+
 
 class PrefixReader(AbstractReader):
     """An :class:`AbstractReader` that replays an already-read *prefix*.
@@ -353,6 +402,15 @@ class PrefixReader(AbstractReader):
 
     def at_eof(self) -> bool:
         return not self._buf and self._reader.at_eof()
+
+    def has_buffered(self) -> bool:
+        return bool(self._buf) or self._reader.has_buffered()
+
+    def buffered_len(self) -> int:
+        return len(self._buf) + self._reader.buffered_len()
+
+    def peek(self, n: int) -> bytes:
+        return (bytes(self._buf) + self._reader.peek(n))[:n]
 
 
 # ---------------------------------------------------------------------------
@@ -923,7 +981,7 @@ class WebSocketRecipient(BaseRecipient):
     Ping/pong handling requires write access to the transport, so the raw
     writer is stored alongside the reader.
 
-    **Two read modes, selected by ``ws_queue_depth``.**
+    **Three read modes, selected by ``ws_queue_depth`` and listeners.**
 
     ``0`` (default) — *inline*.  Frames are read in the app's own task, only
     when it calls ``receive()``.  There is no background task and no queue, so
@@ -936,17 +994,24 @@ class WebSocketRecipient(BaseRecipient):
     serviced while the handler is busy, so a PING is answered even between
     ``receive()`` calls, and up to *depth* messages buffer under a slow app.
 
-    Both modes deliver an identical *ASGI* event sequence to the app; only the
+    *deferred* (``0`` + a ``websocket_message`` listener) — inline at first,
+    so a consuming handler keeps the no-handoff win *even when the listener is
+    registered*.  The idle watchdog (:class:`WsIdleWatchdog`) starts a reader
+    task only after the app has gone quiet for more than one scanner tick —
+    a handler that never calls ``receive()`` still produces events and still
+    gets control frames serviced.
+
+    All modes deliver an identical *ASGI* event sequence to the app; only the
     timing of control-frame servicing and the existence of buffering differ.
-    Inline mode still answers PING and echoes CLOSE per RFC 6455 §5.5 — it does
-    so when the app drives the next read.  RFC 6455 §5.5.2 permits a delayed
+    Inline mode still answers PING and echoes CLOSE per RFC 6455 §5.5 — it
+    does so when the app drives the next read, or, for a handler that has
+    stopped reading, at the next ``send()`` (send-time servicing) and on each
+    idle scanner tick (the watchdog).  RFC 6455 §5.5.2 permits a delayed
     PONG, which is what makes inline mode conformant.
 
-    The one thing that *can* tell the modes apart is the ``websocket_message``
-    Level B event, which fires when the server reads a message rather than when
-    the app consumes it — a handler that never calls ``receive()`` must still
-    produce it.  A registered listener therefore forces eager mode; see
-    :meth:`_read_ahead_observed`.
+    The ``websocket_message`` Level B event fires when the server reads a
+    message rather than when the app consumes it — a handler that never calls
+    ``receive()`` must still produce it.  See :meth:`_read_ahead_observed`.
     """
 
     # Hard cap on the declared payload length of a single inbound
@@ -970,7 +1035,9 @@ class WebSocketRecipient(BaseRecipient):
                  conn: dict | Connection | None = None,
                  ws_queue_depth: int = _WS_READ_INLINE,
                  decompressor=None,
-                 max_frame_payload: int | None = None):
+                 max_frame_payload: int | None = None,
+                 on_message: Callable[[dict], Awaitable[None]] | None = None,
+                 read_ahead_needed: Callable[[], bool] | None = None):
         super().__init__(reader)
         self._writer = writer
         self._connect_sent = False
@@ -1022,6 +1089,27 @@ class WebSocketRecipient(BaseRecipient):
         # compression is disabled for this connection and any inbound RSV1=1
         # frame is treated as a protocol violation (handled by the read loop).
         self._decompressor = decompressor
+        # Read-time emit adapter for the ``websocket_message`` Level B event
+        # (server path — the actor wires this to its aggregator).  The
+        # dispatcher/conn pair is the equivalent for direct-recipient drives;
+        # the event fires when the message is READ, in every mode.
+        self._on_message = on_message
+        self._read_ahead_needed = read_ahead_needed
+        # Wire-ownership coordination (design A'): exactly one of {inline
+        # receive, reader task, watchdog servicing} drives the wire at a
+        # time.  ``_reading`` is set while the app's own receive() drives it;
+        # ``_servicing`` while control-frame servicing reads fully-buffered
+        # frames.  The reader task and the watchdog both yield on these.
+        self._reading = False
+        self._servicing = False
+        # Design A' (deferred reader): a listener is registered (read-ahead
+        # "needed") but the reader task has not been started yet.  Set at
+        # connect; cleared when the idle watchdog starts the reader.
+        self._deferred_pending = False
+        # Idle watchdog — created lazily on the first touch() so constructing
+        # a recipient never requires a running loop.
+        self._watchdog: WsIdleWatchdog | None = None
+        self._closed = False
 
     async def _emit(self, item) -> None:
         """Hand one ASGI event (or an exception to re-raise app-side) to the app.
@@ -1052,15 +1140,14 @@ class WebSocketRecipient(BaseRecipient):
         Anything to be delivered goes through :meth:`_emit`; a frame that
         produces nothing (an incomplete fragment, a PING, an unsolicited PONG)
         emits nothing and returns False, so whichever driver is running simply
-        reads again.  Keeping every RFC decision here means the two modes
+        reads again.  Keeping every RFC decision here means the modes
         cannot drift apart.
         """
-        _CONTROL_OPS = (WSOpcode.CLOSE, WSOpcode.PING, WSOpcode.PONG)
         h = await read_frame_header(self._reader)
 
         # RFC 6455 §5.5 — control frames MUST have payload ≤125 and
         # MUST NOT be fragmented.  Reject without reading the body.
-        if h.opcode in _CONTROL_OPS:
+        if h.opcode in _WS_CONTROL_OPS:
             if not h.fin:
                 raise ProtocolError('fragmented control frame')
             if h.length > 125:
@@ -1077,7 +1164,7 @@ class WebSocketRecipient(BaseRecipient):
             raise ProtocolError(
                 f'RSV2/RSV3 set without negotiated extension '
                 f'(rsv2={h.rsv2} rsv3={h.rsv3})')
-        if h.rsv1 and (self._decompressor is None or h.opcode in _CONTROL_OPS):
+        if h.rsv1 and (self._decompressor is None or h.opcode in _WS_CONTROL_OPS):
             raise ProtocolError(
                 f'RSV1 set on frame (opcode={h.opcode}) without '
                 f'negotiated permessage-deflate')
@@ -1166,8 +1253,13 @@ class WebSocketRecipient(BaseRecipient):
             return True
 
     async def _read_loop(self) -> None:
-        """Eager driver: read ahead of the app until the read side is done."""
+        """Eager/deferred driver: read ahead of the app until the read side
+        is done, yielding to the app's inline receive() and to watchdog
+        servicing so the wire has exactly one owner at a time."""
         while not self._read_finished:
+            if self._reading or self._servicing:
+                await asyncio.sleep(0)
+                continue
             self._read_finished = await self._drive_once()
 
     async def _handle_data_frame(self, opcode, payload: bytes, fin: bool,
@@ -1216,7 +1308,12 @@ class WebSocketRecipient(BaseRecipient):
                 'text': None,
                 'bytes': full_payload,
             }
-        if self._dispatcher is not None and self._conn is not None:
+        # The read-time emit adapter (server path) or the dispatcher (direct
+        # path) fires ``websocket_message`` HERE, when the message is read —
+        # before delivery to the app, in every mode.
+        if self._on_message is not None:
+            await self._on_message(asgi_event)
+        elif self._dispatcher is not None and self._conn is not None:
             await self._dispatcher.emit(Event(
                 'websocket_message',
                 detail={
@@ -1300,39 +1397,161 @@ class WebSocketRecipient(BaseRecipient):
             ))
 
     def _read_ahead_observed(self) -> bool:
-        """Whether anything can tell the difference between the two modes.
+        """Whether anything can tell the difference between the read modes.
 
         ``websocket_message`` is contractually emitted **when the server reads
         the message, not when the handler calls receive()** — a handler that
-        never consumes must still produce the event.  Only a reader task
-        running ahead of the app can do that, so a registered listener forces
-        eager mode no matter what the depth says.  With no listener nothing
-        observes the difference and the handoff is pure cost.
+        never consumes must still produce the event.  On the server path the
+        actor supplies a predicate (the aggregator's listener check); on a
+        direct drive the dispatcher supplies it.  With no listener nothing
+        observes the difference and read-ahead is pure cost.
 
         Mirrors ``disconnect_events_observed`` on the HTTP path: pay for the
         machinery exactly when someone is watching it.
         """
+        if self._read_ahead_needed is not None:
+            return self._read_ahead_needed()
         return (self._dispatcher is not None
                 and self._dispatcher.has_listeners('websocket_message'))
 
     def _ensure_reader_started(self) -> None:
-        """Start the read-ahead task, in eager mode only.
+        """Decide the read mode at connect time.
 
         Inline mode has no background reader at all, so this is where the
         per-message task handoff stops existing rather than being made cheaper.
+        A positive depth starts the eager reader now.  A registered listener
+        does **not** (design A'): a consuming handler keeps the inline win,
+        and read-ahead is started later by the idle watchdog only if the app
+        stops driving ``receive()``.
         """
         if self._event_queue is not None:
             return
-        if self._ws_queue_depth > 0 or self._read_ahead_observed():
-            # A listener can force eager mode with the depth left at 0, so fall
-            # back to the standard depth rather than building a 0-maxsize (i.e.
-            # unbounded) queue, which would drop the backpressure bound.
-            depth = self._ws_queue_depth or _WS_EVENT_QUEUE_DEPTH
-            self._event_queue = asyncio.Queue(maxsize=depth)
+        if self._ws_queue_depth > 0:
+            self._event_queue = asyncio.Queue(maxsize=self._ws_queue_depth)
             self._reader_task = asyncio.create_task(self._read_loop())
+        elif self._read_ahead_observed():
+            # Deferred reader (design A'): read-ahead is needed but not yet
+            # started — see start_deferred_reader().
+            self._deferred_pending = True
+
+    def start_deferred_reader(self) -> None:
+        """Start the deferred reader task (design A').
+
+        Called by the idle watchdog once the app has stopped driving
+        ``receive()`` on a connection that needs read-ahead (a
+        ``websocket_message`` listener).  Idempotent and safe: refuses while
+        a reader already owns the wire, while the app is mid-read, or after
+        the read side terminated.
+        """
+        if (not self._deferred_pending or self._event_queue is not None
+                or self._reader_task is not None or self._reading
+                or self._read_finished):
+            return
+        depth = self._ws_queue_depth or _WS_EVENT_QUEUE_DEPTH
+        self._event_queue = asyncio.Queue(maxsize=depth)
+        self._reader_task = asyncio.create_task(self._read_loop())
+        self._deferred_pending = False
+
+    def _frame_bytes_needed(self) -> int | None:
+        """Bytes required for the next *complete* frame, or None when it is
+        not fully buffered yet.  Drives the non-blocking guarantee of
+        :meth:`service_available_control_frames`: a partial frame is never
+        read (which would block) — it is left for the next read or tick."""
+        buffered = self._reader.buffered_len()
+        if buffered < 2:
+            return None
+        head = self._reader.peek(2)
+        len_code = head[1] & 0x7F
+        ext = 2 if len_code == 126 else (8 if len_code == 127 else 0)
+        if buffered < 2 + ext + 4:                # header + mask key
+            return None
+        if ext:
+            payload_len = int.from_bytes(self._reader.peek(2 + ext)[2:], 'big')
+        else:
+            payload_len = len_code
+        total = 2 + ext + 4 + payload_len
+        return total if buffered >= total else None
+
+    async def service_available_control_frames(self) -> bool:
+        """Non-blocking servicing of fully-buffered inbound control frames.
+
+        Answers PINGs and echoes CLOSE that arrived while the handler was
+        doing something other than ``receive()`` (send-time servicing) or
+        after it went quiet (the idle watchdog).  Reads only frames already
+        fully buffered, so it never blocks and never steals the wire from an
+        inline ``receive()`` (guarded by ``_reading`` / ``_servicing``).  A
+        data frame stops the loop without being consumed — the app or a
+        reader owns it.  Returns True if any frame was serviced.
+        """
+        if (self._servicing or self._reading or self._read_finished
+                or self._event_queue is not None):
+            # A reader task owns the wire when ``_event_queue`` is set — it
+            # services control frames itself; the watchdog must not race it.
+            return False
+        if not self._reader.has_buffered():
+            return False
+        self._servicing = True
+        try:
+            serviced = False
+            while (not self._read_finished and not self._reading
+                   and self._reader.has_buffered()):
+                if self._frame_bytes_needed() is None:
+                    break
+                head = self._reader.peek(2)
+                if (head[0] & 0x0F) not in _WS_CONTROL_OPS:
+                    break                     # data frame — owned by app/reader
+                self._read_finished = await self._drive_once()
+                serviced = True
+            return serviced
+        finally:
+            self._servicing = False
+
+    def _on_idle_tick(self) -> None:
+        """Watchdog callback: the connection has been quiet for a tick.
+
+        Runs from the scanner's timer context — cheap checks only, then a
+        task for any actual work.  A reader already owns the wire (eager /
+        deferred started) and services control frames itself; only a pure
+        inline connection needs the watchdog's help.
+        """
+        if self._read_finished or self._reading or self._closed:
+            return
+        if self._event_queue is not None:
+            return
+        if self._deferred_pending:
+            self.start_deferred_reader()
+        elif self._reader.has_buffered():
+            asyncio.get_running_loop().create_task(
+                self.service_available_control_frames())
+
+    def has_buffered(self) -> bool:
+        """True when inbound bytes are already buffered (a read won't block).
+
+        The actor's send-time servicing probes this so it skips the servicing
+        call entirely on the common empty-buffer path.
+        """
+        return self._reader.has_buffered()
+
+    def _ensure_watchdog(self) -> None:
+        if self._watchdog is None:
+            self._watchdog = WsIdleWatchdog(self._on_idle_tick)
+
+    def touch(self) -> None:
+        """Mark connection activity (receive or send) for the idle watchdog.
+
+        The default hot path pays one ``loop.time()`` + a comparison per
+        message; an actively-driven connection never fires the watchdog.
+        """
+        self._ensure_watchdog()
+        self._watchdog.touch()
+
+    def disarm_watchdog(self) -> None:
+        if self._watchdog is not None:
+            self._watchdog.disarm()
 
     async def shutdown(self) -> None:
-        """Cancel and await the background read-loop task.
+        """Cancel and await the background read-loop task, and disarm the
+        idle watchdog.
 
         Client sessions call this from ``close()`` so no reader task
         outlives the session (a leaked task
@@ -1340,6 +1559,8 @@ class WebSocketRecipient(BaseRecipient):
         Idempotent, and safe to call before the first ``__call__`` ever
         started the loop.
         """
+        self._closed = True
+        self.disarm_watchdog()
         task = self._reader_task
         self._reader_task = None
         if task is not None and not task.done():
@@ -1350,13 +1571,14 @@ class WebSocketRecipient(BaseRecipient):
                 pass  # Expected: the task was cancelled intentionally.
 
     async def __call__(self) -> dict:
+        self.touch()
         if not self._connect_sent:
             self._connect_sent = True
             self._ensure_reader_started()
             return {'type': ASGIEvent.WS_CONNECT}
         self._ensure_reader_started()
         if self._terminal_delivered:
-            # Canonical across both modes: once the terminal event has been
+            # Canonical across all modes: once the terminal event has been
             # handed to the app, receive() keeps answering a disconnect so a
             # handler that reads past it can never block on a dead connection.
             return {'type': ASGIEvent.WS_DISCONNECT,
@@ -1367,9 +1589,19 @@ class WebSocketRecipient(BaseRecipient):
             # Inline: drive the wire in the app's own task until this read has
             # something to hand back.  Frames that produce nothing (fragments,
             # PING, unsolicited PONG) simply loop, so control frames are still
-            # serviced — just at the app's read cadence rather than ahead of it.
-            while not self._pending and not self._read_finished:
-                self._read_finished = await self._drive_once()
+            # serviced — just at the app's read cadence rather than ahead of
+            # it.  ``_reading`` marks wire ownership for the reader task and
+            # the watchdog; ``_servicing`` defers to an in-flight watchdog
+            # read so the two never interleave on the same transport.
+            self._reading = True
+            try:
+                while not self._pending and not self._read_finished:
+                    if self._servicing:
+                        await asyncio.sleep(0)
+                        continue
+                    self._read_finished = await self._drive_once()
+            finally:
+                self._reading = False
             if not self._pending:
                 # The read side finished without leaving anything: the app is
                 # calling receive() past the terminal event it already got.
@@ -1382,7 +1614,7 @@ class WebSocketRecipient(BaseRecipient):
             raise item
         if item.get('type') == ASGIEvent.WS_DISCONNECT:
             # The terminal event is always the last thing the read side
-            # produces (both drivers stop after emitting it), so handing it
+            # produces (all drivers stop after emitting it), so handing it
             # out is the point of no return in eager mode.
             self._terminal_delivered = True
         return item
@@ -1423,11 +1655,15 @@ class RecipientFactory:
                   dispatcher: EventDispatcher | None = None,
                   conn: dict | Connection | None = None,
                   ws_queue_depth: int = _WS_READ_INLINE,
-                  decompressor=None) -> WebSocketRecipient:
+                  decompressor=None,
+                  on_message: Callable[[dict], Awaitable[None]] | None = None,
+                  read_ahead_needed: Callable[[], bool] | None = None) -> WebSocketRecipient:
         if not isinstance(reader, AbstractReader):
             reader = AsyncioReader(reader)
         if not isinstance(writer, AbstractWriter):
             writer = AsyncioWriter(writer)
         return WebSocketRecipient(reader, writer, dispatcher=dispatcher, conn=conn,
                                   ws_queue_depth=ws_queue_depth,
-                                  decompressor=decompressor)
+                                  decompressor=decompressor,
+                                  on_message=on_message,
+                                  read_ahead_needed=read_ahead_needed)

@@ -223,6 +223,21 @@ per-frame dispatch seam, and the handler owns its receive loop.  A
 declared-scope API is unlocked on demonstrated demand, not
 speculatively.
 
+### WebSocket inline mode: PONG latency is bounded, not instant
+
+With the default `BB_WS_QUEUE_DEPTH=0` (inline), a `ping` is answered
+when the handler next drives a read — or, for a handler that is not
+reading, at the next `send()` and then on every deadline-scanner tick
+for a connection idle more than ~0.3 s.  Worst-case PONG latency is
+therefore bounded to ~one scanner tick (`BB_DEADLINE_TICK_MS`,
+default 300 ms) for a handler that neither reads nor sends, with no
+per-connection timers.  That satisfies RFC 6455 §5.5.2 (a delayed
+`pong` is explicitly permitted), but an intermediary that times out on
+PONG in under ~300 ms will drop a connection whose handler is stuck.
+Handlers that must answer keepalives during long work should set
+`BB_WS_QUEUE_DEPTH` positive (read-ahead answers immediately), or keep
+their own `ping`/`pong` cadence.
+
 ### gRPC: reflection is v1alpha-only
 
 All four gRPC RPC shapes — unary, server-streaming, client-streaming, and

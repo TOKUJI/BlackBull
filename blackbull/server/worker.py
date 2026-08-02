@@ -14,13 +14,15 @@ import logging
 import os
 import signal
 
+from .recipient import _WS_READ_INLINE
+
 logger = logging.getLogger(__name__)
 
 
 def run_worker(app, raw_sockets, ssl_context, worker_id: int,
                max_connections: int,
                stream_queue_depth: int = 64,
-               ws_queue_depth: int = 256,
+               ws_queue_depth: int = _WS_READ_INLINE,
                protocol_sockets=None) -> None:
     """Entry point executed in each worker process.
 

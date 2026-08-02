@@ -170,6 +170,15 @@ class BufferedH1Reader:
     def at_eof(self) -> bool:
         return self._eof and not self._buf
 
+    def has_buffered(self) -> bool:
+        return bool(self._buf) or self._reader.has_buffered()
+
+    def buffered_len(self) -> int:
+        return len(self._buf) + self._reader.buffered_len()
+
+    def peek(self, n: int) -> bytes:
+        return (bytes(self._buf) + self._reader.peek(n))[:n]
+
     def __getattr__(self, name):
         # Anything else the underlying reader offers (feed_eof, transport
         # pokes in tests) passes through unchanged.

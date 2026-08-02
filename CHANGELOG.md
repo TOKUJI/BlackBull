@@ -55,6 +55,31 @@ so the editable install's metadata catches up.
   without configuration.  Client sessions are unaffected: they keep read-ahead
   on by default.
 
+- **Design A′: a `websocket_message` listener no longer forces read-ahead on
+  at connect; bounded control-frame servicing for non-reading handlers.**
+  The Sprint 89 inline win was conditional on not registering a
+  `websocket_message` listener (a listener forced the background reader and
+  its 4.09 loop touches).  Now a consuming handler keeps the inline win even
+  with a listener registered — the read-time emit adapter fires the event
+  when the message is read, which in inline mode is exactly when the handler
+  calls `receive()`.  If the handler goes quiet for more than ~one scanner
+  tick, the deadline scanner starts a deferred reader that produces the
+  events (and buffers messages) without ever adding a timer per connection.
+
+  Control frames for a handler that is *not* reading are bounded by two new
+  mechanisms instead of being deferred to the next `receive()`: send-time
+  servicing (each `send()` answers PINGs/CLOSE already fully buffered,
+  non-blocking) and an idle watchdog on the per-process deadline scanner (a
+  connection idle > ~0.3 s gets its buffered control frames serviced each
+  tick).  Worst-case PONG latency is bounded to ~one scanner tick with no
+  per-connection timers.
+
+  The server path also emits the documented canonical `websocket_message`
+  detail shape `{'conn', 'text', 'bytes'}` (it had drifted to
+  `{'conn', 'message'}` on the real server path).  Loop touches stay at the
+  inline floor: **WebSocket 2.08**, HTTP/1.1 2.06, HTTP/2 5.21 — unchanged
+  (`python bench/loop_touches.py`).
+
 ## [0.68.1] — 2026-08-02
 
 Post-Sprint-88 patch — router param-kind classification (which also fixed a
