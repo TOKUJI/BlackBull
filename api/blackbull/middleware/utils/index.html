@@ -4125,34 +4125,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../../server/http2_messages/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    http2_messages
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../../server/http2_ws/" class="md-nav__link">
         
   
@@ -5051,9 +5023,10 @@
 <p>Public API:
 - <code>as_middleware</code>: decorator that normalises the <code>send</code> callable so inner
   send wrappers defined by the middleware always receive a single native
-  representation — <code>NativeResponse</code> on the H1 native path, plain ASGI event
-  dicts elsewhere — never raw <code>Response</code> objects.  Works on both async
-  middleware functions and middleware classes (decorates <code>__call__</code>).</p>
+  representation — <code>NativeResponse</code> on the HTTP path (H1 + H2 since Sprint
+  93), plain ASGI event dicts only at the external-host edge — never raw
+  <code>Response</code> objects.  Works on both async middleware functions and
+  middleware classes (decorates <code>__call__</code>).</p>
 
 
 
@@ -5088,15 +5061,15 @@
 
         <p>Decorator that marks an async function <strong>or</strong> class as BlackBull middleware.</p>
 <p>Wraps <code>call_next</code> so any <code>send</code> callable the middleware passes to it is
-automatically normalised — Response/JSONResponse objects are expanded into
-ASGI event dicts before reaching the middleware's inner <code>send</code> wrapper.
-The wrapper therefore only ever sees plain dict events and does not need
-<code>isinstance</code> guards.</p>
+automatically normalised — Response/JSONResponse objects are converted to
+NativeResponse before reaching the middleware's inner <code>send</code> wrapper.
+The wrapper therefore only ever sees the native representation
+(<code>NativeResponse</code> on the HTTP path — H1 and H2).</p>
 <p>Applied to an async function (signature <code>(conn, receive, send, call_next)</code>)::</p>
 <pre><code>@as_middleware
 async def timing_mw(conn, receive, send, call_next):
     async def timed_send(event):
-        # event is always a dict here
+        # event is a NativeResponse on the HTTP path
         await send(event)
     await call_next(conn, receive, timed_send)
 </code></pre>
@@ -5105,7 +5078,7 @@ async def timing_mw(conn, receive, send, call_next):
 class Cache:
     async def __call__(self, conn, receive, send, call_next):
         async def cap_send(event):
-            # event is always a dict here
+            # event is a NativeResponse on the HTTP path
             ...
         await call_next(conn, receive, cap_send)
 </code></pre>

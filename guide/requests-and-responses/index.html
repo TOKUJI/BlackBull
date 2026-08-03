@@ -4374,34 +4374,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/server/http2_messages/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    http2_messages
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../../api/blackbull/server/http2_ws/" class="md-nav__link">
         
   
@@ -5853,20 +5825,20 @@ package to parse the body manually.</p>
 <h2 id="responses">Responses<a class="headerlink" href="#responses" title="Permanent link">&para;</a></h2>
 <div class="admonition note">
 <p class="admonition-title">Native send path</p>
-<p>On BlackBull's own HTTP/1.1 server, <code>send</code> accepts <strong><code>Response</code> /
-<code>JSONResponse</code> objects, <code>(bytes, status, headers)</code>, <code>NativeResponse</code>,
-and ASGI <code>http.response.*</code> dicts</strong> — the full-form ASGI dict forms are
-a compatibility contract held until <strong>2027-07-29</strong>, converted to the
-native message at the handler boundary.  A complete <code>Response</code> becomes
-one <code>NativeResponse</code> object (one <code>send</code>); streaming is a header object
-then body-chunk objects.  Under an external ASGI host
+<p>On BlackBull's own HTTP server (HTTP/1.1 and HTTP/2), <code>send</code> accepts
+<strong><code>Response</code> / <code>JSONResponse</code> objects, <code>(bytes, status, headers)</code>,
+<code>NativeResponse</code>, and ASGI <code>http.response.*</code> dicts</strong> — the full-form
+ASGI dict forms are a compatibility contract held until <strong>2027-07-29</strong>,
+converted to the native message at the handler boundary.  A complete
+<code>Response</code> becomes one <code>NativeResponse</code> object (one <code>send</code>); streaming
+is a header object then body-chunk objects.  Under an external ASGI host
 (<code>BlackBull(asgi=True)</code> + <code>to_asgi()</code>) the same handler code runs with
 plain ASGI dicts on the wire.  The <code>http.response.start</code> <code>trailers</code>
 flag is preserved losslessly via <code>NativeResponse.expects_trailers</code>.</p>
 <p>On the native path a <code>Response</code> (or subclass) is serialised via
 <code>Response.to_native()</code>.  A subclass that overrides <code>__call__</code> to emit a
-custom event sequence is honoured on the ASGI lanes (H2 / external
-host) but not on the native H1 path — keep the wire behaviour in
+custom event sequence is honoured on the WebSocket / external-host
+lanes but not on the native HTTP path — keep the wire behaviour in
 <code>__call__</code> (shared by both lanes via the normalisers) or override
 <code>to_native()</code> to control the native serialisation.</p>
 </div>
@@ -6048,7 +6020,7 @@ body events through immediately rather than accumulating them:</p>
     <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">capturing_send</span><span class="p">(</span><span class="n">event</span><span class="p">):</span>
         <span class="k">nonlocal</span> <span class="n">captured_start</span>
         <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">event</span><span class="p">,</span> <span class="n">NativeResponse</span><span class="p">):</span>
-            <span class="c1"># BlackBull&#39;s own HTTP/1.1 server threads native response</span>
+            <span class="c1"># BlackBull&#39;s own HTTP server (H1 + H2) threads native response</span>
             <span class="c1"># objects — see the middleware guide for the contract.  A single</span>
             <span class="c1"># object may carry header + body together.</span>
             <span class="k">if</span> <span class="n">event</span><span class="o">.</span><span class="n">body</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="ow">not</span> <span class="n">event</span><span class="o">.</span><span class="n">more_body</span><span class="p">:</span>
@@ -6082,7 +6054,8 @@ body events through immediately rather than accumulating them:</p>
 <p>The two branches are the same policy on two wire shapes: the native object
 arm transforms only terminal bodies (so <code>more_body=True</code> chunks stream
 through untouched), and the dict arm keeps the original start/body
-sequencing for the ASGI lanes.</p>
+sequencing for the WebSocket / external-host lanes (where the wire contract
+stays ASGI).</p>
 <p>For most use cases (header injection, logging) the middleware
 does not touch the body at all and streaming safety is not a
 concern.</p>

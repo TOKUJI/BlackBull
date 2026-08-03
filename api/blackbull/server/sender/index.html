@@ -4050,34 +4050,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../http2_messages/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    http2_messages
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../http2_ws/" class="md-nav__link">
         
   
@@ -6077,10 +6049,15 @@ bodies raise <code>TypeError</code>.</p>
 
 
         <p>Translates content or ASGI HTTP send events into HTTP/2 frames.</p>
-<p><code>__call__</code> accepts three forms:</p>
+<p><code>__call__</code> accepts four forms:</p>
 <p><strong>High-level</strong> (bytes body + status):
   <code>await sender(body_bytes, HTTPStatus.OK, headers=[...])</code>
   Sends a HEADERS frame followed by a DATA frame.</p>
+<p><strong>Native</strong> (:class:<code>~blackbull.native.NativeResponse</code>, Sprint 93):
+  <code>await sender(NativeResponse(status=..., header=..., body=...))</code>
+  One object may carry header, body, and/or trailers; the sender buffers
+  the header arm exactly like the dict start and delegates body/trailers
+  to the shared helpers (HEADERS + DATA [+ trailing HEADERS] coalesce).</p>
 <p><strong>Low-level</strong> (ASGI event dict):
   <code>await sender({'type': 'http.response.start', ...})</code>
   <code>await sender({'type': 'http.response.body', ...})</code></p>

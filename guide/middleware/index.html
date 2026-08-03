@@ -4301,34 +4301,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/server/http2_messages/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    http2_messages
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../../api/blackbull/server/http2_ws/" class="md-nav__link">
         
   
@@ -5418,12 +5390,13 @@ Quart / ASGI 3.0 generally, with one BlackBull convenience
 shape; the simplified handler form does <strong>not</strong> apply to them.</p>
 <h2 id="typing-the-message-channel">Typing the message channel<a class="headerlink" href="#typing-the-message-channel" title="Permanent link">&para;</a></h2>
 <p>The events crossing <code>receive</code> and <code>send</code> follow the ASGI 3.0 wire contract
-on the <strong>ASGI lanes</strong> — HTTP/2, WebSocket, and the external-host edge
+on the <strong>ASGI lanes</strong> — WebSocket and the external-host edge
 (<code>BlackBull(asgi=True)</code> under uvicorn) — as plain ASGI dicts.  On
-BlackBull's own <strong>HTTP/1.1 native path</strong> the response side carries
-<code>NativeResponse</code> objects instead: one message may hold any combination of a
-header arm, body chunks, and trailers, and its <em>presence</em> semantics are
-<code>is not None</code> (never truthiness — an empty body is a real body).</p>
+BlackBull's own <strong>HTTP path (HTTP/1.1 and HTTP/2)</strong> the response side
+carries <code>NativeResponse</code> objects instead: one message may hold any
+combination of a header arm, body chunks, and trailers, and its <em>presence</em>
+semantics are <code>is not None</code> (never truthiness — an empty body is a real
+body).</p>
 <p>BlackBull also ships a set of <code>TypedDict</code> <em>declarations</em> for the ASGI event
 shapes, so a type checker can tell which keys are legal on which event:</p>
 <div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">blackbull</span><span class="w"> </span><span class="kn">import</span> <span class="n">ASGIReceiveCallable</span><span class="p">,</span> <span class="n">ASGISendCallable</span><span class="p">,</span> <span class="n">ASGISendEvent</span>
@@ -5450,15 +5423,16 @@ Everything here is annotation-only: nothing is validated or converted at
 runtime, and unannotated middleware keeps working exactly as before.</p>
 <div class="admonition note">
 <p class="admonition-title">Native path: the send channel carries <code>NativeResponse</code></p>
-<p>On BlackBull's own HTTP/1.1 path, the response events a middleware's
-inner <code>send</code> wrapper observes are <code>NativeResponse</code> objects — not dicts.
-A middleware that subscripts <code>event['type']</code> must instead branch on the
-object's arms: <code>event.header is not None</code> (header arm, with
-<code>event.status</code> / <code>event.header.get(b'name')</code>), <code>event.body is not None</code>
-(body chunk, with <code>event.more_body</code>), and <code>event.trailers is not None</code>.
-The <code>@as_middleware</code> decorator guarantees this single native
-representation for the wrappers it normalises; on the ASGI lanes the
-same wrappers see plain dicts.  Use
+<p>On BlackBull's own HTTP path (HTTP/1.1 and HTTP/2), the response events
+a middleware's inner <code>send</code> wrapper observes are <code>NativeResponse</code>
+objects — not dicts.  A middleware that subscripts <code>event['type']</code>
+must instead branch on the object's arms: <code>event.header is not None</code>
+(header arm, with <code>event.status</code> / <code>event.header.get(b'name')</code>),
+<code>event.body is not None</code> (body chunk, with <code>event.more_body</code>), and
+<code>event.trailers is not None</code>.  The <code>@as_middleware</code> decorator
+guarantees this single native representation for the wrappers it
+normalises; only on the WebSocket / external-host lanes do the same
+wrappers see plain dicts.  Use
 <a href="../testing/"><code>blackbull.testing.native</code></a> to exercise the native path.</p>
 </div>
 <h2 id="the-as_middleware-decorator">The <code>@as_middleware</code> decorator<a class="headerlink" href="#the-as_middleware-decorator" title="Permanent link">&para;</a></h2>
@@ -5467,7 +5441,8 @@ instead of calling <code>send(...)</code> with raw ASGI events.  A middleware
 that wraps <code>send</code> would otherwise have to handle both forms.
 Decorate the middleware with <code>@as_middleware</code> and the inner
 wrapper sees a single native representation: <code>NativeResponse</code> on
-the HTTP/1.1 native path, plain ASGI dicts on the ASGI lanes —
+the HTTP path (HTTP/1.1 and HTTP/2), plain ASGI dicts on the
+WebSocket / external-host lanes —
 <code>Response</code> objects are converted for you, never leaking through:</p>
 <div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">blackbull</span><span class="w"> </span><span class="kn">import</span> <span class="n">as_middleware</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">blackbull.native</span><span class="w"> </span><span class="kn">import</span> <span class="n">NativeResponse</span>

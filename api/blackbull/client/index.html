@@ -4706,34 +4706,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../server/http2_messages/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    http2_messages
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../server/http2_ws/" class="md-nav__link">
         
   
@@ -6971,9 +6943,13 @@ odd, monotonically-increasing client-initiated stream ID
 
     <div class="doc doc-contents ">
 
-        <p>Escape hatch: read one raw frame; bypasses the receive loop.</p>
+        <p>Escape hatch: read one raw frame, bypassing the receive loop's dispatch.</p>
+<p>For negative-path / fault-injection tests and raw-frame clients that
+need a peer frame <code>_receive_loop</code> would otherwise route through the
+normal dispatcher — the read-side twin of :meth:<code>send_raw_frame</code>.</p>
 <p>Only safe to call when the receive loop is not running (i.e. before
-<code>__aenter__</code> finishes or after the loop has been cancelled).</p>
+<code>__aenter__</code> finishes or after the loop has been cancelled); a
+concurrent loop would race this call for the reader.</p>
 
 
     </div>

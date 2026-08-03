@@ -3691,17 +3691,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#blackbull.protocol.stream.Stream.on_rst_received" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        on_rst_received
-      
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -4166,34 +4155,6 @@
     
   
     http2_actor
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../server/http2_messages/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    http2_messages
   
 
     
@@ -5102,17 +5063,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#blackbull.protocol.stream.Stream.on_rst_received" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        on_rst_received
-      
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -5305,28 +5255,6 @@ via RST_STREAM.</p>
     <div class="doc doc-contents ">
 
         <p>Transition state on HEADERS frame (RFC 7540 §5.1).</p>
-
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-function">
-
-
-<h4 id="blackbull.protocol.stream.Stream.on_rst_received" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">on_rst_received</span><span class="p">()</span></code>
-
-<a href="#blackbull.protocol.stream.Stream.on_rst_received" class="headerlink" title="Permanent link">&para;</a></h4>
-
-
-    <div class="doc doc-contents ">
-
-        <p>Transition on incoming RST_STREAM (RFC 9113 §5.1).</p>
-<p>Marks the stream CLOSED and remembers that it was closed via
-RST_STREAM (vs END_STREAM).  The state is retained so later
-frames arriving on the same identifier can be detected and the
-right error type returned.</p>
 
 
     </div>

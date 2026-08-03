@@ -4399,34 +4399,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../server/http2_messages/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    http2_messages
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../server/http2_ws/" class="md-nav__link">
         
   
@@ -5610,8 +5582,9 @@ HTTP / WebSocket scopes through the global-middleware chain ending in
   middleware prefix across routes.</li>
 <li><code>_default_error_handler</code> — registered on every <code>HTTPStatus</code> error and
   on <code>Exception</code> so unhandled errors produce a sensible plain-text reply.</li>
-<li><code>_wrap_send</code> — adapts the ASGI <code>send</code> callable so handlers may pass
-  <code>Response</code> objects directly.</li>
+<li><code>_wrap_send_native</code> — the handler-boundary adapter: converts every
+  accepted send shape (<code>Response</code>, 3-arg, ASGI dict, NativeResponse) to
+  :class:<code>~blackbull.native.NativeResponse</code> on the HTTP path (H1 + H2).</li>
 </ul>
 
 

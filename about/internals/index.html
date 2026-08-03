@@ -4042,34 +4042,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/server/http2_messages/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    http2_messages
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../../api/blackbull/server/http2_ws/" class="md-nav__link">
         
   
@@ -5795,9 +5767,13 @@ routing under the ask pattern:</p>
     <span class="n">stream_id</span><span class="p">:</span> <span class="nb">int</span>
     <span class="n">increment</span><span class="p">:</span> <span class="nb">int</span>
 </code></pre></div>
-<p>HTTP/2 message types live in <code>blackbull/server/http2_messages.py</code>;
-HTTP/1.1 and WebSocket equivalents are colocated with their
-respective actors.</p>
+<p>The HTTP/2 actor does not exchange dataclass messages with its callers:
+per-stream request/response events flow as ASGI dicts through the
+<code>HTTP2Recipient</code> (<code>put_event</code>), handler coroutines are tracked as
+<code>asyncio.Task</code> objects (<code>_stream_tasks</code>), and connection-level frames
+are dispatched through the Responder registry
+(<code>blackbull/server/response.py</code>).  HTTP/1.1 and WebSocket equivalents are
+colocated with their respective actors.</p>
 <h2 id="how-exceptions-propagate">How exceptions propagate<a class="headerlink" href="#how-exceptions-propagate" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
