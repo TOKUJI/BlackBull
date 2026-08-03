@@ -1173,8 +1173,6 @@ class WebSocketRecipient(BaseRecipient):
         """
         _CONTROL_OPS = (WSOpcode.CLOSE, WSOpcode.PING, WSOpcode.PONG)
         h = await read_frame_header(self._reader)
-        # ... existing frame-processing logic ...
-        return False
 
         # RFC 6455 §5.5 — control frames MUST have payload ≤125 and
         # MUST NOT be fragmented.  Reject without reading the body.
@@ -1238,6 +1236,10 @@ class WebSocketRecipient(BaseRecipient):
             case _:
                 await self._handle_unknown_opcode()
                 return True
+        # Exhaustiveness fallback: the wildcard arm above covers every
+        # opcode, so this line is unreachable — it exists so every path has
+        # an explicit ``bool`` return (the CodeQL mixed-returns rule).
+        return False
 
     async def _drive_once(self) -> bool:
         """One :meth:`_read_step` under the shared error handling.
@@ -1441,7 +1443,14 @@ class WebSocketRecipient(BaseRecipient):
 
         Mirrors ``disconnect_events_observed`` on the HTTP path: pay for the
         machinery exactly when someone is watching it.
+
+        The server path (actor) supplies a ``read_ahead_needed`` predicate
+        instead of a dispatcher — its ``websocket_message`` events go through
+        the read-time emit adapter, not the dispatcher — so the cached
+        ``_listeners`` (refreshed once per receive cycle) answers for it.
         """
+        if self._read_ahead_needed is not None:
+            return self._listeners
         return (self._dispatcher is not None
                 and self._dispatcher.has_listeners('websocket_message'))
 
@@ -1733,7 +1742,9 @@ class RecipientFactory:
                   dispatcher: EventDispatcher | None = None,
                   conn: dict | Connection | None = None,
                   ws_queue_depth: int = _WS_READ_INLINE,
-                  decompressor=None) -> WebSocketRecipient:
+                  decompressor=None,
+                  on_message: Callable[[dict], Awaitable[None]] | None = None,
+                  read_ahead_needed: Callable[[], bool] | None = None) -> WebSocketRecipient:
         if not isinstance(reader, AbstractReader):
             reader = AsyncioReader(reader)
         if not isinstance(writer, AbstractWriter):
