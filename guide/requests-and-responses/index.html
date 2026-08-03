@@ -3656,6 +3656,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../api/blackbull/native/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    native
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../api/blackbull/openapi/" class="md-nav__link">
         
   
@@ -3692,10 +3720,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2_1_21" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2_1_22" >
         
           
-          <label class="md-nav__link" for="__nav_5_2_1_21" id="__nav_5_2_1_21_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_5_2_1_22" id="__nav_5_2_1_22_label" tabindex="0">
             
   
   
@@ -3713,8 +3741,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="4" aria-labelledby="__nav_5_2_1_21_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_5_2_1_21">
+        <nav class="md-nav" data-md-level="4" aria-labelledby="__nav_5_2_1_22_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_2_1_22">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -4027,10 +4055,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2_1_25" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2_1_26" >
         
           
-          <label class="md-nav__link" for="__nav_5_2_1_25" id="__nav_5_2_1_25_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_5_2_1_26" id="__nav_5_2_1_26_label" tabindex="0">
             
   
   
@@ -4048,8 +4076,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="4" aria-labelledby="__nav_5_2_1_25_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_5_2_1_25">
+        <nav class="md-nav" data-md-level="4" aria-labelledby="__nav_5_2_1_26_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_2_1_26">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -4782,10 +4810,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2_1_26" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2_1_27" >
         
           
-          <label class="md-nav__link" for="__nav_5_2_1_26" id="__nav_5_2_1_26_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_5_2_1_27" id="__nav_5_2_1_27_label" tabindex="0">
             
   
   
@@ -4803,8 +4831,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="4" aria-labelledby="__nav_5_2_1_26_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_5_2_1_26">
+        <nav class="md-nav" data-md-level="4" aria-labelledby="__nav_5_2_1_27_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_2_1_27">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -5823,6 +5851,25 @@ default) send key=value pairs in the body.  Read and parse with
 supported by a built-in helper.  Use the <code>python-multipart</code>
 package to parse the body manually.</p>
 <h2 id="responses">Responses<a class="headerlink" href="#responses" title="Permanent link">&para;</a></h2>
+<div class="admonition note">
+<p class="admonition-title">Native send path</p>
+<p>On BlackBull's own HTTP/1.1 server, <code>send</code> accepts <strong><code>Response</code> /
+<code>JSONResponse</code> objects, <code>(bytes, status, headers)</code>, <code>NativeResponse</code>,
+and ASGI <code>http.response.*</code> dicts</strong> — the full-form ASGI dict forms are
+a compatibility contract held until <strong>2027-07-29</strong>, converted to the
+native message at the handler boundary.  A complete <code>Response</code> becomes
+one <code>NativeResponse</code> object (one <code>send</code>); streaming is a header object
+then body-chunk objects.  Under an external ASGI host
+(<code>BlackBull(asgi=True)</code> + <code>to_asgi()</code>) the same handler code runs with
+plain ASGI dicts on the wire.  The <code>http.response.start</code> <code>trailers</code>
+flag is preserved losslessly via <code>NativeResponse.expects_trailers</code>.</p>
+<p>On the native path a <code>Response</code> (or subclass) is serialised via
+<code>Response.to_native()</code>.  A subclass that overrides <code>__call__</code> to emit a
+custom event sequence is honoured on the ASGI lanes (H2 / external
+host) but not on the native H1 path — keep the wire behaviour in
+<code>__call__</code> (shared by both lanes via the normalisers) or override
+<code>to_native()</code> to control the native serialisation.</p>
+</div>
 <h3 id="response"><code>Response</code><a class="headerlink" href="#response" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">blackbull</span><span class="w"> </span><span class="kn">import</span> <span class="n">Response</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">http</span><span class="w"> </span><span class="kn">import</span> <span class="n">HTTPStatus</span>
@@ -5993,12 +6040,28 @@ parts will silently buffer a streaming response, defeating
 <code>more_body=True</code>.</p>
 <p>For function-based middleware, the safest approach is to pass
 body events through immediately rather than accumulating them:</p>
-<div class="highlight"><pre><span></span><code><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">prefix_mw</span><span class="p">(</span><span class="n">scope</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">,</span> <span class="n">call_next</span><span class="p">):</span>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">blackbull.native</span><span class="w"> </span><span class="kn">import</span> <span class="n">NativeResponse</span>
+
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">prefix_mw</span><span class="p">(</span><span class="n">scope</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">,</span> <span class="n">call_next</span><span class="p">):</span>
     <span class="n">captured_start</span> <span class="o">=</span> <span class="kc">None</span>
 
     <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">capturing_send</span><span class="p">(</span><span class="n">event</span><span class="p">):</span>
         <span class="k">nonlocal</span> <span class="n">captured_start</span>
-        <span class="k">if</span> <span class="n">event</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;type&#39;</span><span class="p">)</span> <span class="o">==</span> <span class="s1">&#39;http.response.start&#39;</span><span class="p">:</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">event</span><span class="p">,</span> <span class="n">NativeResponse</span><span class="p">):</span>
+            <span class="c1"># BlackBull&#39;s own HTTP/1.1 server threads native response</span>
+            <span class="c1"># objects — see the middleware guide for the contract.  A single</span>
+            <span class="c1"># object may carry header + body together.</span>
+            <span class="k">if</span> <span class="n">event</span><span class="o">.</span><span class="n">body</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="ow">not</span> <span class="n">event</span><span class="o">.</span><span class="n">more_body</span><span class="p">:</span>
+                <span class="c1"># Non-streaming — transform the terminal body</span>
+                <span class="k">await</span> <span class="n">send</span><span class="p">(</span><span class="n">NativeResponse</span><span class="p">(</span><span class="n">status</span><span class="o">=</span><span class="n">event</span><span class="o">.</span><span class="n">status</span><span class="p">,</span>
+                                          <span class="n">header</span><span class="o">=</span><span class="p">(</span><span class="nb">list</span><span class="p">(</span><span class="n">event</span><span class="o">.</span><span class="n">header</span><span class="p">)</span>
+                                                  <span class="k">if</span> <span class="n">event</span><span class="o">.</span><span class="n">header</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span>
+                                                  <span class="k">else</span> <span class="kc">None</span><span class="p">),</span>
+                                          <span class="n">body</span><span class="o">=</span><span class="sa">b</span><span class="s1">&#39;[prefix] &#39;</span> <span class="o">+</span> <span class="n">event</span><span class="o">.</span><span class="n">body</span><span class="p">))</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="c1"># Streaming (or header-only) — pass through without buffering</span>
+                <span class="k">await</span> <span class="n">send</span><span class="p">(</span><span class="n">event</span><span class="p">)</span>
+        <span class="k">elif</span> <span class="n">event</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;type&#39;</span><span class="p">)</span> <span class="o">==</span> <span class="s1">&#39;http.response.start&#39;</span><span class="p">:</span>
             <span class="n">captured_start</span> <span class="o">=</span> <span class="n">event</span>
         <span class="k">elif</span> <span class="n">event</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;type&#39;</span><span class="p">)</span> <span class="o">==</span> <span class="s1">&#39;http.response.body&#39;</span><span class="p">:</span>
             <span class="k">if</span> <span class="n">event</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;more_body&#39;</span><span class="p">):</span>
@@ -6016,6 +6079,10 @@ body events through immediately rather than accumulating them:</p>
 
     <span class="k">await</span> <span class="n">call_next</span><span class="p">(</span><span class="n">scope</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">capturing_send</span><span class="p">)</span>
 </code></pre></div>
+<p>The two branches are the same policy on two wire shapes: the native object
+arm transforms only terminal bodies (so <code>more_body=True</code> chunks stream
+through untouched), and the dict arm keeps the original start/body
+sequencing for the ASGI lanes.</p>
 <p>For most use cases (header injection, logging) the middleware
 does not touch the body at all and streaming safety is not a
 concern.</p>

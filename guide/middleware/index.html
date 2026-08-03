@@ -3583,6 +3583,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../api/blackbull/native/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    native
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../api/blackbull/openapi/" class="md-nav__link">
         
   
@@ -3619,10 +3647,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2_1_21" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2_1_22" >
         
           
-          <label class="md-nav__link" for="__nav_5_2_1_21" id="__nav_5_2_1_21_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_5_2_1_22" id="__nav_5_2_1_22_label" tabindex="0">
             
   
   
@@ -3640,8 +3668,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="4" aria-labelledby="__nav_5_2_1_21_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_5_2_1_21">
+        <nav class="md-nav" data-md-level="4" aria-labelledby="__nav_5_2_1_22_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_2_1_22">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -3954,10 +3982,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2_1_25" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2_1_26" >
         
           
-          <label class="md-nav__link" for="__nav_5_2_1_25" id="__nav_5_2_1_25_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_5_2_1_26" id="__nav_5_2_1_26_label" tabindex="0">
             
   
   
@@ -3975,8 +4003,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="4" aria-labelledby="__nav_5_2_1_25_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_5_2_1_25">
+        <nav class="md-nav" data-md-level="4" aria-labelledby="__nav_5_2_1_26_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_2_1_26">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -4709,10 +4737,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2_1_26" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2_1_27" >
         
           
-          <label class="md-nav__link" for="__nav_5_2_1_26" id="__nav_5_2_1_26_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_5_2_1_27" id="__nav_5_2_1_27_label" tabindex="0">
             
   
   
@@ -4730,8 +4758,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="4" aria-labelledby="__nav_5_2_1_26_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_5_2_1_26">
+        <nav class="md-nav" data-md-level="4" aria-labelledby="__nav_5_2_1_27_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_2_1_27">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -5389,10 +5417,15 @@ Quart / ASGI 3.0 generally, with one BlackBull convenience
 <p>Middleware functions keep the full <code>(scope, receive, send, call_next)</code>
 shape; the simplified handler form does <strong>not</strong> apply to them.</p>
 <h2 id="typing-the-message-channel">Typing the message channel<a class="headerlink" href="#typing-the-message-channel" title="Permanent link">&para;</a></h2>
-<p>The events crossing <code>receive</code> and <code>send</code> are ASGI 3.0 dicts — that wire
-contract is unchanged and always will be.  What BlackBull adds is a set of
-<code>TypedDict</code> <em>declarations</em> for them, so a type checker can tell which keys
-are legal on which event:</p>
+<p>The events crossing <code>receive</code> and <code>send</code> follow the ASGI 3.0 wire contract
+on the <strong>ASGI lanes</strong> — HTTP/2, WebSocket, and the external-host edge
+(<code>BlackBull(asgi=True)</code> under uvicorn) — as plain ASGI dicts.  On
+BlackBull's own <strong>HTTP/1.1 native path</strong> the response side carries
+<code>NativeResponse</code> objects instead: one message may hold any combination of a
+header arm, body chunks, and trailers, and its <em>presence</em> semantics are
+<code>is not None</code> (never truthiness — an empty body is a real body).</p>
+<p>BlackBull also ships a set of <code>TypedDict</code> <em>declarations</em> for the ASGI event
+shapes, so a type checker can tell which keys are legal on which event:</p>
 <div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">blackbull</span><span class="w"> </span><span class="kn">import</span> <span class="n">ASGIReceiveCallable</span><span class="p">,</span> <span class="n">ASGISendCallable</span><span class="p">,</span> <span class="n">ASGISendEvent</span>
 
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">add_header_mw</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">receive</span><span class="p">:</span> <span class="n">ASGIReceiveCallable</span><span class="p">,</span>
@@ -5415,24 +5448,47 @@ runtime on <code>event['type']</code>.</p>
 are importable from <code>blackbull.asgi</code> if you want to name one directly.
 Everything here is annotation-only: nothing is validated or converted at
 runtime, and unannotated middleware keeps working exactly as before.</p>
+<div class="admonition note">
+<p class="admonition-title">Native path: the send channel carries <code>NativeResponse</code></p>
+<p>On BlackBull's own HTTP/1.1 path, the response events a middleware's
+inner <code>send</code> wrapper observes are <code>NativeResponse</code> objects — not dicts.
+A middleware that subscripts <code>event['type']</code> must instead branch on the
+object's arms: <code>event.header is not None</code> (header arm, with
+<code>event.status</code> / <code>event.header.get(b'name')</code>), <code>event.body is not None</code>
+(body chunk, with <code>event.more_body</code>), and <code>event.trailers is not None</code>.
+The <code>@as_middleware</code> decorator guarantees this single native
+representation for the wrappers it normalises; on the ASGI lanes the
+same wrappers see plain dicts.  Use
+<a href="../testing/"><code>blackbull.testing.native</code></a> to exercise the native path.</p>
+</div>
 <h2 id="the-as_middleware-decorator">The <code>@as_middleware</code> decorator<a class="headerlink" href="#the-as_middleware-decorator" title="Permanent link">&para;</a></h2>
 <p>Route handlers can return <code>Response</code> / <code>JSONResponse</code> objects
 instead of calling <code>send(...)</code> with raw ASGI events.  A middleware
 that wraps <code>send</code> would otherwise have to handle both forms.
 Decorate the middleware with <code>@as_middleware</code> and the inner
-wrapper sees only plain dict events — <code>Response</code> objects are
-expanded into <code>http.response.start</code> + <code>http.response.body</code> for you:</p>
+wrapper sees a single native representation: <code>NativeResponse</code> on
+the HTTP/1.1 native path, plain ASGI dicts on the ASGI lanes —
+<code>Response</code> objects are converted for you, never leaking through:</p>
 <div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">blackbull</span><span class="w"> </span><span class="kn">import</span> <span class="n">as_middleware</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">blackbull.native</span><span class="w"> </span><span class="kn">import</span> <span class="n">NativeResponse</span>
 
 <span class="nd">@as_middleware</span>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">add_header_mw</span><span class="p">(</span><span class="n">scope</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">,</span> <span class="n">call_next</span><span class="p">):</span>
     <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">wrapped</span><span class="p">(</span><span class="n">event</span><span class="p">):</span>
-        <span class="k">if</span> <span class="n">event</span><span class="p">[</span><span class="s1">&#39;type&#39;</span><span class="p">]</span> <span class="o">==</span> <span class="s1">&#39;http.response.start&#39;</span><span class="p">:</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">event</span><span class="p">,</span> <span class="n">NativeResponse</span><span class="p">):</span>
+            <span class="k">if</span> <span class="n">event</span><span class="o">.</span><span class="n">header</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="c1"># header arm — append zero-copy; visible to the sender</span>
+                <span class="n">event</span><span class="o">.</span><span class="n">header</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="sa">b</span><span class="s1">&#39;x-custom&#39;</span><span class="p">,</span> <span class="sa">b</span><span class="s1">&#39;1&#39;</span><span class="p">)</span>
+        <span class="k">elif</span> <span class="n">event</span><span class="p">[</span><span class="s1">&#39;type&#39;</span><span class="p">]</span> <span class="o">==</span> <span class="s1">&#39;http.response.start&#39;</span><span class="p">:</span>
             <span class="n">event</span> <span class="o">=</span> <span class="p">{</span><span class="o">**</span><span class="n">event</span><span class="p">,</span>
                      <span class="s1">&#39;headers&#39;</span><span class="p">:</span> <span class="nb">list</span><span class="p">(</span><span class="n">event</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;headers&#39;</span><span class="p">,</span> <span class="p">[]))</span> <span class="o">+</span> <span class="p">[(</span><span class="sa">b</span><span class="s1">&#39;x-custom&#39;</span><span class="p">,</span> <span class="sa">b</span><span class="s1">&#39;1&#39;</span><span class="p">)]}</span>
         <span class="k">await</span> <span class="n">send</span><span class="p">(</span><span class="n">event</span><span class="p">)</span>
     <span class="k">await</span> <span class="n">call_next</span><span class="p">(</span><span class="n">scope</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">wrapped</span><span class="p">)</span>
 </code></pre></div>
+<p>On the native path a complete response is <strong>one object, one <code>send</code></strong>
+(header + body together), while a streamed response is a header object
+followed by body-chunk objects.  Remember the presence contract: test
+<code>event.header is not None</code> / <code>event.body is not None</code>, never truthiness.</p>
 <p><code>@as_middleware</code> also works on classes (it wraps <code>__call__</code>).  All
 of BlackBull's built-in middleware uses the class form:</p>
 <div class="highlight"><pre><span></span><code><span class="nd">@as_middleware</span>

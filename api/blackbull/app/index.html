@@ -1843,6 +1843,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.app.BlackBull.to_asgi" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        to_asgi
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.app.BlackBull.url_path_for" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3670,6 +3681,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../native/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    native
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../openapi/" class="md-nav__link">
         
   
@@ -3706,10 +3745,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2_1_21" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2_1_22" >
         
           
-          <label class="md-nav__link" for="__nav_5_2_1_21" id="__nav_5_2_1_21_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_5_2_1_22" id="__nav_5_2_1_22_label" tabindex="0">
             
   
   
@@ -3727,8 +3766,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="4" aria-labelledby="__nav_5_2_1_21_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_5_2_1_21">
+        <nav class="md-nav" data-md-level="4" aria-labelledby="__nav_5_2_1_22_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_2_1_22">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -4041,10 +4080,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2_1_25" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2_1_26" >
         
           
-          <label class="md-nav__link" for="__nav_5_2_1_25" id="__nav_5_2_1_25_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_5_2_1_26" id="__nav_5_2_1_26_label" tabindex="0">
             
   
   
@@ -4062,8 +4101,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="4" aria-labelledby="__nav_5_2_1_25_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_5_2_1_25">
+        <nav class="md-nav" data-md-level="4" aria-labelledby="__nav_5_2_1_26_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_2_1_26">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -4796,10 +4835,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2_1_26" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2_1_27" >
         
           
-          <label class="md-nav__link" for="__nav_5_2_1_26" id="__nav_5_2_1_26_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_5_2_1_27" id="__nav_5_2_1_27_label" tabindex="0">
             
   
   
@@ -4817,8 +4856,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="4" aria-labelledby="__nav_5_2_1_26_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_5_2_1_26">
+        <nav class="md-nav" data-md-level="4" aria-labelledby="__nav_5_2_1_27_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_2_1_27">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -5424,6 +5463,17 @@
     <span class="md-ellipsis">
       
         static
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.app.BlackBull.to_asgi" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        to_asgi
       
     </span>
   </a>
@@ -6543,6 +6593,30 @@ is not for a static path never enters this code: it resolves in the
 router's exact-match dict and never reaches the parametrised scan.
 This is also what every peer framework does — Starlette, Sanic,
 aiohttp, Flask and Django all mount static as a route.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.app.BlackBull.to_asgi" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">to_asgi</span><span class="p">()</span></code>
+
+<a href="#blackbull.app.BlackBull.to_asgi" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Return the ASGI 3.0 callable to hand to an external host (uvicorn …).</p>
+<p>The app is native internally in both modes; <code>BlackBull(asgi=True)</code>
+applies the native→ASGI boundary conversion in <code>__call__</code> whenever
+the app is driven (scope entry included), so the app instance itself
+is the callable — <code>uvicorn.run(app.to_asgi())</code> or <code>uvicorn.run(app)</code>
+are equivalent.  Requires the <code>asgi=True</code> constructor flag: without
+it the app is wired for BlackBull's own native server.</p>
 
 
     </div>

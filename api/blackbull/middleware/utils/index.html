@@ -3407,6 +3407,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../native/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    native
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../openapi/" class="md-nav__link">
         
   
@@ -3443,10 +3471,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2_1_21" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2_1_22" >
         
           
-          <label class="md-nav__link" for="__nav_5_2_1_21" id="__nav_5_2_1_21_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_5_2_1_22" id="__nav_5_2_1_22_label" tabindex="0">
             
   
   
@@ -3464,8 +3492,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="4" aria-labelledby="__nav_5_2_1_21_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_5_2_1_21">
+        <nav class="md-nav" data-md-level="4" aria-labelledby="__nav_5_2_1_22_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_2_1_22">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -3778,10 +3806,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2_1_25" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2_1_26" >
         
           
-          <label class="md-nav__link" for="__nav_5_2_1_25" id="__nav_5_2_1_25_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_5_2_1_26" id="__nav_5_2_1_26_label" tabindex="0">
             
   
   
@@ -3799,8 +3827,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="4" aria-labelledby="__nav_5_2_1_25_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_5_2_1_25">
+        <nav class="md-nav" data-md-level="4" aria-labelledby="__nav_5_2_1_26_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_2_1_26">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -4533,10 +4561,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2_1_26" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2_1_27" >
         
           
-          <label class="md-nav__link" for="__nav_5_2_1_26" id="__nav_5_2_1_26_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_5_2_1_27" id="__nav_5_2_1_27_label" tabindex="0">
             
   
   
@@ -4554,8 +4582,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="4" aria-labelledby="__nav_5_2_1_26_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_5_2_1_26">
+        <nav class="md-nav" data-md-level="4" aria-labelledby="__nav_5_2_1_27_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_2_1_27">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -5022,9 +5050,10 @@
         <p>Utilities for middleware authors.</p>
 <p>Public API:
 - <code>as_middleware</code>: decorator that normalises the <code>send</code> callable so inner
-  send wrappers defined by the middleware always receive plain ASGI event
-  dicts, never <code>Response</code> objects.  Works on both async middleware functions
-  and middleware classes (decorates <code>__call__</code>).</p>
+  send wrappers defined by the middleware always receive a single native
+  representation — <code>NativeResponse</code> on the H1 native path, plain ASGI event
+  dicts elsewhere — never raw <code>Response</code> objects.  Works on both async
+  middleware functions and middleware classes (decorates <code>__call__</code>).</p>
 
 
 
