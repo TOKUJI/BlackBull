@@ -8,10 +8,11 @@ from dataclasses import dataclass, field
 from typing import ClassVar
 
 from ..asgi import ASGIEvent
-# Imported at runtime (not under TYPE_CHECKING) so beartype can resolve
-# the ``'EventAggregator'`` forward reference on
-# ``_make_disconnect_detecting_receive``.  No circular-import risk —
-# ``event_aggregator`` does not import anything back from this module.
+# Imported at runtime (not under TYPE_CHECKING) so beartype can resolve the
+# ``EventAggregator`` union annotations below (with ``from __future__ import
+# annotations`` beartype parses them as expressions against module globals).
+# No circular-import risk — ``event_aggregator`` does not import anything
+# back from this module.
 from ..event_aggregator import EventAggregator  # noqa: TC002
 from ..logger import enqueue_access_log  # O4 fast path (no import cycle: logger imports nothing here)
 
@@ -64,7 +65,7 @@ def emit_access_log(record: 'AccessLogRecord') -> None:
             _access_logger.info(record, extra=extra)
 
 
-def request_record_needed(aggregator: 'EventAggregator | None') -> bool:
+def request_record_needed(aggregator: EventAggregator | None) -> bool:
     """Whether the per-request :class:`AccessLogRecord` will be consumed.
 
     The record (and the ``conn.state['access_log']`` write it forces, plus the
@@ -81,7 +82,7 @@ def request_record_needed(aggregator: 'EventAggregator | None') -> bool:
     return aggregator is not None and aggregator.has_request_completed_listeners()
 
 
-def disconnect_events_observed(aggregator: 'EventAggregator | None') -> bool:
+def disconnect_events_observed(aggregator: EventAggregator | None) -> bool:
     """Whether the disconnect-detecting receive wrapper is observed.
 
     The wrapper (a per-request closure) exists to (a) emit ``request_disconnected``
@@ -252,7 +253,7 @@ class AccessLogRecord:
 
 
 
-def _make_disconnect_detecting_receive(receive, conn, aggregator: 'EventAggregator'):
+def _make_disconnect_detecting_receive(receive, conn, aggregator: EventAggregator):
     """Wrap *receive* to emit request_disconnected when http.disconnect is seen.
 
     Used by both the HTTP/1.1 and HTTP/2 actor paths.

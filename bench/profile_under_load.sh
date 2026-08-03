@@ -26,7 +26,9 @@ K6_DURATION="${K6_DURATION:-60s}"
 export K6_VUS K6_DURATION
 
 # Embed the VU count in output filenames so multiple passes don't collide.
-SVG="$RESULT_DIR/profile_stress_${TS}_vu${K6_VUS}.svg"
+# speedscope JSON (not SVG): each sample is a full call-stack, so the file
+# opens directly in VS Code / speedscope.app and parses with stdlib json.
+PROFILE="$RESULT_DIR/profile_stress_${TS}_vu${K6_VUS}.speedscope.json"
 K6_JSON="$RESULT_DIR/k6_stress_profile_${TS}_vu${K6_VUS}.json"
 
 CERT="${CERT:-tests/cert.pem}"
@@ -53,13 +55,13 @@ if [ -n "$EXISTING" ]; then
 fi
 
 # py-spy duration: server-startup (~5s) + warmup (~5s) + K6_DURATION
-# seconds of stress + ~15s buffer for graceful py-spy SVG write.
+# seconds of stress + ~15s buffer for graceful py-spy speedscope JSON write.
 # Expects K6_DURATION in 'Ns' seconds form (e.g. '60s').
 _k6_secs="${K6_DURATION%s}"
 PY_SPY_DURATION=$(( _k6_secs + 25 ))
 
 echo "Starting server under py-spy (duration=${PY_SPY_DURATION}s, rate=200 Hz) ..."
-echo "  SVG → $SVG"
+echo "  profile → $PROFILE"
 # BB_ACCESS_LOG=0 mirrors bench/peers/run_peer.sh's blackbull case
 # (set at run_peer.sh line ~148): the bench harness disables per-request
 # access logging across all peers so the profile is apples-to-apples with
@@ -71,7 +73,8 @@ BB_ACCESS_LOG="${BB_ACCESS_LOG:-0}" \
 py-spy record \
     --duration "$PY_SPY_DURATION" \
     --rate 200 \
-    --output "$SVG" \
+    --format speedscope \
+    --output "$PROFILE" \
     -- python bench/app.py --port 8443 --cert "$CERT" --key "$KEY" &
 PY_SPY_PID=$!
 
@@ -107,7 +110,7 @@ echo "Event loop lag (post-stress):"
 curl -sk --max-time 5 "$BASE/metrics" || true
 echo ""
 
-# --- wait for py-spy to finish writing the SVG ---
+# --- wait for py-spy to finish writing the speedscope JSON ---
 echo "Waiting for py-spy to finish ..."
 wait "$PY_SPY_PID" 2>/dev/null || true
 
@@ -128,4 +131,5 @@ print(f"  max    : {dur['max']:.2f} ms")
 PYEOF
 
 echo ""
-echo "Profile written: $SVG"
+echo "Profile written: $PROFILE"
+echo "  (view in VS Code or https://www.speedscope.app)"

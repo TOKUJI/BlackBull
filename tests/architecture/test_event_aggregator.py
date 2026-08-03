@@ -94,3 +94,69 @@ def test_has_websocket_message_listeners_is_cached_between_calls() -> None:
     d.has_listeners = Mock(side_effect=AssertionError(
         'has_listeners must not be called again while generation is unchanged'))
     assert agg.has_websocket_message_listeners() is False  # served from cache
+
+
+# ---------------------------------------------------------------------------
+# has_request_completed_listeners / has_request_disconnected_listeners — the
+# HTTP per-request hot-path guards (Sprint 91: same generation-keyed cache as
+# the WS guard, so the set lookup runs only when listeners change)
+# ---------------------------------------------------------------------------
+
+_HTTP_LISTENER_CHECKS = [
+    ("has_request_completed_listeners", "request_completed"),
+    ("has_request_disconnected_listeners", "request_disconnected"),
+]
+
+
+@pytest.mark.parametrize("method,event", _HTTP_LISTENER_CHECKS)
+def test_http_listener_check_false_when_empty(method, event) -> None:
+    agg = EventAggregator(EventDispatcher())
+    assert getattr(agg, method)() is False
+
+
+@pytest.mark.parametrize("method,event", _HTTP_LISTENER_CHECKS)
+def test_http_listener_check_true_when_registered(method, event) -> None:
+    d = EventDispatcher()
+    d.on(event, AsyncMock())
+    assert getattr(EventAggregator(d), method)() is True
+
+
+@pytest.mark.parametrize("method,event", _HTTP_LISTENER_CHECKS)
+def test_http_listener_check_ignores_other_events(method, event) -> None:
+    """A listener on some *other* event must not flip the HTTP guard."""
+    d = EventDispatcher()
+    d.on('websocket_message', AsyncMock())
+    assert getattr(EventAggregator(d), method)() is False
+
+
+@pytest.mark.parametrize("method,event", _HTTP_LISTENER_CHECKS)
+def test_http_listener_check_invalidates_late_registration(method, event) -> None:
+    d = EventDispatcher()
+    agg = EventAggregator(d)
+    assert getattr(agg, method)() is False   # caches False
+    d.on(event, AsyncMock())                 # bumps generation
+    assert getattr(agg, method)() is True    # recomputed
+
+
+@pytest.mark.parametrize("method,event", _HTTP_LISTENER_CHECKS)
+def test_http_listener_check_is_cached_between_calls(method, event) -> None:
+    d = EventDispatcher()
+    agg = EventAggregator(d)
+    getattr(agg, method)()                   # prime the cache
+    d.has_listeners = Mock(side_effect=AssertionError(
+        'has_listeners must not be called again while generation is unchanged'))
+    assert getattr(agg, method)() is False   # served from cache
+
+
+@pytest.mark.parametrize("method,event", _HTTP_LISTENER_CHECKS)
+def test_http_listener_check_caches_independently(method, event) -> None:
+    """Each event's cache refreshes on its own generation key; a registration
+    for the other request event must not corrupt this event's cached verdict."""
+    d = EventDispatcher()
+    agg = EventAggregator(d)
+    other = 'request_disconnected' if event == 'request_completed' else 'request_completed'
+    assert getattr(agg, method)() is False       # cache this event as False
+    d.on(other, AsyncMock())                     # bump generation (other event)
+    assert getattr(agg, method)() is False       # still False after refresh
+    d.on(event, AsyncMock())                     # register THIS event
+    assert getattr(agg, method)() is True        # now True

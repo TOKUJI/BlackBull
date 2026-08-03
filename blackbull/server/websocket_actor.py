@@ -78,9 +78,24 @@ class WebSocketActor(Actor):
             reader, writer,
             ws_queue_depth=ws_queue_depth,
             decompressor=decompressor,
+            on_message=self._emit_websocket_message,
+            read_ahead_needed=self._aggregator.has_websocket_message_listeners,
         )
         self._ws_send = SenderFactory.websocket(writer, compressor=compressor)
         self._disconnect_code: int = WSCloseCode.ABNORMAL
+
+    async def _emit_websocket_message(self, event: dict) -> None:
+        """Read-time emit adapter: ``websocket_message`` fires when the
+        recipient reads a message, before the handler consumes it.
+
+        Re-checks the listener set per message (cached predicate) so a
+        listener registered after this connection was built still receives
+        events, while a no-listener throughput workload pays one boolean
+        check instead of the whole ``Event``/``emit`` chain.
+        """
+        if not self._aggregator.has_websocket_message_listeners():
+            return
+        await self._aggregator.on_websocket_message(self._conn, event)
 
     async def run(self) -> None:
         try:
@@ -95,16 +110,12 @@ class WebSocketActor(Actor):
         finally:
             await self._aggregator.on_websocket_disconnected(
                 self._conn, code=self._disconnect_code)
+            self._ws_receive.disarm_watchdog()
             await self._writer.close()
 
     async def _receive(self) -> dict[str, Any]:
         event = await self._ws_receive()
-        if event.get('type') == ASGIEvent.WS_RECEIVE:
-            # Hot path: skip the Event + detail-dict build and emit indirection
-            # entirely when no ``websocket_message`` handler is registered.
-            if self._aggregator.has_websocket_message_listeners():
-                await self._aggregator.on_websocket_message(self._conn, event)
-        elif event.get('type') == ASGIEvent.WS_DISCONNECT:
+        if event.get('type') == ASGIEvent.WS_DISCONNECT:
             self._disconnect_code = event.get('code', WSCloseCode.ABNORMAL)
         return event
 
@@ -125,6 +136,14 @@ class WebSocketActor(Actor):
             await self._aggregator.on_websocket_connected(
                 self._conn, event.get('subprotocol'))
         await self._ws_send(event)
+        # Control-frame watchdog (design A'): the idle watchdog services
+        # PING/CLOSE frames on connections quiet for > ~1 scanner tick.  The
+        # send-time servicing fast path was removed — at echo throughput it
+        # cost ~2% per message, and the watchdog alone bounds PONG latency to
+        # ~one tick, the documented contract.  ``send_touch`` keeps the
+        # watchdog armed and marks activity only once control frames matter
+        # or a listener needs the deferred reader.
+        self._ws_receive.send_touch()
 
     async def _handle(self, msg: Message) -> None:
         raise NotImplementedError

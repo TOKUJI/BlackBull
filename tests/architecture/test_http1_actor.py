@@ -12,6 +12,23 @@ from blackbull.server.sender import AbstractWriter
 from blackbull.server.websocket_actor import WebSocketActor
 
 
+def _mock_aggregator() -> AsyncMock:
+    """AsyncMock aggregator whose listener predicates return real bools.
+
+    ``request_record_needed`` / ``disconnect_events_observed`` (access_log)
+    are beartype-instrumented on their return type; a bare AsyncMock's
+    predicate methods return MagicMock and trip the bool check under
+    ``--beartype-packages``.  The actor reaches those helpers on the
+    request path, so every aggregator mock in this file needs the return
+    values configured.
+    """
+    agg = AsyncMock(spec=EventAggregator)
+    agg.has_request_completed_listeners.return_value = False
+    agg.has_request_disconnected_listeners.return_value = False
+    agg.has_websocket_message_listeners.return_value = False
+    return agg
+
+
 # ---------------------------------------------------------------------------
 # In-process reader/writer fakes (no live sockets)
 # ---------------------------------------------------------------------------
@@ -104,7 +121,7 @@ def mock_app():
 
 @pytest.mark.asyncio
 async def test_request_lifecycle_events(mock_reader, mock_writer, mock_app) -> None:
-    aggregator = AsyncMock(spec=EventAggregator)
+    aggregator = _mock_aggregator()
     actor = HTTP1Actor(mock_reader, mock_writer, mock_app, aggregator)
     await actor.run()
 
@@ -123,7 +140,7 @@ async def test_app_exception_fires_error(mock_reader, mock_writer) -> None:
     async def bad_app(scope, receive, send):
         raise boom
 
-    aggregator = AsyncMock(spec=EventAggregator)
+    aggregator = _mock_aggregator()
     actor = HTTP1Actor(mock_reader, mock_writer, bad_app, aggregator)
     await actor.run()  # isolate strategy: exception is swallowed after re-emitting
 
@@ -136,7 +153,7 @@ async def test_app_exception_fires_error(mock_reader, mock_writer) -> None:
 
 @pytest.mark.asyncio
 async def test_keep_alive_two_requests(mock_keep_alive_reader, mock_writer, mock_app) -> None:
-    aggregator = AsyncMock(spec=EventAggregator)
+    aggregator = _mock_aggregator()
     actor = HTTP1Actor(mock_keep_alive_reader, mock_writer, mock_app, aggregator)
     await actor.run()
     assert mock_app.await_count == 2
@@ -163,7 +180,7 @@ async def test_parse_connection_header_does_not_corrupt_scheme(mock_writer) -> N
         await send({'type': 'http.response.start', 'status': 200, 'headers': []})
         await send({'type': 'http.response.body', 'body': b''})
 
-    aggregator = AsyncMock(spec=EventAggregator)
+    aggregator = _mock_aggregator()
     actor = HTTP1Actor(reader, mock_writer, capture_app, aggregator)
     await actor.run()
 
@@ -187,7 +204,7 @@ async def test_parse_host_without_port(mock_writer) -> None:
         await send({'type': 'http.response.start', 'status': 200, 'headers': []})
         await send({'type': 'http.response.body', 'body': b''})
 
-    aggregator = AsyncMock(spec=EventAggregator)
+    aggregator = _mock_aggregator()
     actor = HTTP1Actor(reader, mock_writer, capture_app, aggregator)
     await actor.run()  # must not raise
 
@@ -209,7 +226,11 @@ async def test_request_disconnected_on_eof(mock_reader, mock_writer) -> None:
         await receive()  # consumes the body (http.request)
         await receive()  # HTTP1Recipient returns http.disconnect on second call
 
-    aggregator = AsyncMock(spec=EventAggregator)
+    aggregator = _mock_aggregator()
+    # The disconnect-detecting receive wrapper is built only when the
+    # aggregator reports a listener — opt in so the wrapper fires
+    # on_request_disconnected on EOF (the thing this test asserts).
+    aggregator.has_request_disconnected_listeners.return_value = True
 
     async def _on_disconnect(*args, **kwargs):
         nonlocal disconnected_called

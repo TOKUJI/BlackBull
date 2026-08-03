@@ -9,6 +9,22 @@ from blackbull.server.sender import AbstractWriter
 from blackbull.server.connection_actor import ConnectionActor
 
 
+def _mock_aggregator() -> AsyncMock:
+    """AsyncMock aggregator whose listener predicates return real bools.
+
+    ``request_record_needed`` / ``disconnect_events_observed`` (access_log)
+    are beartype-instrumented on their return type; a bare AsyncMock's
+    predicate methods return MagicMock and trip the bool check under
+    ``--beartype-packages``.  The actor reaches those helpers on the
+    request path.
+    """
+    agg = AsyncMock(spec_set=EventAggregator)
+    agg.has_request_completed_listeners.return_value = False
+    agg.has_request_disconnected_listeners.return_value = False
+    agg.has_websocket_message_listeners.return_value = False
+    return agg
+
+
 # ---------------------------------------------------------------------------
 # In-process fakes
 # ---------------------------------------------------------------------------
@@ -145,7 +161,7 @@ def mock_app():
 @pytest.mark.asyncio
 async def test_connection_dispatches_http1(
         fake_http1_reader, fake_writer, mock_app) -> None:
-    aggregator = AsyncMock(spec_set=EventAggregator)
+    aggregator = _mock_aggregator()
     actor = ConnectionActor(fake_http1_reader, fake_writer, mock_app, aggregator)
     await actor.run()
 
@@ -156,7 +172,7 @@ async def test_connection_dispatches_http1(
 @pytest.mark.asyncio
 async def test_connection_dispatches_http2(
         fake_http2_preface_reader, fake_writer, mock_app) -> None:
-    aggregator = AsyncMock(spec_set=EventAggregator)
+    aggregator = _mock_aggregator()
     actor = ConnectionActor(fake_http2_preface_reader, fake_writer, mock_app, aggregator)
     await actor.run()
 
@@ -166,7 +182,7 @@ async def test_connection_dispatches_http2(
 @pytest.mark.asyncio
 async def test_connection_isolates_protocol_error(
         fake_bad_reader, fake_writer, mock_app) -> None:
-    aggregator = AsyncMock(spec_set=EventAggregator)
+    aggregator = _mock_aggregator()
     actor = ConnectionActor(fake_bad_reader, fake_writer, mock_app, aggregator)
     await actor.run()  # must not raise
 
@@ -186,7 +202,7 @@ async def test_connection_dispatches_http2_fragmented_preface(
     continuation').  readexactly(8) reads all 8 bytes and the dispatch succeeds.
     """
     reader = _ByteByByteReader(_HTTP2_PREFACE)
-    aggregator = AsyncMock(spec_set=EventAggregator)
+    aggregator = _mock_aggregator()
     actor = ConnectionActor(reader, fake_writer, mock_app, aggregator)
     await actor.run()  # must not raise ValueError
 

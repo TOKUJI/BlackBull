@@ -22,6 +22,7 @@ sample is mixed, and any median-based Δ from that run should be discarded.
 """
 from __future__ import annotations
 
+import math
 import statistics as st
 import sys
 from pathlib import Path
@@ -39,9 +40,16 @@ def _load(raw: Path) -> dict[str, dict[str, list[float]]]:
             continue
         phase, _round, arm, rps = parts[:4]
         try:
-            out.setdefault(phase, {}).setdefault(arm, []).append(float(rps))
+            rps_f = float(rps)
         except ValueError:
             continue
+        # A failed run (server not ready, load generator error) writes NaN.
+        # Statistics cannot consume it, and reporting a mean built on it is
+        # worse than reporting the missing run — skip non-finite rows so a
+        # partial run still reports what did measure rather than crashing.
+        if not math.isfinite(rps_f):
+            continue
+        out.setdefault(phase, {}).setdefault(arm, []).append(rps_f)
     return out
 
 

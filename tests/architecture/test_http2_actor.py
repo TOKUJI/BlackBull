@@ -15,6 +15,23 @@ from blackbull.server.http2_actor import HTTP2Actor
 from blackbull.connection import Connection
 
 
+def _mock_aggregator() -> AsyncMock:
+    """AsyncMock aggregator whose listener predicates return real bools.
+
+    ``request_record_needed`` / ``disconnect_events_observed`` (access_log)
+    are beartype-instrumented on their return type; a bare AsyncMock's
+    predicate methods return MagicMock and trip the bool check under
+    ``--beartype-packages``.  The actor reaches those helpers on the
+    request path, so every aggregator mock in this file needs the return
+    values configured.
+    """
+    agg = AsyncMock(spec=EventAggregator)
+    agg.has_request_completed_listeners.return_value = False
+    agg.has_request_disconnected_listeners.return_value = False
+    agg.has_websocket_message_listeners.return_value = False
+    return agg
+
+
 def _req_field(target, name):
     """Read a request field from what the actor dispatched — a native
     ``Connection`` (attribute) on the default lane, or an ASGI scope dict under
@@ -133,7 +150,7 @@ def mock_app():
 
 @pytest.mark.asyncio
 async def test_stream_request_lifecycle(fake_h2_reader, fake_writer, mock_app) -> None:
-    aggregator = AsyncMock(spec=EventAggregator)
+    aggregator = _mock_aggregator()
     actor = HTTP2Actor(fake_h2_reader, fake_writer, mock_app, aggregator)
     await actor.run()
 
@@ -147,7 +164,7 @@ async def test_stream_request_lifecycle(fake_h2_reader, fake_writer, mock_app) -
 
 @pytest.mark.asyncio
 async def test_two_concurrent_streams(fake_two_stream_reader, fake_writer, mock_app) -> None:
-    aggregator = AsyncMock(spec=EventAggregator)
+    aggregator = _mock_aggregator()
     actor = HTTP2Actor(fake_two_stream_reader, fake_writer, mock_app, aggregator)
     await actor.run()
     assert mock_app.await_count == 2
@@ -171,7 +188,7 @@ async def test_stream_error_isolated(fake_two_stream_reader, fake_writer) -> Non
         await send({'type': 'http.response.body', 'body': b''})
         completed += 1
 
-    aggregator = AsyncMock(spec=EventAggregator)
+    aggregator = _mock_aggregator()
     actor = HTTP2Actor(fake_two_stream_reader, fake_writer, app_with_one_error, aggregator)
     await actor.run()
 
@@ -194,7 +211,7 @@ async def test_conn_has_client_and_server(fake_h2_reader, fake_writer) -> None:
         await send({'type': 'http.response.start', 'status': 200, 'headers': []})
         await send({'type': 'http.response.body', 'body': b''})
 
-    aggregator = AsyncMock(spec=EventAggregator)
+    aggregator = _mock_aggregator()
     actor = HTTP2Actor(
         fake_h2_reader, fake_writer, capture_app, aggregator,
         peername=('192.168.1.1', 54321),
@@ -244,7 +261,7 @@ async def test_handshake_sends_settings_initial_window_size(
     reset_settings_cache()
 
     writer = _FakeWriter()
-    aggregator = AsyncMock(spec=EventAggregator)
+    aggregator = _mock_aggregator()
     actor = HTTP2Actor(fake_h2_reader, writer, mock_app, aggregator)
     await actor.run()
 
@@ -272,7 +289,7 @@ async def test_handshake_sends_connection_window_update(
     reset_settings_cache()
 
     writer = _FakeWriter()
-    aggregator = AsyncMock(spec=EventAggregator)
+    aggregator = _mock_aggregator()
     actor = HTTP2Actor(fake_h2_reader, writer, mock_app, aggregator)
     await actor.run()
 
@@ -287,7 +304,7 @@ async def test_handshake_sends_connection_window_update(
 async def test_make_sender_uses_peer_initial_window_size(fake_writer, mock_app):
     """Stream senders created after the peer's SETTINGS must use the peer's announced IWS."""
     peer_iws = 2097152  # 2 MiB — larger than the RFC default
-    aggregator = AsyncMock(spec=EventAggregator)
+    aggregator = _mock_aggregator()
     actor = HTTP2Actor(None, fake_writer, mock_app, aggregator)
     actor._peer_initial_window_size = peer_iws
 
@@ -301,7 +318,7 @@ async def test_make_sender_uses_peer_initial_window_size(fake_writer, mock_app):
 @pytest.mark.asyncio
 async def test_make_sender_uses_current_connection_window(fake_writer, mock_app):
     """Stream senders created after a connection WINDOW_UPDATE must see the updated budget."""
-    aggregator = AsyncMock(spec=EventAggregator)
+    aggregator = _mock_aggregator()
     actor = HTTP2Actor(None, fake_writer, mock_app, aggregator)
     actor._conn_window.size = 4194304  # simulates post-WINDOW_UPDATE value
 
@@ -325,7 +342,7 @@ async def test_make_sender_uses_current_connection_window(fake_writer, mock_app)
 async def test_handshake_includes_max_concurrent_streams(fake_h2_reader, mock_app):
     """Server's initial SETTINGS must advertise SETTINGS_MAX_CONCURRENT_STREAMS."""
     writer = _FakeWriter()
-    aggregator = AsyncMock(spec=EventAggregator)
+    aggregator = _mock_aggregator()
     actor = HTTP2Actor(fake_h2_reader, writer, mock_app, aggregator)
     await actor.run()
 
@@ -339,7 +356,7 @@ async def test_handshake_includes_max_concurrent_streams(fake_h2_reader, mock_ap
 @pytest.mark.asyncio
 async def test_max_concurrent_streams_sends_rst_on_overflow(fake_writer, mock_app):
     """When the active stream count equals the limit, new HEADERS must receive RST_STREAM."""
-    aggregator = AsyncMock(spec=EventAggregator)
+    aggregator = _mock_aggregator()
     headers_frame = _make_headers_frame(stream_id=1, end_stream=True)
     reader = _FakeReader(headers_frame)
     actor = HTTP2Actor(reader, fake_writer, mock_app, aggregator)
@@ -364,7 +381,7 @@ async def test_max_concurrent_streams_does_not_dispatch_app(fake_writer):
         await send({'type': 'http.response.start', 'status': 200, 'headers': []})
         await send({'type': 'http.response.body', 'body': b''})
 
-    aggregator = AsyncMock(spec=EventAggregator)
+    aggregator = _mock_aggregator()
     headers_frame = _make_headers_frame(stream_id=1, end_stream=True)
     reader = _FakeReader(headers_frame)
     actor = HTTP2Actor(reader, fake_writer, counting_app, aggregator)
@@ -378,7 +395,7 @@ async def test_max_concurrent_streams_does_not_dispatch_app(fake_writer):
 @pytest.mark.asyncio
 async def test_active_stream_count_zero_after_completion(fake_h2_reader, fake_writer, mock_app):
     """_active_stream_count must return to zero once the connection closes."""
-    aggregator = AsyncMock(spec=EventAggregator)
+    aggregator = _mock_aggregator()
     actor = HTTP2Actor(fake_h2_reader, fake_writer, mock_app, aggregator)
     await actor.run()
 
