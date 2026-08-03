@@ -42,11 +42,17 @@ class EventAggregator:
 
     def __init__(self, dispatcher: EventDispatcher) -> None:
         self._dispatcher = dispatcher
-        # Generation-keyed cache for the WebSocket receive hot path
-        # (has_websocket_message_listeners): a single-event lookup, cached so
-        # a 456K-msg/s echo workload never re-scans per frame.
+        # Generation-keyed caches for the per-message / per-request listener
+        # guards.  Each event's verdict is a plain bool, refreshed only when
+        # the dispatcher's registration generation changes (listeners are
+        # almost always registered before serving), so the hot path pays one
+        # int read + compare per check instead of a set lookup.
         self._ws_msg_cache_gen: int = -1
         self._ws_msg_cache_val: bool = False
+        self._req_completed_cache_gen: int = -1
+        self._req_completed_cache_val: bool = False
+        self._req_disconnected_cache_gen: int = -1
+        self._req_disconnected_cache_val: bool = False
 
     # ------------------------------------------------------------------
     # Server lifecycle
@@ -123,15 +129,28 @@ class EventAggregator:
         AccessLogRecord (whose wire fields this event reports) must be built,
         and whether the disconnect-detecting receive wrapper (whose
         ``mark_disconnected`` this event reads to suppress itself on a dropped
-        request) is observed."""
-        return self._dispatcher.has_listeners('request_completed')
+        request) is observed.  Cached against the dispatcher's registration
+        generation, so the lookup runs only when listeners change.
+        """
+        gen = self._dispatcher.generation
+        if gen != self._req_completed_cache_gen:
+            self._req_completed_cache_val = self._dispatcher.has_listeners('request_completed')
+            self._req_completed_cache_gen = gen
+        return self._req_completed_cache_val
 
     def has_request_disconnected_listeners(self) -> bool:
         """Return True if any ``request_disconnected`` handler is registered.
 
         Read on the request hot path to decide whether the disconnect-detecting
-        receive wrapper needs to be built at all."""
-        return self._dispatcher.has_listeners('request_disconnected')
+        receive wrapper needs to be built at all.  Cached against the
+        dispatcher's registration generation, so the lookup runs only when
+        listeners change.
+        """
+        gen = self._dispatcher.generation
+        if gen != self._req_disconnected_cache_gen:
+            self._req_disconnected_cache_val = self._dispatcher.has_listeners('request_disconnected')
+            self._req_disconnected_cache_gen = gen
+        return self._req_disconnected_cache_val
 
     def has_websocket_message_listeners(self) -> bool:
         """Return True if any ``websocket_message`` handler is registered.
@@ -151,9 +170,25 @@ class EventAggregator:
     async def on_websocket_message(
         self, conn, message: WebSocketReceiveEvent
     ) -> None:
-        """Fire Level B ``websocket_message`` (``conn`` is a Connection)."""
+        """Fire Level B ``websocket_message`` (``conn`` is a Connection).
+
+        Canonical detail shape ``{'conn', 'text', 'bytes'}`` — the shape the
+        direct-recipient path and docs/guide/events.md use.  (It was briefly
+        ``{'conn', 'message'}`` on the server path; unified in Sprint 90.)
+
+        Guarded like the other ``on_*`` methods: with no ``websocket_message``
+        listener, the ``Event`` + detail-dict allocation and the ``emit``
+        indirection are skipped (the cached predicate is the receive path's
+        documented skip mechanism).
+        """
+        if not self.has_websocket_message_listeners():
+            return
         await self._dispatcher.emit(
-            Event("websocket_message", {'conn': conn, "message": message})
+            Event("websocket_message", {
+                'conn':  conn,
+                'text':  message.get('text'),
+                'bytes': message.get('bytes'),
+            })
         )
 
     async def on_websocket_disconnected(

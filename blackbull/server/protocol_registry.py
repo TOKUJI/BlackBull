@@ -36,7 +36,7 @@ from typing import Any
 
 from ..event_aggregator import EventAggregator
 from .deadline import ConnectionDeadline
-from .recipient import AbstractReader, _HTTP2_STREAM_QUEUE_DEPTH, _WS_EVENT_QUEUE_DEPTH
+from .recipient import AbstractReader, _HTTP2_STREAM_QUEUE_DEPTH, _WS_READ_INLINE
 from .sender import AbstractWriter
 
 logger = logging.getLogger(__name__)
@@ -93,7 +93,7 @@ class ConnectionView:
     deadline: ConnectionDeadline
     connection_id: str
     stream_queue_depth: int = _HTTP2_STREAM_QUEUE_DEPTH
-    ws_queue_depth: int = _WS_EVENT_QUEUE_DEPTH
+    ws_queue_depth: int = _WS_READ_INLINE
 
 
 # ---------------------------------------------------------------------------

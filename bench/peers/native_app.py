@@ -11,6 +11,7 @@ from http import HTTPMethod
 from urllib.parse import parse_qs
 
 from blackbull import BlackBull, Connection, Response
+from blackbull.utils import Scheme
 
 app = BlackBull()
 
@@ -112,7 +113,7 @@ async def baseline11(conn: Connection):
     return Response(str(total).encode(), content_type=_PLAIN_CT)
 
 
-@app.route(path="/ws", methods=[HTTPMethod.GET])
+@app.route(path="/ws", methods=[HTTPMethod.GET], scheme=Scheme.websocket)
 async def ws_echo(conn, receive, send):
     """WebSocket echo — full-form handler (conn, receive, send)."""
     event = await receive()

@@ -15,7 +15,7 @@ from ..protocol.rsock import (
 )
 from .sender import AbstractWriter
 from .recipient import (AbstractReader,
-                        _HTTP2_STREAM_QUEUE_DEPTH, _WS_EVENT_QUEUE_DEPTH)
+                        _HTTP2_STREAM_QUEUE_DEPTH, _WS_READ_INLINE)
 from .access_log import AccessLogRecord, emit_access_log as _emit_access_log
 from .cap_log import log_cap_hit
 from ..asgi import ASGIEvent
@@ -189,7 +189,7 @@ class Server:
                  ssl_context=None, certfile=None, keyfile=None, password=None,
                  max_connections: int = 0,
                  stream_queue_depth: int = _HTTP2_STREAM_QUEUE_DEPTH,
-                 ws_queue_depth: int = _WS_EVENT_QUEUE_DEPTH,
+                 ws_queue_depth: int = _WS_READ_INLINE,
                  protocol_registry=None,
                  **kwds):
         self.app = app

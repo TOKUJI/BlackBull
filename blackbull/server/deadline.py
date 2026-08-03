@@ -41,8 +41,8 @@ class _Scanner:
     type system.
     """
 
-    _LOOP: ClassVar['asyncio.AbstractEventLoop | None'] = None
-    _HANDLE: ClassVar['asyncio.TimerHandle | None'] = None
+    _LOOP: ClassVar[asyncio.AbstractEventLoop | None] = None
+    _HANDLE: ClassVar[asyncio.TimerHandle | None] = None
     _REGISTRY: ClassVar[set] = set()
 
 
@@ -271,3 +271,58 @@ class WriteDeadline:
                 task.uncancel()
             raise TimeoutError
         return False
+
+
+class WsIdleWatchdog:
+    """Per-connection WebSocket idle state, riding the shared tick scanner.
+
+    Inline reading (the default) services PING/CLOSE only when the handler
+    calls ``receive()``.  A handler that goes quiet — long work between
+    reads, or send-only — stops servicing control frames, and (with a
+    ``websocket_message`` listener) stops producing events.  This watchdog
+    bounds both: while a connection has been quiet for more than one tick,
+    the scanner fires the connection's callback roughly every tick, and the
+    callback services buffered control frames / starts the deferred reader.
+
+    The design constraint is the same one that built
+    :class:`ConnectionDeadline`: no per-connection asyncio timers.  One
+    ``TimerHandle`` serves every connection; this object is just registry
+    state plus a callback, re-armed on every fire so it keeps watching until
+    :meth:`disarm`.  ``touch()`` is called on each receive/send, which keeps
+    an actively-driven connection from ever firing (the common case — so the
+    default hot path pays a ``loop.time()`` + one comparison per message and
+    no scanner work at all).
+    """
+
+    __slots__ = ('_loop', '_idle_s', '_deadline_at', '_callback', '_registered')
+
+    def __init__(self, callback, *, idle_s: float | None = None) -> None:
+        self._loop = asyncio.get_running_loop()
+        self._idle_s: float = _TICK_S if idle_s is None else idle_s
+        self._deadline_at: float = _INF
+        self._callback = callback
+        self._registered = False
+
+    def touch(self) -> None:
+        """Mark connection activity; the watchdog goes quiet for _idle_s."""
+        self._deadline_at = self._loop.time() + self._idle_s
+        if not self._registered:
+            _ensure_scanner_running(self._loop)
+            _Scanner._REGISTRY.add(self)
+            self._registered = True
+
+    def _fire_from_scanner(self) -> None:
+        """Invoked by :func:`_tick` when the connection has been idle."""
+        # Re-arm first: the callback may schedule work, but this watchdog
+        # keeps watching (once per tick) until disarm().
+        self._deadline_at = self._loop.time() + self._idle_s
+        cb = self._callback
+        if cb is not None:
+            cb()
+
+    def disarm(self) -> None:
+        """Stop watching.  Idempotent."""
+        self._deadline_at = _INF
+        if self._registered:
+            _Scanner._REGISTRY.discard(self)
+            self._registered = False

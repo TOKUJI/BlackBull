@@ -13,7 +13,8 @@ from unittest.mock import MagicMock
 import pytest
 
 from blackbull.client.websocket import WebSocketSession
-from blackbull.server.recipient import AbstractReader, WebSocketRecipient
+from blackbull.server.recipient import (_WS_EVENT_QUEUE_DEPTH, AbstractReader,
+                                        WebSocketRecipient)
 from blackbull.server.sender import AbstractWriter
 from blackbull.server.ws_codec import WSOpcode, encode_frame
 
@@ -86,8 +87,13 @@ class TestRecipientShutdown:
 
     @pytest.mark.asyncio
     async def test_shutdown_cancels_running_reader(self):
+        # Read-ahead depth explicitly, because this asserts on the reader
+        # *task* — which only exists in eager mode.  The real client sessions
+        # construct the recipient the same way; the server default is inline
+        # and has no task for shutdown() to cancel.
         r = WebSocketRecipient(_ScriptedReader(), _CaptureWriter(),
-                               require_masked=False)
+                               require_masked=False,
+                               ws_queue_depth=_WS_EVENT_QUEUE_DEPTH)
         r._connect_sent = True
         recv = asyncio.create_task(r())
         await asyncio.sleep(0.05)  # let the read loop start and park

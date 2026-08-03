@@ -32,6 +32,19 @@ include a safety mechanism that works without the agent:
   agent reads the file afterward; it never polls a live process.
 - A command that could hang must carry an explicit timeout.
 
+Long-running steps that must **wake the agent up** on completion use the
+tool's async/background mechanism — never `nohup … &` inside a sync command,
+which detaches the process and drops the completion notification.  After
+launching such a step:
+
+1. Record the terminal id and the expected completion-marker path in
+   session memory.
+2. END the turn — the async completion notification is the wake-up.
+3. On any later turn, first check the pending-task ledger's completion
+   markers, then read the written result file and present it.  Never
+   assume a long task finished; verify its marker or ground-truth state
+   (e.g. `aws describe-instances`) before claiming completion.
+
 ### 5. Verifiable, ephemeral work products
 
 Do not embed complex logic inline in prompt responses.  Instead:

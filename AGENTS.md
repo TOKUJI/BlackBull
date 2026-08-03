@@ -37,6 +37,13 @@ A personal learning project — wire correctness over API stability (ZeroVer).
   to capture non-obvious intent, design trade-offs, or invariants the next
   reader would otherwise have to reverse-engineer from the code.
 
+- **Verified numbers only — estimates and calculations alike.** Never present
+  arithmetic, percentages, or summed tables that a tool has not computed.  For
+  any calculation use `bc` / `calc` / `python -c`; for any table with a Σ row,
+  generate it from a script that checks its own sums (Σ == total) and paste
+  the output verbatim — never hand-copy numbers into a response.  A number
+  you cannot reproduce from a script output is a number you do not have.
+
 - **Questions end the turn.** A pending decision gate is a stop, not a
   licence to continue.  If the answer to a gate question is not an explicit
   user choice, end the turn with the question restated — do not treat a
@@ -124,8 +131,9 @@ Rules that aren't architectural but will cause subtle bugs if you forget them.
 | File finding | `rg --files` or `rg -l` | One tool, less context switching |
 | Python package management | `uv` | Single binary replaces `pip` + `venv`; see `pyproject.toml` `[project.scripts]` |
 | Command runner | `just` | Project-specific commands in `justfile`.  `just typecheck`, `just docs`, etc. — no more memorising long `pytest`/`mkdocs` invocations |
-| CPU profiling | `py-spy` | `py-spy record -o profile.svg -- python app.py` (flamegraph) / `py-spy top -- python app.py` (live).  Run as same user — if ptrace blocked, add `--nonblocking` |
+| CPU profiling | `py-spy` | `py-spy record -f speedscope -o profile.json -- python app.py` — speedscope JSON, **not** SVG: each sample is already a full call-stack (list of frame indices into `shared.frames`), so it opens directly in VS Code / speedscope.app and parses with stdlib `json` (no SVG geometry reconstruction).  `py-spy top -- python app.py` (live).  Run as same user — if ptrace blocked, add `--nonblocking` |
 | JSON filtering | `jq` | `jq '[.cases[] \| select(.state=="failed")]'` on h2spec/http11probe results |
+| Arithmetic / sums | `bc` (or `calc`, `python -c`) | No mental math — pipe the operands into `bc` and let it add; paste script/table output verbatim (see *Verified numbers only*) |
 
 - Prefer `rg` over `grep` / `find` for all text search.
 - Prefer `ast-grep -p 'pattern' -l python` over `rg` when matching code

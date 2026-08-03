@@ -300,10 +300,11 @@ record on `blackbull.caps` when it fires.  Coverage:
 | `BB_H2_WS_MAX_STREAMS_PER_CONNECTION` | RFC 8441 WebSocket stream cap tripped |
 | `BB_COMPRESSION_MAX_INFLIGHT` | Compression middleware bypassed (executor saturated) |
 
-`BB_WS_QUEUE_DEPTH` is intentionally **not** logged — the WebSocket
-event queue applies backpressure (blocking `await put()`) rather
-than dropping events, so a hit is normal flow control rather than
-a rejection.  The HTTP/2 per-stream queue (depth controlled by
+`BB_WS_QUEUE_DEPTH` is intentionally **not** logged — when read-ahead
+is enabled at all, the WebSocket event queue applies backpressure
+(blocking `await put()`) rather than dropping events, so a hit is
+normal flow control rather than a rejection.  At the default depth of
+`0` there is no queue to hit.  The HTTP/2 per-stream queue (depth controlled by
 `BB_STREAM_QUEUE_DEPTH`-style internals) does drop and is logged
 under the cap name `stream_queue_depth`.
 

@@ -29,6 +29,7 @@ import os
 import signal
 import time
 
+from .recipient import _WS_READ_INLINE
 from .worker import run_worker
 from ..protocol.rsock import create_dual_stack_sockets, REUSEPORT_SUPPORTED
 
@@ -62,7 +63,7 @@ class MultiWorkerServer:
                  workers: int,
                  max_connections: int = 500,
                  stream_queue_depth: int = 64,
-                 ws_queue_depth: int = 256,
+                 ws_queue_depth: int = _WS_READ_INLINE,
                  shutdown_timeout: float = _SHUTDOWN_TIMEOUT,
                  reload: bool = False,
                  reload_paths=None,

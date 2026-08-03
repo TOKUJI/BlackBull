@@ -225,7 +225,8 @@ def _parse_args():
     p.add_argument('--stream-queue-depth', type=int, default=None,
                    help='HTTP/2 per-stream queue depth (default BB_STREAM_QUEUE_DEPTH or 64)')
     p.add_argument('--ws-queue-depth', type=int, default=None,
-                   help='WebSocket event queue depth (default BB_WS_QUEUE_DEPTH or 256)')
+                   help='WebSocket read-ahead depth; 0 = inline '
+                        '(default BB_WS_QUEUE_DEPTH or 0)')
     return p.parse_args()
 
 

@@ -22,7 +22,7 @@ from ..headers import Headers
 from .deadline import ConnectionDeadline
 from .h1_buffer import LIMIT_EXCEEDED, BufferedH1Reader
 from .recipient import (AbstractReader, HTTP1Recipient, IncompleteReadError,
-                        RecipientFactory, _WS_EVENT_QUEUE_DEPTH)
+                        RecipientFactory, _WS_READ_INLINE)
 from .sender import AbstractWriter, SenderFactory
 from .access_log import (AccessLogRecord as _AccessLogRecord,
                          _make_disconnect_detecting_receive,
@@ -559,7 +559,7 @@ class HTTP1Actor(Actor):
         peername: tuple[str, int] | None = None,
         sockname: tuple[str, int] | None = None,
         ssl: bool = False,
-        ws_queue_depth: int = _WS_EVENT_QUEUE_DEPTH,
+        ws_queue_depth: int = _WS_READ_INLINE,
         deadline: ConnectionDeadline | None = None,
         connection_id: str = '',
     ) -> None:

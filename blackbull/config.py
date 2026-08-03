@@ -91,8 +91,9 @@ class AppConfig:
     #: to ``BB_STREAM_QUEUE_DEPTH``.
     stream_queue_depth: int | None = None
 
-    #: ``asyncio.Queue`` depth for inbound WebSocket events per connection.
-    #: ``None`` defers to ``BB_WS_QUEUE_DEPTH``.
+    #: WebSocket inbound read-ahead depth.  ``0`` reads inline in the handler
+    #: task; a positive value runs a background reader with a queue of that
+    #: depth.  ``None`` defers to ``BB_WS_QUEUE_DEPTH`` (default ``0``).
     ws_queue_depth: int | None = None
 
     #: Enable auto-reload (requires the ``[reload]`` extra).

@@ -401,13 +401,51 @@ The following are protocol violations and raise
 | New TEXT or BINARY frame while a fragment sequence is open | §5.4 |
 | Control frame (ping/pong/close) with FIN=0 | §5.5 |
 
-## Queue depth and back-pressure
+## Read-ahead and back-pressure
 
-Each WebSocket connection has an inbound event queue; the depth
-defaults to 256 and is configurable via `BB_WS_QUEUE_DEPTH`.
-When the queue fills (your handler is slower than the client),
-new frames block the per-connection read loop rather than
-unbounded buffering in memory.
+`BB_WS_QUEUE_DEPTH` selects how far ahead of your handler the
+connection reads.  It defaults to `0`.
+
+**`0` — inline (default).**  Frames are read in your handler's own
+task, when it calls `receive()`.  There is no background reader task
+and no per-message queue, which is what makes a WebSocket message cost
+the same event-loop work as an HTTP/1.1 request.  Control frames are
+still handled for you — a `ping` is answered and a `close` echoed per
+RFC 6455 §5.5 — at the point your handler drives the next read.
+RFC 6455 §5.5.2 explicitly permits a delayed `pong`.
+
+**`N > 0` — read-ahead.**  A background task reads *ahead* of your
+handler into a queue of depth `N`.  This costs an extra event-loop
+round-trip per message and buys two things: control frames are
+serviced even while your handler is busy between `receive()` calls,
+and up to `N` messages buffer when the client outruns you.  When the
+queue fills, the read loop blocks rather than buffering without bound.
+
+Choose read-ahead when a handler does slow work between reads and you
+need keepalive `ping`s answered during it.  A handler that loops
+tightly on `receive()` — the common shape — wants the default.
+
+!!! note "`websocket_message` and control frames when your handler isn't reading"
+
+    Two automatic mechanisms keep a handler that is *not* reading
+    conformant, without ever forcing read-ahead on one that is:
+
+    - **The PONG-latency contract.**  In inline mode a `ping` is answered
+      when your handler next drives a read, or on every tick of the
+      internal deadline scanner for a connection idle more than ~0.3 s
+      (the idle watchdog).  Worst-case PONG latency is therefore bounded
+      to roughly one scanner tick even for a handler that never reads —
+      with no per-connection timers.  A handler that loops tightly on
+      `receive()` is never touched by the watchdog.
+    - **The `websocket_message` read-time contract.**  The
+      [`websocket_message`](events.md) event fires when the *server*
+      reads a message, not when your handler consumes it, so a handler
+      that never calls `receive()` still produces events.  Registering a
+      listener does **not** switch read-ahead on at connect — a consuming
+      handler keeps the inline win.  Instead, if your handler goes quiet
+      for more than ~0.3 s, a deferred reader starts in the background
+      and fires the event at read time.  Nothing else observes the
+      difference between the modes.
 
 ## Next
 

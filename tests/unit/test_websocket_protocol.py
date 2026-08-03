@@ -116,14 +116,18 @@ class _RecipientWrapper:
     and a .writer attribute so tests written against WebSocketHandler.receive()
     continue to work unchanged."""
 
-    def __init__(self, raw_bytes: bytes, *, max_frame_payload: int | None = None):
+    def __init__(self, raw_bytes: bytes, *, max_frame_payload: int | None = None,
+                 ws_queue_depth: int = 0):
         self.writer = _FakeWriter()
         # Wrap the sync _FakeWriter in AsyncioWriter so WebSocketRecipient
         # receives a proper AbstractWriter (shim removed from __init__).
+        # ws_queue_depth defaults to 0 (inline reading) to match the server
+        # default, so every test in this module exercises the default path.
         self._recipient = WebSocketRecipient(
             AsyncioReader(_FakeReader(raw_bytes)),
             AsyncioWriter(self.writer),
             max_frame_payload=max_frame_payload,
+            ws_queue_depth=ws_queue_depth,
         )
 
     async def receive(self):
@@ -962,3 +966,255 @@ class TestFramePayloadSizeGuard:
         assert WSCloseCode.MESSAGE_TOO_BIG.to_bytes(2, 'big') not in bytes(wrapper.writer.written), (
             'with the cap raised, the size guard must not fire on '
             'declared lengths within the override')
+
+
+# ---------------------------------------------------------------------------
+# Read-ahead mode — inline (default) vs eager background reader
+# ---------------------------------------------------------------------------
+
+class TestReadAheadMode:
+    """``ws_queue_depth`` selects *how far ahead of the app the wire is read*.
+
+    ``0`` (the default) reads inline, in the app's own task: nothing is pulled
+    off the transport until the app asks for it.  A positive depth restores the
+    background reader task, which reads ahead into a bounded queue and so can
+    service control frames while the handler is busy.
+
+    The two modes are distinguished here by *when bytes reach the writer*,
+    which is the only externally visible difference — both must deliver an
+    identical event sequence to the app.
+    """
+
+    @staticmethod
+    def _ping_then_text() -> bytes:
+        return (_make_client_frame(b'are-you-there', opcode=0x9)   # PING
+                + _make_client_frame(b'hello', opcode=0x1))        # TEXT
+
+    @pytest.mark.asyncio
+    async def test_inline_mode_reads_nothing_until_the_app_asks(self):
+        """Default mode must not touch the wire before the app calls receive().
+
+        This is the property that removes the per-message task handoff: with no
+        background reader there is no producer to run ahead, so the PONG cannot
+        appear until the app drives the read itself.
+        """
+        wrapper = _RecipientWrapper(self._ping_then_text())
+        assert await wrapper.receive() == {'type': 'websocket.connect'}
+
+        # Give any (wrongly) spawned background task room to run.
+        for _ in range(10):
+            await asyncio.sleep(0)
+        assert bytes(wrapper.writer.written) == b'', (
+            'inline mode read ahead and answered the PING before the app '
+            'asked for anything — the background reader is still running')
+
+        event = await wrapper.receive()
+        assert event['text'] == 'hello', 'the PING must not be delivered to the app'
+        assert b'are-you-there' in bytes(wrapper.writer.written), (
+            'the PONG must be sent once the app drives the read')
+
+    @pytest.mark.asyncio
+    async def test_eager_mode_answers_ping_before_the_app_asks(self):
+        """A positive depth restores read-ahead: the PONG goes out unprompted.
+
+        This is what the knob buys, and why it is kept rather than deleted —
+        an app that is slow between receive() calls still answers keepalives.
+        """
+        wrapper = _RecipientWrapper(self._ping_then_text(), ws_queue_depth=8)
+        assert await wrapper.receive() == {'type': 'websocket.connect'}
+
+        for _ in range(10):
+            await asyncio.sleep(0)
+        assert b'are-you-there' in bytes(wrapper.writer.written), (
+            'eager mode did not answer the PING ahead of the app — the '
+            'background reader never ran')
+
+        event = await wrapper.receive()
+        assert event['text'] == 'hello'
+
+    @pytest.mark.asyncio
+    async def test_a_websocket_message_listener_does_not_force_eager(self):
+        """A registered listener must NOT switch read-ahead on at connect.
+
+        Design A' (Sprint 90): a consuming handler keeps the inline win even
+        when a ``websocket_message`` listener is registered — the event fires
+        at read time, which in inline mode is exactly when ``receive()``
+        drives the read.  Forcing the reader task on at connect would hand
+        every message through a queue (the 4.09 loop-touch cost) for a handler
+        that is happily consuming.
+        """
+        from blackbull.event import EventDispatcher
+
+        dispatcher = EventDispatcher()
+        seen = []
+
+        async def _observer(event):
+            seen.append(event.detail['text'])
+
+        dispatcher.on('websocket_message', _observer)
+
+        writer = _FakeWriter()
+        recipient = WebSocketRecipient(
+            AsyncioReader(_FakeReader(_make_client_frame(b'hello', opcode=0x1))),
+            AsyncioWriter(writer),
+            dispatcher=dispatcher,
+            conn={'path': '/ws', 'client': None},
+            ws_queue_depth=0,
+        )
+        assert await recipient() == {'type': 'websocket.connect'}
+
+        # Give a wrongly-started background reader room to run.
+        for _ in range(10):
+            await asyncio.sleep(0)
+        assert seen == [], (
+            'a websocket_message listener must not force read-ahead — '
+            'nothing has been read yet for a consuming handler')
+
+        # The event fires at read time = the moment receive() drives the read.
+        # ``@app.on`` observers are detached (fire-and-forget), so yield a
+        # couple of loop turns for the observer task to run.
+        event = await recipient()
+        assert event['text'] == 'hello'
+        for _ in range(5):
+            await asyncio.sleep(0)
+        assert seen == ['hello'], (
+            'the event must fire when the message is read, i.e. now')
+
+    @pytest.mark.asyncio
+    async def test_deferred_reader_fires_event_for_non_consuming_handler(
+            self, monkeypatch):
+        """A listener + a handler that never consumes still produces events.
+
+        The idle watchdog (deadline scanner) starts the deferred reader on a
+        connection quiet for more than one tick; the reader consumes ahead of
+        the handler and fires ``websocket_message`` at read time.
+        """
+        import blackbull.server.deadline as _deadline
+        monkeypatch.setattr(_deadline, '_TICK_S', 0.02)
+
+        from blackbull.event import EventDispatcher
+
+        dispatcher = EventDispatcher()
+        seen = []
+        fired = asyncio.Event()
+
+        async def _observer(event):
+            seen.append(event.detail['text'])
+            fired.set()
+
+        dispatcher.on('websocket_message', _observer)
+
+        writer = _FakeWriter()
+        recipient = WebSocketRecipient(
+            AsyncioReader(_FakeReader(_make_client_frame(b'unconsumed', opcode=0x1))),
+            AsyncioWriter(writer),
+            dispatcher=dispatcher,
+            conn={'path': '/ws', 'client': None},
+            ws_queue_depth=0,
+        )
+        assert await recipient() == {'type': 'websocket.connect'}
+
+        # No receive() is ever called again; the watchdog's deferred reader
+        # must still read the message and fire the event within a couple of
+        # scanner ticks.
+        await asyncio.wait_for(fired.wait(), timeout=2.0)
+        assert seen == ['unconsumed']
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize('depth', [0, 8], ids=['inline', 'eager'])
+    async def test_both_modes_deliver_the_same_event_sequence(self, depth):
+        """Mode changes *timing*, never the events the app observes."""
+        raw = (_make_client_frame(b'one', opcode=0x1)
+               + _make_client_frame(b'', opcode=0x9)               # PING, empty
+               + _make_client_frame(b'two', opcode=0x2)            # BINARY
+               + _make_client_frame(b'\x03\xe8', opcode=0x8))      # CLOSE 1000
+        wrapper = _RecipientWrapper(raw, ws_queue_depth=depth)
+
+        assert await wrapper.receive() == {'type': 'websocket.connect'}
+        assert (await wrapper.receive())['text'] == 'one'
+        assert (await wrapper.receive())['bytes'] == b'two'
+        closed = await wrapper.receive()
+        assert closed['type'] == 'websocket.disconnect'
+        assert closed['code'] == 1000
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize('depth', [0, 8], ids=['inline', 'eager'])
+    async def test_both_modes_reassemble_fragments(self, depth):
+        """Fragmented messages must arrive as one message in either mode.
+
+        Fragments emit no event, so the inline path has to keep reading rather
+        than return control to the app after each frame.
+        """
+        # Build fragments by hand: FIN=0 TEXT, FIN=0 CONT, FIN=1 CONT.
+        def _frag(payload: bytes, opcode: int, fin: bool) -> bytes:
+            mask = b'\xde\xad\xbe\xef'
+            masked = bytes(b ^ mask[i % 4] for i, b in enumerate(payload))
+            first = (0x80 if fin else 0x00) | opcode
+            return bytes([first, 0x80 | len(payload)]) + mask + masked
+
+        raw = (_frag(b'he', 0x1, False)
+               + _frag(b'll', 0x0, False)
+               + _frag(b'o', 0x0, True))
+        wrapper = _RecipientWrapper(raw, ws_queue_depth=depth)
+
+        assert await wrapper.receive() == {'type': 'websocket.connect'}
+        assert (await wrapper.receive())['text'] == 'hello'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize('depth', [0, 8], ids=['inline', 'eager'])
+    async def test_both_modes_reject_invalid_utf8_with_1007(self, depth):
+        """RFC 6455 §8.1 — invalid UTF-8 in TEXT closes with 1007 in either mode."""
+        raw = _make_client_frame(b'\xff\xfe', opcode=0x1)
+        wrapper = _RecipientWrapper(raw, ws_queue_depth=depth)
+
+        assert await wrapper.receive() == {'type': 'websocket.connect'}
+        with pytest.raises(Exception):
+            await wrapper.receive()
+        from blackbull.server.constants import WSCloseCode
+        assert WSCloseCode.INVALID_UTF8.to_bytes(2, 'big') in bytes(
+            wrapper.writer.written)
+
+
+class TestReceivePastTerminalConsistency:
+    """receive() past the terminal event must behave identically in both modes.
+
+    Canonical behaviour: after the terminal event has been handed to the app,
+    receive() keeps answering ``websocket.disconnect`` with the terminal code
+    instead of blocking.  Eager mode used to block forever on ``queue.get()``
+    once the reader task had stopped; this pins both modes to one sequence.
+    """
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize('depth', [0, 8], ids=['inline', 'eager'])
+    async def test_post_terminal_receive_answers_disconnect(self, depth):
+        """One message + a clean CLOSE; the receive after the terminal returns
+        a disconnect with the same code — it must never block."""
+        raw = _make_client_frame(b'hello') + _make_client_frame(b'', opcode=0x8)
+        wrapper = _RecipientWrapper(raw, ws_queue_depth=depth)
+
+        seq = []
+        # connect + message + disconnect + one receive past the terminal.
+        for _ in range(4):
+            seq.append(await asyncio.wait_for(wrapper.receive(), timeout=2.0))
+
+        assert seq[0] == {'type': 'websocket.connect'}
+        assert seq[1] == {'type': 'websocket.receive', 'text': 'hello',
+                          'bytes': None}
+        assert seq[2] == {'type': 'websocket.disconnect', 'code': 1000}
+        # Post-terminal: same code, no hang (a blocking eager mode would
+        # surface as TimeoutError here).
+        assert seq[3] == {'type': 'websocket.disconnect', 'code': 1000}
+
+    @pytest.mark.asyncio
+    async def test_both_modes_identical_sequence_past_terminal(self):
+        """The two modes must produce identical event sequences including the
+        post-terminal receive — consistency between modes is the contract."""
+        raw = _make_client_frame(b'hello') + _make_client_frame(b'', opcode=0x8)
+        sequences = []
+        for depth in (0, 8):
+            wrapper = _RecipientWrapper(raw, ws_queue_depth=depth)
+            seq = []
+            for _ in range(4):
+                seq.append(await asyncio.wait_for(wrapper.receive(), timeout=2.0))
+            sequences.append(seq)
+        assert sequences[0] == sequences[1]

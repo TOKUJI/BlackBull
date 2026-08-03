@@ -283,8 +283,9 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         '--ws-queue-depth', type=int, default=None, metavar='N',
-        help='asyncio.Queue depth for inbound WebSocket events per '
-             'connection.  Defaults to BB_WS_QUEUE_DEPTH (=256).',
+        help='WebSocket inbound read-ahead depth.  0 (the default) reads '
+             'inline in the handler task; >0 runs a background reader with a '
+             'queue of that depth.  Defaults to BB_WS_QUEUE_DEPTH (=0).',
     )
     p.add_argument(
         '--reload', action='store_true',

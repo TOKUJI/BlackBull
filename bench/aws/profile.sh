@@ -10,8 +10,8 @@
 #
 # Output lands locally in:
 #   bench/results/aws/<TS>Z/profile/
-#       profile_stress_<ts>_vu200.svg
-#       profile_stress_<ts>_vu500.svg
+#       profile_stress_<ts>_vu200.speedscope.json
+#       profile_stress_<ts>_vu500.speedscope.json
 #       k6_stress_profile_<ts>_vu200.json
 #       k6_stress_profile_<ts>_vu500.json
 #
@@ -40,7 +40,7 @@ echo "  VU passes: $K6_VUS_LIST"
 echo
 
 # Each profile pass is ~2 min wall (15s warmup + 60s stress + a few seconds
-# of py-spy SVG write).  Cool down 10s between passes so py-spy and the
+# of py-spy speedscope JSON write).  Cool down 10s between passes so py-spy and the
 # previous server fully release the port.
 for vu in $K6_VUS_LIST; do
     echo "=== Pass: K6_VUS=$vu ==="
@@ -58,10 +58,10 @@ done
 echo
 echo "Remote profile passes finished.  Fetching artefacts ..."
 
-# Sync the profile_stress_*.svg and k6_stress_profile_*.json that
+# Sync the profile_stress_*.speedscope.json and k6_stress_profile_*.json that
 # bench/profile_under_load.sh wrote into the remote bench/results/.
 rsync -az -e "ssh ${SSH_OPTS[*]}" \
-    --include='profile_stress_*.svg' \
+    --include='profile_stress_*.speedscope.json' \
     --include='k6_stress_profile_*.json' \
     --exclude='*' \
     "$REMOTE:$REMOTE_REPO/bench/results/" \
@@ -69,9 +69,10 @@ rsync -az -e "ssh ${SSH_OPTS[*]}" \
 
 echo
 echo "Profile artefacts:"
-ls -lh "$LOCAL_DEST"/*.svg "$LOCAL_DEST"/*.json 2>/dev/null || \
-    echo "  WARNING: no SVG / JSON files copied back." >&2
+ls -lh "$LOCAL_DEST"/*.speedscope.json "$LOCAL_DEST"/*.json 2>/dev/null || \
+    echo "  WARNING: no profile / JSON files copied back." >&2
 
 echo
-echo "Done.  Open the SVGs in a browser to read the flame graphs."
+echo "Done.  Open the speedscope JSON in VS Code (built-in viewer) or"
+echo "https://www.speedscope.app/ to read the flame graph."
 echo "Next: write findings into bench/CHARACTERIZATION.md, then bash bench/aws/down.sh."
