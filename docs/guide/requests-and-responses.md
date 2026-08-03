@@ -315,6 +315,18 @@ package to parse the body manually.
 
 ## Responses
 
+!!! note "Native send path"
+    On BlackBull's own HTTP/1.1 server, `send` accepts **`Response` /
+    `JSONResponse` objects, `(bytes, status, headers)`, `NativeResponse`,
+    and ASGI `http.response.*` dicts** — the full-form ASGI dict forms are
+    a compatibility contract held until **2027-07-29**, converted to the
+    native message at the handler boundary.  A complete `Response` becomes
+    one `NativeResponse` object (one `send`); streaming is a header object
+    then body-chunk objects.  Under an external ASGI host
+    (`BlackBull(asgi=True)` + `to_asgi()`) the same handler code runs with
+    plain ASGI dicts on the wire.  The `http.response.start` `trailers`
+    flag is preserved losslessly via `NativeResponse.expects_trailers`.
+
 ### `Response`
 
 ```python
