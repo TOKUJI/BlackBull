@@ -29,7 +29,46 @@ so the editable install's metadata catches up.
 
 ---
 
-## [Unreleased]
+## [0.70.0] — 2026-08-04
+
+### Changed
+
+- **HTTP/2 sends natively — the send-side native seam now covers every HTTP
+  boundary.**  `HTTP2Sender` consumes `NativeResponse` (header / body /
+  trailers arms mirroring the H1 path), and the three Sprint-92
+  `http_version == '1.1'` gates are removed: the handler-boundary adapter,
+  `_boundary_wrap`, and `as_middleware` normalise to the native contract
+  unconditionally.  ASGI event dicts remain only on the WebSocket lane and
+  the external-host edge (`BlackBull(asgi=True)` under uvicorn, via
+  `to_asgi()`).  An EC2 A/B (m7a.2xlarge, H1/WS/H2 lanes) showed no
+  regression: the H2 native arm measured **+0.66 % ± 0.26** over the dict
+  lane (2.5 SE), H1 neutral, WS neutral.
+
+- **WebSocket: the deferred reader (design A′) is gone; canonical
+  post-terminal receive.**  A `websocket_message` listener now switches
+  read-ahead back on at connect — a consuming handler still keeps the
+  Sprint-89 inline win, because the event fires when the *server* reads,
+  which in inline mode is exactly when `receive()` drives the read.  Once
+  the terminal event (disconnect or protocol error) has been handed to the
+  app, `receive()` keeps answering a disconnect with the last terminal close
+  code in both modes — eager mode previously blocked forever on a dead
+  queue; inline returned a hardcoded ABNORMAL.
+
+### Internal
+
+- **Orphan audit (vulture 2.16):** removed verified dead code —
+  `blackbull/server/http2_messages.py` (never imported), WebSocket
+  `has_received_closed`, `Compression._brotli_quality`,
+  `Reloader._watchfiles`, `Headers.has_continuation`,
+  `Headers.set_table_size` / `table_size` (RFC 9113 §6.2 has no
+  `table_size`), `Stream.on_rst_received` / `closed_via_rst`, and a dead
+  Router f-string.  Public API kept even where test-only (project policy).
+
+- **A/B harness:** new HTTP/2 lane runner (`ab_commit_h2.sh`, h2c + h2load)
+  and WebSocket/H2 runner fixes (deleted-file swap handling, venv `python`
+  resolution, no "AD" index state on restore).
+
+## [0.69.0] — 2026-08-03
 
 ### Changed
 
@@ -54,6 +93,46 @@ so the editable install's metadata catches up.
   *server* reads a message — not when the handler consumes it — is preserved
   without configuration.  Client sessions are unaffected: they keep read-ahead
   on by default.
+
+- **Design A′: a `websocket_message` listener no longer forces read-ahead on
+  at connect; bounded control-frame servicing for non-reading handlers.**
+  The Sprint 89 inline win was conditional on not registering a
+  `websocket_message` listener (a listener forced the background reader and
+  its 4.09 loop touches).  Now a consuming handler keeps the inline win even
+  with a listener registered — the read-time emit adapter fires the event
+  when the message is read, which in inline mode is exactly when the handler
+  calls `receive()`.  If the handler goes quiet for more than ~one scanner
+  tick, the deadline scanner starts a deferred reader that produces the
+  events (and buffers messages) without ever adding a timer per connection.
+
+  Control frames for a handler that is *not* reading are bounded by two new
+  mechanisms instead of being deferred to the next `receive()`: send-time
+  servicing (each `send()` answers PINGs/CLOSE already fully buffered,
+  non-blocking) and an idle watchdog on the per-process deadline scanner (a
+  connection idle > ~0.3 s gets its buffered control frames serviced each
+  tick).  Worst-case PONG latency is bounded to ~one scanner tick with no
+  per-connection timers.
+
+  The server path also emits the documented canonical `websocket_message`
+  detail shape `{'conn', 'text', 'bytes'}` (it had drifted to
+  `{'conn', 'message'}` on the real server path).  Loop touches stay at the
+  inline floor: **WebSocket 2.08**, HTTP/1.1 2.06, HTTP/2 5.21 — unchanged
+  (`python bench/loop_touches.py`).
+
+### Internal
+
+- **The HTTP per-request listener checks use the generation-keyed plain-bool
+  cache the WS path already had.**  `has_request_completed_listeners` /
+  `has_request_disconnected_listeners` collapse to a cached bool + int
+  compare instead of a dispatcher set lookup per request.  An EC2 four-row
+  A/B showed no measurable throughput change (the zero-listener workload
+  cannot resolve sub-0.3 % effects); shipped as structure matching the WS
+  pattern.
+- **The WebSocket idle watchdog is armed once at connect, not per message.**
+  `send_touch` no longer re-arms the watchdog, removing the per-message arm
+  check from the echo path.  Measured on the EC2 WS echo lane at
+  **+0.78 % ± 0.49** (four-row rule: clears its own SE and the null floor);
+  the ~1-tick worst-case PONG-latency contract is unchanged.
 
 ## [0.68.1] — 2026-08-02
 
