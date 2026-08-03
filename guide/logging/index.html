@@ -5664,10 +5664,11 @@ record on <code>blackbull.caps</code> when it fires.  Coverage:</p>
 </tr>
 </tbody>
 </table>
-<p><code>BB_WS_QUEUE_DEPTH</code> is intentionally <strong>not</strong> logged — the WebSocket
-event queue applies backpressure (blocking <code>await put()</code>) rather
-than dropping events, so a hit is normal flow control rather than
-a rejection.  The HTTP/2 per-stream queue (depth controlled by
+<p><code>BB_WS_QUEUE_DEPTH</code> is intentionally <strong>not</strong> logged — when read-ahead
+is enabled at all, the WebSocket event queue applies backpressure
+(blocking <code>await put()</code>) rather than dropping events, so a hit is
+normal flow control rather than a rejection.  At the default depth of
+<code>0</code> there is no queue to hit.  The HTTP/2 per-stream queue (depth controlled by
 <code>BB_STREAM_QUEUE_DEPTH</code>-style internals) does drop and is logged
 under the cap name <code>stream_queue_depth</code>.</p>
 <h3 id="record-shape">Record shape<a class="headerlink" href="#record-shape" title="Permanent link">&para;</a></h3>

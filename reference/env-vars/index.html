@@ -5339,8 +5339,8 @@ first-hit-then-summary rate-limit model.</p>
 </tr>
 <tr>
 <td><code>BB_WS_QUEUE_DEPTH</code></td>
-<td><code>256</code></td>
-<td><code>asyncio.Queue</code> depth for inbound WebSocket events per connection.</td>
+<td><code>0</code></td>
+<td>WebSocket inbound <strong>read-ahead</strong> depth.  <code>0</code> (default) reads frames inline, in the handler's own task, when it calls <code>receive()</code> — no reader task and no per-message queue hop.  A positive value restores a background reader that reads <em>ahead</em> of the handler into a queue of that depth, so control frames are serviced between <code>receive()</code> calls and up to <code>N</code> messages buffer under a slow handler.  Control frames are serviced even at depth <code>0</code> when the handler isn't reading: on every deadline-scanner tick for a connection idle more than ~0.3 s (the idle watchdog), bounding PONG latency to ~one tick with no per-connection timers.  Registering a <code>websocket_message</code> listener does <strong>not</strong> force read-ahead on — a consuming handler keeps the inline win; a deferred reader starts only after the handler goes quiet (see <a href="../../guide/websockets/">WebSocket guide</a> → "Read-ahead and back-pressure").</td>
 </tr>
 </tbody>
 </table>

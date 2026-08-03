@@ -5422,7 +5422,8 @@ It is a framework-internal component.</p>
 AccessLogRecord (whose wire fields this event reports) must be built,
 and whether the disconnect-detecting receive wrapper (whose
 <code>mark_disconnected</code> this event reads to suppress itself on a dropped
-request) is observed.</p>
+request) is observed.  Cached against the dispatcher's registration
+generation, so the lookup runs only when listeners change.</p>
 
 
     </div>
@@ -5442,7 +5443,9 @@ request) is observed.</p>
 
         <p>Return True if any <code>request_disconnected</code> handler is registered.</p>
 <p>Read on the request hot path to decide whether the disconnect-detecting
-receive wrapper needs to be built at all.</p>
+receive wrapper needs to be built at all.  Cached against the
+dispatcher's registration generation, so the lookup runs only when
+listeners change.</p>
 
 
     </div>
@@ -5715,6 +5718,13 @@ self-hosted path, or an ASGI scope dict only on the <code>BB_FORCE_ASGI_SCOPE</c
     <div class="doc doc-contents ">
 
         <p>Fire Level B <code>websocket_message</code> (<code>conn</code> is a Connection).</p>
+<p>Canonical detail shape <code>{'conn', 'text', 'bytes'}</code> — the shape the
+direct-recipient path and docs/guide/events.md use.  (It was briefly
+<code>{'conn', 'message'}</code> on the server path; unified in Sprint 90.)</p>
+<p>Guarded like the other <code>on_*</code> methods: with no <code>websocket_message</code>
+listener, the <code>Event</code> + detail-dict allocation and the <code>emit</code>
+indirection are skipped (the cached predicate is the receive path's
+documented skip mechanism).</p>
 
 
     </div>

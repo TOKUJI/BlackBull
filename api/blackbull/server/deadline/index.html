@@ -4042,6 +4042,45 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#blackbull.server.deadline.WsIdleWatchdog" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WsIdleWatchdog
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="WsIdleWatchdog">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.deadline.WsIdleWatchdog.disarm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        disarm
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.deadline.WsIdleWatchdog.touch" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        touch
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -5079,6 +5118,45 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#blackbull.server.deadline.WsIdleWatchdog" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WsIdleWatchdog
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="WsIdleWatchdog">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.deadline.WsIdleWatchdog.disarm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        disarm
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.deadline.WsIdleWatchdog.touch" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        touch
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -5339,6 +5417,103 @@ resolves the riders.</p>
 
 
 
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="blackbull.server.deadline.WsIdleWatchdog" class="doc doc-heading">
+            <code>WsIdleWatchdog</code>
+
+
+<a href="#blackbull.server.deadline.WsIdleWatchdog" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+
+
+        <p>Per-connection WebSocket idle state, riding the shared tick scanner.</p>
+<p>Inline reading (the default) services PING/CLOSE only when the handler
+calls <code>receive()</code>.  A handler that goes quiet — long work between
+reads, or send-only — stops servicing control frames, and (with a
+<code>websocket_message</code> listener) stops producing events.  This watchdog
+bounds both: while a connection has been quiet for more than one tick,
+the scanner fires the connection's callback roughly every tick, and the
+callback services buffered control frames / starts the deferred reader.</p>
+<p>The design constraint is the same one that built
+:class:<code>ConnectionDeadline</code>: no per-connection asyncio timers.  One
+<code>TimerHandle</code> serves every connection; this object is just registry
+state plus a callback, re-armed on every fire so it keeps watching until
+:meth:<code>disarm</code>.  <code>touch()</code> is called on each receive/send, which keeps
+an actively-driven connection from ever firing (the common case — so the
+default hot path pays a <code>loop.time()</code> + one comparison per message and
+no scanner work at all).</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.server.deadline.WsIdleWatchdog.disarm" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">disarm</span><span class="p">()</span></code>
+
+<a href="#blackbull.server.deadline.WsIdleWatchdog.disarm" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Stop watching.  Idempotent.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.server.deadline.WsIdleWatchdog.touch" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">touch</span><span class="p">()</span></code>
+
+<a href="#blackbull.server.deadline.WsIdleWatchdog.touch" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Mark connection activity; the watchdog goes quiet for _idle_s.</p>
+
+
+    </div>
+
+</div>
 
 
 
