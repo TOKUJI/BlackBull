@@ -80,6 +80,21 @@ so the editable install's metadata catches up.
   inline floor: **WebSocket 2.08**, HTTP/1.1 2.06, HTTP/2 5.21 — unchanged
   (`python bench/loop_touches.py`).
 
+### Internal
+
+- **The HTTP per-request listener checks use the generation-keyed plain-bool
+  cache the WS path already had.**  `has_request_completed_listeners` /
+  `has_request_disconnected_listeners` collapse to a cached bool + int
+  compare instead of a dispatcher set lookup per request.  An EC2 four-row
+  A/B showed no measurable throughput change (the zero-listener workload
+  cannot resolve sub-0.3 % effects); shipped as structure matching the WS
+  pattern.
+- **The WebSocket idle watchdog is armed once at connect, not per message.**
+  `send_touch` no longer re-arms the watchdog, removing the per-message arm
+  check from the echo path.  Measured on the EC2 WS echo lane at
+  **+0.78 % ± 0.49** (four-row rule: clears its own SE and the null floor);
+  the ~1-tick worst-case PONG-latency contract is unchanged.
+
 ## [0.68.1] — 2026-08-02
 
 Post-Sprint-88 patch — router param-kind classification (which also fixed a

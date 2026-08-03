@@ -37,12 +37,12 @@ A personal learning project — wire correctness over API stability (ZeroVer).
   to capture non-obvious intent, design trade-offs, or invariants the next
   reader would otherwise have to reverse-engineer from the code.
 
-- **Verified numbers only.** Never present arithmetic, percentages, or summed
-  tables that a tool has not computed.  For any calculation use `bc` / `calc` /
-  `python -c`; for any table with a Σ row, generate it from a script that
-  checks its own sums (Σ == total) and paste the output verbatim — never
-  hand-copy numbers into a response.  A number you cannot reproduce from a
-  script output is a number you do not have.
+- **Verified numbers only — estimates and calculations alike.** Never present
+  arithmetic, percentages, or summed tables that a tool has not computed.  For
+  any calculation use `bc` / `calc` / `python -c`; for any table with a Σ row,
+  generate it from a script that checks its own sums (Σ == total) and paste
+  the output verbatim — never hand-copy numbers into a response.  A number
+  you cannot reproduce from a script output is a number you do not have.
 
 - **Questions end the turn.** A pending decision gate is a stop, not a
   licence to continue.  If the answer to a gate question is not an explicit
