@@ -117,6 +117,11 @@ _swap_file_set() {  # $1 = ref (or HEAD_REF for restore)
         if git cat-file -e "$ref:$f" 2>/dev/null; then
             git checkout "$ref" -- "$f" || return 1
         else
+            # Absent at the target ref.  Removing the worktree file alone
+            # leaves the earlier `git checkout`'s staged entry behind ("AD"
+            # state), which trips the dirty check on the next session.
+            # Unstage it too.
+            git rm --cached -q --ignore-unmatch -- "$f" 2>/dev/null || true
             rm -f "$f"
         fi
     done

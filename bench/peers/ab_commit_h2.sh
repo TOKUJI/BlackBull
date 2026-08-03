@@ -61,6 +61,15 @@ else
 fi
 
 REPO="$(git rev-parse --show-toplevel)"
+# Python resolved ONCE from the repo's venv.  Not the bare `python` (absent
+# on the EC2 bench image) and not `uv run` (which can recreate the venv
+# mid-harness and silently break the server spawn) — the direct .venv path
+# is deterministic across the whole run.
+PY="${PY:-$REPO/.venv/bin/python}"
+if [ ! -x "$PY" ]; then
+    echo "ab_commit_h2.sh: missing $PY — is the venv installed?" >&2
+    exit 1
+fi
 cd "$REPO"
 
 TS="$(date -u +%Y%m%d-%H%M%S)"
@@ -112,6 +121,11 @@ _swap_file_set() {  # $1 = ref (or HEAD_REF for restore)
         if git cat-file -e "$ref:$f" 2>/dev/null; then
             git checkout "$ref" -- "$f" || return 1
         else
+            # Absent at the target ref.  Removing the worktree file alone
+            # leaves the earlier `git checkout`'s staged entry behind ("AD"
+            # state), which trips the dirty check on the next session.
+            # Unstage it too.
+            git rm --cached -q --ignore-unmatch -- "$f" 2>/dev/null || true
             rm -f "$f"
         fi
     done
@@ -145,7 +159,7 @@ swap_to() {
     local ref="$1"
     _swap_file_set "$ref" || return 1
     if [ -n "$PROOF_FILE" ]; then
-        uv run python - "$PROOF_FILE" <<'PY'
+        "$PY" - "$PROOF_FILE" <<'PY'
 import hashlib, importlib, pathlib, sys
 rel = sys.argv[1]
 mod = importlib.import_module(
@@ -162,7 +176,7 @@ PY
 
 start_server() {
     BB_UVLOOP="$BB_UVLOOP" BB_WORKERS=1 BB_ACCESS_LOG=0 \
-        setsid "${PIN_SERVER[@]}" python bench/app.py --no-tls \
+        setsid "${PIN_SERVER[@]}" "$PY" bench/app.py --no-tls \
             --port "$PORT" \
             >"$OUTDIR/server.log" 2>&1 &
     SERVER_PID=$!
