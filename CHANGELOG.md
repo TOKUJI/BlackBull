@@ -31,6 +31,8 @@ so the editable install's metadata catches up.
 
 ## [Unreleased]
 
+## [0.69.0] — 2026-08-03
+
 ### Changed
 
 - **WebSocket reads inline by default; `BB_WS_QUEUE_DEPTH` now means read-ahead
