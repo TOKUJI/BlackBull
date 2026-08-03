@@ -6,7 +6,7 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from blackbull import JSONResponse, RedirectResponse, Response, WebSocketResponse
-from blackbull.app import _wrap_send
+from blackbull.app import _wrap_send_native
 from blackbull.native import NativeResponse
 from blackbull.response import cookie_header
 
@@ -244,12 +244,13 @@ async def test_wrap_send_unpacks_redirectresponse():
         calls.append(event)
 
     r = RedirectResponse('/login', status=HTTPStatus.SEE_OTHER)
-    await _wrap_send(raw)(r)
-    assert len(calls) == 2
-    start, body = calls
-    assert start['status'] == int(HTTPStatus.SEE_OTHER)
-    assert (b'location', b'/login') in start['headers']
-    assert body == {'type': 'http.response.body', 'body': b'', 'more_body': False}
+    await _wrap_send_native(raw)(r)
+    assert len(calls) == 1
+    n = calls[0]
+    assert isinstance(n, NativeResponse)
+    assert n.status == int(HTTPStatus.SEE_OTHER)
+    assert (b'location', b'/login') in list(n.header)
+    assert n.body == b''
 
 
 # ---------------------------------------------------------------------------
@@ -283,25 +284,26 @@ def test_cookie_header_path():
 
 
 # ---------------------------------------------------------------------------
-# _wrap_send
+# _wrap_send_native
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
 async def test_wrap_send_unpacks_response():
-    """A Response object becomes a standard ASGI start + body event pair."""
+    """A Response object becomes a single NativeResponse (one send)."""
     calls = []
 
     async def raw(event):
         calls.append(event)
 
     r = Response(b'hi', status=HTTPStatus.CREATED)
-    await _wrap_send(raw)(r)
-    assert len(calls) == 2
-    start, body = calls
-    assert start['type'] == 'http.response.start'
-    assert start['status'] == int(HTTPStatus.CREATED)
-    assert (b'content-type', b'text/html; charset=utf-8') in start['headers']
-    assert body == {'type': 'http.response.body', 'body': b'hi', 'more_body': False}
+    await _wrap_send_native(raw)(r)
+    assert len(calls) == 1
+    n = calls[0]
+    assert isinstance(n, NativeResponse)
+    assert n.status == int(HTTPStatus.CREATED)
+    assert (b'content-type', b'text/html; charset=utf-8') in list(n.header)
+    assert n.body == b'hi'
+    assert n.more_body is False
 
 
 @pytest.mark.asyncio
@@ -312,39 +314,44 @@ async def test_wrap_send_unpacks_jsonresponse():
         calls.append(event)
 
     r = JSONResponse({'ok': True}, status=HTTPStatus.UNAUTHORIZED)
-    await _wrap_send(raw)(r)
-    assert len(calls) == 2
-    start, body = calls
-    assert start['status'] == int(HTTPStatus.UNAUTHORIZED)
-    assert (b'content-type', b'application/json') in start['headers']
-    assert body['body'] == b'{"ok": true}'
+    await _wrap_send_native(raw)(r)
+    assert len(calls) == 1
+    n = calls[0]
+    assert isinstance(n, NativeResponse)
+    assert n.status == int(HTTPStatus.UNAUTHORIZED)
+    assert (b'content-type', b'application/json') in list(n.header)
+    assert n.body == b'{"ok": true}'
 
 
 @pytest.mark.asyncio
-async def test_wrap_send_passes_dict_through():
-    """Standard ASGI event dicts forward unchanged to the raw send callable."""
+async def test_wrap_native_send_converts_dict_to_native():
+    """ASGI event dicts are converted to NativeResponse on the native path."""
     calls = []
 
     async def raw(event):
         calls.append(event)
 
     evt = {'type': 'http.response.start', 'status': 200, 'headers': []}
-    await _wrap_send(raw)(evt)
-    assert calls[0] is evt
+    await _wrap_send_native(raw)(evt)
+    n = calls[0]
+    assert isinstance(n, NativeResponse)
+    assert n.status == 200
+    assert n.header is not None
 
 
 @pytest.mark.asyncio
-async def test_wrap_send_passes_bytes_through():
-    """Bytes are emitted as a start + body event pair carrying the bytes payload."""
+async def test_wrap_native_send_bytes_to_single_native():
+    """Bytes become a single NativeResponse (one send), not a start+body pair."""
     calls = []
 
     async def raw(event):
         calls.append(event)
 
-    await _wrap_send(raw)(b'raw bytes')
-    assert len(calls) == 2
-    assert calls[0]['type'] == 'http.response.start'
-    assert calls[1] == {'type': 'http.response.body', 'body': b'raw bytes', 'more_body': False}
+    await _wrap_send_native(raw)(b'raw bytes')
+    assert len(calls) == 1
+    n = calls[0]
+    assert isinstance(n, NativeResponse)
+    assert n.body == b'raw bytes'
 
 
 # ---------------------------------------------------------------------------

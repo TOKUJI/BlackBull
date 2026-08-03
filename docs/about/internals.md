@@ -240,9 +240,13 @@ class WindowUpdate(Message):         # ask-pattern reply
     increment: int
 ```
 
-HTTP/2 message types live in `blackbull/server/http2_messages.py`;
-HTTP/1.1 and WebSocket equivalents are colocated with their
-respective actors.
+The HTTP/2 actor does not exchange dataclass messages with its callers:
+per-stream request/response events flow as ASGI dicts through the
+`HTTP2Recipient` (``put_event``), handler coroutines are tracked as
+``asyncio.Task`` objects (``_stream_tasks``), and connection-level frames
+are dispatched through the Responder registry
+(`blackbull/server/response.py`).  HTTP/1.1 and WebSocket equivalents are
+colocated with their respective actors.
 
 ## How exceptions propagate
 

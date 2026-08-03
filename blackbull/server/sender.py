@@ -842,11 +842,17 @@ class ConnectionWindow:
 class HTTP2Sender(BaseSender):
     """Translates content or ASGI HTTP send events into HTTP/2 frames.
 
-    ``__call__`` accepts three forms:
+    ``__call__`` accepts four forms:
 
     **High-level** (bytes body + status):
       ``await sender(body_bytes, HTTPStatus.OK, headers=[...])``
       Sends a HEADERS frame followed by a DATA frame.
+
+    **Native** (:class:`~blackbull.native.NativeResponse`, Sprint 93):
+      ``await sender(NativeResponse(status=..., header=..., body=...))``
+      One object may carry header, body, and/or trailers; the sender buffers
+      the header arm exactly like the dict start and delegates body/trailers
+      to the shared helpers (HEADERS + DATA [+ trailing HEADERS] coalesce).
 
     **Low-level** (ASGI event dict):
       ``await sender({'type': 'http.response.start', ...})``
@@ -862,7 +868,7 @@ class HTTP2Sender(BaseSender):
         '_conn_window', 'stream_window_size',
         'max_frame_size', '_window_open', '_end_stream_sent',
         '_buffered_status', '_buffered_headers', '_expect_trailers',
-        '_buffered_body', '_auto_flush_task',
+        '_buffered_body', '_auto_flush_task', '_log_record',
     )
 
     def __init__(self, writer: AbstractWriter, factory, stream_id: int,
@@ -904,6 +910,11 @@ class HTTP2Sender(BaseSender):
         # The deferred auto-flush task (retained so a non-connection failure
         # inside it is surfaced, not lost as an un-retrieved task exception).
         self._auto_flush_task: asyncio.Future | None = None
+        # Optional access-log record (Sprint 93 M1): the actor sets this so
+        # the sender can capture status / response_bytes inline in its arms —
+        # no per-event coroutine-dispatch wrapper (the H2 native seam would
+        # otherwise never match the dict-shaped capturing wrapper).
+        self._log_record = None
 
     @property
     def connection_window_size(self) -> int:
@@ -926,6 +937,7 @@ class HTTP2Sender(BaseSender):
         self._buffered_headers = None
         self._expect_trailers = False
         self._buffered_body = None
+        self._log_record = None
         # Drop the slot reference; a still-pending task from the prior request
         # is harmless — its identity guard (buffered body ``is`` its snapshot)
         # no-ops now that the buffer is cleared.
@@ -1125,6 +1137,124 @@ class HTTP2Sender(BaseSender):
         if delta > 0:
             self.wake_window()
 
+    async def _handle_body_content(self, payload: bytes, end_stream: bool) -> None:
+        """Write one body chunk — shared by the dict and native H2 paths.
+
+        ``payload`` is the chunk; ``end_stream`` is True for the **terminal**
+        chunk (note the polarity flip vs ``HTTP1Sender._handle_body_content``,
+        which takes ``more_body`` — the negation).  A terminal chunk must not
+        carry END_STREAM while trailers are pending: END_STREAM belongs on
+        the trailing HEADERS (RFC 9113 §8.1 — frames after END_STREAM are a
+        protocol error).
+        """
+        # Inline access-log capture (mirrors the H1 body helper): count every
+        # chunk's bytes; bracket the terminal chunk's write for phase trace.
+        if self._log_record is not None and payload:
+            self._log_record.response_bytes += len(payload)
+        if self._log_record is not None and end_stream:
+            self._log_record.mark('body_arm_in')
+        if self._buffered_status is not None:
+            # Trailers-coalescing fast path: when trailers are expected
+            # and this is the first single-frame body chunk, hold it so
+            # HEADERS + DATA + trailing HEADERS flush together at the
+            # trailers event (halves the writes+drains for a unary RPC).
+            # Only for a non-terminal chunk that fits one DATA frame and
+            # the current flow-control windows.
+            if (self._expect_trailers and not end_stream
+                    and self._buffered_body is None
+                    and 0 < len(payload) <= self.max_frame_size
+                    and len(payload) <= self.stream_window_size
+                    and len(payload) <= self._conn_window.size):
+                self._buffered_body = payload
+                self._schedule_auto_flush()
+            else:
+                # A second body chunk (or a multi-frame / terminal one):
+                # flush any deferred first chunk with the HEADERS, then
+                # write this chunk normally.
+                if self._buffered_body is not None:
+                    await self._write_response_start_and_body(
+                        self._buffered_body, False, self._buffered_status,
+                        self._buffered_headers, self._expect_trailers)
+                    self._buffered_status = None
+                    self._buffered_headers = None
+                    self._buffered_body = None
+                    # Review M2: withhold END_STREAM from a terminal chunk
+                    # while trailers are pending — the trailing HEADERS
+                    # carries it.
+                    await self._write_data(
+                        payload,
+                        end_stream=end_stream and not self._expect_trailers)
+                else:
+                    await self._write_response_start_and_body(
+                        payload, end_stream, self._buffered_status,
+                        self._buffered_headers, self._expect_trailers)
+                    self._buffered_status = None
+                    self._buffered_headers = None
+        else:
+            # Streaming continuation after the start (and possibly a deferred
+            # first chunk) already flushed.  Review M2: same END_STREAM
+            # withholding when trailers are pending.
+            await self._write_data(
+                payload, end_stream=end_stream and not self._expect_trailers)
+        if self._log_record is not None and end_stream:
+            self._log_record.mark('body_arm_out')
+        if end_stream and not self._expect_trailers:
+            self._end_stream_sent = True
+
+    async def _handle_trailers(self, headers: list[tuple[bytes, bytes]]) -> None:
+        """Write the trailing HEADERS — shared by the dict and native H2 paths.
+
+        Takes a plain ``list`` of pairs (the H2 variant; ``HTTP1Sender``'s
+        same-named helper takes a ``HeaderList``).
+
+        HPACK's dynamic table is stateful, so header blocks MUST be encoded in
+        wire order: the response HEADERS block first, then the trailing HEADERS
+        block.  Encoding trailers before the deferred HEADERS would desync the
+        peer's HPACK decoder.
+        """
+        if self._buffered_status is not None:
+            # Start (and possibly one deferred body chunk) never flushed:
+            # emit HEADERS [+ DATA] + trailing HEADERS in a single write.
+            h_bytes = build_response_headers(
+                self._factory.encoder, self._stream_id,
+                self._buffered_status, self._buffered_headers or [],
+                end_stream=False)
+            trailer_bytes = build_trailers(
+                self._factory.encoder, self._stream_id, headers)
+            if self._buffered_body is not None:
+                # Review M3: the deferred chunk was validated against the
+                # flow-control windows at *buffer* time, but the connection
+                # window is shared across streams and may have drained since.
+                # When it still fits, coalesce HEADERS + DATA + trailers into
+                # one write; when it no longer fits, write HEADERS, then the
+                # flow-controlled DATA (waits on WINDOW_UPDATE), then the
+                # trailers — preserving wire order, HPACK order, and RFC 9113
+                # §6.9.1 (DATA beyond the peer's connection window is a
+                # connection-level FLOW_CONTROL_ERROR).
+                if (len(self._buffered_body) <= self._conn_window.size
+                        and len(self._buffered_body) <= self.stream_window_size):
+                    total = len(self._buffered_body)
+                    d_bytes = (total.to_bytes(3, 'big') + b'\x00'
+                               + b'\x00'  # DATA flags: no END_STREAM (trailers carry it)
+                               + self._stream_id.to_bytes(4, 'big')
+                               + self._buffered_body)
+                    await self._write(h_bytes + d_bytes + trailer_bytes)
+                    self._conn_window.size -= total
+                    self.stream_window_size -= total
+                else:
+                    await self._write(h_bytes)
+                    await self._write_data(self._buffered_body, end_stream=False)
+                    await self._write(trailer_bytes)
+                self._buffered_body = None
+            else:
+                await self._write(h_bytes + trailer_bytes)
+            self._buffered_status = None
+            self._buffered_headers = None
+        else:
+            await self._write(build_trailers(
+                self._factory.encoder, self._stream_id, headers))
+        self._end_stream_sent = True
+
     async def __call__(self, body: _SenderBody | FrameBase,
                        status: HTTPStatus = HTTPStatus.OK,
                        headers: HeaderList = []):
@@ -1145,6 +1275,10 @@ class HTTP2Sender(BaseSender):
                     'the response was complete)',
                     self._stream_id)
                 return
+            # Inline access-log capture (mirrors the H1 bytes path).
+            if self._log_record is not None:
+                self._log_record.status = int(status)
+                self._log_record.response_bytes += len(body)
             # High-level: build HEADERS + DATA frames from bytes + status.
             # RFC 9110 §6.6.1 — Date SHOULD be present; the builder injects
             # it when the app didn't (mirrors the HTTP/1.1 _flush path).
@@ -1172,6 +1306,48 @@ class HTTP2Sender(BaseSender):
                 await self._write_data(body, end_stream=True)
             self._end_stream_sent = True
 
+        elif isinstance(body, NativeResponse):
+            # Unified native response (native-ization, Sprint 93 — the H2 arm
+            # of the H1 seam): one object may carry header, body, and/or
+            # trailers; presence is `is not None`.  Header is buffered exactly
+            # like the dict start arm (the first body object completes the
+            # flush); body/trailers delegate to the shared helpers the dict
+            # arms use.  A terminal body sends END_STREAM; trailers after that
+            # are dropped (frames after END_STREAM are a protocol error,
+            # RFC 9113 §8.1), mirroring the dict lane's entry guard.  A
+            # non-terminal body — or an ``expects_trailers`` deferral — keeps
+            # END_STREAM withheld, so a single object may legitimately carry
+            # header + body + trailers (HEADERS + DATA + trailing HEADERS
+            # coalesce into one write).
+            if self._end_stream_sent:
+                logger.warning(
+                    'HTTP2Sender: dropping NativeResponse on stream %d — '
+                    'END_STREAM already sent (ASGI app sent a response after '
+                    'the response was complete)',
+                    self._stream_id)
+                return
+            if body._header is not None:
+                self._buffered_status = HTTPStatus(body.status)
+                self._buffered_headers = list(body._header)
+                self._expect_trailers = body.expects_trailers
+                # Inline access-log capture (Sprint 93 M1 — mirrors the H1
+                # native arm; no per-event capturing wrapper on this lane).
+                if self._log_record is not None:
+                    self._log_record.status = body.status
+                    self._log_record.mark('start_arm_in')
+                    for hk, hv in body._header:
+                        if isinstance(hk, bytes):
+                            hkl = hk.lower()
+                            if hkl == b'content-type':
+                                self._log_record.resp_content_type = hv
+                            elif hkl == b'content-encoding':
+                                self._log_record.resp_content_encoding = hv
+                    self._log_record.mark('start_arm_out')
+            if body.body is not None:
+                await self._handle_body_content(body._body, not body.more_body)
+            if body.trailers is not None and not self._end_stream_sent:
+                await self._handle_trailers(list(body.trailers))
+
         elif isinstance(body, dict):
             event_type = body.get('type', '')
             logger.debug('HTTP2Sender event: %r', event_type)
@@ -1192,81 +1368,26 @@ class HTTP2Sender(BaseSender):
                 self._buffered_status = HTTPStatus(body.get('status', 200))
                 self._buffered_headers = list(body.get('headers', []))
                 self._expect_trailers = bool(body.get('trailers', False))
+                # Inline access-log capture (Sprint 93 M1 — mirrors the H1
+                # dict start arm).
+                if self._log_record is not None:
+                    self._log_record.status = body.get('status', '-')
+                    self._log_record.mark('start_arm_in')
+                    for hk, hv in body.get('headers', []):
+                        if isinstance(hk, bytes):
+                            hkl = hk.lower()
+                            if hkl == b'content-type':
+                                self._log_record.resp_content_type = hv
+                            elif hkl == b'content-encoding':
+                                self._log_record.resp_content_encoding = hv
+                    self._log_record.mark('start_arm_out')
 
             elif event_type == ASGIEvent.HTTP_RESPONSE_BODY:
-                payload = body.get('body', b'')
-                end_stream = not body.get('more_body', False)
-                if self._buffered_status is not None:
-                    # Trailers-coalescing fast path: when trailers are expected
-                    # and this is the first single-frame body chunk, hold it so
-                    # HEADERS + DATA + trailing HEADERS flush together at the
-                    # trailers event (halves the writes+drains for a unary RPC).
-                    # Only for a non-terminal chunk that fits one DATA frame and
-                    # the current flow-control windows.
-                    if (self._expect_trailers and not end_stream
-                            and self._buffered_body is None
-                            and 0 < len(payload) <= self.max_frame_size
-                            and len(payload) <= self.stream_window_size
-                            and len(payload) <= self._conn_window.size):
-                        self._buffered_body = payload
-                        self._schedule_auto_flush()
-                    else:
-                        # A second body chunk (or a multi-frame / terminal one):
-                        # flush any deferred first chunk with the HEADERS, then
-                        # write this chunk normally.
-                        if self._buffered_body is not None:
-                            await self._write_response_start_and_body(
-                                self._buffered_body, False, self._buffered_status,
-                                self._buffered_headers, self._expect_trailers)
-                            self._buffered_status = None
-                            self._buffered_headers = None
-                            self._buffered_body = None
-                            await self._write_data(payload, end_stream=end_stream)
-                        else:
-                            await self._write_response_start_and_body(
-                                payload, end_stream, self._buffered_status,
-                                self._buffered_headers, self._expect_trailers)
-                            self._buffered_status = None
-                            self._buffered_headers = None
-                else:
-                    await self._write_data(payload, end_stream=end_stream)
-                if end_stream and not self._expect_trailers:
-                    self._end_stream_sent = True
+                await self._handle_body_content(
+                    body.get('body', b''), not body.get('more_body', False))
 
             elif event_type == ASGIEvent.HTTP_RESPONSE_TRAILERS:
-                # HPACK's dynamic table is stateful, so header blocks MUST be
-                # encoded in wire order: the response HEADERS block first, then
-                # the trailing HEADERS block.  Encoding trailers before the
-                # deferred HEADERS would desync the peer's HPACK decoder.
-                if self._buffered_status is not None:
-                    # Start (and possibly one deferred body chunk) never flushed:
-                    # emit HEADERS [+ DATA] + trailing HEADERS in a single write.
-                    h_bytes = build_response_headers(
-                        self._factory.encoder, self._stream_id,
-                        self._buffered_status, self._buffered_headers or [],
-                        end_stream=False)
-                    trailer_bytes = build_trailers(
-                        self._factory.encoder, self._stream_id,
-                        list(body.get('headers', [])))
-                    if self._buffered_body is not None:
-                        total = len(self._buffered_body)
-                        d_bytes = (total.to_bytes(3, 'big') + b'\x00'
-                                   + b'\x00'  # DATA flags: no END_STREAM (trailers carry it)
-                                   + self._stream_id.to_bytes(4, 'big')
-                                   + self._buffered_body)
-                        await self._write(h_bytes + d_bytes + trailer_bytes)
-                        self._conn_window.size -= total
-                        self.stream_window_size -= total
-                        self._buffered_body = None
-                    else:
-                        await self._write(h_bytes + trailer_bytes)
-                    self._buffered_status = None
-                    self._buffered_headers = None
-                else:
-                    await self._write(build_trailers(
-                        self._factory.encoder, self._stream_id,
-                        list(body.get('headers', []))))
-                self._end_stream_sent = True
+                await self._handle_trailers(list(body.get('headers', [])))
 
             elif event_type == ASGIEvent.HTTP_RESPONSE_PUSH:
                 if self._push_callback is not None:
@@ -1295,11 +1416,10 @@ class WebSocketSender(BaseSender):
     consistency but are unused for WebSocket connections.
     """
 
-    __slots__ = ('has_received_closed', '_compressor')
+    __slots__ = ('_compressor',)
 
     def __init__(self, writer: AbstractWriter, *, compressor=None):
         super().__init__(writer)
-        self.has_received_closed = False
         # When permessage-deflate is negotiated, an
         # :class:`OutboundCompressor` is supplied here.  ``None`` means
         # outbound frames are sent verbatim (RSV1=0).

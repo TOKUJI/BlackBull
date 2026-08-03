@@ -1601,7 +1601,6 @@ class Router:
     ``{param}`` segments); raw ``re.Pattern`` routes live in
     ``self._raw_regex`` and are scanned only on a trie miss.
     """
-    f_string = re.compile(r'\{([a-zA-Z_]\w*?)\}', flags=re.ASCII)
     _param_pattern = re.compile(r'\{([a-zA-Z_]\w*?)(?::([a-zA-Z_]\w*?))?\}', flags=re.ASCII)
 
     # Default bound for the per-worker lookup cache (overridable per instance

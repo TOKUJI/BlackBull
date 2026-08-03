@@ -221,14 +221,16 @@ async def test_startup_accepts_undecorated_valid_middleware():
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_h2_lane_normalization_stays_dict_with_as_middleware():
-    """Clean-subagent BLOCKER guard: on an http_version='2' request,
-    @as_middleware's normalisation must keep the ASGI-dict contract.  A
-    leaked NativeResponse would TypeError the H2 sender (no native arm yet —
-    the H2 gate)."""
+async def test_h2_lane_normalization_is_native_with_as_middleware():
+    """Sprint 93: the H2 gate dropped with the H2 native arm — on an
+    http_version='2' request, @as_middleware's normalisation now produces the
+    native contract (NativeResponse), exactly like H1.  Wire correctness is
+    the HTTP2Sender native arm's job (pinned in
+    tests/conformance/http2/test_native_response.py)."""
     from blackbull import BlackBull
     from blackbull.headers import Headers
     from blackbull.connection import Connection
+    from blackbull.native import NativeResponse
 
     app = BlackBull()
 
@@ -259,19 +261,21 @@ async def test_h2_lane_normalization_stays_dict_with_as_middleware():
     await app(conn, receive, send)
 
     assert sent, 'no response emitted'
-    assert all(isinstance(e, dict) for e in sent), (
-        f'NativeResponse leaked onto the H2 lane: {sent!r}')
-    assert any(e.get('type') == 'http.response.start' for e in sent)
+    assert isinstance(sent[0], NativeResponse), (
+        f'expected a NativeResponse on the H2 lane, got {sent!r}')
+    assert sent[0].body == b'ok'
 
 
 @pytest.mark.asyncio
-async def test_h2_with_cors_global_middleware_stays_dict():
-    """Clean-subagent BLOCKER: H2 + global CORS must not leak NativeResponse
-    to the H2 sender (would TypeError — HTTP2Sender has no native arm)."""
+async def test_h2_with_cors_global_middleware_native():
+    """Sprint 93: H2 + global CORS works natively — the CORS headers land on
+    the NativeResponse header arm (no dict lane needed; the HTTP2Sender native
+    arm consumes the object)."""
     from blackbull import BlackBull
     from blackbull.headers import Headers
     from blackbull.connection import Connection
     from blackbull.middleware.cors import CORS
+    from blackbull.native import NativeResponse
 
     app = BlackBull()
     app.use(CORS(allow_origins=['https://example.com']))
@@ -295,11 +299,10 @@ async def test_h2_with_cors_global_middleware_stays_dict():
 
     await app(conn, receive, send)
 
-    assert all(isinstance(e, dict) for e in sent), (
-        f'NativeResponse leaked to the H2 lane via CORS: {sent!r}')
-    start = next(e for e in sent if e.get('type') == 'http.response.start')
-    hdrs = dict(start.get('headers', []))
-    assert hdrs.get(b'access-control-allow-origin') == b'https://example.com'
+    assert sent, 'no response emitted'
+    n = sent[0]
+    assert isinstance(n, NativeResponse), f'expected NativeResponse, got {sent!r}'
+    assert (b'access-control-allow-origin', b'https://example.com') in list(n.header)
 
 
 @pytest.mark.asyncio

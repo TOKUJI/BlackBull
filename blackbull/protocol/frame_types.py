@@ -138,9 +138,6 @@ class FrameBase:
             logger.debug('FrameBase is saving a frame %r', res)
         return res
 
-    def has_continuation(self) -> bool:
-        return False
-
     def __eq__(self, other):
         return self.type_ == other.type_ and\
                self.flags == other.flags and\
@@ -314,9 +311,6 @@ class Headers(FrameBase):
         if self.end_headers:
             self.parse_payload()
 
-    def set_table_size(self, size):
-        self.table_size = size
-
     def parse_payload(self):
         assert self.decoder is not None
         payload = BytesIO(self.raw_block)
@@ -447,9 +441,6 @@ class Headers(FrameBase):
         if logger.isEnabledFor(logging.DEBUG):
             logger.debug('Headers.save: %r', base + payload)
         return base + payload
-
-    def has_continuation(self) -> bool:
-        return not bool(self.end_stream)
 
     def __getattr__(self, key):
         if key == 'stream_dependency':

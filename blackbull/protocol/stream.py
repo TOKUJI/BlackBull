@@ -43,7 +43,6 @@ class Stream:
     __slots__ = (
         'parent', 'weight', 'stream_id', 'window_size',
         'children', 'conn', 'state', 'priority_hint',
-        'closed_via_rst',
         'expected_content_length', 'received_data_bytes',
     )
 
@@ -61,10 +60,6 @@ class Stream:
         self.conn = None
         self.state = StreamState.IDLE
         self.priority_hint: dict[str, int | bool] | None = None
-        # RFC 9113 §5.1 — distinguishes closed-via-END_STREAM (normal close)
-        # from closed-via-RST_STREAM.  Influences whether late frames are
-        # treated as connection or stream errors.
-        self.closed_via_rst: bool = False
         # RFC 9113 §8.1.2.6 — content-length tracking.  ``expected_content_length``
         # is parsed from the request's content-length header (None if absent);
         # ``received_data_bytes`` accumulates DATA-frame payload lengths so the
@@ -90,17 +85,6 @@ class Stream:
         """
         if end_stream:
             self.state = StreamState.HALF_CLOSED_REMOTE
-
-    def on_rst_received(self) -> None:
-        """Transition on incoming RST_STREAM (RFC 9113 §5.1).
-
-        Marks the stream CLOSED and remembers that it was closed via
-        RST_STREAM (vs END_STREAM).  The state is retained so later
-        frames arriving on the same identifier can be detected and the
-        right error type returned.
-        """
-        self.state = StreamState.CLOSED
-        self.closed_via_rst = True
 
     def add_child(self, stream_id):
         existing = self.find_child(stream_id)

@@ -1,41 +1,38 @@
 #!/usr/bin/env bash
-# bench/peers/ab_commit.sh — A/B two BlackBull commits on the local box.
+# bench/peers/ab_commit_h2.sh — HTTP/2-lane A/B of two BlackBull commits.
 #
-# compare_servers.sh answers "how does BlackBull compare to uvicorn"; this
-# answers "did my commit cost anything", which needs a different shape:
+# The HTTP/2 analogue of ab_commit.sh (Sprint 93: the H2 native arm is the
+# change under test).  Reuses the exact ab-commit discipline:
 #   * one stack, two code states, everything else held fixed;
-#   * arms interleaved ABBA inside a single session, because a number from
-#     one run differenced against a number from another run measures the
-#     gap between the two sessions as much as the gap between the commits;
-#   * only the files that actually differ are swapped, in place, so both
-#     arms load through the same venv and the same editable install.
+#   * arms interleaved ABBA inside a single session;
+#   * only the files that actually differ are swapped, in place, with an
+#     import-hash proof that the interpreter really loaded the ref's bytes;
+#   * a `null` phase serving identical bytes under both labels, measured in
+#     the same session, so the box's resolution floor is known in-session.
+#
+# Lane: HTTP/2 cleartext (h2c prior knowledge), h2load floods N concurrent
+# streams (bench/peers/ab_commit.sh is HTTP/1.1-only wrk; this one drives
+# the h2c bench app `bench/app.py --no-tls` with h2load).  The measured axis
+# is h2load's aggregate req/s (the `finished in … req/s` line).
 #
 # Usage:
-#   bash bench/peers/ab_commit.sh
-#   REF_BASE=v0.67.0 REF_TREAT=HEAD ROUNDS=4 bash bench/peers/ab_commit.sh
+#   bash bench/peers/ab_commit_h2.sh
+#   REF_BASE=c93de3b REF_TREAT=5741b40 ROUNDS=4 bash bench/peers/ab_commit_h2.sh
 #
-# Env:
-#   REF_BASE   baseline commit-ish            (default HEAD~1)
-#   REF_TREAT  treatment commit-ish           (default HEAD)
-#   PATHSPEC   limit the swapped file set     (default blackbull/)
-#   ROUNDS     ABBA rounds; 4 runs each       (default 3)
-#   DURATION   wrk seconds per run            (default 10)
-#   WARMUP     wrk seconds before each run    (default 5, discarded)
-#   THREADS    wrk threads                    (default 4)
-#   CONNS      wrk connections                (default 32)
-#   URL_PATH   path to hammer                 (default /plaintext)
-#   PORT       bind port                      (default 8443)
-#   BB_UVLOOP  0 = pure-Python identity       (default 0)
-#   PIPELINE   wrk pipeline depth             (default 1 = serialized keep-alive)
-#   PHASES     which phases to run            (default "null real")
+# Env (ab_commit.sh shared):
+#   REF_BASE / REF_TREAT / PATHSPEC / ROUNDS / PORT / BB_UVLOOP / PHASES
+#   SERVER_CPUS / LOAD_CPUS
+# PATHSPEC defaults to blackbull/ — the bench app is the instrument and is
+# never swapped (both arms serve the working tree's app).
+# H2-specific:
+#   URL_PATH     path to hammer (default /1kb; bench/app.py routes: /ping,
+#                /1kb, /16kb, /echo, /ws, /metrics)
+#   H2_CONNS     h2load concurrent connections  (default 32)
+#   H2_STREAMS   h2load max concurrent streams per connection (default 16)
+#   H2_N         requests in the measured run   (default 100000)
+#   H2_WARMUP    requests in the discarded warmup (default 10000)
 #
-# The `null` phase is an A/A control: it serves identical bytes under both
-# labels, so its delta is known to be zero and whatever it reports is this
-# box's floor.  It runs by default and in the same session as the real phase,
-# because a floor recalled from another session is not this session's floor.
-# A real delta smaller than the null delta is a property of the box.
-#
-# Output: bench/results/ab-commit-<UTC>/report.md + raw wrk logs.
+# Output: bench/results/ab-h2-<UTC>/report.md + raw.tsv + h2load logs.
 
 set -uo pipefail
 
@@ -43,19 +40,17 @@ REF_BASE="${REF_BASE:-HEAD~1}"
 REF_TREAT="${REF_TREAT:-HEAD}"
 PATHSPEC="${PATHSPEC:-blackbull/}"
 ROUNDS="${ROUNDS:-3}"
-DURATION="${DURATION:-10}"
-WARMUP="${WARMUP:-5}"
-THREADS="${THREADS:-4}"
-CONNS="${CONNS:-32}"
-URL_PATH="${URL_PATH:-/plaintext}"
 PORT="${PORT:-8443}"
 BB_UVLOOP="${BB_UVLOOP:-0}"
-PIPELINE="${PIPELINE:-1}"
 PHASES="${PHASES:-null real}"
-# Server and load generator on disjoint cores.  Unpinned, the two fight for
-# the same cores and the throughput distribution goes bimodal (two scheduler
-# placements, ~15 % apart), which swamps anything a refactor of this size
-# could do.  Pinning is what makes the floor small enough to measure against.
+URL_PATH="${URL_PATH:-/1kb}"
+H2_CONNS="${H2_CONNS:-32}"
+H2_STREAMS="${H2_STREAMS:-16}"
+H2_N="${H2_N:-100000}"
+H2_WARMUP="${H2_WARMUP:-10000}"
+# Server and load generator on disjoint cores — same bimodality argument as
+# ab_commit.sh: unpinned, the two fight for the same cores and the
+# distribution goes bimodal, swamping a refactor-scale delta.
 SERVER_CPUS="${SERVER_CPUS:-0-1}"
 LOAD_CPUS="${LOAD_CPUS:-4-9}"
 if command -v taskset >/dev/null 2>&1; then
@@ -66,10 +61,19 @@ else
 fi
 
 REPO="$(git rev-parse --show-toplevel)"
+# Python resolved ONCE from the repo's venv.  Not the bare `python` (absent
+# on the EC2 bench image) and not `uv run` (which can recreate the venv
+# mid-harness and silently break the server spawn) — the direct .venv path
+# is deterministic across the whole run.
+PY="${PY:-$REPO/.venv/bin/python}"
+if [ ! -x "$PY" ]; then
+    echo "ab_commit_h2.sh: missing $PY — is the venv installed?" >&2
+    exit 1
+fi
 cd "$REPO"
 
 TS="$(date -u +%Y%m%d-%H%M%S)"
-OUTDIR="bench/results/ab-commit-${TS}Z"
+OUTDIR="bench/results/ab-h2-${TS}Z"
 mkdir -p "$OUTDIR"
 REPORT="$OUTDIR/report.md"
 RAW="$OUTDIR/raw.tsv"
@@ -82,7 +86,7 @@ HEAD_REF="$(git rev-parse HEAD)"
 # --- the file set under test ----------------------------------------------
 mapfile -t FILES < <(git diff --name-only "$REF_BASE" "$REF_TREAT" -- "$PATHSPEC")
 if [ "${#FILES[@]}" -eq 0 ]; then
-    echo "ab_commit.sh: $SHA_BASE..$SHA_TREAT touch nothing under $PATHSPEC" >&2
+    echo "ab_commit_h2.sh: $SHA_BASE..$SHA_TREAT touch nothing under $PATHSPEC" >&2
     exit 1
 fi
 
@@ -91,7 +95,7 @@ fi
 # files being swapped.
 for f in "${FILES[@]}"; do
     if ! git diff --quiet -- "$f" || ! git diff --cached --quiet -- "$f"; then
-        echo "ab_commit.sh: $f has uncommitted changes — commit or stash first" >&2
+        echo "ab_commit_h2.sh: $f has uncommitted changes — commit or stash first" >&2
         exit 1
     fi
 done
@@ -136,7 +140,7 @@ kill_server() {
     if command -v fuser >/dev/null 2>&1; then
         fuser -k -9 -n tcp "$PORT" 2>/dev/null || true
     fi
-    pkill -9 -f "bench.peers.native_app" 2>/dev/null || true
+    pkill -9 -f "bench/app.py" 2>/dev/null || true
     for _ in $(seq 1 20); do
         ss -tln 2>/dev/null | grep -q ":$PORT " || return 0
         sleep 0.25
@@ -155,7 +159,7 @@ swap_to() {
     local ref="$1"
     _swap_file_set "$ref" || return 1
     if [ -n "$PROOF_FILE" ]; then
-        uv run python - "$PROOF_FILE" <<'PY'
+        "$PY" - "$PROOF_FILE" <<'PY'
 import hashlib, importlib, pathlib, sys
 rel = sys.argv[1]
 mod = importlib.import_module(
@@ -172,31 +176,31 @@ PY
 
 start_server() {
     BB_UVLOOP="$BB_UVLOOP" BB_WORKERS=1 BB_ACCESS_LOG=0 \
-        setsid "${PIN_SERVER[@]}" uv run blackbull bench.peers.native_app:app \
-            --bind "127.0.0.1:${PORT}" \
+        setsid "${PIN_SERVER[@]}" "$PY" bench/app.py --no-tls \
+            --port "$PORT" \
             >"$OUTDIR/server.log" 2>&1 &
     SERVER_PID=$!
     for _ in $(seq 1 60); do
-        if curl -s --max-time 2 "$BASE_URL$URL_PATH" 2>/dev/null | grep -q Hello; then
+        if curl -s --max-time 2 -o /dev/null -w '%{http_code}' \
+                "$BASE_URL$URL_PATH" 2>/dev/null | grep -q '200'; then
             return 0
         fi
         sleep 0.5
     done
-    echo "ab_commit.sh: server not ready on $BASE_URL" >&2
+    echo "ab_commit_h2.sh: server not ready on $BASE_URL" >&2
     tail -20 "$OUTDIR/server.log" >&2
     return 1
 }
 
-# One measured run.  Echoes req/s on stdout.
+# One measured run.  Echoes aggregate req/s (the `finished in … req/s`
+# field) on stdout.
 measure() {
     local tag="$1"
-    local pipe_args=()
-    [ "$PIPELINE" != "1" ] && pipe_args=(-s bench/wrk/pipeline.lua -- "$PIPELINE")
-    "${PIN_LOAD[@]}" wrk -t"$THREADS" -c"$CONNS" -d"${WARMUP}s" --latency \
-        "$BASE_URL$URL_PATH" "${pipe_args[@]}" >/dev/null 2>&1
-    "${PIN_LOAD[@]}" wrk -t"$THREADS" -c"$CONNS" -d"${DURATION}s" --latency \
-        "$BASE_URL$URL_PATH" "${pipe_args[@]}" >"$OUTDIR/wrk_${tag}.txt" 2>&1
-    awk '/Requests\/sec:/ {print $2}' "$OUTDIR/wrk_${tag}.txt"
+    "${PIN_LOAD[@]}" h2load -c "$H2_CONNS" -m "$H2_STREAMS" -n "$H2_WARMUP" \
+        "$BASE_URL$URL_PATH" >/dev/null 2>&1
+    "${PIN_LOAD[@]}" h2load -c "$H2_CONNS" -m "$H2_STREAMS" -n "$H2_N" \
+        "$BASE_URL$URL_PATH" >"$OUTDIR/h2_${tag}.txt" 2>&1
+    awk '/finished in/ {print $4}' "$OUTDIR/h2_${tag}.txt"
 }
 
 run_arm() {
@@ -224,10 +228,10 @@ run_arm() {
 # --- drive -----------------------------------------------------------------
 printf 'phase\tround\tarm\trps\tproof\n' >"$RAW"
 
-echo "ab_commit.sh: $SHA_BASE (base) vs $SHA_TREAT (treat)"
+echo "ab_commit_h2.sh: $SHA_BASE (base) vs $SHA_TREAT (treat)"
 echo "  files: ${FILES[*]}"
-echo "  lane : HTTP/1.1 cleartext keep-alive, wrk -t$THREADS -c$CONNS -d${DURATION}s $URL_PATH"
-echo "  uvloop=$BB_UVLOOP  rounds=$ROUNDS (ABBA)  pipeline=$PIPELINE"
+echo "  lane : HTTP/2 cleartext (h2c), h2load -c $H2_CONNS -m $H2_STREAMS -n $H2_N $URL_PATH"
+echo "  uvloop=$BB_UVLOOP  rounds=$ROUNDS (ABBA)"
 echo "  pin  : server=${SERVER_CPUS:-none} load=${LOAD_CPUS:-none}"
 echo "  phases: $PHASES"
 echo ""
@@ -257,11 +261,11 @@ restore_tree
 {
     echo "# A/B — $SHA_BASE (base) vs $SHA_TREAT (treat)"
     echo ""
-    echo "Local box, HTTP/1.1 cleartext keep-alive, single worker."
+    echo "EC2 m7a.2xlarge, HTTP/2 cleartext (h2c), single worker."
     echo ""
     echo "| | |"
     echo "|---|---|"
-    echo "| Lane | \`wrk -t$THREADS -c$CONNS -d${DURATION}s $URL_PATH\` |"
+    echo "| Lane | \`h2load -c $H2_CONNS -m $H2_STREAMS -n $H2_N $URL_PATH\` |"
     echo "| Rounds | $ROUNDS ABBA per phase |"
     echo "| uvloop | $BB_UVLOOP |"
     echo "| Pinning | server \`$SERVER_CPUS\` / load \`$LOAD_CPUS\` |"

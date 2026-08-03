@@ -109,8 +109,41 @@ for f in "${FILES[@]}"; do
     fi
 done
 
+# A file may exist in only one of the two refs (added or deleted between
+# them).  `git checkout <ref> -- <path>` cannot handle a path absent from
+# the target ref, so each file is checked out when it exists at the target
+# and REMOVED when it does not.  `$PROOF_FILE` is the first swapped file
+# that exists in BOTH refs — the import-hash proof below needs a module
+# that is importable under either arm.
+PROOF_FILE=""
+for f in "${FILES[@]}"; do
+    if git cat-file -e "$REF_BASE:$f" 2>/dev/null \
+            && git cat-file -e "$REF_TREAT:$f" 2>/dev/null; then
+        PROOF_FILE="$f"
+        break
+    fi
+done
+
+_swap_file_set() {  # $1 = ref (or HEAD_REF for restore)
+    local ref="$1" f
+    for f in "${FILES[@]}"; do
+        if git cat-file -e "$ref:$f" 2>/dev/null; then
+            git checkout "$ref" -- "$f" || return 1
+        else
+            # Absent at the target ref.  Removing the worktree file alone
+            # leaves the earlier `git checkout`'s staged entry behind ("AD"
+            # state), which trips the dirty check on the next session.
+            # Unstage it too.
+            git rm --cached -q --ignore-unmatch -- "$f" 2>/dev/null || true
+            rm -f "$f"
+        fi
+    done
+    find blackbull -name '__pycache__' -type d -prune -exec rm -rf {} + 2>/dev/null || true
+    return 0
+}
+
 restore_tree() {
-    git checkout "$HEAD_REF" -- "${FILES[@]}" 2>/dev/null || true
+    _swap_file_set "$HEAD_REF" 2>/dev/null || true
 }
 kill_server() {
     if command -v fuser >/dev/null 2>&1; then
@@ -129,22 +162,13 @@ trap cleanup EXIT INT TERM HUP
 
 swap_to() {
     local ref="$1"
-    git checkout "$ref" -- "${FILES[@]}" || return 1
-    find blackbull -name '__pycache__' -type d -prune -exec rm -rf {} + 2>/dev/null || true
+    _swap_file_set "$ref" || return 1
     # Prove the interpreter loaded the ref's bytes for the framework, not the
     # bench app: the A/B measures a blackbull/ change, so the proof must cover
-    # it.  ``git diff --name-only`` lists paths in name order, which would
-    # put ``bench/peers/native_app.py`` first; pick the first blackbull/ file
-    # instead.
-    local proof_file=""
-    for f in "${FILES[@]}"; do
-        if [[ "$f" == blackbull/* ]]; then
-            proof_file="$f"
-            break
-        fi
-    done
-    [ -n "$proof_file" ] || proof_file="${FILES[0]}"
-    "$PY" - "$proof_file" <<'PY'
+    # it.  `$PROOF_FILE` is the first swapped file that exists in BOTH refs —
+    # the import-hash proof needs a module importable under either arm.
+    if [ -n "$PROOF_FILE" ]; then
+        "$PY" - "$PROOF_FILE" <<'PY'
 import hashlib, importlib, pathlib, sys
 rel = sys.argv[1]
 mod = importlib.import_module(
@@ -156,6 +180,7 @@ if p != want:
     raise SystemExit(1)
 print(f'{p} {hashlib.sha1(p.read_bytes()).hexdigest()[:12]}')
 PY
+    fi
 }
 
 start_server() {
