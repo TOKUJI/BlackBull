@@ -394,8 +394,12 @@ def wrap_native_send(raw_send):
                     header=list(event.get('headers') or []),
                     expects_trailers=bool(event.get('trailers', False))))
             elif ev_type == 'http.response.body':
+                # ``body=None`` (spec violation) falls back to an empty body:
+                # the native sender skips a ``None`` body and a buffered
+                # header would never flush → silent hang.  Empty body keeps
+                # the response completing.
                 await raw_send(NativeResponse(
-                    body=event.get('body', b''),
+                    body=event.get('body') or b'',
                     more_body=event.get('more_body', False)))
             elif ev_type == 'http.response.trailers':
                 await raw_send(NativeResponse(
@@ -422,12 +426,18 @@ async def _stream_and_convert(stream, raw_send) -> None:
         if isinstance(event, dict):
             ev_type = event.get('type')
             if ev_type == 'http.response.start':
+                # Preserve the ASGI `trailers: True` flag losslessly (same
+                # as wrap_native_send — a custom StreamingResponse subclass
+                # may set it).
                 await raw_send(NativeResponse(
                     status=int(event.get('status', HTTPStatus.OK)),
-                    header=list(event.get('headers') or [])))
+                    header=list(event.get('headers') or []),
+                    expects_trailers=bool(event.get('trailers', False))))
             elif ev_type == 'http.response.body':
+                # ``body=None`` (spec violation) falls back to empty — avoids
+                # the native sender skipping a None body (silent hang).
                 await raw_send(NativeResponse(
-                    body=event.get('body', b''),
+                    body=event.get('body') or b'',
                     more_body=event.get('more_body', False)))
             else:
                 await raw_send(event)

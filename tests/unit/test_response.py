@@ -40,6 +40,28 @@ def test_response_to_native_is_single_object():
     assert len(n.to_asgi()) == 2  # start + body, and back again losslessly
 
 
+@pytest.mark.asyncio
+async def test_wrap_native_send_body_none_falls_back_to_empty():
+    """Clean-subagent MAJOR: a spec-violating full-form body event with
+    body=None must not hang the native sender (it skips a None body and a
+    buffered header would never flush) — it falls back to an empty body."""
+    from blackbull.app import _wrap_send_native
+
+    sent = []
+
+    async def raw_send(event):
+        sent.append(event)
+
+    send = _wrap_send_native(raw_send)
+    await send({'type': 'http.response.start', 'status': 200, 'headers': []})
+    await send({'type': 'http.response.body', 'body': None, 'more_body': False})
+
+    assert len(sent) == 2
+    n = sent[1]
+    assert n.body is not None      # falls back to b'', never None
+    assert n.body == b''
+
+
 def test_response_body_from_bytes():
     assert Response(b'hi').body == b'hi'
 

@@ -221,6 +221,88 @@ async def test_startup_accepts_undecorated_valid_middleware():
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
+async def test_h2_lane_normalization_stays_dict_with_as_middleware():
+    """Clean-subagent BLOCKER guard: on an http_version='2' request,
+    @as_middleware's normalisation must keep the ASGI-dict contract.  A
+    leaked NativeResponse would TypeError the H2 sender (no native arm yet —
+    the H2 gate)."""
+    from blackbull import BlackBull
+    from blackbull.headers import Headers
+    from blackbull.connection import Connection
+
+    app = BlackBull()
+
+    @as_middleware
+    async def forward_mw(scope, receive, send, call_next):
+        async def inner_send(event):
+            await send(event)
+        await call_next(scope, receive, inner_send)
+
+    app.use(forward_mw)
+
+    @app.route(path='/h2')
+    async def h2():
+        return b'ok'
+
+    conn = Connection(type='http', http_version='2', method='GET', scheme='http',
+                      path='/h2', raw_path=b'/h2', query_string=b'', root_path='',
+                      headers=Headers([(b'host', b'localhost')]),
+                      client=('127.0.0.1', 5), server=('localhost', 80), extensions={})
+    sent = []
+
+    async def receive():
+        return {'type': 'http.request', 'body': b'', 'more_body': False}
+
+    async def send(ev):
+        sent.append(ev)
+
+    await app(conn, receive, send)
+
+    assert sent, 'no response emitted'
+    assert all(isinstance(e, dict) for e in sent), (
+        f'NativeResponse leaked onto the H2 lane: {sent!r}')
+    assert any(e.get('type') == 'http.response.start' for e in sent)
+
+
+@pytest.mark.asyncio
+async def test_h2_with_cors_global_middleware_stays_dict():
+    """Clean-subagent BLOCKER: H2 + global CORS must not leak NativeResponse
+    to the H2 sender (would TypeError — HTTP2Sender has no native arm)."""
+    from blackbull import BlackBull
+    from blackbull.headers import Headers
+    from blackbull.connection import Connection
+    from blackbull.middleware.cors import CORS
+
+    app = BlackBull()
+    app.use(CORS(allow_origins=['https://example.com']))
+
+    @app.route(path='/h2c')
+    async def h2c():
+        return {'ok': True}
+
+    conn = Connection(type='http', http_version='2', method='GET', scheme='http',
+                      path='/h2c', raw_path=b'/h2c', query_string=b'', root_path='',
+                      headers=Headers([(b'host', b'localhost'),
+                                       (b'origin', b'https://example.com')]),
+                      client=('127.0.0.1', 5), server=('localhost', 80), extensions={})
+    sent = []
+
+    async def receive():
+        return {'type': 'http.request', 'body': b'', 'more_body': False}
+
+    async def send(ev):
+        sent.append(ev)
+
+    await app(conn, receive, send)
+
+    assert all(isinstance(e, dict) for e in sent), (
+        f'NativeResponse leaked to the H2 lane via CORS: {sent!r}')
+    start = next(e for e in sent if e.get('type') == 'http.response.start')
+    hdrs = dict(start.get('headers', []))
+    assert hdrs.get(b'access-control-allow-origin') == b'https://example.com'
+
+
+@pytest.mark.asyncio
 async def test_plain_middleware_send_wrapper_sees_native():
     """An undecorated middleware that wraps ``send`` must receive
     NativeResponse on the H1 native path — never raw ``Response`` objects.
