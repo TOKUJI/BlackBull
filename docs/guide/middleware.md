@@ -33,12 +33,13 @@ shape; the simplified handler form does **not** apply to them.
 ## Typing the message channel
 
 The events crossing `receive` and `send` follow the ASGI 3.0 wire contract
-on the **ASGI lanes** — HTTP/2, WebSocket, and the external-host edge
+on the **ASGI lanes** — WebSocket and the external-host edge
 (`BlackBull(asgi=True)` under uvicorn) — as plain ASGI dicts.  On
-BlackBull's own **HTTP/1.1 native path** the response side carries
-`NativeResponse` objects instead: one message may hold any combination of a
-header arm, body chunks, and trailers, and its *presence* semantics are
-`is not None` (never truthiness — an empty body is a real body).
+BlackBull's own **HTTP path (HTTP/1.1 and HTTP/2)** the response side
+carries `NativeResponse` objects instead: one message may hold any
+combination of a header arm, body chunks, and trailers, and its *presence*
+semantics are `is not None` (never truthiness — an empty body is a real
+body).
 
 BlackBull also ships a set of `TypedDict` *declarations* for the ASGI event
 shapes, so a type checker can tell which keys are legal on which event:
@@ -70,15 +71,16 @@ Everything here is annotation-only: nothing is validated or converted at
 runtime, and unannotated middleware keeps working exactly as before.
 
 !!! note "Native path: the send channel carries `NativeResponse`"
-    On BlackBull's own HTTP/1.1 path, the response events a middleware's
-    inner `send` wrapper observes are `NativeResponse` objects — not dicts.
-    A middleware that subscripts `event['type']` must instead branch on the
-    object's arms: `event.header is not None` (header arm, with
-    `event.status` / `event.header.get(b'name')`), `event.body is not None`
-    (body chunk, with `event.more_body`), and `event.trailers is not None`.
-    The `@as_middleware` decorator guarantees this single native
-    representation for the wrappers it normalises; on the ASGI lanes the
-    same wrappers see plain dicts.  Use
+    On BlackBull's own HTTP path (HTTP/1.1 and HTTP/2), the response events
+    a middleware's inner `send` wrapper observes are `NativeResponse`
+    objects — not dicts.  A middleware that subscripts `event['type']`
+    must instead branch on the object's arms: `event.header is not None`
+    (header arm, with `event.status` / `event.header.get(b'name')`),
+    `event.body is not None` (body chunk, with `event.more_body`), and
+    `event.trailers is not None`.  The `@as_middleware` decorator
+    guarantees this single native representation for the wrappers it
+    normalises; only on the WebSocket / external-host lanes do the same
+    wrappers see plain dicts.  Use
     [`blackbull.testing.native`](testing.md) to exercise the native path.
 
 ## The `@as_middleware` decorator
@@ -88,7 +90,8 @@ instead of calling `send(...)` with raw ASGI events.  A middleware
 that wraps `send` would otherwise have to handle both forms.
 Decorate the middleware with `@as_middleware` and the inner
 wrapper sees a single native representation: `NativeResponse` on
-the HTTP/1.1 native path, plain ASGI dicts on the ASGI lanes —
+the HTTP path (HTTP/1.1 and HTTP/2), plain ASGI dicts on the
+WebSocket / external-host lanes —
 `Response` objects are converted for you, never leaking through:
 
 ```python

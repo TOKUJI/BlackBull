@@ -316,21 +316,21 @@ package to parse the body manually.
 ## Responses
 
 !!! note "Native send path"
-    On BlackBull's own HTTP/1.1 server, `send` accepts **`Response` /
-    `JSONResponse` objects, `(bytes, status, headers)`, `NativeResponse`,
-    and ASGI `http.response.*` dicts** — the full-form ASGI dict forms are
-    a compatibility contract held until **2027-07-29**, converted to the
-    native message at the handler boundary.  A complete `Response` becomes
-    one `NativeResponse` object (one `send`); streaming is a header object
-    then body-chunk objects.  Under an external ASGI host
+    On BlackBull's own HTTP server (HTTP/1.1 and HTTP/2), `send` accepts
+    **`Response` / `JSONResponse` objects, `(bytes, status, headers)`,
+    `NativeResponse`, and ASGI `http.response.*` dicts** — the full-form
+    ASGI dict forms are a compatibility contract held until **2027-07-29**,
+    converted to the native message at the handler boundary.  A complete
+    `Response` becomes one `NativeResponse` object (one `send`); streaming
+    is a header object then body-chunk objects.  Under an external ASGI host
     (`BlackBull(asgi=True)` + `to_asgi()`) the same handler code runs with
     plain ASGI dicts on the wire.  The `http.response.start` `trailers`
     flag is preserved losslessly via `NativeResponse.expects_trailers`.
 
     On the native path a `Response` (or subclass) is serialised via
     `Response.to_native()`.  A subclass that overrides `__call__` to emit a
-    custom event sequence is honoured on the ASGI lanes (H2 / external
-    host) but not on the native H1 path — keep the wire behaviour in
+    custom event sequence is honoured on the WebSocket / external-host
+    lanes but not on the native HTTP path — keep the wire behaviour in
     `__call__` (shared by both lanes via the normalisers) or override
     `to_native()` to control the native serialisation.
 
@@ -569,7 +569,8 @@ async def prefix_mw(scope, receive, send, call_next):
 The two branches are the same policy on two wire shapes: the native object
 arm transforms only terminal bodies (so `more_body=True` chunks stream
 through untouched), and the dict arm keeps the original start/body
-sequencing for the ASGI lanes.
+sequencing for the WebSocket / external-host lanes (where the wire contract
+stays ASGI).
 
 For most use cases (header injection, logging) the middleware
 does not touch the body at all and streaming safety is not a
