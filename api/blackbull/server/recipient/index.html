@@ -6738,7 +6738,7 @@ read the next frame from the transport:
   - Pong frame   → silently dropped, reads the next frame</p>
 <p>Ping/pong handling requires write access to the transport, so the raw
 writer is stored alongside the reader.</p>
-<p><strong>Three read modes, selected by <code>ws_queue_depth</code> and listeners.</strong></p>
+<p><strong>Two read modes, selected by <code>ws_queue_depth</code>.</strong></p>
 <p><code>0</code> (default) — <em>inline</em>.  Frames are read in the app's own task, only
 when it calls <code>receive()</code>.  There is no background task and no queue, so
 a message costs no handoff.  This is the difference between WebSocket's
@@ -6748,22 +6748,16 @@ future plus one extra <code>call_soon</code> per message.</p>
 that depth.  Costs the handoff, and buys read-ahead: control frames are
 serviced while the handler is busy, so a PING is answered even between
 <code>receive()</code> calls, and up to <em>depth</em> messages buffer under a slow app.</p>
-<p><em>deferred</em> (<code>0</code> + a <code>websocket_message</code> listener) — inline at first,
-so a consuming handler keeps the no-handoff win <em>even when the listener is
-registered</em>.  The idle watchdog (:class:<code>WsIdleWatchdog</code>) starts a reader
-task only after the app has gone quiet for more than one scanner tick —
-a handler that never calls <code>receive()</code> still produces events and still
-gets control frames serviced.</p>
-<p>All modes deliver an identical <em>ASGI</em> event sequence to the app; only the
+<p>Both modes deliver an identical <em>ASGI</em> event sequence to the app; only the
 timing of control-frame servicing and the existence of buffering differ.
-Inline mode still answers PING and echoes CLOSE per RFC 6455 §5.5 — it
-does so when the app drives the next read, or, for a handler that has
-stopped reading, at the next <code>send()</code> (send-time servicing) and on each
-idle scanner tick (the watchdog).  RFC 6455 §5.5.2 permits a delayed
+Inline mode still answers PING and echoes CLOSE per RFC 6455 §5.5 — it does
+so when the app drives the next read.  RFC 6455 §5.5.2 permits a delayed
 PONG, which is what makes inline mode conformant.</p>
-<p>The <code>websocket_message</code> Level B event fires when the server reads a
-message rather than when the app consumes it — a handler that never calls
-<code>receive()</code> must still produce it.  See :meth:<code>_read_ahead_observed</code>.</p>
+<p>The one thing that <em>can</em> tell the modes apart is the <code>websocket_message</code>
+Level B event, which fires when the server reads a message rather than when
+the app consumes it — a handler that never calls <code>receive()</code> must still
+produce it.  A registered listener therefore forces eager mode; see
+:meth:<code>_read_ahead_observed</code>.</p>
 
 
 

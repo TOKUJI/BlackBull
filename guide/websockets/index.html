@@ -5786,27 +5786,13 @@ queue fills, the read loop blocks rather than buffering without bound.</p>
 need keepalive <code>ping</code>s answered during it.  A handler that loops
 tightly on <code>receive()</code> — the common shape — wants the default.</p>
 <div class="admonition note">
-<p class="admonition-title"><code>websocket_message</code> and control frames when your handler isn't reading</p>
-<p>Two automatic mechanisms keep a handler that is <em>not</em> reading
-conformant, without ever forcing read-ahead on one that is:</p>
-<ul>
-<li><strong>The PONG-latency contract.</strong>  In inline mode a <code>ping</code> is answered
-  when your handler next drives a read, or on every tick of the
-  internal deadline scanner for a connection idle more than ~0.3 s
-  (the idle watchdog).  Worst-case PONG latency is therefore bounded
-  to roughly one scanner tick even for a handler that never reads —
-  with no per-connection timers.  A handler that loops tightly on
-  <code>receive()</code> is never touched by the watchdog.</li>
-<li><strong>The <code>websocket_message</code> read-time contract.</strong>  The
-  <a href="../events/"><code>websocket_message</code></a> event fires when the <em>server</em>
-  reads a message, not when your handler consumes it, so a handler
-  that never calls <code>receive()</code> still produces events.  Registering a
-  listener does <strong>not</strong> switch read-ahead on at connect — a consuming
-  handler keeps the inline win.  Instead, if your handler goes quiet
-  for more than ~0.3 s, a deferred reader starts in the background
-  and fires the event at read time.  Nothing else observes the
-  difference between the modes.</li>
-</ul>
+<p class="admonition-title"><code>websocket_message</code> forces read-ahead</p>
+<p>The <a href="../events/"><code>websocket_message</code></a> event fires when the <em>server</em>
+reads a message, not when your handler consumes it, so a handler
+that never calls <code>receive()</code> still produces events.  That is only
+possible with a reader running ahead of the handler, so registering
+a <code>websocket_message</code> listener switches read-ahead on even at depth
+<code>0</code>.  Nothing else observes the difference between the two modes.</p>
 </div>
 <h2 id="next">Next<a class="headerlink" href="#next" title="Permanent link">&para;</a></h2>
 <ul>
