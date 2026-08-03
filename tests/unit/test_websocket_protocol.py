@@ -1033,15 +1033,12 @@ class TestReadAheadMode:
         assert event['text'] == 'hello'
 
     @pytest.mark.asyncio
-    async def test_a_websocket_message_listener_does_not_force_eager(self):
-        """A registered listener must NOT switch read-ahead on at connect.
-
-        Design A' (Sprint 90): a consuming handler keeps the inline win even
-        when a ``websocket_message`` listener is registered — the event fires
-        at read time, which in inline mode is exactly when ``receive()``
-        drives the read.  Forcing the reader task on at connect would hand
-        every message through a queue (the 4.09 loop-touch cost) for a handler
-        that is happily consuming.
+    async def test_a_websocket_message_listener_forces_read_ahead(self):
+        """``websocket_message`` fires when the *server* reads, not when the
+        handler calls receive() — so a registered listener must switch read-ahead
+        back on even at depth 0, or a handler that never consumes stops
+        producing events.  Pins the contract that
+        tests/architecture/events/test_websocket_message_event.py states.
         """
         from blackbull.event import EventDispatcher
 
@@ -1050,57 +1047,6 @@ class TestReadAheadMode:
 
         async def _observer(event):
             seen.append(event.detail['text'])
-
-        dispatcher.on('websocket_message', _observer)
-
-        writer = _FakeWriter()
-        recipient = WebSocketRecipient(
-            AsyncioReader(_FakeReader(_make_client_frame(b'hello', opcode=0x1))),
-            AsyncioWriter(writer),
-            dispatcher=dispatcher,
-            conn={'path': '/ws', 'client': None},
-            ws_queue_depth=0,
-        )
-        assert await recipient() == {'type': 'websocket.connect'}
-
-        # Give a wrongly-started background reader room to run.
-        for _ in range(10):
-            await asyncio.sleep(0)
-        assert seen == [], (
-            'a websocket_message listener must not force read-ahead — '
-            'nothing has been read yet for a consuming handler')
-
-        # The event fires at read time = the moment receive() drives the read.
-        # ``@app.on`` observers are detached (fire-and-forget), so yield a
-        # couple of loop turns for the observer task to run.
-        event = await recipient()
-        assert event['text'] == 'hello'
-        for _ in range(5):
-            await asyncio.sleep(0)
-        assert seen == ['hello'], (
-            'the event must fire when the message is read, i.e. now')
-
-    @pytest.mark.asyncio
-    async def test_deferred_reader_fires_event_for_non_consuming_handler(
-            self, monkeypatch):
-        """A listener + a handler that never consumes still produces events.
-
-        The idle watchdog (deadline scanner) starts the deferred reader on a
-        connection quiet for more than one tick; the reader consumes ahead of
-        the handler and fires ``websocket_message`` at read time.
-        """
-        import blackbull.server.deadline as _deadline
-        monkeypatch.setattr(_deadline, '_TICK_S', 0.02)
-
-        from blackbull.event import EventDispatcher
-
-        dispatcher = EventDispatcher()
-        seen = []
-        fired = asyncio.Event()
-
-        async def _observer(event):
-            seen.append(event.detail['text'])
-            fired.set()
 
         dispatcher.on('websocket_message', _observer)
 
@@ -1110,15 +1056,17 @@ class TestReadAheadMode:
             AsyncioWriter(writer),
             dispatcher=dispatcher,
             conn={'path': '/ws', 'client': None},
-            ws_queue_depth=0,
+            ws_queue_depth=0,          # inline by configuration ...
         )
         assert await recipient() == {'type': 'websocket.connect'}
 
-        # No receive() is ever called again; the watchdog's deferred reader
-        # must still read the message and fire the event within a couple of
-        # scanner ticks.
-        await asyncio.wait_for(fired.wait(), timeout=2.0)
-        assert seen == ['unconsumed']
+        # ... but the listener forces the reader task on, so the message is
+        # observed without the app ever calling receive() again.
+        for _ in range(10):
+            await asyncio.sleep(0)
+        assert seen == ['unconsumed'], (
+            'a websocket_message listener did not force read-ahead — the '
+            'event only fires if the server reads ahead of the handler')
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize('depth', [0, 8], ids=['inline', 'eager'])
