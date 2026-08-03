@@ -1139,29 +1139,6 @@ class WebSocketRecipient(BaseRecipient):
         else:
             self._pending.append(item)
 
-    async def _emit(self, item) -> None:
-        """Hand one ASGI event (or an exception to re-raise app-side) to the app.
-
-        The only place the two read modes diverge.  Eager mode pushes through
-        the bounded queue, which is what applies backpressure to a fast peer;
-        inline mode drops it in the handoff slot, where the caller one frame up
-        the stack is already waiting for it.
-
-        The terminal code is recorded here — from a disconnect event, a
-        :class:`ProtocolError`, or any other exception — so a receive() past
-        the terminal event can keep answering a disconnect with the same code.
-        """
-        if isinstance(item, dict) and item.get('type') == ASGIEvent.WS_DISCONNECT:
-            self._terminal_code = item.get('code', WSCloseCode.ABNORMAL)
-        elif isinstance(item, ProtocolError):
-            self._terminal_code = item.close_code
-        elif isinstance(item, Exception):
-            self._terminal_code = WSCloseCode.ABNORMAL
-        if self._event_queue is not None:
-            await self._event_queue.put(item)
-        else:
-            self._pending.append(item)
-
     async def _read_step(self) -> bool:
         """Read and process exactly one frame.  True ⇒ the read side is done.
 
