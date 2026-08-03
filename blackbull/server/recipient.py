@@ -1173,6 +1173,8 @@ class WebSocketRecipient(BaseRecipient):
         """
         _CONTROL_OPS = (WSOpcode.CLOSE, WSOpcode.PING, WSOpcode.PONG)
         h = await read_frame_header(self._reader)
+        # ... existing frame-processing logic ...
+        return False
 
         # RFC 6455 §5.5 — control frames MUST have payload ≤125 and
         # MUST NOT be fragmented.  Reject without reading the body.
