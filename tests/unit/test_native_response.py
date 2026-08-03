@@ -79,6 +79,24 @@ class TestHeaderView:
         hv.append(b'content-encoding', b'gzip')
         assert (b'content-encoding', b'gzip') in r.to_asgi()[0]['headers']
 
+    def test_append_single_tuple_is_one_pair(self):
+        # A bare (name, value) 2-tuple in the one-arg form must be treated as
+        # one pair, not extended element-wise (extend() would walk the two
+        # bytes as separate malformed entries — the blackbull-session footgun).
+        r = NativeResponse(header=[])
+        hv = r.header
+        assert hv is not None
+        hv.append((b'set-cookie', b'a=b'))
+        assert list(hv) == [(b'set-cookie', b'a=b')]
+        assert hv.get(b'set-cookie') == b'a=b'
+
+    def test_append_list_of_pairs_still_extends(self):
+        r = NativeResponse(header=[])
+        hv = r.header
+        assert hv is not None
+        hv.append([(b'a', b'1'), (b'b', b'2')])
+        assert list(hv) == [(b'a', b'1'), (b'b', b'2')]
+
     def test_header_absent_returns_none(self):
         assert NativeResponse().header is None
         assert NativeResponse(body=b'x').header is None

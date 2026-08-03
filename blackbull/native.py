@@ -59,7 +59,15 @@ class _HeaderView:
 
     def append(self, name_or_pairs, value: bytes | None = None) -> None:
         if value is None:
-            self._items.extend(name_or_pairs)
+            # One-arg form: a *list* of pairs to extend with.  A bare
+            # (name, value) 2-tuple is a footgun — ``extend`` would walk its
+            # elements (two bytes) as separate entries and corrupt the list —
+            # so a 2-tuple of (bytes, bytes) is treated as one pair.
+            if (isinstance(name_or_pairs, tuple) and len(name_or_pairs) == 2
+                    and isinstance(name_or_pairs[0], (bytes, str))):
+                self._items.append(name_or_pairs)
+            else:
+                self._items.extend(name_or_pairs)
         else:
             self._items.append((name_or_pairs, value))
 
