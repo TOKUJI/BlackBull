@@ -146,7 +146,6 @@ class Compression:
         # (the collapse mode a static-asset workload triggers).
         self._executor_max_inflight = executor_max_inflight
         self._executor_inflight: int = 0
-        self._brotli_quality = brotli_quality
         self._available = _detect_codecs(brotli_quality=brotli_quality)
         # ``Accept-Encoding`` header bytes → selection.  Real-world traffic
         # has very few distinct Accept-Encoding values (browsers send a

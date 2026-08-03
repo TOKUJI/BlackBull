@@ -255,10 +255,15 @@ class HTTP2Client:
         await self._send_raw_frame(frame)
 
     async def receive_raw_frame(self) -> FrameBase | None:
-        """Escape hatch: read one raw frame; bypasses the receive loop.
+        """Escape hatch: read one raw frame, bypassing the receive loop's dispatch.
+
+        For negative-path / fault-injection tests and raw-frame clients that
+        need a peer frame ``_receive_loop`` would otherwise route through the
+        normal dispatcher — the read-side twin of :meth:`send_raw_frame`.
 
         Only safe to call when the receive loop is not running (i.e. before
-        ``__aenter__`` finishes or after the loop has been cancelled).
+        ``__aenter__`` finishes or after the loop has been cancelled); a
+        concurrent loop would race this call for the reader.
         """
         return await self._receive_frame()
 

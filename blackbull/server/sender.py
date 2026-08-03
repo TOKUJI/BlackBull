@@ -1416,11 +1416,10 @@ class WebSocketSender(BaseSender):
     consistency but are unused for WebSocket connections.
     """
 
-    __slots__ = ('has_received_closed', '_compressor')
+    __slots__ = ('_compressor',)
 
     def __init__(self, writer: AbstractWriter, *, compressor=None):
         super().__init__(writer)
-        self.has_received_closed = False
         # When permessage-deflate is negotiated, an
         # :class:`OutboundCompressor` is supplied here.  ``None`` means
         # outbound frames are sent verbatim (RSV1=0).

@@ -95,8 +95,6 @@ class FileChangeWatcher:
                 "Install with: pip install -e '.[reload]'"
             ) from exc
 
-        self._watchfiles = watchfiles
-
         def _loop() -> None:
             try:
                 # ``stop_event`` is the cooperative shutdown signal.
