@@ -70,20 +70,33 @@ class NativeResponse:
     ``header`` is ``None`` when absent (never ``[]`` — presence is decided by
     ``is not None``).  ``body`` is ``None`` when absent; ``b''`` is a real
     empty body.  ``more_body`` marks a non-terminal body chunk (streaming).
+    ``expects_trailers`` preserves the ASGI ``http.response.start``
+    ``trailers: True`` flag so the sender withholds the terminal chunk until
+    the trailers event (lossless full-form compat — a terminal body before
+    trailers would otherwise corrupt chunked framing).
     """
 
-    __slots__ = ('status', '_header', '_body', 'more_body', 'trailers')
+    __slots__ = (
+        '_body',
+        '_header',
+        'expects_trailers',
+        'more_body',
+        'status',
+        'trailers',
+    )
 
     def __init__(self, *, status: int = 200,
                  header: list[tuple[bytes, bytes]] | None = None,
                  body: bytes | None = None,
                  more_body: bool = False,
-                 trailers: list[tuple[bytes, bytes]] | None = None) -> None:
+                 trailers: list[tuple[bytes, bytes]] | None = None,
+                 expects_trailers: bool = False) -> None:
         self.status = status
         self.header = header          # setter stores into _header
         self._body = body
         self.more_body = more_body
         self.trailers = trailers
+        self.expects_trailers = expects_trailers
 
     # --- header: DX view, or None when absent -----------------------------
     @property
@@ -133,9 +146,12 @@ class NativeResponse:
         """
         events: list[dict] = []
         if self._header is not None:
-            events.append({'type': 'http.response.start',
+            start: dict = {'type': 'http.response.start',
                            'status': self.status,
-                           'headers': self._header})
+                           'headers': self._header}
+            if self.expects_trailers:
+                start['trailers'] = True
+            events.append(start)
         if self._body is not None:
             events.append({'type': 'http.response.body',
                            'body': self._body,

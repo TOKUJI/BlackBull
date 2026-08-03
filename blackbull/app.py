@@ -84,27 +84,92 @@ def _wrap_send(raw_send: ASGISendCallable):
     return _send
 
 
+def _wrap_send_native(raw_send: ASGISendCallable):
+    """Handler-boundary adapter for the native H1 path: all shapes → native.
+
+    Thin wrapper over :func:`blackbull.response.wrap_native_send` — the
+    shared conversion (with ``as_middleware``) so global and per-route
+    middleware observe the same native contract.  Installed at the same
+    altitude as :func:`_wrap_send` (the handler boundary, innermost), so on
+    H1 everything above the route handler sees only
+    :class:`~blackbull.native.NativeResponse`.  See ``wrap_native_send`` for
+    the accepted shapes (full-form ``send(dict)`` compat held until
+    2027-07-29).
+    """
+    from .response import wrap_native_send  # noqa: PLC0415
+    return wrap_native_send(raw_send)
+
+
+def _to_asgi_boundary(send: ASGISendCallable):
+    """Wrap an external ASGI host's ``send`` with native→ASGI conversion.
+
+    The app is native internally in **both** modes (decision 7): the router
+    converts handler sends to ``NativeResponse`` on the H1 path.  At the
+    external-host edge (scope-dict entry / ``asgi=True``), this wrapper
+    converts ``NativeResponse`` emissions back to ASGI dicts via
+    :meth:`~blackbull.native.NativeResponse.to_asgi` so uvicorn / httpx /
+    TestClient receive standard ``http.response.*`` events.  Everything else
+    (lifespan, websocket, and already-ASGI events) passes straight through.
+    """
+    from .native import NativeResponse  # noqa: PLC0415
+
+    async def _send(event):
+        if isinstance(event, NativeResponse):
+            for ev in event.to_asgi():
+                await send(ev)
+        else:
+            await send(event)
+
+    return _send
+
+
 def _inject_response_headers(raw_send: ASGISendCallable, extra_headers):
     """Wrap *raw_send* to append *extra_headers* to the response.
 
     A route may declare headers (via the ``_bb_response_headers`` hook) that
     must appear on all of its responses — success and the centrally-rendered
-    error alike.  Installed **below** :func:`_wrap_send`, so it only ever
-    observes plain ASGI dicts: convenience shapes (``Response``, 3-arg) have
-    already been normalised by the time an event reaches here.  The headers
-    are appended to the ``http.response.start`` event; every other event
-    passes straight through.
+    error alike.  Installed **below** the handler-boundary adapter, so on the
+    H1 native path it observes ``NativeResponse`` (appends to the header arm)
+    and on the H2 / ASGI path it observes plain ASGI dicts (appends to the
+    ``http.response.start`` event).  Every other event passes straight
+    through.
     """
+    from .native import NativeResponse  # noqa: PLC0415
+
     # Unannotated for the same per-request-closure reason as _wrap_send;
-    # ``event`` is an ASGISendEvent.
+    # ``event`` is a NativeResponse or an ASGISendEvent.
     async def _send(event):
-        if isinstance(event, dict) and event.get('type') == 'http.response.start':
+        if isinstance(event, NativeResponse):
+            # Native header arm — presence is `is not None`, never truthiness
+            # (an empty header list is a real header).
+            if event.header is not None:
+                event.header.append(extra_headers)
+        elif isinstance(event, dict) and event.get('type') == 'http.response.start':
             headers: list = list(event.get('headers') or [])
             headers.extend(extra_headers)
             event = {**event, 'headers': headers}
         await raw_send(event)
 
     return _send
+
+
+def _boundary_wrap(mw):
+    """Wrap a global middleware so its input send is native-converting on H1.
+
+    Middleware-generated events (short-circuit responses, the static
+    middleware's ``_respond`` / pathsend dicts) bypass the handler-boundary
+    adapter; wrapping the middleware's input send converts those to
+    ``NativeResponse`` too, so the pipeline below the middleware is uniformly
+    native.  On H2 the ASGI-dict path stays (no native sender arm yet — next
+    sprint), so the conversion is gated per request and disappears with the
+    H2 native-ization.
+    """
+    async def wrapped(conn, receive, send, call_next):
+        if conn.http_version == '1.1':
+            send = _wrap_send_native(send)
+        return await mw(conn, receive, send, call_next)
+
+    return wrapped
 
 
 def _wants_html(conn) -> bool:
@@ -249,7 +314,15 @@ class BlackBull:
                  trusted_proxies: list[str] | str | None = None,
                  config: AppConfig | None = None,
                  cache_max: int | None = None,
+                 asgi: bool = False,
                  ):
+        # ``asgi`` marks the app as external-host-oriented (decision 2026-08-03):
+        # the app is native internally in BOTH modes, and the native→ASGI
+        # boundary conversion applies at the external edge.  asgi=True applies
+        # it unconditionally in ``__call__``; the flag-less app still gets it
+        # automatically when entered with an ASGI scope dict (uvicorn / httpx /
+        # TestClient).  ``to_asgi()`` requires the flag.
+        self._asgi = asgi
         self._config = config
         # ``cache_max`` bounds the per-worker route lookup cache (0 disables
         # it); ``None`` keeps the Router default (2048).  See the routing guide.
@@ -668,15 +741,19 @@ class BlackBull:
                 await serve_grpc(self._grpc_registry, conn, receive, send)
                 return
 
-        # Normalise send for the HTTP path: handlers may emit Response objects
-        # or the (bytes, status, headers) 3-arg form.  Apply _wrap_send here —
-        # at the handler boundary, after the WebSocket branch — so middleware
-        # (which sees send before _dispatch is entered) always receives plain
-        # ASGI dicts.  See _wrap_send for why outward placement is a bug.
-        # ``raw_send`` is retained so an RFC 10008 ``Accept-Query`` route can
-        # re-wrap with the header injector *below* _wrap_send (dict-only).
+        # Normalise send for the HTTP path.  On H1 (Sprint 92 native seam)
+        # the handler-boundary adapter converts every accepted shape —
+        # Response, the (bytes, status, headers) 3-arg form, ASGI dicts
+        # (full-form compat), NativeResponse — to NativeResponse, so
+        # middleware and the sender observe a single native representation.
+        # On H2 the ASGI-dict path stays until its native arm (next sprint) —
+        # this gate exists only to keep the H2 tests passing and disappears
+        # with the H2 native-ization.  ``raw_send`` is retained so an RFC
+        # 10008 ``Accept-Query`` route can re-wrap with the header injector
+        # *below* the adapter.
+        adapter = _wrap_send_native if conn.http_version == '1.1' else _wrap_send
         raw_send = send
-        send = _wrap_send(send)
+        send = adapter(send)
 
         try:
             # RFC 9110 §9.1 — methods are case-sensitive tokens.  Prefer the
@@ -723,10 +800,10 @@ class BlackBull:
         # the guard, not here.
         resp_headers = getattr(function, '_bb_response_headers', None)
         if resp_headers is not None:
-            # Installed below _wrap_send so it sees only ASGI dicts, and around
-            # raw_send so the header also lands on the centrally-rendered error
-            # response (e.g. a guard's 415).
-            send = _wrap_send(_inject_response_headers(raw_send, resp_headers))
+            # Installed below the adapter (sees native on H1, dicts on H2),
+            # and around raw_send so the header also lands on the
+            # centrally-rendered error response (e.g. a guard's 415).
+            send = adapter(_inject_response_headers(raw_send, resp_headers))
         guard = getattr(function, '_bb_request_guard', None)
         if guard is not None:
             try:
@@ -802,7 +879,14 @@ class BlackBull:
     def _build_chain(self):
         chain = self._dispatch
         for mw in reversed(self._global_middlewares):
-            chain = functools.partial(mw, call_next=chain)
+            # Middleware-boundary adapter (decision 2026-08-03): wrap each
+            # global middleware's input send with the native conversion on H1
+            # so middleware-generated events (short-circuit responses, the
+            # static middleware's pathsend / _respond dicts) are also native
+            # — the pipeline below a global middleware is uniformly native.
+            # On H2 the dict path stays (no native sender arm yet), so the
+            # conversion is gated per request.
+            chain = functools.partial(_boundary_wrap(mw), call_next=chain)
         self._chain = chain
 
     async def __call__(self, conn, receive: ASGIReceiveCallable | None,
@@ -824,9 +908,19 @@ class BlackBull:
         # thread the Connection from then on. (Lifespan is the one scope that is
         # not a request and never becomes a Connection.)
         #
+        # External edge (decision 2026-08-03): the app is native internally in
+        # BOTH modes, so when entered with an ASGI scope dict (uvicorn / httpx /
+        # TestClient) — or when built with ``asgi=True`` — the host's ``send``
+        # is wrapped with the native→ASGI boundary conversion: the router emits
+        # NativeResponse, this wrapper converts them back to ``http.response.*``
+        # dicts for the host.  BlackBull's own server (native Connection entry,
+        # asgi=False) passes a native-capable send through untouched.
+        #
         # ``target`` is the object the actor's disconnect-detecting receive wrapper
         # shares with us (the Connection natively, the scope dict in the compat
         # lanes); ``disconnected(target)`` reads the flag off whichever it is.
+        if self._asgi or not isinstance(conn, Connection):
+            send = _to_asgi_boundary(send)
         target = conn
         if isinstance(conn, Connection):
             request = conn                        # HTTP/WebSocket native
@@ -928,6 +1022,22 @@ class BlackBull:
                     'path':      rpath,
                     'exception': err,
                 }))
+
+    def to_asgi(self):
+        """Return the ASGI 3.0 callable to hand to an external host (uvicorn …).
+
+        The app is native internally in both modes; ``BlackBull(asgi=True)``
+        applies the native→ASGI boundary conversion in ``__call__`` whenever
+        the app is driven (scope entry included), so the app instance itself
+        is the callable — ``uvicorn.run(app.to_asgi())`` or ``uvicorn.run(app)``
+        are equivalent.  Requires the ``asgi=True`` constructor flag: without
+        it the app is wired for BlackBull's own native server.
+        """
+        if not self._asgi:
+            raise RuntimeError(
+                'to_asgi() requires BlackBull(asgi=True); an asgi=False app '
+                'is wired for BlackBull\u2019s own native server')
+        return self.__call__
 
     def route(self, methods: str | HTTPMethod | Iterable[str | HTTPMethod] = [HTTPMethod.GET],
               path: str | re.Pattern = '/', scheme: Scheme | Iterable[Scheme] = Scheme.http,

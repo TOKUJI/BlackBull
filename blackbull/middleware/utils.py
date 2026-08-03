@@ -2,51 +2,40 @@
 
 Public API:
 - ``as_middleware``: decorator that normalises the ``send`` callable so inner
-  send wrappers defined by the middleware always receive plain ASGI event
-  dicts, never ``Response`` objects.  Works on both async middleware functions
-  and middleware classes (decorates ``__call__``).
+  send wrappers defined by the middleware always receive a single native
+  representation — ``NativeResponse`` on the H1 native path, plain ASGI event
+  dicts elsewhere — never raw ``Response`` objects.  Works on both async
+  middleware functions and middleware classes (decorates ``__call__``).
 """
 from functools import wraps
 
 from ..asgi import ASGISendCallable
-from ..response import Response
+from ..response import wrap_native_send
 
 
 def _normalize_send(inner_send: ASGISendCallable | None):
-    """Return a wrapper around *inner_send* that expands Response objects.
+    """Return a wrapper around *inner_send* that normalises to native.
 
-    Handlers that use the simplified return-value form call ``send`` with a
-    ``Response`` (or ``JSONResponse``) object.  Middleware that wraps ``send``
-    would otherwise need an ``isinstance`` guard for every response type.
-    This wrapper intercepts ``Response`` objects and emits the two ASGI events
-    (``http.response.start`` + ``http.response.body``) that ``inner_send``
-    expects, forwarding all other event dicts unchanged.
+    On the H1 native path the handler boundary already converts every shape
+    to :class:`~blackbull.native.NativeResponse`, so the middleware's inner
+    send wrapper observes native objects.  This wrapper guarantees the same
+    contract regardless of the seam: ``Response`` / ``StreamingResponse`` /
+    3-arg / ASGI dict shapes from the handler are all converted to
+    ``NativeResponse`` before reaching ``inner_send`` — the exact conversion
+    the app applies at its handler boundary (shared via
+    :func:`blackbull.response.wrap_native_send`), so global and per-route
+    middleware see one representation.
 
     ASGI ``send`` is always called with a single positional event — no
     ``*args/**kwargs`` form needs to be preserved here, and dropping it
     shaves a per-event call-frame setup that shows in py-spy profiles of
     the static path.
-
-    The Response→ASGI expansion is delegated to :meth:`Response.__call__` so
-    there is a single source of truth for the start/body event shape (shared
-    with ``app._wrap_send`` and the simplified-handler dispatch).
     """
     # ``inner_send`` is Optional because a middleware may be driven with no
     # send channel at all on pass-through paths (a websocket or lifespan
     # scope a middleware declines to touch).  The wrapper is built either
     # way; it is simply never invoked in that case.
-    # Unannotated on purpose: rebuilt per request (see _wrap_send in app.py).
-    # ``event`` is an ASGISendEvent or a Response.
-    async def normalized(event):
-        if isinstance(event, Response):
-            # Response is ASGI-callable and ignores conn/receive (it is a pure
-            # serialiser wearing the ASGI-app signature), so drive it with the
-            # inner send to reuse the one Response→ASGI path.
-            await event(None, None, inner_send)
-        else:
-            await inner_send(event)
-
-    return normalized
+    return wrap_native_send(inner_send)
 
 
 def as_middleware(target):

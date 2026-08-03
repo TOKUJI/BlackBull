@@ -559,7 +559,10 @@ class HTTP1Sender(BaseSender):
                 if body.header is not None:
                     self._buffered_status = HTTPStatus(body.status)
                     self._buffered_headers = Headers(list(body._header))
-                    self._expect_trailers = False
+                    # Preserve the ASGI start `trailers: True` flag so a
+                    # terminal body before the trailers event withholds the
+                    # terminal chunk (lossless full-form compat).
+                    self._expect_trailers = body.expects_trailers
                     if self._log_record is not None:
                         self._log_record.status = body.status
                         self._log_record.mark('start_arm_in')

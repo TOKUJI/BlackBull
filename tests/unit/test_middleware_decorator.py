@@ -1,16 +1,19 @@
 """Tests for the @as_middleware decorator and _normalize_send utility."""
+import json
+
 import pytest
 
 from blackbull.middleware.utils import _normalize_send, as_middleware
+from blackbull.native import NativeResponse
 from blackbull.response import JSONResponse, Response
 
-
 # ---------------------------------------------------------------------------
-# _normalize_send
+# _normalize_send — native contract (Sprint 92): the middleware's inner send
+# wrapper observes NativeResponse, never raw Response objects.
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_normalize_response_expands_to_start_and_body():
+async def test_normalize_response_to_single_native_response():
     sent = []
 
     async def inner(event, *a, **kw):
@@ -18,19 +21,16 @@ async def test_normalize_response_expands_to_start_and_body():
 
     await _normalize_send(inner)(Response('hello'))
 
-    assert sent[0] == {
-        'type': 'http.response.start',
-        'status': 200,
-        'headers': [(b'content-type', b'text/html; charset=utf-8')],
-    }
-    assert sent[1]['type'] == 'http.response.body'
-    assert sent[1]['body'] == b'hello'
-    assert sent[1]['more_body'] is False
+    assert len(sent) == 1
+    n = sent[0]
+    assert isinstance(n, NativeResponse)
+    assert n.status == 200
+    assert (b'content-type', b'text/html; charset=utf-8') in list(n.header)
+    assert n.body == b'hello'
 
 
 @pytest.mark.asyncio
 async def test_normalize_json_response():
-    import json
     sent = []
 
     async def inner(event, *a, **kw):
@@ -38,12 +38,13 @@ async def test_normalize_json_response():
 
     await _normalize_send(inner)(JSONResponse({'ok': True}))
 
-    assert sent[0]['type'] == 'http.response.start'
-    assert json.loads(sent[1]['body']) == {'ok': True}
+    n = sent[0]
+    assert isinstance(n, NativeResponse)
+    assert json.loads(n.body) == {'ok': True}
 
 
 @pytest.mark.asyncio
-async def test_normalize_dict_passthrough():
+async def test_normalize_dict_converts_to_native():
     sent = []
 
     async def inner(event, *a, **kw):
@@ -52,7 +53,11 @@ async def test_normalize_dict_passthrough():
     event = {'type': 'http.response.start', 'status': 204, 'headers': []}
     await _normalize_send(inner)(event)
 
-    assert sent == [event]
+    assert len(sent) == 1
+    n = sent[0]
+    assert isinstance(n, NativeResponse)
+    assert n.status == 204
+    assert n.header is not None
 
 
 # ---------------------------------------------------------------------------
@@ -60,8 +65,9 @@ async def test_normalize_dict_passthrough():
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_decorated_inner_send_receives_dicts_for_response():
-    """Inner send wrapper inside an @as_middleware-decorated function sees only dicts."""
+async def test_decorated_inner_send_receives_native_for_response():
+    """Inner send wrapper inside an @as_middleware-decorated function sees
+    NativeResponse on the native contract (Sprint 92)."""
     received = []
 
     @as_middleware
@@ -81,13 +87,13 @@ async def test_decorated_inner_send_receives_dicts_for_response():
 
     await mw({}, None, outer_send, call_next=handler)
 
-    assert all(isinstance(e, dict) for e in received)
-    assert received[0]['type'] == 'http.response.start'
-    assert received[1]['type'] == 'http.response.body'
+    assert all(isinstance(e, NativeResponse) for e in received)
+    assert received[0].header is not None
+    assert received[0].body == b'hi'
 
 
 @pytest.mark.asyncio
-async def test_decorated_inner_send_receives_dicts_for_json_response():
+async def test_decorated_inner_send_receives_native_for_json_response():
     received = []
 
     @as_middleware
@@ -105,7 +111,8 @@ async def test_decorated_inner_send_receives_dicts_for_json_response():
 
     await mw({}, None, noop_send, call_next=handler)
 
-    assert all(isinstance(e, dict) for e in received)
+    assert all(isinstance(e, NativeResponse) for e in received)
+    assert json.loads(received[0].body) == {'n': 42}
 
 
 # ---------------------------------------------------------------------------
@@ -144,7 +151,6 @@ def test_wraps_preserves_name_and_doc():
     @as_middleware
     async def my_middleware(scope, receive, send, call_next):
         """My doc."""
-        pass
 
     assert my_middleware.__name__ == 'my_middleware'
     assert my_middleware.__doc__ == 'My doc.'
@@ -215,25 +221,32 @@ async def test_startup_accepts_undecorated_valid_middleware():
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_plain_middleware_send_wrapper_sees_asgi_dicts():
-    """An undecorated middleware that wraps ``send`` and subscripts
-    ``msg['type']`` must receive ASGI dicts.
+async def test_plain_middleware_send_wrapper_sees_native():
+    """An undecorated middleware that wraps ``send`` must receive
+    NativeResponse on the H1 native path — never raw ``Response`` objects.
 
     Before 0.43.2 ``_wrap_send`` was applied at ``BlackBull.__call__``
     (outermost), so a simplified handler returning a dict (auto-JSONResponse)
     reached the middleware's send wrapper as a ``Response`` object →
     ``TypeError: 'Response' object is not subscriptable``.  The adapter now
-    sits at the handler boundary in ``_dispatch`` so middleware always sees
-    plain dicts.
+    sits at the handler boundary in ``_dispatch`` so middleware sees the
+    native contract (NativeResponse on H1; ASGI dicts on H2 / the ASGI
+    path), never a bare ``Response``.  The drive below enters via a scope
+    dict, so the external edge converts the native emission back to dicts
+    for the host's ``send``.
     """
     from blackbull import BlackBull
+    from blackbull.native import NativeResponse
 
     app = BlackBull()
     seen_status = []
 
     async def stats_mw(scope, receive, send, call_next):
         async def capture(msg):
-            if msg['type'] == 'http.response.start':   # subscripts the dict
+            if isinstance(msg, NativeResponse):
+                if msg.header is not None:        # native header arm
+                    seen_status.append(msg.status)
+            elif msg.get('type') == 'http.response.start':  # H2/ASGI lane
                 seen_status.append(msg['status'])
             await send(msg)
         await call_next(scope, receive, capture)
@@ -257,5 +270,6 @@ async def test_plain_middleware_send_wrapper_sees_asgi_dicts():
     await app(scope, receive, send)
 
     assert seen_status == [200]
+    # scope entry → the external edge converts native → ASGI dicts
     assert all(isinstance(e, dict) for e in sent)
     assert sent[0]['type'] == 'http.response.start'

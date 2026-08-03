@@ -21,6 +21,7 @@ class TestConstruction:
         assert r.body is None
         assert r.more_body is False
         assert r.trailers is None
+        assert r.expects_trailers is False
 
     def test_full_response(self):
         r = NativeResponse(status=201,
@@ -133,6 +134,16 @@ class TestToASGI:
         assert r.to_asgi() == [
             {'type': 'http.response.trailers', 'headers': [(b'x-trailer', b'v')]},
         ]
+
+    def test_expects_trailers_flag_on_start(self):
+        # the ASGI start `trailers: True` flag is preserved losslessly
+        # through the native form and back at the boundary.
+        r = NativeResponse(status=200,
+                           header=[(b'content-type', b'text/plain')],
+                           expects_trailers=True)
+        events = r.to_asgi()
+        assert events[0]['trailers'] is True
+        assert NativeResponse(status=200, header=[]).to_asgi()[0].get('trailers') is None
 
 
 class TestSlots:

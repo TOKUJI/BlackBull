@@ -17,7 +17,6 @@ import pathlib
 
 import blackbull
 
-
 _PKG_ROOT = pathlib.Path(blackbull.__file__).parent
 
 # Files still allowed to construct a raw ``{'type': 'http'|'websocket', ...}``
@@ -88,9 +87,11 @@ def test_native_baseline_request_never_materializes_scope_dict():
     framework-internal hot-path code starts deriving a scope from the
     Connection, one of those methods fires and this fails."""
     import asyncio
+
     from blackbull import BlackBull
-    from blackbull.headers import Headers
     from blackbull.connection import Connection
+    from blackbull.headers import Headers
+    from blackbull.native import NativeResponse
 
     app = BlackBull()
 
@@ -123,7 +124,12 @@ def test_native_baseline_request_never_materializes_scope_dict():
             return {'type': 'http.request', 'body': b'', 'more_body': False}
 
         async def send(ev):
-            sent.append(ev)
+            # H1 native seam (Sprint 92): the app emits NativeResponse on the
+            # native path — expand to its ASGI events for the assertions.
+            if isinstance(ev, NativeResponse):
+                sent.extend(ev.to_asgi())
+            else:
+                sent.append(ev)
 
         # Native entry: hand the Connection straight to the app (as the actor does).
         asyncio.run(app(conn, receive, send))

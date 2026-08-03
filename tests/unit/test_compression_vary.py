@@ -27,11 +27,26 @@ def _scope(accept: bytes = b'gzip'):
     })
 
 
+def _collecting_send(events):
+    """Send wrapper that expands NativeResponse to its ASGI event list.
+
+    The middleware under test is ``@as_middleware``-decorated, so its sends
+    are normalised to the H1 native contract (NativeResponse); the tests
+    inspect the ASGI event shape, so the seam is normalised away here.
+    """
+    from blackbull.native import NativeResponse
+
+    async def send(event):
+        if isinstance(event, NativeResponse):
+            events.extend(event.to_asgi())
+        else:
+            events.append(event)
+    return send
+
+
 async def _run(mw, body: bytes, resp_headers, accept: bytes = b'gzip') -> dict:
     events: list[dict] = []
-
-    async def send(event: dict) -> None:
-        events.append(event)
+    send = _collecting_send(events)
 
     async def call_next(scope, receive, send):
         await send({'type': 'http.response.start', 'status': 200,
@@ -181,9 +196,7 @@ class TestNoCodecPathForwardsBodiesUntouched:
     @pytest.mark.asyncio
     async def test_streamed_body_chunks_are_forwarded_verbatim(self):
         events: list[dict] = []
-
-        async def send(event):
-            events.append(event)
+        send = _collecting_send(events)
 
         chunks = [b'alpha', b'beta', b'gamma']
 
@@ -207,9 +220,7 @@ class TestNoCodecPathForwardsBodiesUntouched:
     @pytest.mark.asyncio
     async def test_unknown_event_types_pass_through(self):
         events: list[dict] = []
-
-        async def send(event):
-            events.append(event)
+        send = _collecting_send(events)
 
         async def call_next(scope, receive, send):
             await send({'type': 'http.response.start', 'status': 200,

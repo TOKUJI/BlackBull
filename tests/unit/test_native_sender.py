@@ -129,6 +129,54 @@ class TestNativeResponsePath:
         assert b'x-t: v' in w.data
         assert w.data.endswith(b'0\r\nx-t: v\r\n\r\n')
 
+    async def test_expects_trailers_matches_dict_path(self):
+        # Full-form ASGI start(trailers=True) → chunked body → trailers.  The
+        # native form preserves the start flag (expects_trailers) so the
+        # terminal chunk is withheld until the trailers event — byte-identical
+        # to the dict path (lossless compat).
+        s1, w1 = _sender()
+        await s1({'type': ASGIEvent.HTTP_RESPONSE_START, 'status': 200,
+                  'headers': [(b'content-type', b'text/plain')], 'trailers': True})
+        await s1({'type': ASGIEvent.HTTP_RESPONSE_BODY, 'body': b'Hi',
+                  'more_body': True})
+        await s1({'type': ASGIEvent.HTTP_RESPONSE_TRAILERS,
+                  'headers': [(b'x-t', b'v')]})
+
+        s2, w2 = _sender()
+        await s2(NativeResponse(status=200,
+                                header=[(b'content-type', b'text/plain')],
+                                expects_trailers=True))
+        await s2(NativeResponse(body=b'Hi', more_body=True))
+        await s2(NativeResponse(trailers=[(b'x-t', b'v')]))
+        assert w2.data == w1.data
+        assert b'transfer-encoding: chunked' in w2.data
+        assert w2.data.endswith(b'2\r\nHi\r\n0\r\nx-t: v\r\n\r\n')
+        assert s2._completed is True
+
+    async def test_terminal_body_then_trailers_matches_dict_path(self):
+        # start(trailers=True) → body(more_body=False) → trailers: on H1 the
+        # completed guard drops a post-terminal trailers event today (both the
+        # content-length framing and the drop are pre-existing H1 behaviour —
+        # the H2 sender's END_STREAM deferral is the next-sprint concern).
+        # The native path mirrors the dict path byte-for-byte (lossless compat).
+        s1, w1 = _sender()
+        await s1({'type': ASGIEvent.HTTP_RESPONSE_START, 'status': 200,
+                  'headers': [(b'content-type', b'text/plain')], 'trailers': True})
+        await s1({'type': ASGIEvent.HTTP_RESPONSE_BODY, 'body': b'Hi',
+                  'more_body': False})
+        await s1({'type': ASGIEvent.HTTP_RESPONSE_TRAILERS,
+                  'headers': [(b'x-t', b'v')]})
+
+        s2, w2 = _sender()
+        await s2(NativeResponse(status=200,
+                                header=[(b'content-type', b'text/plain')],
+                                expects_trailers=True))
+        await s2(NativeResponse(body=b'Hi'))
+        await s2(NativeResponse(trailers=[(b'x-t', b'v')]))
+        assert w2.data == w1.data
+        assert b'content-length: 2\r\n' in w2.data
+        assert b'x-t: v' not in w2.data      # dropped — existing H1 behaviour
+
     async def test_completed_drops_later_sends(self):
         s, w = _sender()
         await s(NativeResponse(status=200, body=b'Hi'))

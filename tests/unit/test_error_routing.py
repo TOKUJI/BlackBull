@@ -134,17 +134,22 @@ def _make_scope(path='/', method='GET', type_='http'):
 
 
 class _CaptureSend:
-    """Collects all ASGI send() calls.
+    """Collects all send() calls.
 
-    Accepts both forms:
-    - ASGI event dict: ``await send({'type': 'http.response.start', ...})``
-    - High-level bytes: ``await send(body_bytes, status, headers)``
+    Accepts the shapes the app emits on the H1 native path (Sprint 92):
+    - native response message: ``await send(NativeResponse(...))`` — expanded
+      to its ASGI event list via ``to_asgi()``;
+    - ASGI event dict: ``await send({'type': 'http.response.start', ...})``;
+    - high-level bytes: ``await send(body_bytes, status, headers)``.
     """
     def __init__(self):
         self.events = []
 
     async def __call__(self, body_or_event, status: HTTPStatus=None, headers=None):
-        if isinstance(body_or_event, dict):
+        from blackbull.native import NativeResponse
+        if isinstance(body_or_event, NativeResponse):
+            self.events.extend(body_or_event.to_asgi())
+        elif isinstance(body_or_event, dict):
             self.events.append(body_or_event)
         elif isinstance(body_or_event, bytes):
             if status is not None:
