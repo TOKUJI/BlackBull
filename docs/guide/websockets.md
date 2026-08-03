@@ -425,27 +425,14 @@ Choose read-ahead when a handler does slow work between reads and you
 need keepalive `ping`s answered during it.  A handler that loops
 tightly on `receive()` — the common shape — wants the default.
 
-!!! note "`websocket_message` and control frames when your handler isn't reading"
+!!! note "`websocket_message` forces read-ahead"
 
-    Two automatic mechanisms keep a handler that is *not* reading
-    conformant, without ever forcing read-ahead on one that is:
-
-    - **The PONG-latency contract.**  In inline mode a `ping` is answered
-      when your handler next drives a read, or on every tick of the
-      internal deadline scanner for a connection idle more than ~0.3 s
-      (the idle watchdog).  Worst-case PONG latency is therefore bounded
-      to roughly one scanner tick even for a handler that never reads —
-      with no per-connection timers.  A handler that loops tightly on
-      `receive()` is never touched by the watchdog.
-    - **The `websocket_message` read-time contract.**  The
-      [`websocket_message`](events.md) event fires when the *server*
-      reads a message, not when your handler consumes it, so a handler
-      that never calls `receive()` still produces events.  Registering a
-      listener does **not** switch read-ahead on at connect — a consuming
-      handler keeps the inline win.  Instead, if your handler goes quiet
-      for more than ~0.3 s, a deferred reader starts in the background
-      and fires the event at read time.  Nothing else observes the
-      difference between the modes.
+    The [`websocket_message`](events.md) event fires when the *server*
+    reads a message, not when your handler consumes it, so a handler
+    that never calls `receive()` still produces events.  That is only
+    possible with a reader running ahead of the handler, so registering
+    a `websocket_message` listener switches read-ahead on even at depth
+    `0`.  Nothing else observes the difference between the two modes.
 
 ## Next
 
