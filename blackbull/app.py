@@ -13,8 +13,9 @@ Companion definitions live in this module to avoid circular imports:
   middleware prefix across routes.
 - ``_default_error_handler`` — registered on every ``HTTPStatus`` error and
   on ``Exception`` so unhandled errors produce a sensible plain-text reply.
-- ``_wrap_send`` — adapts the ASGI ``send`` callable so handlers may pass
-  ``Response`` objects directly.
+- ``_wrap_send_native`` — the handler-boundary adapter: converts every
+  accepted send shape (``Response``, 3-arg, ASGI dict, NativeResponse) to
+  :class:`~blackbull.native.NativeResponse` on the HTTP path (H1 + H2).
 """
 import functools
 from collections.abc import Awaitable, Callable, Iterable
@@ -34,54 +35,6 @@ from .connection import Connection, disconnected, CONNECTION_STASH_KEY
 from .asgi import ASGIReceiveCallable, ASGISendCallable
 from .config import AppConfig
 logger = logging.getLogger(__name__)
-
-
-def _wrap_send(raw_send: ASGISendCallable):
-    """Adapt the handler-facing ``send`` to accept BlackBull convenience shapes.
-
-    BlackBull lets a handler emit more than bare ASGI dicts: a ``Response``
-    object, or the ``send(body_bytes, status, headers)`` 3-arg form.  This
-    wrapper normalises those into standard ASGI ``http.response.start`` +
-    ``http.response.body`` events before they reach ``raw_send`` (the access
-    log + wire sender, which also accept dict events natively), so the app
-    stays ASGI 3.0 compliant under external servers (uvicorn, hypercorn,
-    httpx.ASGITransport, …).
-
-    **Altitude matters.**  This adapter is installed at the *handler boundary*
-    inside :meth:`_dispatch` — never at :meth:`__call__` around the whole
-    middleware chain.  Wrapping outward leaks ``Response`` objects into
-    middleware ``send`` wrappers, which reasonably assume ASGI dicts and
-    crash on ``msg['type']`` (locked by
-    ``tests/unit/test_middleware_decorator.py``).  Keep it innermost so
-    everything above the route handler observes plain ASGI dicts.
-
-    The Response case delegates to :meth:`Response.__call__` — the single
-    source of truth for Response→ASGI serialisation, shared with
-    ``middleware.utils._normalize_send``.  Response is a pure serialiser and
-    ignores scope/receive, so ``None`` is passed for both.
-    """
-    from .response import Response as _Response, _emit_response
-
-    # Deliberately unannotated: this closure is rebuilt on every request, and
-    # a parameter annotation makes each rebuild construct an ``__annotate__``
-    # closure too — measured at ~+0.2 us/req (~3 % of in-process dispatch) on
-    # the micro-driver.  Annotations are only free on definitions evaluated
-    # once at import; the accepted shapes are documented above instead.
-    # Accepts: ASGISendEvent | Response | bytes | bytearray | memoryview.
-    async def _send(event, status=HTTPStatus.OK, headers=[]):
-        if isinstance(event, _Response):
-            await event(None, None, raw_send)
-        elif isinstance(event, (bytes, bytearray, memoryview)):
-            # ``send(body, status, headers)`` convenience form — used by
-            # full-form handlers and custom error handlers.
-            body = bytes(event) if not isinstance(event, bytes) else event
-            await _emit_response(raw_send, body, status, headers)
-        else:
-            # ASGI dict (the common path) or any other shape — passed through
-            # so the underlying sender's type checking decides what to do.
-            await raw_send(event)
-
-    return _send
 
 
 def _wrap_send_native(raw_send: ASGISendCallable):
@@ -156,22 +109,18 @@ def _inject_response_headers(raw_send: ASGISendCallable, extra_headers):
 
 
 def _boundary_wrap(mw):
-    """Wrap a global middleware so its input send is native-converting on H1.
+    """Wrap a global middleware so its input send is native-converting.
 
     Middleware-generated events (short-circuit responses, the static
     middleware's ``_respond`` / pathsend dicts) bypass the handler-boundary
     adapter; wrapping the middleware's input send converts those to
     ``NativeResponse`` too, so the pipeline below the middleware is uniformly
-    native.  On H2 the ASGI-dict path stays (no native sender arm yet — next
-    sprint), so the conversion is gated per request and disappears with the
-    H2 native-ization.
+    native on the HTTP path (H1 + H2 since Sprint 93).  WebSocket and gRPC
+    lanes are handled before ``_dispatch_http``, so they never reach this
+    wrapper.
     """
     async def wrapped(conn, receive, send, call_next):
-        # Same defensive gate as middleware.utils.as_middleware: tolerate a
-        # raw scope-dict drive (no http_version attribute) as the H2/dict
-        # lane rather than AttributeErroring.
-        if getattr(conn, 'http_version', '1.1') == '1.1':
-            send = _wrap_send_native(send)
+        send = _wrap_send_native(send)
         return await mw(conn, receive, send, call_next)
 
     return wrapped
@@ -746,19 +695,16 @@ class BlackBull:
                 await serve_grpc(self._grpc_registry, conn, receive, send)
                 return
 
-        # Normalise send for the HTTP path.  On H1 (Sprint 92 native seam)
-        # the handler-boundary adapter converts every accepted shape —
+        # Normalise send for the HTTP path (Sprint 92 H1 seam + Sprint 93 H2
+        # arm): the handler-boundary adapter converts every accepted shape —
         # Response, the (bytes, status, headers) 3-arg form, ASGI dicts
         # (full-form compat), NativeResponse — to NativeResponse, so
-        # middleware and the sender observe a single native representation.
-        # On H2 the ASGI-dict path stays until its native arm (next sprint) —
-        # this gate exists only to keep the H2 tests passing and disappears
-        # with the H2 native-ization.  ``raw_send`` is retained so an RFC
-        # 10008 ``Accept-Query`` route can re-wrap with the header injector
-        # *below* the adapter.
-        adapter = _wrap_send_native if conn.http_version == '1.1' else _wrap_send
+        # middleware and the sender observe a single native representation on
+        # both H1 and H2 (the Sprint 92 H2 gate dropped with the H2 native
+        # arm).  ``raw_send`` is retained so an RFC 10008 ``Accept-Query``
+        # route can re-wrap with the header injector *below* the adapter.
         raw_send = send
-        send = adapter(send)
+        send = _wrap_send_native(send)
 
         try:
             # RFC 9110 §9.1 — methods are case-sensitive tokens.  Prefer the
@@ -805,10 +751,10 @@ class BlackBull:
         # the guard, not here.
         resp_headers = getattr(function, '_bb_response_headers', None)
         if resp_headers is not None:
-            # Installed below the adapter (sees native on H1, dicts on H2),
-            # and around raw_send so the header also lands on the
+            # Installed below the adapter (sees native on the HTTP path), and
+            # around raw_send so the header also lands on the
             # centrally-rendered error response (e.g. a guard's 415).
-            send = adapter(_inject_response_headers(raw_send, resp_headers))
+            send = _wrap_send_native(_inject_response_headers(raw_send, resp_headers))
         guard = getattr(function, '_bb_request_guard', None)
         if guard is not None:
             try:

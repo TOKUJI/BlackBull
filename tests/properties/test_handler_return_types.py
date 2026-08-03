@@ -10,31 +10,35 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from blackbull.app import _wrap_send
+from blackbull.app import _wrap_send_native
+from blackbull.native import NativeResponse
 from blackbull.router import _adapt_handler
 from .strategies import json_value
 
 
 # ---------------------------------------------------------------------------
-# Fake send that captures body bytes after passing through _wrap_send
+# Fake send that captures body bytes after passing through _wrap_send_native
 # ---------------------------------------------------------------------------
 
 def _make_send():
-    """Return a (_wrap_send-wrapped send, body_parts list).
+    """Return a (_wrap_send_native-wrapped send, body_parts list).
 
-    _adapt_handler passes Response/JSONResponse objects to send; _wrap_send
-    decomposes them into standard ASGI ``http.response.start`` +
-    ``http.response.body`` event dicts on the underlying raw_send.
+    _adapt_handler passes Response/JSONResponse objects to send;
+    _wrap_send_native converts them to a single NativeResponse on the
+    underlying raw_send.
     """
     body_parts = []
 
     async def raw_send(event):
-        if isinstance(event, dict) and event.get('type') == 'http.response.body':
+        if isinstance(event, NativeResponse):
+            if event.body:
+                body_parts.append(bytes(event.body))
+        elif isinstance(event, dict) and event.get('type') == 'http.response.body':
             body = event.get('body', b'')
             if body:
                 body_parts.append(bytes(body))
 
-    return _wrap_send(raw_send), body_parts
+    return _wrap_send_native(raw_send), body_parts
 
 
 def _run_handler(fn, path='/', converters=None):
