@@ -209,7 +209,27 @@ class Cache:
         streaming = False
         flushed = False
 
+        # Per-request scope: the import must not sit inside the per-event
+        # closure — it would re-bind for every chunk of a streamed response.
+        from ..native import NativeResponse  # noqa: PLC0415
+
         async def cap_send(event):
+            nonlocal status, response_headers, streaming, flushed
+            # On the H1 native path the handler's emission arrives as a
+            # NativeResponse (possibly carrying header + body in one object);
+            # expand it to its ASGI event list and process each event through
+            # the dict logic below — the cache is protocol-agnostic and stores
+            # dicts, so the native seam is normalised away at this entry point.
+            # (Expansion iterates through the sibling ``_cap_dict`` — never a
+            # self-referential closure, which would reintroduce the v0.60.0
+            # per-request reference cycle.)
+            if isinstance(event, NativeResponse):
+                for ev in event.to_asgi():
+                    await _cap_dict(ev)
+                return
+            await _cap_dict(event)
+
+        async def _cap_dict(event):
             nonlocal status, response_headers, streaming, flushed
             # The ``@as_middleware`` class decorator normalises ``call_next`` so
             # Response/JSONResponse objects from the handler arrive here as

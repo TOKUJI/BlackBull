@@ -18,6 +18,7 @@ import logging
 from ..asgi import (ASGIEvent, ASGISendEvent, HTTPDisconnectEvent,
                     WebSocketAcceptEvent, WebSocketCloseEvent, WebSocketSendEvent)
 from ..headers import Headers, HeaderList
+from ..native import NativeResponse
 
 logger = logging.getLogger(__name__)
 
@@ -365,7 +366,7 @@ class AsyncioWriter(AbstractWriter):
 # sending a disconnect or a bare byte string is legal, because through the
 # app-facing channel it is not.
 _SenderEvent = ASGISendEvent | HTTPDisconnectEvent
-_SenderBody = _SenderEvent | bytes
+_SenderBody = _SenderEvent | bytes | NativeResponse
 _WSSenderEvent = WebSocketSendEvent | WebSocketCloseEvent | WebSocketAcceptEvent
 
 
@@ -547,6 +548,46 @@ class HTTP1Sender(BaseSender):
                 await self._flush(status, h, body)
                 self._completed = True
 
+            case NativeResponse():
+                # Unified native response (native-ization, Sprint 92): one
+                # object may carry header, body, and/or trailers; presence is
+                # `is not None`.  A complete response is one object, one
+                # dispatch; streaming is header-object then body-chunk
+                # objects.  Header is buffered exactly like the dict start
+                # arm (body completes the flush); body/trailers delegate to
+                # the shared helpers the dict arms use.
+                if body._header is not None:
+                    self._buffered_status = HTTPStatus(body.status)
+                    self._buffered_headers = Headers(list(body._header))
+                    # Preserve the ASGI start `trailers: True` flag so a
+                    # terminal body before the trailers event withholds the
+                    # terminal chunk (lossless full-form compat).
+                    self._expect_trailers = body.expects_trailers
+                    if self._log_record is not None:
+                        self._log_record.status = body.status
+                        self._log_record.mark('start_arm_in')
+                        for hk, hv in body._header:
+                            if isinstance(hk, bytes):
+                                hkl = hk.lower()
+                                if hkl == b'content-type':
+                                    self._log_record.resp_content_type = hv
+                                elif hkl == b'content-encoding':
+                                    self._log_record.resp_content_encoding = hv
+                        self._log_record.mark('start_arm_out')
+                if body.body is not None:
+                    await self._handle_body_content(body._body, body.more_body)
+                if body.trailers is not None and not self._completed:
+                    # Single-object header + terminal body + trailers: the
+                    # terminal body already completed the response on the
+                    # wire (content-length framing); writing the trailers
+                    # block now would splice chunked framing after it.  Drop
+                    # them — the dict lane's entry guard already drops
+                    # post-terminal trailers.  A non-terminal body
+                    # (``more_body=True``) keeps ``_completed`` False, so the
+                    # trailers block legitimately terminates the chunked
+                    # framing.
+                    await self._handle_trailers(body.trailers)
+
             case {'type': ASGIEvent.HTTP_RESPONSE_START}:
                 self._buffered_status = HTTPStatus(body.get('status', HTTPStatus.OK))
                 self._buffered_headers = Headers(list(body.get('headers', [])))
@@ -571,51 +612,11 @@ class HTTP1Sender(BaseSender):
                     self._log_record.mark('start_arm_out')
 
             case {'type': ASGIEvent.HTTP_RESPONSE_BODY}:
-                content = body.get('body', b'')
-                more_body = body.get('more_body', False)
-                if self._log_record is not None and content:
-                    self._log_record.response_bytes += len(content)
-                # Bracket the actual transport
-                # write for the last body event so we can see whether the
-                # 30-60 ms woff2 tail lives in middleware/handler work
-                # before the write (``start_arm_out → body_arm_in``) or
-                # inside the write + drain (``body_arm_in → body_arm_out``).
-                if self._log_record is not None and not more_body:
-                    self._log_record.mark('body_arm_in')
-                if self._buffered_status is not None:
-                    assert self._buffered_headers is not None
-                    await self._flush(self._buffered_status, self._buffered_headers, content, more_body)
-                    self._buffered_status = None
-                    self._buffered_headers = None
-                else:
-                    if self._head_mode:
-                        # already wrote headers; HEAD response carries no body
-                        if self._log_record is not None and not more_body:
-                            self._log_record.mark('body_arm_out')
-                        if not more_body:
-                            self._completed = True
-                        return
-                    if self._chunked:
-                        if content:
-                            chunk = f'{len(content):x}\r\n'.encode() + content + b'\r\n'
-                            if not more_body and not self._expect_trailers:
-                                chunk += b'0\r\n\r\n'
-                            await self._write(chunk)
-                        elif not more_body and not self._expect_trailers:
-                            await self._write(b'0\r\n\r\n')
-                    elif content:
-                        await self._write(content)
-                if self._log_record is not None and not more_body:
-                    self._log_record.mark('body_arm_out')
-                if not more_body:
-                    self._completed = True
+                await self._handle_body_content(body.get('body', b''),
+                                                body.get('more_body', False))
 
             case {'type': ASGIEvent.HTTP_RESPONSE_TRAILERS}:
-                await self._write(b'0\r\n')
-                for name, value in body.get('headers', []):
-                    await self._write(name + b': ' + value + b'\r\n')
-                await self._write(b'\r\n')
-                self._completed = True
+                await self._handle_trailers(body.get('headers', []))
 
             case {'type': ASGIEvent.HTTP_RESPONSE_PATHSEND}:
                 await self._pathsend(body['path'])
@@ -634,6 +635,53 @@ class HTTP1Sender(BaseSender):
 
             case _:
                 raise TypeError(f'HTTP1Sender expected bytes or dict, got {type(body)!r}')
+
+    async def _handle_body_content(self, content: bytes, more_body: bool) -> None:
+        """Write one body chunk — shared by the dict and native paths."""
+        if self._log_record is not None and content:
+            self._log_record.response_bytes += len(content)
+        # Bracket the actual transport
+        # write for the last body event so we can see whether the
+        # 30-60 ms woff2 tail lives in middleware/handler work
+        # before the write (``start_arm_out → body_arm_in``) or
+        # inside the write + drain (``body_arm_in → body_arm_out``).
+        if self._log_record is not None and not more_body:
+            self._log_record.mark('body_arm_in')
+        if self._buffered_status is not None:
+            assert self._buffered_headers is not None
+            await self._flush(self._buffered_status, self._buffered_headers, content, more_body)
+            self._buffered_status = None
+            self._buffered_headers = None
+        else:
+            if self._head_mode:
+                # already wrote headers; HEAD response carries no body
+                if self._log_record is not None and not more_body:
+                    self._log_record.mark('body_arm_out')
+                if not more_body:
+                    self._completed = True
+                return
+            if self._chunked:
+                if content:
+                    chunk = f'{len(content):x}\r\n'.encode() + content + b'\r\n'
+                    if not more_body and not self._expect_trailers:
+                        chunk += b'0\r\n\r\n'
+                    await self._write(chunk)
+                elif not more_body and not self._expect_trailers:
+                    await self._write(b'0\r\n\r\n')
+            elif content:
+                await self._write(content)
+        if self._log_record is not None and not more_body:
+            self._log_record.mark('body_arm_out')
+        if not more_body:
+            self._completed = True
+
+    async def _handle_trailers(self, headers: HeaderList) -> None:
+        """Write trailing headers — shared by the dict and native paths."""
+        await self._write(b'0\r\n')
+        for name, value in headers:
+            await self._write(name + b': ' + value + b'\r\n')
+        await self._write(b'\r\n')
+        self._completed = True
 
     def reset_per_request_state(self) -> None:
         # HTTP1Sender is shared across keep-alive requests;

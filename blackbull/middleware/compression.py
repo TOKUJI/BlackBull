@@ -209,14 +209,27 @@ class Compression:
         point: compressible Content-Type AND no pre-existing Content-Encoding.
         """
         # Unannotated on purpose: rebuilt per request (see _wrap_send in
-        # app.py).  ``event`` is an ASGISendEvent.
+        # app.py).  ``event`` is a NativeResponse or an ASGISendEvent.  The
+        # import lives at per-request scope — inside the per-event closure it
+        # would re-bind for every chunk of a streamed response.
+        from ..native import NativeResponse  # noqa: PLC0415
+
         async def vary_send(event):
+            # H1 native path: the header arm is a NativeResponse — stamp Vary
+            # directly on its header list (zero-copy; no expansion).  Absence
+            # is ``is not None`` — never truthiness.
+            if isinstance(event, NativeResponse):
+                if event._header is not None:
+                    headers = Headers(event._header)
+                    if _is_compressible_content_type(headers) and \
+                            not headers.get(b'content-encoding'):
+                        _merge_vary(event._header)
             # Discriminate on the raw type before building anything.  Going
             # through `parse_response_event` allocated a `ResponseBody` copy
             # of every body event just to have the next line's `isinstance`
             # reject it — a per-chunk cost on a streamed response, for a
             # wrapper that only ever cares about the start event.
-            if event.get('type') == ASGIEvent.HTTP_RESPONSE_START:
+            elif event.get('type') == ASGIEvent.HTTP_RESPONSE_START:
                 headers = Headers(event.get('headers', []))
                 if _is_compressible_content_type(headers) and \
                         not headers.get(b'content-encoding'):
@@ -253,8 +266,25 @@ class Compression:
         skip_compression = False
 
         # Unannotated on purpose: rebuilt per request (see _wrap_send in
-        # app.py).  ``event`` is an ASGISendEvent.
+        # app.py).  ``event`` is a NativeResponse or an ASGISendEvent.  The
+        # import lives at per-request scope — inside the per-event closure it
+        # would re-bind for every chunk of a streamed response.
+        from ..native import NativeResponse  # noqa: PLC0415
+
         async def intercepting_send(event):
+            nonlocal streaming, skip_compression, start_forwarded
+            # H1 native path: a NativeResponse may carry header + body in one
+            # object — expand to its ASGI event list and process each event
+            # through the sibling ``_dict_event`` (never a self-referential
+            # closure: the v0.60.0 per-request cycle guard reclaims these
+            # adapters by refcounting alone).
+            if isinstance(event, NativeResponse):
+                for ev in event.to_asgi():
+                    await _dict_event(ev)
+                return
+            await _dict_event(event)
+
+        async def _dict_event(event):
             nonlocal streaming, skip_compression, start_forwarded
             # Fast path: once the start event has been forwarded under a
             # pass-through decision (already-encoded response, non-

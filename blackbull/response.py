@@ -11,11 +11,12 @@ Provides:
 - `cookie_header`: builds a ``(b'set-cookie', ...)`` header tuple with secure defaults.
 """
 import json
+import logging
 from collections.abc import AsyncIterator, Mapping
 from http import HTTPStatus
-from typing import Union
 
-import logging
+from .native import NativeResponse
+
 logger = logging.getLogger(__name__)
 
 
@@ -91,7 +92,7 @@ class Response:
         await send(Response(b'data', status=HTTPStatus.NOT_FOUND))
     """
 
-    def __init__(self, content: Union[str, bytes],
+    def __init__(self, content: str | bytes,
                  status: HTTPStatus = HTTPStatus.OK,
                  content_type: str = 'text/html; charset=utf-8',
                  headers: Mapping | list | None = None):
@@ -119,6 +120,19 @@ class Response:
         for turning a Response into ASGI events.
         """
         await _emit_response(send, self.body, self.status, self.headers)
+
+    def to_native(self) -> NativeResponse:
+        """Convert this response to the unified native message (one send).
+
+        The native-path serialiser: a complete ``Response`` becomes a single
+        :class:`~blackbull.native.NativeResponse` carrying status, headers,
+        and body — one object, one ``send``.  Symmetric with
+        :meth:`NativeResponse.to_asgi` (the boundary conversion); streaming
+        response types drive themselves and are not converted here.
+        """
+        return NativeResponse(status=int(self.status),
+                              header=list(self.headers),
+                              body=self.body)
 
 
 class JSONResponse(Response):
@@ -324,3 +338,110 @@ def WebSocketResponse(content) -> dict:
     if isinstance(content, bytes):
         return {'type': 'websocket.send', 'bytes': content}
     return {'type': 'websocket.send', 'text': json.dumps(content)}
+
+
+def wrap_native_send(raw_send):
+    """Handler-facing send adapter: every accepted shape → NativeResponse.
+
+    The native-ization flip of ``app._wrap_send``: instead of normalising
+    convenience shapes (``Response``, 3-arg) into ASGI dicts so downstream
+    sees plain dicts, **every** accepted shape becomes a
+    :class:`~blackbull.native.NativeResponse` here, so everything above the
+    route handler (route-header injection, middleware, access log, sender)
+    observes a single native representation on the H1 path.
+
+    Shared by ``app._wrap_send_native`` (the handler boundary) and
+    ``middleware.utils._normalize_send`` (``as_middleware``'s ``call_next``),
+    so global and per-route middleware see the same native contract.
+
+    Accepted shapes (full-form ``send`` — the compat contract, held until
+    2027-07-29):
+
+    * ``Response`` (incl. subclasses) — one NativeResponse (``to_native()``);
+    * ``StreamingResponse`` / ``EventSourceResponse`` — driven; their own
+      start/body dict sequence converts per-event below;
+    * ``(bytes, status, headers)`` 3-arg form — one NativeResponse;
+    * ASGI dicts — per-event: ``http.response.start`` → header arm (the
+      ``trailers`` flag → ``expects_trailers``), ``http.response.body`` →
+      body chunk, ``http.response.trailers`` → trailers arm; push / pathsend /
+      disconnect / unknown pass through (the bilingual sender decides — push
+      is H2-only, pathsend is the static middleware's deferred form);
+    * ``NativeResponse`` — pass through;
+    * anything else — pass through so the sender's type check decides.
+    """
+    # Deliberately unannotated: rebuilt per request (see _wrap_send in app.py).
+    async def _send(event, status=HTTPStatus.OK, headers=()):
+        if isinstance(event, StreamingResponse):
+            # Streaming owns its start/body sequence; drive it through a
+            # cycle-free converter (no self-referential closure — the v0.60.0
+            # per-request cycle guard must keep reclaiming these adapters by
+            # refcounting alone).
+            await _stream_and_convert(event, raw_send)
+        elif isinstance(event, Response):
+            await raw_send(event.to_native())
+        elif isinstance(event, (bytes, bytearray, memoryview)):
+            body = bytes(event) if not isinstance(event, bytes) else event
+            await raw_send(NativeResponse(status=int(status),
+                                          header=list(headers),
+                                          body=body))
+        elif isinstance(event, NativeResponse):
+            await raw_send(event)
+        elif isinstance(event, dict):
+            ev_type = event.get('type')
+            if ev_type == 'http.response.start':
+                await raw_send(NativeResponse(
+                    status=int(event.get('status', HTTPStatus.OK)),
+                    header=list(event.get('headers') or []),
+                    expects_trailers=bool(event.get('trailers', False))))
+            elif ev_type == 'http.response.body':
+                # ``body=None`` (spec violation) falls back to an empty body:
+                # the native sender skips a ``None`` body and a buffered
+                # header would never flush → silent hang.  Empty body keeps
+                # the response completing.
+                await raw_send(NativeResponse(
+                    body=event.get('body') or b'',
+                    more_body=event.get('more_body', False)))
+            elif ev_type == 'http.response.trailers':
+                await raw_send(NativeResponse(
+                    trailers=list(event.get('headers') or [])))
+            else:
+                # push / pathsend / disconnect / unknown — pass through.
+                await raw_send(event)
+        else:
+            await raw_send(event)
+
+    return _send
+
+
+async def _stream_and_convert(stream, raw_send) -> None:
+    """Drive a :class:`StreamingResponse` through the native conversion.
+
+    Streaming emits only ``http.response.start`` / ``http.response.body``
+    dicts; each is converted to a ``NativeResponse`` before reaching
+    *raw_send*.  Kept as a module function so the per-request send adapter
+    holds no self-referential closure (the v0.60.0 per-request cycle guard).
+    """
+    # Deliberately unannotated: rebuilt per request (see _wrap_send in app.py).
+    async def convert(event, status=HTTPStatus.OK, headers=()):
+        if isinstance(event, dict):
+            ev_type = event.get('type')
+            if ev_type == 'http.response.start':
+                # Preserve the ASGI `trailers: True` flag losslessly (same
+                # as wrap_native_send — a custom StreamingResponse subclass
+                # may set it).
+                await raw_send(NativeResponse(
+                    status=int(event.get('status', HTTPStatus.OK)),
+                    header=list(event.get('headers') or []),
+                    expects_trailers=bool(event.get('trailers', False))))
+            elif ev_type == 'http.response.body':
+                # ``body=None`` (spec violation) falls back to empty — avoids
+                # the native sender skipping a None body (silent hang).
+                await raw_send(NativeResponse(
+                    body=event.get('body') or b'',
+                    more_body=event.get('more_body', False)))
+            else:
+                await raw_send(event)
+        else:
+            await raw_send(event)
+
+    await stream(None, None, convert)

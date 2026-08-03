@@ -19,17 +19,33 @@ carry extra fields such as ``headers`` or ``subprotocols``.  The fix is to check
 """
 
 import gzip
-import pytest
 from unittest.mock import AsyncMock
+
+import pytest
+
 from blackbull.middleware import websocket
 from blackbull.middleware.compression import Compression
+from blackbull.native import NativeResponse
+
+
+def _collect(events, event):
+    """Expand a NativeResponse to its ASGI event list when capturing.
+
+    The middleware under test is ``@as_middleware``-decorated, so its sends
+    are normalised to the H1 native contract (NativeResponse); the tests
+    inspect the ASGI event shape, so the seam is normalised away here.
+    """
+    if isinstance(event, NativeResponse):
+        events.extend(event.to_asgi())
+    else:
+        events.append(event)
 
 # The legacy ``compress`` module-level instance was retired with the
 # *Middleware-suffix rename — tests construct a fresh ``Compression``
 # here, which is the same shape (pre-built, no args).
 compress = Compression()
-from blackbull.headers import Headers
 from blackbull.connection import Connection
+from blackbull.headers import Headers
 
 try:
     import brotli as _brotli
@@ -357,7 +373,7 @@ class TestHTTPCompression:
         events = []
 
         async def capture_send(event):
-            events.append(event)
+            _collect(events, event)
 
         await compress(scope, AsyncMock(return_value={'type': 'http.disconnect'}),
                        capture_send, call_next=handler)

@@ -2,34 +2,26 @@
 
 Public API:
 - ``as_middleware``: decorator that normalises the ``send`` callable so inner
-  send wrappers defined by the middleware always receive plain ASGI event
-  dicts, never ``Response`` objects.  Works on both async middleware functions
-  and middleware classes (decorates ``__call__``).
+  send wrappers defined by the middleware always receive a single native
+  representation — ``NativeResponse`` on the H1 native path, plain ASGI event
+  dicts elsewhere — never raw ``Response`` objects.  Works on both async
+  middleware functions and middleware classes (decorates ``__call__``).
 """
 from functools import wraps
 
 from ..asgi import ASGISendCallable
-from ..response import Response
+from ..response import Response, wrap_native_send
 
 
-def _normalize_send(inner_send: ASGISendCallable | None):
+def _normalize_dict_send(inner_send: ASGISendCallable | None):
     """Return a wrapper around *inner_send* that expands Response objects.
 
-    Handlers that use the simplified return-value form call ``send`` with a
-    ``Response`` (or ``JSONResponse``) object.  Middleware that wraps ``send``
-    would otherwise need an ``isinstance`` guard for every response type.
-    This wrapper intercepts ``Response`` objects and emits the two ASGI events
-    (``http.response.start`` + ``http.response.body``) that ``inner_send``
-    expects, forwarding all other event dicts unchanged.
-
-    ASGI ``send`` is always called with a single positional event — no
-    ``*args/**kwargs`` form needs to be preserved here, and dropping it
-    shaves a per-event call-frame setup that shows in py-spy profiles of
-    the static path.
-
-    The Response→ASGI expansion is delegated to :meth:`Response.__call__` so
-    there is a single source of truth for the start/body event shape (shared
-    with ``app._wrap_send`` and the simplified-handler dispatch).
+    The v0.69 ASGI-lane normalisation: handlers that use the simplified
+    return-value form call ``send`` with a ``Response`` object; this wrapper
+    expands it to the two ASGI events (``http.response.start`` +
+    ``http.response.body``) that ``inner_send`` expects, and forwards every
+    other event dict unchanged.  Used on the H2 / external ASGI lanes where
+    the wire contract stays dict — never converts to ``NativeResponse``.
     """
     # ``inner_send`` is Optional because a middleware may be driven with no
     # send channel at all on pass-through paths (a websocket or lifespan
@@ -47,6 +39,28 @@ def _normalize_send(inner_send: ASGISendCallable | None):
             await inner_send(event)
 
     return normalized
+
+
+def _normalize_send(inner_send: ASGISendCallable | None, *, native: bool = True):
+    """Return a wrapper around *inner_send* normalising to the lane's contract.
+
+    * ``native=True`` (the H1 native path) — every shape (``Response`` /
+      ``StreamingResponse`` / 3-arg / ASGI dict) is converted to
+      :class:`~blackbull.native.NativeResponse` before reaching
+      ``inner_send`` (shared with the app's handler-boundary adapter via
+      :func:`blackbull.response.wrap_native_send`), so middleware sees one
+      native representation.
+    * ``native=False`` (the H2 / external ASGI lanes) — the v0.69 contract:
+      ``Response`` objects are expanded to ASGI events, everything else
+      passes through as dicts.  **Never** converts to ``NativeResponse`` on
+      these lanes — the H2 sender has no native arm yet (the H2 gate), so a
+      leaked ``NativeResponse`` would ``TypeError`` it.
+
+    ``as_middleware`` picks the flag from ``conn.http_version``.
+    """
+    if native:
+        return wrap_native_send(inner_send)
+    return _normalize_dict_send(inner_send)
 
 
 def as_middleware(target):
@@ -88,7 +102,13 @@ def as_middleware(target):
         @wraps(original_call)
         async def wrapped_call(self, conn, receive, send, call_next):
             async def normalizing_call_next(conn, receive, inner_send):
-                return await call_next(conn, receive, _normalize_send(inner_send))
+                # Protocol-aware: native by default (the H1 / Sprint 92
+                # contract), v0.69 dict normalisation on the H2 lane (the
+                # H2 sender has no native arm yet — a leaked NativeResponse
+                # would TypeError it; the gate drops with the H2 sprint).
+                native = getattr(conn, 'http_version', '1.1') == '1.1'
+                return await call_next(
+                    conn, receive, _normalize_send(inner_send, native=native))
             return await original_call(self, conn, receive, send, normalizing_call_next)
 
         target.__call__ = wrapped_call
@@ -98,7 +118,9 @@ def as_middleware(target):
     @wraps(target)
     async def wrapper(conn, receive, send, call_next):
         async def normalizing_call_next(conn, receive, inner_send):
-            return await call_next(conn, receive, _normalize_send(inner_send))
+            native = getattr(conn, 'http_version', '1.1') == '1.1'
+            return await call_next(
+                conn, receive, _normalize_send(inner_send, native=native))
         return await target(conn, receive, send, normalizing_call_next)
 
     wrapper.__blackbull_middleware__ = True

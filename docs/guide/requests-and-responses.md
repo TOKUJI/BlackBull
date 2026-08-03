@@ -315,6 +315,25 @@ package to parse the body manually.
 
 ## Responses
 
+!!! note "Native send path"
+    On BlackBull's own HTTP/1.1 server, `send` accepts **`Response` /
+    `JSONResponse` objects, `(bytes, status, headers)`, `NativeResponse`,
+    and ASGI `http.response.*` dicts** — the full-form ASGI dict forms are
+    a compatibility contract held until **2027-07-29**, converted to the
+    native message at the handler boundary.  A complete `Response` becomes
+    one `NativeResponse` object (one `send`); streaming is a header object
+    then body-chunk objects.  Under an external ASGI host
+    (`BlackBull(asgi=True)` + `to_asgi()`) the same handler code runs with
+    plain ASGI dicts on the wire.  The `http.response.start` `trailers`
+    flag is preserved losslessly via `NativeResponse.expects_trailers`.
+
+    On the native path a `Response` (or subclass) is serialised via
+    `Response.to_native()`.  A subclass that overrides `__call__` to emit a
+    custom event sequence is honoured on the ASGI lanes (H2 / external
+    host) but not on the native H1 path — keep the wire behaviour in
+    `__call__` (shared by both lanes via the normalisers) or override
+    `to_native()` to control the native serialisation.
+
 ### `Response`
 
 ```python
@@ -507,12 +526,28 @@ For function-based middleware, the safest approach is to pass
 body events through immediately rather than accumulating them:
 
 ```python
+from blackbull.native import NativeResponse
+
 async def prefix_mw(scope, receive, send, call_next):
     captured_start = None
 
     async def capturing_send(event):
         nonlocal captured_start
-        if event.get('type') == 'http.response.start':
+        if isinstance(event, NativeResponse):
+            # BlackBull's own HTTP/1.1 server threads native response
+            # objects — see the middleware guide for the contract.  A single
+            # object may carry header + body together.
+            if event.body is not None and not event.more_body:
+                # Non-streaming — transform the terminal body
+                await send(NativeResponse(status=event.status,
+                                          header=(list(event.header)
+                                                  if event.header is not None
+                                                  else None),
+                                          body=b'[prefix] ' + event.body))
+            else:
+                # Streaming (or header-only) — pass through without buffering
+                await send(event)
+        elif event.get('type') == 'http.response.start':
             captured_start = event
         elif event.get('type') == 'http.response.body':
             if event.get('more_body'):
@@ -530,6 +565,11 @@ async def prefix_mw(scope, receive, send, call_next):
 
     await call_next(scope, receive, capturing_send)
 ```
+
+The two branches are the same policy on two wire shapes: the native object
+arm transforms only terminal bodies (so `more_body=True` chunks stream
+through untouched), and the dict arm keeps the original start/body
+sequencing for the ASGI lanes.
 
 For most use cases (header injection, logging) the middleware
 does not touch the body at all and streaming safety is not a

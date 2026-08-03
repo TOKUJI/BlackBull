@@ -5,14 +5,62 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from blackbull import Response, JSONResponse, RedirectResponse, WebSocketResponse
-from blackbull.response import cookie_header
+from blackbull import JSONResponse, RedirectResponse, Response, WebSocketResponse
 from blackbull.app import _wrap_send
-
+from blackbull.native import NativeResponse
+from blackbull.response import cookie_header
 
 # ---------------------------------------------------------------------------
 # Response
 # ---------------------------------------------------------------------------
+
+def test_response_to_native():
+    r = Response(b'Hi', status=HTTPStatus.CREATED,
+                 headers=[(b'x-a', b'1')])
+    n = r.to_native()
+    assert isinstance(n, NativeResponse)
+    assert n.status == 201
+    assert n.header is not None
+    assert (b'x-a', b'1') in list(n.header)
+    assert n.body == b'Hi'
+    assert n.more_body is False
+    assert n.trailers is None
+
+
+def test_json_response_to_native():
+    n = JSONResponse({'ok': True}).to_native()
+    assert n.body == json.dumps({'ok': True}).encode()
+    assert n.content_type == b'application/json'
+
+
+def test_response_to_native_is_single_object():
+    # the native serialiser is one object — the wire-emission equivalent of
+    # `to_asgi()` returning a start+body pair (1 send vs 2).
+    n = Response(b'Hi').to_native()
+    assert len(n.to_asgi()) == 2  # start + body, and back again losslessly
+
+
+@pytest.mark.asyncio
+async def test_wrap_native_send_body_none_falls_back_to_empty():
+    """Clean-subagent MAJOR: a spec-violating full-form body event with
+    body=None must not hang the native sender (it skips a None body and a
+    buffered header would never flush) — it falls back to an empty body."""
+    from blackbull.app import _wrap_send_native
+
+    sent = []
+
+    async def raw_send(event):
+        sent.append(event)
+
+    send = _wrap_send_native(raw_send)
+    await send({'type': 'http.response.start', 'status': 200, 'headers': []})
+    await send({'type': 'http.response.body', 'body': None, 'more_body': False})
+
+    assert len(sent) == 2
+    n = sent[1]
+    assert n.body is not None      # falls back to b'', never None
+    assert n.body == b''
+
 
 def test_response_body_from_bytes():
     assert Response(b'hi').body == b'hi'

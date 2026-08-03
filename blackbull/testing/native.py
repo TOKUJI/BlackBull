@@ -208,11 +208,13 @@ async def request(
     response_headers: list = []
 
     # Same dual-form signature as the protocol senders: a handler may emit ASGI
-    # dicts, or the ``send(body, status, headers)`` convenience form that the
-    # actor's sender also accepts.  Tier 1 has to accept both or it would
-    # reject code the real server runs.
-    async def send(event: Any, status_arg: HTTPStatus = HTTPStatus.OK,
-                   headers_arg: Any = ()) -> None:
+    # dicts, the ``send(body, status, headers)`` convenience form that the
+    # actor's sender also accepts, or — on the H1 native seam (Sprint 92) — a
+    # NativeResponse.  Tier 1 has to accept all of them or it would reject code
+    # the real server runs.  The NativeResponse expansion iterates through the
+    # sibling ``_record`` — never a self-referential closure.
+    def _record(event: Any, status_arg: HTTPStatus = HTTPStatus.OK,
+                headers_arg: Any = ()) -> None:
         nonlocal status, response_headers
         if not isinstance(event, dict):
             body_bytes = bytes(event) if not isinstance(event, bytes) else event
@@ -238,6 +240,17 @@ async def request(
             # the file.  The observable response is then the same either way.
             with open(event['path'], 'rb') as fp:
                 chunks.append(fp.read())
+
+    async def send(event: Any, status_arg: HTTPStatus = HTTPStatus.OK,
+                   headers_arg: Any = ()) -> None:
+        from ..native import NativeResponse  # noqa: PLC0415
+        if isinstance(event, NativeResponse):
+            # one native object may carry header + body + trailers — expand to
+            # its ASGI event list and fold each event into the same capture.
+            for ev in event.to_asgi():
+                _record(ev)
+            return
+        _record(event, status_arg, headers_arg)
 
     # Bind the body channel the way the protocol actor does, so ``conn.body()``
     # / ``conn.stream()`` drain this request's payload rather than nothing.

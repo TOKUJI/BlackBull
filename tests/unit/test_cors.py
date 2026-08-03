@@ -41,11 +41,19 @@ async def _call(mw, scope):
 
 
 def _header(events, name: bytes) -> bytes | None:
+    # The middleware is @as_middleware-decorated → its sends are normalised
+    # to the H1 native contract; expand NativeResponse to its ASGI events.
+    from blackbull.native import NativeResponse
     for event in events:
-        if event.get('type') == 'http.response.start':
-            for k, v in event.get('headers', []):
-                if k.lower() == name:
-                    return v
+        if isinstance(event, NativeResponse):
+            evs = event.to_asgi()
+        else:
+            evs = [event]
+        for ev in evs:
+            if ev.get('type') == 'http.response.start':
+                for k, v in ev.get('headers', []):
+                    if k.lower() == name:
+                        return v
     return None
 
 
