@@ -534,7 +534,7 @@ async def prefix_mw(scope, receive, send, call_next):
     async def capturing_send(event):
         nonlocal captured_start
         if isinstance(event, NativeResponse):
-            # BlackBull's own HTTP/1.1 server threads native response
+            # BlackBull's own HTTP server (H1 + H2) threads native response
             # objects — see the middleware guide for the contract.  A single
             # object may carry header + body together.
             if event.body is not None and not event.more_body:

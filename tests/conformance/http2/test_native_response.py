@@ -223,6 +223,116 @@ class TestNativeResponsePath:
         await s(NativeResponse(body=b'second'))
         assert bytes(w) == before, 'later sends after END_STREAM must be dropped'
 
+    async def test_two_chunk_terminal_then_trailers_holds_end_stream(self):
+        # Review M2: a SECOND (multi-frame) terminal chunk with trailers
+        # pending must not carry END_STREAM — END_STREAM belongs on the
+        # trailing HEADERS (frames after END_STREAM are RFC 9113 §8.1
+        # protocol errors).  Dict and native lanes share the helper; this
+        # pins the ≥2-chunk case the single-chunk test missed.
+        s, w, f, _ = _make_sender()
+        await s({'type': ASGIEvent.HTTP_RESPONSE_START, 'status': 200,
+                 'headers': [], 'trailers': True})
+        await s({'type': ASGIEvent.HTTP_RESPONSE_BODY, 'body': b'c1',
+                 'more_body': True})
+        await s({'type': ASGIEvent.HTTP_RESPONSE_BODY, 'body': b'c2',
+                 'more_body': False})
+        await s({'type': ASGIEvent.HTTP_RESPONSE_TRAILERS,
+                 'headers': [(b'x-t', b'v')]})
+
+        frames = _collect_frames(w, f)
+        data = [fr for fr in frames if fr.FRAME_TYPE == FrameTypes.DATA]
+        assert len(data) == 2
+        assert not any(fr.end_stream for fr in data), \
+            'no DATA may END_STREAM while trailers are pending (RFC 9113 §8.1)'
+        assert frames[-1].FRAME_TYPE == FrameTypes.HEADERS
+        assert frames[-1].end_stream, 'trailing HEADERS must carry END_STREAM'
+        assert s._end_stream_sent is True
+
+    async def test_two_chunk_terminal_then_trailers_native(self):
+        # Same M2 case driven natively (one object per chunk).
+        s, w, f, _ = _make_sender()
+        await s(NativeResponse(status=200, header=[], expects_trailers=True))
+        await s(NativeResponse(body=b'c1', more_body=True))
+        await s(NativeResponse(body=b'c2'))
+        await s(NativeResponse(trailers=[(b'x-t', b'v')]))
+
+        frames = _collect_frames(w, f)
+        data = [fr for fr in frames if fr.FRAME_TYPE == FrameTypes.DATA]
+        assert not any(fr.end_stream for fr in data), \
+            'no DATA may END_STREAM while trailers are pending (RFC 9113 §8.1)'
+        assert frames[-1].end_stream
+        assert s._end_stream_sent is True
+
+
+class TestAccessLogCapture:
+    """Review M1: the HTTP2Sender captures the access-log record inline in
+    its native / dict / bytes arms — the old dict-shaped
+    ``_make_capturing_send`` wrapper never saw a NativeResponse after the
+    H2 native seam, so status/response_bytes regressed to '-'/0."""
+
+    def _record(self):
+        from blackbull.server.access_log import AccessLogRecord
+        return AccessLogRecord(
+            client_ip='1.2.3.4', method='GET', path='/', http_version='2')
+
+    async def test_native_captures_status_and_bytes(self):
+        s, w, f, _ = _make_sender()
+        record = self._record()
+        s._log_record = record
+        await s(NativeResponse(status=201,
+                               header=[(b'content-type', b'text/plain')],
+                               body=b'Hello'))
+        assert record.status == 201
+        assert record.response_bytes == 5
+
+    async def test_native_streaming_captures_all_chunks(self):
+        s, w, f, _ = _make_sender()
+        record = self._record()
+        s._log_record = record
+        await s(NativeResponse(status=200, header=[(b'content-type', b'text/plain')]))
+        await s(NativeResponse(body=b'c1', more_body=True))
+        await s(NativeResponse(body=b'c2'))
+        assert record.status == 200
+        assert record.response_bytes == 4
+
+    async def test_dict_captures_status_and_bytes(self):
+        s, w, f, _ = _make_sender()
+        record = self._record()
+        s._log_record = record
+        await s({'type': ASGIEvent.HTTP_RESPONSE_START, 'status': 204,
+                 'headers': []})
+        await s({'type': ASGIEvent.HTTP_RESPONSE_BODY, 'body': b'',
+                 'more_body': False})
+        assert record.status == 204
+
+    async def test_bytes_path_captures(self):
+        s, w, f, _ = _make_sender()
+        record = self._record()
+        s._log_record = record
+        await s(b'hi')
+        assert record.status == 200
+        assert record.response_bytes == 2
+
+    async def test_phase_marks_present_on_native(self):
+        # start_arm_in/out and body_arm_in/out are marked on the native path
+        # (same names as the H1 inline capture).
+        import blackbull.server.access_log as alog
+        old = alog.PHASE_TRACE
+        alog.PHASE_TRACE = True
+        try:
+            s, w, f, _ = _make_sender()
+            record = self._record()
+            s._log_record = record
+            await s(NativeResponse(status=200,
+                                   header=[(b'content-type', b'text/plain')],
+                                   body=b'Hi'))
+            assert 'start_arm_in' in record.phases
+            assert 'start_arm_out' in record.phases
+            assert 'body_arm_in' in record.phases
+            assert 'body_arm_out' in record.phases
+        finally:
+            alog.PHASE_TRACE = old
+
 
 async def pytest_turn():
     """Yield one event-loop iteration (lets a stale auto-flush fire)."""

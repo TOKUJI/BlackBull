@@ -29,7 +29,7 @@ from .recipient import (AbstractReader, IncompleteReadError,
 from .response import ResponderFactory
 from .sender import AbstractWriter, ConnectionWindow, SenderFactory
 from .access_log import (
-    AccessLogRecord, _make_capturing_send, _make_disconnect_detecting_receive,
+    AccessLogRecord, _make_disconnect_detecting_receive,
     emit_access_log as _emit_access_log,
     request_record_needed as _request_record_needed,
     disconnect_events_observed as _disconnect_events_observed,
@@ -1206,13 +1206,19 @@ class HTTP2Actor(Actor):
             # No body to deliver — skip queue allocation; recipient synthesizes
             # the empty http.request event on first receive() call if needed.
             stream_recipient.mark_end_of_stream_on_headers()
-        # Build the access-log record (and wrap send to capture status/bytes)
-        # only when something consumes it: access log, phase trace, or a
-        # request_completed listener. The legacy (aggregator=None) path always
-        # builds it — _run_with_log emits unconditionally.
+        # Build the access-log record (and hand it to the sender for inline
+        # capture) only when something consumes it: access log, phase trace, or
+        # a request_completed listener.  The legacy (aggregator=None) path
+        # always builds it — _run_with_log emits unconditionally.
         if self._aggregator is None or _request_record_needed(self._aggregator):
             log_record = _make_log_record(conn)
-            dispatch_send = _make_capturing_send(send, log_record)
+            # Sprint 93 M1 — inline capture: the HTTP2Sender updates the
+            # record in its native/dict/bytes arms.  The old dict-shaped
+            # _make_capturing_send wrapper never saw a NativeResponse after
+            # the H2 native seam (status/bytes silently regressed to '-'/0)
+            # and cost a per-event coroutine dispatch besides.
+            send._log_record = log_record
+            dispatch_send = send
         else:
             log_record = None
             dispatch_send = send
@@ -1307,11 +1313,12 @@ class HTTP2Actor(Actor):
         stream.conn = target
         stream_recipient = self._make_stream_recipient(stream.stream_id)
         self._recipients[stream.stream_id] = stream_recipient
-        # Same consumer-gate as the HEADERS path: skip the record + capturing
-        # send wrapper when nothing reads them.
+        # Same consumer-gate as the HEADERS path: skip the record + inline
+        # capture when nothing reads them.
         if self._aggregator is None or _request_record_needed(self._aggregator):
             log_record = _make_log_record(conn)
-            dispatch_send = _make_capturing_send(send, log_record)
+            send._log_record = log_record
+            dispatch_send = send
         else:
             log_record = None
             dispatch_send = send
@@ -1602,7 +1609,9 @@ class HTTP2Actor(Actor):
             self._writer, self.factory, push_stream_id, push_callback=None,
             conn_window=self._conn_window)
         log_record = _make_log_record(pushed_conn)
-        capturing_send = _make_capturing_send(push_sender, log_record)
+        # Inline capture (Sprint 93 M1), same as the request path.
+        push_sender._log_record = log_record
+        capturing_send = push_sender
 
         if self._task_group is not None:
             self._spawn_stream_task(
