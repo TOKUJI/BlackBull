@@ -1576,14 +1576,15 @@ class WebSocketRecipient(BaseRecipient):
     def send_touch(self) -> None:
         """Mark send activity for the idle watchdog, at one bool's cost.
 
-        The watchdog is only meaningful once control frames matter or a
-        listener needs the deferred reader; before that, arm it once (so an
-        idle connection with a buffered control frame is still serviced) and
-        skip the per-message ``loop.time()``.  The send-time servicing fast
-        path was removed — the watchdog alone bounds PONG latency to ~one
-        scanner tick (the documented contract).
+        The watchdog is armed once at connect (an idle connection with a
+        buffered control frame must still be serviced even if it never
+        touches); this only keeps the deadline fresh once control frames
+        matter or a listener needs the deferred reader.  ``touch()`` itself
+        re-arms a missing watchdog, so a send before the connect receive is
+        still safe.  The send-time servicing fast path was removed — the
+        watchdog alone bounds PONG latency to ~one scanner tick (the
+        documented contract).
         """
-        self._ensure_watchdog_armed()
         if self._deferred_pending or self._saw_control_frame:
             self.touch()
 
@@ -1643,13 +1644,19 @@ class WebSocketRecipient(BaseRecipient):
         # frame.
         ra = self._read_ahead_needed
         self._listeners = (ra is None) or ra()
-        self._ensure_watchdog_armed()
-        if self._deferred_pending or self._saw_control_frame:
-            self.touch()
         if not self._connect_sent:
             self._connect_sent = True
+            # Arm the idle watchdog once at connect.  Per-message receives
+            # and sends only touch it when control frames matter or a
+            # listener needs the deferred reader; arming here (not per
+            # message) keeps the zero-listener echo free of the per-message
+            # arm call while an idle connection with a buffered control
+            # frame is still serviced.
+            self._ensure_watchdog_armed()
             self._ensure_reader_started()
             return {'type': ASGIEvent.WS_CONNECT}
+        if self._deferred_pending or self._saw_control_frame:
+            self.touch()
         self._ensure_reader_started()
         if self._terminal_delivered:
             # Canonical across all modes: once the terminal event has been
