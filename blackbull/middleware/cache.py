@@ -209,6 +209,10 @@ class Cache:
         streaming = False
         flushed = False
 
+        # Per-request scope: the import must not sit inside the per-event
+        # closure — it would re-bind for every chunk of a streamed response.
+        from ..native import NativeResponse  # noqa: PLC0415
+
         async def cap_send(event):
             nonlocal status, response_headers, streaming, flushed
             # On the H1 native path the handler's emission arrives as a
@@ -219,7 +223,6 @@ class Cache:
             # (Expansion iterates through the sibling ``_cap_dict`` — never a
             # self-referential closure, which would reintroduce the v0.60.0
             # per-request reference cycle.)
-            from ..native import NativeResponse  # noqa: PLC0415
             if isinstance(event, NativeResponse):
                 for ev in event.to_asgi():
                     await _cap_dict(ev)

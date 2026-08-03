@@ -556,7 +556,7 @@ class HTTP1Sender(BaseSender):
                 # objects.  Header is buffered exactly like the dict start
                 # arm (body completes the flush); body/trailers delegate to
                 # the shared helpers the dict arms use.
-                if body.header is not None:
+                if body._header is not None:
                     self._buffered_status = HTTPStatus(body.status)
                     self._buffered_headers = Headers(list(body._header))
                     # Preserve the ASGI start `trailers: True` flag so a
@@ -576,7 +576,16 @@ class HTTP1Sender(BaseSender):
                         self._log_record.mark('start_arm_out')
                 if body.body is not None:
                     await self._handle_body_content(body._body, body.more_body)
-                if body.trailers is not None:
+                if body.trailers is not None and not self._completed:
+                    # Single-object header + terminal body + trailers: the
+                    # terminal body already completed the response on the
+                    # wire (content-length framing); writing the trailers
+                    # block now would splice chunked framing after it.  Drop
+                    # them — the dict lane's entry guard already drops
+                    # post-terminal trailers.  A non-terminal body
+                    # (``more_body=True``) keeps ``_completed`` False, so the
+                    # trailers block legitimately terminates the chunked
+                    # framing.
                     await self._handle_trailers(body.trailers)
 
             case {'type': ASGIEvent.HTTP_RESPONSE_START}:

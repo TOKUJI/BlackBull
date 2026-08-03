@@ -209,14 +209,17 @@ class Compression:
         point: compressible Content-Type AND no pre-existing Content-Encoding.
         """
         # Unannotated on purpose: rebuilt per request (see _wrap_send in
-        # app.py).  ``event`` is a NativeResponse or an ASGISendEvent.
+        # app.py).  ``event`` is a NativeResponse or an ASGISendEvent.  The
+        # import lives at per-request scope — inside the per-event closure it
+        # would re-bind for every chunk of a streamed response.
+        from ..native import NativeResponse  # noqa: PLC0415
+
         async def vary_send(event):
             # H1 native path: the header arm is a NativeResponse — stamp Vary
             # directly on its header list (zero-copy; no expansion).  Absence
             # is ``is not None`` — never truthiness.
-            from ..native import NativeResponse  # noqa: PLC0415
             if isinstance(event, NativeResponse):
-                if event.header is not None:
+                if event._header is not None:
                     headers = Headers(event._header)
                     if _is_compressible_content_type(headers) and \
                             not headers.get(b'content-encoding'):
@@ -263,7 +266,11 @@ class Compression:
         skip_compression = False
 
         # Unannotated on purpose: rebuilt per request (see _wrap_send in
-        # app.py).  ``event`` is a NativeResponse or an ASGISendEvent.
+        # app.py).  ``event`` is a NativeResponse or an ASGISendEvent.  The
+        # import lives at per-request scope — inside the per-event closure it
+        # would re-bind for every chunk of a streamed response.
+        from ..native import NativeResponse  # noqa: PLC0415
+
         async def intercepting_send(event):
             nonlocal streaming, skip_compression, start_forwarded
             # H1 native path: a NativeResponse may carry header + body in one
@@ -271,7 +278,6 @@ class Compression:
             # through the sibling ``_dict_event`` (never a self-referential
             # closure: the v0.60.0 per-request cycle guard reclaims these
             # adapters by refcounting alone).
-            from ..native import NativeResponse  # noqa: PLC0415
             if isinstance(event, NativeResponse):
                 for ev in event.to_asgi():
                     await _dict_event(ev)

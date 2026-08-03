@@ -103,8 +103,9 @@ class CORS:
         # app.py).  ``event`` is a NativeResponse or an ASGISendEvent.
         async def cors_send(event):
             if isinstance(event, NativeResponse):
-                # Header arm — presence is `is not None` (never truthiness).
-                if event.header is not None:
+                # Header arm — presence is `is not None` (never truthiness);
+                # raw slot for the check, view for the guarded append.
+                if event._header is not None:
                     event.header.append(cors_hdrs)
             elif event.get('type') == ASGIEvent.HTTP_RESPONSE_START:
                 existing = list(event.get('headers', []))

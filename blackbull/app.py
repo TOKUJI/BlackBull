@@ -141,8 +141,10 @@ def _inject_response_headers(raw_send: ASGISendCallable, extra_headers):
     async def _send(event):
         if isinstance(event, NativeResponse):
             # Native header arm — presence is `is not None`, never truthiness
-            # (an empty header list is a real header).
-            if event.header is not None:
+            # (an empty header list is a real header).  Read the raw slot for
+            # the presence check (no discarded _HeaderView on the hot path);
+            # the append still goes through the view's footgun guard.
+            if event._header is not None:
                 event.header.append(extra_headers)
         elif isinstance(event, dict) and event.get('type') == 'http.response.start':
             headers: list = list(event.get('headers') or [])
@@ -165,7 +167,10 @@ def _boundary_wrap(mw):
     H2 native-ization.
     """
     async def wrapped(conn, receive, send, call_next):
-        if conn.http_version == '1.1':
+        # Same defensive gate as middleware.utils.as_middleware: tolerate a
+        # raw scope-dict drive (no http_version attribute) as the H2/dict
+        # lane rather than AttributeErroring.
+        if getattr(conn, 'http_version', '1.1') == '1.1':
             send = _wrap_send_native(send)
         return await mw(conn, receive, send, call_next)
 

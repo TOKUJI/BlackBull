@@ -63,6 +63,20 @@ class TestHeaderView:
         assert b'content-type' in hv
         assert b'x-missing' not in hv
 
+    def test_lookups_case_insensitive(self):
+        # RFC 9110 §5.1 — header field names are case-insensitive; the view
+        # models the Headers DX (review m2), so mixed-case lookups must hit
+        # even when the stored names are lowercase.
+        r = NativeResponse(header=[(b'content-type', b'text/plain'),
+                                   (b'x-a', b'1'), (b'x-a', b'2')])
+        hv = r.header
+        assert hv is not None
+        assert b'Content-Type' in hv
+        assert hv.get(b'CONTENT-TYPE') == b'text/plain'
+        assert hv.get(b'X-A') == b'1'
+        assert hv.getlist(b'X-A') == [(b'x-a', b'1'), (b'x-a', b'2')]
+        assert hv.get(b'Content-Encoding', b'def') == b'def'
+
     def test_len_and_iter(self):
         r = NativeResponse(header=[(b'a', b'1'), (b'b', b'2')])
         hv = r.header
@@ -162,6 +176,24 @@ class TestToASGI:
         events = r.to_asgi()
         assert events[0]['trailers'] is True
         assert NativeResponse(status=200, header=[]).to_asgi()[0].get('trailers') is None
+
+    def test_to_asgi_copies_header_lists(self):
+        # Review i2: the start/trailers dicts must not alias the live
+        # NativeResponse's lists — the cache middleware stores these events,
+        # and an in-place append on the live response (CORS / header
+        # injection) must not leak into a stored entry.
+        r = NativeResponse(header=[(b'a', b'1')],
+                           trailers=[(b't', b'v')])
+        events = r.to_asgi()
+        events[0]['headers'].append((b'b', b'2'))
+        events[-1]['headers'].append((b't2', b'v2'))
+        # live object untouched
+        assert list(r.header) == [(b'a', b'1')]
+        assert r.trailers == [(b't', b'v')]
+        # a second conversion is unaffected by the first's mutation
+        again = r.to_asgi()
+        assert again[0]['headers'] == [(b'a', b'1')]
+        assert again[-1]['headers'] == [(b't', b'v')]
 
 
 class TestSlots:

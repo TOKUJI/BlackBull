@@ -177,6 +177,37 @@ class TestNativeResponsePath:
         assert b'content-length: 2\r\n' in w2.data
         assert b'x-t: v' not in w2.data      # dropped — existing H1 behaviour
 
+    async def test_single_object_terminal_body_trailers_drop(self):
+        # Review M1: one object carrying header + terminal body + trailers
+        # must NOT splice chunked trailers framing after a content-length
+        # body.  The native arm drops the trailers once the body completed
+        # the response — the same post-terminal drop as the dict lane's
+        # entry guard.
+        s, w = _sender()
+        await s(NativeResponse(status=200,
+                               header=[(b'content-type', b'text/plain')],
+                               body=b'Hi',
+                               trailers=[(b'x-t', b'v')]))
+        assert b'content-length: 2\r\n' in w.data
+        assert w.data.endswith(b'\r\n\r\nHi')
+        assert b'x-t: v' not in w.data
+        assert b'0\r\n' not in w.data
+        assert s._completed is True
+
+    async def test_single_object_nonterminal_body_trailers(self):
+        # Legitimate single-object trailers: a non-terminal body keeps
+        # ``_completed`` False, so the trailers block legitimately terminates
+        # the chunked framing.
+        s, w = _sender()
+        await s(NativeResponse(status=200,
+                               header=[(b'content-type', b'text/plain')],
+                               body=b'Hi', more_body=True,
+                               trailers=[(b'x-t', b'v')]))
+        assert b'transfer-encoding: chunked' in w.data
+        assert b'x-t: v' in w.data
+        assert w.data.endswith(b'2\r\nHi\r\n0\r\nx-t: v\r\n\r\n')
+        assert s._completed is True
+
     async def test_completed_drops_later_sends(self):
         s, w = _sender()
         await s(NativeResponse(status=200, body=b'Hi'))

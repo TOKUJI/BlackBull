@@ -20,7 +20,8 @@ Design invariants (validated in ``scratch/send-model-c.py``):
   the property+view overhead; the properties exist for middleware and
   handler-facing DX.
 - **``to_asgi()`` is the boundary conversion** — 1 object → ASGI event list,
-  used only on the ``asgi=True`` path (symmetric with
+  used only at conversion boundaries: the external ASGI edge (``asgi=True``
+  / external hosts) and the middleware native-read arms (symmetric with
   :meth:`Connection.as_scope`).
 """
 from __future__ import annotations
@@ -31,7 +32,8 @@ class _HeaderView:
 
     Mutations (``append``) are visible to anything reading the response
     afterwards (the sender, ``to_asgi``).  Models the DX of
-    :class:`blackbull.headers.Headers` without a copy.
+    :class:`blackbull.headers.Headers` without a copy — lookups are
+    case-insensitive (RFC 9110 §5.1), matching ``Headers``.
     """
 
     __slots__ = ('_items',)
@@ -46,16 +48,20 @@ class _HeaderView:
         return len(self._items)
 
     def __contains__(self, name: bytes) -> bool:
-        return any(k == name for k, _ in self._items)
+        lowered = name.lower()
+        return any(k == name or k.lower() == lowered for k, _ in self._items)
 
     def get(self, name: bytes, default: bytes = b'') -> bytes:
+        lowered = name.lower()
         for k, v in self._items:
-            if k == name:
+            if k == name or k.lower() == lowered:
                 return v
         return default
 
     def getlist(self, name: bytes) -> list[tuple[bytes, bytes]]:
-        return [(k, v) for k, v in self._items if k == name]
+        lowered = name.lower()
+        return [(k, v) for k, v in self._items
+                if k == name or k.lower() == lowered]
 
     def append(self, name_or_pairs, value: bytes | None = None) -> None:
         if value is None:
@@ -149,14 +155,20 @@ class NativeResponse:
         """Convert to the ASGI event list (``http.response.*`` dicts).
 
         One object → one or more ASGI events, in wire order.  Used only at
-        the ASGI boundary (external hosts / ``asgi=True``); the native path
-        never materialises these dicts.
+        conversion boundaries — the external ASGI edge (external hosts /
+        ``asgi=True``) and the middleware native-read arms (cache,
+        compression); the native H1 sender path never materialises these
+        dicts.
         """
         events: list[dict] = []
         if self._header is not None:
             start: dict = {'type': 'http.response.start',
                            'status': self.status,
-                           'headers': self._header}
+                           # Copy: the cache middleware stores these events,
+                           # and an in-place append on the live response
+                           # (CORS / header injection) must not leak into a
+                           # stored entry via list aliasing.
+                           'headers': list(self._header)}
             if self.expects_trailers:
                 start['trailers'] = True
             events.append(start)
@@ -166,5 +178,5 @@ class NativeResponse:
                            'more_body': self.more_body})
         if self.trailers is not None:
             events.append({'type': 'http.response.trailers',
-                           'headers': self.trailers})
+                           'headers': list(self.trailers)})
         return events
