@@ -227,8 +227,8 @@ speculatively.
 
 With the default `BB_WS_QUEUE_DEPTH=0` (inline), a `ping` is answered
 when the handler next drives a read — or, for a handler that is not
-reading, at the next `send()` and then on every deadline-scanner tick
-for a connection idle more than ~0.3 s.  Worst-case PONG latency is
+reading, on every deadline-scanner tick for a connection idle more
+than ~0.3 s.  Worst-case PONG latency is
 therefore bounded to ~one scanner tick (`BB_DEADLINE_TICK_MS`,
 default 300 ms) for a handler that neither reads nor sends, with no
 per-connection timers.  That satisfies RFC 6455 §5.5.2 (a delayed
