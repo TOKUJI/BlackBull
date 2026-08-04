@@ -19,6 +19,7 @@
 #   ROUNDS(=8) DURATION(=15) WARMUP(=5) THREADS(=4) CONNS(=32)
 #   PORT(=8443) BB_UVLOOP(=0) PIPELINE(=1) PHASES(=null real)
 #   SERVER_CPUS(=0-1) LOAD_CPUS(=2-5)
+#   WRK_HEADERS (extra wrk header args, e.g. '-H Accept-Encoding:gzip')
 #   URL_PATH(=/plaintext) or URL_PATHS (comma-separated — multiple sessions)
 #   EXPECT_LINES (raw.tsv completeness per session; default 1+ROUNDS*8)
 #   AB_FINISH_LOG (finish progress log; default bench/results/ab-finish.log)
@@ -49,6 +50,7 @@ LOAD_CPUS="${LOAD_CPUS:-2-5}"
 URL_PATH="${URL_PATH:-/plaintext}"
 URL_PATHS="${URL_PATHS:-}"
 PEER_MW="${PEER_MW:-}"
+WRK_HEADERS="${WRK_HEADERS:-}"
 EXPECT_LINES="${EXPECT_LINES:-$((1 + ROUNDS * 8))}"
 AB_FINISH_LOG="${AB_FINISH_LOG:-$REPO_ROOT/bench/results/ab-finish.log}"
 AB_POLLS="${AB_POLLS:-300}"
@@ -65,6 +67,7 @@ ab_env() {  # $1 = url
     printf "PIPELINE='%s' PHASES='%s' SERVER_CPUS='%s' LOAD_CPUS='%s' " \
         "$PIPELINE" "$PHASES" "$SERVER_CPUS" "$LOAD_CPUS"
     printf "PEER_MW='%s' " "$PEER_MW"
+    printf "WRK_HEADERS='%s' " "$WRK_HEADERS"
 }
 
 case "$MODE" in
