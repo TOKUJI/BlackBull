@@ -52,6 +52,12 @@ PORT="${PORT:-8443}"
 BB_UVLOOP="${BB_UVLOOP:-0}"
 PIPELINE="${PIPELINE:-1}"
 PHASES="${PHASES:-null real}"
+# Extra wrk header args, e.g. -H 'Accept-Encoding: gzip'.  Without an
+# Accept-Encoding the Compression middleware takes its vary_send (selection is
+# None) branch and the native-complete path under test is never exercised —
+# both arms measure identical middleware code.  Kept unquoted at the call site
+# so multi-arg header flags word-split correctly.
+WRK_HEADERS="${WRK_HEADERS:-}"
 # Server and load generator on disjoint cores.  Unpinned, the two fight for
 # the same cores and the throughput distribution goes bimodal (two scheduler
 # placements, ~15 % apart), which swamps anything a refactor of this size
@@ -185,9 +191,11 @@ start_server() {
     for _ in $(seq 1 60); do
         # Accept any HTTP 200 — the old `grep -q Hello` body probe only
         # matched /plaintext-style responses and failed binary/compressed
-        # lanes (/preencoded, /1kb) with "server not ready".
+        # lanes (/preencoded, /1kb) with "server not ready".  Send the same
+        # Accept-Encoding as wrk so the probe exercises the same middleware
+        # branch the measurement will.
         if curl -s -o /dev/null --max-time 2 -w '%{http_code}' \
-                "$BASE_URL$URL_PATH" 2>/dev/null | grep -q '^200'; then
+                $WRK_HEADERS "$BASE_URL$URL_PATH" 2>/dev/null | grep -q '^200'; then
             return 0
         fi
         sleep 0.5
@@ -203,9 +211,9 @@ measure() {
     local pipe_args=()
     [ "$PIPELINE" != "1" ] && pipe_args=(-s bench/wrk/pipeline.lua -- "$PIPELINE")
     "${PIN_LOAD[@]}" wrk -t"$THREADS" -c"$CONNS" -d"${WARMUP}s" --latency \
-        "$BASE_URL$URL_PATH" "${pipe_args[@]}" >/dev/null 2>&1
+        $WRK_HEADERS "$BASE_URL$URL_PATH" "${pipe_args[@]}" >/dev/null 2>&1
     "${PIN_LOAD[@]}" wrk -t"$THREADS" -c"$CONNS" -d"${DURATION}s" --latency \
-        "$BASE_URL$URL_PATH" "${pipe_args[@]}" >"$OUTDIR/wrk_${tag}.txt" 2>&1
+        $WRK_HEADERS "$BASE_URL$URL_PATH" "${pipe_args[@]}" >"$OUTDIR/wrk_${tag}.txt" 2>&1
     awk '/Requests\/sec:/ {print $2}' "$OUTDIR/wrk_${tag}.txt"
 }
 
