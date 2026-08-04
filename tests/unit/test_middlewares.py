@@ -323,7 +323,7 @@ class TestHTTPCompression:
         events = []
 
         async def capture_send(event):
-            events.append(event)
+            _collect(events, event)
 
         await compress(scope, AsyncMock(return_value={'type': 'http.disconnect'}),
                        capture_send, call_next=handler)
@@ -347,7 +347,7 @@ class TestHTTPCompression:
         events = []
 
         async def capture_send(event):
-            events.append(event)
+            _collect(events, event)
 
         await compress(scope, AsyncMock(return_value={'type': 'http.disconnect'}),
                        capture_send, call_next=handler)
@@ -399,7 +399,7 @@ class TestHTTPCompression:
         events = []
 
         async def capture_send(event):
-            events.append(event)
+            _collect(events, event)
 
         await compress(scope, AsyncMock(return_value={'type': 'http.disconnect'}),
                        capture_send, call_next=handler)
@@ -425,7 +425,7 @@ class TestHTTPCompression:
         events = []
 
         async def capture_send(event):
-            events.append(event)
+            _collect(events, event)
 
         await compress(scope, AsyncMock(return_value={'type': 'http.disconnect'}),
                        capture_send, call_next=handler)
@@ -465,7 +465,7 @@ class TestHTTPCompression:
         events = []
 
         async def capture_send(event):
-            events.append(event)
+            _collect(events, event)
 
         await compress(scope, AsyncMock(return_value={'type': 'http.disconnect'}),
                        capture_send, call_next=handler)
@@ -500,7 +500,7 @@ class TestHTTPCompression:
         events = []
 
         async def capture_send(event):
-            events.append(event)
+            _collect(events, event)
 
         await compress(scope, AsyncMock(return_value={'type': 'http.disconnect'}),
                        capture_send, call_next=handler)
@@ -535,7 +535,7 @@ class TestBrotliCompression:
         events = []
 
         async def capture_send(event):
-            events.append(event)
+            _collect(events, event)
 
         await compress(scope, AsyncMock(return_value={'type': 'http.disconnect'}),
                        capture_send, call_next=handler)
@@ -552,7 +552,7 @@ class TestBrotliCompression:
         events = []
 
         async def capture_send(event):
-            events.append(event)
+            _collect(events, event)
 
         await compress(scope, AsyncMock(return_value={'type': 'http.disconnect'}),
                        capture_send, call_next=handler)
@@ -571,7 +571,7 @@ class TestBrotliCompression:
         events = []
 
         async def capture_send(event):
-            events.append(event)
+            _collect(events, event)
 
         await compress(scope, AsyncMock(return_value={'type': 'http.disconnect'}),
                        capture_send, call_next=handler)
@@ -597,7 +597,7 @@ class TestZstdCompression:
         events = []
 
         async def capture_send(event):
-            events.append(event)
+            _collect(events, event)
 
         await compress(scope, AsyncMock(return_value={'type': 'http.disconnect'}),
                        capture_send, call_next=handler)
@@ -615,7 +615,7 @@ class TestZstdCompression:
         events = []
 
         async def capture_send(event):
-            events.append(event)
+            _collect(events, event)
 
         await compress(scope, AsyncMock(return_value={'type': 'http.disconnect'}),
                        capture_send, call_next=handler)

@@ -33,6 +33,24 @@ so the editable install's metadata catches up.
 
 ### Fixed
 
+- **A static file larger than the `StaticFiles` cache threshold (4 MiB),
+  requested with `Accept-Encoding`, returned no response at all.**  Above the
+  threshold `StaticFiles` sends `http.response.start` then
+  `http.response.pathsend`; with a codec negotiated the Compression middleware
+  was still holding the start pending a compress decision, so the sender —
+  which drops a pathsend it has no buffered start for — emitted nothing.  The
+  held header is now released before any event compression cannot act on.
+  Pre-existing and older than v0.67.0; never surfaced because the benchmark
+  corpus is all small files.
+- **The `static` lane no longer round-trips through ASGI dicts.**  The native
+  complete-response path matched only a response arriving as one object, so
+  `StaticFiles` — which sends its header and body as two events — expanded
+  through `to_asgi()` and was re-converted below, on every request that
+  negotiated a codec.  Compression now holds a header arm and merges it with
+  the terminal body that follows, restoring one-object-one-send.  Measured
+  against v0.67.0 on m7a.8xlarge (HttpArena, 3 runs/arm, FastAPI co-resident
+  as control): `static` −3.4 %…−6.3 %, `static-h2` −3.5 %, at flat CPU.
+
 - **`Expect: 100-continue` is answered on every request, not just the first
   on a connection.**  The interim response was written before the shared
   `HTTP1Sender`'s per-request reset, so its "response already complete" guard

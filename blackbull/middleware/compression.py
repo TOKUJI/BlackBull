@@ -111,6 +111,24 @@ def _merge_vary(headers: list[tuple[bytes, bytes]],
     headers.append((b'vary', field))
 
 
+def _stamp_vary_if_compressible(header: list[tuple[bytes, bytes]]) -> bool:
+    """Whether *header* describes a body worth compressing; stamps ``Vary``.
+
+    The decision point shared by every native exit: a compressible
+    Content-Type that is not already encoded is a compression candidate, and
+    its body varies by ``Accept-Encoding`` on *all* outcomes — compressed,
+    too small, executor at cap, or handed to ``sendfile`` — so ``Vary`` is
+    stamped here rather than only where compression succeeds.  Mutates
+    *header* in place (zero-copy; the caller owns the list).
+    """
+    if not _is_compressible_content_type(Headers(header)):
+        return False
+    if any(k.lower() == b'content-encoding' for k, _ in header):
+        return False
+    _merge_vary(header)
+    return True
+
+
 # ---------------------------------------------------------------------------
 # Middleware
 # ---------------------------------------------------------------------------
@@ -294,6 +312,10 @@ class Compression:
         body_parts: list[bytes] = []
         streaming = False
         skip_compression = False
+        # A header-arm NativeResponse awaiting its body (the StaticFiles
+        # shape).  Held, never expanded, so the pair can be merged back into
+        # one object at the decision point.
+        pending_header = None
 
         # Unannotated on purpose: rebuilt per request (see _wrap_send in
         # app.py).  ``event`` is a NativeResponse or an ASGISendEvent.  The
@@ -301,19 +323,103 @@ class Compression:
         # would re-bind for every chunk of a streamed response.
         from ..native import NativeResponse  # noqa: PLC0415
 
+        async def _emit_native_complete(status, header, body,
+                                        original=None) -> None:
+            """Decide, compress, and emit the response as **one** object.
+
+            The whole point of the native lane: no ``to_asgi()`` expansion
+            into dicts for the layer below to convert straight back.  Pass
+            *original* when the caller already holds an equivalent
+            ``NativeResponse``, so the uncompressed exit forwards it verbatim
+            instead of allocating a copy.
+            """
+            if _stamp_vary_if_compressible(header) and len(body) >= self._min_size:
+                threshold = self._executor_threshold
+                if threshold > 0 and len(body) >= threshold:
+                    compressed = await self._compress(compressor, body)
+                else:
+                    # Below the offload threshold: compress synchronously on
+                    # the loop — no coroutine hop on the common small-body
+                    # (json-comp) range.
+                    compressed = compressor(body)
+                if compressed is not None:
+                    # The compressed body is a different size; strip any
+                    # upstream content-length and replace it with the
+                    # post-compression length (keeps H1 keepalive framing and
+                    # strict H2 clients correct).
+                    existing = [(k, v) for k, v in header
+                                if k.lower() != b'content-length']
+                    existing.append(
+                        (b'content-encoding', codec_name.encode()))
+                    existing.append(
+                        (b'content-length', str(len(compressed)).encode()))
+                    _merge_vary(existing)
+                    await send(NativeResponse(status=status, header=existing,
+                                              body=compressed))
+                    return
+            # Uncompressed forward: pre-encoded / non-compressible / too-small
+            # / executor-at-cap.  Vary is already stamped on *header* when this
+            # response was a candidate, so either way the object carries the
+            # correct cache key.
+            await send(original if original is not None else NativeResponse(
+                status=status, header=header, body=body))
+
+        async def _release_pending(held) -> None:
+            """Forward a held header arm verbatim and stop compressing.
+
+            Used when whatever followed the header is something compression
+            cannot act on — a ``pathsend`` (we never see the bytes), or a
+            streamed chunk (we no longer have the body in one piece).  The
+            header has to go out *first*: the sender drops a pathsend it has
+            no buffered start for, which left a large static file answering
+            with no response at all.
+            """
+            nonlocal start_forwarded, skip_compression
+            _stamp_vary_if_compressible(held._header)
+            await send(held)
+            start_forwarded = True
+            skip_compression = True
+
         async def intercepting_send(event):
             nonlocal streaming, skip_compression, start_forwarded
-            # H1 native path: a *complete* NativeResponse (header + terminal
-            # body in one object, no trailers) is consumed directly — decide,
-            # compress, and emit **one** NativeResponse downstream, with no
-            # ``to_asgi()`` expansion.  Expanding every request through
-            # ``to_asgi()`` → dict → ``wrap_native_send`` → NativeResponse
-            # round-tripped the exact two-dicts-two-sends cost the native seam
-            # removed (measured regression vs v0.67.0: static −3.4〜−6.4 %,
-            # json-comp −1.2〜−3.2 % on m7a.8xlarge).  Partial / streaming /
-            # trailer shapes and plain dict events keep the ``_dict_event``
-            # lane (behaviour unchanged).
+            nonlocal pending_header
+            # H1/H2 native path.  Two shapes reach the one-object fast path:
+            # a *complete* NativeResponse (header + terminal body together,
+            # the shape a handler returning a ``Response`` produces), and a
+            # header arm followed by its terminal body — the shape
+            # ``StaticFiles`` produces, which is held here and merged.
+            # Expanding either through ``to_asgi()`` → dict →
+            # ``wrap_native_send`` → NativeResponse round-trips the exact
+            # two-dicts-two-sends cost the native seam removed (measured
+            # against v0.67.0 on m7a.8xlarge: static −3.4〜−6.3 %, json-comp
+            # −1.2〜−3.2 %).  Trailer shapes and plain dict events keep the
+            # ``_dict_event`` lane.
             if isinstance(event, NativeResponse):
+                # Pass-through: a forward-verbatim decision is already made,
+                # so later objects are relayed untouched (mirrors the
+                # ``_dict_event`` fast path).
+                if start_forwarded and (skip_compression or streaming):
+                    await send(event)
+                    return
+
+                held, pending_header = pending_header, None
+                if held is not None:
+                    if (event._header is None and event._body is not None
+                            and not event.more_body
+                            and not event.expects_trailers
+                            and event.trailers is None):
+                        # The terminal body for the held header: the two
+                        # halves are a complete response again.
+                        await _emit_native_complete(
+                            held.status, held._header, event._body)
+                        start_forwarded = True
+                        return
+                    # A streamed chunk, trailers, or a second header — give up
+                    # on compressing and relay both in order.
+                    await _release_pending(held)
+                    await send(event)
+                    return
+
                 if (not streaming and not skip_compression
                         and not start_forwarded
                         and event._header is not None
@@ -321,60 +427,33 @@ class Compression:
                         and not event.more_body
                         and not event.expects_trailers
                         and event.trailers is None):
-                    header = event._header
-                    body = event._body
-                    if _is_compressible_content_type(Headers(header)):
-                        if not any(k.lower() == b'content-encoding'
-                                   for k, _ in header):
-                            # Compressible + not pre-encoded: stamp Vary now
-                            # (in place, zero-copy) so every exit path —
-                            # compressed, too-small, executor-at-cap — is
-                            # cache-keyed on Accept-Encoding (mirrors the
-                            # ``_dict_event`` decision point).
-                            _merge_vary(header)
-                            if len(body) >= self._min_size:
-                                threshold = self._executor_threshold
-                                if threshold > 0 and len(body) >= threshold:
-                                    compressed = await self._compress(
-                                        compressor, body)
-                                else:
-                                    # Below the offload threshold: compress
-                                    # synchronously on the loop — no
-                                    # coroutine hop on the common
-                                    # small-body (json-comp) range.
-                                    compressed = compressor(body)
-                                if compressed is not None:
-                                    # The compressed body is a different size;
-                                    # strip any upstream content-length and
-                                    # replace it with the post-compression
-                                    # length (keeps H1 keepalive framing and
-                                    # strict H2 clients correct).
-                                    existing = [
-                                        (k, v) for k, v in header
-                                        if k.lower() != b'content-length']
-                                    existing.append(
-                                        (b'content-encoding',
-                                         codec_name.encode()))
-                                    existing.append(
-                                        (b'content-length',
-                                         str(len(compressed)).encode()))
-                                    _merge_vary(existing)
-                                    await send(NativeResponse(
-                                        status=event.status,
-                                        header=existing,
-                                        body=compressed))
-                                    start_forwarded = True
-                                    return
-                    # Uncompressed forward: pre-encoded / non-compressible /
-                    # too-small / executor-at-cap.  Vary is already stamped on
-                    # *header* when this response was compressible + unencoded,
-                    # so the verbatim object carries the correct cache key.
-                    await send(event)
+                    await _emit_native_complete(
+                        event.status, event._header, event._body,
+                        original=event)
                     start_forwarded = True
                     return
+
+                if (not streaming and not skip_compression
+                        and not start_forwarded
+                        and event._header is not None
+                        and event._body is None
+                        and not event.expects_trailers
+                        and event.trailers is None):
+                    # Header arm alone.  Hold it — the body that follows
+                    # completes the response, and the compress decision needs
+                    # both.  Nothing is on the wire yet, so holding costs no
+                    # ordering; the tail releases it if no body ever arrives.
+                    pending_header = event
+                    return
+
                 for ev in event.to_asgi():
                     await _dict_event(ev)
                 return
+
+            # A plain dict: ``pathsend`` / ``push`` / an external-host lane.
+            if pending_header is not None:
+                held, pending_header = pending_header, None
+                await _release_pending(held)
             await _dict_event(event)
 
         async def _dict_event(event):
@@ -436,9 +515,26 @@ class Compression:
                     else:
                         body_parts.append(parsed.body)
                 case _:
+                    # Not a start/body event — ``pathsend``, ``push``.  None
+                    # of them can be compressed (we never see the bytes), and
+                    # the sender drops a pathsend it has no buffered start
+                    # for, so release the start we are holding first.
+                    if not start_forwarded and start_event:
+                        skip_compression = True
+                        await send(start_event)
+                        start_forwarded = True
                     await send(parsed)
 
         await call_next(conn, receive, intercepting_send)
+
+        if pending_header is not None:
+            # A header arm with no body event behind it (a handler that sent
+            # headers and stopped).  Release it rather than swallow the
+            # response.
+            held, pending_header = pending_header, None
+            _stamp_vary_if_compressible(held._header)
+            await send(held)
+            return
 
         if streaming:
             return

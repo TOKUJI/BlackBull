@@ -52,8 +52,16 @@ async def _run_through(mw, body: bytes, accept: bytes = b'gzip') -> dict:
     return ``{'headers': {bytes: bytes}, 'body': bytes}``."""
     events: list[dict] = []
 
-    async def send(event: dict) -> None:
-        events.append(event)
+    async def send(event) -> None:
+        # The middleware is ``@as_middleware``-decorated, so it emits the H1
+        # native contract (NativeResponse).  These tests assert on the ASGI
+        # event shape, so the seam is normalised away here — the same
+        # convention ``test_middlewares._collect`` uses.
+        from blackbull.native import NativeResponse
+        if isinstance(event, NativeResponse):
+            events.extend(event.to_asgi())
+        else:
+            events.append(event)
 
     handler = _make_handler(body)
 
@@ -166,8 +174,15 @@ async def test_skip_path_emits_exactly_one_start_event():
 
     events: list[dict] = []
 
-    async def send(event: dict) -> None:
-        events.append(event)
+    async def send(event) -> None:
+        # Normalise the native seam away — these assertions are about how
+        # many response.start events reach the wire, which is a property of
+        # the ASGI shape either representation expands to.
+        from blackbull.native import NativeResponse
+        if isinstance(event, NativeResponse):
+            events.extend(event.to_asgi())
+        else:
+            events.append(event)
 
     async def upstream(scope, receive, send_):
         # Upstream sets Content-Encoding itself — typical precompressed
@@ -219,15 +234,17 @@ async def test_small_body_under_threshold_ignores_inflight_cap():
 @pytest.mark.asyncio
 async def test_passthrough_skips_event_reparsing(monkeypatch):
     """When the inner handler already sets ``Content-Encoding`` (e.g.
-    StaticFiles serving a precompressed sibling), the middleware's
-    ``intercepting_send`` must forward subsequent body events verbatim —
-    no second ``parse_response_event`` call.
+    StaticFiles serving a precompressed sibling), the response must reach the
+    wire without being taken apart on the way.
 
-    This is what gives the static-file cache-hit path its win.
-    Without the fast path, ``parse_response_event`` runs once per ASGI
-    event; the precompressed-sibling response is 2 events so the cost
-    doubles for no useful work."""
+    Two costs are pinned, because the static cache-hit path pays both per
+    request: dict re-parsing (``parse_response_event`` per ASGI event) and
+    native expansion (``to_asgi()`` back into dicts for the layer below to
+    re-convert).  The native merge path avoids both entirely — this asserts
+    the ceiling, not an exact call count, so a further improvement does not
+    fail the test."""
     from blackbull.middleware import compression as _compression
+    from blackbull.native import NativeResponse
 
     calls: list[bytes] = []
     real_parse = _compression.parse_response_event
@@ -237,6 +254,15 @@ async def test_passthrough_skips_event_reparsing(monkeypatch):
         return real_parse(event)
 
     monkeypatch.setattr(_compression, 'parse_response_event', counting_parse)
+
+    expansions = {'n': 0}
+    real_to_asgi = NativeResponse.to_asgi
+
+    def counting_to_asgi(self):
+        expansions['n'] += 1
+        return real_to_asgi(self)
+
+    monkeypatch.setattr(NativeResponse, 'to_asgi', counting_to_asgi)
 
     async def already_encoded_handler(scope, receive, send):
         await send({
@@ -254,7 +280,10 @@ async def test_passthrough_skips_event_reparsing(monkeypatch):
     events: list[dict] = []
 
     async def out_send(event):
-        events.append(event)
+        if isinstance(event, NativeResponse):
+            events.extend(real_to_asgi(event))
+        else:
+            events.append(event)
 
     async def call_next(scope, receive, send):
         await already_encoded_handler(scope, receive, send)
@@ -262,19 +291,23 @@ async def test_passthrough_skips_event_reparsing(monkeypatch):
     mw = Compression()
     await mw(_scope(b'br, gzip'), _noop_receive, out_send, call_next)
 
-    # The start event must be parsed (we need to inspect Content-Encoding
-    # to decide to skip).  The body event must NOT be parsed — that's the
-    # fast path.
-    assert 'http.response.start' in calls, \
-        f'expected start to be parsed; got {calls!r}'
+    # The body event is the expensive one — it carries the payload, and
+    # re-parsing it buys nothing once the skip decision is made.
     assert 'http.response.body' not in calls, \
         f'fast path bypassed: body event re-parsed; got {calls!r}'
+    assert len(calls) <= 1, \
+        f'response was taken apart {len(calls)}x on the way out; got {calls!r}'
+    assert expansions['n'] == 0, \
+        (f'response expanded through to_asgi() {expansions["n"]}x — the native '
+         f'path round-tripped it back into dicts')
 
-    # Sanity: response still round-trips correctly.
+    # Sanity: response still round-trips correctly, unchanged.
     starts = [e for e in events if e['type'] == 'http.response.start']
     bodies = [e for e in events if e['type'] == 'http.response.body']
     assert len(starts) == 1 and len(bodies) == 1
     assert bodies[0]['body'] == b'BR-COMPRESSED-BYTES'
+    assert dict(starts[0]['headers'])[b'content-encoding'] == b'br', \
+        'the precompressed sibling must not be re-encoded'
 
 
 @pytest.mark.asyncio

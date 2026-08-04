@@ -250,6 +250,14 @@ pass through uncompressed.
 Every compressed response carries `Vary: Accept-Encoding` (folded into
 any existing `Vary`) so a shared cache never replays an encoded body to
 a client that sent `identity` / no `Accept-Encoding` (RFC 9110 §12.5.5).
+A response that is *compressible but not compressed* — below `min_size`,
+or served straight from disk — carries it too, for the same reason.
+
+Large files that [`StaticFiles`](#staticfiles) hands to the sender as a
+path (`http.response.pathsend`, so the kernel can `sendfile` them) are
+served uncompressed: the middleware never sees those bytes.  Pre-compress
+them on disk instead — `StaticFiles` serves a `.br` / `.gz` sibling when
+the client accepts it, which costs no CPU per request.
 
 ### Sessions — moved to `blackbull-session`
 
