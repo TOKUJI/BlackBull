@@ -69,6 +69,17 @@ async def _1kb_endpoint():
     return Response(_1KB, content_type=_HTML_CT)
 
 
+# Sprint 94 A/B lane: a pre-encoded response — the static-asset shape
+# (StaticFiles precompressed siblings carry Content-Encoding before the
+# Compression middleware sees them).  With PEER_MW=httparena the middleware
+# must pass it through verbatim: no re-compression, no Vary stamp.  This is
+# the lane the v0.67.0 → v0.70.0 static regression was measured on.
+@app.route(path="/preencoded", methods=[HTTPMethod.GET])
+async def preencoded():
+    return Response(_16KB, content_type=_HTML_CT,
+                    headers=[(b"content-encoding", b"br")])
+
+
 @app.route(path="/16kb", methods=[HTTPMethod.GET])
 async def _16kb_endpoint():
     return Response(_16KB, content_type=_HTML_CT)

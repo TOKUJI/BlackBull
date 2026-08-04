@@ -48,6 +48,7 @@ SERVER_CPUS="${SERVER_CPUS:-0-1}"
 LOAD_CPUS="${LOAD_CPUS:-2-5}"
 URL_PATH="${URL_PATH:-/plaintext}"
 URL_PATHS="${URL_PATHS:-}"
+PEER_MW="${PEER_MW:-}"
 EXPECT_LINES="${EXPECT_LINES:-$((1 + ROUNDS * 8))}"
 AB_FINISH_LOG="${AB_FINISH_LOG:-$REPO_ROOT/bench/results/ab-finish.log}"
 AB_POLLS="${AB_POLLS:-300}"
@@ -63,6 +64,7 @@ ab_env() {  # $1 = url
         "$DURATION" "$WARMUP" "$THREADS" "$CONNS" "$PORT" "$BB_UVLOOP"
     printf "PIPELINE='%s' PHASES='%s' SERVER_CPUS='%s' LOAD_CPUS='%s' " \
         "$PIPELINE" "$PHASES" "$SERVER_CPUS" "$LOAD_CPUS"
+    printf "PEER_MW='%s' " "$PEER_MW"
 }
 
 case "$MODE" in
