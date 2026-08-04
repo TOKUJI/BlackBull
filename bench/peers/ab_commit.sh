@@ -155,7 +155,13 @@ swap_to() {
     local ref="$1"
     _swap_file_set "$ref" || return 1
     if [ -n "$PROOF_FILE" ]; then
-        uv run python - "$PROOF_FILE" <<'PY'
+        # Use the install.sh-provisioned venv interpreter directly: `uv run`
+        # can re-resolve the project and *recreate* .venv, dropping the
+        # editable blackbull install (and its console script) — the recurring
+        # "Failed to spawn: blackbull" gotcha.  .venv/bin/python carries the
+        # editable meta-path finder, so the swapped files are still the ones
+        # imported.
+        .venv/bin/python - "$PROOF_FILE" <<'PY'
 import hashlib, importlib, pathlib, sys
 rel = sys.argv[1]
 mod = importlib.import_module(
@@ -172,7 +178,7 @@ PY
 
 start_server() {
     BB_UVLOOP="$BB_UVLOOP" BB_WORKERS=1 BB_ACCESS_LOG=0 \
-        setsid "${PIN_SERVER[@]}" uv run blackbull bench.peers.native_app:app \
+        setsid "${PIN_SERVER[@]}" .venv/bin/blackbull bench.peers.native_app:app \
             --bind "127.0.0.1:${PORT}" \
             >"$OUTDIR/server.log" 2>&1 &
     SERVER_PID=$!
@@ -267,7 +273,7 @@ restore_tree
     echo "| Pinning | server \`$SERVER_CPUS\` / load \`$LOAD_CPUS\` |"
     echo "| Files swapped | \`${FILES[*]}\` |"
     echo ""
-    uv run python bench/peers/ab_report.py "$RAW"
+    .venv/bin/python bench/peers/ab_report.py "$RAW"
 } >"$REPORT"
 
 echo ""
