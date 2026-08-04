@@ -213,8 +213,11 @@ class HTTP1ResponseRecipient:
         te = headers.get(b'transfer-encoding', b'').lower()
         if te == b'chunked':
             return b''.join([c async for c in self._read_chunked(reader)])
+        # Absence is emptiness here: ``Headers.get`` returns ``b''`` for a
+        # missing field, so a ``is not None`` test would call ``int(b'')`` on
+        # every response that legitimately omits the header — 101, 204, 304.
         cl_raw = headers.get(b'content-length')
-        if cl_raw is not None:
+        if cl_raw:
             return await reader.readexactly(int(cl_raw))
         # No Content-Length and no chunked: caller (e.g. HEAD, 204, 304) must
         # interpret as empty body.  We don't read-until-EOF here because that
@@ -228,8 +231,9 @@ class HTTP1ResponseRecipient:
             async for chunk in self._read_chunked(reader):
                 yield chunk
             return
+        # Same absence-is-emptiness rule as ``_read_body``.
         cl_raw = headers.get(b'content-length')
-        if cl_raw is not None:
+        if cl_raw:
             yield await reader.readexactly(int(cl_raw))
 
     async def _read_chunked(self, reader: AbstractReader) -> AsyncIterator[bytes]:

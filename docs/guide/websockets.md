@@ -425,14 +425,19 @@ Choose read-ahead when a handler does slow work between reads and you
 need keepalive `ping`s answered during it.  A handler that loops
 tightly on `receive()` — the common shape — wants the default.
 
-!!! note "`websocket_message` forces read-ahead"
+!!! note "`websocket_message` and the deferred reader"
 
     The [`websocket_message`](events.md) event fires when the *server*
     reads a message, not when your handler consumes it, so a handler
-    that never calls `receive()` still produces events.  That is only
-    possible with a reader running ahead of the handler, so registering
-    a `websocket_message` listener switches read-ahead on even at depth
-    `0`.  Nothing else observes the difference between the two modes.
+    that never calls `receive()` still produces events.
+
+    Registering a listener does **not** switch read-ahead on at depth
+    `0`.  A handler that consumes is already reading, so it keeps the
+    inline path and pays nothing extra; the reader is only marked
+    *deferred*.  If the handler then goes quiet, the idle watchdog
+    starts the deferred reader, and events keep flowing.  Either way the
+    event fires at read time — the only thing you can observe is that a
+    consuming handler no longer pays for read-ahead it never needed.
 
 ## Next
 

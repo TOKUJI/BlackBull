@@ -98,6 +98,16 @@ def _http_date() -> bytes:
     return _HTTP_DATE
 
 
+def _is_informational(status) -> bool:
+    """True for a 1xx status — a provisional response, not the final one.
+
+    An interim response shares the sender with the final response that must
+    still follow it, so it neither completes the exchange nor commits a
+    status, and it carries no content framing (RFC 9110 §8.6, §15.2).
+    """
+    return int(status) < 200
+
+
 def _has_header(items, name: bytes) -> bool:
     """Case-insensitive membership check over ``(key, value)`` tuples.
 
@@ -546,7 +556,11 @@ class HTTP1Sender(BaseSender):
                     self._log_record.status = int(status)
                     self._log_record.response_bytes += len(body)
                 await self._flush(status, h, body)
-                self._completed = True
+                # An interim (1xx) response does not complete the exchange —
+                # the final response still has to go out on this same sender,
+                # and completing here would drop it.
+                if not _is_informational(status):
+                    self._completed = True
 
             case NativeResponse():
                 # Unified native response (native-ization, Sprint 92): one
@@ -697,7 +711,14 @@ class HTTP1Sender(BaseSender):
         self._head_mode = False
         self._log_record = None
 
-    def _ensure_framing_headers(self, headers: Headers, body_len: int, more_body: bool) -> None:
+    def _ensure_framing_headers(self, status: HTTPStatus, headers: Headers,
+                                body_len: int, more_body: bool) -> None:
+        # RFC 9110 §8.6 / RFC 9112 §6.1 — an informational response MUST NOT
+        # carry Content-Length or Transfer-Encoding.  It has no body, and a
+        # length a proxy believes bounds one desyncs the connection that the
+        # real response still has to use.
+        if _is_informational(status):
+            return
         if more_body:
             if b'transfer-encoding' not in headers:
                 headers.append(b'transfer-encoding', b'chunked')
@@ -716,8 +737,13 @@ class HTTP1Sender(BaseSender):
             headers.append(b'Date', _http_date())
 
     async def _flush(self, status: HTTPStatus, headers: Headers, body: bytes, more_body: bool = False) -> None:
-        self._started = True
-        self._ensure_framing_headers(headers, len(body), more_body)
+        # ``_started`` means the *final* status line is on the wire, which is
+        # what the actor's 408 synthesis consults.  An interim response does
+        # not commit a status, so a request that later times out can still be
+        # answered with 408 (RFC 9110 §15.2 — 1xx is provisional).
+        if not _is_informational(status):
+            self._started = True
+        self._ensure_framing_headers(status, headers, len(body), more_body)
         self._ensure_date_header(headers)
 
         # Coalesce status line + headers + body into a single write so the
@@ -782,7 +808,8 @@ class HTTP1Sender(BaseSender):
         self._started = True
         size = os.path.getsize(path)
         headers = self._buffered_headers
-        self._ensure_framing_headers(headers, size, more_body=False)
+        self._ensure_framing_headers(self._buffered_status, headers, size,
+                                     more_body=False)
         self._ensure_date_header(headers)
 
         head = self._render_start(self._buffered_status, headers)

@@ -1326,14 +1326,6 @@ class HTTP1Actor(Actor):
         """
         import asyncio  # noqa: PLC0415
 
-        # RFC 9110 §10.1.1 / §15.2 — a server MUST NOT send a 1xx
-        # response to an HTTP/1.0 client (COMP-NO-1XX-HTTP10); the
-        # Expect header is ignored and the body read normally.
-        if (conn.http_version != '1.0'
-                and conn.headers.get(b'expect').lower()
-                == b'100-continue'):
-            await send(b'', HTTPStatus.CONTINUE)
-
         # Build the access-log record only when something consumes it
         # (access log / phase trace / request_completed listener). On the
         # baseline hot path — no logging, no listeners — skipping it drops
@@ -1367,6 +1359,23 @@ class HTTP1Actor(Actor):
         # so adding a new per-request slot can't be silently
         # missed at this call site.
         send.reset_per_request_state()
+
+        # RFC 9110 §10.1.1 / §15.2 — a server MUST NOT send a 1xx
+        # response to an HTTP/1.0 client (COMP-NO-1XX-HTTP10); the
+        # Expect header is ignored and the body read normally.
+        #
+        # Emitted *after* the reset: the sender is shared across keep-alive
+        # requests, and its "response already complete" guard is still set
+        # from the previous response until the reset clears it.  Written
+        # before it, the interim response is silently dropped from request
+        # two onward and the peer stalls until its own Expect timeout.
+        # Before ``_log_record`` is attached, too, so the interim status
+        # never lands in the record the real response owns.
+        if (conn.http_version != '1.0'
+                and conn.headers.get(b'expect').lower()
+                == b'100-continue'):
+            await send(b'', HTTPStatus.CONTINUE)
+
         # Inline access-log capture into the sender itself —
         # avoids the per-event coroutine dispatch through a
         # wrapper (which was 622 samples / 7% of CPU in the

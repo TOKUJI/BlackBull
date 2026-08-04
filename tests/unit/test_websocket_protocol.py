@@ -12,7 +12,8 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from blackbull.server.sender import WebSocketSender, AsyncioWriter, AbstractWriter
-from blackbull.server.recipient import WebSocketRecipient, AsyncioReader, AbstractReader
+from blackbull.server.recipient import (WebSocketRecipient, AsyncioReader,
+                                        AbstractReader, ProtocolError)
 from blackbull.server.ws_codec import (encode_frame, encode_frame_header,
                                        read_frame, WSOpcode)
 
@@ -470,7 +471,6 @@ class TestPingPong:
 # Unmasked client frames (P1 item 5)
 # ---------------------------------------------------------------------------
 
-@pytest.mark.asyncio
 class TestUnmaskedFrames:
     """WebSocketRecipient.receive() must reject unmasked client frames.
 
@@ -487,6 +487,9 @@ class TestUnmaskedFrames:
     def _make_handler(self, raw_bytes: bytes):
         return _RecipientWrapper(raw_bytes)
 
+    # Sync on purpose: Hypothesis drives the loop itself via ``asyncio.run``
+    # below, so no ``asyncio`` marker here (one on the class would apply to
+    # this sync test too and pytest-asyncio warns about it).
     @given(opcode=st.sampled_from([0x1, 0x2, 0x8, 0x9]),
            payload=st.binary(max_size=32))
     def test_unmasked_frame_raises_for_any_opcode(self, opcode, payload):
@@ -494,10 +497,14 @@ class TestUnmaskedFrames:
         async def _run():
             handler = self._make_handler(_make_unmasked_frame(payload, opcode=opcode))
             await handler.receive()    # consume websocket.connect
-            with pytest.raises(Exception):
+            # ProtocolError specifically: a bare ``Exception`` would also pass
+            # on an unrelated TypeError from a broken frame path, which is the
+            # opposite of what this pins.
+            with pytest.raises(ProtocolError):
                 await handler.receive()
         asyncio.run(_run())
 
+    @pytest.mark.asyncio
     async def test_masked_frame_still_accepted(self):
         """Properly masked frame must continue to be accepted (regression)."""
         handler = self._make_handler(_make_client_frame(b'hello', opcode=0x1))
@@ -1033,12 +1040,13 @@ class TestReadAheadMode:
         assert event['text'] == 'hello'
 
     @pytest.mark.asyncio
-    async def test_a_websocket_message_listener_forces_read_ahead(self):
+    async def test_a_websocket_message_listener_defers_read_ahead(self):
         """``websocket_message`` fires when the *server* reads, not when the
-        handler calls receive() — so a registered listener must switch read-ahead
-        back on even at depth 0, or a handler that never consumes stops
-        producing events.  Pins the contract that
-        tests/architecture/events/test_websocket_message_event.py states.
+        handler calls receive() — so a handler that never consumes must still
+        produce events.  A listener does not switch read-ahead on at connect,
+        though: that would cost every *consuming* handler the queue handoff.
+        It marks the reader deferred, and the idle watchdog starts it once the
+        app has gone quiet.
         """
         from blackbull.event import EventDispatcher
 
@@ -1060,13 +1068,20 @@ class TestReadAheadMode:
         )
         assert await recipient() == {'type': 'websocket.connect'}
 
-        # ... but the listener forces the reader task on, so the message is
-        # observed without the app ever calling receive() again.
+        # ... and it stays inline: no queue, no reader task, so a consuming
+        # handler keeps driving the wire in its own task.
+        assert recipient._event_queue is None
+        assert recipient._deferred_pending is True
+
+        # The watchdog's tick is what starts the deferred reader; from there
+        # the message is observed without the app ever calling receive().
+        recipient._on_idle_tick()
         for _ in range(10):
             await asyncio.sleep(0)
         assert seen == ['unconsumed'], (
-            'a websocket_message listener did not force read-ahead — the '
-            'event only fires if the server reads ahead of the handler')
+            'the deferred reader did not produce the read-time event — a '
+            'non-consuming handler would silence websocket_message observers')
+        await recipient.shutdown()
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize('depth', [0, 8], ids=['inline', 'eager'])

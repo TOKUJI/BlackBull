@@ -29,6 +29,56 @@ so the editable install's metadata catches up.
 
 ---
 
+## [Unreleased]
+
+### Fixed
+
+- **`Expect: 100-continue` is answered on every request, not just the first
+  on a connection.**  The interim response was written before the shared
+  `HTTP1Sender`'s per-request reset, so its "response already complete" guard
+  — still set from the previous response — dropped it from request two
+  onward, and the peer stalled until its own Expect timeout before sending
+  the body.  An interim response no longer completes the exchange or commits
+  a status, so a request that later times out can still be answered with 408.
+- **A 1xx response no longer carries `Content-Length` or `Transfer-Encoding`**
+  (RFC 9110 §8.6, RFC 9112 §6.1).  An informational response has no body, and
+  a length a proxy believes bounds one desyncs the connection the real
+  response still has to use.
+- **The HTTP/1.1 client reads a body-less response as empty instead of
+  crashing.**  `Headers.get` returns `b''` for a missing field, so the
+  presence test for `Content-Length` was always true and the documented
+  "no `Content-Length` → empty body" branch was unreachable: a 101, 204, or
+  304 raised `ValueError: invalid literal for int() with base 10: b''`.
+  Latent until the 1xx framing fix above stopped the server from padding its
+  own 101 handshake with `Content-Length: 0`.
+- **The deferred WebSocket reader is actually reachable.**  The branch that
+  marked the reader deferred sat behind a condition that could never be true,
+  so a `websocket_message` listener started an eager reader at connect
+  instead — the per-message queue handoff the deferred design exists to avoid,
+  paid by every *consuming* handler.  `start_deferred_reader()`, the idle
+  watchdog's deferred branch, and the `_deferred_pending` gates were all dead
+  code.
+- **WebSocket wire ownership is enforced.**  The flag marking the app as owner
+  of the transport while it drives `receive()` inline was never set, so the
+  idle watchdog could read underneath a handler parked mid-frame and
+  interpret payload bytes as a frame header.  Switching read modes also no
+  longer strands an event the previous mode had buffered.
+
+### Changed
+
+- Registering a `websocket_message` listener no longer forces read-ahead on
+  at `BB_WS_QUEUE_DEPTH=0`.  The event still fires when the server *reads*
+  the message: a consuming handler drives the wire itself, and the idle
+  watchdog starts the deferred reader if the handler goes quiet.  A positive
+  `BB_WS_QUEUE_DEPTH` is unchanged — an explicit opt-in to read-ahead.
+
+### Docs
+
+- WebSocket guide + env-vars reference: the `websocket_message` note now
+  describes the deferred reader instead of forced read-ahead.
+
+---
+
 ## [0.70.0] — 2026-08-04
 
 ### Changed
