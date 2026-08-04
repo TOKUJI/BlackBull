@@ -199,6 +199,37 @@ class Compression:
             cache[accept_header] = result
         return result
 
+    async def _compress(self, compressor: Callable[[bytes], bytes],
+                        body: bytes) -> bytes | None:
+        """Offload *body*'s compression to the executor, honouring the
+        in-flight cap.  Only called when the caller's threshold check says
+        the body crosses ``_executor_threshold`` (below it the caller inlines
+        the synchronous ``compressor(body)`` — no coroutine hop on the
+        common small-body path).  Returns ``None`` when the executor is at
+        cap (the caller serves the body uncompressed).  Shared by the native
+        complete-response path and the ``_dict_event`` lane so the
+        backpressure behaviour is defined once.
+        """
+        # Backpressure: if the executor already has _executor_max_inflight
+        # compressions running, skip this one and serve uncompressed rather
+        # than queueing.  Prevents the unbounded executor backlog that caused
+        # the HttpArena `static` profile to collapse to 0 r/s on run 2 under
+        # c=1024.  Counter increment / decrement is safe without a lock —
+        # asyncio is single-threaded.
+        if (self._executor_max_inflight > 0
+                and self._executor_inflight >= self._executor_max_inflight):
+            log_cap_hit('compression_max_inflight',
+                        requested=self._executor_inflight + 1,
+                        limit=self._executor_max_inflight,
+                        protocol='compression')
+            return None
+        self._executor_inflight += 1
+        try:
+            loop = asyncio.get_running_loop()
+            return await loop.run_in_executor(None, compressor, body)
+        finally:
+            self._executor_inflight -= 1
+
     @staticmethod
     def _vary_ensuring_send(send):
         """Wrap *send* so a compressible, not-yet-encoded ``ResponseStart`` gains
@@ -272,12 +303,75 @@ class Compression:
 
         async def intercepting_send(event):
             nonlocal streaming, skip_compression, start_forwarded
-            # H1 native path: a NativeResponse may carry header + body in one
-            # object — expand to its ASGI event list and process each event
-            # through the sibling ``_dict_event`` (never a self-referential
-            # closure: the v0.60.0 per-request cycle guard reclaims these
-            # adapters by refcounting alone).
+            # H1 native path: a *complete* NativeResponse (header + terminal
+            # body in one object, no trailers) is consumed directly — decide,
+            # compress, and emit **one** NativeResponse downstream, with no
+            # ``to_asgi()`` expansion.  Expanding every request through
+            # ``to_asgi()`` → dict → ``wrap_native_send`` → NativeResponse
+            # round-tripped the exact two-dicts-two-sends cost the native seam
+            # removed (measured regression vs v0.67.0: static −3.4〜−6.4 %,
+            # json-comp −1.2〜−3.2 % on m7a.8xlarge).  Partial / streaming /
+            # trailer shapes and plain dict events keep the ``_dict_event``
+            # lane (behaviour unchanged).
             if isinstance(event, NativeResponse):
+                if (not streaming and not skip_compression
+                        and not start_forwarded
+                        and event._header is not None
+                        and event._body is not None
+                        and not event.more_body
+                        and not event.expects_trailers
+                        and event.trailers is None):
+                    header = event._header
+                    body = event._body
+                    if _is_compressible_content_type(Headers(header)):
+                        if not any(k.lower() == b'content-encoding'
+                                   for k, _ in header):
+                            # Compressible + not pre-encoded: stamp Vary now
+                            # (in place, zero-copy) so every exit path —
+                            # compressed, too-small, executor-at-cap — is
+                            # cache-keyed on Accept-Encoding (mirrors the
+                            # ``_dict_event`` decision point).
+                            _merge_vary(header)
+                            if len(body) >= self._min_size:
+                                threshold = self._executor_threshold
+                                if threshold > 0 and len(body) >= threshold:
+                                    compressed = await self._compress(
+                                        compressor, body)
+                                else:
+                                    # Below the offload threshold: compress
+                                    # synchronously on the loop — no
+                                    # coroutine hop on the common
+                                    # small-body (json-comp) range.
+                                    compressed = compressor(body)
+                                if compressed is not None:
+                                    # The compressed body is a different size;
+                                    # strip any upstream content-length and
+                                    # replace it with the post-compression
+                                    # length (keeps H1 keepalive framing and
+                                    # strict H2 clients correct).
+                                    existing = [
+                                        (k, v) for k, v in header
+                                        if k.lower() != b'content-length']
+                                    existing.append(
+                                        (b'content-encoding',
+                                         codec_name.encode()))
+                                    existing.append(
+                                        (b'content-length',
+                                         str(len(compressed)).encode()))
+                                    _merge_vary(existing)
+                                    await send(NativeResponse(
+                                        status=event.status,
+                                        header=existing,
+                                        body=compressed))
+                                    start_forwarded = True
+                                    return
+                    # Uncompressed forward: pre-encoded / non-compressible /
+                    # too-small / executor-at-cap.  Vary is already stamped on
+                    # *header* when this response was compressible + unencoded,
+                    # so the verbatim object carries the correct cache key.
+                    await send(event)
+                    start_forwarded = True
+                    return
                 for ev in event.to_asgi():
                     await _dict_event(ev)
                 return
@@ -369,30 +463,16 @@ class Compression:
 
         threshold = self._executor_threshold
         if threshold > 0 and len(body) >= threshold:
-            # Backpressure: if the executor already has _executor_max_inflight
-            # compressions running, skip this one and serve uncompressed
-            # rather than queueing.  Prevents the unbounded executor backlog
-            # that caused the HttpArena `static` profile to collapse to 0 r/s
-            # on run 2 under c=1024.  Counter increment / decrement
-            # is safe without a lock — asyncio is single-threaded.
-            if (self._executor_max_inflight > 0
-                    and self._executor_inflight >= self._executor_max_inflight):
-                log_cap_hit('compression_max_inflight',
-                            requested=self._executor_inflight + 1,
-                            limit=self._executor_max_inflight,
-                            protocol='compression')
-                await send(start_event)
-                await send({'type': ASGIEvent.HTTP_RESPONSE_BODY,
-                            'body': body, 'more_body': False})
-                return
-            self._executor_inflight += 1
-            try:
-                loop = asyncio.get_running_loop()
-                compressed = await loop.run_in_executor(None, compressor, body)
-            finally:
-                self._executor_inflight -= 1
+            compressed = await self._compress(compressor, body)
         else:
             compressed = compressor(body)
+        if compressed is None:
+            # Executor at cap — serve uncompressed (Vary already stamped at
+            # the decision point on the buffered start event).
+            await send(start_event)
+            await send({'type': ASGIEvent.HTTP_RESPONSE_BODY,
+                        'body': body, 'more_body': False})
+            return
         # The compressed body is a different size; strip any upstream
         # content-length and replace it with the post-compression length.
         # Leaving the original value behind breaks HTTP/1.1 keepalive

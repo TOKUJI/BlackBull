@@ -303,3 +303,144 @@ async def test_codec_selection_cache_bounded():
         mw._select_codec(f'gzip;q=0.{i:03d}'.encode())
     assert len(mw._codec_cache) <= 256, \
         f'cache exceeded bound: {len(mw._codec_cache)}'
+
+
+# ---------------------------------------------------------------------------
+# Native complete-response path (Sprint 94 — native 直結化)
+# ---------------------------------------------------------------------------
+
+def _make_native_handler(body: bytes, content_type: bytes = b'text/plain',
+                         content_encoding: bytes | None = None):
+    """Build a fake inner handler that yields ONE complete
+    ``NativeResponse`` (header + terminal body in one object) — the exact
+    shape the router emits on the native H1 path (``Response.to_native()``).
+
+    ``intercepting_send`` must consume this object directly (no
+    ``to_asgi()`` expansion) — that is the regression fix under test.
+    """
+    from blackbull.native import NativeResponse
+
+    headers = [(b'content-type', content_type)]
+    if content_encoding is not None:
+        headers.append((b'content-encoding', content_encoding))
+    headers.append((b'content-length', str(len(body)).encode()))
+
+    async def handler(scope, receive, send):
+        await send(NativeResponse(status=200, header=headers, body=body))
+
+    return handler
+
+
+async def _run_native_through(mw, body: bytes, accept: bytes = b'gzip',
+                              content_type: bytes = b'text/plain',
+                              content_encoding: bytes | None = None) -> list:
+    """Run *mw* with a complete-NativeResponse inner handler; return the raw
+    downstream event list (asserted to be exactly one NativeResponse)."""
+    from blackbull.native import NativeResponse
+
+    events: list = []
+
+    async def send(event) -> None:
+        events.append(event)
+
+    handler = _make_native_handler(body, content_type, content_encoding)
+
+    async def call_next(scope, receive, send):
+        await handler(scope, receive, send)
+
+    await mw(_scope(accept), _noop_receive, send, call_next)
+    return events
+
+
+@pytest.mark.asyncio
+async def test_native_complete_response_emits_one_native_response():
+    """The complete-NativeResponse path consumes the object directly: the
+    downstream send receives exactly ONE ``NativeResponse`` — not the two
+    ASGI dicts a ``to_asgi()`` expansion would emit.  Compressed body with
+    content-encoding, rewritten content-length, and Vary.
+
+    This is the Sprint 94 regression pin: expanding through ``to_asgi()``
+    round-tripped NR → dict → NR on every request (static −3.4〜−6.4 %,
+    json-comp −1.2〜−3.2 % vs v0.67.0)."""
+    from blackbull.native import NativeResponse
+
+    mw = Compression()
+    body = b'hello world, hello world ' * 30   # ~660 B, > min_size
+    events = await _run_native_through(mw, body, accept=b'gzip')
+
+    assert len(events) == 1, \
+        f'expected exactly 1 downstream object, got {len(events)}'
+    assert isinstance(events[0], NativeResponse), \
+        f'expected a NativeResponse, got {type(events[0])!r}'
+    nr = events[0]
+    assert nr._body != body            # compressed
+    assert gzip.decompress(nr._body) == body
+    hdrs = dict(nr._header)
+    assert hdrs[b'content-encoding'] == b'gzip'
+    assert hdrs[b'content-length'] == str(len(nr._body)).encode()
+    assert b'accept-encoding' in hdrs.get(b'vary', b'').lower()
+
+
+@pytest.mark.asyncio
+async def test_native_complete_pre_encoded_passes_through():
+    """A pre-encoded complete NativeResponse (the static-asset case —
+    StaticFiles serving a precompressed sibling) passes through verbatim:
+    one object, no re-compression, no Vary stamp."""
+    from blackbull.native import NativeResponse
+
+    mw = Compression()
+    body = b'BR-COMPRESSED-BYTES'
+    events = await _run_native_through(
+        mw, body, accept=b'br, gzip', content_encoding=b'br')
+
+    assert len(events) == 1
+    assert isinstance(events[0], NativeResponse)
+    nr = events[0]
+    assert nr._body == body            # verbatim — no double-wrap
+    hdrs = dict(nr._header)
+    assert hdrs[b'content-encoding'] == b'br'
+    assert b'vary' not in hdrs         # pre-encoded → no Vary stamp
+
+
+@pytest.mark.asyncio
+async def test_native_complete_small_body_uncompressed_with_vary():
+    """A compressible but below-min-size complete NativeResponse passes
+    through uncompressed, yet still carries Vary: Accept-Encoding — the
+    shared-cache correctness the decision-point stamp guarantees."""
+    from blackbull.native import NativeResponse
+
+    mw = Compression()
+    body = b'tiny'                     # < _MIN_SIZE (100)
+    events = await _run_native_through(mw, body, accept=b'gzip')
+
+    assert len(events) == 1
+    assert isinstance(events[0], NativeResponse)
+    nr = events[0]
+    assert nr._body == body            # uncompressed
+    assert dict(nr._header).get(b'content-encoding') is None
+    assert b'accept-encoding' in dict(nr._header).get(b'vary', b'').lower()
+
+
+@pytest.mark.asyncio
+async def test_native_complete_at_cap_serves_uncompressed_with_vary():
+    """The native executor-at-cap exit: when ``_executor_inflight`` is already
+    at the cap, a complete compressible NativeResponse is served uncompressed
+    (one object, no content-encoding, content-length untouched) — but Vary is
+    still stamped, because the decision-point stamp precedes the backpressure
+    check.  Pins the 'every exit path carries the cache key' invariant on the
+    native lane."""
+    from blackbull.native import NativeResponse
+
+    mw = Compression(executor_max_inflight=1)
+    mw._executor_inflight = 1          # full pool → backpressure kicks in
+    body = b'lorem ipsum dolor sit amet ' * 4000   # ~104 KB, > threshold
+    events = await _run_native_through(mw, body, accept=b'gzip')
+
+    assert len(events) == 1
+    assert isinstance(events[0], NativeResponse)
+    nr = events[0]
+    assert nr._body == body            # verbatim — uncompressed
+    hdrs = dict(nr._header)
+    assert b'content-encoding' not in hdrs
+    assert hdrs[b'content-length'] == str(len(body)).encode()
+    assert b'accept-encoding' in hdrs.get(b'vary', b'').lower()
