@@ -183,7 +183,11 @@ start_server() {
             >"$OUTDIR/server.log" 2>&1 &
     SERVER_PID=$!
     for _ in $(seq 1 60); do
-        if curl -s --max-time 2 "$BASE_URL$URL_PATH" 2>/dev/null | grep -q Hello; then
+        # Accept any HTTP 200 — the old `grep -q Hello` body probe only
+        # matched /plaintext-style responses and failed binary/compressed
+        # lanes (/preencoded, /1kb) with "server not ready".
+        if curl -s -o /dev/null --max-time 2 -w '%{http_code}' \
+                "$BASE_URL$URL_PATH" 2>/dev/null | grep -q '^200'; then
             return 0
         fi
         sleep 0.5
