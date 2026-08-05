@@ -5167,8 +5167,8 @@ upgrades, and Server-Sent Events all work through this topology.</p>
 <span class="p">}</span>
 </code></pre></div>
 <h2 id="trusted-proxy-headers">Trusted-proxy headers<a class="headerlink" href="#trusted-proxy-headers" title="Permanent link">&para;</a></h2>
-<p>By default, <code>scope['client']</code> is the raw TCP peer (nginx's
-loopback address) and <code>scope['scheme']</code> is <code>'http'</code> even when
+<p>By default, <code>conn.client</code> is the raw TCP peer (nginx's
+loopback address) and <code>conn.scheme</code> is <code>'http'</code> even when
 the client connected via HTTPS.  Enable <code>TrustedProxy</code> to
 rewrite both from the proxy's forwarded headers:</p>
 <div class="highlight"><pre><span></span><code><span class="c1"># Shortcut on BlackBull — registers TrustedProxy automatically</span>
@@ -5189,12 +5189,12 @@ rewrite both from the proxy's forwarded headers:</p>
 </thead>
 <tbody>
 <tr>
-<td><code>scope['client']</code></td>
+<td><code>conn.client</code></td>
 <td>nginx's loopback IP</td>
 <td>real client IP (from <code>X-Forwarded-For</code>)</td>
 </tr>
 <tr>
-<td><code>scope['scheme']</code></td>
+<td><code>conn.scheme</code></td>
 <td><code>'http'</code></td>
 <td><code>'https'</code> (from <code>X-Forwarded-Proto</code>)</td>
 </tr>

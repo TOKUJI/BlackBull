@@ -5513,7 +5513,7 @@ inner handler can skip that boilerplate:</p>
 <div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">blackbull.middleware</span><span class="w"> </span><span class="kn">import</span> <span class="n">websocket</span>
 
 <span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">&#39;/chat&#39;</span><span class="p">,</span> <span class="n">scheme</span><span class="o">=</span><span class="n">Scheme</span><span class="o">.</span><span class="n">websocket</span><span class="p">,</span> <span class="n">middlewares</span><span class="o">=</span><span class="p">[</span><span class="n">websocket</span><span class="p">])</span>
-<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">chat</span><span class="p">(</span><span class="n">scope</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">chat</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
     <span class="c1"># Connection already accepted; go straight to reading messages</span>
     <span class="k">while</span> <span class="kc">True</span><span class="p">:</span>
         <span class="n">event</span> <span class="o">=</span> <span class="k">await</span> <span class="n">receive</span><span class="p">()</span>
@@ -5758,13 +5758,17 @@ queue fills, the read loop blocks rather than buffering without bound.</p>
 need keepalive <code>ping</code>s answered during it.  A handler that loops
 tightly on <code>receive()</code> — the common shape — wants the default.</p>
 <div class="admonition note">
-<p class="admonition-title"><code>websocket_message</code> forces read-ahead</p>
+<p class="admonition-title"><code>websocket_message</code> and the deferred reader</p>
 <p>The <a href="../events/"><code>websocket_message</code></a> event fires when the <em>server</em>
 reads a message, not when your handler consumes it, so a handler
-that never calls <code>receive()</code> still produces events.  That is only
-possible with a reader running ahead of the handler, so registering
-a <code>websocket_message</code> listener switches read-ahead on even at depth
-<code>0</code>.  Nothing else observes the difference between the two modes.</p>
+that never calls <code>receive()</code> still produces events.</p>
+<p>Registering a listener does <strong>not</strong> switch read-ahead on at depth
+<code>0</code>.  A handler that consumes is already reading, so it keeps the
+inline path and pays nothing extra; the reader is only marked
+<em>deferred</em>.  If the handler then goes quiet, the idle watchdog
+starts the deferred reader, and events keep flowing.  Either way the
+event fires at read time — the only thing you can observe is that a
+consuming handler no longer pays for read-ahead it never needed.</p>
 </div>
 <h2 id="next">Next<a class="headerlink" href="#next" title="Permanent link">&para;</a></h2>
 <ul>

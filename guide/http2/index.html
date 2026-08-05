@@ -749,10 +749,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#what-lands-on-scope" class="md-nav__link">
+  <a href="#what-lands-on-the-connection" class="md-nav__link">
     <span class="md-ellipsis">
       
-        What lands on scope
+        What lands on the Connection
       
     </span>
   </a>
@@ -5145,10 +5145,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#what-lands-on-scope" class="md-nav__link">
+  <a href="#what-lands-on-the-connection" class="md-nav__link">
     <span class="md-ellipsis">
       
-        What lands on scope
+        What lands on the Connection
       
     </span>
   </a>
@@ -5362,13 +5362,13 @@ the protocol detector sniff the connection preface:</p>
 <h2 id="priority-hints">Priority hints<a class="headerlink" href="#priority-hints" title="Permanent link">&para;</a></h2>
 <p>HTTP/2 lets a client tell the server which of its outstanding
 requests is more important.  BlackBull surfaces the hint on the
-scope so your app can act on it.</p>
-<h3 id="what-lands-on-scope">What lands on <code>scope</code><a class="headerlink" href="#what-lands-on-scope" title="Permanent link">&para;</a></h3>
-<p>Every HTTP/2 request scope advertises the priority hint via the
+the <code>Connection</code> so your app can act on it.</p>
+<h3 id="what-lands-on-the-connection">What lands on the <code>Connection</code><a class="headerlink" href="#what-lands-on-the-connection" title="Permanent link">&para;</a></h3>
+<p>Every HTTP/2 request advertises the priority hint via the
 <code>http.response.priority</code> ASGI extension (matches gunicorn's beta
 HTTP/2 key shape; the <em>contents</em> are RFC 9218 urgency/incremental,
 not the deprecated RFC 7540 weight/tree):</p>
-<div class="highlight"><pre><span></span><code><span class="n">scope</span><span class="p">[</span><span class="s1">&#39;extensions&#39;</span><span class="p">][</span><span class="s1">&#39;http.response.priority&#39;</span><span class="p">]</span>
+<div class="highlight"><pre><span></span><code><span class="n">conn</span><span class="o">.</span><span class="n">extensions</span><span class="p">[</span><span class="s1">&#39;http.response.priority&#39;</span><span class="p">]</span>
 <span class="c1"># → {&#39;urgency&#39;: int, &#39;incremental&#39;: bool}</span>
 </code></pre></div>
 <table>
@@ -5408,9 +5408,8 @@ not the deprecated RFC 7540 weight/tree):</p>
 <div class="highlight"><pre><span></span><code><span class="n">_DEFAULT_PRIORITY</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;urgency&#39;</span><span class="p">:</span> <span class="mi">3</span><span class="p">,</span> <span class="s1">&#39;incremental&#39;</span><span class="p">:</span> <span class="kc">False</span><span class="p">}</span>
 
 <span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">&#39;/search&#39;</span><span class="p">)</span>
-<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">search</span><span class="p">(</span><span class="n">scope</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
-    <span class="n">ext</span> <span class="o">=</span> <span class="n">scope</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;extensions&#39;</span><span class="p">)</span> <span class="ow">or</span> <span class="p">{}</span>
-    <span class="n">hint</span> <span class="o">=</span> <span class="n">ext</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;http.response.priority&#39;</span><span class="p">,</span> <span class="n">_DEFAULT_PRIORITY</span><span class="p">)</span>
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">search</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
+    <span class="n">hint</span> <span class="o">=</span> <span class="n">conn</span><span class="o">.</span><span class="n">extensions</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;http.response.priority&#39;</span><span class="p">,</span> <span class="n">_DEFAULT_PRIORITY</span><span class="p">)</span>
     <span class="k">if</span> <span class="n">hint</span><span class="p">[</span><span class="s1">&#39;urgency&#39;</span><span class="p">]</span> <span class="o">&lt;=</span> <span class="mi">2</span><span class="p">:</span>
         <span class="c1"># High-urgency: return cached / pre-computed result immediately</span>
         <span class="n">result</span> <span class="o">=</span> <span class="n">get_cached_result</span><span class="p">()</span>
@@ -5422,9 +5421,9 @@ not the deprecated RFC 7540 weight/tree):</p>
 <h3 id="across-every-route-via-an-interceptor">Across every route, via an interceptor<a class="headerlink" href="#across-every-route-via-an-interceptor" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">intercept</span><span class="p">(</span><span class="s1">&#39;before_handler&#39;</span><span class="p">)</span>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">handle_priority</span><span class="p">(</span><span class="n">event</span><span class="p">):</span>
-    <span class="n">scope</span> <span class="o">=</span> <span class="n">event</span><span class="o">.</span><span class="n">detail</span><span class="p">[</span><span class="s1">&#39;conn&#39;</span><span class="p">]</span>
-    <span class="n">ext</span> <span class="o">=</span> <span class="n">scope</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;extensions&#39;</span><span class="p">)</span> <span class="ow">or</span> <span class="p">{}</span>
-    <span class="n">hint</span> <span class="o">=</span> <span class="n">ext</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;http.response.priority&#39;</span><span class="p">,</span> <span class="p">{</span><span class="s1">&#39;urgency&#39;</span><span class="p">:</span> <span class="mi">3</span><span class="p">,</span> <span class="s1">&#39;incremental&#39;</span><span class="p">:</span> <span class="kc">False</span><span class="p">})</span>
+    <span class="n">conn</span> <span class="o">=</span> <span class="n">event</span><span class="o">.</span><span class="n">detail</span><span class="p">[</span><span class="s1">&#39;conn&#39;</span><span class="p">]</span>
+    <span class="n">hint</span> <span class="o">=</span> <span class="n">conn</span><span class="o">.</span><span class="n">extensions</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;http.response.priority&#39;</span><span class="p">,</span>
+                                <span class="p">{</span><span class="s1">&#39;urgency&#39;</span><span class="p">:</span> <span class="mi">3</span><span class="p">,</span> <span class="s1">&#39;incremental&#39;</span><span class="p">:</span> <span class="kc">False</span><span class="p">})</span>
     <span class="k">if</span> <span class="n">hint</span><span class="p">[</span><span class="s1">&#39;urgency&#39;</span><span class="p">]</span> <span class="o">&lt;=</span> <span class="mi">1</span><span class="p">:</span>
         <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;HIGH-PRIORITY u=</span><span class="si">%d</span><span class="s1">: </span><span class="si">%s</span><span class="s1"> </span><span class="si">%s</span><span class="s1">&#39;</span><span class="p">,</span>
                     <span class="n">hint</span><span class="p">[</span><span class="s1">&#39;urgency&#39;</span><span class="p">],</span> <span class="n">event</span><span class="o">.</span><span class="n">detail</span><span class="p">[</span><span class="s1">&#39;method&#39;</span><span class="p">],</span> <span class="n">event</span><span class="o">.</span><span class="n">detail</span><span class="p">[</span><span class="s1">&#39;path&#39;</span><span class="p">])</span>
@@ -5432,25 +5431,24 @@ not the deprecated RFC 7540 weight/tree):</p>
 <h3 id="migrating-from-scopehttp2_priority-pre-v031">Migrating from <code>scope['http2_priority']</code> (pre-v0.31)<a class="headerlink" href="#migrating-from-scopehttp2_priority-pre-v031" title="Permanent link">&para;</a></h3>
 <p>Earlier BlackBull releases exposed priority as a top-level scope
 key, <code>scope['http2_priority']</code>.  v0.31 moved it under
-<code>scope['extensions']</code> to match ASGI conventions and align the key
+<code>conn.extensions</code> to match ASGI conventions and align the key
 name with gunicorn's beta HTTP/2 surface.  The legacy key is still
 populated alongside the new extension during the v0.31 cycle and
 is scheduled for removal in v0.32.0.</p>
 <p>To migrate, replace:</p>
-<div class="highlight"><pre><span></span><code><span class="n">hint</span> <span class="o">=</span> <span class="n">scope</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;http2_priority&#39;</span><span class="p">,</span> <span class="n">DEFAULT</span><span class="p">)</span>            <span class="c1"># legacy</span>
+<div class="highlight"><pre><span></span><code><span class="n">hint</span> <span class="o">=</span> <span class="n">scope</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;http2_priority&#39;</span><span class="p">,</span> <span class="n">DEFAULT</span><span class="p">)</span>            <span class="c1"># legacy (pre-v0.31)</span>
 </code></pre></div>
 <p>with:</p>
-<div class="highlight"><pre><span></span><code><span class="n">ext</span> <span class="o">=</span> <span class="n">scope</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;extensions&#39;</span><span class="p">)</span> <span class="ow">or</span> <span class="p">{}</span>
-<span class="n">hint</span> <span class="o">=</span> <span class="n">ext</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;http.response.priority&#39;</span><span class="p">,</span> <span class="n">DEFAULT</span><span class="p">)</span>       <span class="c1"># v0.31+</span>
+<div class="highlight"><pre><span></span><code><span class="n">hint</span> <span class="o">=</span> <span class="n">conn</span><span class="o">.</span><span class="n">extensions</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;http.response.priority&#39;</span><span class="p">,</span> <span class="n">DEFAULT</span><span class="p">)</span>   <span class="c1"># v0.31+</span>
 </code></pre></div>
 <p>The dict shape (<code>{'urgency': int, 'incremental': bool}</code>) is
 unchanged.</p>
 <h3 id="http2-stream-info-grpc-foundation">HTTP/2 stream info (gRPC foundation)<a class="headerlink" href="#http2-stream-info-grpc-foundation" title="Permanent link">&para;</a></h3>
 <p>Alongside the priority extension, v0.31 adds
-<code>scope['extensions']['http.response.http2_stream']</code> — a snapshot of
+<code>conn.extensions['http.response.http2_stream']</code> — a snapshot of
 the HTTP/2 stream identity and send-flow-control credit at request
 entry:</p>
-<div class="highlight"><pre><span></span><code><span class="n">scope</span><span class="p">[</span><span class="s1">&#39;extensions&#39;</span><span class="p">][</span><span class="s1">&#39;http.response.http2_stream&#39;</span><span class="p">]</span>
+<div class="highlight"><pre><span></span><code><span class="n">conn</span><span class="o">.</span><span class="n">extensions</span><span class="p">[</span><span class="s1">&#39;http.response.http2_stream&#39;</span><span class="p">]</span>
 <span class="c1"># → {&#39;stream_id&#39;: int, &#39;send_window_remaining&#39;: int,</span>
 <span class="c1">#    &#39;connection_send_window_remaining&#39;: int}</span>
 </code></pre></div>
@@ -5476,7 +5474,7 @@ entry:</p>
 </tr>
 </tbody>
 </table>
-<p>The window values are snapshots taken at scope-build time; they
+<p>The window values are snapshots taken when the <code>Connection</code> is built; they
 move as the response body streams.  Applications that need
 live readings (e.g. gRPC server-streaming back-pressure) can
 re-read the dict, though they will see the snapshot value unless
@@ -5519,7 +5517,7 @@ saving one round-trip.</p>
 <p>The app signals a push by calling <code>send</code> with an
 <code>http.response.push</code> event before the final <code>http.response.body</code>:</p>
 <div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">&#39;/&#39;</span><span class="p">)</span>
-<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">index</span><span class="p">(</span><span class="n">scope</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">index</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
     <span class="c1"># Push a stylesheet before sending the HTML.</span>
     <span class="k">await</span> <span class="n">send</span><span class="p">({</span>
         <span class="s1">&#39;type&#39;</span><span class="p">:</span> <span class="s1">&#39;http.response.push&#39;</span><span class="p">,</span>
@@ -5542,19 +5540,19 @@ automatically — do not include them in <code>headers</code>.</p>
 <li>Sends a <code>PUSH_PROMISE</code> frame on the parent stream.  The frame
    contains the synthetic request headers (<code>GET /static/style.css</code>)
    the client can use to match its cache.</li>
-<li>Creates a synthetic scope (<code>type='http'</code>, <code>method='GET'</code>,
+<li>Creates a synthetic <code>Connection</code> (<code>type='http'</code>, <code>method='GET'</code>,
    <code>path='/static/style.css'</code>) and dispatches it to your app as
    a new task on the promised stream.  Your app handles the
    pushed request exactly like a normal GET — same route, same
    middleware, same response cycle.</li>
 </ol>
 <h3 id="checking-for-support">Checking for support<a class="headerlink" href="#checking-for-support" title="Permanent link">&para;</a></h3>
-<p>The server advertises push support in <code>scope['extensions']</code>:</p>
-<div class="highlight"><pre><span></span><code><span class="k">if</span> <span class="s1">&#39;http.response.push&#39;</span> <span class="ow">in</span> <span class="n">scope</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;extensions&#39;</span><span class="p">,</span> <span class="p">{}):</span>
+<p>The server advertises push support in <code>conn.extensions</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="k">if</span> <span class="s1">&#39;http.response.push&#39;</span> <span class="ow">in</span> <span class="n">conn</span><span class="o">.</span><span class="n">extensions</span><span class="p">:</span>
     <span class="k">await</span> <span class="n">send</span><span class="p">({</span><span class="s1">&#39;type&#39;</span><span class="p">:</span> <span class="s1">&#39;http.response.push&#39;</span><span class="p">,</span>
                 <span class="s1">&#39;path&#39;</span><span class="p">:</span> <span class="s1">&#39;/logo.png&#39;</span><span class="p">,</span> <span class="s1">&#39;headers&#39;</span><span class="p">:</span> <span class="p">[]})</span>
 </code></pre></div>
-<p>For HTTP/1.1 requests <code>scope['extensions']</code> does not contain
+<p>For HTTP/1.1 requests <code>conn.extensions</code> does not contain
 <code>'http.response.push'</code>, so the guard above keeps the same handler
 working on both protocols.</p>
 <h3 id="caveats">Caveats<a class="headerlink" href="#caveats" title="Permanent link">&para;</a></h3>

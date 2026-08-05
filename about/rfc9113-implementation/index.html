@@ -5411,7 +5411,7 @@ BlackBull does not build the tree; it accepts PRIORITY frames and translates
 them, plus RFC 9218 <code>PRIORITY_UPDATE</code>, into a simple
 <code>{'urgency', 'incremental'}</code> hint (built by <code>_resolve_priority() in
 http2_actor.py</code> / <code>_build_h2_extensions() in http2_actor.py</code>) exposed at
-<code>scope['extensions']['http.response.priority']</code>.  <em>Because</em> the tree was
+<code>conn.extensions['http.response.priority']</code>.  <em>Because</em> the tree was
 unimplementable interoperably — RFC 9113 itself removed it, and modern clients
 send RFC 9218 urgency signals instead.  (Background: §5.3.1.)</p>
 <p><strong>§5.4 Error Handling</strong> ✅ — <em>this is where the actor model earns its place.</em>
@@ -5625,7 +5625,7 @@ parser.py</code> (v0.54.0): an <code>http(s)</code> request carrying neither <co
 <code>Host</code> is malformed, as is an authority containing userinfo, RFC 3986 §3.2
 delimiters, or whitespace (the same grammar HTTP/1.1 enforces on <code>Host</code>);
 multiple <code>Host</code> fields without <code>:authority</code> are likewise rejected.  A valid
-<code>:authority</code> is mapped into <code>scope['headers']</code> as the <code>host</code> header,
+<code>:authority</code> is mapped into <code>conn.headers</code> as the <code>host</code> header,
 replacing any literal <code>Host</code> — the ASGI host mapping, mirroring H1's
 absolute-form-overrides-Host semantics — on both the request path and the
 RFC 8441 Extended CONNECT path, so <code>HTTP2Actor._handle_push()</code> synthesises

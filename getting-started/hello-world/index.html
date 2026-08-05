@@ -420,22 +420,22 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#the-asgi-triplet" class="md-nav__link">
+  <a href="#the-full-triplet" class="md-nav__link">
     <span class="md-ellipsis">
       
-        The ASGI triplet
+        The full triplet
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="The ASGI triplet">
+    <nav class="md-nav" aria-label="The full triplet">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#common-scope-keys" class="md-nav__link">
+  <a href="#whats-on-the-connection" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Common scope keys
+        What's on the Connection
       
     </span>
   </a>
@@ -4984,22 +4984,22 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#the-asgi-triplet" class="md-nav__link">
+  <a href="#the-full-triplet" class="md-nav__link">
     <span class="md-ellipsis">
       
-        The ASGI triplet
+        The full triplet
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="The ASGI triplet">
+    <nav class="md-nav" aria-label="The full triplet">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#common-scope-keys" class="md-nav__link">
+  <a href="#whats-on-the-connection" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Common scope keys
+        What's on the Connection
       
     </span>
   </a>
@@ -5071,7 +5071,7 @@
 <span class="n">app</span> <span class="o">=</span> <span class="n">BlackBull</span><span class="p">()</span>
 
 <span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">&#39;/&#39;</span><span class="p">)</span>
-<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">hello</span><span class="p">(</span><span class="n">scope</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">hello</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
     <span class="k">await</span> <span class="n">send</span><span class="p">(</span><span class="n">Response</span><span class="p">(</span><span class="sa">b</span><span class="s1">&#39;Hello, world!&#39;</span><span class="p">))</span>
 
 <span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s1">&#39;__main__&#39;</span><span class="p">:</span>
@@ -5087,7 +5087,7 @@ Hello,<span class="w"> </span>world!
 <p>That's a complete server: an HTTP/1.1 listener bound on
 <code>127.0.0.1:8000</code> with one route registered.  No external server
 process and no separate framework package — <code>BlackBull</code> is both.</p>
-<h2 id="the-asgi-triplet">The ASGI triplet<a class="headerlink" href="#the-asgi-triplet" title="Permanent link">&para;</a></h2>
+<h2 id="the-full-triplet">The full triplet<a class="headerlink" href="#the-full-triplet" title="Permanent link">&para;</a></h2>
 <p>Every HTTP handler receives three arguments:</p>
 <table>
 <thead>
@@ -5099,9 +5099,9 @@ process and no separate framework package — <code>BlackBull</code> is both.</p
 </thead>
 <tbody>
 <tr>
-<td><code>scope</code></td>
-<td><code>dict</code></td>
-<td>Request metadata (method, path, headers, query string, …)</td>
+<td><code>conn</code></td>
+<td><code>Connection</code></td>
+<td>The parsed request — method, path, headers, query string, …</td>
 </tr>
 <tr>
 <td><code>receive</code></td>
@@ -5115,57 +5115,79 @@ process and no separate framework package — <code>BlackBull</code> is both.</p
 </tr>
 </tbody>
 </table>
-<p><code>send</code> accepts either a <code>Response</code> object (as above) or raw ASGI
-event dicts; both forms work and can be mixed in the same handler.</p>
-<h3 id="common-scope-keys">Common scope keys<a class="headerlink" href="#common-scope-keys" title="Permanent link">&para;</a></h3>
+<p><code>send</code> accepts a <code>Response</code> object (as above), a <code>NativeResponse</code>, or
+raw ASGI event dicts; all three work and can be mixed in the same
+handler.</p>
+<div class="admonition note">
+<p class="admonition-title"><code>Connection</code>, not a scope dict</p>
+<p>BlackBull threads a typed <code>Connection</code> end to end.  It is <strong>not</strong>
+subscriptable — <code>conn['headers']</code> raises <code>TypeError</code>.  An ASGI
+scope dict appears only where BlackBull meets something that speaks
+ASGI: an external host such as uvicorn, <code>BB_FORCE_ASGI_SCOPE=1</code>, or
+a middleware that asks for one by naming its first parameter
+<code>scope</code> (see <a href="../../guide/middleware/">Middleware</a>).</p>
+</div>
+<h3 id="whats-on-the-connection">What's on the <code>Connection</code><a class="headerlink" href="#whats-on-the-connection" title="Permanent link">&para;</a></h3>
 <table>
 <thead>
 <tr>
-<th>Key</th>
+<th>Attribute</th>
 <th>Type</th>
 <th>Notes</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td><code>scope['type']</code></td>
+<td><code>conn.type</code></td>
 <td><code>str</code></td>
 <td><code>'http'</code> or <code>'websocket'</code></td>
 </tr>
 <tr>
-<td><code>scope['method']</code></td>
+<td><code>conn.method</code></td>
 <td><code>str</code></td>
 <td><code>'GET'</code>, <code>'POST'</code>, …</td>
 </tr>
 <tr>
-<td><code>scope['path']</code></td>
+<td><code>conn.path</code></td>
 <td><code>str</code></td>
 <td>URL path, e.g. <code>'/tasks/42'</code></td>
 </tr>
 <tr>
-<td><code>scope['headers']</code></td>
+<td><code>conn.headers</code></td>
 <td><code>Headers</code></td>
 <td>Case-insensitive multi-valued header store</td>
 </tr>
 <tr>
-<td><code>scope['query_string']</code></td>
+<td><code>conn.query_string</code></td>
 <td><code>bytes</code></td>
 <td>Raw query string, parse with <code>urllib.parse.parse_qs</code></td>
 </tr>
 <tr>
-<td><code>scope['path_params']</code></td>
+<td><code>conn.path_params</code></td>
 <td><code>dict</code></td>
 <td>Values captured from <code>{name}</code> segments</td>
 </tr>
 <tr>
-<td><code>scope['state']</code></td>
+<td><code>conn.state</code></td>
 <td><code>dict</code></td>
-<td>Framework-managed per-request scratch space</td>
+<td>Per-request scratch space, shared by every layer</td>
+</tr>
+<tr>
+<td><code>await conn.body()</code></td>
+<td><code>bytes</code></td>
+<td>The complete request body</td>
+</tr>
+<tr>
+<td><code>conn.stream()</code></td>
+<td>async iterator</td>
+<td>The body one chunk at a time</td>
 </tr>
 </tbody>
 </table>
-<p>Middleware may add more keys — typical custom additions are
-<code>scope['user']</code> (auth result), <code>scope['json']</code> (parsed body).</p>
+<p>Middleware passes values to inner layers through <code>conn.state</code> —
+typical additions are <code>conn.state['user']</code> (auth result) and
+<code>conn.state['json']</code> (parsed body).  Setting an attribute or a
+top-level key instead does <strong>not</strong> reach the handler.</p>
 <h2 id="what-response-does">What <code>Response</code> does<a class="headerlink" href="#what-response-does" title="Permanent link">&para;</a></h2>
 <p><code>Response(b'Hello, world!')</code> constructs a response object with a
 sensible default <code>Content-Type</code> (<code>text/html; charset=utf-8</code>) and
@@ -5177,11 +5199,11 @@ override:</p>
 <div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">blackbull</span><span class="w"> </span><span class="kn">import</span> <span class="n">JSONResponse</span>
 
 <span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">&#39;/health&#39;</span><span class="p">)</span>
-<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">health</span><span class="p">(</span><span class="n">scope</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">health</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
     <span class="k">await</span> <span class="n">send</span><span class="p">(</span><span class="n">JSONResponse</span><span class="p">({</span><span class="s1">&#39;status&#39;</span><span class="p">:</span> <span class="s1">&#39;ok&#39;</span><span class="p">}))</span>
 </code></pre></div>
 <h2 id="when-you-dont-need-the-triplet">When you don't need the triplet<a class="headerlink" href="#when-you-dont-need-the-triplet" title="Permanent link">&para;</a></h2>
-<p>Most handlers only use <code>scope</code>, or nothing at all.  BlackBull
+<p>Most handlers only use <code>conn</code>, or nothing at all.  BlackBull
 detects this at registration time and lets you drop the boilerplate:</p>
 <div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">&#39;/&#39;</span><span class="p">)</span>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">hello</span><span class="p">():</span>

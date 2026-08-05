@@ -5430,7 +5430,7 @@ other side-effects that the request path should not depend on.</p>
 (exceptions logged, never propagated):</p>
 <div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">on</span><span class="p">(</span><span class="s1">&#39;scope_completed&#39;</span><span class="p">,</span> <span class="n">blocking</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">close_session</span><span class="p">(</span><span class="n">event</span><span class="p">:</span> <span class="n">Event</span><span class="p">):</span>
-    <span class="n">session</span> <span class="o">=</span> <span class="n">event</span><span class="o">.</span><span class="n">detail</span><span class="p">[</span><span class="s1">&#39;conn&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;state&#39;</span><span class="p">,</span> <span class="p">{})</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;db_session&#39;</span><span class="p">)</span>
+    <span class="n">session</span> <span class="o">=</span> <span class="n">event</span><span class="o">.</span><span class="n">detail</span><span class="p">[</span><span class="s1">&#39;conn&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">state</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;db_session&#39;</span><span class="p">)</span>
     <span class="k">if</span> <span class="n">session</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
         <span class="k">await</span> <span class="n">session</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
 </code></pre></div>
@@ -5473,6 +5473,15 @@ itself; reach for <code>@app.intercept('app_startup')</code> directly when
 you want the consistency of writing every hook as
 <code>(event: Event) -&gt; None</code>.</p>
 <h2 id="event-reference">Event reference<a class="headerlink" href="#event-reference" title="Permanent link">&para;</a></h2>
+<p>Every request- and connection-scoped event carries <code>detail['conn']</code>:
+the same native
+<a href="../requests-and-responses/"><code>Connection</code></a> the handler receives, not a
+copy and not an ASGI scope dict.  Read it with attributes —
+<code>conn.method</code>, <code>conn.path</code>, <code>conn.headers.get(b'accept')</code>,
+<code>conn.state</code> — and use <code>conn.state</code> when a listener needs to pass
+something to the handler.  The other <code>detail</code> keys are conveniences
+lifted off that same object (plus wire fields the <code>Connection</code> does
+not carry, such as <code>status</code> and <code>duration_ms</code>).</p>
 <table>
 <thead>
 <tr>
@@ -5498,55 +5507,55 @@ you want the consistency of writing every hook as
 <tr>
 <td><code>request_received</code></td>
 <td>HTTP request entered the app, before routing</td>
-<td><code>scope</code>, <code>client_ip</code>, <code>method</code>, <code>path</code>, <code>http_version</code>, <code>headers</code></td>
+<td><code>conn</code>, <code>client_ip</code>, <code>method</code>, <code>path</code>, <code>http_version</code>, <code>headers</code></td>
 <td><code>@app.on</code> and <code>@app.intercept</code>; raise to abort</td>
 </tr>
 <tr>
 <td><code>before_handler</code></td>
 <td>Route matched, before handler dispatch (not for 404/405)</td>
-<td><code>scope</code>, <code>client_ip</code>, <code>method</code>, <code>path</code>, <code>handler</code></td>
+<td><code>conn</code>, <code>client_ip</code>, <code>method</code>, <code>path</code>, <code>handler</code></td>
 <td><code>@app.on</code> and <code>@app.intercept</code>; raise to abort</td>
 </tr>
 <tr>
 <td><code>after_handler</code></td>
 <td>Handler returned or raised</td>
-<td><code>scope</code>, <code>client_ip</code>, <code>method</code>, <code>path</code>, <code>handler</code>, <code>exception</code></td>
+<td><code>conn</code>, <code>client_ip</code>, <code>method</code>, <code>path</code>, <code>handler</code>, <code>exception</code></td>
 <td>Observation only; <code>exception</code> is <code>None</code> on success</td>
 </tr>
 <tr>
 <td><code>request_completed</code></td>
 <td>HTTP request finished — response fully sent (or failed before that)</td>
-<td><code>scope</code>, <code>client_ip</code>, <code>method</code>, <code>path</code>, <code>http_version</code>, <code>status</code>, <code>response_bytes</code>, <code>duration_ms</code></td>
+<td><code>conn</code>, <code>client_ip</code>, <code>method</code>, <code>path</code>, <code>http_version</code>, <code>status</code>, <code>response_bytes</code>, <code>duration_ms</code></td>
 <td>Observation only; not fired if client disconnected or for WebSocket</td>
 </tr>
 <tr>
 <td><code>scope_completed</code></td>
 <td>Any ASGI scope finished — HTTP request, WebSocket connection, or gRPC call</td>
-<td><code>scope</code>, <code>type</code>, <code>client_ip</code>, <code>path</code>, <code>exception</code></td>
+<td><code>conn</code>, <code>type</code>, <code>client_ip</code>, <code>path</code>, <code>exception</code></td>
 <td>Guaranteed once per scope, every protocol, on success or error; the cleanup hook. Pair with <code>@app.on(..., blocking=True)</code></td>
 </tr>
 <tr>
 <td><code>request_disconnected</code></td>
 <td>HTTP client closed connection before response complete</td>
-<td><code>scope</code>, <code>client_ip</code>, <code>method</code>, <code>path</code>, <code>http_version</code></td>
+<td><code>conn</code>, <code>client_ip</code>, <code>method</code>, <code>path</code>, <code>http_version</code></td>
 <td>Observation only; mutually exclusive with <code>request_completed</code></td>
 </tr>
 <tr>
 <td><code>websocket_message</code></td>
 <td>WebSocket message fully received and reassembled, before the handler reads it</td>
-<td><code>scope</code>, <code>text</code>, <code>bytes</code></td>
+<td><code>conn</code>, <code>text</code>, <code>bytes</code></td>
 <td>Observation only</td>
 </tr>
 <tr>
 <td><code>websocket_connected</code></td>
 <td><code>websocket.accept</code> sent</td>
-<td><code>connection_id</code>, <code>path</code>, <code>client_ip</code>, <code>subprotocol</code></td>
+<td><code>conn</code>, <code>connection_id</code>, <code>path</code>, <code>client_ip</code>, <code>subprotocol</code></td>
 <td>Observation only</td>
 </tr>
 <tr>
 <td><code>websocket_disconnected</code></td>
 <td>WebSocket connection closed</td>
-<td><code>connection_id</code>, <code>code</code></td>
+<td><code>conn</code>, <code>connection_id</code>, <code>client_ip</code>, <code>path</code>, <code>code</code></td>
 <td>Observation only</td>
 </tr>
 </tbody>
@@ -5568,7 +5577,7 @@ runs as an ASGI app under an external server (uvicorn, hypercorn,
 <code>TestClient</code>).  WebSocket connections never fire this event.</p>
 <div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">intercept</span><span class="p">(</span><span class="s1">&#39;request_received&#39;</span><span class="p">)</span>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">require_api_key</span><span class="p">(</span><span class="n">event</span><span class="p">):</span>
-    <span class="n">headers</span> <span class="o">=</span> <span class="n">event</span><span class="o">.</span><span class="n">detail</span><span class="p">[</span><span class="s1">&#39;conn&#39;</span><span class="p">][</span><span class="s1">&#39;headers&#39;</span><span class="p">]</span>
+    <span class="n">headers</span> <span class="o">=</span> <span class="n">event</span><span class="o">.</span><span class="n">detail</span><span class="p">[</span><span class="s1">&#39;conn&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">headers</span>
     <span class="k">if</span> <span class="n">headers</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="sa">b</span><span class="s1">&#39;x-api-key&#39;</span><span class="p">)</span> <span class="o">!=</span> <span class="sa">b</span><span class="s1">&#39;secret&#39;</span><span class="p">:</span>
         <span class="k">raise</span> <span class="ne">PermissionError</span><span class="p">(</span><span class="s1">&#39;missing or invalid API key&#39;</span><span class="p">)</span>
 
@@ -5597,9 +5606,9 @@ exist and those keys carry placeholders (<code>'-'</code> / <code>0</code> / <co
 </thead>
 <tbody>
 <tr>
-<td><code>scope</code></td>
-<td><code>dict</code></td>
-<td>The ASGI scope dict for the request</td>
+<td><code>conn</code></td>
+<td><code>Connection</code></td>
+<td>The request itself — <code>conn.method</code>, <code>conn.path</code>, <code>conn.headers</code>, <code>conn.state</code></td>
 </tr>
 <tr>
 <td><code>client_ip</code></td>
@@ -5669,9 +5678,9 @@ too, and is meant for <strong>resource cleanup</strong>.</p>
 </thead>
 <tbody>
 <tr>
-<td><code>scope</code></td>
-<td><code>dict</code></td>
-<td>The ASGI scope dict</td>
+<td><code>conn</code></td>
+<td><code>Connection</code></td>
+<td>The request / connection itself</td>
 </tr>
 <tr>
 <td><code>type</code></td>
@@ -5699,8 +5708,8 @@ too, and is meant for <strong>resource cleanup</strong>.</p>
 is gone:</p>
 <div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">on</span><span class="p">(</span><span class="s1">&#39;scope_completed&#39;</span><span class="p">,</span> <span class="n">blocking</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">cleanup</span><span class="p">(</span><span class="n">event</span><span class="p">:</span> <span class="n">Event</span><span class="p">):</span>
-    <span class="n">scope</span> <span class="o">=</span> <span class="n">event</span><span class="o">.</span><span class="n">detail</span><span class="p">[</span><span class="s1">&#39;conn&#39;</span><span class="p">]</span>
-    <span class="n">tmp</span> <span class="o">=</span> <span class="n">scope</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;state&#39;</span><span class="p">,</span> <span class="p">{})</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;tempfile&#39;</span><span class="p">)</span>
+    <span class="n">conn</span> <span class="o">=</span> <span class="n">event</span><span class="o">.</span><span class="n">detail</span><span class="p">[</span><span class="s1">&#39;conn&#39;</span><span class="p">]</span>
+    <span class="n">tmp</span> <span class="o">=</span> <span class="n">conn</span><span class="o">.</span><span class="n">state</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;tempfile&#39;</span><span class="p">)</span>
     <span class="k">if</span> <span class="n">tmp</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
         <span class="n">os</span><span class="o">.</span><span class="n">unlink</span><span class="p">(</span><span class="n">tmp</span><span class="p">)</span>
     <span class="k">if</span> <span class="n">event</span><span class="o">.</span><span class="n">detail</span><span class="p">[</span><span class="s1">&#39;exception&#39;</span><span class="p">]</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
@@ -5734,10 +5743,10 @@ server accepted — including ones the handler never reads.</p>
 <div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">on</span><span class="p">(</span><span class="s1">&#39;websocket_message&#39;</span><span class="p">)</span>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">log_message</span><span class="p">(</span><span class="n">event</span><span class="p">:</span> <span class="n">Event</span><span class="p">):</span>
     <span class="k">if</span> <span class="n">event</span><span class="o">.</span><span class="n">detail</span><span class="p">[</span><span class="s1">&#39;text&#39;</span><span class="p">]</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
-        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;[ws] text on </span><span class="si">{</span><span class="n">event</span><span class="o">.</span><span class="n">detail</span><span class="p">[</span><span class="s1">&#39;conn&#39;</span><span class="p">][</span><span class="s1">&#39;path&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">: &quot;</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;[ws] text on </span><span class="si">{</span><span class="n">event</span><span class="o">.</span><span class="n">detail</span><span class="p">[</span><span class="s1">&#39;conn&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">path</span><span class="si">}</span><span class="s2">: &quot;</span>
               <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">event</span><span class="o">.</span><span class="n">detail</span><span class="p">[</span><span class="s1">&#39;text&#39;</span><span class="p">]</span><span class="si">!r}</span><span class="s2">&quot;</span><span class="p">)</span>
     <span class="k">else</span><span class="p">:</span>
-        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;[ws] binary on </span><span class="si">{</span><span class="n">event</span><span class="o">.</span><span class="n">detail</span><span class="p">[</span><span class="s1">&#39;conn&#39;</span><span class="p">][</span><span class="s1">&#39;path&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">: &quot;</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;[ws] binary on </span><span class="si">{</span><span class="n">event</span><span class="o">.</span><span class="n">detail</span><span class="p">[</span><span class="s1">&#39;conn&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">path</span><span class="si">}</span><span class="s2">: &quot;</span>
               <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">event</span><span class="o">.</span><span class="n">detail</span><span class="p">[</span><span class="s1">&#39;bytes&#39;</span><span class="p">])</span><span class="si">}</span><span class="s2"> bytes&quot;</span><span class="p">)</span>
 </code></pre></div>
 <p>The message has already been read off the wire by the time the

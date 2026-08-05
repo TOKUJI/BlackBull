@@ -5340,7 +5340,7 @@ first-hit-then-summary rate-limit model.</p>
 <tr>
 <td><code>BB_WS_QUEUE_DEPTH</code></td>
 <td><code>0</code></td>
-<td>WebSocket inbound <strong>read-ahead</strong> depth.  <code>0</code> (default) reads frames inline, in the handler's own task, when it calls <code>receive()</code> — no reader task and no per-message queue hop.  A positive value restores a background reader that reads <em>ahead</em> of the handler into a queue of that depth, so control frames are serviced between <code>receive()</code> calls and up to <code>N</code> messages buffer under a slow handler.  Registering a <code>websocket_message</code> listener forces read-ahead on regardless, since that event fires when the server reads rather than when the handler consumes.</td>
+<td>WebSocket inbound <strong>read-ahead</strong> depth.  <code>0</code> (default) reads frames inline, in the handler's own task, when it calls <code>receive()</code> — no reader task and no per-message queue hop.  A positive value restores a background reader that reads <em>ahead</em> of the handler into a queue of that depth, so control frames are serviced between <code>receive()</code> calls and up to <code>N</code> messages buffer under a slow handler.  Registering a <code>websocket_message</code> listener does not force read-ahead on: that event fires when the server reads rather than when the handler consumes, and a consuming handler is already reading, so the reader is only marked <em>deferred</em> and the idle watchdog starts it if the handler goes quiet.  See the <a href="../../guide/websockets/">WebSocket guide</a>.</td>
 </tr>
 </tbody>
 </table>

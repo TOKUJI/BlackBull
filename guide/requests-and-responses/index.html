@@ -5608,7 +5608,7 @@ representation, so it is generated on demand rather than held.</p>
 <strong>percent-decoded</strong> request target with the query string removed —
 <code>/files/a%2Fb</code> arrives as <code>/files/a/b</code>, matching the ASGI spec and
 uvicorn.  The <strong>un</strong>decoded bytes are available as
-<code>scope['raw_path']</code> (<code>bytes</code>, query excluded) for the rare consumer
+<code>conn.raw_path</code> (<code>bytes</code>, query excluded) for the rare consumer
 — reverse proxies, WAFs, cache-key / signature verification — that
 must reproduce the exact received byte sequence.  RFC 3986 <code>;</code>
 parameters are preserved in both (<code>/cart;sid=abc</code> stays intact).
@@ -5622,7 +5622,7 @@ streaming bodies chunk by chunk.</p>
 <div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">blackbull</span><span class="w"> </span><span class="kn">import</span> <span class="n">read_body</span>
 
 <span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">&#39;/echo&#39;</span><span class="p">,</span> <span class="n">methods</span><span class="o">=</span><span class="p">[</span><span class="n">HTTPMethod</span><span class="o">.</span><span class="n">POST</span><span class="p">])</span>
-<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">echo</span><span class="p">(</span><span class="n">scope</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">echo</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
     <span class="n">raw</span><span class="p">:</span> <span class="nb">bytes</span> <span class="o">=</span> <span class="k">await</span> <span class="n">read_body</span><span class="p">(</span><span class="n">receive</span><span class="p">)</span>
     <span class="k">await</span> <span class="n">send</span><span class="p">(</span><span class="n">Response</span><span class="p">(</span><span class="n">raw</span><span class="p">))</span>
 </code></pre></div>
@@ -5641,7 +5641,7 @@ wrap <code>read_body</code> so the handler skips the parse/decode boilerplate:</
 <span class="kn">from</span><span class="w"> </span><span class="nn">blackbull</span><span class="w"> </span><span class="kn">import</span> <span class="n">read_json</span><span class="p">,</span> <span class="n">read_text</span><span class="p">,</span> <span class="n">JSONResponse</span>
 
 <span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">&#39;/api/things&#39;</span><span class="p">,</span> <span class="n">methods</span><span class="o">=</span><span class="p">[</span><span class="n">HTTPMethod</span><span class="o">.</span><span class="n">POST</span><span class="p">])</span>
-<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">create_thing</span><span class="p">(</span><span class="n">scope</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">create_thing</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
     <span class="n">data</span> <span class="o">=</span> <span class="k">await</span> <span class="n">read_json</span><span class="p">(</span><span class="n">receive</span><span class="p">)</span>        <span class="c1"># dict | list | … | None</span>
     <span class="k">if</span> <span class="n">data</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
         <span class="k">await</span> <span class="n">send</span><span class="p">(</span><span class="n">JSONResponse</span><span class="p">({</span><span class="s1">&#39;error&#39;</span><span class="p">:</span> <span class="s1">&#39;invalid JSON&#39;</span><span class="p">},</span>
@@ -5650,7 +5650,7 @@ wrap <code>read_body</code> so the handler skips the parse/decode boilerplate:</
     <span class="k">await</span> <span class="n">send</span><span class="p">(</span><span class="n">JSONResponse</span><span class="p">({</span><span class="s1">&#39;created&#39;</span><span class="p">:</span> <span class="n">data</span><span class="p">}))</span>
 
 <span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">&#39;/api/note&#39;</span><span class="p">,</span> <span class="n">methods</span><span class="o">=</span><span class="p">[</span><span class="n">HTTPMethod</span><span class="o">.</span><span class="n">POST</span><span class="p">])</span>
-<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">note</span><span class="p">(</span><span class="n">scope</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">note</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
     <span class="n">text</span> <span class="o">=</span> <span class="k">await</span> <span class="n">read_text</span><span class="p">(</span><span class="n">receive</span><span class="p">)</span>        <span class="c1"># str (errors=&#39;replace&#39;)</span>
     <span class="k">await</span> <span class="n">send</span><span class="p">(</span><span class="n">Response</span><span class="p">(</span><span class="n">text</span><span class="p">))</span>
 </code></pre></div>
@@ -5664,33 +5664,33 @@ at most once per request, exactly like <code>read_body</code>.</p>
 <span class="kn">from</span><span class="w"> </span><span class="nn">http</span><span class="w"> </span><span class="kn">import</span> <span class="n">HTTPStatus</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">blackbull</span><span class="w"> </span><span class="kn">import</span> <span class="n">read_body</span><span class="p">,</span> <span class="n">JSONResponse</span>
 
-<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">json_body_mw</span><span class="p">(</span><span class="n">scope</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">,</span> <span class="n">call_next</span><span class="p">):</span>
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">json_body_mw</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">,</span> <span class="n">call_next</span><span class="p">):</span>
     <span class="n">raw</span> <span class="o">=</span> <span class="k">await</span> <span class="n">read_body</span><span class="p">(</span><span class="n">receive</span><span class="p">)</span>
     <span class="k">try</span><span class="p">:</span>
-        <span class="n">scope</span><span class="p">[</span><span class="s1">&#39;json&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">loads</span><span class="p">(</span><span class="n">raw</span><span class="p">)</span>
+        <span class="n">conn</span><span class="o">.</span><span class="n">state</span><span class="p">[</span><span class="s1">&#39;json&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">loads</span><span class="p">(</span><span class="n">raw</span><span class="p">)</span>
     <span class="k">except</span> <span class="p">(</span><span class="n">json</span><span class="o">.</span><span class="n">JSONDecodeError</span><span class="p">,</span> <span class="ne">ValueError</span><span class="p">):</span>
         <span class="k">await</span> <span class="n">send</span><span class="p">(</span><span class="n">JSONResponse</span><span class="p">({</span><span class="s1">&#39;error&#39;</span><span class="p">:</span> <span class="s1">&#39;Invalid JSON&#39;</span><span class="p">},</span>
                                 <span class="n">status</span><span class="o">=</span><span class="n">HTTPStatus</span><span class="o">.</span><span class="n">BAD_REQUEST</span><span class="p">))</span>
         <span class="k">return</span>
-    <span class="k">await</span> <span class="n">call_next</span><span class="p">(</span><span class="n">scope</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">)</span>
+    <span class="k">await</span> <span class="n">call_next</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">)</span>
 </code></pre></div>
-<p>The handler then reads <code>scope['json']</code> without touching <code>receive</code>.</p>
+<p>The handler then reads <code>conn.state['json']</code> without touching <code>receive</code>.</p>
 <h2 id="reading-request-headers">Reading request headers<a class="headerlink" href="#reading-request-headers" title="Permanent link">&para;</a></h2>
-<p><code>scope['headers']</code> is a <code>Headers</code> object — case-insensitive, ordered,
+<p><code>conn.headers</code> is a <code>Headers</code> object — case-insensitive, ordered,
 multi-valued.</p>
 <div class="highlight"><pre><span></span><code><span class="c1"># First value for a header; returns b&#39;&#39; when absent</span>
-<span class="n">ct</span>   <span class="o">=</span> <span class="n">scope</span><span class="p">[</span><span class="s1">&#39;headers&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="sa">b</span><span class="s1">&#39;content-type&#39;</span><span class="p">)</span>
-<span class="n">auth</span> <span class="o">=</span> <span class="n">scope</span><span class="p">[</span><span class="s1">&#39;headers&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="sa">b</span><span class="s1">&#39;authorization&#39;</span><span class="p">,</span> <span class="sa">b</span><span class="s1">&#39;&#39;</span><span class="p">)</span>
+<span class="n">ct</span>   <span class="o">=</span> <span class="n">conn</span><span class="o">.</span><span class="n">headers</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="sa">b</span><span class="s1">&#39;content-type&#39;</span><span class="p">)</span>
+<span class="n">auth</span> <span class="o">=</span> <span class="n">conn</span><span class="o">.</span><span class="n">headers</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="sa">b</span><span class="s1">&#39;authorization&#39;</span><span class="p">,</span> <span class="sa">b</span><span class="s1">&#39;&#39;</span><span class="p">)</span>
 
 <span class="c1"># All (name, value) pairs for a header (multi-value support)</span>
-<span class="n">pairs</span> <span class="o">=</span> <span class="n">scope</span><span class="p">[</span><span class="s1">&#39;headers&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">getlist</span><span class="p">(</span><span class="sa">b</span><span class="s1">&#39;accept&#39;</span><span class="p">)</span>   <span class="c1"># list[tuple[bytes, bytes]]</span>
+<span class="n">pairs</span> <span class="o">=</span> <span class="n">conn</span><span class="o">.</span><span class="n">headers</span><span class="o">.</span><span class="n">getlist</span><span class="p">(</span><span class="sa">b</span><span class="s1">&#39;accept&#39;</span><span class="p">)</span>      <span class="c1"># list[tuple[bytes, bytes]]</span>
 
 <span class="c1"># ASGI-compliant iteration</span>
-<span class="k">for</span> <span class="n">name</span><span class="p">,</span> <span class="n">value</span> <span class="ow">in</span> <span class="n">scope</span><span class="p">[</span><span class="s1">&#39;headers&#39;</span><span class="p">]:</span>
+<span class="k">for</span> <span class="n">name</span><span class="p">,</span> <span class="n">value</span> <span class="ow">in</span> <span class="n">conn</span><span class="o">.</span><span class="n">headers</span><span class="p">:</span>
     <span class="o">...</span>
 
 <span class="c1"># Membership test</span>
-<span class="k">if</span> <span class="sa">b</span><span class="s1">&#39;content-length&#39;</span> <span class="ow">in</span> <span class="n">scope</span><span class="p">[</span><span class="s1">&#39;headers&#39;</span><span class="p">]:</span>
+<span class="k">if</span> <span class="sa">b</span><span class="s1">&#39;content-length&#39;</span> <span class="ow">in</span> <span class="n">conn</span><span class="o">.</span><span class="n">headers</span><span class="p">:</span>
     <span class="o">...</span>
 </code></pre></div>
 <p>Header names are stored lowercase.</p>
@@ -5777,26 +5777,26 @@ per request — handlers that declare no query params keep the exact adapted
 form they had before.</p>
 <h3 id="raw-query-strings">Raw query strings<a class="headerlink" href="#raw-query-strings" title="Permanent link">&para;</a></h3>
 <p>For repeated keys, unusual encodings, or full control,
-<code>scope['query_string']</code> contains the raw query string as bytes.
+<code>conn.query_string</code> contains the raw query string as bytes.
 Parse it with the standard library:</p>
 <div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">urllib.parse</span><span class="w"> </span><span class="kn">import</span> <span class="n">parse_qs</span><span class="p">,</span> <span class="n">parse_qsl</span>
 
 <span class="c1"># parse_qs: each key maps to a list of values (handles ?tag=a&amp;tag=b correctly)</span>
-<span class="n">params</span> <span class="o">=</span> <span class="n">parse_qs</span><span class="p">(</span><span class="n">scope</span><span class="p">[</span><span class="s1">&#39;query_string&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">decode</span><span class="p">())</span>
+<span class="n">params</span> <span class="o">=</span> <span class="n">parse_qs</span><span class="p">(</span><span class="n">conn</span><span class="o">.</span><span class="n">query_string</span><span class="o">.</span><span class="n">decode</span><span class="p">())</span>
 <span class="n">page</span>   <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">params</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;page&#39;</span><span class="p">,</span> <span class="p">[</span><span class="s1">&#39;1&#39;</span><span class="p">])[</span><span class="mi">0</span><span class="p">])</span>
 <span class="n">tags</span>   <span class="o">=</span> <span class="n">params</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;tag&#39;</span><span class="p">,</span> <span class="p">[])</span>             <span class="c1"># [&#39;a&#39;, &#39;b&#39;] for ?tag=a&amp;tag=b</span>
 
 <span class="c1"># parse_qsl: flat list of (key, value) pairs preserving order</span>
-<span class="n">pairs</span> <span class="o">=</span> <span class="n">parse_qsl</span><span class="p">(</span><span class="n">scope</span><span class="p">[</span><span class="s1">&#39;query_string&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">decode</span><span class="p">())</span>
+<span class="n">pairs</span> <span class="o">=</span> <span class="n">parse_qsl</span><span class="p">(</span><span class="n">conn</span><span class="o">.</span><span class="n">query_string</span><span class="o">.</span><span class="n">decode</span><span class="p">())</span>
 </code></pre></div>
 <p>For convenience, wrap this in a helper:</p>
 <div class="highlight"><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">qp</span><span class="p">(</span><span class="n">scope</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]:</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;Return first value for each query parameter key.&quot;&quot;&quot;</span>
     <span class="k">return</span> <span class="p">{</span><span class="n">k</span><span class="p">:</span> <span class="n">v</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
-            <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">parse_qs</span><span class="p">(</span><span class="n">scope</span><span class="p">[</span><span class="s1">&#39;query_string&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">decode</span><span class="p">())</span><span class="o">.</span><span class="n">items</span><span class="p">()}</span>
+            <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">parse_qs</span><span class="p">(</span><span class="n">conn</span><span class="o">.</span><span class="n">query_string</span><span class="o">.</span><span class="n">decode</span><span class="p">())</span><span class="o">.</span><span class="n">items</span><span class="p">()}</span>
 
 <span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">&#39;/tasks&#39;</span><span class="p">)</span>
-<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">list_tasks</span><span class="p">(</span><span class="n">scope</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">list_tasks</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
     <span class="n">p</span> <span class="o">=</span> <span class="n">qp</span><span class="p">(</span><span class="n">scope</span><span class="p">)</span>
     <span class="n">done</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;done&#39;</span><span class="p">,</span> <span class="s1">&#39;false&#39;</span><span class="p">)</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span> <span class="o">==</span> <span class="s1">&#39;true&#39;</span>
     <span class="k">await</span> <span class="n">send</span><span class="p">(</span><span class="n">JSONResponse</span><span class="p">({</span><span class="s1">&#39;done_filter&#39;</span><span class="p">:</span> <span class="n">done</span><span class="p">}))</span>
@@ -5808,15 +5808,15 @@ default) send key=value pairs in the body.  Read and parse with
 <div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">urllib.parse</span><span class="w"> </span><span class="kn">import</span> <span class="n">parse_qs</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">blackbull</span><span class="w"> </span><span class="kn">import</span> <span class="n">read_body</span>
 
-<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">form_body_mw</span><span class="p">(</span><span class="n">scope</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">,</span> <span class="n">call_next</span><span class="p">):</span>
-<span class="w">    </span><span class="sd">&quot;&quot;&quot;Parse application/x-www-form-urlencoded body; inject scope[&#39;form&#39;].&quot;&quot;&quot;</span>
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">form_body_mw</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">,</span> <span class="n">call_next</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Parse application/x-www-form-urlencoded body; inject conn.state[&#39;form&#39;].&quot;&quot;&quot;</span>
     <span class="n">raw</span> <span class="o">=</span> <span class="k">await</span> <span class="n">read_body</span><span class="p">(</span><span class="n">receive</span><span class="p">)</span>
-    <span class="n">scope</span><span class="p">[</span><span class="s1">&#39;form&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="p">{</span><span class="n">k</span><span class="p">:</span> <span class="n">v</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">parse_qs</span><span class="p">(</span><span class="n">raw</span><span class="o">.</span><span class="n">decode</span><span class="p">())</span><span class="o">.</span><span class="n">items</span><span class="p">()}</span>
-    <span class="k">await</span> <span class="n">call_next</span><span class="p">(</span><span class="n">scope</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">)</span>
+    <span class="n">conn</span><span class="o">.</span><span class="n">state</span><span class="p">[</span><span class="s1">&#39;form&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="p">{</span><span class="n">k</span><span class="p">:</span> <span class="n">v</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">parse_qs</span><span class="p">(</span><span class="n">raw</span><span class="o">.</span><span class="n">decode</span><span class="p">())</span><span class="o">.</span><span class="n">items</span><span class="p">()}</span>
+    <span class="k">await</span> <span class="n">call_next</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">)</span>
 
 <span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">methods</span><span class="o">=</span><span class="p">[</span><span class="n">HTTPMethod</span><span class="o">.</span><span class="n">POST</span><span class="p">],</span> <span class="n">path</span><span class="o">=</span><span class="s1">&#39;/submit&#39;</span><span class="p">,</span> <span class="n">middlewares</span><span class="o">=</span><span class="p">[</span><span class="n">form_body_mw</span><span class="p">])</span>
-<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">submit</span><span class="p">(</span><span class="n">scope</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
-    <span class="n">name</span> <span class="o">=</span> <span class="n">scope</span><span class="p">[</span><span class="s1">&#39;form&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;name&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">)</span>
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">submit</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
+    <span class="n">name</span> <span class="o">=</span> <span class="n">conn</span><span class="o">.</span><span class="n">state</span><span class="p">[</span><span class="s1">&#39;form&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;name&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">)</span>
     <span class="k">await</span> <span class="n">send</span><span class="p">(</span><span class="n">JSONResponse</span><span class="p">({</span><span class="s1">&#39;received&#39;</span><span class="p">:</span> <span class="n">name</span><span class="p">}))</span>
 </code></pre></div>
 <p>Multipart file uploads (<code>multipart/form-data</code>) are not yet
@@ -5906,7 +5906,7 @@ and send it as <code>Authorization: Bearer &lt;token&gt;</code> instead.</p>
 body.  Use the <code>http.response.trailers</code> event after the last
 <code>http.response.body</code> chunk:</p>
 <div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">&#39;/chunked&#39;</span><span class="p">)</span>
-<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">chunked</span><span class="p">(</span><span class="n">scope</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">chunked</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
     <span class="k">await</span> <span class="n">send</span><span class="p">({</span>
         <span class="s1">&#39;type&#39;</span><span class="p">:</span> <span class="s1">&#39;http.response.start&#39;</span><span class="p">,</span>
         <span class="s1">&#39;status&#39;</span><span class="p">:</span> <span class="mi">200</span><span class="p">,</span>
@@ -5952,7 +5952,7 @@ without buffering the whole body in memory.  The class calls
     <span class="k">yield</span> <span class="sa">b</span><span class="s1">&#39;done</span><span class="se">\n</span><span class="s1">&#39;</span>
 
 <span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">&#39;/stream&#39;</span><span class="p">)</span>
-<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">handler</span><span class="p">(</span><span class="n">scope</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">handler</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
     <span class="k">await</span> <span class="n">StreamingResponse</span><span class="p">(</span><span class="n">countdown</span><span class="p">())(</span><span class="n">scope</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">)</span>
 </code></pre></div>
 <p><code>StreamingResponse.__init__</code> accepts:</p>
@@ -6014,7 +6014,7 @@ parts will silently buffer a streaming response, defeating
 body events through immediately rather than accumulating them:</p>
 <div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">blackbull.native</span><span class="w"> </span><span class="kn">import</span> <span class="n">NativeResponse</span>
 
-<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">prefix_mw</span><span class="p">(</span><span class="n">scope</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">,</span> <span class="n">call_next</span><span class="p">):</span>
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">prefix_mw</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">,</span> <span class="n">call_next</span><span class="p">):</span>
     <span class="n">captured_start</span> <span class="o">=</span> <span class="kc">None</span>
 
     <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">capturing_send</span><span class="p">(</span><span class="n">event</span><span class="p">):</span>
@@ -6049,7 +6049,7 @@ body events through immediately rather than accumulating them:</p>
         <span class="k">else</span><span class="p">:</span>
             <span class="k">await</span> <span class="n">send</span><span class="p">(</span><span class="n">event</span><span class="p">)</span>
 
-    <span class="k">await</span> <span class="n">call_next</span><span class="p">(</span><span class="n">scope</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">capturing_send</span><span class="p">)</span>
+    <span class="k">await</span> <span class="n">call_next</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">capturing_send</span><span class="p">)</span>
 </code></pre></div>
 <p>The two branches are the same policy on two wire shapes: the native object
 arm transforms only terminal bodies (so <code>more_body=True</code> chunks stream
@@ -6065,7 +6065,7 @@ concern.</p>
 and server-sent events (SSE) — your handler can check whether
 the client is still there before writing more.</p>
 <div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">&#39;/events&#39;</span><span class="p">)</span>
-<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">sse</span><span class="p">(</span><span class="n">scope</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">sse</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
     <span class="k">await</span> <span class="n">send</span><span class="p">({</span>
         <span class="s1">&#39;type&#39;</span><span class="p">:</span> <span class="s1">&#39;http.response.start&#39;</span><span class="p">,</span>
         <span class="s1">&#39;status&#39;</span><span class="p">:</span> <span class="mi">200</span><span class="p">,</span>

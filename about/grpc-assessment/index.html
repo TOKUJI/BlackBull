@@ -5231,7 +5231,7 @@ gRPC server has to provide:</p>
 <tr>
 <td>Send-side flow-control visibility</td>
 <td>✓ as of v0.31</td>
-<td><code>scope['extensions']['http.response.http2_stream']</code> snapshots <code>send_window_remaining</code> and <code>connection_send_window_remaining</code>.  See <em>What Sprint 32 unlocks</em> below.</td>
+<td><code>conn.extensions['http.response.http2_stream']</code> snapshots <code>send_window_remaining</code> and <code>connection_send_window_remaining</code>.  See <em>What Sprint 32 unlocks</em> below.</td>
 </tr>
 <tr>
 <td><code>application/grpc</code> content negotiation</td>
@@ -5255,13 +5255,13 @@ expected before doing this audit.  The framing layer is solid;
 what's missing is mostly <em>gRPC-flavoured glue</em> on top of primitives
 we already have.</p>
 <h2 id="what-sprint-32-unlocks">What Sprint 32 unlocks<a class="headerlink" href="#what-sprint-32-unlocks" title="Permanent link">&para;</a></h2>
-<p>Sprint 32 added <code>scope['extensions']['http.response.http2_stream']</code>
+<p>Sprint 32 added <code>conn.extensions['http.response.http2_stream']</code>
 exposing <code>send_window_remaining</code> and
 <code>connection_send_window_remaining</code> (per RFC 9113 §5.2).  This is
 the missing primitive a gRPC server-streaming implementation
 needs to back-pressure correctly:</p>
-<div class="highlight"><pre><span></span><code><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">server_streaming_rpc</span><span class="p">(</span><span class="n">scope</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
-    <span class="n">ext</span> <span class="o">=</span> <span class="n">scope</span><span class="p">[</span><span class="s1">&#39;extensions&#39;</span><span class="p">][</span><span class="s1">&#39;http.response.http2_stream&#39;</span><span class="p">]</span>
+<div class="highlight"><pre><span></span><code><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">server_streaming_rpc</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
+    <span class="n">ext</span> <span class="o">=</span> <span class="n">conn</span><span class="o">.</span><span class="n">extensions</span><span class="p">[</span><span class="s1">&#39;http.response.http2_stream&#39;</span><span class="p">]</span>
     <span class="k">for</span> <span class="n">msg</span> <span class="ow">in</span> <span class="n">produce_many_messages</span><span class="p">():</span>
         <span class="c1"># If send window is below a threshold, the peer&#39;s recv buffer</span>
         <span class="c1"># is filling up — defer the next message via cooperative yield</span>
@@ -5291,7 +5291,7 @@ under slow consumers) or peek at internal HTTP/2 sender state
      (requires a hook); or</li>
 <li>
 <p>Replace the scalar with a tiny callable
-     (<code>scope['extensions']['http.response.http2_stream']['send_window']()</code>)
+     (<code>conn.extensions['http.response.http2_stream']['send_window']()</code>)
      that reads the sender's current state.</p>
 </li>
 <li>

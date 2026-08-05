@@ -5275,7 +5275,7 @@ other file-system assets that don't change on every request.</p>
 <span class="n">app</span><span class="o">.</span><span class="n">static</span><span class="p">(</span><span class="s1">&#39;/images&#39;</span><span class="p">,</span> <span class="s1">&#39;public/images&#39;</span><span class="p">)</span>
 
 <span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">&#39;/&#39;</span><span class="p">)</span>
-<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">index</span><span class="p">(</span><span class="n">scope</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">index</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
     <span class="o">...</span>
 </code></pre></div>
 <p>A request to <code>/assets/style.css</code> is routed to the static route and

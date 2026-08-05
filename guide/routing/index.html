@@ -5268,13 +5268,13 @@ groups, and a brief pointer to WebSocket routes.</p>
 <span class="n">app</span> <span class="o">=</span> <span class="n">BlackBull</span><span class="p">()</span>
 
 <span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">methods</span><span class="o">=</span><span class="p">[</span><span class="n">HTTPMethod</span><span class="o">.</span><span class="n">GET</span><span class="p">],</span> <span class="n">path</span><span class="o">=</span><span class="s1">&#39;/tasks&#39;</span><span class="p">)</span>
-<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">list_tasks</span><span class="p">(</span><span class="n">scope</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">list_tasks</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
     <span class="k">await</span> <span class="n">send</span><span class="p">(</span><span class="n">Response</span><span class="p">(</span><span class="sa">b</span><span class="s1">&#39;[]&#39;</span><span class="p">))</span>
 </code></pre></div>
 <p><code>methods</code> defaults to <code>[HTTPMethod.GET]</code>.  Pass a list to accept
 multiple methods on the same handler:</p>
 <div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">methods</span><span class="o">=</span><span class="p">[</span><span class="n">HTTPMethod</span><span class="o">.</span><span class="n">GET</span><span class="p">,</span> <span class="n">HTTPMethod</span><span class="o">.</span><span class="n">HEAD</span><span class="p">],</span> <span class="n">path</span><span class="o">=</span><span class="s1">&#39;/healthz&#39;</span><span class="p">)</span>
-<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">healthz</span><span class="p">(</span><span class="n">scope</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">healthz</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
     <span class="k">await</span> <span class="n">send</span><span class="p">(</span><span class="n">Response</span><span class="p">(</span><span class="sa">b</span><span class="s1">&#39;ok&#39;</span><span class="p">))</span>
 </code></pre></div>
 <p>Any valid method token is accepted, as a string or an <code>HTTPMethod</code>
@@ -5343,11 +5343,11 @@ route still receive the <code>Accept-Query</code> header but are not Content-Typ
 </ul>
 <h2 id="path-parameters">Path parameters<a class="headerlink" href="#path-parameters" title="Permanent link">&para;</a></h2>
 <p>Use <code>{name}</code> segments in the path string.  Captured values are
-available in <code>scope['path_params']</code> (and, in the simplified form,
+available as <code>conn.path_params</code> (and, in the simplified form,
 injected as named arguments):</p>
 <div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">&#39;/tasks/</span><span class="si">{task_id}</span><span class="s1">&#39;</span><span class="p">)</span>
-<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">get_task</span><span class="p">(</span><span class="n">scope</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
-    <span class="n">task_id</span> <span class="o">=</span> <span class="n">scope</span><span class="p">[</span><span class="s1">&#39;path_params&#39;</span><span class="p">][</span><span class="s1">&#39;task_id&#39;</span><span class="p">]</span>   <span class="c1"># str (default converter)</span>
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">get_task</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
+    <span class="n">task_id</span> <span class="o">=</span> <span class="n">conn</span><span class="o">.</span><span class="n">path_params</span><span class="p">[</span><span class="s1">&#39;task_id&#39;</span><span class="p">]</span>       <span class="c1"># str (default converter)</span>
     <span class="k">await</span> <span class="n">send</span><span class="p">(</span><span class="n">Response</span><span class="p">(</span><span class="n">task_id</span><span class="o">.</span><span class="n">encode</span><span class="p">()))</span>
 </code></pre></div>
 <p><code>{name}</code> (no converter) matches <code>[^/]+</code> and injects a <code>str</code>.  Append
@@ -5355,13 +5355,13 @@ injected as named arguments):</p>
 see <a href="#typed-routes">Typed routes</a> below.</p>
 <h3 id="regex-patterns">Regex patterns<a class="headerlink" href="#regex-patterns" title="Permanent link">&para;</a></h3>
 <p>For fully custom patterns supply a compiled regex with named groups;
-the captured values are injected into <code>scope['path_params']</code> — the
+the captured values are injected into <code>conn.path_params</code> — the
 same place as <code>{name}</code> parameters:</p>
 <div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">re</span>
 
 <span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="n">re</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="sa">r</span><span class="s1">&#39;^/items/(?P&lt;id&gt;\d+)$&#39;</span><span class="p">))</span>
-<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">get_item</span><span class="p">(</span><span class="n">scope</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
-    <span class="n">item_id</span> <span class="o">=</span> <span class="n">scope</span><span class="p">[</span><span class="s1">&#39;path_params&#39;</span><span class="p">][</span><span class="s1">&#39;id&#39;</span><span class="p">]</span>
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">get_item</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
+    <span class="n">item_id</span> <span class="o">=</span> <span class="n">conn</span><span class="o">.</span><span class="n">path_params</span><span class="p">[</span><span class="s1">&#39;id&#39;</span><span class="p">]</span>
     <span class="k">await</span> <span class="n">send</span><span class="p">(</span><span class="n">Response</span><span class="p">(</span><span class="n">item_id</span><span class="o">.</span><span class="n">encode</span><span class="p">()))</span>
 </code></pre></div>
 <h2 id="typed-routes">Typed routes<a class="headerlink" href="#typed-routes" title="Permanent link">&para;</a></h2>
@@ -5477,11 +5477,11 @@ registered through it.</p>
 <span class="n">protected</span> <span class="o">=</span> <span class="n">app</span><span class="o">.</span><span class="n">group</span><span class="p">(</span><span class="n">middlewares</span><span class="o">=</span><span class="p">[</span><span class="n">error_mw</span><span class="p">,</span> <span class="n">logging_mw</span><span class="p">,</span> <span class="n">auth_mw</span><span class="p">])</span>
 
 <span class="nd">@public</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">methods</span><span class="o">=</span><span class="p">[</span><span class="n">HTTPMethod</span><span class="o">.</span><span class="n">GET</span><span class="p">],</span> <span class="n">path</span><span class="o">=</span><span class="s1">&#39;/&#39;</span><span class="p">)</span>
-<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">index</span><span class="p">(</span><span class="n">scope</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">index</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
     <span class="k">await</span> <span class="n">send</span><span class="p">(</span><span class="n">Response</span><span class="p">(</span><span class="sa">b</span><span class="s1">&#39;&lt;h1&gt;Login&lt;/h1&gt;&#39;</span><span class="p">))</span>
 
 <span class="nd">@protected</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">methods</span><span class="o">=</span><span class="p">[</span><span class="n">HTTPMethod</span><span class="o">.</span><span class="n">GET</span><span class="p">],</span> <span class="n">path</span><span class="o">=</span><span class="s1">&#39;/tasks&#39;</span><span class="p">)</span>
-<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">get_tasks</span><span class="p">(</span><span class="n">scope</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">get_tasks</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
     <span class="k">return</span> <span class="p">[]</span>                               <span class="c1"># → JSONResponse</span>
 </code></pre></div>
 <p>Per-route <code>middlewares=[...]</code> are <strong>appended after</strong> the group
@@ -5489,7 +5489,7 @@ middlewares:</p>
 <div class="highlight"><pre><span></span><code><span class="c1"># Effective chain: error_mw → logging_mw → auth_mw → json_body_mw → create_task</span>
 <span class="nd">@protected</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">methods</span><span class="o">=</span><span class="p">[</span><span class="n">HTTPMethod</span><span class="o">.</span><span class="n">POST</span><span class="p">],</span> <span class="n">path</span><span class="o">=</span><span class="s1">&#39;/tasks&#39;</span><span class="p">,</span>
                  <span class="n">middlewares</span><span class="o">=</span><span class="p">[</span><span class="n">json_body_mw</span><span class="p">])</span>
-<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">create_task</span><span class="p">(</span><span class="n">scope</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">create_task</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
     <span class="o">...</span>
 </code></pre></div>
 <p>For middleware ordering semantics see <a href="../middleware/">Middleware</a>.</p>

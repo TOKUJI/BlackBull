@@ -1167,10 +1167,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#asgi-middleware-via-appuse" class="md-nav__link">
+  <a href="#middleware-via-appuse" class="md-nav__link">
     <span class="md-ellipsis">
       
-        ASGI middleware via app.use()
+        Middleware via app.use()
       
     </span>
   </a>
@@ -5249,10 +5249,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#asgi-middleware-via-appuse" class="md-nav__link">
+  <a href="#middleware-via-appuse" class="md-nav__link">
     <span class="md-ellipsis">
       
-        ASGI middleware via app.use()
+        Middleware via app.use()
       
     </span>
   </a>
@@ -5596,7 +5596,7 @@ free of resolution logic.</p>
 </table>
 <p>A database client, JSON serialiser, or password hasher is a
 library — import it directly.  An auth layer that adds login
-routes and a <code>scope['user']</code> middleware is an extension —
+routes and a <code>conn.state['user']</code> middleware is an extension —
 wire it through <code>init_app</code>.</p>
 <h2 id="in-tree-reference-openapiextension">In-tree reference: <code>OpenAPIExtension</code><a class="headerlink" href="#in-tree-reference-openapiextension" title="Permanent link">&para;</a></h2>
 <p>BlackBull's own OpenAPI publication is implemented as
@@ -5612,13 +5612,13 @@ drifts from the public extension surface:</p>
 <p><code>BlackBull.enable_openapi(...)</code> is a thin convenience wrapper
 around the same class — so even the core's own ergonomics call
 into the public extension API.</p>
-<h2 id="asgi-middleware-via-appuse">ASGI middleware via <code>app.use()</code><a class="headerlink" href="#asgi-middleware-via-appuse" title="Permanent link">&para;</a></h2>
-<p><code>app.use()</code> accepts any ASGI 3.0 middleware following the
-<code>(scope, receive, send, call_next)</code> shape, so an extension can
+<h2 id="middleware-via-appuse">Middleware via <code>app.use()</code><a class="headerlink" href="#middleware-via-appuse" title="Permanent link">&para;</a></h2>
+<p><code>app.use()</code> accepts any middleware following the
+<code>(conn, receive, send, call_next)</code> shape, so an extension can
 simply pass a middleware callable through it:</p>
-<div class="highlight"><pre><span></span><code><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">x_request_id_mw</span><span class="p">(</span><span class="n">scope</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">,</span> <span class="n">call_next</span><span class="p">):</span>
-    <span class="n">scope</span><span class="p">[</span><span class="s1">&#39;x-request-id&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">generate_id</span><span class="p">()</span>
-    <span class="k">await</span> <span class="n">call_next</span><span class="p">(</span><span class="n">scope</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">x_request_id_mw</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">,</span> <span class="n">call_next</span><span class="p">):</span>
+    <span class="n">conn</span><span class="o">.</span><span class="n">state</span><span class="p">[</span><span class="s1">&#39;x-request-id&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">generate_id</span><span class="p">()</span>
+    <span class="k">await</span> <span class="n">call_next</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">)</span>
 
 
 <span class="k">class</span><span class="w"> </span><span class="nc">RequestIdExtension</span><span class="p">:</span>

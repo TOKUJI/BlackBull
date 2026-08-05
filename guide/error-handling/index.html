@@ -664,10 +664,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#whats-in-scopestate" class="md-nav__link">
+  <a href="#whats-in-connstate" class="md-nav__link">
     <span class="md-ellipsis">
       
-        What's in scope['state']
+        What's in conn.state
       
     </span>
   </a>
@@ -5056,10 +5056,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#whats-in-scopestate" class="md-nav__link">
+  <a href="#whats-in-connstate" class="md-nav__link">
     <span class="md-ellipsis">
       
-        What's in scope['state']
+        What's in conn.state
       
     </span>
   </a>
@@ -5182,19 +5182,19 @@ code or exception type:</p>
 <span class="kn">from</span><span class="w"> </span><span class="nn">blackbull</span><span class="w"> </span><span class="kn">import</span> <span class="n">JSONResponse</span>
 
 <span class="nd">@app</span><span class="o">.</span><span class="n">on_error</span><span class="p">(</span><span class="n">HTTPStatus</span><span class="o">.</span><span class="n">NOT_FOUND</span><span class="p">)</span>
-<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">handle_404</span><span class="p">(</span><span class="n">scope</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">handle_404</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
     <span class="k">await</span> <span class="n">send</span><span class="p">(</span><span class="n">JSONResponse</span><span class="p">({</span><span class="s1">&#39;error&#39;</span><span class="p">:</span> <span class="s1">&#39;not found&#39;</span><span class="p">},</span>
                             <span class="n">status</span><span class="o">=</span><span class="n">HTTPStatus</span><span class="o">.</span><span class="n">NOT_FOUND</span><span class="p">))</span>
 
 <span class="nd">@app</span><span class="o">.</span><span class="n">on_error</span><span class="p">(</span><span class="n">HTTPStatus</span><span class="o">.</span><span class="n">METHOD_NOT_ALLOWED</span><span class="p">)</span>
-<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">handle_405</span><span class="p">(</span><span class="n">scope</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
-    <span class="n">allowed</span> <span class="o">=</span> <span class="s1">&#39;, &#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">scope</span><span class="p">[</span><span class="s1">&#39;state&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;allowed_methods&#39;</span><span class="p">,</span> <span class="p">()))</span>
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">handle_405</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
+    <span class="n">allowed</span> <span class="o">=</span> <span class="s1">&#39;, &#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">conn</span><span class="o">.</span><span class="n">state</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;allowed_methods&#39;</span><span class="p">,</span> <span class="p">()))</span>
     <span class="k">await</span> <span class="n">send</span><span class="p">(</span><span class="n">JSONResponse</span><span class="p">({</span><span class="s1">&#39;error&#39;</span><span class="p">:</span> <span class="sa">f</span><span class="s1">&#39;allowed: </span><span class="si">{</span><span class="n">allowed</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">},</span>
                             <span class="n">status</span><span class="o">=</span><span class="n">HTTPStatus</span><span class="o">.</span><span class="n">METHOD_NOT_ALLOWED</span><span class="p">))</span>
 
 <span class="nd">@app</span><span class="o">.</span><span class="n">on_error</span><span class="p">(</span><span class="ne">ValueError</span><span class="p">)</span>
-<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">handle_value_error</span><span class="p">(</span><span class="n">scope</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
-    <span class="n">exc</span> <span class="o">=</span> <span class="n">scope</span><span class="p">[</span><span class="s1">&#39;state&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;error_exception&#39;</span><span class="p">)</span>
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">handle_value_error</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
+    <span class="n">exc</span> <span class="o">=</span> <span class="n">conn</span><span class="o">.</span><span class="n">state</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;error_exception&#39;</span><span class="p">)</span>
     <span class="k">await</span> <span class="n">send</span><span class="p">(</span><span class="n">JSONResponse</span><span class="p">({</span><span class="s1">&#39;error&#39;</span><span class="p">:</span> <span class="nb">str</span><span class="p">(</span><span class="n">exc</span><span class="p">)},</span>
                             <span class="n">status</span><span class="o">=</span><span class="n">HTTPStatus</span><span class="o">.</span><span class="n">BAD_REQUEST</span><span class="p">))</span>
 </code></pre></div>
@@ -5202,8 +5202,8 @@ code or exception type:</p>
 <code>Exception</code> catches all unhandled subclasses.  More specific
 handlers (e.g. <code>ValueError</code>) take priority over base-class
 handlers.</p>
-<h2 id="whats-in-scopestate">What's in <code>scope['state']</code><a class="headerlink" href="#whats-in-scopestate" title="Permanent link">&para;</a></h2>
-<p>The framework populates <code>scope['state']</code> with information about
+<h2 id="whats-in-connstate">What's in <code>conn.state</code><a class="headerlink" href="#whats-in-connstate" title="Permanent link">&para;</a></h2>
+<p>The framework populates <code>conn.state</code> with information about
 the error before calling your handler:</p>
 <table>
 <thead>
@@ -5238,8 +5238,8 @@ matches the framework's view of what failed.</p>
 PROD-mode minimal page, register a handler for the status code
 you want to override:</p>
 <div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">on_error</span><span class="p">(</span><span class="n">HTTPStatus</span><span class="o">.</span><span class="n">INTERNAL_SERVER_ERROR</span><span class="p">)</span>
-<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">custom_500</span><span class="p">(</span><span class="n">scope</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
-    <span class="n">exc</span> <span class="o">=</span> <span class="n">scope</span><span class="p">[</span><span class="s1">&#39;state&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;error_exception&#39;</span><span class="p">)</span>
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">custom_500</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
+    <span class="n">exc</span> <span class="o">=</span> <span class="n">conn</span><span class="o">.</span><span class="n">state</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;error_exception&#39;</span><span class="p">)</span>
     <span class="c1"># ... your rendering ...</span>
     <span class="k">await</span> <span class="n">send</span><span class="p">(</span><span class="n">Response</span><span class="p">(</span><span class="n">body</span><span class="p">,</span> <span class="n">status</span><span class="o">=</span><span class="n">HTTPStatus</span><span class="o">.</span><span class="n">INTERNAL_SERVER_ERROR</span><span class="p">,</span>
                         <span class="n">content_type</span><span class="o">=</span><span class="s1">&#39;text/html&#39;</span><span class="p">))</span>

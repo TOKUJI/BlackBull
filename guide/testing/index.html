@@ -5569,7 +5569,7 @@ injection, events, and response serialisation.</p>
 </code></pre></div>
 <p>The helpers are <code>get</code> / <code>head</code> / <code>options</code> / <code>post</code> / <code>put</code> /
 <code>patch</code> / <code>delete</code>, plus <code>request</code> for full control.  A response is
-a <code>NativeResponse</code> — <code>status</code>, <code>headers</code> (a <code>Headers</code>), <code>body</code>, and
+a <code>NativeTestResponse</code> — <code>status</code>, <code>headers</code> (a <code>Headers</code>), <code>body</code>, and
 <code>.json()</code> / <code>.text()</code> convenience readers:</p>
 <div class="highlight"><pre><span></span><code><span class="n">resp</span> <span class="o">=</span> <span class="k">await</span> <span class="n">native</span><span class="o">.</span><span class="n">post</span><span class="p">(</span><span class="n">app</span><span class="p">,</span> <span class="s1">&#39;/tasks&#39;</span><span class="p">,</span> <span class="n">json</span><span class="o">=</span><span class="p">{</span><span class="s1">&#39;name&#39;</span><span class="p">:</span> <span class="s1">&#39;write tests&#39;</span><span class="p">})</span>
 <span class="k">assert</span> <span class="n">resp</span><span class="o">.</span><span class="n">status</span> <span class="o">==</span> <span class="mi">201</span>
@@ -5811,7 +5811,7 @@ synchronous calls:</p>
 
 
 <span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">&#39;/ws&#39;</span><span class="p">,</span> <span class="n">scheme</span><span class="o">=</span><span class="n">Scheme</span><span class="o">.</span><span class="n">websocket</span><span class="p">)</span>
-<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">ws_echo</span><span class="p">(</span><span class="n">scope</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">ws_echo</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
     <span class="k">await</span> <span class="n">receive</span><span class="p">()</span>                              <span class="c1"># websocket.connect</span>
     <span class="k">await</span> <span class="n">send</span><span class="p">({</span><span class="s1">&#39;type&#39;</span><span class="p">:</span> <span class="s1">&#39;websocket.accept&#39;</span><span class="p">})</span>
     <span class="k">while</span> <span class="kc">True</span><span class="p">:</span>
@@ -5836,7 +5836,7 @@ close code:</p>
 
 
 <span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">&#39;/ws-auth&#39;</span><span class="p">,</span> <span class="n">scheme</span><span class="o">=</span><span class="n">Scheme</span><span class="o">.</span><span class="n">websocket</span><span class="p">)</span>
-<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">ws_auth</span><span class="p">(</span><span class="n">scope</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">ws_auth</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
     <span class="k">await</span> <span class="n">receive</span><span class="p">()</span>
     <span class="k">await</span> <span class="n">send</span><span class="p">({</span><span class="s1">&#39;type&#39;</span><span class="p">:</span> <span class="s1">&#39;websocket.close&#39;</span><span class="p">,</span> <span class="s1">&#39;code&#39;</span><span class="p">:</span> <span class="mi">4401</span><span class="p">})</span>
 
@@ -5854,7 +5854,7 @@ of frames and then closes, <code>ws.iter_text()</code> and
 the <code>WebSocketDisconnect</code> is caught and turned into normal
 iterator termination so the test reads as a single <code>for</code> loop:</p>
 <div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">&#39;/notifications&#39;</span><span class="p">,</span> <span class="n">scheme</span><span class="o">=</span><span class="n">Scheme</span><span class="o">.</span><span class="n">websocket</span><span class="p">)</span>
-<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">notifications</span><span class="p">(</span><span class="n">scope</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">notifications</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
     <span class="k">await</span> <span class="n">receive</span><span class="p">()</span>                              <span class="c1"># websocket.connect</span>
     <span class="k">await</span> <span class="n">send</span><span class="p">({</span><span class="s1">&#39;type&#39;</span><span class="p">:</span> <span class="s1">&#39;websocket.accept&#39;</span><span class="p">})</span>
     <span class="k">for</span> <span class="n">n</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">3</span><span class="p">):</span>
@@ -6124,7 +6124,7 @@ event dicts:</p>
 
 
 <span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">&#39;/ping&#39;</span><span class="p">)</span>
-<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">ping</span><span class="p">(</span><span class="n">scope</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">ping</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
     <span class="k">await</span> <span class="n">send</span><span class="p">(</span><span class="n">JSONResponse</span><span class="p">({</span><span class="s1">&#39;pong&#39;</span><span class="p">:</span> <span class="kc">True</span><span class="p">}))</span>
 
 
@@ -6159,37 +6159,47 @@ event dicts:</p>
 <p>Useful when you want to assert on the raw ASGI event sequence.
 For anything routing-shaped, prefer <code>native</code> — it costs almost
 nothing more, exercises the whole dispatch pipeline, and hands the
-handler the same <code>Connection</code> the server would.  <code>NativeResponse.events</code>
+handler the same <code>Connection</code> the server would.  <code>NativeTestResponse.events</code>
 keeps the raw event list if that is what you were reaching for here.</p>
 <h2 id="middleware-in-isolation">Middleware in isolation<a class="headerlink" href="#middleware-in-isolation" title="Permanent link">&para;</a></h2>
 <p>Middleware is an async function — test it by passing stub
 callables.  Useful for asserting short-circuit behaviour,
-header mutation, or scope injection:</p>
+header mutation, or <code>state</code> injection.  Drive it with the same
+<code>Connection</code> the server would:</p>
 <div class="highlight"><pre><span></span><code><span class="nd">@pytest</span><span class="o">.</span><span class="n">mark</span><span class="o">.</span><span class="n">asyncio</span>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">test_auth_mw_rejects_missing_token</span><span class="p">():</span>
     <span class="kn">from</span><span class="w"> </span><span class="nn">myapp</span><span class="w"> </span><span class="kn">import</span> <span class="n">auth_mw</span>
-    <span class="kn">from</span><span class="w"> </span><span class="nn">blackbull.server.headers</span><span class="w"> </span><span class="kn">import</span> <span class="n">Headers</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">blackbull.connection</span><span class="w"> </span><span class="kn">import</span> <span class="n">Connection</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">blackbull.headers</span><span class="w"> </span><span class="kn">import</span> <span class="n">Headers</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">blackbull.response</span><span class="w"> </span><span class="kn">import</span> <span class="n">wrap_native_send</span>
 
-    <span class="n">scope</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;type&#39;</span><span class="p">:</span> <span class="s1">&#39;http&#39;</span><span class="p">,</span> <span class="s1">&#39;method&#39;</span><span class="p">:</span> <span class="s1">&#39;GET&#39;</span><span class="p">,</span> <span class="s1">&#39;path&#39;</span><span class="p">:</span> <span class="s1">&#39;/tasks&#39;</span><span class="p">,</span>
-             <span class="s1">&#39;headers&#39;</span><span class="p">:</span> <span class="n">Headers</span><span class="p">([]),</span> <span class="s1">&#39;state&#39;</span><span class="p">:</span> <span class="p">{}}</span>
+    <span class="n">conn</span> <span class="o">=</span> <span class="n">Connection</span><span class="p">(</span><span class="n">method</span><span class="o">=</span><span class="s1">&#39;GET&#39;</span><span class="p">,</span> <span class="n">path</span><span class="o">=</span><span class="s1">&#39;/tasks&#39;</span><span class="p">,</span> <span class="n">raw_path</span><span class="o">=</span><span class="sa">b</span><span class="s1">&#39;/tasks&#39;</span><span class="p">,</span>
+                      <span class="n">headers</span><span class="o">=</span><span class="n">Headers</span><span class="p">([]),</span> <span class="nb">type</span><span class="o">=</span><span class="s1">&#39;http&#39;</span><span class="p">)</span>
 
     <span class="n">events</span> <span class="o">=</span> <span class="p">[]</span>
-    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">fake_send</span><span class="p">(</span><span class="n">event</span><span class="p">):</span>
+    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">collect</span><span class="p">(</span><span class="n">event</span><span class="p">):</span>
         <span class="n">events</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">event</span><span class="p">)</span>
 
     <span class="n">call_next_called</span> <span class="o">=</span> <span class="kc">False</span>
-    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">fake_call_next</span><span class="p">(</span><span class="n">scope</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
+    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">fake_call_next</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
         <span class="k">nonlocal</span> <span class="n">call_next_called</span>
         <span class="n">call_next_called</span> <span class="o">=</span> <span class="kc">True</span>
 
-    <span class="k">await</span> <span class="n">auth_mw</span><span class="p">(</span><span class="n">scope</span><span class="p">,</span> <span class="kc">None</span><span class="p">,</span> <span class="n">fake_send</span><span class="p">,</span> <span class="n">fake_call_next</span><span class="p">)</span>
+    <span class="c1"># `wrap_native_send` is the seam the app puts above a middleware: it</span>
+    <span class="c1"># converts whatever the middleware sends — a `Response`, an ASGI dict —</span>
+    <span class="c1"># into the `NativeResponse` the sender receives.  Without it the stub</span>
+    <span class="c1"># sees the raw object the middleware happened to pass.</span>
+    <span class="k">await</span> <span class="n">auth_mw</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="kc">None</span><span class="p">,</span> <span class="n">wrap_native_send</span><span class="p">(</span><span class="n">collect</span><span class="p">),</span> <span class="n">fake_call_next</span><span class="p">)</span>
 
     <span class="k">assert</span> <span class="ow">not</span> <span class="n">call_next_called</span>          <span class="c1"># short-circuited</span>
-    <span class="n">start</span> <span class="o">=</span> <span class="nb">next</span><span class="p">(</span><span class="n">e</span> <span class="k">for</span> <span class="n">e</span> <span class="ow">in</span> <span class="n">events</span> <span class="k">if</span> <span class="n">e</span><span class="p">[</span><span class="s1">&#39;type&#39;</span><span class="p">]</span> <span class="o">==</span> <span class="s1">&#39;http.response.start&#39;</span><span class="p">)</span>
-    <span class="k">assert</span> <span class="n">start</span><span class="p">[</span><span class="s1">&#39;status&#39;</span><span class="p">]</span> <span class="o">==</span> <span class="mi">401</span>
+    <span class="n">start</span> <span class="o">=</span> <span class="nb">next</span><span class="p">(</span><span class="n">e</span> <span class="k">for</span> <span class="n">e</span> <span class="ow">in</span> <span class="n">events</span> <span class="k">if</span> <span class="n">e</span><span class="o">.</span><span class="n">header</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">)</span>
+    <span class="k">assert</span> <span class="n">start</span><span class="o">.</span><span class="n">status</span> <span class="o">==</span> <span class="mi">401</span>
 </code></pre></div>
 <p>The pattern works for async-function middleware and
-<code>@as_middleware</code> classes alike.</p>
+<code>@as_middleware</code> classes alike.  A middleware that declared <code>scope</code>
+instead receives an ASGI scope dict and emits ASGI event dicts — build
+the stub input with <code>conn.to_asgi_scope()</code>, drop the
+<code>wrap_native_send</code>, and assert on <code>event['type']</code> / <code>event['status']</code>.</p>
 <h2 id="what-blackbulls-own-suite-uses">What BlackBull's own suite uses<a class="headerlink" href="#what-blackbulls-own-suite-uses" title="Permanent link">&para;</a></h2>
 <p>BlackBull's test suite (<code>tests/</code>) splits into four layers:</p>
 <table>

@@ -5413,7 +5413,7 @@ instead of the entire upload.  For a 20 MB upload this is the difference
 between a ~64 KiB and a ~20 MB working set — and, because <code>read_body</code>
 additionally <code>b''.join</code>s the chunk list, several times the throughput
 under concurrency (the join is a full-payload memcpy plus GC pressure).</p>
-<p>Empty chunks are skipped.  A mid-body <code>http.disconnect</code> raises
+<p>Empty chunks are skipped.  A peer that vanishes mid-body raises
 :class:<code>ClientDisconnected</code> (with no <code>partial</code> — chunks already yielded
 are the caller's to keep), so a truncated upload is never silently treated
 as complete.</p>

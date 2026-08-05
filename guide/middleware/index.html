@@ -594,6 +594,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Writing a middleware">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-first-parameters-name-picks-the-request-form" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The first parameter's name picks the request form
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -769,10 +786,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#injecting-values-into-scope" class="md-nav__link">
+  <a href="#passing-values-to-inner-layers" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Injecting values into scope
+        Passing values to inner layers
       
     </span>
   </a>
@@ -5141,6 +5158,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Writing a middleware">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-first-parameters-name-picks-the-request-form" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The first parameter's name picks the request form
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -5316,10 +5350,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#injecting-values-into-scope" class="md-nav__link">
+  <a href="#passing-values-to-inner-layers" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Injecting values into scope
+        Passing values to inner layers
       
     </span>
   </a>
@@ -5371,23 +5405,64 @@ Quart / ASGI 3.0 generally, with one BlackBull convenience
 <h2 id="writing-a-middleware">Writing a middleware<a class="headerlink" href="#writing-a-middleware" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">time</span>
 
-<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">logging_mw</span><span class="p">(</span><span class="n">scope</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">,</span> <span class="n">call_next</span><span class="p">):</span>
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">logging_mw</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">,</span> <span class="n">call_next</span><span class="p">):</span>
     <span class="n">t0</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">monotonic</span><span class="p">()</span>
-    <span class="k">await</span> <span class="n">call_next</span><span class="p">(</span><span class="n">scope</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">)</span>
+    <span class="k">await</span> <span class="n">call_next</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">)</span>
     <span class="n">elapsed</span> <span class="o">=</span> <span class="p">(</span><span class="n">time</span><span class="o">.</span><span class="n">monotonic</span><span class="p">()</span> <span class="o">-</span> <span class="n">t0</span><span class="p">)</span> <span class="o">*</span> <span class="mi">1000</span>
-    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">scope</span><span class="p">[</span><span class="s1">&#39;method&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">scope</span><span class="p">[</span><span class="s1">&#39;path&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">  </span><span class="si">{</span><span class="n">elapsed</span><span class="si">:</span><span class="s2">.1f</span><span class="si">}</span><span class="s2"> ms&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">conn</span><span class="o">.</span><span class="n">method</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">conn</span><span class="o">.</span><span class="n">path</span><span class="si">}</span><span class="s2">  </span><span class="si">{</span><span class="n">elapsed</span><span class="si">:</span><span class="s2">.1f</span><span class="si">}</span><span class="s2"> ms&quot;</span><span class="p">)</span>
 </code></pre></div>
-<p>Signature: <code>async def mw(scope, receive, send, call_next)</code>.</p>
+<p>Signature: <code>async def mw(conn, receive, send, call_next)</code>.</p>
 <ul>
-<li>Call <code>await call_next(scope, receive, send)</code> to pass control to the
+<li>Call <code>await call_next(conn, receive, send)</code> to pass control to the
   next layer.</li>
 <li>The legacy parameter name <code>inner</code> is accepted as an alias for
   <code>call_next</code>.</li>
 <li>Sending a response without calling <code>call_next</code> <strong>short-circuits</strong>
   all inner layers.</li>
 </ul>
-<p>Middleware functions keep the full <code>(scope, receive, send, call_next)</code>
+<p>Middleware functions keep the full <code>(conn, receive, send, call_next)</code>
 shape; the simplified handler form does <strong>not</strong> apply to them.</p>
+<h3 id="the-first-parameters-name-picks-the-request-form">The first parameter's <em>name</em> picks the request form<a class="headerlink" href="#the-first-parameters-name-picks-the-request-form" title="Permanent link">&para;</a></h3>
+<p>BlackBull's own server threads a typed
+<a href="../requests-and-responses/"><code>Connection</code></a> end-to-end — <code>conn.method</code>,
+<code>conn.path</code>, <code>conn.headers.get(b'accept')</code>.  A middleware written against
+plain ASGI wants the scope dict instead, so <code>@as_middleware</code> reads the
+name you gave the parameter:</p>
+<table>
+<thead>
+<tr>
+<th>First parameter named</th>
+<th>Receives</th>
+<th><code>send</code> wrapper observes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>anything but <code>scope</code> (<code>conn</code>, <code>connection</code>, …)</td>
+<td><code>Connection</code></td>
+<td><code>NativeResponse</code> on the HTTP path</td>
+</tr>
+<tr>
+<td><code>scope</code></td>
+<td>a real ASGI scope <code>dict</code></td>
+<td>ASGI event dicts</td>
+</tr>
+</tbody>
+</table>
+<div class="highlight"><pre><span></span><code><span class="nd">@as_middleware</span>
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">asgi_style_mw</span><span class="p">(</span><span class="n">scope</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">,</span> <span class="n">call_next</span><span class="p">):</span>
+    <span class="c1"># A genuine scope dict: subscripting works.</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">scope</span><span class="p">[</span><span class="s1">&#39;method&#39;</span><span class="p">],</span> <span class="n">scope</span><span class="p">[</span><span class="s1">&#39;path&#39;</span><span class="p">])</span>
+    <span class="k">await</span> <span class="n">call_next</span><span class="p">(</span><span class="n">scope</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">)</span>
+</code></pre></div>
+<p>The word <code>scope</code> means a genuine ASGI scope dict everywhere in BlackBull
+and never a <code>Connection</code> — which is why the name is enough to declare
+your intent.  The dict lives across your frame only: <code>call_next</code> always
+passes the <code>Connection</code> down, so a middleware below yours is unaffected
+by the one above it.  The choice is made once, from the signature, when
+the decorator runs — a native middleware pays nothing for the feature.</p>
+<p>Undecorated middleware is not adapted either way and always receives the
+<code>Connection</code>.</p>
 <h2 id="typing-the-message-channel">Typing the message channel<a class="headerlink" href="#typing-the-message-channel" title="Permanent link">&para;</a></h2>
 <p>The events crossing <code>receive</code> and <code>send</code> follow the ASGI 3.0 wire contract
 on the <strong>ASGI lanes</strong> — WebSocket and the external-host edge
@@ -5399,9 +5474,11 @@ semantics are <code>is not None</code> (never truthiness — an empty body is a 
 body).</p>
 <p>BlackBull also ships a set of <code>TypedDict</code> <em>declarations</em> for the ASGI event
 shapes, so a type checker can tell which keys are legal on which event:</p>
-<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">blackbull</span><span class="w"> </span><span class="kn">import</span> <span class="n">ASGIReceiveCallable</span><span class="p">,</span> <span class="n">ASGISendCallable</span><span class="p">,</span> <span class="n">ASGISendEvent</span>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">blackbull</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span><span class="n">ASGIReceiveCallable</span><span class="p">,</span> <span class="n">ASGISendCallable</span><span class="p">,</span> <span class="n">ASGISendEvent</span><span class="p">,</span>
+                       <span class="n">as_middleware</span><span class="p">)</span>
 
-<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">add_header_mw</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">receive</span><span class="p">:</span> <span class="n">ASGIReceiveCallable</span><span class="p">,</span>
+<span class="nd">@as_middleware</span>                       <span class="c1"># required — it is what adapts the edges</span>
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">add_header_mw</span><span class="p">(</span><span class="n">scope</span><span class="p">,</span> <span class="n">receive</span><span class="p">:</span> <span class="n">ASGIReceiveCallable</span><span class="p">,</span>
                         <span class="n">send</span><span class="p">:</span> <span class="n">ASGISendCallable</span><span class="p">,</span> <span class="n">call_next</span><span class="p">):</span>
     <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">wrapped</span><span class="p">(</span><span class="n">event</span><span class="p">:</span> <span class="n">ASGISendEvent</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
         <span class="k">if</span> <span class="n">event</span><span class="p">[</span><span class="s1">&#39;type&#39;</span><span class="p">]</span> <span class="o">==</span> <span class="s1">&#39;http.response.start&#39;</span><span class="p">:</span>
@@ -5410,8 +5487,12 @@ shapes, so a type checker can tell which keys are legal on which event:</p>
             <span class="n">event</span> <span class="o">=</span> <span class="p">{</span><span class="o">**</span><span class="n">event</span><span class="p">,</span>
                      <span class="s1">&#39;headers&#39;</span><span class="p">:</span> <span class="nb">list</span><span class="p">(</span><span class="n">event</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;headers&#39;</span><span class="p">,</span> <span class="p">[]))</span> <span class="o">+</span> <span class="p">[(</span><span class="sa">b</span><span class="s1">&#39;x-custom&#39;</span><span class="p">,</span> <span class="sa">b</span><span class="s1">&#39;1&#39;</span><span class="p">)]}</span>
         <span class="k">await</span> <span class="n">send</span><span class="p">(</span><span class="n">event</span><span class="p">)</span>
-    <span class="k">await</span> <span class="n">call_next</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">wrapped</span><span class="p">)</span>
+    <span class="k">await</span> <span class="n">call_next</span><span class="p">(</span><span class="n">scope</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">wrapped</span><span class="p">)</span>
 </code></pre></div>
+<p>These declarations describe the <strong>ASGI</strong> form, so they fit a middleware
+that asked for one — decorated and with its first parameter named
+<code>scope</code>.  Name it <code>conn</code> and the events are <code>NativeResponse</code> objects, for
+which <code>ASGISendEvent</code> is the wrong annotation.</p>
 <p><code>ASGISendEvent</code> and <code>ASGIReceiveEvent</code> are unions discriminated on the
 <code>type</code> key, so comparing or <code>match</code>-ing against it narrows the union to a
 single member.  A checker then rejects the classic mistake this guards —
@@ -5448,31 +5529,40 @@ WebSocket / external-host lanes —
 <span class="kn">from</span><span class="w"> </span><span class="nn">blackbull.native</span><span class="w"> </span><span class="kn">import</span> <span class="n">NativeResponse</span>
 
 <span class="nd">@as_middleware</span>
-<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">add_header_mw</span><span class="p">(</span><span class="n">scope</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">,</span> <span class="n">call_next</span><span class="p">):</span>
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">add_header_mw</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">,</span> <span class="n">call_next</span><span class="p">):</span>
     <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">wrapped</span><span class="p">(</span><span class="n">event</span><span class="p">):</span>
         <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">event</span><span class="p">,</span> <span class="n">NativeResponse</span><span class="p">):</span>
             <span class="k">if</span> <span class="n">event</span><span class="o">.</span><span class="n">header</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
                 <span class="c1"># header arm — append zero-copy; visible to the sender</span>
                 <span class="n">event</span><span class="o">.</span><span class="n">header</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="sa">b</span><span class="s1">&#39;x-custom&#39;</span><span class="p">,</span> <span class="sa">b</span><span class="s1">&#39;1&#39;</span><span class="p">)</span>
-        <span class="k">elif</span> <span class="n">event</span><span class="p">[</span><span class="s1">&#39;type&#39;</span><span class="p">]</span> <span class="o">==</span> <span class="s1">&#39;http.response.start&#39;</span><span class="p">:</span>
-            <span class="n">event</span> <span class="o">=</span> <span class="p">{</span><span class="o">**</span><span class="n">event</span><span class="p">,</span>
-                     <span class="s1">&#39;headers&#39;</span><span class="p">:</span> <span class="nb">list</span><span class="p">(</span><span class="n">event</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;headers&#39;</span><span class="p">,</span> <span class="p">[]))</span> <span class="o">+</span> <span class="p">[(</span><span class="sa">b</span><span class="s1">&#39;x-custom&#39;</span><span class="p">,</span> <span class="sa">b</span><span class="s1">&#39;1&#39;</span><span class="p">)]}</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="c1"># WebSocket / external-host lanes still carry ASGI dicts</span>
+            <span class="k">if</span> <span class="n">event</span><span class="p">[</span><span class="s1">&#39;type&#39;</span><span class="p">]</span> <span class="o">==</span> <span class="s1">&#39;http.response.start&#39;</span><span class="p">:</span>
+                <span class="n">event</span> <span class="o">=</span> <span class="p">{</span><span class="o">**</span><span class="n">event</span><span class="p">,</span>
+                         <span class="s1">&#39;headers&#39;</span><span class="p">:</span> <span class="nb">list</span><span class="p">(</span><span class="n">event</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;headers&#39;</span><span class="p">,</span> <span class="p">[]))</span>
+                         <span class="o">+</span> <span class="p">[(</span><span class="sa">b</span><span class="s1">&#39;x-custom&#39;</span><span class="p">,</span> <span class="sa">b</span><span class="s1">&#39;1&#39;</span><span class="p">)]}</span>
         <span class="k">await</span> <span class="n">send</span><span class="p">(</span><span class="n">event</span><span class="p">)</span>
-    <span class="k">await</span> <span class="n">call_next</span><span class="p">(</span><span class="n">scope</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">wrapped</span><span class="p">)</span>
+    <span class="k">await</span> <span class="n">call_next</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">wrapped</span><span class="p">)</span>
 </code></pre></div>
 <p>On the native path a complete response is <strong>one object, one <code>send</code></strong>
 (header + body together), while a streamed response is a header object
 followed by body-chunk objects.  Remember the presence contract: test
 <code>event.header is not None</code> / <code>event.body is not None</code>, never truthiness.</p>
+<p>If you would rather not branch at all, name the first parameter <code>scope</code>
+and every event is an ASGI dict — see
+<a href="#the-first-parameters-name-picks-the-request-form">the parameter-name rule</a>
+above.</p>
 <p><code>@as_middleware</code> also works on classes (it wraps <code>__call__</code>).  All
 of BlackBull's built-in middleware uses the class form:</p>
 <div class="highlight"><pre><span></span><code><span class="nd">@as_middleware</span>
 <span class="k">class</span><span class="w"> </span><span class="nc">TimingMiddleware</span><span class="p">:</span>
     <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">threshold_ms</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">100.0</span><span class="p">):</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">_threshold</span> <span class="o">=</span> <span class="n">threshold_ms</span>
-    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="fm">__call__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">scope</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">,</span> <span class="n">call_next</span><span class="p">):</span>
+    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="fm">__call__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">conn</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">,</span> <span class="n">call_next</span><span class="p">):</span>
         <span class="o">...</span>
 </code></pre></div>
+<p>The name rule reads <code>__call__</code>'s first parameter after <code>self</code>, so a class
+middleware opts into the ASGI form the same way a function does.</p>
 <p>Omit the decorator when you need raw <code>send</code> arguments — e.g.
 middleware used in a deployment that never registers simplified
 handlers.</p>
@@ -5563,7 +5653,14 @@ closes the connection itself.</p>
 pass through uncompressed.</p>
 <p>Every compressed response carries <code>Vary: Accept-Encoding</code> (folded into
 any existing <code>Vary</code>) so a shared cache never replays an encoded body to
-a client that sent <code>identity</code> / no <code>Accept-Encoding</code> (RFC 9110 §12.5.5).</p>
+a client that sent <code>identity</code> / no <code>Accept-Encoding</code> (RFC 9110 §12.5.5).
+A response that is <em>compressible but not compressed</em> — below <code>min_size</code>,
+or served straight from disk — carries it too, for the same reason.</p>
+<p>Large files that <a href="#staticfiles"><code>StaticFiles</code></a> hands to the sender as a
+path (<code>http.response.pathsend</code>, so the kernel can <code>sendfile</code> them) are
+served uncompressed: the middleware never sees those bytes.  Pre-compress
+them on disk instead — <code>StaticFiles</code> serves a <code>.br</code> / <code>.gz</code> sibling when
+the client accepts it, which costs no CPU per request.</p>
 <h3 id="sessions-moved-to-blackbull-session">Sessions — moved to <code>blackbull-session</code><a class="headerlink" href="#sessions-moved-to-blackbull-session" title="Permanent link">&para;</a></h3>
 <p>Signed-cookie sessions live in the standalone
 <a href="https://github.com/TOKUJI/blackbull-session"><code>blackbull-session</code></a>
@@ -5578,10 +5675,10 @@ deprecated in 0.38 and <strong>removed in 0.54.0</strong>.</p>
 <span class="n">SessionExtension</span><span class="p">(</span><span class="n">app</span><span class="p">,</span> <span class="n">secret</span><span class="o">=</span><span class="sa">b</span><span class="s1">&#39;&lt;long-random-bytes&gt;&#39;</span><span class="p">)</span>   <span class="c1"># explicit secret</span>
 
 <span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">&#39;/whoami&#39;</span><span class="p">)</span>
-<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">whoami</span><span class="p">(</span><span class="n">scope</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
-    <span class="k">await</span> <span class="n">send</span><span class="p">(</span><span class="n">Response</span><span class="p">(</span><span class="n">scope</span><span class="p">[</span><span class="s1">&#39;session&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;user&#39;</span><span class="p">,</span> <span class="s1">&#39;anonymous&#39;</span><span class="p">)))</span>
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">whoami</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
+    <span class="k">await</span> <span class="n">send</span><span class="p">(</span><span class="n">Response</span><span class="p">(</span><span class="n">conn</span><span class="o">.</span><span class="n">state</span><span class="p">[</span><span class="s1">&#39;session&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;user&#39;</span><span class="p">,</span> <span class="s1">&#39;anonymous&#39;</span><span class="p">)))</span>
 </code></pre></div>
-<p>Handlers keep reading and writing <code>scope['session']</code> exactly as
+<p>Handlers read and write the session through <code>conn.state['session']</code>;
 before; see the <code>blackbull-session</code> README for cookie attributes,
 secret resolution, and session-clearing semantics.</p>
 <h3 id="cache"><code>Cache</code><a class="headerlink" href="#cache" title="Permanent link">&para;</a></h3>
@@ -5747,20 +5844,24 @@ routes need CORS:</p>
 <h3 id="request-id">Request ID<a class="headerlink" href="#request-id" title="Permanent link">&para;</a></h3>
 <p>Attach a unique ID to every request for distributed tracing:</p>
 <div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">uuid</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">blackbull</span><span class="w"> </span><span class="kn">import</span> <span class="n">as_middleware</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">blackbull.native</span><span class="w"> </span><span class="kn">import</span> <span class="n">NativeResponse</span>
 
-<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">request_id_mw</span><span class="p">(</span><span class="n">scope</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">,</span> <span class="n">call_next</span><span class="p">):</span>
-    <span class="n">req_id</span> <span class="o">=</span> <span class="p">(</span><span class="n">scope</span><span class="p">[</span><span class="s1">&#39;headers&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="sa">b</span><span class="s1">&#39;x-request-id&#39;</span><span class="p">,</span> <span class="sa">b</span><span class="s1">&#39;&#39;</span><span class="p">)</span>
+<span class="nd">@as_middleware</span>
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">request_id_mw</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">,</span> <span class="n">call_next</span><span class="p">):</span>
+    <span class="n">req_id</span> <span class="o">=</span> <span class="p">(</span><span class="n">conn</span><span class="o">.</span><span class="n">headers</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="sa">b</span><span class="s1">&#39;x-request-id&#39;</span><span class="p">,</span> <span class="sa">b</span><span class="s1">&#39;&#39;</span><span class="p">)</span>
               <span class="ow">or</span> <span class="n">uuid</span><span class="o">.</span><span class="n">uuid4</span><span class="p">()</span><span class="o">.</span><span class="n">hex</span><span class="o">.</span><span class="n">encode</span><span class="p">())</span>
-    <span class="n">scope</span><span class="p">[</span><span class="s1">&#39;request_id&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span><span class="n">req_id</span><span class="o">.</span><span class="n">decode</span><span class="p">()</span>
-                           <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">req_id</span><span class="p">,</span> <span class="nb">bytes</span><span class="p">)</span> <span class="k">else</span> <span class="n">req_id</span><span class="p">)</span>
+    <span class="n">conn</span><span class="o">.</span><span class="n">state</span><span class="p">[</span><span class="s1">&#39;request_id&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">req_id</span><span class="o">.</span><span class="n">decode</span><span class="p">()</span>
 
-    <span class="n">_send</span> <span class="o">=</span> <span class="n">send</span>
-    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">tagged_send</span><span class="p">(</span><span class="n">body</span><span class="p">,</span> <span class="n">status</span><span class="o">=</span><span class="mi">200</span><span class="p">,</span> <span class="n">headers</span><span class="o">=</span><span class="p">[]):</span>
-        <span class="k">await</span> <span class="n">_send</span><span class="p">(</span><span class="n">body</span><span class="p">,</span> <span class="n">status</span><span class="p">,</span>
-                    <span class="nb">list</span><span class="p">(</span><span class="n">headers</span><span class="p">)</span> <span class="o">+</span> <span class="p">[(</span><span class="sa">b</span><span class="s1">&#39;x-request-id&#39;</span><span class="p">,</span> <span class="n">scope</span><span class="p">[</span><span class="s1">&#39;request_id&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">encode</span><span class="p">())])</span>
+    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">tagged_send</span><span class="p">(</span><span class="n">event</span><span class="p">):</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">event</span><span class="p">,</span> <span class="n">NativeResponse</span><span class="p">)</span> <span class="ow">and</span> <span class="n">event</span><span class="o">.</span><span class="n">header</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">event</span><span class="o">.</span><span class="n">header</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="sa">b</span><span class="s1">&#39;x-request-id&#39;</span><span class="p">,</span> <span class="n">req_id</span><span class="p">)</span>
+        <span class="k">await</span> <span class="n">send</span><span class="p">(</span><span class="n">event</span><span class="p">)</span>
 
-    <span class="k">await</span> <span class="n">call_next</span><span class="p">(</span><span class="n">scope</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">tagged_send</span><span class="p">)</span>
+    <span class="k">await</span> <span class="n">call_next</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">tagged_send</span><span class="p">)</span>
 </code></pre></div>
+<p>Inner layers and the handler read it back as
+<code>conn.state['request_id']</code>.</p>
 <h3 id="rate-limiting-token-bucket-in-process">Rate limiting (token bucket, in-process)<a class="headerlink" href="#rate-limiting-token-bucket-in-process" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">time</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">collections</span><span class="w"> </span><span class="kn">import</span> <span class="n">defaultdict</span>
@@ -5770,8 +5871,8 @@ routes need CORS:</p>
 <span class="n">_buckets</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">float</span><span class="p">,</span> <span class="nb">int</span><span class="p">]]</span> <span class="o">=</span> <span class="n">defaultdict</span><span class="p">(</span><span class="k">lambda</span><span class="p">:</span> <span class="p">(</span><span class="n">time</span><span class="o">.</span><span class="n">monotonic</span><span class="p">(),</span> <span class="mi">0</span><span class="p">))</span>
 <span class="n">RATE_LIMIT</span> <span class="o">=</span> <span class="mi">60</span>   <span class="c1"># requests per minute per IP</span>
 
-<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">rate_limit_mw</span><span class="p">(</span><span class="n">scope</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">,</span> <span class="n">call_next</span><span class="p">):</span>
-    <span class="n">ip</span> <span class="o">=</span> <span class="p">(</span><span class="n">scope</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;client&#39;</span><span class="p">)</span> <span class="ow">or</span> <span class="p">[</span><span class="s1">&#39;unknown&#39;</span><span class="p">])[</span><span class="mi">0</span><span class="p">]</span>
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">rate_limit_mw</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">,</span> <span class="n">call_next</span><span class="p">):</span>
+    <span class="n">ip</span> <span class="o">=</span> <span class="p">(</span><span class="n">conn</span><span class="o">.</span><span class="n">client</span> <span class="ow">or</span> <span class="p">[</span><span class="s1">&#39;unknown&#39;</span><span class="p">])[</span><span class="mi">0</span><span class="p">]</span>
     <span class="n">now</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">monotonic</span><span class="p">()</span>
     <span class="n">window_start</span><span class="p">,</span> <span class="n">count</span> <span class="o">=</span> <span class="n">_buckets</span><span class="p">[</span><span class="n">ip</span><span class="p">]</span>
 
@@ -5784,35 +5885,39 @@ routes need CORS:</p>
     <span class="k">else</span><span class="p">:</span>
         <span class="n">_buckets</span><span class="p">[</span><span class="n">ip</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span><span class="n">window_start</span><span class="p">,</span> <span class="n">count</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span>
 
-    <span class="k">await</span> <span class="n">call_next</span><span class="p">(</span><span class="n">scope</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">)</span>
+    <span class="k">await</span> <span class="n">call_next</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">)</span>
 </code></pre></div>
 <p>Per-IP in-process limiting is fine for a single-worker deployment.
 For multi-worker or multi-host setups, use a shared store (Redis,
 Memcached) so the bucket survives across workers.</p>
 <h3 id="post-response-middleware-inspect-modify-the-response">Post-response middleware (inspect / modify the response)<a class="headerlink" href="#post-response-middleware-inspect-modify-the-response" title="Permanent link">&para;</a></h3>
-<p>The middleware shape <code>(scope, receive, send, call_next)</code> runs
+<p>The middleware shape <code>(conn, receive, send, call_next)</code> runs
 <em>around</em> the handler — code before <code>await call_next(...)</code> sees the
 request, code after sees that the handler returned but <strong>not</strong> what
 the handler sent.  Response status, headers, and body all flow
 through <code>send</code>, not through <code>call_next</code>'s return value.</p>
 <p>To inspect or modify the response, wrap <code>send</code> and forward each
-ASGI event yourself:</p>
-<div class="highlight"><pre><span></span><code><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">log_status_mw</span><span class="p">(</span><span class="n">scope</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">,</span> <span class="n">call_next</span><span class="p">):</span>
+event yourself:</p>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">blackbull</span><span class="w"> </span><span class="kn">import</span> <span class="n">as_middleware</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">blackbull.native</span><span class="w"> </span><span class="kn">import</span> <span class="n">NativeResponse</span>
+
+<span class="nd">@as_middleware</span>
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">log_status_mw</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">,</span> <span class="n">call_next</span><span class="p">):</span>
     <span class="n">captured_status</span> <span class="o">=</span> <span class="kc">None</span>
 
     <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">intercepting_send</span><span class="p">(</span><span class="n">event</span><span class="p">):</span>
         <span class="k">nonlocal</span> <span class="n">captured_status</span>
-        <span class="k">if</span> <span class="n">event</span><span class="p">[</span><span class="s1">&#39;type&#39;</span><span class="p">]</span> <span class="o">==</span> <span class="s1">&#39;http.response.start&#39;</span><span class="p">:</span>
-            <span class="n">captured_status</span> <span class="o">=</span> <span class="n">event</span><span class="p">[</span><span class="s1">&#39;status&#39;</span><span class="p">]</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">event</span><span class="p">,</span> <span class="n">NativeResponse</span><span class="p">)</span> <span class="ow">and</span> <span class="n">event</span><span class="o">.</span><span class="n">header</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">captured_status</span> <span class="o">=</span> <span class="n">event</span><span class="o">.</span><span class="n">status</span>
         <span class="k">await</span> <span class="n">send</span><span class="p">(</span><span class="n">event</span><span class="p">)</span>
 
-    <span class="k">await</span> <span class="n">call_next</span><span class="p">(</span><span class="n">scope</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">intercepting_send</span><span class="p">)</span>
-    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">scope</span><span class="p">[</span><span class="s1">&#39;method&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">scope</span><span class="p">[</span><span class="s1">&#39;path&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2"> → </span><span class="si">{</span><span class="n">captured_status</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="k">await</span> <span class="n">call_next</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">intercepting_send</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">conn</span><span class="o">.</span><span class="n">method</span><span class="si">}</span><span class="s1"> </span><span class="si">{</span><span class="n">conn</span><span class="o">.</span><span class="n">path</span><span class="si">}</span><span class="s1"> → </span><span class="si">{</span><span class="n">captured_status</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
 </code></pre></div>
 <p>The handler now sends to <code>intercepting_send</code>, which records the
-status off the <code>http.response.start</code> event and forwards every event
-to the outer <code>send</code> unchanged.  Once <code>call_next</code> returns, you have
-the captured value.</p>
+status off the header arm and forwards every event to the outer
+<code>send</code> unchanged.  Once <code>call_next</code> returns, you have the captured
+value.</p>
 <p>The pattern generalises to any modification:</p>
 <table>
 <thead>
@@ -5824,19 +5929,19 @@ the captured value.</p>
 <tbody>
 <tr>
 <td>Add a response header</td>
-<td>rewrite <code>event['headers']</code> on <code>http.response.start</code> before forwarding</td>
+<td><code>event.header.append(...)</code> on the header arm before forwarding</td>
 </tr>
 <tr>
 <td>Compute a checksum / size</td>
-<td>accumulate <code>event['body']</code> on <code>http.response.body</code>, finalise when <code>more_body=False</code></td>
+<td>accumulate <code>event.body</code> while <code>event.body is not None</code>, finalise when <code>more_body</code> is false</td>
 </tr>
 <tr>
 <td>Replace the body</td>
-<td>buffer body parts; on the final body event, emit your replacement and skip the original</td>
+<td>buffer body parts; on the terminal body, emit your replacement and skip the original</td>
 </tr>
 <tr>
 <td>Short-circuit a status code</td>
-<td>on <code>http.response.start</code>, decide whether to forward as-is or synthesise a different response</td>
+<td>on the header arm, decide whether to forward as-is or synthesise a different response</td>
 </tr>
 </tbody>
 </table>
@@ -5848,28 +5953,38 @@ handler finishes.</p>
 <p class="admonition-title">Streaming responses</p>
 <p><code>intercepting_send</code> receives every body event, including chunks
 sent with <code>more_body=True</code>.  If your goal is to inspect the
-<em>complete</em> response, either buffer until <code>more_body=False</code> (as
+<em>complete</em> response, either buffer until <code>more_body</code> is false (as
 <code>Compression</code> does for non-streaming payloads) or fall back to
 pass-through when streaming is detected — buffering an unbounded
 stream defeats the point.</p>
 </div>
-<h3 id="injecting-values-into-scope">Injecting values into scope<a class="headerlink" href="#injecting-values-into-scope" title="Permanent link">&para;</a></h3>
-<p>Middleware may add any key to <code>scope</code> for inner layers to consume:</p>
-<div class="highlight"><pre><span></span><code><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">auth_mw</span><span class="p">(</span><span class="n">scope</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">,</span> <span class="n">call_next</span><span class="p">):</span>
-    <span class="n">auth</span> <span class="o">=</span> <span class="n">scope</span><span class="p">[</span><span class="s1">&#39;headers&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="sa">b</span><span class="s1">&#39;authorization&#39;</span><span class="p">,</span> <span class="sa">b</span><span class="s1">&#39;&#39;</span><span class="p">)</span>
+<h3 id="passing-values-to-inner-layers">Passing values to inner layers<a class="headerlink" href="#passing-values-to-inner-layers" title="Permanent link">&para;</a></h3>
+<p><code>conn.state</code> is the per-request scratch dict every layer shares:</p>
+<div class="highlight"><pre><span></span><code><span class="nd">@as_middleware</span>
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">auth_mw</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">,</span> <span class="n">call_next</span><span class="p">):</span>
+    <span class="n">auth</span> <span class="o">=</span> <span class="n">conn</span><span class="o">.</span><span class="n">headers</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="sa">b</span><span class="s1">&#39;authorization&#39;</span><span class="p">,</span> <span class="sa">b</span><span class="s1">&#39;&#39;</span><span class="p">)</span>
     <span class="n">token</span> <span class="o">=</span> <span class="n">auth</span><span class="p">[</span><span class="mi">7</span><span class="p">:]</span><span class="o">.</span><span class="n">decode</span><span class="p">()</span> <span class="k">if</span> <span class="n">auth</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="sa">b</span><span class="s1">&#39;Bearer &#39;</span><span class="p">)</span> <span class="k">else</span> <span class="s1">&#39;&#39;</span>
     <span class="n">user</span> <span class="o">=</span> <span class="n">SESSIONS</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">token</span><span class="p">)</span>
     <span class="k">if</span> <span class="ow">not</span> <span class="n">user</span><span class="p">:</span>
         <span class="k">await</span> <span class="n">send</span><span class="p">(</span><span class="n">JSONResponse</span><span class="p">({</span><span class="s1">&#39;error&#39;</span><span class="p">:</span> <span class="s1">&#39;Unauthorized&#39;</span><span class="p">},</span>
                                 <span class="n">status</span><span class="o">=</span><span class="n">HTTPStatus</span><span class="o">.</span><span class="n">UNAUTHORIZED</span><span class="p">))</span>
-        <span class="k">return</span>                  <span class="c1"># short-circuit: inner layers never run</span>
-    <span class="n">scope</span><span class="p">[</span><span class="s1">&#39;user&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">user</span>        <span class="c1"># available to all inner layers</span>
-    <span class="n">scope</span><span class="p">[</span><span class="s1">&#39;token&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">token</span>
-    <span class="k">await</span> <span class="n">call_next</span><span class="p">(</span><span class="n">scope</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">)</span>
+        <span class="k">return</span>                       <span class="c1"># short-circuit: inner layers never run</span>
+    <span class="n">conn</span><span class="o">.</span><span class="n">state</span><span class="p">[</span><span class="s1">&#39;user&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">user</span>        <span class="c1"># available to all inner layers</span>
+    <span class="n">conn</span><span class="o">.</span><span class="n">state</span><span class="p">[</span><span class="s1">&#39;token&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">token</span>
+    <span class="k">await</span> <span class="n">call_next</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">)</span>
 </code></pre></div>
-<p>The path-parameter dict <code>scope['path_params']</code> and the framework
-error keys (<code>scope['state']['error_status']</code>, etc.) are populated
-by the framework — see <a href="../error-handling/">Error handling</a>.</p>
+<div class="admonition warning">
+<p class="admonition-title"><code>state</code>, not a top-level key</p>
+<p>Use <code>conn.state[...]</code>.  Setting an attribute or a top-level scope
+key on the request object does <strong>not</strong> reach inner layers: the
+scope form a <code>scope</code>-declaring middleware receives is built for
+that frame, and <code>call_next</code> passes the <code>Connection</code> down.  Only
+<code>state</code> (and <code>extensions</code>) are shared by reference across the
+whole chain, which is why they are the injection points.</p>
+</div>
+<p>The path-parameter dict <code>conn.path_params</code> and the framework error
+keys (<code>conn.state['error_status']</code>, etc.) are populated by the
+framework — see <a href="../error-handling/">Error handling</a>.</p>
 <h2 id="next">Next<a class="headerlink" href="#next" title="Permanent link">&para;</a></h2>
 <ul>
 <li><a href="../error-handling/">Error handling</a> — custom error handlers,

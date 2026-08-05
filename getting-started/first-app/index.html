@@ -5327,8 +5327,8 @@ $<span class="w"> </span>curl<span class="w"> </span>localhost:8000/tasks
 <p>The simplified form covers most needs, but not all:</p>
 <ul>
 <li><strong>WebSocket handlers</strong> always receive the full
-  <code>(scope, receive, send)</code> triplet.</li>
-<li><strong>Middleware</strong> functions keep the <code>(scope, receive, send, call_next)</code>
+  <code>(conn, receive, send)</code> triplet.</li>
+<li><strong>Middleware</strong> functions keep the <code>(conn, receive, send, call_next)</code>
   shape; the simplified adaptation does not apply to them.</li>
 <li><strong>Streaming uploads / long polling</strong> need to call <code>receive()</code> in
   a loop, so the full form is clearer.</li>

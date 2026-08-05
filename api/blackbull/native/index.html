@@ -3429,6 +3429,34 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#blackbull.native.NativeWSMessage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        NativeWSMessage
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="NativeWSMessage">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.native.NativeWSMessage.to_asgi" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        to_asgi
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -5011,6 +5039,34 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#blackbull.native.NativeWSMessage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        NativeWSMessage
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="NativeWSMessage">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.native.NativeWSMessage.to_asgi" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        to_asgi
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -5157,6 +5213,92 @@ conversion boundaries — the external ASGI edge (external hosts /
 <code>asgi=True</code>) and the middleware native-read arms (cache,
 compression); the native H1 sender path never materialises these
 dicts.</p>
+
+
+    </div>
+
+</div>
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="blackbull.native.NativeWSMessage" class="doc doc-heading">
+            <code>NativeWSMessage</code>
+
+
+<a href="#blackbull.native.NativeWSMessage" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+
+
+        <p>One message on the native WebSocket send channel.</p>
+<p>The WS counterpart of :class:<code>NativeResponse</code>, and it exists for the same
+reason.  HTTP got a native send message in Sprint 92/93 and the sender a
+native arm; WebSocket was carried along as "conn is native, no scope" while
+its <em>event channel</em> stayed ASGI-shaped — so <code>websocket.*</code> dicts still
+travelled object → middleware → actor → sender on BlackBull's own path.
+The handler never saw them (that is the :class:<code>~blackbull.websocket.WebSocket</code>
+object's whole point), but everything under it did.</p>
+<p>Three kinds, discriminated by :attr:<code>kind</code> rather than by which of seven
+fields happens to be set — the variants carry disjoint payloads, so a tag
+reads better here than the presence test that suits <code>NativeResponse</code>'s
+combinable arms:</p>
+<ul>
+<li><code>ACCEPT</code> — <code>subprotocol</code> / <code>headers</code>; completes the handshake.</li>
+<li><code>SEND</code> — exactly one of <code>text</code> (<code>str</code>) or <code>data</code> (<code>bytes</code>).</li>
+<li><code>CLOSE</code> — <code>code</code> / <code>reason</code>.</li>
+</ul>
+<p><code>data</code> rather than <code>bytes</code>: the ASGI key is <code>bytes</code>, but a slot of
+that name shadows the builtin at every use site inside the class.
+:meth:<code>to_asgi</code> maps it back for the boundary.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.native.NativeWSMessage.to_asgi" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">to_asgi</span><span class="p">()</span></code>
+
+<a href="#blackbull.native.NativeWSMessage.to_asgi" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Convert to the ASGI <code>websocket.*</code> event list.</p>
+<p>Used only at conversion boundaries — the external ASGI edge and the
+raw <code>(conn, receive, send)</code> compat surface — exactly like
+:meth:<code>NativeResponse.to_asgi</code> on the HTTP side.</p>
 
 
     </div>
