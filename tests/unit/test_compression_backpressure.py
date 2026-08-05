@@ -237,23 +237,16 @@ async def test_passthrough_skips_event_reparsing(monkeypatch):
     StaticFiles serving a precompressed sibling), the response must reach the
     wire without being taken apart on the way.
 
-    Two costs are pinned, because the static cache-hit path pays both per
-    request: dict re-parsing (``parse_response_event`` per ASGI event) and
-    native expansion (``to_asgi()`` back into dicts for the layer below to
-    re-convert).  The native merge path avoids both entirely — this asserts
-    the ceiling, not an exact call count, so a further improvement does not
-    fail the test."""
+    The single-world seam removes both costs the static cache-hit path used to
+    pay per request: dict re-parsing and native expansion.  The first is now
+    structural — ``parse_response_event`` is not reachable from this module at
+    all — so it is asserted as absence of the import rather than a call count.
+    The second is counted."""
     from blackbull.middleware import compression as _compression
     from blackbull.native import NativeResponse
 
-    calls: list[bytes] = []
-    real_parse = _compression.parse_response_event
-
-    def counting_parse(event):
-        calls.append(event.get('type', b''))
-        return real_parse(event)
-
-    monkeypatch.setattr(_compression, 'parse_response_event', counting_parse)
+    assert not hasattr(_compression, 'parse_response_event'), (
+        'the dict lane is back: compression imported parse_response_event')
 
     expansions = {'n': 0}
     real_to_asgi = NativeResponse.to_asgi
@@ -291,12 +284,6 @@ async def test_passthrough_skips_event_reparsing(monkeypatch):
     mw = Compression()
     await mw(_scope(b'br, gzip'), _noop_receive, out_send, call_next)
 
-    # The body event is the expensive one — it carries the payload, and
-    # re-parsing it buys nothing once the skip decision is made.
-    assert 'http.response.body' not in calls, \
-        f'fast path bypassed: body event re-parsed; got {calls!r}'
-    assert len(calls) <= 1, \
-        f'response was taken apart {len(calls)}x on the way out; got {calls!r}'
     assert expansions['n'] == 0, \
         (f'response expanded through to_asgi() {expansions["n"]}x — the native '
          f'path round-tripped it back into dicts')

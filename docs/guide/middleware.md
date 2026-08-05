@@ -11,24 +11,55 @@ Quart / ASGI 3.0 generally, with one BlackBull convenience
 ```python
 import time
 
-async def logging_mw(scope, receive, send, call_next):
+async def logging_mw(conn, receive, send, call_next):
     t0 = time.monotonic()
-    await call_next(scope, receive, send)
+    await call_next(conn, receive, send)
     elapsed = (time.monotonic() - t0) * 1000
-    print(f"{scope['method']} {scope['path']}  {elapsed:.1f} ms")
+    print(f"{conn.method} {conn.path}  {elapsed:.1f} ms")
 ```
 
-Signature: `async def mw(scope, receive, send, call_next)`.
+Signature: `async def mw(conn, receive, send, call_next)`.
 
-- Call `await call_next(scope, receive, send)` to pass control to the
+- Call `await call_next(conn, receive, send)` to pass control to the
   next layer.
 - The legacy parameter name `inner` is accepted as an alias for
   `call_next`.
 - Sending a response without calling `call_next` **short-circuits**
   all inner layers.
 
-Middleware functions keep the full `(scope, receive, send, call_next)`
+Middleware functions keep the full `(conn, receive, send, call_next)`
 shape; the simplified handler form does **not** apply to them.
+
+### The first parameter's *name* picks the request form
+
+BlackBull's own server threads a typed
+[`Connection`](requests-and-responses.md) end-to-end — `conn.method`,
+`conn.path`, `conn.headers.get(b'accept')`.  A middleware written against
+plain ASGI wants the scope dict instead, so `@as_middleware` reads the
+name you gave the parameter:
+
+| First parameter named | Receives | `send` wrapper observes |
+|---|---|---|
+| anything but `scope` (`conn`, `connection`, …) | `Connection` | `NativeResponse` on the HTTP path |
+| `scope` | a real ASGI scope `dict` | ASGI event dicts |
+
+```python
+@as_middleware
+async def asgi_style_mw(scope, receive, send, call_next):
+    # A genuine scope dict: subscripting works.
+    print(scope['method'], scope['path'])
+    await call_next(scope, receive, send)
+```
+
+The word `scope` means a genuine ASGI scope dict everywhere in BlackBull
+and never a `Connection` — which is why the name is enough to declare
+your intent.  The dict lives across your frame only: `call_next` always
+passes the `Connection` down, so a middleware below yours is unaffected
+by the one above it.  The choice is made once, from the signature, when
+the decorator runs — a native middleware pays nothing for the feature.
+
+Undecorated middleware is not adapted either way and always receives the
+`Connection`.
 
 ## Typing the message channel
 
@@ -45,9 +76,11 @@ BlackBull also ships a set of `TypedDict` *declarations* for the ASGI event
 shapes, so a type checker can tell which keys are legal on which event:
 
 ```python
-from blackbull import ASGIReceiveCallable, ASGISendCallable, ASGISendEvent
+from blackbull import (ASGIReceiveCallable, ASGISendCallable, ASGISendEvent,
+                       as_middleware)
 
-async def add_header_mw(conn, receive: ASGIReceiveCallable,
+@as_middleware                       # required — it is what adapts the edges
+async def add_header_mw(scope, receive: ASGIReceiveCallable,
                         send: ASGISendCallable, call_next):
     async def wrapped(event: ASGISendEvent) -> None:
         if event['type'] == 'http.response.start':
@@ -56,8 +89,13 @@ async def add_header_mw(conn, receive: ASGIReceiveCallable,
             event = {**event,
                      'headers': list(event.get('headers', [])) + [(b'x-custom', b'1')]}
         await send(event)
-    await call_next(conn, receive, wrapped)
+    await call_next(scope, receive, wrapped)
 ```
+
+These declarations describe the **ASGI** form, so they fit a middleware
+that asked for one — decorated and with its first parameter named
+`scope`.  Name it `conn` and the events are `NativeResponse` objects, for
+which `ASGISendEvent` is the wrong annotation.
 
 `ASGISendEvent` and `ASGIReceiveEvent` are unions discriminated on the
 `type` key, so comparing or `match`-ing against it narrows the union to a
@@ -99,23 +137,31 @@ from blackbull import as_middleware
 from blackbull.native import NativeResponse
 
 @as_middleware
-async def add_header_mw(scope, receive, send, call_next):
+async def add_header_mw(conn, receive, send, call_next):
     async def wrapped(event):
         if isinstance(event, NativeResponse):
             if event.header is not None:
                 # header arm — append zero-copy; visible to the sender
                 event.header.append(b'x-custom', b'1')
-        elif event['type'] == 'http.response.start':
-            event = {**event,
-                     'headers': list(event.get('headers', [])) + [(b'x-custom', b'1')]}
+        else:
+            # WebSocket / external-host lanes still carry ASGI dicts
+            if event['type'] == 'http.response.start':
+                event = {**event,
+                         'headers': list(event.get('headers', []))
+                         + [(b'x-custom', b'1')]}
         await send(event)
-    await call_next(scope, receive, wrapped)
+    await call_next(conn, receive, wrapped)
 ```
 
 On the native path a complete response is **one object, one `send`**
 (header + body together), while a streamed response is a header object
 followed by body-chunk objects.  Remember the presence contract: test
 `event.header is not None` / `event.body is not None`, never truthiness.
+
+If you would rather not branch at all, name the first parameter `scope`
+and every event is an ASGI dict — see
+[the parameter-name rule](#the-first-parameters-name-picks-the-request-form)
+above.
 
 `@as_middleware` also works on classes (it wraps `__call__`).  All
 of BlackBull's built-in middleware uses the class form:
@@ -125,9 +171,12 @@ of BlackBull's built-in middleware uses the class form:
 class TimingMiddleware:
     def __init__(self, threshold_ms: float = 100.0):
         self._threshold = threshold_ms
-    async def __call__(self, scope, receive, send, call_next):
+    async def __call__(self, conn, receive, send, call_next):
         ...
 ```
+
+The name rule reads `__call__`'s first parameter after `self`, so a class
+middleware opts into the ASGI form the same way a function does.
 
 Omit the decorator when you need raw `send` arguments — e.g.
 middleware used in a deployment that never registers simplified
@@ -277,11 +326,11 @@ SessionExtension(app)                        # reads BB_SESSION_SECRET
 SessionExtension(app, secret=b'<long-random-bytes>')   # explicit secret
 
 @app.route(path='/whoami')
-async def whoami(scope, receive, send):
-    await send(Response(scope['session'].get('user', 'anonymous')))
+async def whoami(conn, receive, send):
+    await send(Response(conn.state['session'].get('user', 'anonymous')))
 ```
 
-Handlers keep reading and writing `scope['session']` exactly as
+Handlers read and write the session through `conn.state['session']`;
 before; see the `blackbull-session` README for cookie attributes,
 secret resolution, and session-clearing semantics.
 
@@ -399,20 +448,25 @@ Attach a unique ID to every request for distributed tracing:
 
 ```python
 import uuid
+from blackbull import as_middleware
+from blackbull.native import NativeResponse
 
-async def request_id_mw(scope, receive, send, call_next):
-    req_id = (scope['headers'].get(b'x-request-id', b'')
+@as_middleware
+async def request_id_mw(conn, receive, send, call_next):
+    req_id = (conn.headers.get(b'x-request-id', b'')
               or uuid.uuid4().hex.encode())
-    scope['request_id'] = (req_id.decode()
-                           if isinstance(req_id, bytes) else req_id)
+    conn.state['request_id'] = req_id.decode()
 
-    _send = send
-    async def tagged_send(body, status=200, headers=[]):
-        await _send(body, status,
-                    list(headers) + [(b'x-request-id', scope['request_id'].encode())])
+    async def tagged_send(event):
+        if isinstance(event, NativeResponse) and event.header is not None:
+            event.header.append(b'x-request-id', req_id)
+        await send(event)
 
-    await call_next(scope, receive, tagged_send)
+    await call_next(conn, receive, tagged_send)
 ```
+
+Inner layers and the handler read it back as
+`conn.state['request_id']`.
 
 ### Rate limiting (token bucket, in-process)
 
@@ -425,8 +479,8 @@ from blackbull import JSONResponse
 _buckets: dict[str, tuple[float, int]] = defaultdict(lambda: (time.monotonic(), 0))
 RATE_LIMIT = 60   # requests per minute per IP
 
-async def rate_limit_mw(scope, receive, send, call_next):
-    ip = (scope.get('client') or ['unknown'])[0]
+async def rate_limit_mw(conn, receive, send, call_next):
+    ip = (conn.client or ['unknown'])[0]
     now = time.monotonic()
     window_start, count = _buckets[ip]
 
@@ -439,7 +493,7 @@ async def rate_limit_mw(scope, receive, send, call_next):
     else:
         _buckets[ip] = (window_start, count + 1)
 
-    await call_next(scope, receive, send)
+    await call_next(conn, receive, send)
 ```
 
 Per-IP in-process limiting is fine for a single-worker deployment.
@@ -448,42 +502,46 @@ Memcached) so the bucket survives across workers.
 
 ### Post-response middleware (inspect / modify the response)
 
-The middleware shape `(scope, receive, send, call_next)` runs
+The middleware shape `(conn, receive, send, call_next)` runs
 *around* the handler — code before `await call_next(...)` sees the
 request, code after sees that the handler returned but **not** what
 the handler sent.  Response status, headers, and body all flow
 through `send`, not through `call_next`'s return value.
 
 To inspect or modify the response, wrap `send` and forward each
-ASGI event yourself:
+event yourself:
 
 ```python
-async def log_status_mw(scope, receive, send, call_next):
+from blackbull import as_middleware
+from blackbull.native import NativeResponse
+
+@as_middleware
+async def log_status_mw(conn, receive, send, call_next):
     captured_status = None
 
     async def intercepting_send(event):
         nonlocal captured_status
-        if event['type'] == 'http.response.start':
-            captured_status = event['status']
+        if isinstance(event, NativeResponse) and event.header is not None:
+            captured_status = event.status
         await send(event)
 
-    await call_next(scope, receive, intercepting_send)
-    print(f"{scope['method']} {scope['path']} → {captured_status}")
+    await call_next(conn, receive, intercepting_send)
+    print(f'{conn.method} {conn.path} → {captured_status}')
 ```
 
 The handler now sends to `intercepting_send`, which records the
-status off the `http.response.start` event and forwards every event
-to the outer `send` unchanged.  Once `call_next` returns, you have
-the captured value.
+status off the header arm and forwards every event to the outer
+`send` unchanged.  Once `call_next` returns, you have the captured
+value.
 
 The pattern generalises to any modification:
 
 | Goal | Where to act in `intercepting_send` |
 |---|---|
-| Add a response header | rewrite `event['headers']` on `http.response.start` before forwarding |
-| Compute a checksum / size | accumulate `event['body']` on `http.response.body`, finalise when `more_body=False` |
-| Replace the body | buffer body parts; on the final body event, emit your replacement and skip the original |
-| Short-circuit a status code | on `http.response.start`, decide whether to forward as-is or synthesise a different response |
+| Add a response header | `event.header.append(...)` on the header arm before forwarding |
+| Compute a checksum / size | accumulate `event.body` while `event.body is not None`, finalise when `more_body` is false |
+| Replace the body | buffer body parts; on the terminal body, emit your replacement and skip the original |
+| Short-circuit a status code | on the header arm, decide whether to forward as-is or synthesise a different response |
 
 `Compression` ([`blackbull/middleware/compression.py`](https://github.com/TOKUJI/BlackBull/blob/master/blackbull/middleware/compression.py))
 is the reference implementation: it buffers body parts, compresses
@@ -493,32 +551,41 @@ handler finishes.
 !!! note "Streaming responses"
     `intercepting_send` receives every body event, including chunks
     sent with `more_body=True`.  If your goal is to inspect the
-    *complete* response, either buffer until `more_body=False` (as
+    *complete* response, either buffer until `more_body` is false (as
     `Compression` does for non-streaming payloads) or fall back to
     pass-through when streaming is detected — buffering an unbounded
     stream defeats the point.
 
-### Injecting values into scope
+### Passing values to inner layers
 
-Middleware may add any key to `scope` for inner layers to consume:
+`conn.state` is the per-request scratch dict every layer shares:
 
 ```python
-async def auth_mw(scope, receive, send, call_next):
-    auth = scope['headers'].get(b'authorization', b'')
+@as_middleware
+async def auth_mw(conn, receive, send, call_next):
+    auth = conn.headers.get(b'authorization', b'')
     token = auth[7:].decode() if auth.startswith(b'Bearer ') else ''
     user = SESSIONS.get(token)
     if not user:
         await send(JSONResponse({'error': 'Unauthorized'},
                                 status=HTTPStatus.UNAUTHORIZED))
-        return                  # short-circuit: inner layers never run
-    scope['user'] = user        # available to all inner layers
-    scope['token'] = token
-    await call_next(scope, receive, send)
+        return                       # short-circuit: inner layers never run
+    conn.state['user'] = user        # available to all inner layers
+    conn.state['token'] = token
+    await call_next(conn, receive, send)
 ```
 
-The path-parameter dict `scope['path_params']` and the framework
-error keys (`scope['state']['error_status']`, etc.) are populated
-by the framework — see [Error handling](error-handling.md).
+!!! warning "`state`, not a top-level key"
+    Use `conn.state[...]`.  Setting an attribute or a top-level scope
+    key on the request object does **not** reach inner layers: the
+    scope form a `scope`-declaring middleware receives is built for
+    that frame, and `call_next` passes the `Connection` down.  Only
+    `state` (and `extensions`) are shared by reference across the
+    whole chain, which is why they are the injection points.
+
+The path-parameter dict `conn.path_params` and the framework error
+keys (`conn.state['error_status']`, etc.) are populated by the
+framework — see [Error handling](error-handling.md).
 
 ## Next
 

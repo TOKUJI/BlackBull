@@ -28,7 +28,13 @@ async def _call(mw, scope):
     called = []
 
     async def send(event):
-        sent.append(event)
+        # CORS is a native producer for its own preflight reply; these tests
+        # assert on the ASGI event shape, so the seam is normalised away here.
+        from blackbull.native import NativeResponse
+        if isinstance(event, NativeResponse):
+            sent.extend(event.to_asgi())
+        else:
+            sent.append(event)
 
     async def call_next(s, r, se):
         called.append(True)

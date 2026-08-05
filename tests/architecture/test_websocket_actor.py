@@ -202,11 +202,17 @@ async def test_websocket_protocol_error_isolated(
     await actor.run()  # must not raise
 
     aggregator.on_error.assert_called_once()
-    aggregator.on_websocket_disconnected.assert_called_once_with(conn, code=1006)
     close_1002 = encode_frame((1002).to_bytes(2, 'big'), opcode=0x8)
     assert close_1002 in bytes(fake_writer.written), (
         'CLOSE(1002) frame must be written to the wire on protocol violation'
     )
+    # ...and the reported code must be the one on the wire.  This asserted
+    # 1006 (ABNORMAL — "closed with no close frame") while the line above
+    # required a CLOSE(1002) to have been sent: the actor kept its own copy of
+    # the close code and only updated it from a disconnect *event*, which a
+    # protocol violation never produces (it emits the exception instead), so
+    # the copy stayed at its default.  One record now, read from the recipient.
+    aggregator.on_websocket_disconnected.assert_called_once_with(conn, code=1002)
 
 
 @pytest.mark.asyncio

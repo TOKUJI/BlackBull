@@ -32,6 +32,8 @@ from .utils import Scheme, is_client_error, is_server_error
 from .router import Router, RouteInfo, ErrorRouter, MethodNotApplicable, PathNotRegistered, ConfigurationError, HTTPException, has_middleware_param
 from .request import ClientDisconnected
 from .connection import Connection, disconnected, CONNECTION_STASH_KEY
+from .native import NativeResponse
+from .response import wrap_native_send
 from .asgi import ASGIReceiveCallable, ASGISendCallable
 from .config import AppConfig
 logger = logging.getLogger(__name__)
@@ -49,7 +51,6 @@ def _wrap_send_native(raw_send: ASGISendCallable):
     the accepted shapes (full-form ``send(dict)`` compat held until
     2027-07-29).
     """
-    from .response import wrap_native_send  # noqa: PLC0415
     return wrap_native_send(raw_send)
 
 
@@ -76,54 +77,29 @@ def _to_asgi_boundary(send: ASGISendCallable):
     return _send
 
 
-def _inject_response_headers(raw_send: ASGISendCallable, extra_headers):
+def _inject_response_headers(raw_send, extra_headers):
     """Wrap *raw_send* to append *extra_headers* to the response.
 
     A route may declare headers (via the ``_bb_response_headers`` hook) that
     must appear on all of its responses — success and the centrally-rendered
-    error alike.  Installed **below** the handler-boundary adapter, so on the
-    H1 native path it observes ``NativeResponse`` (appends to the header arm)
-    and on the H2 / ASGI path it observes plain ASGI dicts (appends to the
-    ``http.response.start`` event).  Every other event passes straight
-    through.
+    error alike.  Installed **below** the handler-boundary adapter, so the
+    seam is native and only the header arm needs handling.  Every other event
+    passes straight through.
     """
-    from .native import NativeResponse  # noqa: PLC0415
-
     # Unannotated for the same per-request-closure reason as _wrap_send;
-    # ``event`` is a NativeResponse or an ASGISendEvent.
+    # ``event`` is a NativeResponse.
     async def _send(event):
+        # Native header arm — presence is `is not None`, never truthiness (an
+        # empty header list is a real header).  Read the raw slot for the
+        # presence check (no discarded _HeaderView on the hot path); the
+        # append still goes through the view's footgun guard.
         if isinstance(event, NativeResponse):
-            # Native header arm — presence is `is not None`, never truthiness
-            # (an empty header list is a real header).  Read the raw slot for
-            # the presence check (no discarded _HeaderView on the hot path);
-            # the append still goes through the view's footgun guard.
-            if event._header is not None:
-                event.header.append(extra_headers)
-        elif isinstance(event, dict) and event.get('type') == 'http.response.start':
-            headers: list = list(event.get('headers') or [])
-            headers.extend(extra_headers)
-            event = {**event, 'headers': headers}
+            view = event.header
+            if view is not None:
+                view.append(extra_headers)
         await raw_send(event)
 
     return _send
-
-
-def _boundary_wrap(mw):
-    """Wrap a global middleware so its input send is native-converting.
-
-    Middleware-generated events (short-circuit responses, the static
-    middleware's ``_respond`` / pathsend dicts) bypass the handler-boundary
-    adapter; wrapping the middleware's input send converts those to
-    ``NativeResponse`` too, so the pipeline below the middleware is uniformly
-    native on the HTTP path (H1 + H2 since Sprint 93).  WebSocket and gRPC
-    lanes are handled before ``_dispatch_http``, so they never reach this
-    wrapper.
-    """
-    async def wrapped(conn, receive, send, call_next):
-        send = _wrap_send_native(send)
-        return await mw(conn, receive, send, call_next)
-
-    return wrapped
 
 
 def _wants_html(conn) -> bool:
@@ -830,14 +806,12 @@ class BlackBull:
     def _build_chain(self):
         chain = self._dispatch
         for mw in reversed(self._global_middlewares):
-            # Middleware-boundary adapter (decision 2026-08-03): wrap each
-            # global middleware's input send with the native conversion on H1
-            # so middleware-generated events (short-circuit responses, the
-            # static middleware's pathsend / _respond dicts) are also native
-            # — the pipeline below a global middleware is uniformly native.
-            # On H2 the dict path stays (no native sender arm yet), so the
-            # conversion is gated per request.
-            chain = functools.partial(_boundary_wrap(mw), call_next=chain)
+            # No per-middleware conversion adapter.  It existed only because
+            # framework producers (``StaticFiles``' start/body/pathsend,
+            # ``CORS``' preflight) emitted ASGI dicts that bypassed the
+            # handler-boundary adapter; those producers are native now, so
+            # there is nothing left for a second altitude to catch.
+            chain = functools.partial(mw, call_next=chain)
         self._chain = chain
 
     async def __call__(self, conn, receive: ASGIReceiveCallable | None,

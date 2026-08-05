@@ -47,9 +47,11 @@ so the editable install's metadata catches up.
   `StaticFiles` — which sends its header and body as two events — expanded
   through `to_asgi()` and was re-converted below, on every request that
   negotiated a codec.  Compression now holds a header arm and merges it with
-  the terminal body that follows, restoring one-object-one-send.  Measured
-  against v0.67.0 on m7a.8xlarge (HttpArena, 3 runs/arm, FastAPI co-resident
-  as control): `static` −3.4 %…−6.3 %, `static-h2` −3.5 %, at flat CPU.
+  the terminal body that follows, restoring one-object-one-send.  Worth
+  ~0.6 µs/req (microbenchmark, N=30,000), which an ABBA A/B on the static
+  lane could not separate from noise: −0.52 % ± 0.31 against a 0.26 % null.
+  The v0.67.0 → v0.70.0 HttpArena `static` delta is **not** explained by this
+  round trip and remains unattributed.
 
 - **`Expect: 100-continue` is answered on every request, not just the first
   on a connection.**  The interim response was written before the shared
@@ -82,6 +84,24 @@ so the editable install's metadata catches up.
   interpret payload bytes as a frame header.  Switching read modes also no
   longer strands an event the previous mode had buffered.
 
+### Added
+
+- **`@as_middleware` honours a `scope` parameter.**  The middleware guide has
+  always documented the ASGI form — `async def mw(scope, receive, send,
+  call_next)` reading `scope['method']` — but BlackBull's own server threads a
+  native `Connection`, which is not subscriptable, so that example raised
+  `TypeError` on every request.  A middleware whose first parameter is
+  literally named `scope` is now handed a real ASGI scope dict, and is adapted
+  at both of its own edges: the events its `send` wrapper observes are ASGI
+  dicts (it will inspect `event['type']`), and its emissions are native again
+  on the way out.  The dict form therefore exists across exactly that one
+  frame — `call_next` always passes the `Connection` down.
+
+  Any other parameter name (`conn`, `connection`, …) is native and is not
+  adapted at all, so the default path pays nothing.  The decision is made once
+  from the signature, at decoration time, and recorded as
+  `__blackbull_asgi_scope__`.
+
 ### Changed
 
 - Registering a `websocket_message` listener no longer forces read-ahead on
@@ -90,10 +110,196 @@ so the editable install's metadata catches up.
   watchdog starts the deferred reader if the handler goes quiet.  A positive
   `BB_WS_QUEUE_DEPTH` is unchanged — an explicit opt-in to read-ahead.
 
+### Internal
+
+- **Every framework-owned response producer emits native.**  `StaticFiles`
+  (cache hit, sendfile, chunked fallback, and its error/`304` responses),
+  the `CORS` preflight, and the `Cache` middleware's stored entries now build
+  `NativeResponse` directly instead of ASGI event dicts; `NativeResponse`
+  grew a `file_path` arm so the sendfile form is one native shape rather than
+  a `http.response.pathsend` dict.  `Cache` stores `(status, header, body)` as
+  data and builds a fresh response per hit, keeping the header-list copy the
+  dict form provided.
+
+  With no dict producer left inside the seam, `Compression`'s ASGI-dict lane
+  (`_dict_event` and the buffered-parts tail) and the app's `_boundary_wrap`
+  are both deleted — the second conversion altitude has nothing left to
+  catch.  `parse_response_event` now has no caller inside the framework; it
+  remains exported for the external compat surface.
+
+  Counted on the `static` lane (`Accept-Encoding: gzip`, one request):
+  send-path adapter closures 2 → 1, `NativeResponse` allocations 3 → 2,
+  `to_asgi()` round trips 0, per-request function-level imports 9 → 8.  This
+  is object-count work; it is not an A/B result, and the unattributed
+  v0.67.0 → v0.70.0 `static` delta stays open.
+
+- **Architecture guard: the ASGI boundaries are enumerated.**
+  `tests/architecture/test_single_native_world.py` scans the package for
+  native↔ASGI conversions (`to_asgi()`, `to_asgi_scope()`, response-event dict
+  literals, `http.request` dict literals) and fails on any site not named in
+  its allowlist with the reason it exists.  Entries are marked *boundary*
+  (permanent — where BlackBull meets ASGI) or *residual* (a producer awaiting
+  conversion); every entry is *boundary*, on every rule and both directions,
+  so the enumerated edges are the only places a dict is built.  The guard
+  self-checks, so a scanner that stopped matching cannot pass vacuously.
+
+- **`Response` and `StreamingResponse` emit native (proposal §8.2).**  Both are
+  BlackBull-owned serialisers on BlackBull's own send path, and both emitted
+  `http.response.*` dicts that `wrap_native_send` converted straight back —
+  the last response-dict round trip in the framework.  `Response` gets the
+  bigger win: a complete response is now **one object, one send** (header and
+  body together) where the dict form always cost two.  The shared
+  `_emit_response` helper carries the app's `send(body, status, headers)`
+  convenience form and the default error handler with it.
+
+  No residual response-dict producers remain; the architecture guard's
+  allowlist is boundary-only on that rule.
+
+- **`CORS` and `Compression` no longer crash an object-form WebSocket
+  handler.**  Both middleware wrap `send` with a header-injecting wrapper whose
+  non-native branch assumed every event is a dict and called `.get('type')` on
+  it.  Once the WS send channel went native (below), an object-form handler
+  sending through either raised
+  `AttributeError: 'NativeWSMessage' object has no attribute 'get'` —
+  `NativeWSMessage` is a `__slots__` class with no `.get`.  Reachable on
+  `CORS` for any object-form WS handler whose upgrade request carries an
+  allowed `Origin`, and on `Compression` via the no-matching-codec path.  The
+  raw `(conn, receive, send)` form was unaffected, since its events really are
+  dicts — which is why the break was invisible until the object form was run.
+
+  `Cache` was already correct.  Both branches are now guarded with
+  `isinstance(event, dict)`, and both guards are mutation-tested: removing
+  either turns the new suite red.
+
+- **The WebSocket receive channel is native too (proposal §6, receive half).**
+  `WebSocketRecipient` built a `websocket.receive` dict for every message,
+  which the `WebSocket` object then took apart one frame later to hand the
+  application the `str | bytes` it had a moment earlier.  The channel now
+  carries the message itself — `str` for text, `bytes` for binary, which *is*
+  the discriminator the object's public contract already publishes — via
+  `next_message()`, with the peer's close raising `WebSocketDisconnect`
+  carrying the RFC 6455 §7.4 code and a `ProtocolError` propagating unchanged.
+  `await_connect()` is the handshake counterpart.  Same shape as the HTTP body
+  channel, for the same reason.
+
+  `receive()` is unchanged and still mints the ASGI dicts, for the raw
+  `(conn, receive, send)` form and the external host.  Measured on the real
+  recipient (20 000 messages, 64-byte payloads, mean ± SE over 3 runs):
+  **2550.1 ± 30.1 → 2438.5 ± 30.6 ns/message**, −4.4 %.
+
+- **A WebSocket's close code is recorded once.**  `WebSocketActor` kept its own
+  copy of the code, updated only when a disconnect *event* passed through its
+  receive wrapper — but a protocol violation emits the exception instead, so
+  the copy stayed at its `1006 ABNORMAL` default while the server had already
+  sent `CLOSE(1002)` on the wire.  `websocket_disconnected` and the access log
+  now report the code the peer actually received.  The wrapper is gone with
+  it: one less per-message coroutine hop on the WebSocket hot path.
+
+- **The WebSocket send channel is native (proposal §6).**  The `WebSocket`
+  object was called the native form but was a facade: `accept()` /
+  `send_text()` / `send_bytes()` / `close()` built `websocket.*` ASGI dicts and
+  pushed them down the *same* channel the raw `(conn, receive, send)` form
+  uses, and `WebSocketSender` had no native arm at all — HTTP gained
+  `case NativeResponse():` in Sprint 93; WS never did.  The handler never saw
+  those dicts, but middleware, the actor, and the sender all did.
+
+  New `NativeWSMessage` (accept / send / close, tagged by `kind` because the
+  variants carry disjoint payloads), a native arm on `WebSocketSender` sharing
+  its framing helpers with the dict arm, and a native accept arm on
+  `WebSocketActor`.  `websocket.*` dicts now appear only at the enumerated
+  boundaries: the external ASGI edge, the raw compat form, and the Tier-2 test
+  client.  A test asserts the two arms put **identical bytes on the wire**, so
+  the compat surface cannot drift.
+
+- **The gRPC bridge emits native (proposal §7).**  `serve_grpc` is dispatched
+  from `BlackBull._dispatch` *before* the handler-boundary adapter, so its
+  `http.response.*` dicts reached middleware and the sender unconverted — an
+  ASGI shape on the native seam that nothing had asked for, from
+  framework-internal code that only lives in a module called `asgi.py`.  All
+  seven emission sites now build `NativeResponse`; the wire contract is
+  unchanged and tested in both directions.
+
+- **The last request-dict producer is gone (proposal §8.1).**  The H2 trailers
+  path (RFC 9113 §8.1 — a second HEADERS on an open stream) built an
+  `http.request` dict for the recipient to translate straight back.
+  `put_event()` is replaced by `put_end_of_stream()`, which enqueues the native
+  pair.  RFC 8441 WS-over-H2 (`HTTP2WSWriter`, and the client's `_send_ws`)
+  emits `NativeResponse` too (§8.2).
+
+- **The request body crosses the framework as `bytes`.**  `HTTP1Recipient` and
+  `HTTP2Recipient` grew `next_chunk()`, which returns the chunk itself and
+  `None` once the body is complete; a peer that vanishes mid-body raises
+  `ClientDisconnected`, and so does a body-read timeout (still recorded as a
+  cap hit).  `None` rather than `b''` for the reason `NativeResponse` decides
+  presence with `is not None` — an empty body is a real body — and the
+  sentinel is unambiguous on both framings, since a zero-length chunk *is* the
+  terminator in chunked encoding (RFC 9112 §7.1) and a Content-Length slice is
+  never empty.
+
+  `Connection.body()` / `stream()` — and `read_body` / `stream_body` beneath
+  them — consume that channel directly.  The `http.request` dict is now built
+  **only** by the recipients' `__call__`, i.e. only when something asks for the
+  ASGI encoding: a full-form handler calling `receive()`, or an external host.
+  It used to be built unconditionally, so a handler using `conn.body()` paid
+  one dict per chunk it never read.
+
+  No user-visible contract changes: `receive()` returns the identical event
+  sequence (`more_body` is recovered from the end marker `next_chunk` just
+  set), and both channels share that marker so a reader starting on one cannot
+  block on the other.  Measured on the real H1 recipient at 4 KiB chunks over
+  2000 requests per run (mean ± SE, N=5): **803.2 ± 52.6 → 536.3 ± 12.3
+  ns/chunk**, −33.2 % — 4.27 µs on a 64 KiB upload, which also goes from 16
+  `http.request` dicts to **0**.
+
+- **The receive and event paths take a `Connection`, not "a `Connection` or a
+  scope dict".**  `HTTP1Recipient.__init__` / `bind()` carried a three-way
+  shape check — native `Connection`, a scope dict with a stashed `Connection`,
+  a raw scope dict — plus a `Headers` re-wrap, on a per-request path.  Only
+  `HTTP1Actor._dispatch_request` ever builds or rebinds a recipient and it is
+  typed `conn: Connection`; under `BB_FORCE_ASGI_SCOPE=1` the *app* gets the
+  scope dict while the recipient still gets the `Connection`.  The dict shape
+  was reachable from tests alone.  Same deletion in `WebSocketRecipient`
+  (`conn`, the `websocket_disconnected` detail, the frame-payload cap log) and
+  in `EventAggregator._ws_fields`.
+
+  `RequestActor` keeps its `dict | Connection` union — that one is the real
+  `BB_FORCE_ASGI_SCOPE` lane, not a compat leftover.
+
 ### Docs
 
 - WebSocket guide + env-vars reference: the `websocket_message` note now
   describes the deferred reader instead of forced read-ahead.
+- Middleware guide: the `scope` / `conn` parameter names now select the
+  request form a middleware receives, and the examples say which is which.
+  The `scope`-subscripting examples throughout the middleware, logging,
+  extensions, requests-and-responses, testing, and first-app pages were
+  rewritten to the native form — they raised `TypeError` as written, because
+  an undecorated middleware receives a `Connection`, which is not
+  subscriptable.  Injection is now documented as `conn.state[...]`: a
+  top-level scope-key write never reached inner layers.
+- **`blackbull.testing.NativeResponse` is now `NativeTestResponse`.**  The
+  old name collided with `blackbull.native.NativeResponse` — the framework's
+  send message — so two unrelated classes were indistinguishable in a
+  traceback or an `isinstance` check, and `testing/native.py` had to import
+  the framework one *inside a function* to dodge the shadowing.  It joins its
+  siblings `NativeClient` / `NativeTestServer`.  `NativeResponse` remains as
+  an alias, so existing imports keep working.
+- Handler-facing docs no longer teach the request as a scope dict.  The
+  `hello-world` request table, `routing`'s `path_params`, `error-handling`'s
+  `state`, `requests-and-responses`' header and query-string sections,
+  `http2`'s `extensions`, and `behind-nginx`'s `client` / `scheme` were all
+  written as `scope['x']` — which raises `TypeError` on the `Connection` a
+  handler actually receives.  They now use attributes, and 27 full-form
+  handler signatures were renamed from `scope` to `conn`.  Every rewritten
+  idiom was executed against a running app.  The `scope[...]` references that
+  remain are the ones that genuinely mean the ASGI scope: the parameter-name
+  rule's own example, two field-origin notes, and a pre-v0.31 migration note.
+- Events guide: the request- and connection-scoped events carry
+  `detail['conn']` — the native `Connection` — which the reference tables
+  called `scope` and typed as an ASGI dict.  The four examples that read it
+  as a mapping (`.get('state', {})`, `['headers']`, `['path']`) now use
+  attributes, and the `websocket_connected` / `websocket_disconnected` rows
+  list the keys those events actually emit.
 
 ---
 

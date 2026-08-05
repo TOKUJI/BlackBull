@@ -81,8 +81,8 @@ server {
 
 ## Trusted-proxy headers
 
-By default, `scope['client']` is the raw TCP peer (nginx's
-loopback address) and `scope['scheme']` is `'http'` even when
+By default, `conn.client` is the raw TCP peer (nginx's
+loopback address) and `conn.scheme` is `'http'` even when
 the client connected via HTTPS.  Enable `TrustedProxy` to
 rewrite both from the proxy's forwarded headers:
 
@@ -99,8 +99,8 @@ With trusted-proxy support active:
 
 | `scope` key | Without middleware | With middleware |
 |---|---|---|
-| `scope['client']` | nginx's loopback IP | real client IP (from `X-Forwarded-For`) |
-| `scope['scheme']` | `'http'` | `'https'` (from `X-Forwarded-Proto`) |
+| `conn.client` | nginx's loopback IP | real client IP (from `X-Forwarded-For`) |
+| `conn.scheme` | `'http'` | `'https'` (from `X-Forwarded-Proto`) |
 
 Supported headers, in precedence order:
 

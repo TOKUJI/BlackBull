@@ -64,6 +64,7 @@ from typing import Any
 from urllib.parse import unquote
 
 from ..asgi import ASGIReceiveEvent
+from ..native import NativeWSMessage
 from ..websocket import WebSocketDisconnect
 
 import httpx
@@ -411,10 +412,19 @@ class WebSocketTestSession:
         )
 
     def _recv_event(self) -> dict:
+        """The next server event, as an ASGI dict.
+
+        Tier-2 drives the app through the ASGI WebSocket contract, so this is
+        a boundary: BlackBull's own path now emits ``NativeWSMessage`` and it
+        is expanded here, at the one place server events enter the client.
+        """
         deadline = self.timeout
         while True:
             try:
-                return self._loop_thread.server_to_client.get(timeout=0.05)
+                event = self._loop_thread.server_to_client.get(timeout=0.05)
+                if isinstance(event, NativeWSMessage):
+                    return event.to_asgi()[0]
+                return event
             except queue.Empty:
                 deadline -= 0.05
                 if self._app_task is not None and self._app_task.done():
@@ -606,9 +616,11 @@ class TestClient:
 # ``native.get(app, '/')`` reads better at a call site than a bare ``get``.
 from . import native                                        # noqa: E402
 from .native import (                                        # noqa: E402
-    NativeClient, NativeResponse, NativeTestServer, build_connection,
+    NativeClient, NativeResponse, NativeTestResponse, NativeTestServer,
+    build_connection,
 )
 
 __all__ = ['TestClient', 'WebSocketTestSession', 'WebSocketDisconnect',
-           'native', 'NativeClient', 'NativeResponse', 'NativeTestServer',
+           'native', 'NativeClient', 'NativeTestResponse',
+           'NativeResponse', 'NativeTestServer',
            'build_connection']

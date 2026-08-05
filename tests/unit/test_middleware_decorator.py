@@ -71,11 +71,11 @@ async def test_decorated_inner_send_receives_native_for_response():
     received = []
 
     @as_middleware
-    async def mw(scope, receive, send, call_next):
+    async def mw(conn, receive, send, call_next):
         async def inner_send(event):
             received.append(event)
             await send(event)
-        await call_next(scope, receive, inner_send)
+        await call_next(conn, receive, inner_send)
 
     async def handler(scope, receive, send):
         await send(Response('hi'))
@@ -97,11 +97,11 @@ async def test_decorated_inner_send_receives_native_for_json_response():
     received = []
 
     @as_middleware
-    async def mw(scope, receive, send, call_next):
+    async def mw(conn, receive, send, call_next):
         async def inner_send(event):
             received.append(event)
             await send(event)
-        await call_next(scope, receive, inner_send)
+        await call_next(conn, receive, inner_send)
 
     async def handler(scope, receive, send):
         await send(JSONResponse({'n': 42}))
@@ -123,9 +123,9 @@ async def test_decorated_inner_send_receives_native_for_json_response():
 async def test_undecorated_call_next_is_not_wrapped():
     captured = []
 
-    async def raw_mw(scope, receive, send, call_next):
+    async def raw_mw(conn, receive, send, call_next):
         captured.append(call_next)
-        await call_next(scope, receive, send)
+        await call_next(conn, receive, send)
 
     async def handler(scope, receive, send):
         pass
@@ -141,7 +141,7 @@ async def test_undecorated_call_next_is_not_wrapped():
 
 def test_marker_attribute_is_set():
     @as_middleware
-    async def mw(scope, receive, send, call_next):
+    async def mw(conn, receive, send, call_next):
         pass
 
     assert getattr(mw, '__blackbull_middleware__', False) is True
@@ -149,7 +149,7 @@ def test_marker_attribute_is_set():
 
 def test_wraps_preserves_name_and_doc():
     @as_middleware
-    async def my_middleware(scope, receive, send, call_next):
+    async def my_middleware(conn, receive, send, call_next):
         """My doc."""
 
     assert my_middleware.__name__ == 'my_middleware'
@@ -194,8 +194,8 @@ async def test_startup_accepts_undecorated_valid_middleware():
 
     app = BlackBull()
 
-    async def raw_mw(scope, receive, send, call_next):
-        await call_next(scope, receive, send)
+    async def raw_mw(conn, receive, send, call_next):
+        await call_next(conn, receive, send)
 
     app.use(raw_mw)
 
@@ -235,10 +235,10 @@ async def test_h2_lane_normalization_is_native_with_as_middleware():
     app = BlackBull()
 
     @as_middleware
-    async def forward_mw(scope, receive, send, call_next):
+    async def forward_mw(conn, receive, send, call_next):
         async def inner_send(event):
             await send(event)
-        await call_next(scope, receive, inner_send)
+        await call_next(conn, receive, inner_send)
 
     app.use(forward_mw)
 
@@ -326,7 +326,7 @@ async def test_plain_middleware_send_wrapper_sees_native():
     app = BlackBull()
     seen_status = []
 
-    async def stats_mw(scope, receive, send, call_next):
+    async def stats_mw(conn, receive, send, call_next):
         async def capture(msg):
             if isinstance(msg, NativeResponse):
                 if msg.header is not None:        # native header arm
@@ -334,7 +334,7 @@ async def test_plain_middleware_send_wrapper_sees_native():
             elif msg.get('type') == 'http.response.start':  # H2/ASGI lane
                 seen_status.append(msg['status'])
             await send(msg)
-        await call_next(scope, receive, capture)
+        await call_next(conn, receive, capture)
 
     app.use(stats_mw)
 

@@ -21,6 +21,7 @@ import logging
 import os
 import struct
 
+from ..native import NativeResponse
 from ..request import read_body, ClientDisconnected
 from . import compression
 from .codec import decode_messages, encode_message, GrpcDecodeError, MAX_MESSAGE_LENGTH
@@ -344,12 +345,13 @@ async def _send_trailers_only(send, status: GrpcStatus, details: str,
     *trailing* is handler-set trailing metadata (``set_trailing_metadata``);
     grpcio delivers it on non-OK calls too — the rich-error model's
     ``grpc-status-details-bin`` rides it through ``abort``."""
-    await send({'type': 'http.response.start', 'status': 200,
-                'headers': [(b'content-type', content_type),
-                            (b'grpc-accept-encoding', _GRPC_ACCEPT_ENCODING)],
-                'trailers': True})
-    await send({'type': 'http.response.trailers',
-                'headers': _status_trailers(status, details, trailing)})
+    await send(NativeResponse(
+        status=200,
+        header=[(b'content-type', content_type),
+                (b'grpc-accept-encoding', _GRPC_ACCEPT_ENCODING)],
+        expects_trailers=True))
+    await send(NativeResponse(
+        trailers=_status_trailers(status, details, trailing)))
 
 
 async def _read_unary_request(receive, encoding: bytes) -> bytes:
@@ -460,7 +462,7 @@ def _validate_response_message(response) -> bytes:
 def _response_start(content_type: bytes,
                     response_encoding: bytes | None = None,
                     initial_metadata: list[tuple[bytes, bytes]] | None = None
-                    ) -> dict:
+                    ) -> NativeResponse:
     headers = [(b'content-type', content_type),
                (b'grpc-accept-encoding', _GRPC_ACCEPT_ENCODING)]
     # Advertise the encoding used for any compressed response messages.  Present
@@ -472,8 +474,7 @@ def _response_start(content_type: bytes,
     # Handler-supplied leading metadata (context.send_initial_metadata).
     if initial_metadata:
         headers.extend(initial_metadata)
-    return {'type': 'http.response.start', 'status': 200,
-            'headers': headers, 'trailers': True}
+    return NativeResponse(status=200, header=headers, expects_trailers=True)
 
 
 async def _serve_unary(handler, request, context, send, content_type,
@@ -513,12 +514,12 @@ async def _serve_unary(handler, request, context, send, content_type,
         return
 
     await context._start_response()
-    await send({'type': 'http.response.body',
-                'body': _frame_response(response, response_encoding is not None),
-                'more_body': True})
-    await send({'type': 'http.response.trailers',
-                'headers': _status_trailers(context.code, context.details,
-                                            context._trailing)})
+    await send(NativeResponse(
+        body=_frame_response(response, response_encoding is not None),
+        more_body=True))
+    await send(NativeResponse(
+        trailers=_status_trailers(context.code, context.details,
+                                  context._trailing)))
 
 
 async def _serve_server_streaming(handler, request, context, send, content_type,
@@ -553,8 +554,7 @@ async def _serve_server_streaming(handler, request, context, send, content_type,
             data = bytes(buf)
             buf.clear()
             await context._start_response()
-            await send({'type': 'http.response.body',
-                        'body': data, 'more_body': True})
+            await send(NativeResponse(body=data, more_body=True))
 
     # Loop-idle flushing: the drive loop marks the buffer dirty after each
     # message; this task only gets to run once the producer *suspends* (a
@@ -658,9 +658,9 @@ async def _serve_server_streaming(handler, request, context, send, content_type,
     # sent here so the client still sees Response-Headers + Trailers.
     await _flush()
     await context._start_response()  # idempotent — emits HEADERS if not yet sent
-    await send({'type': 'http.response.trailers',
-                'headers': _status_trailers(context.code, context.details,
-                                            context._trailing)})
+    await send(NativeResponse(
+        trailers=_status_trailers(context.code, context.details,
+                                  context._trailing)))
 
 
 async def _finish_stream_error(send, context: GrpcContext, status: GrpcStatus,
@@ -672,9 +672,8 @@ async def _finish_stream_error(send, context: GrpcContext, status: GrpcStatus,
     grpcio's contract for ``set_trailing_metadata`` on an aborted call, and
     the transport leg of the rich-error model (``grpc-status-details-bin``)."""
     if context._started:
-        await send({'type': 'http.response.trailers',
-                    'headers': _status_trailers(status, details,
-                                                context._trailing)})
+        await send(NativeResponse(
+            trailers=_status_trailers(status, details, context._trailing)))
     else:
         await _send_trailers_only(send, status, details, content_type,
                                   context._trailing)

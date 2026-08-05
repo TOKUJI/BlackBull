@@ -18,6 +18,19 @@ from blackbull.server.ws_codec import (encode_frame, encode_frame_header,
                                        read_frame, WSOpcode)
 
 
+def _ws_conn(path: str = '/ws'):
+    """The native ``Connection`` the WebSocket actor holds.
+
+    ``WebSocketRecipient`` reads ``conn.path`` / ``conn.client`` for the
+    ``websocket_disconnected`` detail and the cap-hit log; there is no
+    scope-dict shape.
+    """
+    from blackbull.connection import Connection
+    from blackbull.headers import Headers
+    return Connection(method='GET', path=path, raw_path=path.encode(),
+                      headers=Headers([]), type='websocket')
+
+
 # ---------------------------------------------------------------------------
 # Helpers – minimal stream fakes
 # ---------------------------------------------------------------------------
@@ -1063,7 +1076,7 @@ class TestReadAheadMode:
             AsyncioReader(_FakeReader(_make_client_frame(b'unconsumed', opcode=0x1))),
             AsyncioWriter(writer),
             dispatcher=dispatcher,
-            conn={'path': '/ws', 'client': None},
+            conn=_ws_conn('/ws'),
             ws_queue_depth=0,          # inline by configuration ...
         )
         assert await recipient() == {'type': 'websocket.connect'}

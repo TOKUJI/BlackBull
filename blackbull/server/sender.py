@@ -18,7 +18,7 @@ import logging
 from ..asgi import (ASGIEvent, ASGISendEvent, HTTPDisconnectEvent,
                     WebSocketAcceptEvent, WebSocketCloseEvent, WebSocketSendEvent)
 from ..headers import Headers, HeaderList
-from ..native import NativeResponse
+from ..native import NativeResponse, NativeWSMessage
 
 logger = logging.getLogger(__name__)
 
@@ -588,6 +588,13 @@ class HTTP1Sender(BaseSender):
                                 elif hkl == b'content-encoding':
                                     self._log_record.resp_content_encoding = hv
                         self._log_record.mark('start_arm_out')
+                if body.file_path is not None:
+                    # Sendfile form: the header arm was just buffered, which
+                    # is exactly what ``_pathsend`` needs — it flushes those
+                    # headers and hands the file to ``loop.sendfile``.
+                    await self._pathsend(body.file_path)
+                    self._completed = True
+                    return
                 if body.body is not None:
                     await self._handle_body_content(body._body, body.more_body)
                 if body.trailers is not None and not self._completed:
@@ -1452,11 +1459,54 @@ class WebSocketSender(BaseSender):
         # outbound frames are sent verbatim (RSV1=0).
         self._compressor = compressor
 
-    async def __call__(self, body: _WSSenderEvent,
+    async def _send_payload(self, raw: bytes, opcode: WSOpcode) -> None:
+        """Frame and write one data payload.
+
+        Shared by the native and dict arms so the two cannot put different
+        bytes on the wire.  Vectored write: ``(header, payload)`` goes to
+        writelines so the payload is never copied into a concatenated frame
+        buffer (the join ``encode_frame`` would allocate).
+        """
+        rsv1 = self._compressor is not None
+        if rsv1:
+            raw = self._compressor.compress(raw)
+        header = encode_frame_header(len(raw), opcode, rsv1=rsv1)
+        await self._write_many((header, raw))
+
+    async def _send_close(self, code: int) -> None:
+        await self._write(encode_frame(code.to_bytes(2, 'big'),
+                                       opcode=WSOpcode.CLOSE))
+
+    async def __call__(self, body: '_WSSenderEvent | NativeWSMessage',
                        _status: HTTPStatus | None = None,
                        _headers: HeaderList = []):
+        # Native arm (the WS counterpart of the HTTP ``case NativeResponse():``
+        # seam).  BlackBull's own path emits these; the dict arm below is the
+        # external-host edge and the raw (conn, receive, send) compat surface.
+        if isinstance(body, NativeWSMessage):
+            match body.kind:
+                case NativeWSMessage.SEND:
+                    if body.text is not None:
+                        await self._send_payload(body.text.encode('utf-8'),
+                                                 WSOpcode.TEXT)
+                    else:
+                        await self._send_payload(body.data or b'',
+                                                 WSOpcode.BINARY)
+                case NativeWSMessage.CLOSE:
+                    await self._send_close(body.code
+                                           if body.code is not None
+                                           else WSCloseCode.NORMAL)
+                case NativeWSMessage.ACCEPT:
+                    pass  # handshake reply is the actor's, not the sender's
+                case _:
+                    logger.warning('WebSocketSender: unknown native kind %r',
+                                   body.kind)
+            return
+
         if not isinstance(body, dict):
-            raise TypeError(f'WebSocketSender expected a dict, got {type(body)!r}')
+            raise TypeError(
+                f'WebSocketSender expected a NativeWSMessage or a dict, '
+                f'got {type(body)!r}')
 
         event_type = body.get('type', '')
 
@@ -1464,24 +1514,14 @@ class WebSocketSender(BaseSender):
 
             case ASGIEvent.WS_SEND:
                 if 'text' in body and body['text'] is not None:
-                    raw = body['text'].encode('utf-8')
-                    opcode = WSOpcode.TEXT
+                    await self._send_payload(body['text'].encode('utf-8'),
+                                             WSOpcode.TEXT)
                 else:
-                    raw = body.get('bytes', b'')
-                    opcode = WSOpcode.BINARY
-                rsv1 = self._compressor is not None
-                if rsv1:
-                    raw = self._compressor.compress(raw)
-                # Vectored write: hand (header, payload) to writelines so the
-                # payload is never copied into a concatenated frame buffer
-                # (the header+payload join encode_frame would allocate).
-                header = encode_frame_header(len(raw), opcode, rsv1=rsv1)
-                await self._write_many((header, raw))
+                    await self._send_payload(body.get('bytes', b''),
+                                             WSOpcode.BINARY)
 
             case ASGIEvent.WS_CLOSE:
-                code = body.get('code', WSCloseCode.NORMAL)
-                frame = encode_frame(code.to_bytes(2, 'big'), opcode=WSOpcode.CLOSE)
-                await self._write(frame)
+                await self._send_close(body.get('code', WSCloseCode.NORMAL))
 
             case ASGIEvent.WS_ACCEPT:
                 pass  # handshake reply is sent by HTTP1Actor._do_ws_handshake()

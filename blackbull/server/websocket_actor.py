@@ -5,6 +5,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from ..actor import Actor, Message
+from ..native import NativeWSMessage
 from ..connection import Connection
 from ..event_aggregator import EventAggregator
 from ..asgi import (ASGIEvent, WebSocketAcceptEvent, WebSocketCloseEvent,
@@ -82,11 +83,26 @@ class WebSocketActor(Actor):
             read_ahead_needed=self._aggregator.has_websocket_message_listeners,
         )
         self._ws_send = SenderFactory.websocket(writer, compressor=compressor)
-        self._disconnect_code: int = WSCloseCode.ABNORMAL
 
-    async def _emit_websocket_message(self, event: dict) -> None:
+    @property
+    def _disconnect_code(self) -> int:
+        """How this connection ended (RFC 6455 §7.4), for the access log.
+
+        Derived, not mirrored: the recipient records the terminal code for
+        both encodings, and the actor used to keep a second copy by
+        intercepting every event to look for a disconnect.  Two records of one
+        fact is one place for them to disagree — and the interception was a
+        per-message coroutine hop on the WebSocket hot path.
+        """
+        return self._ws_receive.terminal_code or WSCloseCode.ABNORMAL
+
+    async def _emit_websocket_message(self, message: str | bytes) -> None:
         """Read-time emit adapter: ``websocket_message`` fires when the
         recipient reads a message, before the handler consumes it.
+
+        The recipient hands over the message itself (``str`` text, ``bytes``
+        binary); the documented ``{'conn', 'text', 'bytes'}`` detail shape is
+        built here, and only once a listener is known to want it.
 
         Re-checks the listener set per message (cached predicate) so a
         listener registered after this connection was built still receives
@@ -95,11 +111,16 @@ class WebSocketActor(Actor):
         """
         if not self._aggregator.has_websocket_message_listeners():
             return
-        await self._aggregator.on_websocket_message(self._conn, event)
+        is_text = isinstance(message, str)
+        await self._aggregator.on_websocket_message(
+            self._conn,
+            {'type': ASGIEvent.WS_RECEIVE,
+             'text': message if is_text else None,
+             'bytes': None if is_text else message})
 
     async def run(self) -> None:
         try:
-            await self._app(self._conn, self._receive, self._send)
+            await self._app(self._conn, self._ws_receive, self._send)
         except asyncio.CancelledError:
             # Cancellation is not an error: re-raise so the task actually
             # cancels rather than completing normally.  (Mirrors HTTP1Actor;
@@ -113,28 +134,32 @@ class WebSocketActor(Actor):
             self._ws_receive.disarm_watchdog()
             await self._writer.close()
 
-    async def _receive(self) -> dict[str, Any]:
-        event = await self._ws_receive()
-        if event.get('type') == ASGIEvent.WS_DISCONNECT:
-            self._disconnect_code = event.get('code', WSCloseCode.ABNORMAL)
-        return event
 
     async def _send(self,
                     event: WebSocketSendEvent | WebSocketCloseEvent | WebSocketAcceptEvent,
                     _status=None, _headers=None) -> None:
-        if isinstance(event, dict) and event.get('type') == ASGIEvent.WS_ACCEPT:
+        # The accept message is the actor's cue to fire the deferred 101/200
+        # and the ``websocket_connected`` event.  It arrives native from the
+        # ``WebSocket`` object and as a dict from the raw compat form, so read
+        # the subprotocol from whichever shape this is.
+        if isinstance(event, NativeWSMessage):
+            is_accept = event.kind == NativeWSMessage.ACCEPT
+            offered = event.subprotocol
+        else:
+            is_accept = (isinstance(event, dict)
+                         and event.get('type') == ASGIEvent.WS_ACCEPT)
+            offered = event.get('subprotocol') if is_accept else None
+        if is_accept:
             ws_bag = self._conn._ws or {}
             send_101 = ws_bag.pop('send_101', None)
             if send_101:
-                subprotocol = (event.get('subprotocol')
-                               or ws_bag.pop('auto_subprotocol', None))
+                subprotocol = offered or ws_bag.pop('auto_subprotocol', None)
                 await send_101(subprotocol)
             if not self._conn.connection_id:
                 # Normally set by the HTTP actor's upgrade path from the
                 # accept-time id; mint one only for direct test drives.
                 self._conn.connection_id = new_connection_id()
-            await self._aggregator.on_websocket_connected(
-                self._conn, event.get('subprotocol'))
+            await self._aggregator.on_websocket_connected(self._conn, offered)
         await self._ws_send(event)
         # Control-frame watchdog (design A'): the idle watchdog services
         # PING/CLOSE frames on connections quiet for > ~1 scanner tick.  The

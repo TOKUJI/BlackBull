@@ -26,6 +26,20 @@ from blackbull.server.recipient import (
 from blackbull.server.sender import AbstractWriter
 
 
+def _conn(headers, path: str = '/'):
+    """The native ``Connection`` the actor binds a recipient to.
+
+    ``HTTP1Recipient`` frames from ``conn.headers``; it has no scope-dict
+    shape, so a test that drives it directly builds the same object the
+    parser would.
+    """
+    from blackbull.connection import Connection
+    from blackbull.headers import Headers
+    return Connection(method='POST', path=path, raw_path=path.encode(),
+                      headers=headers if isinstance(headers, Headers)
+                      else Headers(headers), type='http')
+
+
 # ---------------------------------------------------------------------------
 # Harness
 # ---------------------------------------------------------------------------
@@ -67,7 +81,7 @@ def _make_actor(writer=None):
 def _chunked_recipient(wire: bytes) -> HTTP1Recipient:
     return HTTP1Recipient(
         _BufReader(wire),
-        {'headers': [(b'transfer-encoding', b'chunked')]},
+        _conn([(b'transfer-encoding', b'chunked')]),
         chunk_size=64 * 1024,
     )
 
@@ -391,7 +405,7 @@ class TestChunkLineLengthBound:
 
         recipient = HTTP1Recipient(
             _OverrunReader(),
-            {'headers': [(b'transfer-encoding', b'chunked')]},
+            _conn([(b'transfer-encoding', b'chunked')]),
             chunk_size=64 * 1024,
         )
         with pytest.raises(HTTPException) as exc_info:

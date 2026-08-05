@@ -234,7 +234,12 @@ class TestStreamingResponse:
         events: list = []
 
         async def send(event):
-            events.append(event)
+            # Responses emit native now; these assertions describe the
+            # wire, so record the ASGI events each object stands for.
+            if isinstance(event, NativeResponse):
+                events.extend(event.to_asgi())
+            else:
+                events.append(event)
 
         async def gen():
             yield b'part1'
@@ -254,7 +259,12 @@ class TestStreamingResponse:
         events: list = []
 
         async def send(event):
-            events.append(event)
+            # Responses emit native now; these assertions describe the
+            # wire, so record the ASGI events each object stands for.
+            if isinstance(event, NativeResponse):
+                events.extend(event.to_asgi())
+            else:
+                events.append(event)
 
         async def gen():
             yield 'hello'
@@ -269,7 +279,12 @@ class TestStreamingResponse:
         events: list = []
 
         async def send(event):
-            events.append(event)
+            # Responses emit native now; these assertions describe the
+            # wire, so record the ASGI events each object stands for.
+            if isinstance(event, NativeResponse):
+                events.extend(event.to_asgi())
+            else:
+                events.append(event)
 
         async def gen():
             yield b'x'
@@ -284,7 +299,12 @@ class TestStreamingResponse:
         events: list = []
 
         async def send(event):
-            events.append(event)
+            # Responses emit native now; these assertions describe the
+            # wire, so record the ASGI events each object stands for.
+            if isinstance(event, NativeResponse):
+                events.extend(event.to_asgi())
+            else:
+                events.append(event)
 
         async def gen():
             yield b'x'
@@ -372,8 +392,8 @@ class TestCompressionStreaming:
 
 class TestUseWarning:
     def test_function_middleware_no_warn(self):
-        async def fn_mw(scope, receive, send, call_next):
-            await call_next(scope, receive, send)
+        async def fn_mw(conn, receive, send, call_next):
+            await call_next(conn, receive, send)
 
         app = BlackBull()
         with warnings.catch_warnings(record=True) as w:

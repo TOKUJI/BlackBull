@@ -42,6 +42,7 @@ import ssl as _ssl
 import struct
 
 from ..asgi import ASGIEvent
+from ..native import NativeResponse
 from ..protocol.frame import FrameFactory
 from ..protocol.frame_types import (
     DataFrameFlags, FrameTypes, HeaderFrameFlags, PseudoHeaders,
@@ -240,11 +241,7 @@ class WebSocketH2Session:
         # than max_frame_size are split into multiple DATA frames and
         # send-side flow control is honoured.  ``more_body=True``
         # leaves END_STREAM unset so the WS session stays open.
-        await self._sender({
-            'type': ASGIEvent.HTTP_RESPONSE_BODY,
-            'body': ws_bytes,
-            'more_body': True,
-        })
+        await self._sender(NativeResponse(body=ws_bytes, more_body=True))
 
     async def _credit_returned(self, n: int) -> None:
         """Account for *n* bytes consumed off the receive buffer and

@@ -31,10 +31,10 @@ import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any
 
-from .asgi import (ASGIEvent, WebSocketAcceptEvent, WebSocketCloseEvent,
-                   WebSocketSendEvent)
+from .asgi import ASGIEvent
 from .connection import Connection
 from .headers import Headers
+from .native import NativeWSMessage
 
 logger = logging.getLogger(__name__)
 
@@ -302,6 +302,17 @@ class WebSocket:
             return
         self._connect_seen = True
         mark_connect_consumed(self._conn)
+        native = getattr(self._receive, 'await_connect', None)
+        if native is not None:
+            try:
+                await native()
+            except WebSocketDisconnect as exc:
+                # The peer gave up mid-handshake.  Record it so accept()/close()
+                # can decide what to do rather than writing to a dead transport.
+                self._disconnected = True
+                self._close_code = exc.code
+                self._close_reason = exc.reason
+            return
         event = await self._receive()
         etype = event.get('type')
         if etype == ASGIEvent.WS_DISCONNECT:
@@ -363,11 +374,10 @@ class WebSocket:
         if self._disconnected:
             raise WebSocketDisconnect(self._close_code or _NO_STATUS,
                                       self._close_reason)
-        event: WebSocketAcceptEvent = {
-            'type': ASGIEvent.WS_ACCEPT, 'subprotocol': subprotocol}
-        if headers is not None:
-            event['headers'] = headers
-        await self._send(event)
+        # Native: the object is BlackBull's own producer, so it emits the
+        # channel's native message rather than the ASGI dict the raw
+        # (conn, receive, send) compat form uses.
+        await self._send(NativeWSMessage.accept(subprotocol, headers))
         self._accepted = True
         mark_handshake_accepted(self._conn)
 
@@ -393,10 +403,7 @@ class WebSocket:
                 self._closed = True
                 return
         self._closed = True
-        event: WebSocketCloseEvent = {'type': ASGIEvent.WS_CLOSE, 'code': code}
-        if reason is not None:
-            event['reason'] = reason
-        await self._send(event)
+        await self._send(NativeWSMessage.close(code, reason or ''))
         self._close_code = code
         self._close_reason = reason
         # Published so middleware wrapping this handler does not append a
@@ -419,14 +426,12 @@ class WebSocket:
     async def send_text(self, data: str) -> None:
         """Send one complete text message."""
         self._check_sendable()
-        event: WebSocketSendEvent = {'type': ASGIEvent.WS_SEND, 'text': data}
-        await self._send(event)
+        await self._send(NativeWSMessage.text_message(data))
 
     async def send_bytes(self, data: bytes) -> None:
         """Send one complete binary message."""
         self._check_sendable()
-        event: WebSocketSendEvent = {'type': ASGIEvent.WS_SEND, 'bytes': data}
-        await self._send(event)
+        await self._send(NativeWSMessage.binary_message(data))
 
     async def send_json(self, data: Any, *, binary: bool = False) -> None:
         """JSON-serialise *data* and send it as one message.
@@ -474,6 +479,20 @@ class WebSocket:
             raise RuntimeError(
                 'WebSocket is not accepted yet — await ws.accept() before '
                 'receiving.')
+        native = getattr(self._receive, 'next_message', None)
+        if native is not None:
+            # Native channel (BlackBull's own recipient): the message *is* the
+            # str/bytes this method returns, and the close arrives as the
+            # WebSocketDisconnect this method raises — so there is nothing to
+            # build and nothing to take apart.  The dict loop below is the
+            # external-host / middleware-wrapped path.
+            try:
+                return await native()
+            except WebSocketDisconnect as exc:
+                self._disconnected = True
+                self._close_code = exc.code
+                self._close_reason = exc.reason
+                raise
         while True:
             event = await self._receive()
             etype = event.get('type')

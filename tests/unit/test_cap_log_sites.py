@@ -36,6 +36,20 @@ from blackbull.server.recipient import AbstractReader
 from blackbull.server.sender import AbstractWriter
 
 
+def _conn(headers, path: str = '/'):
+    """The native ``Connection`` the actor binds a recipient to.
+
+    ``HTTP1Recipient`` frames from ``conn.headers``; it has no scope-dict
+    shape, so a test that drives it directly builds the same object the
+    parser would.
+    """
+    from blackbull.connection import Connection
+    from blackbull.headers import Headers
+    return Connection(method='POST', path=path, raw_path=path.encode(),
+                      headers=headers if isinstance(headers, Headers)
+                      else Headers(headers), type='http')
+
+
 # ----------------------------------------------------------------------
 # Common fixtures
 # ----------------------------------------------------------------------
@@ -183,7 +197,7 @@ async def test_ws_max_frame_payload_logs(caps_caplog):
 
     recipient = WebSocketRecipient(
         reader=reader, writer=writer,
-        conn={'path': '/ws'},
+        conn=_conn([], '/ws'),
         max_frame_payload=1024,
     )
     recipient._event_queue = asyncio.Queue()    # _read_loop asserts non-None
@@ -226,7 +240,7 @@ async def test_ws_max_frame_payload_no_log_under_cap(caps_caplog):
 
     recipient = WebSocketRecipient(
         reader=reader, writer=writer,
-        conn={'path': '/ws'},
+        conn=_conn([], '/ws'),
         max_frame_payload=1024,
     )
     recipient._event_queue = asyncio.Queue()
@@ -253,7 +267,7 @@ async def test_body_timeout_logs(caps_caplog):
         async def readuntil(self, sep: bytes) -> bytes:
             raise asyncio.TimeoutError()
 
-    conn = {'path': '/upload', 'headers': [(b'content-length', b'1024')]}
+    conn = _conn([(b'content-length', b'1024')], '/upload')
     recipient = HTTP1Recipient(reader=_SlowReader(), conn=conn,
                                body_timeout=0.0)
     recipient._content_length = 1024  # bypass the parser
@@ -279,7 +293,7 @@ async def test_body_timeout_no_log_when_data_arrives(caps_caplog):
             raise asyncio.IncompleteReadError(b'', 0)
 
     # Simple content-length request — one readexactly call, then http.disconnect.
-    conn = {'path': '/upload', 'headers': [(b'content-length', b'5')]}
+    conn = _conn([(b'content-length', b'5')], '/upload')
     recipient = HTTP1Recipient(reader=_FastReader(), conn=conn,
                                body_timeout=30.0)
     recipient._content_length = 5  # bypass parser
@@ -420,11 +434,10 @@ async def test_stream_queue_depth_logs(caps_caplog):
     recipient._queue_depth = 1
     # Pre-fill the queue so the next put_nowait raises QueueFull.
     q = recipient._ensure_queue()
-    q.put_nowait({'type': 'http.request', 'body': b'first', 'more_body': True})
+    q.put_nowait(((b'first', False), 0))
 
-    dropped = recipient.put_event({'type': 'http.request',
-                                    'body': b'overflow', 'more_body': False})
-    assert dropped is False  # event was dropped
+    dropped = recipient.put_end_of_stream()
+    assert dropped is False  # item was dropped
     assert len(_records_for(caps_caplog, 'stream_queue_depth')) >= 1
 
 
@@ -436,8 +449,7 @@ async def test_stream_queue_depth_no_log_under_cap(caps_caplog):
     recipient = HTTP2Recipient()
     recipient._queue_depth = 10
     # Queue has room — put_nowait must succeed.
-    ok = recipient.put_event({'type': 'http.request',
-                               'body': b'data', 'more_body': False})
+    ok = recipient.put_end_of_stream()
     assert ok is True
     assert _records_for(caps_caplog, 'stream_queue_depth') == []
 

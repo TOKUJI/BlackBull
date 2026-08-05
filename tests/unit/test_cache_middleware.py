@@ -15,6 +15,7 @@ from unittest.mock import patch
 
 import pytest
 
+from blackbull.native import NativeResponse
 from blackbull.middleware.cache import (
     Cache,
     _Entry,
@@ -62,7 +63,14 @@ async def _run(mw, scope, call_next):
     sent: list = []
 
     async def send(event):
-        sent.append(event)
+        # Cache stores and replays native objects; these tests assert on the
+        # ASGI event shape, so the seam is normalised away here (same
+        # convention as ``test_middlewares._collect``).
+        from blackbull.native import NativeResponse
+        if isinstance(event, NativeResponse):
+            sent.extend(event.to_asgi())
+        else:
+            sent.append(event)
 
     await mw(scope, None, send, call_next)
     return sent
@@ -619,3 +627,62 @@ class TestVaryHelpers:
     def test_vary_key_missing_header_is_empty(self):
         from blackbull.middleware.cache import _vary_key
         assert _vary_key((b'accept-encoding',), {}) == ((b'accept-encoding', b''),)
+
+
+# ---------------------------------------------------------------------------
+# Replay isolation — the guard the dict form used to provide by copying
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+class TestReplayIsolation:
+    """A cache hit must hand out a private copy of the stored response.
+
+    Middleware below the cache — CORS, the route header injector — append to
+    a response's header list **in place**.  The dict-era cache copied every
+    event on replay for exactly this reason; storing native objects has to
+    keep that guarantee, or each hit grows the stored entry by one header and
+    the response drifts on every request.
+    """
+
+    async def test_downstream_header_append_does_not_reach_the_entry(self):
+        mw = Cache()
+        cn, _ = _make_handler()
+
+        async def _hit():
+            sent: list = []
+
+            async def send(event):
+                # Simulate CORS / _inject_response_headers: in-place append.
+                if isinstance(event, NativeResponse) and event._header is not None:
+                    event.header.append((b'x-injected', b'1'))
+                sent.append(event)
+
+            await mw(_scope(), None, send, cn)
+            return sent
+
+        await _hit()                      # miss → stores
+        first = await _hit()              # hit  → replay
+        second = await _hit()             # hit  → replay again
+
+        def _count(events, name):
+            n = 0
+            for e in events:
+                if isinstance(e, NativeResponse) and e._header is not None:
+                    n += sum(1 for k, _ in e._header if k.lower() == name)
+            return n
+
+        assert _count(first, b'x-injected') == 1
+        assert _count(second, b'x-injected') == 1, (
+            'the injected header accumulated in the stored entry — replay '
+            'handed out the cached object instead of a copy')
+
+    async def test_body_and_status_stable_across_hits(self):
+        mw = Cache()
+        cn, _ = _make_handler()
+
+        await _run(mw, _scope(), cn)
+        a = _split_response(await _run(mw, _scope(), cn))
+        b = _split_response(await _run(mw, _scope(), cn))
+
+        assert a[0] == b[0]
+        assert a[2] == b[2]

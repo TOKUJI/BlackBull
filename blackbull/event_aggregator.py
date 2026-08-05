@@ -15,13 +15,13 @@ def _request_fields(conn):
 
 
 def _ws_fields(conn):
-    """Read ``(client, connection_id, path)`` for a WebSocket event detail from
-    a native :class:`~blackbull.connection.Connection` or, on a
-    direct test drive, an ASGI scope dict."""
-    from blackbull.connection import Connection  # noqa: PLC0415 — avoid import cycle
-    if isinstance(conn, Connection):
-        return conn.client, conn.connection_id, conn.path
-    return (conn.get('client'), conn.get('_connection_id', ''), conn.get('path', ''))
+    """Read ``(client, connection_id, path)`` for a WebSocket event detail.
+
+    *conn* is the native :class:`~blackbull.connection.Connection` the
+    WebSocket actor holds — the convenience keys on a WS event detail are
+    lifted off the same object the listener gets as ``detail['conn']``.
+    """
+    return conn.client, conn.connection_id, conn.path
 
 
 class EventAggregator:

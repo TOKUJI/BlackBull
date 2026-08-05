@@ -78,6 +78,100 @@ class _HeaderView:
             self._items.append((name_or_pairs, value))
 
 
+class NativeWSMessage:
+    """One message on the native WebSocket send channel.
+
+    The WS counterpart of :class:`NativeResponse`, and it exists for the same
+    reason.  HTTP got a native send message in Sprint 92/93 and the sender a
+    native arm; WebSocket was carried along as "conn is native, no scope" while
+    its *event channel* stayed ASGI-shaped — so ``websocket.*`` dicts still
+    travelled object → middleware → actor → sender on BlackBull's own path.
+    The handler never saw them (that is the :class:`~blackbull.websocket.WebSocket`
+    object's whole point), but everything under it did.
+
+    Three kinds, discriminated by :attr:`kind` rather than by which of seven
+    fields happens to be set — the variants carry disjoint payloads, so a tag
+    reads better here than the presence test that suits ``NativeResponse``'s
+    combinable arms:
+
+    - ``ACCEPT`` — ``subprotocol`` / ``headers``; completes the handshake.
+    - ``SEND`` — exactly one of ``text`` (``str``) or ``data`` (``bytes``).
+    - ``CLOSE`` — ``code`` / ``reason``.
+
+    ``data`` rather than ``bytes``: the ASGI key is ``bytes``, but a slot of
+    that name shadows the builtin at every use site inside the class.
+    :meth:`to_asgi` maps it back for the boundary.
+    """
+
+    ACCEPT = 'accept'
+    SEND = 'send'
+    CLOSE = 'close'
+
+    __slots__ = ('kind', 'text', 'data', 'code', 'reason', 'subprotocol',
+                 'headers')
+
+    def __init__(self, kind: str, *, text: str | None = None,
+                 data: bytes | None = None,
+                 code: int | None = None, reason: str = '',
+                 subprotocol: str | None = None,
+                 headers: list[tuple[bytes, bytes]] | None = None) -> None:
+        self.kind = kind
+        self.text = text
+        self.data = data
+        self.code = code
+        self.reason = reason
+        self.subprotocol = subprotocol
+        self.headers = headers
+
+    # --- constructors, one per kind ---------------------------------------
+
+    @classmethod
+    def accept(cls, subprotocol: str | None = None,
+               headers: list[tuple[bytes, bytes]] | None = None
+               ) -> 'NativeWSMessage':
+        return cls(cls.ACCEPT, subprotocol=subprotocol, headers=headers)
+
+    @classmethod
+    def text_message(cls, text: str) -> 'NativeWSMessage':
+        return cls(cls.SEND, text=text)
+
+    @classmethod
+    def binary_message(cls, data: bytes) -> 'NativeWSMessage':
+        return cls(cls.SEND, data=data)
+
+    @classmethod
+    def close(cls, code: int = 1000, reason: str = '') -> 'NativeWSMessage':
+        return cls(cls.CLOSE, code=code, reason=reason)
+
+    # --- boundary conversion ----------------------------------------------
+
+    def to_asgi(self) -> list[dict]:
+        """Convert to the ASGI ``websocket.*`` event list.
+
+        Used only at conversion boundaries — the external ASGI edge and the
+        raw ``(conn, receive, send)`` compat surface — exactly like
+        :meth:`NativeResponse.to_asgi` on the HTTP side.
+        """
+        if self.kind == self.ACCEPT:
+            event: dict = {'type': 'websocket.accept',
+                           'subprotocol': self.subprotocol}
+            if self.headers is not None:
+                event['headers'] = list(self.headers)
+            return [event]
+        if self.kind == self.CLOSE:
+            event = {'type': 'websocket.close', 'code': self.code}
+            if self.reason:
+                event['reason'] = self.reason
+            return [event]
+        # SEND — exactly the key that is set, which is what the ``WebSocket``
+        # object put on this channel before it went native.  ASGI permits
+        # either shape (both keys with one ``None``, or just the set one); the
+        # compat surface must not change under existing consumers.
+        if self.text is not None:
+            return [{'type': 'websocket.send', 'text': self.text}]
+        return [{'type': 'websocket.send', 'bytes': self.data}]
+
+
 class NativeResponse:
     """A response on the native send path: header and/or body and/or trailers.
 
@@ -94,6 +188,7 @@ class NativeResponse:
         '_body',
         '_header',
         'expects_trailers',
+        'file_path',
         'more_body',
         'status',
         'trailers',
@@ -104,13 +199,21 @@ class NativeResponse:
                  body: bytes | None = None,
                  more_body: bool = False,
                  trailers: list[tuple[bytes, bytes]] | None = None,
-                 expects_trailers: bool = False) -> None:
+                 expects_trailers: bool = False,
+                 file_path: str | None = None) -> None:
         self.status = status
         self.header = header          # setter stores into _header
         self._body = body
         self.more_body = more_body
         self.trailers = trailers
         self.expects_trailers = expects_trailers
+        # Sendfile form: the response body *is* this file, and the sender is
+        # free to hand it to ``loop.sendfile`` rather than read it into a
+        # ``body``.  This is the ``http.response.pathsend`` ASGI extension's
+        # function without its dict shape, so a framework-owned producer
+        # (``StaticFiles``) can stay native and still get zero-copy.
+        # Mutually exclusive with ``body``: the bytes come from the file.
+        self.file_path = file_path
 
     # --- header: DX view, or None when absent -----------------------------
     @property
@@ -172,6 +275,9 @@ class NativeResponse:
             if self.expects_trailers:
                 start['trailers'] = True
             events.append(start)
+        if self.file_path is not None:
+            events.append({'type': 'http.response.pathsend',
+                           'path': self.file_path})
         if self._body is not None:
             events.append({'type': 'http.response.body',
                            'body': self._body,

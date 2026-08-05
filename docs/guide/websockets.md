@@ -214,7 +214,7 @@ inner handler can skip that boilerplate:
 from blackbull.middleware import websocket
 
 @app.route(path='/chat', scheme=Scheme.websocket, middlewares=[websocket])
-async def chat(scope, receive, send):
+async def chat(conn, receive, send):
     # Connection already accepted; go straight to reading messages
     while True:
         event = await receive()

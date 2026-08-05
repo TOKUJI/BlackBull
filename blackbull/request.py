@@ -50,18 +50,31 @@ async def read_body(receive: ASGIReceiveCallable) -> bytes:
     returned as if whole.
     """
     chunks: list[bytes] = []
-    while True:
-        event = await receive()
-        if event.get('type') == ASGIEvent.HTTP_DISCONNECT:
-            # Peer went away mid-body — the accumulated bytes are a partial
-            # upload, not a complete one.  Surface it rather than returning
-            # the truncated body as if it were the whole message.
-            raise ClientDisconnected(b''.join(chunks))
-        chunk = event.get('body', b'')
-        if chunk:
-            chunks.append(chunk)
-        if not event.get('more_body', False):
-            break
+    next_chunk = getattr(receive, 'next_chunk', None)
+    if next_chunk is not None:
+        # Native channel (BlackBull's own recipients): the chunk *is* the
+        # bytes, so nothing is built here to be taken apart again.  The
+        # ``http.request`` dict below exists for an external ASGI host, which
+        # hands us a plain callable with no native arm.
+        try:
+            while (chunk := await next_chunk()) is not None:
+                chunks.append(chunk)
+        except ClientDisconnected:
+            # The recipient does not accumulate; the partial is ours.
+            raise ClientDisconnected(b''.join(chunks)) from None
+    else:
+        while True:
+            event = await receive()
+            if event.get('type') == ASGIEvent.HTTP_DISCONNECT:
+                # Peer went away mid-body — the accumulated bytes are a partial
+                # upload, not a complete one.  Surface it rather than returning
+                # the truncated body as if it were the whole message.
+                raise ClientDisconnected(b''.join(chunks))
+            chunk = event.get('body', b'')
+            if chunk:
+                chunks.append(chunk)
+            if not event.get('more_body', False):
+                break
     if not chunks:
         return b''
     if len(chunks) == 1:
@@ -80,11 +93,19 @@ async def stream_body(receive: ASGIReceiveCallable) -> AsyncIterator[bytes]:
     additionally ``b''.join``s the chunk list, several times the throughput
     under concurrency (the join is a full-payload memcpy plus GC pressure).
 
-    Empty chunks are skipped.  A mid-body ``http.disconnect`` raises
+    Empty chunks are skipped.  A peer that vanishes mid-body raises
     :class:`ClientDisconnected` (with no ``partial`` — chunks already yielded
     are the caller's to keep), so a truncated upload is never silently treated
     as complete.
     """
+    next_chunk = getattr(receive, 'next_chunk', None)
+    if next_chunk is not None:
+        # Native channel — see :func:`read_body`.  ``None`` ends the body;
+        # the disconnect propagates as it is raised.
+        while (chunk := await next_chunk()) is not None:
+            if chunk:
+                yield chunk
+        return
     while True:
         event = await receive()
         if event.get('type') == ASGIEvent.HTTP_DISCONNECT:

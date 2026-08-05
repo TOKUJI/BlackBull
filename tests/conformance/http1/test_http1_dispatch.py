@@ -17,6 +17,20 @@ from blackbull.server.recipient import AbstractReader, IncompleteReadError
 from blackbull.server.websocket_actor import WebSocketActor
 
 
+def _conn(headers, path: str = '/'):
+    """The native ``Connection`` the actor binds a recipient to.
+
+    ``HTTP1Recipient`` frames from ``conn.headers``; it has no scope-dict
+    shape, so a test that drives it directly builds the same object the
+    parser would.
+    """
+    from blackbull.connection import Connection
+    from blackbull.headers import Headers
+    return Connection(method='POST', path=path, raw_path=path.encode(),
+                      headers=headers if isinstance(headers, Headers)
+                      else Headers(headers), type='http')
+
+
 # ---------------------------------------------------------------------------
 # In-process fakes
 # ---------------------------------------------------------------------------
@@ -512,9 +526,9 @@ class TestStreamingRequestBody:
     def _make_recipient(self, chunked_wire: bytes):
         from blackbull.server.recipient import HTTP1Recipient, AsyncioReader
         from blackbull.headers import Headers
-        scope = {'headers': Headers([(b'transfer-encoding', b'chunked')])}
+        conn = _conn(Headers([(b'transfer-encoding', b'chunked')]))
         reader = AsyncioReader(_FakeReader(chunked_wire))
-        return HTTP1Recipient(reader, scope)
+        return HTTP1Recipient(reader, conn)
 
     async def test_first_chunk_has_more_body_true(self):
         wire = b'5\r\nhello\r\n5\r\nworld\r\n0\r\n\r\n'
@@ -629,17 +643,17 @@ class TestHTTP1Recipient:
     @pytest.mark.asyncio
     async def test_unsupported_transfer_encoding_raises(self):
         from blackbull.server.recipient import HTTP1Recipient
-        scope = {'headers': [(b'transfer-encoding', b'gzip')]}
+        conn = _conn([(b'transfer-encoding', b'gzip')])
         reader = self._make_reader(b'')
         with pytest.raises(NotImplementedError, match='not supported'):
-            HTTP1Recipient(reader, scope)
+            HTTP1Recipient(reader, conn)
 
     @pytest.mark.asyncio
     async def test_second_call_returns_disconnect(self):
         from blackbull.server.recipient import HTTP1Recipient
-        scope = {'headers': [(b'content-length', b'5')]}
+        conn = _conn([(b'content-length', b'5')])
         reader = self._make_reader(b'hello')
-        r = HTTP1Recipient(reader, scope)
+        r = HTTP1Recipient(reader, conn)
         first = await r()
         assert first['type'] == 'http.request'
         second = await r()
@@ -651,9 +665,9 @@ class TestHTTP1Recipient:
     async def test_content_length_streams_in_chunks(self):
         """A body larger than chunk_size arrives as several http.request events."""
         from blackbull.server.recipient import HTTP1Recipient
-        scope = {'headers': [(b'content-length', b'10')]}
+        conn = _conn([(b'content-length', b'10')])
         reader = self._make_reader(b'0123456789')
-        r = HTTP1Recipient(reader, scope, chunk_size=4)
+        r = HTTP1Recipient(reader, conn, chunk_size=4)
         events = []
         while True:
             e = await r()
@@ -667,9 +681,9 @@ class TestHTTP1Recipient:
     @pytest.mark.asyncio
     async def test_single_chunk_more_body_false(self):
         from blackbull.server.recipient import HTTP1Recipient
-        scope = {'headers': [(b'content-length', b'5')]}
+        conn = _conn([(b'content-length', b'5')])
         reader = self._make_reader(b'hello')
-        r = HTTP1Recipient(reader, scope, chunk_size=65536)
+        r = HTTP1Recipient(reader, conn, chunk_size=65536)
         event = await r()
         assert event == {'type': 'http.request', 'body': b'hello', 'more_body': False}
 
@@ -677,9 +691,9 @@ class TestHTTP1Recipient:
     async def test_exact_multiple_of_chunk_size(self):
         """No spurious empty trailing event when the body divides evenly."""
         from blackbull.server.recipient import HTTP1Recipient
-        scope = {'headers': [(b'content-length', b'8')]}
+        conn = _conn([(b'content-length', b'8')])
         reader = self._make_reader(b'abcdefgh')
-        r = HTTP1Recipient(reader, scope, chunk_size=4)
+        r = HTTP1Recipient(reader, conn, chunk_size=4)
         events = []
         while True:
             e = await r()
@@ -692,18 +706,18 @@ class TestHTTP1Recipient:
     @pytest.mark.asyncio
     async def test_empty_content_length_one_event(self):
         from blackbull.server.recipient import HTTP1Recipient
-        scope = {'headers': [(b'content-length', b'0')]}
+        conn = _conn([(b'content-length', b'0')])
         reader = self._make_reader(b'')
-        r = HTTP1Recipient(reader, scope, chunk_size=4)
+        r = HTTP1Recipient(reader, conn, chunk_size=4)
         event = await r()
         assert event == {'type': 'http.request', 'body': b'', 'more_body': False}
 
     @pytest.mark.asyncio
     async def test_no_body_headers_one_empty_event(self):
         from blackbull.server.recipient import HTTP1Recipient
-        scope = {'headers': []}
+        conn = _conn([])
         reader = self._make_reader(b'')
-        r = HTTP1Recipient(reader, scope, chunk_size=4)
+        r = HTTP1Recipient(reader, conn, chunk_size=4)
         event = await r()
         assert event == {'type': 'http.request', 'body': b'', 'more_body': False}
 
@@ -715,9 +729,9 @@ class TestHTTP1Recipient:
         monkeypatch.setenv('BB_BODY_CHUNK_SIZE', '3')
         env.get_settings.cache_clear()
         try:
-            scope = {'headers': [(b'content-length', b'7')]}
+            conn = _conn([(b'content-length', b'7')])
             reader = self._make_reader(b'abcdefg')
-            r = HTTP1Recipient(reader, scope)        # no chunk_size → env
+            r = HTTP1Recipient(reader, conn)        # no chunk_size → env
             sizes = []
             while True:
                 e = await r()

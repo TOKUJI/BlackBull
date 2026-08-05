@@ -259,6 +259,50 @@ colocated with their respective actors.
 | `ConnectionActor` unhandled | Log + close connection | One connection's failure is bounded |
 | `ASGIServer` accept error | Backoff + retry | Server stays alive across transient errors |
 
+## Receive-path invariant
+
+The request body crosses the framework as **`bytes`**, and the end of
+the body is carried by the call protocol rather than by a field beside
+the payload:
+
+```python
+chunk = await recipient.next_chunk()   # bytes  → more body follows
+chunk is None                          #        → body complete
+raise ClientDisconnected               #        → peer vanished mid-body
+```
+
+`None` rather than `b''`, for the same reason `NativeResponse` decides
+presence with `is not None`: an empty body is a real body.  The sentinel
+is unambiguous on both framings — a zero-length chunk *is* the
+terminator in chunked encoding (RFC 9112 §7.1), and a Content-Length
+slice is never empty.
+
+`Connection.body()` / `stream()` — and `read_body` / `stream_body`
+underneath them — consume that channel directly.  The ASGI
+`http.request` dict is built **only** by `HTTP1Recipient.__call__` /
+`HTTP2Recipient.__call__`, which is to say only when something asks for
+the ASGI encoding: a full-form handler calling `receive()`, or an
+external host.  It used to be built unconditionally, so a handler using
+`conn.body()` paid one dict per chunk that it never read.
+
+The two channels share one end marker on both protocols.  `__call__`
+does not *consult* it — a full-form handler calling `receive()` past the
+end still gets `http.disconnect` (H1) or still waits for the disconnect
+event (H2), exactly as before — but it does *set* it, so a reader that
+starts on one channel and finishes on the other cannot block on a queue
+that will never be fed again.
+
+Measured on the real H1 recipient — 4 KiB chunks, 2000 requests per run,
+mean ± SE over 5 runs:
+
+| channel | ns/chunk |
+|---|---|
+| `receive()` (ASGI) | 803.2 ± 52.6 |
+| `next_chunk()` (native) | 536.3 ± 12.3 |
+
+267 ns/chunk, or **4.27 µs saved on a 64 KiB upload** — and the dict count
+for that upload goes from 16 to 0.
+
 ## Send-path invariant
 
 Protocol senders never choose between joining and vectored I/O

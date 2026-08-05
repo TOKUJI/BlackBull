@@ -21,6 +21,7 @@ import pytest
 
 from blackbull import EventSourceResponse, StreamingResponse
 from blackbull.response import _format_sse_event
+from blackbull.native import NativeResponse
 
 
 # ----------------------------------------------------------------------
@@ -89,8 +90,13 @@ class _AsgiCapture:
     def __init__(self):
         self.events: list[dict] = []
 
-    async def __call__(self, event: dict) -> None:
-        self.events.append(event)
+    async def __call__(self, event) -> None:
+        # Responses emit native now; these assertions describe the wire, so
+        # record the ASGI events each object stands for.
+        if isinstance(event, NativeResponse):
+            self.events.extend(event.to_asgi())
+        else:
+            self.events.append(event)
 
 
 @pytest.mark.asyncio

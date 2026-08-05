@@ -378,10 +378,10 @@ class TestASGIMiddlewareCompat:
         app = BlackBull()
         calls: list[str] = []
 
-        async def _x_request_id(scope, receive, send, call_next):
+        async def _x_request_id(conn, receive, send, call_next):
             calls.append('mw_enter')
-            scope.state['x-request-id'] = 'test-001'
-            await call_next(scope, receive, send)
+            conn.state['x-request-id'] = 'test-001'
+            await call_next(conn, receive, send)
             calls.append('mw_exit')
 
         app.use(_x_request_id)
@@ -403,7 +403,7 @@ class TestASGIMiddlewareCompat:
         app = BlackBull()
         handler_called = False
 
-        async def _block_mw(scope, receive, send, call_next):
+        async def _block_mw(conn, receive, send, call_next):
             # Short-circuit without calling call_next
             await send({
                 'type': 'http.response.start',

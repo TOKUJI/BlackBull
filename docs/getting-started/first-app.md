@@ -199,8 +199,8 @@ $ curl localhost:8000/tasks
 The simplified form covers most needs, but not all:
 
 - **WebSocket handlers** always receive the full
-  `(scope, receive, send)` triplet.
-- **Middleware** functions keep the `(scope, receive, send, call_next)`
+  `(conn, receive, send)` triplet.
+- **Middleware** functions keep the `(conn, receive, send, call_next)`
   shape; the simplified adaptation does not apply to them.
 - **Streaming uploads / long polling** need to call `receive()` in
   a loop, so the full form is clearer.

@@ -17,6 +17,7 @@ from blackbull import (BlackBull, Connection, Depends, Headers, WebSocket,
 from blackbull.router import (_ParamKind, _adapt_websocket_handler,
                               _websocket_param_plan)
 from blackbull.utils import Scheme
+from blackbull.native import NativeWSMessage
 
 
 # ---------------------------------------------------------------------------
@@ -36,7 +37,12 @@ class _Channel:
         return self._inbound.pop(0)
 
     async def send(self, event, *_args, **_kwargs):
-        self.sent.append(event)
+        # The WebSocket object emits native now; these assertions are about
+        # the wire, so record what each message stands for.
+        if isinstance(event, NativeWSMessage):
+            self.sent.extend(event.to_asgi())
+        else:
+            self.sent.append(event)
 
 
 CONNECT = {'type': 'websocket.connect'}

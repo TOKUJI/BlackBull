@@ -73,7 +73,7 @@ unaffected.
     **percent-decoded** request target with the query string removed —
     `/files/a%2Fb` arrives as `/files/a/b`, matching the ASGI spec and
     uvicorn.  The **un**decoded bytes are available as
-    `scope['raw_path']` (`bytes`, query excluded) for the rare consumer
+    `conn.raw_path` (`bytes`, query excluded) for the rare consumer
     — reverse proxies, WAFs, cache-key / signature verification — that
     must reproduce the exact received byte sequence.  RFC 3986 `;`
     parameters are preserved in both (`/cart;sid=abc` stays intact).
@@ -90,7 +90,7 @@ streaming bodies chunk by chunk.
 from blackbull import read_body
 
 @app.route(path='/echo', methods=[HTTPMethod.POST])
-async def echo(scope, receive, send):
+async def echo(conn, receive, send):
     raw: bytes = await read_body(receive)
     await send(Response(raw))
 ```
@@ -115,7 +115,7 @@ from http import HTTPStatus
 from blackbull import read_json, read_text, JSONResponse
 
 @app.route(path='/api/things', methods=[HTTPMethod.POST])
-async def create_thing(scope, receive, send):
+async def create_thing(conn, receive, send):
     data = await read_json(receive)        # dict | list | … | None
     if data is None:
         await send(JSONResponse({'error': 'invalid JSON'},
@@ -124,7 +124,7 @@ async def create_thing(scope, receive, send):
     await send(JSONResponse({'created': data}))
 
 @app.route(path='/api/note', methods=[HTTPMethod.POST])
-async def note(scope, receive, send):
+async def note(conn, receive, send):
     text = await read_text(receive)        # str (errors='replace')
     await send(Response(text))
 ```
@@ -142,38 +142,38 @@ import json
 from http import HTTPStatus
 from blackbull import read_body, JSONResponse
 
-async def json_body_mw(scope, receive, send, call_next):
+async def json_body_mw(conn, receive, send, call_next):
     raw = await read_body(receive)
     try:
-        scope['json'] = json.loads(raw)
+        conn.state['json'] = json.loads(raw)
     except (json.JSONDecodeError, ValueError):
         await send(JSONResponse({'error': 'Invalid JSON'},
                                 status=HTTPStatus.BAD_REQUEST))
         return
-    await call_next(scope, receive, send)
+    await call_next(conn, receive, send)
 ```
 
-The handler then reads `scope['json']` without touching `receive`.
+The handler then reads `conn.state['json']` without touching `receive`.
 
 ## Reading request headers
 
-`scope['headers']` is a `Headers` object — case-insensitive, ordered,
+`conn.headers` is a `Headers` object — case-insensitive, ordered,
 multi-valued.
 
 ```python
 # First value for a header; returns b'' when absent
-ct   = scope['headers'].get(b'content-type')
-auth = scope['headers'].get(b'authorization', b'')
+ct   = conn.headers.get(b'content-type')
+auth = conn.headers.get(b'authorization', b'')
 
 # All (name, value) pairs for a header (multi-value support)
-pairs = scope['headers'].getlist(b'accept')   # list[tuple[bytes, bytes]]
+pairs = conn.headers.getlist(b'accept')      # list[tuple[bytes, bytes]]
 
 # ASGI-compliant iteration
-for name, value in scope['headers']:
+for name, value in conn.headers:
     ...
 
 # Membership test
-if b'content-length' in scope['headers']:
+if b'content-length' in conn.headers:
     ...
 ```
 
@@ -257,19 +257,19 @@ form they had before.
 ### Raw query strings
 
 For repeated keys, unusual encodings, or full control,
-`scope['query_string']` contains the raw query string as bytes.
+`conn.query_string` contains the raw query string as bytes.
 Parse it with the standard library:
 
 ```python
 from urllib.parse import parse_qs, parse_qsl
 
 # parse_qs: each key maps to a list of values (handles ?tag=a&tag=b correctly)
-params = parse_qs(scope['query_string'].decode())
+params = parse_qs(conn.query_string.decode())
 page   = int(params.get('page', ['1'])[0])
 tags   = params.get('tag', [])             # ['a', 'b'] for ?tag=a&tag=b
 
 # parse_qsl: flat list of (key, value) pairs preserving order
-pairs = parse_qsl(scope['query_string'].decode())
+pairs = parse_qsl(conn.query_string.decode())
 ```
 
 For convenience, wrap this in a helper:
@@ -278,10 +278,10 @@ For convenience, wrap this in a helper:
 def qp(scope) -> dict[str, str]:
     """Return first value for each query parameter key."""
     return {k: v[0]
-            for k, v in parse_qs(scope['query_string'].decode()).items()}
+            for k, v in parse_qs(conn.query_string.decode()).items()}
 
 @app.route(path='/tasks')
-async def list_tasks(scope, receive, send):
+async def list_tasks(conn, receive, send):
     p = qp(scope)
     done = p.get('done', 'false').lower() == 'true'
     await send(JSONResponse({'done_filter': done}))
@@ -297,15 +297,15 @@ default) send key=value pairs in the body.  Read and parse with
 from urllib.parse import parse_qs
 from blackbull import read_body
 
-async def form_body_mw(scope, receive, send, call_next):
-    """Parse application/x-www-form-urlencoded body; inject scope['form']."""
+async def form_body_mw(conn, receive, send, call_next):
+    """Parse application/x-www-form-urlencoded body; inject conn.state['form']."""
     raw = await read_body(receive)
-    scope['form'] = {k: v[0] for k, v in parse_qs(raw.decode()).items()}
-    await call_next(scope, receive, send)
+    conn.state['form'] = {k: v[0] for k, v in parse_qs(raw.decode()).items()}
+    await call_next(conn, receive, send)
 
 @app.route(methods=[HTTPMethod.POST], path='/submit', middlewares=[form_body_mw])
-async def submit(scope, receive, send):
-    name = scope['form'].get('name', '')
+async def submit(conn, receive, send):
+    name = conn.state['form'].get('name', '')
     await send(JSONResponse({'received': name}))
 ```
 
@@ -422,7 +422,7 @@ body.  Use the `http.response.trailers` event after the last
 
 ```python
 @app.route(path='/chunked')
-async def chunked(scope, receive, send):
+async def chunked(conn, receive, send):
     await send({
         'type': 'http.response.start',
         'status': 200,
@@ -477,7 +477,7 @@ async def countdown():
     yield b'done\n'
 
 @app.route(path='/stream')
-async def handler(scope, receive, send):
+async def handler(conn, receive, send):
     await StreamingResponse(countdown())(scope, receive, send)
 ```
 
@@ -528,7 +528,7 @@ body events through immediately rather than accumulating them:
 ```python
 from blackbull.native import NativeResponse
 
-async def prefix_mw(scope, receive, send, call_next):
+async def prefix_mw(conn, receive, send, call_next):
     captured_start = None
 
     async def capturing_send(event):
@@ -563,7 +563,7 @@ async def prefix_mw(scope, receive, send, call_next):
         else:
             await send(event)
 
-    await call_next(scope, receive, capturing_send)
+    await call_next(conn, receive, capturing_send)
 ```
 
 The two branches are the same policy on two wire shapes: the native object
@@ -585,7 +585,7 @@ the client is still there before writing more.
 
 ```python
 @app.route(path='/events')
-async def sse(scope, receive, send):
+async def sse(conn, receive, send):
     await send({
         'type': 'http.response.start',
         'status': 200,

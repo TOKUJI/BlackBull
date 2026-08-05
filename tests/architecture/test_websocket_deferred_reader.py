@@ -216,15 +216,16 @@ async def test_switching_to_read_ahead_does_not_strand_a_buffered_event():
     recipient, _reader = _make_recipient(listeners=True)
     try:
         await recipient()
-        buffered = {'type': ASGIEvent.WS_RECEIVE, 'text': 'buffered',
-                    'bytes': None}
-        recipient._pending.append(buffered)
+        # The handoff slot carries the message itself — the channel is native;
+        # `receive()` encodes it as an ASGI event on the way out.
+        recipient._pending.append('buffered')
 
         recipient._on_idle_tick()               # starts the deferred reader
         assert recipient._event_queue is not None
 
         event = await asyncio.wait_for(recipient(), timeout=1.0)
-        assert event == buffered, (
-            'the event buffered before the switch was never delivered')
+        assert event == {'type': ASGIEvent.WS_RECEIVE, 'text': 'buffered',
+                         'bytes': None}, (
+            'the message buffered before the switch was never delivered')
     finally:
         await recipient.shutdown()

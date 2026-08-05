@@ -18,6 +18,7 @@ from typing import Awaitable, Callable, Optional
 
 from .recipient import AbstractReader
 from .sender import AbstractWriter
+from ..native import NativeResponse
 from ..protocol.frame_types import Data
 
 
@@ -141,9 +142,13 @@ class HTTP2WSWriter(AbstractWriter):
         self._ended: bool = False
 
     async def write(self, data: bytes) -> None:
-        await self._sender({'type': 'http.response.body', 'body': data, 'more_body': True})
+        # Framework-owned producer on BlackBull's own send path: native, like
+        # StaticFiles and CORS.  The header arm went out with the RFC 8441
+        # handshake, so these carry a body arm only; ``more_body`` keeps
+        # END_STREAM withheld and the session open.
+        await self._sender(NativeResponse(body=data, more_body=True))
 
     async def close(self) -> None:
         if not self._ended:
             self._ended = True
-            await self._sender({'type': 'http.response.body', 'body': b'', 'more_body': False})
+            await self._sender(NativeResponse(body=b'', more_body=False))
