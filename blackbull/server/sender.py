@@ -18,7 +18,7 @@ import logging
 from ..asgi import (ASGIEvent, ASGISendEvent, HTTPDisconnectEvent,
                     WebSocketAcceptEvent, WebSocketCloseEvent, WebSocketSendEvent)
 from ..headers import Headers, HeaderList
-from ..native import NativeResponse
+from ..native import NativeResponse, NativeWSMessage
 
 logger = logging.getLogger(__name__)
 
@@ -96,6 +96,16 @@ def _http_date() -> bytes:
         _HTTP_DATE = formatdate(timeval=now, localtime=False, usegmt=True).encode('ascii')
         _HTTP_DATE_TS = now
     return _HTTP_DATE
+
+
+def _is_informational(status) -> bool:
+    """True for a 1xx status — a provisional response, not the final one.
+
+    An interim response shares the sender with the final response that must
+    still follow it, so it neither completes the exchange nor commits a
+    status, and it carries no content framing (RFC 9110 §8.6, §15.2).
+    """
+    return int(status) < 200
 
 
 def _has_header(items, name: bytes) -> bool:
@@ -546,7 +556,11 @@ class HTTP1Sender(BaseSender):
                     self._log_record.status = int(status)
                     self._log_record.response_bytes += len(body)
                 await self._flush(status, h, body)
-                self._completed = True
+                # An interim (1xx) response does not complete the exchange —
+                # the final response still has to go out on this same sender,
+                # and completing here would drop it.
+                if not _is_informational(status):
+                    self._completed = True
 
             case NativeResponse():
                 # Unified native response (native-ization, Sprint 92): one
@@ -574,6 +588,13 @@ class HTTP1Sender(BaseSender):
                                 elif hkl == b'content-encoding':
                                     self._log_record.resp_content_encoding = hv
                         self._log_record.mark('start_arm_out')
+                if body.file_path is not None:
+                    # Sendfile form: the header arm was just buffered, which
+                    # is exactly what ``_pathsend`` needs — it flushes those
+                    # headers and hands the file to ``loop.sendfile``.
+                    await self._pathsend(body.file_path)
+                    self._completed = True
+                    return
                 if body.body is not None:
                     await self._handle_body_content(body._body, body.more_body)
                 if body.trailers is not None and not self._completed:
@@ -697,7 +718,14 @@ class HTTP1Sender(BaseSender):
         self._head_mode = False
         self._log_record = None
 
-    def _ensure_framing_headers(self, headers: Headers, body_len: int, more_body: bool) -> None:
+    def _ensure_framing_headers(self, status: HTTPStatus, headers: Headers,
+                                body_len: int, more_body: bool) -> None:
+        # RFC 9110 §8.6 / RFC 9112 §6.1 — an informational response MUST NOT
+        # carry Content-Length or Transfer-Encoding.  It has no body, and a
+        # length a proxy believes bounds one desyncs the connection that the
+        # real response still has to use.
+        if _is_informational(status):
+            return
         if more_body:
             if b'transfer-encoding' not in headers:
                 headers.append(b'transfer-encoding', b'chunked')
@@ -716,8 +744,13 @@ class HTTP1Sender(BaseSender):
             headers.append(b'Date', _http_date())
 
     async def _flush(self, status: HTTPStatus, headers: Headers, body: bytes, more_body: bool = False) -> None:
-        self._started = True
-        self._ensure_framing_headers(headers, len(body), more_body)
+        # ``_started`` means the *final* status line is on the wire, which is
+        # what the actor's 408 synthesis consults.  An interim response does
+        # not commit a status, so a request that later times out can still be
+        # answered with 408 (RFC 9110 §15.2 — 1xx is provisional).
+        if not _is_informational(status):
+            self._started = True
+        self._ensure_framing_headers(status, headers, len(body), more_body)
         self._ensure_date_header(headers)
 
         # Coalesce status line + headers + body into a single write so the
@@ -782,7 +815,8 @@ class HTTP1Sender(BaseSender):
         self._started = True
         size = os.path.getsize(path)
         headers = self._buffered_headers
-        self._ensure_framing_headers(headers, size, more_body=False)
+        self._ensure_framing_headers(self._buffered_status, headers, size,
+                                     more_body=False)
         self._ensure_date_header(headers)
 
         head = self._render_start(self._buffered_status, headers)
@@ -1425,11 +1459,54 @@ class WebSocketSender(BaseSender):
         # outbound frames are sent verbatim (RSV1=0).
         self._compressor = compressor
 
-    async def __call__(self, body: _WSSenderEvent,
+    async def _send_payload(self, raw: bytes, opcode: WSOpcode) -> None:
+        """Frame and write one data payload.
+
+        Shared by the native and dict arms so the two cannot put different
+        bytes on the wire.  Vectored write: ``(header, payload)`` goes to
+        writelines so the payload is never copied into a concatenated frame
+        buffer (the join ``encode_frame`` would allocate).
+        """
+        rsv1 = self._compressor is not None
+        if rsv1:
+            raw = self._compressor.compress(raw)
+        header = encode_frame_header(len(raw), opcode, rsv1=rsv1)
+        await self._write_many((header, raw))
+
+    async def _send_close(self, code: int) -> None:
+        await self._write(encode_frame(code.to_bytes(2, 'big'),
+                                       opcode=WSOpcode.CLOSE))
+
+    async def __call__(self, body: '_WSSenderEvent | NativeWSMessage',
                        _status: HTTPStatus | None = None,
                        _headers: HeaderList = []):
+        # Native arm (the WS counterpart of the HTTP ``case NativeResponse():``
+        # seam).  BlackBull's own path emits these; the dict arm below is the
+        # external-host edge and the raw (conn, receive, send) compat surface.
+        if isinstance(body, NativeWSMessage):
+            match body.kind:
+                case NativeWSMessage.SEND:
+                    if body.text is not None:
+                        await self._send_payload(body.text.encode('utf-8'),
+                                                 WSOpcode.TEXT)
+                    else:
+                        await self._send_payload(body.data or b'',
+                                                 WSOpcode.BINARY)
+                case NativeWSMessage.CLOSE:
+                    await self._send_close(body.code
+                                           if body.code is not None
+                                           else WSCloseCode.NORMAL)
+                case NativeWSMessage.ACCEPT:
+                    pass  # handshake reply is the actor's, not the sender's
+                case _:
+                    logger.warning('WebSocketSender: unknown native kind %r',
+                                   body.kind)
+            return
+
         if not isinstance(body, dict):
-            raise TypeError(f'WebSocketSender expected a dict, got {type(body)!r}')
+            raise TypeError(
+                f'WebSocketSender expected a NativeWSMessage or a dict, '
+                f'got {type(body)!r}')
 
         event_type = body.get('type', '')
 
@@ -1437,24 +1514,14 @@ class WebSocketSender(BaseSender):
 
             case ASGIEvent.WS_SEND:
                 if 'text' in body and body['text'] is not None:
-                    raw = body['text'].encode('utf-8')
-                    opcode = WSOpcode.TEXT
+                    await self._send_payload(body['text'].encode('utf-8'),
+                                             WSOpcode.TEXT)
                 else:
-                    raw = body.get('bytes', b'')
-                    opcode = WSOpcode.BINARY
-                rsv1 = self._compressor is not None
-                if rsv1:
-                    raw = self._compressor.compress(raw)
-                # Vectored write: hand (header, payload) to writelines so the
-                # payload is never copied into a concatenated frame buffer
-                # (the header+payload join encode_frame would allocate).
-                header = encode_frame_header(len(raw), opcode, rsv1=rsv1)
-                await self._write_many((header, raw))
+                    await self._send_payload(body.get('bytes', b''),
+                                             WSOpcode.BINARY)
 
             case ASGIEvent.WS_CLOSE:
-                code = body.get('code', WSCloseCode.NORMAL)
-                frame = encode_frame(code.to_bytes(2, 'big'), opcode=WSOpcode.CLOSE)
-                await self._write(frame)
+                await self._send_close(body.get('code', WSCloseCode.NORMAL))
 
             case ASGIEvent.WS_ACCEPT:
                 pass  # handshake reply is sent by HTTP1Actor._do_ws_handshake()

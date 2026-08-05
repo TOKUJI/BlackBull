@@ -19,6 +19,7 @@ from blackbull.grpc import (
     encode_message, decode_messages,
 )
 from blackbull.grpc.asgi import serve_grpc
+from blackbull.native import NativeResponse
 
 
 # ---------------------------------------------------------------------------
@@ -84,7 +85,12 @@ def _collector():
     events = []
 
     async def send(event):
-        events.append(event)
+        # gRPC emits native on the seam; these assertions are
+        # about the wire, so expand to the ASGI events it stands for.
+        if isinstance(event, NativeResponse):
+            events.extend(event.to_asgi())
+        else:
+            events.append(event)
     return events, send
 
 

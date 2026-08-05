@@ -33,6 +33,19 @@ from blackbull.server.recipient import (
 from blackbull.server.sender import AbstractWriter, HTTP1Sender
 
 
+def _conn(headers, path: str = '/'):
+    """The native ``Connection`` the actor binds a recipient to.
+
+    ``HTTP1Recipient`` frames from ``conn.headers``; it has no scope-dict
+    shape, so a test that drives it directly builds the same object the
+    parser would.
+    """
+    from blackbull.connection import Connection
+    from blackbull.headers import Headers
+    return Connection(method='POST', path=path, raw_path=path.encode(),
+                      headers=headers if isinstance(headers, Headers)
+                      else Headers(headers), type='http')
+
 
 # ---------------------------------------------------------------------------
 # In-process fakes
@@ -93,7 +106,7 @@ async def test_chunked_body_reassembled_across_fragmented_reads():
     wire = f'{len(payload):x}\r\n'.encode() + payload + b'\r\n0\r\n\r\n'
     recipient = HTTP1Recipient(
         _DribbleReader(wire),
-        {'headers': [(b'transfer-encoding', b'chunked')]},
+        _conn([(b'transfer-encoding', b'chunked')]),
         chunk_size=64 * 1024,
     )
     body = await _drain_recipient(recipient)
@@ -107,7 +120,7 @@ async def test_chunked_multiple_chunks_fragmented():
             + f'{len(b):x}\r\n'.encode() + b + b'\r\n0\r\n\r\n')
     recipient = HTTP1Recipient(
         _DribbleReader(wire),
-        {'headers': [(b'transfer-encoding', b'chunked')]},
+        _conn([(b'transfer-encoding', b'chunked')]),
         chunk_size=64 * 1024,
     )
     assert await _drain_recipient(recipient) == a + b
@@ -119,7 +132,7 @@ async def test_chunked_multiple_chunks_fragmented():
 
 @pytest.mark.asyncio
 async def test_needs_drain_false_for_bodyless_request():
-    recipient = HTTP1Recipient(_DribbleReader(b''), {'headers': []})
+    recipient = HTTP1Recipient(_DribbleReader(b''), _conn([]))
     assert recipient.needs_drain() is False
 
 
@@ -128,7 +141,7 @@ async def test_drain_consumes_unread_content_length_body():
     body = b'z' * 300
     recipient = HTTP1Recipient(
         _DribbleReader(body),
-        {'headers': [(b'content-length', str(len(body)).encode())]},
+        _conn([(b'content-length', str(len(body)).encode())]),
         chunk_size=64 * 1024,
     )
     assert recipient.needs_drain() is True
@@ -141,7 +154,7 @@ async def test_drain_gives_up_past_bound_so_caller_closes():
     body = b'z' * 5000
     recipient = HTTP1Recipient(
         _DribbleReader(body),
-        {'headers': [(b'content-length', str(len(body)).encode())]},
+        _conn([(b'content-length', str(len(body)).encode())]),
         chunk_size=64,
     )
     # A body larger than the drain bound returns False → caller closes the

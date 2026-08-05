@@ -88,7 +88,7 @@ Pass `blocking=True` to await the observer in registration order
 ```python
 @app.on('scope_completed', blocking=True)
 async def close_session(event: Event):
-    session = event.detail['conn'].get('state', {}).get('db_session')
+    session = event.detail['conn'].state.get('db_session')
     if session is not None:
         await session.close()
 ```
@@ -147,19 +147,29 @@ you want the consistency of writing every hook as
 
 ## Event reference
 
+Every request- and connection-scoped event carries `detail['conn']`:
+the same native
+[`Connection`](requests-and-responses.md) the handler receives, not a
+copy and not an ASGI scope dict.  Read it with attributes —
+`conn.method`, `conn.path`, `conn.headers.get(b'accept')`,
+`conn.state` — and use `conn.state` when a listener needs to pass
+something to the handler.  The other `detail` keys are conveniences
+lifted off that same object (plus wire fields the `Connection` does
+not carry, such as `status` and `duration_ms`).
+
 | Event | Fires when | `detail` keys | Notes |
 | --- | --- | --- | --- |
 | `app_startup` | Server has bound its socket and is about to accept connections | *(empty)* | Sugar: `@app.on_startup` |
 | `app_shutdown` | Server has received a stop signal and is about to exit | *(empty)* | Sugar: `@app.on_shutdown` |
-| `request_received` | HTTP request entered the app, before routing | `scope`, `client_ip`, `method`, `path`, `http_version`, `headers` | `@app.on` and `@app.intercept`; raise to abort |
-| `before_handler` | Route matched, before handler dispatch (not for 404/405) | `scope`, `client_ip`, `method`, `path`, `handler` | `@app.on` and `@app.intercept`; raise to abort |
-| `after_handler` | Handler returned or raised | `scope`, `client_ip`, `method`, `path`, `handler`, `exception` | Observation only; `exception` is `None` on success |
-| `request_completed` | HTTP request finished — response fully sent (or failed before that) | `scope`, `client_ip`, `method`, `path`, `http_version`, `status`, `response_bytes`, `duration_ms` | Observation only; not fired if client disconnected or for WebSocket |
-| `scope_completed` | Any ASGI scope finished — HTTP request, WebSocket connection, or gRPC call | `scope`, `type`, `client_ip`, `path`, `exception` | Guaranteed once per scope, every protocol, on success or error; the cleanup hook. Pair with `@app.on(..., blocking=True)` |
-| `request_disconnected` | HTTP client closed connection before response complete | `scope`, `client_ip`, `method`, `path`, `http_version` | Observation only; mutually exclusive with `request_completed` |
-| `websocket_message` | WebSocket message fully received and reassembled, before the handler reads it | `scope`, `text`, `bytes` | Observation only |
-| `websocket_connected` | `websocket.accept` sent | `connection_id`, `path`, `client_ip`, `subprotocol` | Observation only |
-| `websocket_disconnected` | WebSocket connection closed | `connection_id`, `code` | Observation only |
+| `request_received` | HTTP request entered the app, before routing | `conn`, `client_ip`, `method`, `path`, `http_version`, `headers` | `@app.on` and `@app.intercept`; raise to abort |
+| `before_handler` | Route matched, before handler dispatch (not for 404/405) | `conn`, `client_ip`, `method`, `path`, `handler` | `@app.on` and `@app.intercept`; raise to abort |
+| `after_handler` | Handler returned or raised | `conn`, `client_ip`, `method`, `path`, `handler`, `exception` | Observation only; `exception` is `None` on success |
+| `request_completed` | HTTP request finished — response fully sent (or failed before that) | `conn`, `client_ip`, `method`, `path`, `http_version`, `status`, `response_bytes`, `duration_ms` | Observation only; not fired if client disconnected or for WebSocket |
+| `scope_completed` | Any ASGI scope finished — HTTP request, WebSocket connection, or gRPC call | `conn`, `type`, `client_ip`, `path`, `exception` | Guaranteed once per scope, every protocol, on success or error; the cleanup hook. Pair with `@app.on(..., blocking=True)` |
+| `request_disconnected` | HTTP client closed connection before response complete | `conn`, `client_ip`, `method`, `path`, `http_version` | Observation only; mutually exclusive with `request_completed` |
+| `websocket_message` | WebSocket message fully received and reassembled, before the handler reads it | `conn`, `text`, `bytes` | Observation only |
+| `websocket_connected` | `websocket.accept` sent | `conn`, `connection_id`, `path`, `client_ip`, `subprotocol` | Observation only |
+| `websocket_disconnected` | WebSocket connection closed | `conn`, `connection_id`, `client_ip`, `path`, `code` | Observation only |
 
 Request flow:
 
@@ -185,7 +195,7 @@ runs as an ASGI app under an external server (uvicorn, hypercorn,
 ```python
 @app.intercept('request_received')
 async def require_api_key(event):
-    headers = event.detail['conn']['headers']
+    headers = event.detail['conn'].headers
     if headers.get(b'x-api-key') != b'secret':
         raise PermissionError('missing or invalid API key')
 
@@ -210,7 +220,7 @@ exist and those keys carry placeholders (`'-'` / `0` / `0.0`).
 
 | Key | Type | Description |
 | --- | --- | --- |
-| `scope` | `dict` | The ASGI scope dict for the request |
+| `conn` | `Connection` | The request itself — `conn.method`, `conn.path`, `conn.headers`, `conn.state` |
 | `client_ip` | `str` | Remote address (`'-'` when unavailable) |
 | `method` | `str` | HTTP method |
 | `path` | `str` | Request path |
@@ -248,7 +258,7 @@ too, and is meant for **resource cleanup**.
 
 | Key | Type | Description |
 | --- | --- | --- |
-| `scope` | `dict` | The ASGI scope dict |
+| `conn` | `Connection` | The request / connection itself |
 | `type` | `str` | Scope type: `'http'` (also gRPC) or `'websocket'` |
 | `client_ip` | `str` | Remote address (`'-'` when unavailable) |
 | `path` | `str` | Request / connection path |
@@ -260,8 +270,8 @@ is gone:
 ```python
 @app.on('scope_completed', blocking=True)
 async def cleanup(event: Event):
-    scope = event.detail['conn']
-    tmp = scope.get('state', {}).get('tempfile')
+    conn = event.detail['conn']
+    tmp = conn.state.get('tempfile')
     if tmp is not None:
         os.unlink(tmp)
     if event.detail['exception'] is not None:
@@ -305,10 +315,10 @@ server accepted — including ones the handler never reads.
 @app.on('websocket_message')
 async def log_message(event: Event):
     if event.detail['text'] is not None:
-        print(f"[ws] text on {event.detail['conn']['path']}: "
+        print(f"[ws] text on {event.detail['conn'].path}: "
               f"{event.detail['text']!r}")
     else:
-        print(f"[ws] binary on {event.detail['conn']['path']}: "
+        print(f"[ws] binary on {event.detail['conn'].path}: "
               f"{len(event.detail['bytes'])} bytes")
 ```
 

@@ -119,20 +119,20 @@ For the full list see [environment variables](../reference/env-vars.md).
 ## Extending the access log record from middleware
 
 The `AccessLogRecord` for the current request is stored at
-`scope['state']['access_log']`.  Middleware that runs before the
+`conn.state['access_log']`.  Middleware that runs before the
 handler can attach extra attributes:
 
 ```python
 import uuid
 
-async def request_id_mw(scope, receive, send, call_next):
+async def request_id_mw(conn, receive, send, call_next):
     req_id = uuid.uuid4().hex
-    scope['request_id'] = req_id
+    conn.state['request_id'] = req_id
     # Attach to the access log record so it appears in log output
-    record = scope['state'].get('access_log')
+    record = conn.state.get('access_log')
     if record:
         record.request_id = req_id   # arbitrary extra attribute
-    await call_next(scope, receive, send)
+    await call_next(conn, receive, send)
 ```
 
 A custom `logging.Filter` can then surface the attribute:

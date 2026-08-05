@@ -195,7 +195,7 @@ BlackBull does not build the tree; it accepts PRIORITY frames and translates
 them, plus RFC 9218 `PRIORITY_UPDATE`, into a simple
 `{'urgency', 'incremental'}` hint (built by `_resolve_priority() in
 http2_actor.py` / `_build_h2_extensions() in http2_actor.py`) exposed at
-`scope['extensions']['http.response.priority']`.  *Because* the tree was
+`conn.extensions['http.response.priority']`.  *Because* the tree was
 unimplementable interoperably — RFC 9113 itself removed it, and modern clients
 send RFC 9218 urgency signals instead.  (Background: §5.3.1.)
 
@@ -440,7 +440,7 @@ parser.py` (v0.54.0): an `http(s)` request carrying neither `:authority` nor
 `Host` is malformed, as is an authority containing userinfo, RFC 3986 §3.2
 delimiters, or whitespace (the same grammar HTTP/1.1 enforces on `Host`);
 multiple `Host` fields without `:authority` are likewise rejected.  A valid
-`:authority` is mapped into `scope['headers']` as the `host` header,
+`:authority` is mapped into `conn.headers` as the `host` header,
 replacing any literal `Host` — the ASGI host mapping, mirroring H1's
 absolute-form-overrides-Host semantics — on both the request path and the
 RFC 8441 Extended CONNECT path, so `HTTP2Actor._handle_push()` synthesises

@@ -75,19 +75,19 @@ from http import HTTPStatus
 from blackbull import JSONResponse
 
 @app.on_error(HTTPStatus.NOT_FOUND)
-async def handle_404(scope, receive, send):
+async def handle_404(conn, receive, send):
     await send(JSONResponse({'error': 'not found'},
                             status=HTTPStatus.NOT_FOUND))
 
 @app.on_error(HTTPStatus.METHOD_NOT_ALLOWED)
-async def handle_405(scope, receive, send):
-    allowed = ', '.join(scope['state'].get('allowed_methods', ()))
+async def handle_405(conn, receive, send):
+    allowed = ', '.join(conn.state.get('allowed_methods', ()))
     await send(JSONResponse({'error': f'allowed: {allowed}'},
                             status=HTTPStatus.METHOD_NOT_ALLOWED))
 
 @app.on_error(ValueError)
-async def handle_value_error(scope, receive, send):
-    exc = scope['state'].get('error_exception')
+async def handle_value_error(conn, receive, send):
+    exc = conn.state.get('error_exception')
     await send(JSONResponse({'error': str(exc)},
                             status=HTTPStatus.BAD_REQUEST))
 ```
@@ -97,9 +97,9 @@ Exception handlers use MRO walk: a handler registered for
 handlers (e.g. `ValueError`) take priority over base-class
 handlers.
 
-## What's in `scope['state']`
+## What's in `conn.state`
 
-The framework populates `scope['state']` with information about
+The framework populates `conn.state` with information about
 the error before calling your handler:
 
 | Key | Type | Present when |
@@ -119,8 +119,8 @@ you want to override:
 
 ```python
 @app.on_error(HTTPStatus.INTERNAL_SERVER_ERROR)
-async def custom_500(scope, receive, send):
-    exc = scope['state'].get('error_exception')
+async def custom_500(conn, receive, send):
+    exc = conn.state.get('error_exception')
     # ... your rendering ...
     await send(Response(body, status=HTTPStatus.INTERNAL_SERVER_ERROR,
                         content_type='text/html'))

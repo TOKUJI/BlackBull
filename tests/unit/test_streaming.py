@@ -7,6 +7,8 @@ import warnings
 
 import pytest
 
+from blackbull.native import NativeResponse
+
 from blackbull.server.sender import HTTP1Sender, AbstractWriter
 from blackbull.response import StreamingResponse
 from blackbull.middleware.compression import Compression
@@ -232,7 +234,12 @@ class TestStreamingResponse:
         events: list = []
 
         async def send(event):
-            events.append(event)
+            # Responses emit native now; these assertions describe the
+            # wire, so record the ASGI events each object stands for.
+            if isinstance(event, NativeResponse):
+                events.extend(event.to_asgi())
+            else:
+                events.append(event)
 
         async def gen():
             yield b'part1'
@@ -252,7 +259,12 @@ class TestStreamingResponse:
         events: list = []
 
         async def send(event):
-            events.append(event)
+            # Responses emit native now; these assertions describe the
+            # wire, so record the ASGI events each object stands for.
+            if isinstance(event, NativeResponse):
+                events.extend(event.to_asgi())
+            else:
+                events.append(event)
 
         async def gen():
             yield 'hello'
@@ -267,7 +279,12 @@ class TestStreamingResponse:
         events: list = []
 
         async def send(event):
-            events.append(event)
+            # Responses emit native now; these assertions describe the
+            # wire, so record the ASGI events each object stands for.
+            if isinstance(event, NativeResponse):
+                events.extend(event.to_asgi())
+            else:
+                events.append(event)
 
         async def gen():
             yield b'x'
@@ -282,7 +299,12 @@ class TestStreamingResponse:
         events: list = []
 
         async def send(event):
-            events.append(event)
+            # Responses emit native now; these assertions describe the
+            # wire, so record the ASGI events each object stands for.
+            if isinstance(event, NativeResponse):
+                events.extend(event.to_asgi())
+            else:
+                events.append(event)
 
         async def gen():
             yield b'x'
@@ -316,7 +338,13 @@ class TestCompressionStreaming:
             await send({'type': 'http.response.body', 'body': b'y' * 200, 'more_body': False})
 
         async def send(event):
-            received.append(event)
+            # The middleware is ``@as_middleware``-decorated, so it emits the
+            # H1 native contract (NativeResponse); these tests inspect the
+            # ASGI event shape, so normalise the seam away here.
+            if isinstance(event, NativeResponse):
+                received.extend(event.to_asgi())
+            else:
+                received.append(event)
 
         await mw(scope, None, send, call_next)
 
@@ -340,7 +368,13 @@ class TestCompressionStreaming:
             await send({'type': 'http.response.body', 'body': b'hello world', 'more_body': False})
 
         async def send(event):
-            received.append(event)
+            # The middleware is ``@as_middleware``-decorated, so it emits the
+            # H1 native contract (NativeResponse); these tests inspect the
+            # ASGI event shape, so normalise the seam away here.
+            if isinstance(event, NativeResponse):
+                received.extend(event.to_asgi())
+            else:
+                received.append(event)
 
         await mw(scope, None, send, call_next)
 
@@ -358,8 +392,8 @@ class TestCompressionStreaming:
 
 class TestUseWarning:
     def test_function_middleware_no_warn(self):
-        async def fn_mw(scope, receive, send, call_next):
-            await call_next(scope, receive, send)
+        async def fn_mw(conn, receive, send, call_next):
+            await call_next(conn, receive, send)
 
         app = BlackBull()
         with warnings.catch_warnings(record=True) as w:

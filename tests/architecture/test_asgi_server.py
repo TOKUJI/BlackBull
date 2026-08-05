@@ -352,31 +352,40 @@ class FakeStreamReader:
 class TestHTTP1_1BodyDecoding:
     """HTTP/1.1 body reading: Content-Length and Transfer-Encoding: chunked."""
 
-    def _make_recipient(self, body_bytes: bytes, scope: dict):
-        """Return an HTTP1Recipient backed by an in-memory buffer."""
-        return RecipientFactory.http1(FakeStreamReader(body_bytes), scope)
+    def _make_recipient(self, body_bytes: bytes, headers: list):
+        """Return an HTTP1Recipient backed by an in-memory buffer.
+
+        The recipient frames from a native ``Connection`` — the only shape the
+        actor ever binds it to — so the headers are given as the list the
+        parser would have produced.
+        """
+        from blackbull.connection import Connection
+        from blackbull.headers import Headers
+
+        conn = Connection(method='POST', path='/', raw_path=b'/',
+                          headers=Headers(headers), type='http')
+        return RecipientFactory.http1(FakeStreamReader(body_bytes), conn)
 
     @pytest.mark.asyncio
     async def test_content_length_reads_exact_bytes(self):
         """receive() must return exactly the bytes declared by Content-Length."""
         body = b'hello world'
-        scope = {'headers': [(b'content-length', str(len(body)).encode())]}
-        event = await self._make_recipient(body, scope)()
+        headers = [(b'content-length', str(len(body)).encode())]
+        event = await self._make_recipient(body, headers)()
         assert event == {'type': 'http.request', 'body': b'hello world', 'more_body': False}
 
     @pytest.mark.asyncio
     async def test_content_length_multi_digit(self):
         """A multi-digit Content-Length (e.g. 100) must not be truncated to its first digit."""
         body = b'x' * 100
-        scope = {'headers': [(b'content-length', b'100')]}
-        event = await self._make_recipient(body, scope)()
+        headers = [(b'content-length', b'100')]
+        event = await self._make_recipient(body, headers)()
         assert len(event['body']) == 100
 
     @pytest.mark.asyncio
     async def test_no_body_headers_returns_empty(self):
         """A request with no Content-Length or Transfer-Encoding has an empty body."""
-        scope = {'headers': []}
-        event = await self._make_recipient(b'', scope)()
+        event = await self._make_recipient(b'', [])()
         assert event == {'type': 'http.request', 'body': b'', 'more_body': False}
 
     @pytest.mark.asyncio
@@ -388,8 +397,8 @@ class TestHTTP1_1BodyDecoding:
             + f'{len(chunk2):x}\r\n'.encode() + chunk2 + b'\r\n'
             + b'0\r\n\r\n'
         )
-        scope = {'headers': [(b'transfer-encoding', b'chunked')]}
-        recipient = self._make_recipient(chunked, scope)
+        headers = [(b'transfer-encoding', b'chunked')]
+        recipient = self._make_recipient(chunked, headers)
         e1 = await recipient()
         e2 = await recipient()
         e3 = await recipient()
@@ -402,15 +411,15 @@ class TestHTTP1_1BodyDecoding:
         """A single non-empty chunk followed by the terminal chunk must decode correctly."""
         body = b'ping'
         chunked = f'{len(body):x}\r\n'.encode() + body + b'\r\n0\r\n\r\n'
-        scope = {'headers': [(b'transfer-encoding', b'chunked')]}
-        event = await self._make_recipient(chunked, scope)()
+        headers = [(b'transfer-encoding', b'chunked')]
+        event = await self._make_recipient(chunked, headers)()
         assert event['body'] == body
 
     @pytest.mark.asyncio
     async def test_chunked_empty_body(self):
         """A terminal-only chunked body (0\\r\\n\\r\\n) must produce an empty body."""
-        scope = {'headers': [(b'transfer-encoding', b'chunked')]}
-        event = await self._make_recipient(b'0\r\n\r\n', scope)()
+        headers = [(b'transfer-encoding', b'chunked')]
+        event = await self._make_recipient(b'0\r\n\r\n', headers)()
         assert event['body'] == b''
 
 

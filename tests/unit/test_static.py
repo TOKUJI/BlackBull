@@ -32,12 +32,29 @@ async def _noop_receive():
     return {'type': 'http.disconnect'}
 
 
+def _native_collecting_send(events):
+    """Send wrapper normalising the native seam away for assertion purposes.
+
+    ``StaticFiles`` is a native producer — it emits ``NativeResponse``.  These
+    tests assert on the ASGI event shape (status, headers, body bytes), which
+    is what ``to_asgi()`` expands to, so the representation is normalised here
+    rather than in every test.  Same convention as
+    ``test_middlewares._collect``.
+    """
+    from blackbull.native import NativeResponse
+
+    async def send(event):
+        if isinstance(event, NativeResponse):
+            events.extend(event.to_asgi())
+        else:
+            events.append(event)
+    return send
+
+
 async def _collect(app, scope) -> tuple[dict, bytes]:
     """Run *app* and return (start_event, concatenated_body)."""
     events = []
-
-    async def send(event):
-        events.append(event)
+    send = _native_collecting_send(events)
 
     await app(scope, _noop_receive, send)
     start = next(e for e in events if e.get('type') == 'http.response.start')
@@ -541,9 +558,7 @@ class TestStaticFilesPathsend:
         from blackbull.middleware.static import StaticFiles
         app = StaticFiles(directory=str(large_dir))
         events: list = []
-
-        async def send(event):
-            events.append(event)
+        send = _native_collecting_send(events)
 
         await app(_scope_with_pathsend('/big.bin'), _noop_receive, send)
 
@@ -570,9 +585,7 @@ class TestStaticFilesPathsend:
         from blackbull.middleware.static import StaticFiles
         app = StaticFiles(directory=str(large_dir))
         events: list = []
-
-        async def send(event):
-            events.append(event)
+        send = _native_collecting_send(events)
 
         scope = _scope_with_pathsend('/big.bin',
                                      headers={'range': 'bytes=0-99'})
@@ -590,9 +603,7 @@ class TestStaticFilesPathsend:
         from blackbull.middleware.static import StaticFiles
         app = StaticFiles(directory=str(static_dir))
         events: list = []
-
-        async def send(event):
-            events.append(event)
+        send = _native_collecting_send(events)
 
         await app(_scope_with_pathsend('/hello.txt'), _noop_receive, send)
 

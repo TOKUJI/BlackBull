@@ -24,9 +24,9 @@ def app():
 async def test_post_processing_runs_after_handler(app):
     order = []
 
-    async def mw(scope, receive, send, call_next):
+    async def mw(conn, receive, send, call_next):
         order.append('before')
-        result = await call_next(scope, receive, send)
+        result = await call_next(conn, receive, send)
         order.append('after')
         return result
 
@@ -49,9 +49,9 @@ async def test_state_mutation_visible_in_handler(app):
     # BlackBull threads a native Connection, so middleware share
     # per-request data with the handler via ``conn.state`` (the ASGI
     # ``scope['key'] = ...`` grab-bag idiom is gone).
-    async def inject_user(scope, receive, send, call_next):
-        scope.state['user'] = 'alice'
-        return await call_next(scope, receive, send)
+    async def inject_user(conn, receive, send, call_next):
+        conn.state['user'] = 'alice'
+        return await call_next(conn, receive, send)
 
     seen = []
 
@@ -79,9 +79,9 @@ async def test_state_mutation_visible_in_handler(app):
 async def test_middleware_catches_handler_exception(app):
     caught = []
 
-    async def error_mw(scope, receive, send, call_next):
+    async def error_mw(conn, receive, send, call_next):
         try:
-            return await call_next(scope, receive, send)
+            return await call_next(conn, receive, send)
         except ValueError as exc:
             caught.append(str(exc))
             return 'handled'
@@ -104,21 +104,21 @@ async def test_middleware_catches_handler_exception(app):
 async def test_three_middleware_chain_order(app):
     log = []
 
-    async def mw_a(scope, receive, send, call_next):
+    async def mw_a(conn, receive, send, call_next):
         log.append('a_in')
-        res = await call_next(scope, receive, send)
+        res = await call_next(conn, receive, send)
         log.append('a_out')
         return res
 
-    async def mw_b(scope, receive, send, call_next):
+    async def mw_b(conn, receive, send, call_next):
         log.append('b_in')
-        res = await call_next(scope, receive, send)
+        res = await call_next(conn, receive, send)
         log.append('b_out')
         return res
 
-    async def mw_c(scope, receive, send, call_next):
+    async def mw_c(conn, receive, send, call_next):
         log.append('c_in')
-        res = await call_next(scope, receive, send)
+        res = await call_next(conn, receive, send)
         log.append('c_out')
         return res
 
@@ -140,8 +140,8 @@ async def test_three_middleware_chain_order(app):
 async def test_call_next_return_value_propagates(app):
     received = []
 
-    async def capture_mw(scope, receive, send, call_next):
-        val = await call_next(scope, receive, send)
+    async def capture_mw(conn, receive, send, call_next):
+        val = await call_next(conn, receive, send)
         received.append(val)
         return val
 
@@ -163,13 +163,13 @@ async def test_call_next_return_value_propagates(app):
 async def test_short_circuit_skips_outer_post_processing(app):
     log = []
 
-    async def outer(scope, receive, send, call_next):
+    async def outer(conn, receive, send, call_next):
         log.append('outer_before')
-        res = await call_next(scope, receive, send)
+        res = await call_next(conn, receive, send)
         log.append('outer_after')
         return res
 
-    async def blocker(scope, receive, send, call_next):
+    async def blocker(conn, receive, send, call_next):
         log.append('blocker')
         return 'blocked'  # does NOT call call_next
 
@@ -193,8 +193,8 @@ async def test_short_circuit_skips_outer_post_processing(app):
 @pytest.mark.asyncio
 async def test_chain_built_once_across_requests(app):
     """The global middleware chain must be compiled once and reused across requests."""
-    async def noop(scope, receive, send, call_next):
-        await call_next(scope, receive, send)
+    async def noop(conn, receive, send, call_next):
+        await call_next(conn, receive, send)
 
     app.use(noop)
 
@@ -215,8 +215,8 @@ async def test_chain_built_once_across_requests(app):
 @pytest.mark.asyncio
 async def test_chain_invalidated_when_middleware_added(app):
     """Adding a middleware via use() must invalidate the cached chain."""
-    async def noop(scope, receive, send, call_next):
-        await call_next(scope, receive, send)
+    async def noop(conn, receive, send, call_next):
+        await call_next(conn, receive, send)
 
     @app.route(methods=[HTTPMethod.GET], path='/inv')
     async def h():
@@ -239,13 +239,13 @@ async def test_chain_includes_all_global_middlewares(app):
     """Every middleware registered via use() must execute on each request."""
     log = []
 
-    async def mw_a(scope, receive, send, call_next):
+    async def mw_a(conn, receive, send, call_next):
         log.append('a')
-        await call_next(scope, receive, send)
+        await call_next(conn, receive, send)
 
-    async def mw_b(scope, receive, send, call_next):
+    async def mw_b(conn, receive, send, call_next):
         log.append('b')
-        await call_next(scope, receive, send)
+        await call_next(conn, receive, send)
 
     app.use(mw_a)
     app.use(mw_b)

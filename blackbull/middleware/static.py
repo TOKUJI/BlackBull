@@ -11,6 +11,7 @@ from http import HTTPStatus
 from blackbull.connection import Connection
 from blackbull.env import get_settings, Environment
 from blackbull.asgi import ASGIEvent
+from blackbull.native import NativeResponse
 
 
 # Common web-asset MIME types that may be missing from the host's
@@ -488,18 +489,18 @@ class StaticFiles:
             extra_headers.append((b'vary', b'Accept-Encoding'))
 
         if body is not None:
-            # Cache-hit (or just-filled) fast path: two send() calls, no
-            # thread-pool dispatch.  Slicing a bytes object is cheap and
-            # the slice doesn't escape this coroutine.
-            await send({'type': ASGIEvent.HTTP_RESPONSE_START, 'status': status,
-                        'headers': [
-                            (b'content-type', mime),
-                            (b'content-length', str(body_len).encode()),
-                            *extra_headers,
-                        ]})
+            # Cache-hit (or just-filled) fast path: one send(), no thread-pool
+            # dispatch.  Slicing a bytes object is cheap and the slice doesn't
+            # escape this coroutine.
             chunk = body[start:end + 1] if (start or end != size - 1) else body
-            await send({'type': ASGIEvent.HTTP_RESPONSE_BODY,
-                        'body': chunk, 'more_body': False})
+            await send(NativeResponse(
+                status=status,
+                header=[
+                    (b'content-type', mime),
+                    (b'content-length', str(body_len).encode()),
+                    *extra_headers,
+                ],
+                body=chunk))
             return
 
         # Large-file streaming path — only hit when size exceeds the cache
@@ -520,17 +521,20 @@ class StaticFiles:
         pathsend_ok = (status != HTTPStatus.PARTIAL_CONTENT
                        and 'http.response.pathsend' in conn.extensions)
 
-        await send({'type': ASGIEvent.HTTP_RESPONSE_START, 'status': status,
-                    'headers': [
-                        (b'content-type', mime),
-                        (b'content-length', str(body_len).encode()),
-                        *extra_headers,
-                    ]})
+        header = [
+            (b'content-type', mime),
+            (b'content-length', str(body_len).encode()),
+            *extra_headers,
+        ]
 
         if pathsend_ok:
-            await send({'type': ASGIEvent.HTTP_RESPONSE_PATHSEND,
-                        'path': served_path})
+            # Header and the file in one object: the sender flushes the
+            # headers and hands the path to ``loop.sendfile``.
+            await send(NativeResponse(status=status, header=header,
+                                      file_path=served_path))
             return
+
+        await send(NativeResponse(status=status, header=header))
 
         remaining = body_len
         fobj = await asyncio.to_thread(open, served_path, 'rb')
@@ -543,8 +547,8 @@ class StaticFiles:
                 if not chunk:
                     break
                 remaining -= len(chunk)
-                await send({'type': ASGIEvent.HTTP_RESPONSE_BODY,
-                            'body': chunk, 'more_body': remaining > 0})
+                await send(NativeResponse(body=chunk,
+                                          more_body=remaining > 0))
         finally:
             await asyncio.to_thread(fobj.close)
 
@@ -559,6 +563,6 @@ class StaticFiles:
 
     @staticmethod
     async def _respond(send, status: int, extra_headers=None):
-        await send({'type': ASGIEvent.HTTP_RESPONSE_START, 'status': status,
-                    'headers': extra_headers or []})
-        await send({'type': ASGIEvent.HTTP_RESPONSE_BODY, 'body': b''})
+        await send(NativeResponse(status=status,
+                                  header=list(extra_headers or []),
+                                  body=b''))

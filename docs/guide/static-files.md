@@ -15,7 +15,7 @@ app.static('/assets', 'public/assets')
 app.static('/images', 'public/images')
 
 @app.route(path='/')
-async def index(scope, receive, send):
+async def index(conn, receive, send):
     ...
 ```
 

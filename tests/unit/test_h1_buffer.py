@@ -10,6 +10,20 @@ from blackbull.server.h1_buffer import LIMIT_EXCEEDED, BufferedH1Reader
 from blackbull.server.recipient import IncompleteReadError
 
 
+def _conn(headers, path: str = '/'):
+    """The native ``Connection`` the actor binds a recipient to.
+
+    ``HTTP1Recipient`` frames from ``conn.headers``; it has no scope-dict
+    shape, so a test that drives it directly builds the same object the
+    parser would.
+    """
+    from blackbull.connection import Connection
+    from blackbull.headers import Headers
+    return Connection(method='POST', path=path, raw_path=path.encode(),
+                      headers=headers if isinstance(headers, Headers)
+                      else Headers(headers), type='http')
+
+
 class _FakeReader:
     """Hands out pre-scripted chunks, one per ``read`` call.
 
@@ -155,6 +169,6 @@ def test_recipient_factory_does_not_rewrap_it():
 
     reader = BufferedH1Reader(_FakeReader(b''))
     recipient = RecipientFactory.http1(
-        reader, {'headers': [], 'path': '/'})
+        reader, _conn([], '/'))
 
     assert recipient._reader is reader

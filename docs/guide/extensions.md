@@ -240,7 +240,7 @@ Not every reusable component needs to be an extension.
 
 A database client, JSON serialiser, or password hasher is a
 library — import it directly.  An auth layer that adds login
-routes and a `scope['user']` middleware is an extension —
+routes and a `conn.state['user']` middleware is an extension —
 wire it through `init_app`.
 
 ## In-tree reference: `OpenAPIExtension`
@@ -262,16 +262,16 @@ OpenAPIExtension(app, title='My API', version='1.0.0')
 around the same class — so even the core's own ergonomics call
 into the public extension API.
 
-## ASGI middleware via `app.use()`
+## Middleware via `app.use()`
 
-`app.use()` accepts any ASGI 3.0 middleware following the
-`(scope, receive, send, call_next)` shape, so an extension can
+`app.use()` accepts any middleware following the
+`(conn, receive, send, call_next)` shape, so an extension can
 simply pass a middleware callable through it:
 
 ```python
-async def x_request_id_mw(scope, receive, send, call_next):
-    scope['x-request-id'] = generate_id()
-    await call_next(scope, receive, send)
+async def x_request_id_mw(conn, receive, send, call_next):
+    conn.state['x-request-id'] = generate_id()
+    await call_next(conn, receive, send)
 
 
 class RequestIdExtension:

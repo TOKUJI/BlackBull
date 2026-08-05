@@ -76,11 +76,10 @@ async def _emit_response(send, body: bytes, status, headers) -> None:
     may be an ``int`` or an ``HTTPStatus`` (coerced to ``int`` for the wire);
     *headers* is any iterable of ``(bytes, bytes)`` pairs (copied defensively).
     """
-    await send({'type': 'http.response.start',
-                'status': int(status),
-                'headers': list(headers)})
-    await send({'type': 'http.response.body',
-                'body': body, 'more_body': False})
+    # One object, one send: the complete-response shape the native seam was
+    # built for.  The dict form always cost two events for the same response.
+    await send(NativeResponse(status=int(status), header=list(headers),
+                              body=body))
 
 
 class Response:
@@ -210,13 +209,13 @@ class StreamingResponse:
         h = list(self._headers)
         if not any(k.lower() == b'content-type' for k, _ in h):
             h.insert(0, (b'content-type', self._media_type.encode()))
-        await send({'type': 'http.response.start', 'status': self._status, 'headers': h})
+        await send(NativeResponse(status=self._status, header=h))
         async for chunk in self._content:
             if isinstance(chunk, str):
                 chunk = chunk.encode()
             if chunk:
-                await send({'type': 'http.response.body', 'body': chunk, 'more_body': True})
-        await send({'type': 'http.response.body', 'body': b'', 'more_body': False})
+                await send(NativeResponse(body=chunk, more_body=True))
+        await send(NativeResponse(body=b'', more_body=False))
 
 
 def _format_sse_event(event) -> bytes:

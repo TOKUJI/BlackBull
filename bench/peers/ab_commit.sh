@@ -52,6 +52,12 @@ PORT="${PORT:-8443}"
 BB_UVLOOP="${BB_UVLOOP:-0}"
 PIPELINE="${PIPELINE:-1}"
 PHASES="${PHASES:-null real}"
+# Extra wrk header args, e.g. -H 'Accept-Encoding: gzip'.  Without an
+# Accept-Encoding the Compression middleware takes its vary_send (selection is
+# None) branch and the native-complete path under test is never exercised —
+# both arms measure identical middleware code.  Kept unquoted at the call site
+# so multi-arg header flags word-split correctly.
+WRK_HEADERS="${WRK_HEADERS:-}"
 # Server and load generator on disjoint cores.  Unpinned, the two fight for
 # the same cores and the throughput distribution goes bimodal (two scheduler
 # placements, ~15 % apart), which swamps anything a refactor of this size
@@ -155,7 +161,13 @@ swap_to() {
     local ref="$1"
     _swap_file_set "$ref" || return 1
     if [ -n "$PROOF_FILE" ]; then
-        uv run python - "$PROOF_FILE" <<'PY'
+        # Use the install.sh-provisioned venv interpreter directly: `uv run`
+        # can re-resolve the project and *recreate* .venv, dropping the
+        # editable blackbull install (and its console script) — the recurring
+        # "Failed to spawn: blackbull" gotcha.  .venv/bin/python carries the
+        # editable meta-path finder, so the swapped files are still the ones
+        # imported.
+        .venv/bin/python - "$PROOF_FILE" <<'PY'
 import hashlib, importlib, pathlib, sys
 rel = sys.argv[1]
 mod = importlib.import_module(
@@ -172,12 +184,18 @@ PY
 
 start_server() {
     BB_UVLOOP="$BB_UVLOOP" BB_WORKERS=1 BB_ACCESS_LOG=0 \
-        setsid "${PIN_SERVER[@]}" uv run blackbull bench.peers.native_app:app \
+        setsid "${PIN_SERVER[@]}" .venv/bin/blackbull bench.peers.native_app:app \
             --bind "127.0.0.1:${PORT}" \
             >"$OUTDIR/server.log" 2>&1 &
     SERVER_PID=$!
     for _ in $(seq 1 60); do
-        if curl -s --max-time 2 "$BASE_URL$URL_PATH" 2>/dev/null | grep -q Hello; then
+        # Accept any HTTP 200 — the old `grep -q Hello` body probe only
+        # matched /plaintext-style responses and failed binary/compressed
+        # lanes (/preencoded, /1kb) with "server not ready".  Send the same
+        # Accept-Encoding as wrk so the probe exercises the same middleware
+        # branch the measurement will.
+        if curl -s -o /dev/null --max-time 2 -w '%{http_code}' \
+                $WRK_HEADERS "$BASE_URL$URL_PATH" 2>/dev/null | grep -q '^200'; then
             return 0
         fi
         sleep 0.5
@@ -193,9 +211,9 @@ measure() {
     local pipe_args=()
     [ "$PIPELINE" != "1" ] && pipe_args=(-s bench/wrk/pipeline.lua -- "$PIPELINE")
     "${PIN_LOAD[@]}" wrk -t"$THREADS" -c"$CONNS" -d"${WARMUP}s" --latency \
-        "$BASE_URL$URL_PATH" "${pipe_args[@]}" >/dev/null 2>&1
+        $WRK_HEADERS "$BASE_URL$URL_PATH" "${pipe_args[@]}" >/dev/null 2>&1
     "${PIN_LOAD[@]}" wrk -t"$THREADS" -c"$CONNS" -d"${DURATION}s" --latency \
-        "$BASE_URL$URL_PATH" "${pipe_args[@]}" >"$OUTDIR/wrk_${tag}.txt" 2>&1
+        $WRK_HEADERS "$BASE_URL$URL_PATH" "${pipe_args[@]}" >"$OUTDIR/wrk_${tag}.txt" 2>&1
     awk '/Requests\/sec:/ {print $2}' "$OUTDIR/wrk_${tag}.txt"
 }
 
@@ -267,7 +285,7 @@ restore_tree
     echo "| Pinning | server \`$SERVER_CPUS\` / load \`$LOAD_CPUS\` |"
     echo "| Files swapped | \`${FILES[*]}\` |"
     echo ""
-    uv run python bench/peers/ab_report.py "$RAW"
+    .venv/bin/python bench/peers/ab_report.py "$RAW"
 } >"$REPORT"
 
 echo ""

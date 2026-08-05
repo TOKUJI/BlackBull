@@ -5,7 +5,7 @@ from collections.abc import Callable
 from ..asgi import ASGIEvent
 from ..connection import Connection
 from ..headers import Headers
-from ..asgi import ResponseStart, ResponseBody, parse_response_event
+from ..native import NativeResponse
 from ..server.cap_log import log_cap_hit
 from .utils import as_middleware
 
@@ -111,6 +111,24 @@ def _merge_vary(headers: list[tuple[bytes, bytes]],
     headers.append((b'vary', field))
 
 
+def _stamp_vary_if_compressible(header: list[tuple[bytes, bytes]]) -> bool:
+    """Whether *header* describes a body worth compressing; stamps ``Vary``.
+
+    The decision point shared by every native exit: a compressible
+    Content-Type that is not already encoded is a compression candidate, and
+    its body varies by ``Accept-Encoding`` on *all* outcomes — compressed,
+    too small, executor at cap, or handed to ``sendfile`` — so ``Vary`` is
+    stamped here rather than only where compression succeeds.  Mutates
+    *header* in place (zero-copy; the caller owns the list).
+    """
+    if not _is_compressible_content_type(Headers(header)):
+        return False
+    if any(k.lower() == b'content-encoding' for k, _ in header):
+        return False
+    _merge_vary(header)
+    return True
+
+
 # ---------------------------------------------------------------------------
 # Middleware
 # ---------------------------------------------------------------------------
@@ -199,6 +217,37 @@ class Compression:
             cache[accept_header] = result
         return result
 
+    async def _compress(self, compressor: Callable[[bytes], bytes],
+                        body: bytes) -> bytes | None:
+        """Offload *body*'s compression to the executor, honouring the
+        in-flight cap.  Only called when the caller's threshold check says
+        the body crosses ``_executor_threshold`` (below it the caller inlines
+        the synchronous ``compressor(body)`` — no coroutine hop on the
+        common small-body path).  Returns ``None`` when the executor is at
+        cap (the caller serves the body uncompressed).  Shared by the native
+        complete-response path and the ``_dict_event`` lane so the
+        backpressure behaviour is defined once.
+        """
+        # Backpressure: if the executor already has _executor_max_inflight
+        # compressions running, skip this one and serve uncompressed rather
+        # than queueing.  Prevents the unbounded executor backlog that caused
+        # the HttpArena `static` profile to collapse to 0 r/s on run 2 under
+        # c=1024.  Counter increment / decrement is safe without a lock —
+        # asyncio is single-threaded.
+        if (self._executor_max_inflight > 0
+                and self._executor_inflight >= self._executor_max_inflight):
+            log_cap_hit('compression_max_inflight',
+                        requested=self._executor_inflight + 1,
+                        limit=self._executor_max_inflight,
+                        protocol='compression')
+            return None
+        self._executor_inflight += 1
+        try:
+            loop = asyncio.get_running_loop()
+            return await loop.run_in_executor(None, compressor, body)
+        finally:
+            self._executor_inflight -= 1
+
     @staticmethod
     def _vary_ensuring_send(send):
         """Wrap *send* so a compressible, not-yet-encoded ``ResponseStart`` gains
@@ -211,7 +260,6 @@ class Compression:
         # app.py).  ``event`` is a NativeResponse or an ASGISendEvent.  The
         # import lives at per-request scope — inside the per-event closure it
         # would re-bind for every chunk of a streamed response.
-        from ..native import NativeResponse  # noqa: PLC0415
 
         async def vary_send(event):
             # H1 native path: the header arm is a NativeResponse — stamp Vary
@@ -228,7 +276,8 @@ class Compression:
             # of every body event just to have the next line's `isinstance`
             # reject it — a per-chunk cost on a streamed response, for a
             # wrapper that only ever cares about the start event.
-            elif event.get('type') == ASGIEvent.HTTP_RESPONSE_START:
+            elif isinstance(event, dict) and \
+                    event.get('type') == ASGIEvent.HTTP_RESPONSE_START:
                 headers = Headers(event.get('headers', []))
                 if _is_compressible_content_type(headers) and \
                         not headers.get(b'content-encoding'):
@@ -258,155 +307,178 @@ class Compression:
             return
 
         codec_name, compressor = selection
-        start_event: dict = {}
         start_forwarded = False
-        body_parts: list[bytes] = []
         streaming = False
         skip_compression = False
+        # A header-arm NativeResponse awaiting its body (the StaticFiles
+        # shape).  Held, never expanded, so the pair can be merged back into
+        # one object at the decision point.
+        pending_header = None
 
         # Unannotated on purpose: rebuilt per request (see _wrap_send in
         # app.py).  ``event`` is a NativeResponse or an ASGISendEvent.  The
         # import lives at per-request scope — inside the per-event closure it
         # would re-bind for every chunk of a streamed response.
-        from ..native import NativeResponse  # noqa: PLC0415
+
+        async def _emit_native_complete(status, header, body,
+                                        original=None) -> None:
+            """Decide, compress, and emit the response as **one** object.
+
+            The whole point of the native lane: no ``to_asgi()`` expansion
+            into dicts for the layer below to convert straight back.  Pass
+            *original* when the caller already holds an equivalent
+            ``NativeResponse``, so the uncompressed exit forwards it verbatim
+            instead of allocating a copy.
+            """
+            if _stamp_vary_if_compressible(header) and len(body) >= self._min_size:
+                threshold = self._executor_threshold
+                if threshold > 0 and len(body) >= threshold:
+                    compressed = await self._compress(compressor, body)
+                else:
+                    # Below the offload threshold: compress synchronously on
+                    # the loop — no coroutine hop on the common small-body
+                    # (json-comp) range.
+                    compressed = compressor(body)
+                if compressed is not None:
+                    # The compressed body is a different size; strip any
+                    # upstream content-length and replace it with the
+                    # post-compression length (keeps H1 keepalive framing and
+                    # strict H2 clients correct).
+                    existing = [(k, v) for k, v in header
+                                if k.lower() != b'content-length']
+                    existing.append(
+                        (b'content-encoding', codec_name.encode()))
+                    existing.append(
+                        (b'content-length', str(len(compressed)).encode()))
+                    _merge_vary(existing)
+                    await send(NativeResponse(status=status, header=existing,
+                                              body=compressed))
+                    return
+            # Uncompressed forward: pre-encoded / non-compressible / too-small
+            # / executor-at-cap.  Vary is already stamped on *header* when this
+            # response was a candidate, so either way the object carries the
+            # correct cache key.
+            await send(original if original is not None else NativeResponse(
+                status=status, header=header, body=body))
+
+        async def _release_pending(held) -> None:
+            """Forward a held header arm verbatim and stop compressing.
+
+            Used when whatever followed the header is something compression
+            cannot act on — a ``pathsend`` (we never see the bytes), or a
+            streamed chunk (we no longer have the body in one piece).  The
+            header has to go out *first*: the sender drops a pathsend it has
+            no buffered start for, which left a large static file answering
+            with no response at all.
+            """
+            nonlocal start_forwarded, skip_compression
+            _stamp_vary_if_compressible(held._header)
+            await send(held)
+            start_forwarded = True
+            skip_compression = True
 
         async def intercepting_send(event):
             nonlocal streaming, skip_compression, start_forwarded
-            # H1 native path: a NativeResponse may carry header + body in one
-            # object — expand to its ASGI event list and process each event
-            # through the sibling ``_dict_event`` (never a self-referential
-            # closure: the v0.60.0 per-request cycle guard reclaims these
-            # adapters by refcounting alone).
+            nonlocal pending_header
+            # H1/H2 native path.  Two shapes reach the one-object fast path:
+            # a *complete* NativeResponse (header + terminal body together,
+            # the shape a handler returning a ``Response`` produces), and a
+            # header arm followed by its terminal body — the shape
+            # ``StaticFiles`` produces, which is held here and merged.
+            # Expanding either through ``to_asgi()`` → dict →
+            # ``wrap_native_send`` → NativeResponse round-trips the exact
+            # two-dicts-two-sends cost the native seam removed (measured
+            # against v0.67.0 on m7a.8xlarge: static −3.4〜−6.3 %, json-comp
+            # −1.2〜−3.2 %).  Trailer shapes and plain dict events keep the
+            # ``_dict_event`` lane.
             if isinstance(event, NativeResponse):
-                for ev in event.to_asgi():
-                    await _dict_event(ev)
-                return
-            await _dict_event(event)
+                # Pass-through: a forward-verbatim decision is already made,
+                # so later objects are relayed untouched (mirrors the
+                # ``_dict_event`` fast path).
+                if start_forwarded and (skip_compression or streaming):
+                    await send(event)
+                    return
 
-        async def _dict_event(event):
-            nonlocal streaming, skip_compression, start_forwarded
-            # Fast path: once the start event has been forwarded under a
-            # pass-through decision (already-encoded response, non-
-            # compressible Content-Type, or streaming chunks), subsequent
-            # events are forwarded verbatim — no parse, no re-wrap, no
-            # match.  py-spy put this overhead at ~35 % of
-            # the static-path CPU on responses StaticFiles already
-            # encoded via a precompressed sibling.
-            if start_forwarded and (skip_compression or streaming):
+                held, pending_header = pending_header, None
+                if held is not None:
+                    if (event._header is None and event._body is not None
+                            and not event.more_body
+                            and not event.expects_trailers
+                            and event.trailers is None):
+                        # The terminal body for the held header: the two
+                        # halves are a complete response again.
+                        await _emit_native_complete(
+                            held.status, held._header, event._body)
+                        start_forwarded = True
+                        return
+                    # A streamed chunk, trailers, or a second header — give up
+                    # on compressing and relay both in order.
+                    await _release_pending(held)
+                    await send(event)
+                    return
+
+                if (not streaming and not skip_compression
+                        and not start_forwarded
+                        and event._header is not None
+                        and event._body is not None
+                        and not event.more_body
+                        and not event.expects_trailers
+                        and event.trailers is None):
+                    await _emit_native_complete(
+                        event.status, event._header, event._body,
+                        original=event)
+                    start_forwarded = True
+                    return
+
+                if (not streaming and not skip_compression
+                        and not start_forwarded
+                        and event._header is not None
+                        and event._body is None
+                        and not event.expects_trailers
+                        and event.trailers is None):
+                    # Header arm alone.  Hold it — the body that follows
+                    # completes the response, and the compress decision needs
+                    # both.  Nothing is on the wire yet, so holding costs no
+                    # ordering; the tail releases it if no body ever arrives.
+                    pending_header = event
+                    return
+
+                # Every remaining native shape — a sendfile form, a
+                # trailer-bearing response, a streaming chunk with no held
+                # header.  None can be compressed: we either never see the
+                # bytes (sendfile) or no longer hold them in one piece.
+                # Decide once, then relay verbatim.
+                if event._header is not None:
+                    _stamp_vary_if_compressible(event._header)
+                    start_forwarded = True
+                skip_compression = True
                 await send(event)
                 return
-            parsed = parse_response_event(event)
-            match parsed:
-                case ResponseStart():
-                    start_event.update(parsed)
-                    if not _is_compressible_content_type(parsed.headers):
-                        skip_compression = True
-                    # An upstream layer (e.g. `StaticFiles` serving a
-                    # precompressed sibling) may have already set
-                    # Content-Encoding.  Don't double-wrap.
-                    elif parsed.headers.get(b'content-encoding'):
-                        skip_compression = True
-                    else:
-                        # Compressible + not pre-encoded: this response's body
-                        # varies by Accept-Encoding on *every* exit path
-                        # (compressed, too-small, executor-at-cap), so stamp
-                        # Vary now — at the decision point — instead of only
-                        # after a successful compress.  Later paths
-                        # inherit it via start_event; the compress path's own
-                        # _merge_vary then no-ops.
-                        hdrs = list(start_event.get('headers', []))
-                        _merge_vary(hdrs)
-                        start_event['headers'] = hdrs
-                    # When skipping, forward the start event immediately
-                    # so the downstream sender doesn't sit on a body with
-                    # no headers (which would be invalid HTTP).
-                    if skip_compression:
-                        await send(start_event)
-                        start_forwarded = True
-                case ResponseBody():
-                    if streaming or skip_compression:
-                        # If we already decided to skip but the start
-                        # arrived as part of this body event somehow,
-                        # forward it now to be safe.
-                        if not start_forwarded and start_event:
-                            await send(start_event)
-                            start_forwarded = True
-                        await send(parsed)
-                    elif parsed.more_body:
-                        streaming = True
-                        await send(start_event)
-                        start_forwarded = True
-                        if parsed.body:
-                            await send({'type': ASGIEvent.HTTP_RESPONSE_BODY,
-                                        'body': parsed.body, 'more_body': True})
-                    else:
-                        body_parts.append(parsed.body)
-                case _:
-                    await send(parsed)
+
+            # A plain dict — ``push``, or an event the native seam does not
+            # model.  Uncompressible for the same reason; release a held
+            # header first so the sender has its headers before the thing that
+            # depends on them.
+            if pending_header is not None:
+                held, pending_header = pending_header, None
+                await _release_pending(held)
+            skip_compression = True
+            await send(event)
 
         await call_next(conn, receive, intercepting_send)
 
-        if streaming:
+        if pending_header is not None:
+            # A header arm with no body event behind it (a handler that sent
+            # headers and stopped).  Release it rather than swallow the
+            # response.
+            held, pending_header = pending_header, None
+            _stamp_vary_if_compressible(held._header)
+            await send(held)
             return
 
-        # When skip_compression triggered on the upstream ResponseStart,
-        # intercepting_send has already forwarded both the start event
-        # and the body inline.  Re-sending here would produce two start
-        # events on the same response, which the HTTP/1.1 sender treats
-        # as the end of the first response — causing the connection to
-        # be closed after every successful response.  Detected via the
-        # 1:1 success/read-error ratio under wrk keep-alive load
-        # workload.
-        if start_forwarded:
-            return
-
-        body = b''.join(body_parts)
-
-        if skip_compression or len(body) < self._min_size:
-            await send(start_event)
-            await send({'type': ASGIEvent.HTTP_RESPONSE_BODY, 'body': body, 'more_body': False})
-            return
-
-        threshold = self._executor_threshold
-        if threshold > 0 and len(body) >= threshold:
-            # Backpressure: if the executor already has _executor_max_inflight
-            # compressions running, skip this one and serve uncompressed
-            # rather than queueing.  Prevents the unbounded executor backlog
-            # that caused the HttpArena `static` profile to collapse to 0 r/s
-            # on run 2 under c=1024.  Counter increment / decrement
-            # is safe without a lock — asyncio is single-threaded.
-            if (self._executor_max_inflight > 0
-                    and self._executor_inflight >= self._executor_max_inflight):
-                log_cap_hit('compression_max_inflight',
-                            requested=self._executor_inflight + 1,
-                            limit=self._executor_max_inflight,
-                            protocol='compression')
-                await send(start_event)
-                await send({'type': ASGIEvent.HTTP_RESPONSE_BODY,
-                            'body': body, 'more_body': False})
-                return
-            self._executor_inflight += 1
-            try:
-                loop = asyncio.get_running_loop()
-                compressed = await loop.run_in_executor(None, compressor, body)
-            finally:
-                self._executor_inflight -= 1
-        else:
-            compressed = compressor(body)
-        # The compressed body is a different size; strip any upstream
-        # content-length and replace it with the post-compression length.
-        # Leaving the original value behind breaks HTTP/1.1 keepalive
-        # framing (client expects N bytes but receives the compressed
-        # body) and is rejected as a protocol error by strict HTTP/2
-        # clients.
-        existing = [(k, v) for k, v in start_event.get('headers', [])
-                    if k.lower() != b'content-length']
-        existing.append((b'content-encoding', codec_name.encode()))
-        existing.append((b'content-length', str(len(compressed)).encode()))
-        # Shared caches must key this response on Accept-Encoding.
-        _merge_vary(existing)
-        await send({**start_event, 'headers': existing})
-        await send({'type': ASGIEvent.HTTP_RESPONSE_BODY, 'body': compressed, 'more_body': False})
+        # Every other path already emitted its response inside
+        # ``intercepting_send`` — the native seam decides and sends in one
+        # place, so there is no buffered tail left to flush here.
 
 
 def _make_default_compress() -> 'Compression':

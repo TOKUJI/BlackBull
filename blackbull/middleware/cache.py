@@ -58,6 +58,7 @@ from collections import OrderedDict
 
 from ..asgi import ASGIEvent
 from ..connection import Connection
+from ..native import NativeResponse
 from .utils import as_middleware
 
 logger = logging.getLogger(__name__)
@@ -72,19 +73,28 @@ _DEFAULT_CACHEABLE_METHODS = frozenset({'GET', 'HEAD'})
 
 
 class _Entry:
-    """One stored cache hit.
+    """One stored cache hit — the response as *data*, not as a message.
 
-    ``events`` is the list of ASGI ``http.response.start`` / ``.body``
-    events captured from the handler.  Replay copies the list (so a
-    later mutation of e.g. response headers in another middleware on
-    the next request doesn't corrupt the cached copy).
+    Held as ``(status, header, body)`` rather than a ready-made
+    :class:`~blackbull.native.NativeResponse` so every replay can build a
+    fresh object over a fresh header list.  Middleware below the cache — CORS,
+    the route header injector — append to ``_header`` **in place**; handing
+    out one shared object would grow the stored entry on every hit.
     """
-    __slots__ = ('events', 'etag', 'expires_at')
+    __slots__ = ('status', 'header', 'body', 'etag', 'expires_at')
 
-    def __init__(self, events: list[dict], etag: bytes, expires_at: float):
-        self.events = events
+    def __init__(self, status: int, header: list[tuple[bytes, bytes]],
+                 body: bytes, etag: bytes, expires_at: float):
+        self.status = status
+        self.header = header
+        self.body = body
         self.etag = etag
         self.expires_at = expires_at
+
+    def replay(self) -> 'NativeResponse':
+        """A private copy of the stored response, safe to mutate downstream."""
+        return NativeResponse(status=self.status, header=list(self.header),
+                              body=self.body)
 
     def expired(self, now: float | None = None) -> bool:
         return (now if now is not None else time.monotonic()) >= self.expires_at
@@ -185,14 +195,13 @@ class Cache:
             bucket.entries.move_to_end(variant_key)  # variant touched → MRU
             inm = req_headers.get(b'if-none-match')
             if inm is not None and _etag_matches(inm, entry.etag):
-                await send({'type': ASGIEvent.HTTP_RESPONSE_START, 'status': 304,
-                            'headers': [(b'etag', entry.etag)]})
-                await send({'type': ASGIEvent.HTTP_RESPONSE_BODY, 'body': b''})
+                await send(NativeResponse(status=304,
+                                          header=[(b'etag', entry.etag)],
+                                          body=b''))
                 return
-            # Replay the stored events.  We copy each dict so downstream
-            # middleware can't mutate our cached state.
-            for event in entry.events:
-                await send(dict(event))
+            # Replay a private copy — downstream middleware append headers in
+            # place, and the stored entry must not accumulate them.
+            await send(entry.replay())
             return
 
         # --- cache miss → call inner, buffer, then send + maybe store ---
@@ -202,116 +211,127 @@ class Cache:
         # arriving as True on the first body chunk) the buffer drops
         # straight through and we skip caching: a streaming body's size
         # is unknown and hashing it post-hoc would defeat the streaming.
-        captured: list[dict] = []
+        held: list = []                 # native objects buffered, in order
         body_chunks: list[bytes] = []
         status: int | None = None
         response_headers: list[tuple[bytes, bytes]] = []
         streaming = False
         flushed = False
 
-        # Per-request scope: the import must not sit inside the per-event
-        # closure — it would re-bind for every chunk of a streamed response.
-        from ..native import NativeResponse  # noqa: PLC0415
-
         async def cap_send(event):
-            nonlocal status, response_headers, streaming, flushed
-            # On the H1 native path the handler's emission arrives as a
-            # NativeResponse (possibly carrying header + body in one object);
-            # expand it to its ASGI event list and process each event through
-            # the dict logic below — the cache is protocol-agnostic and stores
-            # dicts, so the native seam is normalised away at this entry point.
-            # (Expansion iterates through the sibling ``_cap_dict`` — never a
-            # self-referential closure, which would reintroduce the v0.60.0
-            # per-request reference cycle.)
-            if isinstance(event, NativeResponse):
-                for ev in event.to_asgi():
-                    await _cap_dict(ev)
-                return
-            await _cap_dict(event)
+            """Buffer the response so an ETag can be injected before any byte
+            reaches the client.  The seam is native, so the header and body
+            arms are read off the object directly — no expansion, no dicts.
 
-        async def _cap_dict(event):
+            A ``NativeResponse`` may carry the header and terminal body
+            together (the complete shape), the header alone, or a body chunk
+            alone; all three are handled here.
+            """
             nonlocal status, response_headers, streaming, flushed
-            # The ``@as_middleware`` class decorator normalises ``call_next`` so
-            # Response/JSONResponse objects from the handler arrive here as
-            # plain start+body dict events.
-            t = event.get('type')
-            if t == ASGIEvent.HTTP_RESPONSE_START:
-                status = event.get('status')
-                response_headers = list(event.get('headers', []))
-                captured.append(event)
-                return  # don't send yet — wait for body so we can add ETag
 
-            if t == ASGIEvent.HTTP_RESPONSE_BODY:
-                body_chunks.append(event.get('body', b''))
-                if event.get('more_body', False):
-                    # Streaming starts here.  Flush whatever we have
-                    # (start + this chunk) and switch to pass-through.
+            if not isinstance(event, NativeResponse):
+                # A non-response event (pathsend / push) cannot be cached and
+                # cannot be held — release anything buffered, then pass it on.
+                if not flushed:
                     streaming = True
-                    captured.append(event)
-                    if not flushed:
-                        for buf in captured:
-                            await send(buf)
-                        flushed = True
-                    return
-                # Final body chunk arrived; decide cacheability + ETag now.
-                captured.append(event)
-                if self._should_cache(status, response_headers):
-                    vary_fields = _response_vary(response_headers)
-                    body = b''.join(body_chunks)
-                    etag = _read_etag(response_headers) or (
-                        self._make_etag(body) if self._generate_etag else None)
-                    if etag is not None and _read_etag(response_headers) is None:
-                        # Inject the generated ETag into the start event
-                        # *before* we send it; both the live response and
-                        # the cached copy carry the same header.
-                        start = captured[0]
-                        new_hdrs = list(start.get('headers', []))
-                        new_hdrs.append((b'etag', etag))
-                        start['headers'] = new_hdrs
-                    # ``vary_fields is None`` ⇒ ``Vary: *`` ⇒ uncacheable.
-                    if etag is not None and vary_fields is not None:
-                        ttl = _response_max_age(response_headers) or self._max_age
-                        bucket = self._store.get(base_key)
-                        if bucket is None:
-                            bucket = _Bucket(vary_fields)
-                            self._store[base_key] = bucket
-                        elif bucket.vary_fields != vary_fields:
-                            # The response's Vary changed; the old variant keys
-                            # were built from the old fields and can no longer be
-                            # reached — adopt the new fields and drop them.
-                            bucket.vary_fields = vary_fields
-                            bucket.entries.clear()
-                        variant_key = _vary_key(vary_fields, req_headers)
-                        bucket.entries[variant_key] = _Entry(
-                            events=[dict(e) for e in captured],
-                            etag=etag,
-                            expires_at=time.monotonic() + ttl,
-                        )
-                        bucket.entries.move_to_end(variant_key)
-                        self._store.move_to_end(base_key)
-                        # Per-bucket variant bound, then per-URL bound.
-                        while len(bucket.entries) > _MAX_VARIANTS_PER_KEY:
-                            bucket.entries.popitem(last=False)
-                        while len(self._store) > self._max_entries:
-                            self._store.popitem(last=False)
-                # Flush to client.
-                for buf in captured:
-                    await send(buf)
-                flushed = True
+                    for buf in held:
+                        await send(buf)
+                    flushed = True
+                await send(event)
                 return
 
-            # Anything else (trailers, etc) — pass through after the flush.
-            captured.append(event)
-            if flushed:
-                await send(event)
+            if event._header is not None:
+                status = event.status
+                response_headers = list(event._header)
+
+            if event.file_path is not None:
+                # Sendfile: the bytes never pass through us, so there is
+                # nothing to hash and nothing to store.
+                streaming = True
+                held.append(event)
+                if not flushed:
+                    for buf in held:
+                        await send(buf)
+                    flushed = True
+                return
+
+            if event._body is None:
+                # Header arm alone — hold it for the body that completes it.
+                held.append(event)
+                return
+
+            body_chunks.append(event._body)
+            if event.more_body:
+                # Streaming starts here.  Flush what we have and switch to
+                # pass-through: a streamed body's size is unknown and hashing
+                # it post-hoc would defeat the streaming.
+                streaming = True
+                held.append(event)
+                if not flushed:
+                    for buf in held:
+                        await send(buf)
+                    flushed = True
+                return
+            # Final body chunk arrived; decide cacheability + ETag now.
+            held.append(event)
+            body = b''.join(body_chunks)
+            if self._should_cache(status, response_headers):
+                vary_fields = _response_vary(response_headers)
+                etag = _read_etag(response_headers) or (
+                    self._make_etag(body) if self._generate_etag else None)
+                if etag is not None and _read_etag(response_headers) is None:
+                    # Inject the generated ETag before anything is sent, so the
+                    # live response and the cached copy carry the same header.
+                    # ``response_headers`` is already our own list; the header
+                    # arm is updated from it so both agree.
+                    response_headers.append((b'etag', etag))
+                    for buf in held:
+                        if buf._header is not None:
+                            buf.header = list(response_headers)
+                            break
+                # ``vary_fields is None`` ⇒ ``Vary: *`` ⇒ uncacheable.
+                if etag is not None and vary_fields is not None:
+                    ttl = _response_max_age(response_headers) or self._max_age
+                    bucket = self._store.get(base_key)
+                    if bucket is None:
+                        bucket = _Bucket(vary_fields)
+                        self._store[base_key] = bucket
+                    elif bucket.vary_fields != vary_fields:
+                        # The response's Vary changed; the old variant keys
+                        # were built from the old fields and can no longer be
+                        # reached — adopt the new fields and drop them.
+                        bucket.vary_fields = vary_fields
+                        bucket.entries.clear()
+                    variant_key = _vary_key(vary_fields, req_headers)
+                    # Stored as data, with its own header list: replays build a
+                    # fresh object so downstream in-place appends cannot reach
+                    # the entry.
+                    bucket.entries[variant_key] = _Entry(
+                        status=status if status is not None else 200,
+                        header=list(response_headers),
+                        body=body,
+                        etag=etag,
+                        expires_at=time.monotonic() + ttl,
+                    )
+                    bucket.entries.move_to_end(variant_key)
+                    self._store.move_to_end(base_key)
+                    # Per-bucket variant bound, then per-URL bound.
+                    while len(bucket.entries) > _MAX_VARIANTS_PER_KEY:
+                        bucket.entries.popitem(last=False)
+                    while len(self._store) > self._max_entries:
+                        self._store.popitem(last=False)
+            # Flush to client.
+            for buf in held:
+                await send(buf)
+            flushed = True
 
         await call_next(conn, receive, cap_send)
 
-        # If the handler never emitted a body event the response was
-        # never flushed — forward whatever we have so the client at
-        # least sees something.  Pathological case; not cached.
+        # If the handler never emitted a terminal body the response was never
+        # flushed — forward whatever we have so the client at least sees
+        # something.  Pathological case; not cached.
         if not flushed:
-            for buf in captured:
+            for buf in held:
                 await send(buf)
 
     # ---- helpers --------------------------------------------------------

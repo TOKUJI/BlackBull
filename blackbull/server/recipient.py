@@ -12,10 +12,8 @@ from .ws_codec import (
 )
 from .constants import WSCloseCode
 from ..asgi import ASGIEvent, ASGIReceiveEvent
-from ..headers import Headers
-from ..connection import (
-    CONNECTION_STASH_KEY, Connection, disconnected, mark_disconnected,
-)
+from ..connection import Connection, disconnected, mark_disconnected
+from ..request import ClientDisconnected
 from ..protocol.frame_types import FrameBase, Data, DEFAULT_INITIAL_WINDOW_SIZE
 from ..event import Event, EventDispatcher
 import logging
@@ -40,6 +38,29 @@ _WS_READ_INLINE = 0
 # the byte budget cannot see: queue_depth × 16 (1024 by default) is far above
 # any conformant burst yet keeps per-stream event-dict overhead bounded.
 _EVENT_CAP_MULTIPLIER = 16
+
+# Queue marker for "the WebSocket peer is gone".  The WS channel carries the
+# message *values* — ``str`` for text, ``bytes`` for binary — so the end of the
+# connection needs a value outside that domain rather than a tagged envelope
+# every reader would have to unwrap.  The close code rides ``_terminal_code``,
+# which the recipient already tracked.
+_WS_CLOSED = object()
+
+
+def _ws_disconnect(code: int | None):
+    """Build the app-facing close signal for the native WS channel.
+
+    Imported lazily: ``websocket`` imports ``connection``, which this module
+    already depends on, so a module-level import would close a cycle.
+    """
+    from ..websocket import WebSocketDisconnect  # noqa: PLC0415
+    return WebSocketDisconnect(code or WSCloseCode.ABNORMAL)
+
+# Queue marker for "the peer is gone".  The H2 queue carries native
+# ``(chunk, end_of_stream)`` pairs, and a disconnect is not a chunk — it is the
+# absence of any further one — so it needs a value outside that domain rather
+# than a third tuple field every reader would have to check.
+_H2_DISCONNECT = object()
 
 # RFC 6455 §5.5 control opcodes — used by the non-blocking control-frame
 # servicing (``WebSocketRecipient.service_available_control_frames``), which
@@ -506,14 +527,14 @@ class BaseRecipient(ABC):
 class HTTP1Recipient(BaseRecipient):
     """Reads an HTTP/1.1 request body and emits a single ``http.request`` event.
 
-    Body bytes are read lazily on the first ``__call__`` using the Content-Length
-    or Transfer-Encoding header from ``scope``.  Subsequent calls return
-    ``{'type': 'http.disconnect'}``.
+    Body bytes are read lazily on the first ``__call__`` using the
+    Content-Length or Transfer-Encoding header of the :class:`Connection` it is
+    bound to.  Subsequent calls return ``{'type': 'http.disconnect'}``.
     """
 
     _reader: AbstractReader  # narrows BaseRecipient._reader from AbstractReader | None
 
-    def __init__(self, reader: AbstractReader, conn: dict | Connection,
+    def __init__(self, reader: AbstractReader, conn: Connection,
                  *, body_timeout: float = 0.0,
                  deadline: ConnectionDeadline | None = None,
                  chunk_size: int | None = None):
@@ -541,7 +562,7 @@ class HTTP1Recipient(BaseRecipient):
         # belongs to the request.
         self.bind(conn)
 
-    def bind(self, conn: dict | Connection) -> 'HTTP1Recipient':
+    def bind(self, conn: Connection) -> 'HTTP1Recipient':
         """Point this recipient at *conn*, the next request on the connection.
 
         The reader, chunk size, and deadline are properties of the connection
@@ -555,28 +576,14 @@ class HTTP1Recipient(BaseRecipient):
         method would leak from request N into request N+1, so new state belongs
         here, not in ``__init__``.
         """
-        # BlackBull's own actor passes the native :class:`Connection` directly
-        # on the native-Connection entry; read its ``headers`` with no
-        # conversion. A stashed Connection, or an external/hand-built ASGI scope
-        # dict, are the other two shapes.
-        #
         # We deliberately do **not** retain the Connection: the actor binds this
         # recipient as ``conn._receive`` for lazy ``conn.body()``, so a
         # back-reference here would close a per-request cycle (conn → recipient →
         # conn) reclaimable only by the cyclic GC — the v0.60.0 tail-latency
         # regression. Only the request path is kept (a plain ``str``), purely for
         # the log-cap-hit diagnostics below.
-        if isinstance(conn, Connection):
-            headers = conn.headers
-            self._req_path: str | None = conn.path
-        else:
-            _conn = conn.get(CONNECTION_STASH_KEY) if isinstance(conn, dict) else None
-            headers = _conn.headers if _conn is not None else conn['headers']
-            self._req_path = (
-                _conn.path if _conn is not None
-                else conn.get('path') if isinstance(conn, dict) else None)
-        if not isinstance(headers, Headers):
-            headers = Headers(headers)
+        headers = conn.headers
+        self._req_path: str | None = conn.path
         te = headers.get(b'transfer-encoding', b'').strip().lower()
         cl = headers.get(b'content-length', b'')
         if te and te != b'chunked':
@@ -614,12 +621,15 @@ class HTTP1Recipient(BaseRecipient):
         """
         drained = 0
         while not self._done:
-            event = await self()
-            if event['type'] == ASGIEvent.HTTP_DISCONNECT:
+            try:
+                chunk = await self.next_chunk()
+            except ClientDisconnected:
                 # EOF / body_timeout mid-drain: nothing left to desync, and
                 # ``_done`` is now set so the loop would exit anyway.
                 return True
-            drained += len(event.get('body', b''))
+            if chunk is None:
+                break
+            drained += len(chunk)
             if drained > max_bytes:
                 return False
         return True
@@ -678,10 +688,29 @@ class HTTP1Recipient(BaseRecipient):
             return await asyncio.wait_for(coro, timeout=self._body_timeout)
         return await coro
 
-    async def __call__(self) -> dict:
-        if self._done:
-            return {'type': ASGIEvent.HTTP_DISCONNECT}
+    async def next_chunk(self) -> bytes | None:
+        """The next body chunk, or ``None`` once the body is complete.
 
+        The native receive channel: a chunk is the bytes themselves, and the
+        end of the body is carried by the *call protocol* rather than by a
+        field beside the payload.  ``more_body`` was never information about
+        the chunk — it is the channel's state — and every internal consumer
+        did the same one thing with it (``if not more_body: break``), so the
+        boundary belongs where a Python caller already looks for it.
+
+        ``None``, not ``b''``: an empty body is a real body, the same reason
+        :class:`~blackbull.native.NativeResponse` decides presence with
+        ``is not None``.  On both framings the sentinel is unambiguous — a
+        zero-length chunk *is* the terminator in chunked encoding (RFC 9112
+        §7.1), and a Content-Length slice is never empty.
+
+        Asking again past the end keeps answering ``None``.  A peer that
+        vanishes mid-body raises :class:`ClientDisconnected` — a truncated
+        upload must never read as a complete one — and so does a body-read
+        timeout, which is recorded as a cap hit first.
+        """
+        if self._done:
+            return None
         try:
             if self._chunked:
                 size_line = await self._read_chunk_line()
@@ -709,7 +738,7 @@ class HTTP1Recipient(BaseRecipient):
                                 f'prohibited trailer field {name!r} '
                                 f'(RFC 9110 §6.5.1)')
                     self._done = True
-                    return {'type': ASGIEvent.HTTP_REQUEST, 'body': b'', 'more_body': False}
+                    return None
                 # RFC 9112 §7.1 — the chunk-data is exactly ``chunk_size``
                 # octets.  ``readexactly`` (not the up-to-n ``read``) is
                 # required: a chunk split across TCP segments would otherwise
@@ -726,7 +755,7 @@ class HTTP1Recipient(BaseRecipient):
                     self.framing_broken = True
                     raise _bad_request(
                         f'chunk-data not CRLF-terminated: {term!r}')
-                return {'type': ASGIEvent.HTTP_REQUEST, 'body': data, 'more_body': True}
+                return data
             else:
                 # Stream the Content-Length body in ``chunk_size`` slices so
                 # a large upload is delivered as several ``http.request`` events
@@ -738,13 +767,11 @@ class HTTP1Recipient(BaseRecipient):
                     body = await self._read_with_timeout(
                         self._reader.readexactly(n))
                     self._content_length -= n
-                    more = self._content_length > 0
-                    if not more:
+                    if self._content_length == 0:
                         self._done = True
-                    return {'type': ASGIEvent.HTTP_REQUEST, 'body': body,
-                            'more_body': more}
+                    return body
                 self._done = True
-                return {'type': ASGIEvent.HTTP_REQUEST, 'body': b'', 'more_body': False}
+                return None
 
         except (asyncio.TimeoutError, TimeoutError):
             # body_timeout exceeded — distinguish from EOF mid-body so
@@ -756,13 +783,39 @@ class HTTP1Recipient(BaseRecipient):
                         scope_path=self._req_path,
                         protocol='http1')
             self._done = True
-            return {'type': ASGIEvent.HTTP_DISCONNECT}
+            raise ClientDisconnected() from None
         except IncompleteReadError:
-            # EOF mid-body — not a cap hit (peer disappeared).  Surface
-            # disconnect so the handler can clean up; server closes on
-            # return; no synthetic 408.
+            # EOF mid-body — not a cap hit (peer disappeared).  The handler
+            # must not read a truncated upload as a whole one; server closes
+            # on return; no synthetic 408.
             self._done = True
+            raise ClientDisconnected() from None
+
+    async def __call__(self) -> dict:
+        """The ASGI receive channel: the same body, encoded as event dicts.
+
+        The compat surface, and the only place the ``http.request`` dict is
+        built.  It costs one dict per chunk and is paid for by the caller that
+        wanted the ASGI encoding — a full-form handler calling ``receive()``,
+        or an external host.  ``Connection.body()`` / ``stream()`` take
+        :meth:`next_chunk` and pay nothing.
+
+        The event sequence is unchanged: ``more_body`` is recovered from
+        ``_done``, which :meth:`next_chunk` has just set, so a Content-Length
+        body still ends on its last data event while a chunked body still
+        ends on a separate empty one.
+        """
+        if self._done:
             return {'type': ASGIEvent.HTTP_DISCONNECT}
+        try:
+            chunk = await self.next_chunk()
+        except ClientDisconnected:
+            return {'type': ASGIEvent.HTTP_DISCONNECT}
+        if chunk is None:
+            return {'type': ASGIEvent.HTTP_REQUEST, 'body': b'',
+                    'more_body': False}
+        return {'type': ASGIEvent.HTTP_REQUEST, 'body': chunk,
+                'more_body': not self._done}
 
 
 class HTTP2Recipient(BaseRecipient):
@@ -811,6 +864,11 @@ class HTTP2Recipient(BaseRecipient):
         self._end_of_stream_on_headers: bool = False
         # Set once the synthetic empty event has been delivered.
         self._initial_consumed: bool = False
+        # Native-channel end marker.  Read by ``next_chunk`` only: ``__call__``
+        # deliberately does not consult it, so a full-form handler calling
+        # ``receive()`` past END_STREAM still blocks for the disconnect event
+        # exactly as it did before, rather than being handed a synthetic one.
+        self._done: bool = False
         if isinstance(frame, Data):
             self.put_DATAFrame(frame)
 
@@ -841,12 +899,21 @@ class HTTP2Recipient(BaseRecipient):
         """
         self._end_of_stream_on_headers = True
 
-    def make_event(self, frame: Data) -> dict:
-        return {
-            'type': ASGIEvent.HTTP_REQUEST,
-            'body': frame.payload,
-            'more_body': False if frame.end_stream else True,
-        }
+    @staticmethod
+    def make_item(frame: Data) -> tuple[bytes, bool]:
+        """The queue's payload: ``(chunk, end_of_stream)``.
+
+        The pair the two channels need, and nothing else — ``__call__``
+        re-encodes it as an ASGI event, :meth:`next_chunk` hands the bytes
+        straight over.  Building the dict here charged every H2 body reader
+        for the encoding, including the ones that never read it.
+
+        ``end_stream`` is coerced: the frame carries the raw flag bit
+        (``DataFrameFlags.END_STREAM & flags``, an ``int``), and the queue
+        item is a value both channels read directly, so it holds the answer
+        rather than the wire encoding of it.
+        """
+        return frame.payload, bool(frame.end_stream)
 
     def put_DATAFrame(self, frame: Data) -> bool:
         """Enqueue a DATA frame event.  Returns False when the frame must be
@@ -880,11 +947,11 @@ class HTTP2Recipient(BaseRecipient):
                             limit=event_cap,
                             protocol='http2')
                 return False
-            queue.put_nowait((self.make_event(frame), fc_len))
+            queue.put_nowait((self.make_item(frame), fc_len))
             self._uncredited += fc_len
             return True
         try:
-            self._ensure_queue().put_nowait((self.make_event(frame), 0))
+            self._ensure_queue().put_nowait((self.make_item(frame), 0))
             return True
         except asyncio.QueueFull:
             logger.warning('HTTP2Recipient queue full on stream — dropping DATA frame')
@@ -894,13 +961,23 @@ class HTTP2Recipient(BaseRecipient):
                         protocol='http2')
             return False
 
-    def put_event(self, event: ASGIReceiveEvent) -> bool:
-        """Enqueue a pre-built event dict. Returns False if the queue is full."""
+    def put_end_of_stream(self) -> bool:
+        """Enqueue a clean, empty end-of-body.
+
+        The trailers case (RFC 9113 §8.1): a second HEADERS on an open request
+        stream ends the body without carrying any.  Enqueues the native pair —
+        building an ``http.request`` dict here only to translate it back one
+        line later was the last request-dict producer on the native path.
+        """
+        return self._put_item((b'', True))
+
+    def _put_item(self, item) -> bool:
+        """Enqueue a native queue item.  False when the queue is full."""
         try:
-            self._ensure_queue().put_nowait((event, 0))
+            self._ensure_queue().put_nowait((item, 0))
             return True
         except asyncio.QueueFull:
-            logger.warning('HTTP2Recipient queue full on stream — dropping event %r', event.get('type'))
+            logger.warning('HTTP2Recipient queue full on stream — dropping %r', item)
             log_cap_hit('stream_queue_depth',
                         requested=self._queue_depth + 1,
                         limit=self._queue_depth,
@@ -918,8 +995,7 @@ class HTTP2Recipient(BaseRecipient):
                 and self._initial_consumed):
             return
         try:
-            self._ensure_queue().put_nowait(
-                ({'type': ASGIEvent.HTTP_DISCONNECT}, 0))
+            self._ensure_queue().put_nowait((_H2_DISCONNECT, 0))
         except asyncio.QueueFull:
             # If the queue is completely full the app task is hopelessly behind;
             # TaskGroup cancellation will clean up the stream regardless.
@@ -950,8 +1026,30 @@ class HTTP2Recipient(BaseRecipient):
         # END_STREAM on HEADERS) sees a spurious client disconnect.
         if self._end_of_stream_on_headers and not self._initial_consumed:
             self._initial_consumed = True
+            self._done = True
             return {'type': ASGIEvent.HTTP_REQUEST, 'body': b'', 'more_body': False}
-        event, credit = await self._ensure_queue().get()
+        item = await self._take()
+        if item is _H2_DISCONNECT:
+            self._done = True
+            return {'type': ASGIEvent.HTTP_DISCONNECT}
+        payload, end_stream = item
+        # Set, never read, on this channel: ``__call__`` past END_STREAM keeps
+        # waiting for the disconnect event exactly as it did before, but the
+        # end marker has to be shared or a later ``next_chunk`` would block on
+        # a queue nothing will feed again.
+        if end_stream:
+            self._done = True
+        return {'type': ASGIEvent.HTTP_REQUEST, 'body': payload,
+                'more_body': not end_stream}
+
+    async def _take(self):
+        """Pop the next queue item, replaying consume-time flow-control credit.
+
+        Shared by both channels so the credit contract cannot drift between
+        them: the peer is credited when the app *pops*, whichever channel it
+        pops through.
+        """
+        item, credit = await self._ensure_queue().get()
         if credit and self._credit_cb is not None:
             # Decrement before the (interruptible) send so a racing
             # take_uncredited() can never double-credit; worst case a
@@ -964,7 +1062,29 @@ class HTTP2Recipient(BaseRecipient):
                 # disconnect event is the authoritative teardown signal.
                 logger.debug('consume-time WINDOW_UPDATE replay failed',
                              exc_info=True)
-        return event
+        return item
+
+    async def next_chunk(self) -> bytes | None:
+        """The next body chunk, or ``None`` once the stream has ended.
+
+        The H2 half of the native receive channel — same contract as
+        :meth:`HTTP1Recipient.next_chunk`, so ``Connection.body()`` /
+        ``stream()`` read one protocol and get both.
+        """
+        if self._end_of_stream_on_headers and not self._initial_consumed:
+            self._initial_consumed = True
+            self._done = True
+            return None
+        if self._done:
+            return None
+        item = await self._take()
+        if item is _H2_DISCONNECT:
+            self._done = True
+            raise ClientDisconnected()
+        payload, end_stream = item
+        if end_stream:
+            self._done = True
+        return payload
 
 
 class WebSocketRecipient(BaseRecipient):
@@ -1025,7 +1145,7 @@ class WebSocketRecipient(BaseRecipient):
     def __init__(self, reader: AbstractReader, writer: AbstractWriter, *,
                  require_masked: bool = True,
                  dispatcher: EventDispatcher | None = None,
-                 conn: dict | Connection | None = None,
+                 conn: Connection | None = None,
                  ws_queue_depth: int = _WS_READ_INLINE,
                  decompressor=None,
                  max_frame_payload: int | None = None,
@@ -1116,6 +1236,16 @@ class WebSocketRecipient(BaseRecipient):
         self._watchdog: WsIdleWatchdog | None = None
         self._closed = False
 
+    @property
+    def terminal_code(self) -> int | None:
+        """The RFC 6455 §7.4 close code, once the read side has finished.
+
+        The single record of how this connection ended: the actor used to keep
+        its own copy by intercepting every event to look for a disconnect, and
+        two records of one fact is one place for them to disagree.
+        """
+        return self._terminal_code
+
     async def _emit(self, item) -> None:
         """Hand one ASGI event (or an exception to re-raise app-side) to the app.
 
@@ -1128,9 +1258,7 @@ class WebSocketRecipient(BaseRecipient):
         :class:`ProtocolError`, or any other exception — so a receive() past
         the terminal event can keep answering a disconnect with the same code.
         """
-        if isinstance(item, dict) and item.get('type') == ASGIEvent.WS_DISCONNECT:
-            self._terminal_code = item.get('code', WSCloseCode.ABNORMAL)
-        elif isinstance(item, ProtocolError):
+        if isinstance(item, ProtocolError):
             self._terminal_code = item.close_code
         elif isinstance(item, Exception):
             self._terminal_code = WSCloseCode.ABNORMAL
@@ -1189,8 +1317,7 @@ class WebSocketRecipient(BaseRecipient):
             log_cap_hit('ws_max_frame_payload',
                         requested=exc.declared,
                         limit=self._max_frame_payload,
-                        scope_path=(self._conn.path if isinstance(self._conn, Connection)
-                            else self._conn.get('path')) if self._conn else None,
+                        scope_path=self._conn.path if self._conn else None,
                         protocol='ws')
             raise ProtocolError(
                 str(exc),
@@ -1229,9 +1356,7 @@ class WebSocketRecipient(BaseRecipient):
         try:
             return await self._read_step()
         except (asyncio.IncompleteReadError, IncompleteReadError):
-            await self._emit_disconnected(WSCloseCode.ABNORMAL)
-            await self._emit({'type': ASGIEvent.WS_DISCONNECT,
-                              'code': WSCloseCode.ABNORMAL})
+            await self._close_channel(WSCloseCode.ABNORMAL)
             return True
         except ProtocolError as exc:
             close = encode_frame(
@@ -1302,17 +1427,9 @@ class WebSocketRecipient(BaseRecipient):
                 # treated as a CLOSE with status code 1007.
                 raise ProtocolError(f'invalid UTF-8 in TEXT message: {e}',
                                     close_code=1007)
-            asgi_event = {
-                'type': ASGIEvent.WS_RECEIVE,
-                'text': text,
-                'bytes': None,
-            }
+            message: str | bytes = text
         else:
-            asgi_event = {
-                'type': ASGIEvent.WS_RECEIVE,
-                'text': None,
-                'bytes': full_payload,
-            }
+            message = full_payload
         # The read-time emit adapter (server path) or the dispatcher (direct
         # path) fires ``websocket_message`` HERE, when the message is read —
         # before delivery to the app, in every mode.  The guard must be
@@ -1324,17 +1441,18 @@ class WebSocketRecipient(BaseRecipient):
         if (self._on_message is not None
                 and (self._read_ahead_needed is None
                      or self._read_ahead_needed())):
-            await self._on_message(asgi_event)
+            await self._on_message(message)
         elif self._dispatcher is not None and self._conn is not None:
+            is_text = isinstance(message, str)
             await self._dispatcher.emit(Event(
                 'websocket_message',
                 detail={
                     'conn': self._conn,
-                    'text': asgi_event['text'],
-                    'bytes': asgi_event['bytes'],
+                    'text': message if is_text else None,
+                    'bytes': None if is_text else message,
                 },
             ))
-        await self._emit(asgi_event)
+        await self._emit(message)
 
     async def _handle_control_frame(self, opcode, payload: bytes) -> bool:
         """Handle CLOSE/PING/PONG frame; returns True if the connection should close."""
@@ -1355,9 +1473,7 @@ class WebSocketRecipient(BaseRecipient):
                 await self._writer.write(close)
             except Exception:
                 pass  # best-effort CLOSE frame; the socket may already be gone.
-            await self._emit_disconnected(event_code)
-            await self._emit(
-                {'type': ASGIEvent.WS_DISCONNECT, 'code': event_code})
+            await self._close_channel(event_code)
             return True
         if opcode == WSOpcode.PING:
             # RFC 6455 §5.5 — control-frame payload MUST be ≤125 bytes; the
@@ -1375,9 +1491,19 @@ class WebSocketRecipient(BaseRecipient):
             await self._writer.write(close)
         except Exception:
             pass  # best-effort CLOSE frame; the socket may already be gone.
-        await self._emit_disconnected(WSCloseCode.PROTOCOL_ERROR)
-        await self._emit(
-            {'type': ASGIEvent.WS_DISCONNECT, 'code': WSCloseCode.PROTOCOL_ERROR})
+        await self._close_channel(WSCloseCode.PROTOCOL_ERROR)
+
+    async def _close_channel(self, code: int) -> None:
+        """Fire ``websocket_disconnected`` and end the channel with *code*.
+
+        The close code used to be passed twice — once to the Level B event and
+        again inside the disconnect envelope — which is one place for the two
+        to disagree.  It is recorded once here, on ``_terminal_code``, and both
+        channels read it from there.
+        """
+        await self._emit_disconnected(code)
+        self._terminal_code = code
+        await self._emit(_WS_CLOSED)
 
     async def _emit_disconnected(self, code: int) -> None:
         """Emit websocket_disconnected exactly once per connection.
@@ -1390,13 +1516,8 @@ class WebSocketRecipient(BaseRecipient):
         if (self._dispatcher is not None and conn is not None
                 and not disconnected(conn)):
             mark_disconnected(conn)
-            if isinstance(conn, Connection):
-                client = conn.client
-                connection_id, path = conn.connection_id, conn.path
-            else:
-                client = conn.get('client')
-                connection_id = conn.get('_connection_id', '')
-                path = conn.get('path', '')
+            client = conn.client
+            connection_id, path = conn.connection_id, conn.path
             await self._dispatcher.emit(Event(
                 'websocket_disconnected',
                 detail={
@@ -1431,43 +1552,61 @@ class WebSocketRecipient(BaseRecipient):
         return (self._dispatcher is not None
                 and self._dispatcher.has_listeners('websocket_message'))
 
+    def _start_reader(self, depth: int) -> None:
+        """Create the read-ahead queue and its task, carrying over the handoff.
+
+        Anything the inline driver (or watchdog servicing) already left in
+        ``_pending`` moves into the queue first: once the queue exists the app
+        reads from it alone, so an event left behind in the deque would never
+        be delivered.  ``_pending`` holds at most one item — the inline driver
+        stops as soon as a frame produces something — so the bounded queue
+        cannot overflow here.
+        """
+        queue: asyncio.Queue = asyncio.Queue(maxsize=depth)
+        while self._pending:
+            queue.put_nowait(self._pending.popleft())
+        self._event_queue = queue
+        self._reader_task = asyncio.create_task(self._read_loop())
+        self._deferred_pending = False
+
     def _ensure_reader_started(self) -> None:
-        """Start the read-ahead task, in eager mode only.
+        """Start the read-ahead task, or mark it deferred.
 
         Inline mode has no background reader at all, so this is where the
         per-message task handoff stops existing rather than being made cheaper.
+        A positive ``ws_queue_depth`` is an explicit opt-in and starts the
+        reader now; a listener that merely *needs* read-ahead does not, because
+        the contract it depends on is that the message is read, not that it is
+        read ahead.  A consuming handler drives the wire itself and keeps the
+        inline path; only when the app goes quiet does the idle watchdog start
+        the deferred reader, so nothing observes the difference and no
+        consuming handler pays the handoff.
         """
-        if self._event_queue is not None:
+        if self._event_queue is not None or self._read_finished:
             return
-        if self._ws_queue_depth > 0 or self._read_ahead_observed():
-            # A listener can force eager mode with the depth left at 0, so fall
-            # back to the standard depth rather than building a 0-maxsize (i.e.
-            # unbounded) queue, which would drop the backpressure bound.
-            depth = self._ws_queue_depth or _WS_EVENT_QUEUE_DEPTH
-            self._event_queue = asyncio.Queue(maxsize=depth)
-            self._reader_task = asyncio.create_task(self._read_loop())
+        if self._ws_queue_depth > 0:
+            self._start_reader(self._ws_queue_depth)
         elif self._read_ahead_observed():
-            # Deferred reader (design A'): read-ahead is needed but not yet
-            # started — see start_deferred_reader().
             self._deferred_pending = True
 
     def start_deferred_reader(self) -> None:
-        """Start the deferred reader task (design A').
+        """Start the deferred reader task.
 
         Called by the idle watchdog once the app has stopped driving
         ``receive()`` on a connection that needs read-ahead (a
         ``websocket_message`` listener).  Idempotent and safe: refuses while
         a reader already owns the wire, while the app is mid-read, or after
         the read side terminated.
+
+        A listener can need read-ahead with the depth left at 0, so the queue
+        falls back to the standard depth rather than a 0-maxsize (i.e.
+        unbounded) one, which would drop the backpressure bound.
         """
         if (not self._deferred_pending or self._event_queue is not None
                 or self._reader_task is not None or self._reading
                 or self._read_finished):
             return
-        depth = self._ws_queue_depth or _WS_EVENT_QUEUE_DEPTH
-        self._event_queue = asyncio.Queue(maxsize=depth)
-        self._reader_task = asyncio.create_task(self._read_loop())
-        self._deferred_pending = False
+        self._start_reader(self._ws_queue_depth or _WS_EVENT_QUEUE_DEPTH)
 
     def _frame_bytes_needed(self) -> int | None:
         """Bytes required for the next *complete* frame, or None when it is
@@ -1631,57 +1770,130 @@ class WebSocketRecipient(BaseRecipient):
             except asyncio.CancelledError:
                 pass  # Expected: the task was cancelled intentionally.
 
-    async def __call__(self) -> dict:
-        # Refresh the listener state once per receive cycle — the hot path
-        # reads the plain attr below instead of calling the predicate per
-        # frame.
+    def _mark_connect_sent(self) -> None:
+        """Claim the handshake read and arm the connection's timers.
+
+        Shared by both channels.  Arming the idle watchdog once here (not per
+        message) keeps the zero-listener echo free of a per-message arm call
+        while an idle connection with a buffered control frame is still
+        serviced.
+        """
+        self._connect_sent = True
+        self._ensure_watchdog_armed()
+        self._ensure_reader_started()
+
+    def _refresh_listeners(self) -> None:
+        """Once per receive cycle — the hot path then reads a plain attr
+        instead of calling the predicate per frame."""
         ra = self._read_ahead_needed
         self._listeners = (ra is None) or ra()
-        if not self._connect_sent:
-            self._connect_sent = True
-            # Arm the idle watchdog once at connect.  Per-message receives
-            # and sends only touch it when control frames matter or a
-            # listener needs the deferred reader; arming here (not per
-            # message) keeps the zero-listener echo free of the per-message
-            # arm call while an idle connection with a buffered control
-            # frame is still serviced.
-            self._ensure_watchdog_armed()
-            self._ensure_reader_started()
-            return {'type': ASGIEvent.WS_CONNECT}
+
+    async def _next_item(self):
+        """Pop the next thing the read side produced, or ``_WS_CLOSED``.
+
+        The shared body of both channels: a complete message (``str`` /
+        ``bytes``), an exception to re-raise app-side, or the close marker.
+        Everything above this is encoding; everything below it is the wire.
+        """
         if self._deferred_pending or self._saw_control_frame:
             self.touch()
         self._ensure_reader_started()
         if self._terminal_delivered:
             # Canonical across both modes: once the terminal event has been
-            # handed to the app, receive() keeps answering a disconnect so a
+            # handed to the app, reading again keeps answering the close so a
             # handler that reads past it can never block on a dead connection.
-            return {'type': ASGIEvent.WS_DISCONNECT,
-                    'code': self._terminal_code or WSCloseCode.ABNORMAL}
+            return _WS_CLOSED
         if self._event_queue is not None:
-            item = await self._event_queue.get()
-        else:
-            # Inline: drive the wire in the app's own task until this read has
-            # something to hand back.  Frames that produce nothing (fragments,
-            # PING, unsolicited PONG) simply loop, so control frames are still
-            # serviced — just at the app's read cadence rather than ahead of it.
+            return await self._event_queue.get()
+        # Inline: drive the wire in the app's own task until this read has
+        # something to hand back.  Frames that produce nothing (fragments,
+        # PING, unsolicited PONG) simply loop, so control frames are still
+        # serviced — just at the app's read cadence rather than ahead of it.
+        #
+        # ``_reading`` claims the transport for the whole drive.  The
+        # watchdog's servicing path and the deferred-reader start both yield
+        # on it, because a second reader entering here would resume at
+        # whatever offset this one is parked at — mid-frame, the buffer front
+        # is payload, and peeking it as a frame header desyncs the stream.
+        self._reading = True
+        try:
             while not self._pending and not self._read_finished:
                 self._read_finished = await self._drive_once()
-            if not self._pending:
-                # The read side finished without leaving anything: the app is
-                # calling receive() past the terminal event it already got.
-                self._terminal_delivered = True
-                return {'type': ASGIEvent.WS_DISCONNECT,
-                        'code': self._terminal_code or WSCloseCode.ABNORMAL}
-            item = self._pending.popleft()
+        finally:
+            self._reading = False
+        if not self._pending:
+            # The read side finished without leaving anything: the app is
+            # reading past the terminal event it already got.
+            self._terminal_delivered = True
+            return _WS_CLOSED
+        return self._pending.popleft()
+
+    async def await_connect(self) -> None:
+        """Consume the opening handshake on the native channel.
+
+        The raw ``(conn, receive, send)`` form reads a ``websocket.connect``
+        dict for this; the object form has no use for the envelope, so the
+        native channel just records that the handshake was taken.  A peer that
+        gave up mid-handshake raises :class:`WebSocketDisconnect`, the same
+        signal :meth:`next_message` gives.
+        """
+        self._refresh_listeners()
+        if not self._connect_sent:
+            self._mark_connect_sent()
+            return
+        # Already consumed — the caller is re-entering; surface the terminal
+        # state rather than silently eating the client's first message.
+        if self._terminal_delivered or self._read_finished:
+            raise _ws_disconnect(self._terminal_code)
+
+    async def next_message(self) -> str | bytes:
+        """The next complete application message: ``str`` text, ``bytes`` binary.
+
+        The native receive channel.  Fragments are already reassembled
+        (RFC 6455 §5.4), so what comes back is always a whole message, and the
+        Python type *is* the text/binary discriminator — the same contract
+        :meth:`blackbull.websocket.WebSocket.receive` publishes.
+
+        Raises :class:`~blackbull.websocket.WebSocketDisconnect` when the peer
+        closes, carrying the RFC 6455 §7.4 status code, and re-raises a
+        :class:`ProtocolError` the read side recorded.
+        """
+        self._refresh_listeners()
+        if not self._connect_sent:
+            self._mark_connect_sent()
+        item = await self._next_item()
+        if item is _WS_CLOSED:
+            self._terminal_delivered = True
+            raise _ws_disconnect(self._terminal_code)
         if isinstance(item, Exception):
             self._terminal_delivered = True
             raise item
-        if item.get('type') == ASGIEvent.WS_DISCONNECT:
-            # The terminal event is always the last thing the read side
-            # produces (both drivers stop after emitting it), so handing it
-            # out is the point of no return in eager mode.
-            self._terminal_delivered = True
         return item
+
+    async def __call__(self) -> dict:
+        """The ASGI receive channel: the same messages, encoded as dicts.
+
+        The compat surface, and the only place a ``websocket.*`` receive dict
+        is built — minted per call for whoever wants that encoding: a raw
+        ``(conn, receive, send)`` handler, or an external host.  The object
+        form takes :meth:`next_message` and pays nothing.
+        """
+        self._refresh_listeners()
+        if not self._connect_sent:
+            self._mark_connect_sent()
+            return {'type': ASGIEvent.WS_CONNECT}
+        item = await self._next_item()
+        if item is _WS_CLOSED:
+            self._terminal_delivered = True
+            return {'type': ASGIEvent.WS_DISCONNECT,
+                    'code': self._terminal_code or WSCloseCode.ABNORMAL}
+        if isinstance(item, Exception):
+            self._terminal_delivered = True
+            raise item
+        if isinstance(item, str):
+            return {'type': ASGIEvent.WS_RECEIVE, 'text': item, 'bytes': None}
+        return {'type': ASGIEvent.WS_RECEIVE, 'text': None, 'bytes': item}
+
 
 
 # ---------------------------------------------------------------------------
@@ -1696,7 +1908,7 @@ class RecipientFactory:
     """
 
     @staticmethod
-    def http1(reader, conn: dict | Connection, *,
+    def http1(reader, conn: Connection, *,
               body_timeout: float = 0.0,
               deadline: ConnectionDeadline | None = None) -> HTTP1Recipient:
         if not isinstance(reader, AbstractReader):
@@ -1717,7 +1929,7 @@ class RecipientFactory:
     @staticmethod
     def websocket(reader, writer, *,
                   dispatcher: EventDispatcher | None = None,
-                  conn: dict | Connection | None = None,
+                  conn: Connection | None = None,
                   ws_queue_depth: int = _WS_READ_INLINE,
                   decompressor=None,
                   on_message: Callable[[dict], Awaitable[None]] | None = None,

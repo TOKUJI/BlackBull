@@ -989,9 +989,7 @@ class HTTP2Actor(Actor):
                             stream.on_data_received(end_stream=True)
                             recipient = self._recipients.get(stream.stream_id)
                             if recipient is not None:
-                                recipient.put_event({
-                                    'type': ASGIEvent.HTTP_REQUEST,
-                                    'body': b'', 'more_body': False})
+                                recipient.put_end_of_stream()
                     else:
                         send = self.make_sender(stream.stream_id)
                         spawned = await self._on_headers_frame(frame, stream, send, tg)

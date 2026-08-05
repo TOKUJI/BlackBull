@@ -71,7 +71,7 @@ async def test_hello():
 
 The helpers are `get` / `head` / `options` / `post` / `put` /
 `patch` / `delete`, plus `request` for full control.  A response is
-a `NativeResponse` — `status`, `headers` (a `Headers`), `body`, and
+a `NativeTestResponse` — `status`, `headers` (a `Headers`), `body`, and
 `.json()` / `.text()` convenience readers:
 
 ```python
@@ -372,7 +372,7 @@ from blackbull.router import Scheme
 
 
 @app.route(path='/ws', scheme=Scheme.websocket)
-async def ws_echo(scope, receive, send):
+async def ws_echo(conn, receive, send):
     await receive()                              # websocket.connect
     await send({'type': 'websocket.accept'})
     while True:
@@ -400,7 +400,7 @@ from blackbull.testing import WebSocketDisconnect
 
 
 @app.route(path='/ws-auth', scheme=Scheme.websocket)
-async def ws_auth(scope, receive, send):
+async def ws_auth(conn, receive, send):
     await receive()
     await send({'type': 'websocket.close', 'code': 4401})
 
@@ -421,7 +421,7 @@ iterator termination so the test reads as a single `for` loop:
 
 ```python
 @app.route(path='/notifications', scheme=Scheme.websocket)
-async def notifications(scope, receive, send):
+async def notifications(conn, receive, send):
     await receive()                              # websocket.connect
     await send({'type': 'websocket.accept'})
     for n in range(3):
@@ -711,7 +711,7 @@ app = BlackBull()
 
 
 @app.route(path='/ping')
-async def ping(scope, receive, send):
+async def ping(conn, receive, send):
     await send(JSONResponse({'pong': True}))
 
 
@@ -747,42 +747,52 @@ async def test_ping_handler():
 Useful when you want to assert on the raw ASGI event sequence.
 For anything routing-shaped, prefer `native` — it costs almost
 nothing more, exercises the whole dispatch pipeline, and hands the
-handler the same `Connection` the server would.  `NativeResponse.events`
+handler the same `Connection` the server would.  `NativeTestResponse.events`
 keeps the raw event list if that is what you were reaching for here.
 
 ## Middleware in isolation
 
 Middleware is an async function — test it by passing stub
 callables.  Useful for asserting short-circuit behaviour,
-header mutation, or scope injection:
+header mutation, or `state` injection.  Drive it with the same
+`Connection` the server would:
 
 ```python
 @pytest.mark.asyncio
 async def test_auth_mw_rejects_missing_token():
     from myapp import auth_mw
-    from blackbull.server.headers import Headers
+    from blackbull.connection import Connection
+    from blackbull.headers import Headers
+    from blackbull.response import wrap_native_send
 
-    scope = {'type': 'http', 'method': 'GET', 'path': '/tasks',
-             'headers': Headers([]), 'state': {}}
+    conn = Connection(method='GET', path='/tasks', raw_path=b'/tasks',
+                      headers=Headers([]), type='http')
 
     events = []
-    async def fake_send(event):
+    async def collect(event):
         events.append(event)
 
     call_next_called = False
-    async def fake_call_next(scope, receive, send):
+    async def fake_call_next(conn, receive, send):
         nonlocal call_next_called
         call_next_called = True
 
-    await auth_mw(scope, None, fake_send, fake_call_next)
+    # `wrap_native_send` is the seam the app puts above a middleware: it
+    # converts whatever the middleware sends — a `Response`, an ASGI dict —
+    # into the `NativeResponse` the sender receives.  Without it the stub
+    # sees the raw object the middleware happened to pass.
+    await auth_mw(conn, None, wrap_native_send(collect), fake_call_next)
 
     assert not call_next_called          # short-circuited
-    start = next(e for e in events if e['type'] == 'http.response.start')
-    assert start['status'] == 401
+    start = next(e for e in events if e.header is not None)
+    assert start.status == 401
 ```
 
 The pattern works for async-function middleware and
-`@as_middleware` classes alike.
+`@as_middleware` classes alike.  A middleware that declared `scope`
+instead receives an ASGI scope dict and emits ASGI event dicts — build
+the stub input with `conn.to_asgi_scope()`, drop the
+`wrap_native_send`, and assert on `event['type']` / `event['status']`.
 
 ## What BlackBull's own suite uses
 

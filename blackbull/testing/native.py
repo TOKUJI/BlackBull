@@ -54,9 +54,13 @@ import httpx
 
 from ..connection import Connection, bind_receive_channel
 from ..headers import Headers
+# The framework's send message.  Aliased on import because this module defines
+# its own ``NativeTestResponse`` — two different things that both wanted the
+# name ``NativeResponse``, which is exactly the collision this alias removes.
+from ..native import NativeResponse as _NativeResponse
 
 __all__ = [
-    'NativeResponse', 'NativeClient', 'NativeTestServer',
+    'NativeTestResponse', 'NativeResponse', 'NativeClient', 'NativeTestServer',
     'build_connection', 'request',
     'get', 'head', 'options', 'post', 'put', 'patch', 'delete',
 ]
@@ -95,7 +99,7 @@ def _header_pairs(headers: _HeaderInput) -> list[tuple[bytes, bytes]]:
 
 
 @dataclass
-class NativeResponse:
+class NativeTestResponse:
     """What Tier 1 collected from the app's ``send`` channel.
 
     ``body`` is the concatenation of every ``http.response.body`` chunk, so a
@@ -181,7 +185,7 @@ async def request(
     conn: Connection,
     *,
     body: bytes | str = b'',
-) -> NativeResponse:
+) -> NativeTestResponse:
     """Call ``app(conn, receive, send)`` and collect the response.
 
     The full-control form: build (or mutate) a :class:`Connection` yourself and
@@ -210,8 +214,8 @@ async def request(
     # Same dual-form signature as the protocol senders: a handler may emit ASGI
     # dicts, the ``send(body, status, headers)`` convenience form that the
     # actor's sender also accepts, or — on the H1 native seam (Sprint 92) — a
-    # NativeResponse.  Tier 1 has to accept all of them or it would reject code
-    # the real server runs.  The NativeResponse expansion iterates through the
+    # NativeTestResponse.  Tier 1 has to accept all of them or it would reject code
+    # the real server runs.  The NativeTestResponse expansion iterates through the
     # sibling ``_record`` — never a self-referential closure.
     def _record(event: Any, status_arg: HTTPStatus = HTTPStatus.OK,
                 headers_arg: Any = ()) -> None:
@@ -243,8 +247,7 @@ async def request(
 
     async def send(event: Any, status_arg: HTTPStatus = HTTPStatus.OK,
                    headers_arg: Any = ()) -> None:
-        from ..native import NativeResponse  # noqa: PLC0415
-        if isinstance(event, NativeResponse):
+        if isinstance(event, _NativeResponse):
             # one native object may carry header + body + trailers — expand to
             # its ASGI event list and fold each event into the same capture.
             for ev in event.to_asgi():
@@ -261,15 +264,22 @@ async def request(
         raise AssertionError(
             'The app produced no http.response.start event — the handler '
             'returned without sending a response.')
-    return NativeResponse(status=status, headers=Headers(response_headers),
+    return NativeTestResponse(status=status, headers=Headers(response_headers),
                           body=b''.join(chunks), events=events)
+
+
+#: Deprecated alias.  ``NativeResponse`` used to name *this* class, which
+#: collided with :class:`blackbull.native.NativeResponse` — the framework's
+#: send message — so the two were indistinguishable in a traceback or an
+#: ``isinstance`` check.  Prefer :class:`NativeTestResponse`.
+NativeResponse = NativeTestResponse
 
 
 async def _verb(app: Any, method: str, path: str, *,
                 body: bytes | str = b'',
                 json: Any = None,
                 headers: _HeaderInput = None,
-                **kwargs: Any) -> NativeResponse:
+                **kwargs: Any) -> NativeTestResponse:
     if json is not None:
         if body:
             raise TypeError("pass either 'body' or 'json', not both")
@@ -282,12 +292,12 @@ async def _verb(app: Any, method: str, path: str, *,
     return await request(app, conn, body=body)
 
 
-async def get(app: Any, path: str, **kwargs: Any) -> NativeResponse:
+async def get(app: Any, path: str, **kwargs: Any) -> NativeTestResponse:
     """Drive ``app`` with a GET through the native dispatch path."""
     return await _verb(app, 'GET', path, **kwargs)
 
 
-async def head(app: Any, path: str, **kwargs: Any) -> NativeResponse:
+async def head(app: Any, path: str, **kwargs: Any) -> NativeTestResponse:
     """Drive ``app`` with a HEAD through the native dispatch path.
 
     The handler sees ``HEAD``: rewriting it to ``GET`` and stripping the body
@@ -297,27 +307,27 @@ async def head(app: Any, path: str, **kwargs: Any) -> NativeResponse:
     return await _verb(app, 'HEAD', path, **kwargs)
 
 
-async def options(app: Any, path: str, **kwargs: Any) -> NativeResponse:
+async def options(app: Any, path: str, **kwargs: Any) -> NativeTestResponse:
     """Drive ``app`` with an OPTIONS through the native dispatch path."""
     return await _verb(app, 'OPTIONS', path, **kwargs)
 
 
-async def post(app: Any, path: str, **kwargs: Any) -> NativeResponse:
+async def post(app: Any, path: str, **kwargs: Any) -> NativeTestResponse:
     """Drive ``app`` with a POST through the native dispatch path."""
     return await _verb(app, 'POST', path, **kwargs)
 
 
-async def put(app: Any, path: str, **kwargs: Any) -> NativeResponse:
+async def put(app: Any, path: str, **kwargs: Any) -> NativeTestResponse:
     """Drive ``app`` with a PUT through the native dispatch path."""
     return await _verb(app, 'PUT', path, **kwargs)
 
 
-async def patch(app: Any, path: str, **kwargs: Any) -> NativeResponse:
+async def patch(app: Any, path: str, **kwargs: Any) -> NativeTestResponse:
     """Drive ``app`` with a PATCH through the native dispatch path."""
     return await _verb(app, 'PATCH', path, **kwargs)
 
 
-async def delete(app: Any, path: str, **kwargs: Any) -> NativeResponse:
+async def delete(app: Any, path: str, **kwargs: Any) -> NativeTestResponse:
     """Drive ``app`` with a DELETE through the native dispatch path."""
     return await _verb(app, 'DELETE', path, **kwargs)
 
@@ -372,7 +382,7 @@ class NativeClient:
         finally:
             self._loop_thread.stop()
 
-    def _run(self, fn, *args: Any, **kwargs: Any) -> NativeResponse:
+    def _run(self, fn, *args: Any, **kwargs: Any) -> NativeTestResponse:
         # The guard runs *before* the coroutine is constructed: building one
         # and then raising leaves a "coroutine was never awaited" warning
         # attached to the caller's test, pointing at the wrong problem.
@@ -382,29 +392,29 @@ class NativeClient:
                 '`with NativeClient(app) as client: ...`')
         return self._loop_thread.run_coro(fn(self.app, *args, **kwargs))
 
-    def request(self, conn: Connection, *, body: bytes | str = b'') -> NativeResponse:
+    def request(self, conn: Connection, *, body: bytes | str = b'') -> NativeTestResponse:
         """Full-control form — see :func:`request`."""
         return self._run(request, conn, body=body)
 
-    def get(self, path: str, **kwargs: Any) -> NativeResponse:
+    def get(self, path: str, **kwargs: Any) -> NativeTestResponse:
         return self._run(get, path, **kwargs)
 
-    def head(self, path: str, **kwargs: Any) -> NativeResponse:
+    def head(self, path: str, **kwargs: Any) -> NativeTestResponse:
         return self._run(head, path, **kwargs)
 
-    def options(self, path: str, **kwargs: Any) -> NativeResponse:
+    def options(self, path: str, **kwargs: Any) -> NativeTestResponse:
         return self._run(options, path, **kwargs)
 
-    def post(self, path: str, **kwargs: Any) -> NativeResponse:
+    def post(self, path: str, **kwargs: Any) -> NativeTestResponse:
         return self._run(post, path, **kwargs)
 
-    def put(self, path: str, **kwargs: Any) -> NativeResponse:
+    def put(self, path: str, **kwargs: Any) -> NativeTestResponse:
         return self._run(put, path, **kwargs)
 
-    def patch(self, path: str, **kwargs: Any) -> NativeResponse:
+    def patch(self, path: str, **kwargs: Any) -> NativeTestResponse:
         return self._run(patch, path, **kwargs)
 
-    def delete(self, path: str, **kwargs: Any) -> NativeResponse:
+    def delete(self, path: str, **kwargs: Any) -> NativeTestResponse:
         return self._run(delete, path, **kwargs)
 
 

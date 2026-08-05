@@ -170,9 +170,9 @@ def test_scan_detects_the_offending_shape():
     ``tests/integration/test_middleware_composition.py``.
     """
     source = '''
-async def mw(scope, receive, send, call_next):
-    scope.setdefault('state', {})['x'] = 1
-    await call_next(scope, receive, send)
+async def mw(conn, receive, send, call_next):
+    conn.setdefault('state', {})['x'] = 1
+    await call_next(conn, receive, send)
 
 @app.route(path='/x', middlewares=[mw])
 async def handler(scope):

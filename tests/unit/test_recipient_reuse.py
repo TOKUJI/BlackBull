@@ -162,3 +162,39 @@ async def test_actor_builds_one_recipient_per_connection():
         recipient_mod.HTTP1Recipient.__init__ = original
 
     assert built == 1
+
+
+def test_bind_takes_a_connection_and_nothing_else():
+    """The recipient's request argument is native — there is no scope shape.
+
+    Only ``HTTP1Actor._dispatch_request`` builds or rebinds a recipient, and it
+    is typed ``conn: Connection``; under ``BB_FORCE_ASGI_SCOPE=1`` the *app*
+    gets a scope dict while the recipient still gets the ``Connection``.  So
+    the dict shape ``bind`` used to accept — the ``_connection`` stash lookup,
+    the ``conn['headers']`` fallback, the ``Headers`` re-wrap — was reachable
+    from tests alone, and every request paid the branch to keep it.
+    """
+    from beartype.roar import BeartypeCallHintParamViolation
+
+    r = HTTP1Recipient(AsyncioReader(_Source()), _conn([]))
+
+    # Uninstrumented the dict fails on ``conn.headers``; under
+    # ``--beartype-packages=blackbull`` the annotation rejects it first.
+    with pytest.raises((AttributeError, BeartypeCallHintParamViolation)):
+        r.bind({'path': '/p', 'headers': [(b'content-length', b'2')]})
+
+
+def test_rebinding_reads_the_connection_directly():
+    """A rebound recipient frames from the Connection's own Headers object."""
+    conn = _conn([(b'content-length', b'5')])
+    r = HTTP1Recipient(AsyncioReader(_Source(b'hello')), conn)
+
+    assert r._content_length == 5
+    assert r._req_path == '/p'
+    assert r._chunked is False
+
+    r.bind(_conn([(b'transfer-encoding', b'chunked')], path='/q'))
+
+    assert r._chunked is True
+    assert r._content_length is None
+    assert r._req_path == '/q'

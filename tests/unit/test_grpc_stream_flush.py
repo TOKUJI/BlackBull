@@ -18,6 +18,7 @@ import pytest
 
 from blackbull.grpc import GrpcServiceRegistry, encode_message, decode_messages
 from blackbull.grpc.asgi import serve_grpc
+from blackbull.native import NativeResponse
 
 
 def _grpc_scope(path):
@@ -58,7 +59,12 @@ async def test_message_delivered_while_producer_blocks():
     events = []
 
     async def send(event):
-        events.append(event)
+        # gRPC emits native on the seam; these assertions are
+        # about the wire, so expand to the ASGI events it stands for.
+        if isinstance(event, NativeResponse):
+            events.extend(event.to_asgi())
+        else:
+            events.append(event)
 
     call = asyncio.create_task(serve_grpc(
         reg, _grpc_scope('/watch.W/Watch'),
@@ -98,7 +104,12 @@ async def test_synchronous_burst_still_batches():
     events = []
 
     async def send(event):
-        events.append(event)
+        # gRPC emits native on the seam; these assertions are
+        # about the wire, so expand to the ASGI events it stands for.
+        if isinstance(event, NativeResponse):
+            events.extend(event.to_asgi())
+        else:
+            events.append(event)
 
     await serve_grpc(reg, _grpc_scope('/bulk.B/Burst'),
                      _receive_with(encode_message(b'')), send)
@@ -125,7 +136,12 @@ async def test_slow_producer_flushes_each_message():
     events = []
 
     async def send(event):
-        events.append(event)
+        # gRPC emits native on the seam; these assertions are
+        # about the wire, so expand to the ASGI events it stands for.
+        if isinstance(event, NativeResponse):
+            events.extend(event.to_asgi())
+        else:
+            events.append(event)
 
     await serve_grpc(reg, _grpc_scope('/slow.S/Tick'),
                      _receive_with(encode_message(b'')), send)

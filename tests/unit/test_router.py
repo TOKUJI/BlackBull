@@ -221,7 +221,7 @@ async def test_router_websocket(router):
 # ---------------------------------------------------------------------------
 
 def test_call_next_detected_as_middleware_param():
-    async def mw(scope, receive, send, call_next):
+    async def mw(conn, receive, send, call_next):
         pass
     assert _middleware_param(mw) == 'call_next'
     assert has_middleware_param(mw) is True
@@ -245,8 +245,8 @@ def test_plain_handler_has_no_middleware_param():
 async def test_chain_built_with_call_next_name(router):
     path = 'test_cn'
 
-    async def mw(scope, receive, send, call_next):
-        res = await call_next(scope, receive, send)
+    async def mw(conn, receive, send, call_next):
+        res = await call_next(conn, receive, send)
         return res + '_mw'
 
     async def handler(scope, receive, send):
@@ -278,7 +278,7 @@ async def test_chain_short_circuits_when_call_next_not_called(router):
     path = 'test_sc'
     called = []
 
-    async def mw(scope, receive, send, call_next):
+    async def mw(conn, receive, send, call_next):
         called.append('mw')
         return 'short'
 
@@ -301,8 +301,8 @@ async def test_chain_short_circuits_when_call_next_not_called(router):
 async def test_middlewares_decorator_registers_route(router):
     path = 'test_mw_dec'
 
-    async def mw(scope, receive, send, call_next):
-        return await call_next(scope, receive, send)
+    async def mw(conn, receive, send, call_next):
+        return await call_next(conn, receive, send)
 
     @router.route(methods=[HTTPMethod.GET], path=path, middlewares=[mw])
     async def handler(scope, receive, send):
@@ -317,15 +317,15 @@ async def test_middlewares_chain_runs_in_order(router):
     path = 'test_mw_order'
     log = []
 
-    async def mw1(scope, receive, send, call_next):
+    async def mw1(conn, receive, send, call_next):
         log.append('mw1_before')
-        res = await call_next(scope, receive, send)
+        res = await call_next(conn, receive, send)
         log.append('mw1_after')
         return res
 
-    async def mw2(scope, receive, send, call_next):
+    async def mw2(conn, receive, send, call_next):
         log.append('mw2_before')
-        res = await call_next(scope, receive, send)
+        res = await call_next(conn, receive, send)
         log.append('mw2_after')
         return res
 
@@ -344,7 +344,7 @@ async def test_middlewares_short_circuits(router):
     path = 'test_mw_sc'
     called = []
 
-    async def guard(scope, receive, send, call_next):
+    async def guard(conn, receive, send, call_next):
         called.append('guard')
         return 'blocked'
 
@@ -362,8 +362,8 @@ async def test_middlewares_short_circuits(router):
 def test_middlewares_handler_returned_unchanged(router):
     path = 'test_mw_ret'
 
-    async def mw(scope, receive, send, call_next):
-        return await call_next(scope, receive, send)
+    async def mw(conn, receive, send, call_next):
+        return await call_next(conn, receive, send)
 
     @router.route(methods=[HTTPMethod.GET], path=path, middlewares=[mw])
     async def handler(scope, receive, send):
@@ -401,9 +401,9 @@ def app_():
 async def test_group_middleware_runs_for_every_route(app_):
     log = []
 
-    async def group_mw(scope, receive, send, call_next):
+    async def group_mw(conn, receive, send, call_next):
         log.append('group_mw')
-        return await call_next(scope, receive, send)
+        return await call_next(conn, receive, send)
 
     grp = app_.group(middlewares=[group_mw])
 
@@ -431,13 +431,13 @@ async def test_group_middleware_runs_for_every_route(app_):
 async def test_group_per_route_middleware_appended_after_group(app_):
     order = []
 
-    async def group_mw(scope, receive, send, call_next):
+    async def group_mw(conn, receive, send, call_next):
         order.append('group')
-        return await call_next(scope, receive, send)
+        return await call_next(conn, receive, send)
 
-    async def route_mw(scope, receive, send, call_next):
+    async def route_mw(conn, receive, send, call_next):
         order.append('route')
-        return await call_next(scope, receive, send)
+        return await call_next(conn, receive, send)
 
     grp = app_.group(middlewares=[group_mw])
 
@@ -455,7 +455,7 @@ async def test_group_per_route_middleware_appended_after_group(app_):
 async def test_group_short_circuit_prevents_handler(app_):
     called = []
 
-    async def guard(scope, receive, send, call_next):
+    async def guard(conn, receive, send, call_next):
         called.append('guard')
         return 'blocked'
 
@@ -476,9 +476,9 @@ async def test_group_short_circuit_prevents_handler(app_):
 async def test_group_routes_independent_of_non_group_routes(app_):
     log = []
 
-    async def group_mw(scope, receive, send, call_next):
+    async def group_mw(conn, receive, send, call_next):
         log.append('group_mw')
-        return await call_next(scope, receive, send)
+        return await call_next(conn, receive, send)
 
     grp = app_.group(middlewares=[group_mw])
 
@@ -504,8 +504,8 @@ async def test_middleware_chain_path_param_injected_into_scope(router):
     path = 'items/{item_id}'
     seen = {}
 
-    async def mw(scope, receive, send, call_next):
-        return await call_next(scope, receive, send)
+    async def mw(conn, receive, send, call_next):
+        return await call_next(conn, receive, send)
 
     async def handler(scope, receive, send):
         seen.update(scope['_connection'].path_params)
@@ -543,7 +543,7 @@ class TestSimplifiedHandlerDetection:
         assert _is_simplified_handler(fn) is False
 
     def test_middleware_not_simplified(self):
-        async def fn(scope, receive, send, call_next): pass
+        async def fn(conn, receive, send, call_next): pass
         assert _is_simplified_handler(fn) is False
 
     def test_middleware_inner_not_simplified(self):
@@ -984,9 +984,9 @@ class TestSimplifiedHandlerRegistration:
         """Simplified handler at the end of a middlewares=[...] chain."""
         seen = []
 
-        async def mw(scope, receive, send, call_next):
+        async def mw(conn, receive, send, call_next):
             seen.append('mw')
-            await call_next(scope, receive, send)
+            await call_next(conn, receive, send)
 
         @router.route(path='/tasks/{task_id}', methods=[HTTPMethod.GET],
                       middlewares=[mw])
@@ -1005,9 +1005,9 @@ class TestSimplifiedHandlerRegistration:
         """Simplified handler as the last item in functions=[...]."""
         seen = []
 
-        async def mw(scope, receive, send, call_next):
+        async def mw(conn, receive, send, call_next):
             seen.append('mw')
-            await call_next(scope, receive, send)
+            await call_next(conn, receive, send)
 
         async def get_task(task_id: int):
             seen.append(task_id)

@@ -17,7 +17,7 @@ from blackbull import BlackBull, Response
 app = BlackBull()
 
 @app.route(methods=[HTTPMethod.GET], path='/tasks')
-async def list_tasks(scope, receive, send):
+async def list_tasks(conn, receive, send):
     await send(Response(b'[]'))
 ```
 
@@ -26,7 +26,7 @@ multiple methods on the same handler:
 
 ```python
 @app.route(methods=[HTTPMethod.GET, HTTPMethod.HEAD], path='/healthz')
-async def healthz(scope, receive, send):
+async def healthz(conn, receive, send):
     await send(Response(b'ok'))
 ```
 
@@ -108,13 +108,13 @@ Two more RFC 10008 notes:
 ## Path parameters
 
 Use `{name}` segments in the path string.  Captured values are
-available in `scope['path_params']` (and, in the simplified form,
+available as `conn.path_params` (and, in the simplified form,
 injected as named arguments):
 
 ```python
 @app.route(path='/tasks/{task_id}')
-async def get_task(scope, receive, send):
-    task_id = scope['path_params']['task_id']   # str (default converter)
+async def get_task(conn, receive, send):
+    task_id = conn.path_params['task_id']       # str (default converter)
     await send(Response(task_id.encode()))
 ```
 
@@ -125,15 +125,15 @@ see [Typed routes](#typed-routes) below.
 ### Regex patterns
 
 For fully custom patterns supply a compiled regex with named groups;
-the captured values are injected into `scope['path_params']` — the
+the captured values are injected into `conn.path_params` — the
 same place as `{name}` parameters:
 
 ```python
 import re
 
 @app.route(path=re.compile(r'^/items/(?P<id>\d+)$'))
-async def get_item(scope, receive, send):
-    item_id = scope['path_params']['id']
+async def get_item(conn, receive, send):
+    item_id = conn.path_params['id']
     await send(Response(item_id.encode()))
 ```
 
@@ -250,11 +250,11 @@ public    = app.group(middlewares=[error_mw, logging_mw])
 protected = app.group(middlewares=[error_mw, logging_mw, auth_mw])
 
 @public.route(methods=[HTTPMethod.GET], path='/')
-async def index(scope, receive, send):
+async def index(conn, receive, send):
     await send(Response(b'<h1>Login</h1>'))
 
 @protected.route(methods=[HTTPMethod.GET], path='/tasks')
-async def get_tasks(scope, receive, send):
+async def get_tasks(conn, receive, send):
     return []                               # → JSONResponse
 ```
 
@@ -265,7 +265,7 @@ middlewares:
 # Effective chain: error_mw → logging_mw → auth_mw → json_body_mw → create_task
 @protected.route(methods=[HTTPMethod.POST], path='/tasks',
                  middlewares=[json_body_mw])
-async def create_task(scope, receive, send):
+async def create_task(conn, receive, send):
     ...
 ```
 

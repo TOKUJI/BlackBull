@@ -19,6 +19,7 @@
 #   ROUNDS(=8) DURATION(=15) WARMUP(=5) THREADS(=4) CONNS(=32)
 #   PORT(=8443) BB_UVLOOP(=0) PIPELINE(=1) PHASES(=null real)
 #   SERVER_CPUS(=0-1) LOAD_CPUS(=2-5)
+#   WRK_HEADERS (extra wrk header args, e.g. '-H Accept-Encoding:gzip')
 #   URL_PATH(=/plaintext) or URL_PATHS (comma-separated — multiple sessions)
 #   EXPECT_LINES (raw.tsv completeness per session; default 1+ROUNDS*8)
 #   AB_FINISH_LOG (finish progress log; default bench/results/ab-finish.log)
@@ -48,6 +49,8 @@ SERVER_CPUS="${SERVER_CPUS:-0-1}"
 LOAD_CPUS="${LOAD_CPUS:-2-5}"
 URL_PATH="${URL_PATH:-/plaintext}"
 URL_PATHS="${URL_PATHS:-}"
+PEER_MW="${PEER_MW:-}"
+WRK_HEADERS="${WRK_HEADERS:-}"
 EXPECT_LINES="${EXPECT_LINES:-$((1 + ROUNDS * 8))}"
 AB_FINISH_LOG="${AB_FINISH_LOG:-$REPO_ROOT/bench/results/ab-finish.log}"
 AB_POLLS="${AB_POLLS:-300}"
@@ -63,6 +66,8 @@ ab_env() {  # $1 = url
         "$DURATION" "$WARMUP" "$THREADS" "$CONNS" "$PORT" "$BB_UVLOOP"
     printf "PIPELINE='%s' PHASES='%s' SERVER_CPUS='%s' LOAD_CPUS='%s' " \
         "$PIPELINE" "$PHASES" "$SERVER_CPUS" "$LOAD_CPUS"
+    printf "PEER_MW='%s' " "$PEER_MW"
+    printf "WRK_HEADERS='%s' " "$WRK_HEADERS"
 }
 
 case "$MODE" in
@@ -92,7 +97,10 @@ launch)
         echo 'set -uo pipefail'
         printf 'cd %q\n' "$REMOTE_REPO"
         for u in "${URLS[@]}"; do
-            log="bench/results/ec2-ab-${u#/}.log"
+            # The URL path (e.g. /static/static_ab.js) becomes part of the
+            # log filename; a nested slash must not, or the shell redirect
+            # fails on the missing directory and the runner dies instantly.
+            log="bench/results/ec2-ab-$(printf '%s' "${u#/}" | tr '/' '_').log"
             printf 'env %s bash bench/peers/ab_commit.sh > %q 2>&1\n' "$(ab_env "$u")" "$log"
         done
     } > "$RUNNER"

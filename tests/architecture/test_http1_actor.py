@@ -583,14 +583,15 @@ class TestAccessLogging:
         actor._app = fake_app
         actor._aggregator = aggregator
         actor._writer = writer
-        actor._disconnect_code = WSCloseCode.ABNORMAL
         actor._ws_receive = fake_receive
         actor._ws_send = AsyncMock()
 
-        # Simulate disconnect code capture via _receive
-        event = await actor._receive()  # connect
+        # The close code lives on the recipient, which records it for both
+        # encodings; the actor derives ``_disconnect_code`` from there rather
+        # than intercepting every event to keep a second copy.
+        fake_receive.terminal_code = None
         assert actor._disconnect_code == WSCloseCode.ABNORMAL
-        event = await actor._receive()  # disconnect with code 1001
+        fake_receive.terminal_code = 1001
         assert actor._disconnect_code == 1001
 
     async def test_http2_access_log_emitted_per_stream(self, caplog):

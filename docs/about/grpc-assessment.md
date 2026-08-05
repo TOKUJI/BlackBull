@@ -94,7 +94,7 @@ gRPC server has to provide:
 | Trailers (`http.response.trailers`) | ✓ | Both HTTP/1.1 (chunked) and HTTP/2 paths.  Implemented in `HTTP1Sender` and `HTTP2Sender`. |
 | Bidirectional streaming | ⚠ | `receive()` returns successive `http.request` events as DATA frames arrive; `send()` writes back.  No special bidi support, but the primitives exist. |
 | Per-stream cancellation | ⚠ partial | `RST_STREAM` triggers `http.disconnect` on `receive()`.  Adequate signal; not a first-class cancellation primitive. |
-| Send-side flow-control visibility | ✓ as of v0.31 | `scope['extensions']['http.response.http2_stream']` snapshots `send_window_remaining` and `connection_send_window_remaining`.  See *What Sprint 32 unlocks* below. |
+| Send-side flow-control visibility | ✓ as of v0.31 | `conn.extensions['http.response.http2_stream']` snapshots `send_window_remaining` and `connection_send_window_remaining`.  See *What Sprint 32 unlocks* below. |
 | `application/grpc` content negotiation | ✓ Sprint 57 | `BlackBull._dispatch` routes `content-type: application/grpc` to `serve_grpc` when `app.enable_grpc()` was called. |
 | Length-prefixed message framing | ✓ Sprint 57 | `blackbull.grpc.codec.encode_message` / `decode_messages` — pure binary, protobuf-free. |
 | `grpc-status` trailer + RST-code mapping | ✓ Sprint 57 (unary) | `blackbull.grpc.GrpcStatus` + the `serve_grpc` trailers path; `grpc-message` is percent-encoded per spec. |
@@ -106,15 +106,15 @@ we already have.
 
 ## What Sprint 32 unlocks
 
-Sprint 32 added `scope['extensions']['http.response.http2_stream']`
+Sprint 32 added `conn.extensions['http.response.http2_stream']`
 exposing `send_window_remaining` and
 `connection_send_window_remaining` (per RFC 9113 §5.2).  This is
 the missing primitive a gRPC server-streaming implementation
 needs to back-pressure correctly:
 
 ```python
-async def server_streaming_rpc(scope, receive, send):
-    ext = scope['extensions']['http.response.http2_stream']
+async def server_streaming_rpc(conn, receive, send):
+    ext = conn.extensions['http.response.http2_stream']
     for msg in produce_many_messages():
         # If send window is below a threshold, the peer's recv buffer
         # is filling up — defer the next message via cooperative yield
@@ -146,7 +146,7 @@ In rough order of effort:
    - Re-read the dict and have the populate site re-snapshot
      (requires a hook); or
    - Replace the scalar with a tiny callable
-     (`scope['extensions']['http.response.http2_stream']['send_window']()`)
+     (`conn.extensions['http.response.http2_stream']['send_window']()`)
      that reads the sender's current state.
 
 2. **`application/grpc` content-type routing** (small, ~1-2 days).

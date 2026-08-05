@@ -30,17 +30,17 @@ app.run(port=8080)   # serves both HTTP/1.1 and h2c on the same socket
 
 HTTP/2 lets a client tell the server which of its outstanding
 requests is more important.  BlackBull surfaces the hint on the
-scope so your app can act on it.
+the `Connection` so your app can act on it.
 
-### What lands on `scope`
+### What lands on the `Connection`
 
-Every HTTP/2 request scope advertises the priority hint via the
+Every HTTP/2 request advertises the priority hint via the
 `http.response.priority` ASGI extension (matches gunicorn's beta
 HTTP/2 key shape; the *contents* are RFC 9218 urgency/incremental,
 not the deprecated RFC 7540 weight/tree):
 
 ```python
-scope['extensions']['http.response.priority']
+conn.extensions['http.response.priority']
 # → {'urgency': int, 'incremental': bool}
 ```
 
@@ -65,9 +65,8 @@ For HTTP/1.1 requests the extension key is absent.  Always use
 _DEFAULT_PRIORITY = {'urgency': 3, 'incremental': False}
 
 @app.route(path='/search')
-async def search(scope, receive, send):
-    ext = scope.get('extensions') or {}
-    hint = ext.get('http.response.priority', _DEFAULT_PRIORITY)
+async def search(conn, receive, send):
+    hint = conn.extensions.get('http.response.priority', _DEFAULT_PRIORITY)
     if hint['urgency'] <= 2:
         # High-urgency: return cached / pre-computed result immediately
         result = get_cached_result()
@@ -82,9 +81,9 @@ async def search(scope, receive, send):
 ```python
 @app.intercept('before_handler')
 async def handle_priority(event):
-    scope = event.detail['conn']
-    ext = scope.get('extensions') or {}
-    hint = ext.get('http.response.priority', {'urgency': 3, 'incremental': False})
+    conn = event.detail['conn']
+    hint = conn.extensions.get('http.response.priority',
+                                {'urgency': 3, 'incremental': False})
     if hint['urgency'] <= 1:
         logger.info('HIGH-PRIORITY u=%d: %s %s',
                     hint['urgency'], event.detail['method'], event.detail['path'])
@@ -94,7 +93,7 @@ async def handle_priority(event):
 
 Earlier BlackBull releases exposed priority as a top-level scope
 key, `scope['http2_priority']`.  v0.31 moved it under
-`scope['extensions']` to match ASGI conventions and align the key
+`conn.extensions` to match ASGI conventions and align the key
 name with gunicorn's beta HTTP/2 surface.  The legacy key is still
 populated alongside the new extension during the v0.31 cycle and
 is scheduled for removal in v0.32.0.
@@ -102,14 +101,13 @@ is scheduled for removal in v0.32.0.
 To migrate, replace:
 
 ```python
-hint = scope.get('http2_priority', DEFAULT)            # legacy
+hint = scope.get('http2_priority', DEFAULT)            # legacy (pre-v0.31)
 ```
 
 with:
 
 ```python
-ext = scope.get('extensions') or {}
-hint = ext.get('http.response.priority', DEFAULT)       # v0.31+
+hint = conn.extensions.get('http.response.priority', DEFAULT)   # v0.31+
 ```
 
 The dict shape (`{'urgency': int, 'incremental': bool}`) is
@@ -118,12 +116,12 @@ unchanged.
 ### HTTP/2 stream info (gRPC foundation)
 
 Alongside the priority extension, v0.31 adds
-`scope['extensions']['http.response.http2_stream']` — a snapshot of
+`conn.extensions['http.response.http2_stream']` — a snapshot of
 the HTTP/2 stream identity and send-flow-control credit at request
 entry:
 
 ```python
-scope['extensions']['http.response.http2_stream']
+conn.extensions['http.response.http2_stream']
 # → {'stream_id': int, 'send_window_remaining': int,
 #    'connection_send_window_remaining': int}
 ```
@@ -134,7 +132,7 @@ scope['extensions']['http.response.http2_stream']
 | `send_window_remaining` | Bytes the peer will currently accept on this stream before WINDOW_UPDATE |
 | `connection_send_window_remaining` | Same, at the connection level |
 
-The window values are snapshots taken at scope-build time; they
+The window values are snapshots taken when the `Connection` is built; they
 move as the response body streams.  Applications that need
 live readings (e.g. gRPC server-streaming back-pressure) can
 re-read the dict, though they will see the snapshot value unless
@@ -192,7 +190,7 @@ The app signals a push by calling `send` with an
 
 ```python
 @app.route(path='/')
-async def index(scope, receive, send):
+async def index(conn, receive, send):
     # Push a stylesheet before sending the HTML.
     await send({
         'type': 'http.response.push',
@@ -217,7 +215,7 @@ automatically — do not include them in `headers`.
 2. Sends a `PUSH_PROMISE` frame on the parent stream.  The frame
    contains the synthetic request headers (`GET /static/style.css`)
    the client can use to match its cache.
-3. Creates a synthetic scope (`type='http'`, `method='GET'`,
+3. Creates a synthetic `Connection` (`type='http'`, `method='GET'`,
    `path='/static/style.css'`) and dispatches it to your app as
    a new task on the promised stream.  Your app handles the
    pushed request exactly like a normal GET — same route, same
@@ -225,15 +223,15 @@ automatically — do not include them in `headers`.
 
 ### Checking for support
 
-The server advertises push support in `scope['extensions']`:
+The server advertises push support in `conn.extensions`:
 
 ```python
-if 'http.response.push' in scope.get('extensions', {}):
+if 'http.response.push' in conn.extensions:
     await send({'type': 'http.response.push',
                 'path': '/logo.png', 'headers': []})
 ```
 
-For HTTP/1.1 requests `scope['extensions']` does not contain
+For HTTP/1.1 requests `conn.extensions` does not contain
 `'http.response.push'`, so the guard above keeps the same handler
 working on both protocols.
 
