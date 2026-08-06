@@ -459,10 +459,15 @@ def _validate_response_message(response) -> bytes:
     return bytes(response)
 
 
-def _response_start(content_type: bytes,
-                    response_encoding: bytes | None = None,
-                    initial_metadata: list[tuple[bytes, bytes]] | None = None
-                    ) -> NativeResponse:
+def _response_headers(content_type: bytes,
+                      response_encoding: bytes | None = None,
+                      initial_metadata: list[tuple[bytes, bytes]] | None = None
+                      ) -> list[tuple[bytes, bytes]]:
+    """The response header list, without deciding what object carries it.
+
+    Split from :func:`_response_start` so the unary path can fold these
+    headers into the same object as its body and trailers.
+    """
     headers = [(b'content-type', content_type),
                (b'grpc-accept-encoding', _GRPC_ACCEPT_ENCODING)]
     # Advertise the encoding used for any compressed response messages.  Present
@@ -474,7 +479,18 @@ def _response_start(content_type: bytes,
     # Handler-supplied leading metadata (context.send_initial_metadata).
     if initial_metadata:
         headers.extend(initial_metadata)
-    return NativeResponse(status=200, header=headers, expects_trailers=True)
+    return headers
+
+
+def _response_start(content_type: bytes,
+                    response_encoding: bytes | None = None,
+                    initial_metadata: list[tuple[bytes, bytes]] | None = None
+                    ) -> NativeResponse:
+    return NativeResponse(
+        status=200,
+        header=_response_headers(content_type, response_encoding,
+                                 initial_metadata),
+        expects_trailers=True)
 
 
 async def _serve_unary(handler, request, context, send, content_type,
@@ -513,13 +529,36 @@ async def _serve_unary(handler, request, context, send, content_type,
             send, context, GrpcStatus.INTERNAL, str(exc), content_type)
         return
 
-    await context._start_response()
-    await send(NativeResponse(
-        body=_frame_response(response, response_encoding is not None),
-        more_body=True))
-    await send(NativeResponse(
-        trailers=_status_trailers(context.code, context.details,
-                                  context._trailing)))
+    body = _frame_response(response, response_encoding is not None)
+    trailers = _status_trailers(context.code, context.details,
+                                context._trailing)
+
+    if context._started:
+        # ``send_initial_metadata`` already put HEADERS on the wire, so only
+        # the body and trailers are left.
+        await send(NativeResponse(body=body, more_body=True))
+        await send(NativeResponse(trailers=trailers))
+        return
+
+    # Nothing sent yet, and a unary response is fully known here — headers,
+    # body and status trailers all at once — so it goes as **one** object.
+    # Three objects cost three constructions and three sender dispatches to
+    # describe a single response.
+    #
+    # ``more_body=True`` is deliberate and load-bearing, not an oversight:
+    # HTTP2Sender only takes its trailers-coalescing path for a *non-terminal*
+    # body chunk, holding HEADERS + DATA so they flush together with the
+    # trailing HEADERS in one write.  END_STREAM belongs on the trailers
+    # either way (RFC 9113 §8.1); marking the body terminal here would split
+    # that single write in two.
+    context._started = True
+    await send(NativeResponse(status=200,
+                              header=_response_headers(
+                                  content_type, response_encoding,
+                                  context._initial_metadata),
+                              expects_trailers=True,
+                              body=body, more_body=True,
+                              trailers=trailers))
 
 
 async def _serve_server_streaming(handler, request, context, send, content_type,
