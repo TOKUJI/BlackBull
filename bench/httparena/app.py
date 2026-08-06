@@ -58,6 +58,14 @@ if os.path.isdir(_repo_root) and _repo_root not in sys.path:
     sys.path.insert(0, _repo_root)
 
 from blackbull import BlackBull, Connection, Depends, JSONResponse, Response
+
+# The object-form WebSocket, for the /ws-object lane.  Guarded like the gRPC
+# import below: versions old enough to predate it still serve every other
+# profile, they just don't offer the native-channel endpoint.
+try:
+    from blackbull.websocket import WebSocket
+except ImportError:                                   # pragma: no cover
+    WebSocket = None
 from blackbull.middleware.compression import Compression
 
 import db
@@ -232,6 +240,21 @@ async def ws_echo(scope, receive, send):
         else:
             await send({'type': 'websocket.send',
                         'bytes': event.get('bytes') or b''})
+
+
+# The same echo in object form.  `/ws` above is the raw ASGI form — it mints a
+# `websocket.receive` dict per message and sends dicts back — so the echo-ws
+# profiles measure the compat boundary and say nothing about the native
+# channel.  This endpoint takes `next_message()` / `NativeWSMessage` instead;
+# point a run at it (HttpArena's echo-ws URL, or WS_PATH in ab_commit_ws.sh)
+# to measure the two channels against each other on one build.
+if WebSocket is not None:
+    @app.route(path='/ws-object', methods=[HTTPMethod.GET],
+               scheme=Scheme.websocket)
+    async def ws_echo_object(ws: WebSocket):
+        await ws.accept()
+        async for message in ws:
+            await ws.send(message)
 
 
 # ---------------------------------------------------------------------------
