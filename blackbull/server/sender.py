@@ -1480,9 +1480,37 @@ class WebSocketSender(BaseSender):
     async def __call__(self, body: '_WSSenderEvent | NativeWSMessage',
                        _status: HTTPStatus | None = None,
                        _headers: HeaderList = []):
+        # Dict arm first.  A dict is the one shape here that nothing cheaper
+        # than ``isinstance`` can recognise, and it is what the external-host
+        # edge and the raw (conn, receive, send) compat form emit.  Testing it
+        # first means the compat path pays one check; the native arm below
+        # pays the same one on its way past, where it used to pay one and the
+        # compat path two — the second being a pure type guard.
+        if isinstance(body, dict):
+            event_type = body.get('type', '')
+
+            match event_type:
+
+                case ASGIEvent.WS_SEND:
+                    if 'text' in body and body['text'] is not None:
+                        await self._send_payload(body['text'].encode('utf-8'),
+                                                 WSOpcode.TEXT)
+                    else:
+                        await self._send_payload(body.get('bytes', b''),
+                                                 WSOpcode.BINARY)
+
+                case ASGIEvent.WS_CLOSE:
+                    await self._send_close(body.get('code', WSCloseCode.NORMAL))
+
+                case ASGIEvent.WS_ACCEPT:
+                    pass  # handshake reply sent by HTTP1Actor._do_ws_handshake()
+                case _:
+                    logger.warning('WebSocketSender: unknown event type %r',
+                                   event_type)
+            return
+
         # Native arm (the WS counterpart of the HTTP ``case NativeResponse():``
-        # seam).  BlackBull's own path emits these; the dict arm below is the
-        # external-host edge and the raw (conn, receive, send) compat surface.
+        # seam).  BlackBull's own object path emits these.
         if isinstance(body, NativeWSMessage):
             match body.kind:
                 case NativeWSMessage.SEND:
@@ -1503,30 +1531,9 @@ class WebSocketSender(BaseSender):
                                    body.kind)
             return
 
-        if not isinstance(body, dict):
-            raise TypeError(
-                f'WebSocketSender expected a NativeWSMessage or a dict, '
-                f'got {type(body)!r}')
-
-        event_type = body.get('type', '')
-
-        match event_type:
-
-            case ASGIEvent.WS_SEND:
-                if 'text' in body and body['text'] is not None:
-                    await self._send_payload(body['text'].encode('utf-8'),
-                                             WSOpcode.TEXT)
-                else:
-                    await self._send_payload(body.get('bytes', b''),
-                                             WSOpcode.BINARY)
-
-            case ASGIEvent.WS_CLOSE:
-                await self._send_close(body.get('code', WSCloseCode.NORMAL))
-
-            case ASGIEvent.WS_ACCEPT:
-                pass  # handshake reply is sent by HTTP1Actor._do_ws_handshake()
-            case _:
-                logger.warning('WebSocketSender: unknown event type %r', event_type)
+        raise TypeError(
+            f'WebSocketSender expected a NativeWSMessage or a dict, '
+            f'got {type(body)!r}')
 
 
 

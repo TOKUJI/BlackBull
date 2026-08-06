@@ -155,3 +155,45 @@ def test_close_reason_is_omitted_when_empty():
     """ASGI treats a missing reason and an empty one alike; don't invent keys."""
     assert 'reason' not in NativeWSMessage.close(1000).to_asgi()[0]
     assert NativeWSMessage.close(1000, 'bye').to_asgi()[0]['reason'] == 'bye'
+
+
+# ---------------------------------------------------------------------------
+# Dispatch order: the compat path must not pay for the native arm
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_dict_send_does_not_consult_the_native_type(monkeypatch):
+    """A dict is dispatched without an ``isinstance(_, NativeWSMessage)``.
+
+    The native arm was added ahead of the dict arm, and the dict arm then
+    still ran ``not isinstance(body, dict)`` as a type guard — so every send
+    from the raw ``(conn, receive, send)`` form and every external ASGI host
+    paid two type checks where it had paid none.  That is +71 ns on a ~734 ns
+    send, on the path every `echo-ws` benchmark and every uvicorn-hosted app
+    takes.
+
+    Ordering is the fix, so ordering is what this asserts: the dict arm is
+    reached without the native type being consulted at all.  A timing test
+    would be flaky; an instance-check counter is exact.
+    """
+    import blackbull.server.sender as sender_mod
+
+    consulted = []
+
+    class _Watched(type):
+        def __instancecheck__(cls, obj):     # noqa: N805 - metaclass protocol
+            consulted.append(type(obj))
+            return isinstance(obj, NativeWSMessage)
+
+    class _WatchedNativeWSMessage(metaclass=_Watched):
+        pass
+
+    monkeypatch.setattr(sender_mod, 'NativeWSMessage', _WatchedNativeWSMessage)
+
+    writer = _CollectingWriter()
+    await WebSocketSender(writer)({'type': 'websocket.send', 'text': 'hi'})
+
+    assert writer.out, 'the dict send produced no bytes'
+    assert consulted == [], (
+        f'the dict path consulted NativeWSMessage {len(consulted)}x — the '
+        f'native arm is being tested before the dict arm again')

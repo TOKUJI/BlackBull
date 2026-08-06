@@ -32,6 +32,11 @@
 #   WS_TICK_MS    message burst period        (default 1)
 #   WS_BURST      messages per tick           (default 8)
 #   WS_LIFETIME_MS socket lifetime            (default 8000)
+#   WS_PATH       echo endpoint               (default /ws)
+#                 /ws        = raw (conn, receive, send) form, ASGI dicts
+#                 /ws-object = object form, the native channel
+#                 Both are served by the same app, so switching this changes
+#                 the code path under test and nothing else.
 #
 # Output: bench/results/ab-ws-<UTC>/report.md + raw.tsv + k6 summaries.
 
@@ -54,6 +59,7 @@ WS_DURATION="${WS_DURATION:-10s}"
 WS_TICK_MS="${WS_TICK_MS:-1}"
 WS_BURST="${WS_BURST:-8}"
 WS_LIFETIME_MS="${WS_LIFETIME_MS:-8000}"
+WS_PATH="${WS_PATH:-/ws}"
 # Server and load generator on disjoint cores — same bimodality argument as
 # ab_commit.sh: unpinned, the two fight for the same cores and the
 # distribution goes bimodal, swamping a refactor-scale delta.
@@ -89,7 +95,7 @@ mkdir -p "$OUTDIR"
 REPORT="$OUTDIR/report.md"
 RAW="$OUTDIR/raw.tsv"
 BASE_URL="http://127.0.0.1:${PORT}"
-WS_URL="ws://127.0.0.1:${PORT}/ws"
+WS_URL="ws://127.0.0.1:${PORT}${WS_PATH}"
 
 SHA_BASE="$(git rev-parse --short "$REF_BASE")"
 SHA_TREAT="$(git rev-parse --short "$REF_TREAT")"
@@ -246,7 +252,7 @@ printf 'phase\tround\tarm\trps\tproof\n' >"$RAW"
 
 echo "ab_commit_ws.sh: $SHA_BASE (base) vs $SHA_TREAT (treat)"
 echo "  files: ${FILES[*]}"
-echo "  lane : WebSocket echo, k6 -$WS_VUS conns -d$WS_DURATION (tick ${WS_TICK_MS}ms x${WS_BURST}) -> msg/s"
+echo "  lane : WebSocket echo $WS_PATH, k6 -$WS_VUS conns -d$WS_DURATION (tick ${WS_TICK_MS}ms x${WS_BURST}) -> msg/s"
 echo "  uvloop=$BB_UVLOOP  rounds=$ROUNDS (ABBA)"
 echo "  pin  : server=${SERVER_CPUS:-none} load=${LOAD_CPUS:-none}"
 echo "  phases: $PHASES"

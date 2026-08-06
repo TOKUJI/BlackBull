@@ -208,7 +208,14 @@ so the editable install's metadata catches up.
   its framing helpers with the dict arm, and a native accept arm on
   `WebSocketActor`.  `websocket.*` dicts now appear only at the enumerated
   boundaries: the external ASGI edge, the raw compat form, and the Tier-2 test
-  client.  A test asserts the two arms put **identical bytes on the wire**, so
+  client.  The sender tests the **dict** shape first: a dict is the one arm
+  here that nothing cheaper than `isinstance` recognises, so ordering it first
+  costs the native arm nothing and saves the compat path — every raw-form
+  handler and every external ASGI host — the second check it would otherwise
+  pay as a type guard.  Worth 61 ns on a ~800 ns send (ABBA, in-process,
+  n=16/arm); a test asserts the dict arm is reached without the native type
+  being consulted at all, so the ordering cannot regress silently.
+  A test asserts the two arms put **identical bytes on the wire**, so
   the compat surface cannot drift.
 
 - **The gRPC bridge emits native (proposal §7).**  `serve_grpc` is dispatched
