@@ -78,8 +78,7 @@ async def _emit_response(send, body: bytes, status, headers) -> None:
     """
     # One object, one send: the complete-response shape the native seam was
     # built for.  The dict form always cost two events for the same response.
-    await send(NativeResponse(status=int(status), header=list(headers),
-                              body=body))
+    await send(NativeResponse.complete(int(status), list(headers), body))
 
 
 class Response:
@@ -129,9 +128,8 @@ class Response:
         :meth:`NativeResponse.to_asgi` (the boundary conversion); streaming
         response types drive themselves and are not converted here.
         """
-        return NativeResponse(status=int(self.status),
-                              header=list(self.headers),
-                              body=self.body)
+        return NativeResponse.complete(int(self.status), list(self.headers),
+                                       self.body)
 
 
 class JSONResponse(Response):

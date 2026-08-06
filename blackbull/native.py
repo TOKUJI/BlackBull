@@ -221,6 +221,62 @@ class NativeResponse:
         # Mutually exclusive with ``body``: the bytes come from the file.
         self.file_path = file_path
 
+    # --- fast constructors for framework-owned producers -------------------
+    #
+    # `Connection` — the request-side native object — is built once per
+    # request by a generated dataclass ``__init__`` taking positional
+    # arguments.  The response side had no equivalent: every emission went
+    # through the keyword-only ``__init__`` above, and keyword dispatch with
+    # seven defaulted parameters is where the cost is.  Measured on the same
+    # slots: positional 105.9 ns, ``__new__`` + direct writes 102.9 ns,
+    # keyword 245.4 ns.  Bypassing ``__init__`` buys nothing on its own; the
+    # calling convention is the whole difference.
+    #
+    # These are deliberately *shape-specific* rather than one seven-argument
+    # ``_make``.  In slot order ``more_body`` and ``expects_trailers`` are two
+    # bools separated only by ``trailers``, so a positional catch-all would be
+    # a standing misordering trap for a saving of ~140 ns.  Each constructor
+    # below names the shape it builds and takes only what that shape varies.
+    #
+    # The public keyword ``__init__`` is unchanged and remains the form for
+    # application code and for any shape not covered here.
+
+    @classmethod
+    def complete(cls, status: int, header: list[tuple[bytes, bytes]],
+                 body: bytes | None) -> 'NativeResponse':
+        """Header plus terminal body — a whole response in one object."""
+        self = cls.__new__(cls)
+        self.status = status
+        self._header = header
+        self._body = body
+        self.more_body = False
+        self.trailers = None
+        self.expects_trailers = False
+        self.file_path = None
+        return self
+
+    @classmethod
+    def with_trailers(cls, status: int, header: list[tuple[bytes, bytes]],
+                      body: bytes | None,
+                      trailers: list[tuple[bytes, bytes]]) -> 'NativeResponse':
+        """Header, body and trailers together — the gRPC unary shape.
+
+        ``more_body`` is True by construction, and load-bearing:
+        ``HTTP2Sender`` only takes its trailers-coalescing path for a
+        *non-terminal* body chunk, holding HEADERS + DATA so they flush with
+        the trailing HEADERS in one write.  END_STREAM rides the trailers
+        either way (RFC 9113 §8.1).
+        """
+        self = cls.__new__(cls)
+        self.status = status
+        self._header = header
+        self._body = body
+        self.more_body = True
+        self.trailers = trailers
+        self.expects_trailers = True
+        self.file_path = None
+        return self
+
     # --- header: DX view, or None when absent -----------------------------
     @property
     def header(self) -> _HeaderView | None:
