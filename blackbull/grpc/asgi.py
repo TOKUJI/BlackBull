@@ -552,13 +552,11 @@ async def _serve_unary(handler, request, context, send, content_type,
     # either way (RFC 9113 §8.1); marking the body terminal here would split
     # that single write in two.
     context._started = True
-    await send(NativeResponse(status=200,
-                              header=_response_headers(
-                                  content_type, response_encoding,
-                                  context._initial_metadata),
-                              expects_trailers=True,
-                              body=body, more_body=True,
-                              trailers=trailers))
+    await send(NativeResponse.with_trailers(
+        200,
+        _response_headers(content_type, response_encoding,
+                          context._initial_metadata),
+        body, trailers))
 
 
 async def _serve_server_streaming(handler, request, context, send, content_type,
