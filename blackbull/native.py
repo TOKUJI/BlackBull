@@ -202,7 +202,13 @@ class NativeResponse:
                  expects_trailers: bool = False,
                  file_path: str | None = None) -> None:
         self.status = status
-        self.header = header          # setter stores into _header
+        # Write the slot directly rather than going through the ``header``
+        # property.  The setter is a descriptor call plus an isinstance test,
+        # and this constructor runs for every response the framework emits —
+        # once per HTTP response, three times per gRPC unary call.  The two
+        # branches below are the setter's, inlined; the property remains the
+        # public way to assign a header after construction.
+        self._header = header._items if isinstance(header, _HeaderView) else header
         self._body = body
         self.more_body = more_body
         self.trailers = trailers
