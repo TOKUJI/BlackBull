@@ -112,6 +112,26 @@ so the editable install's metadata catches up.
 
 ### Internal
 
+- **HttpArena correctness gate runs on WSL2; EC2 only ready-checks.**  New
+  `bench/httparena/build_wheel.sh` (git-archive wheel build + sha256 record),
+  `validate_local.sh` (clone+patch the `MDA2AV/HttpArena` harness, stage the
+  framework, pre-build the image, run `validate.sh` under a wall-clock bound,
+  verdict to `bench/results/httparena-local/<UTC>/verdict.txt`) and
+  `ready_check.sh` (minimal container/port/WS/TLS/h2c/gRPC smoke).
+  `run_httparena.sh` runs `ready_check.sh` in place of the full `validate.sh`
+  when `SKIP_VALIDATE=1`; `httparena_compare.sh` uploads it and records the
+  wheel sha256 in `provenance.md`.  The identity rule: validate and benchmark
+  the **same wheel file** (`BB_WHEEL_PATH`).
+
+- **HttpArena crud profile contract completed.**  The get-by-id route now
+  emits `x-cache: MISS|HIT` from the Redis cache status (the harness's
+  cache-aside check), and the create INSERT supplies the NOT NULL columns
+  (`active`, `tags`, `rating_score`, `rating_count`) the schema requires —
+  the harness's crud POST was 503 without them.  Both gaps previously caused
+  HttpArena's `validate.sh` to silently abort mid-crud (the empty `x-cache`
+  grep tripped `set -euo pipefail`), so validation never reached the later
+  profiles on EC2 either; the local gate surfaced and fixed them.
+
 - **Every framework-owned response producer emits native.**  `StaticFiles`
   (cache hit, sendfile, chunked fallback, and its error/`304` responses),
   the `CORS` preflight, and the `Cache` middleware's stored entries now build

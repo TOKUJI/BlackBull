@@ -228,8 +228,13 @@ async def crud_list(conn, category: str | None, page: int, limit: int) -> list[d
     return [_row_to_item(r) for r in rows]
 
 
-async def crud_get(pool, item_id: int) -> dict | None:
+async def crud_get(pool, item_id: int) -> tuple[dict | None, bool]:
     """Get a single item by id, served from the Redis cache when available.
+
+    Returns ``(item, cache_hit)`` — ``cache_hit`` True when the response came
+    from Redis, so the caller can emit the ``x-cache`` header the HttpArena
+    crud contract checks (MISS then HIT on the cache-aside probe, MISS after
+    an update invalidates).
 
     *pool* is injected via ``Depends(get_pool)`` — the plain-async provider
     form, deliberately **not** a per-request connection: a Redis cache hit
@@ -243,37 +248,44 @@ async def crud_get(pool, item_id: int) -> dict | None:
         try:
             cached = await rds.get(key)
             if cached is not None:
-                return json.loads(cached)
+                return json.loads(cached), True
         except Exception:  # noqa: BLE001 - cache miss on any Redis error
             pass
     if pool is None:
-        return None
+        return None, False
     try:
         async with pool.acquire() as conn:
             row = await conn.fetchrow(
                 'SELECT id, name, category, price, quantity, active, tags, '
                 'rating_score, rating_count FROM items WHERE id = $1', item_id)
     except Exception:  # noqa: BLE001
-        return None
+        return None, False
     if row is None:
-        return None
+        return None, False
     item = _row_to_item(row)
     if rds is not None:
         try:
             await rds.set(key, json.dumps(item).encode(), ex=_CACHE_TTL)
         except Exception:  # noqa: BLE001
             pass
-    return item
+    return item, False
 
 
 async def crud_create(conn, data: dict) -> bool:
-    """Insert (or upsert on id conflict) an item.  Returns success."""
+    """Insert (or upsert on id conflict) an item.  Returns success.
+
+    The schema declares ``active`` / ``tags`` / ``rating_score`` /
+    ``rating_count`` NOT NULL and the HttpArena POST body does not carry
+    them, so the INSERT supplies sensible defaults (active, empty tags,
+    zero ratings) — matching the columns the seeded rows use.
+    """
     if conn is None:
         return False
     try:
         await conn.execute(
-            'INSERT INTO items (id, name, category, price, quantity) '
-            'VALUES ($1, $2, $3, $4, $5) '
+            'INSERT INTO items (id, name, category, price, quantity, active, '
+            'tags, rating_score, rating_count) '
+            'VALUES ($1, $2, $3, $4, $5, true, \'[]\'::jsonb, 0, 0) '
             'ON CONFLICT (id) DO UPDATE SET '
             'name = EXCLUDED.name, category = EXCLUDED.category, '
             'price = EXCLUDED.price, quantity = EXCLUDED.quantity',

@@ -58,6 +58,24 @@ if [ "$SKIP_VALIDATE" != "1" ]; then
             fi
         fi
     done
+elif [ -x "$HOME/ready_check.sh" ]; then
+    # SKIP_VALIDATE=1 is set when the wheel was already validated locally
+    # (WSL2, bench/httparena/validate_local.sh).  The full 20-profile contract
+    # was checked there; here we only smoke the EC2-environment residues the
+    # local box cannot see (container start, port binds, wheel transfer, shim).
+    echo "=== HttpArena ready-check (WSL2-validated wheel; minimal smoke) ==="
+    for fw in "${FRAMEWORKS[@]}"; do
+        echo "  - $fw"
+        if bash "$HOME/ready_check.sh" "$fw" 2>&1 \
+               | tee "$RESULTS_DIR/readycheck-${fw}.log"; then
+            echo "    ready-check $fw: PASS"
+        else
+            echo "    ready-check $fw: FAIL (see readycheck-${fw}.log)"
+        fi
+    done
+else
+    echo "SKIP_VALIDATE=1 but ~/ready_check.sh is missing — skipping the "
+         "correctness gate entirely."
 fi
 
 # ── Benchmark ──────────────────────────────────────────────────────────────
