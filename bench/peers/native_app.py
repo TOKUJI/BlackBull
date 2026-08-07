@@ -12,6 +12,7 @@ from urllib.parse import parse_qs
 
 from blackbull import BlackBull, Connection, Response
 from blackbull.utils import Scheme
+from blackbull.websocket import WebSocket
 
 app = BlackBull()
 
@@ -144,6 +145,21 @@ async def ws_echo(conn, receive, send):
         else:
             await send({"type": "websocket.send",
                         "bytes": event.get("bytes") or b""})
+
+
+@app.route(path="/ws-object", methods=[HTTPMethod.GET], scheme=Scheme.websocket)
+async def ws_echo_object(ws: WebSocket):
+    """The same echo, object form — the native send/receive channel.
+
+    Registered alongside /ws so the two channels can be compared in one
+    process, on one build, with the load generator the only thing that
+    changes.  /ws is the raw form: it mints a `websocket.receive` dict per
+    message and sends dicts back, which is the ASGI compat boundary.  This
+    one takes `next_message()` / `NativeWSMessage` and pays neither.
+    """
+    await ws.accept()
+    async for message in ws:
+        await ws.send(message)
 
 
 # Registered LAST on purpose.  Paired with /ping — the first route — this

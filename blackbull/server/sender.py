@@ -1459,19 +1459,24 @@ class WebSocketSender(BaseSender):
         # outbound frames are sent verbatim (RSV1=0).
         self._compressor = compressor
 
-    async def _send_payload(self, raw: bytes, opcode: WSOpcode) -> None:
-        """Frame and write one data payload.
+    def _frame_payload(self, raw: bytes,
+                       opcode: WSOpcode) -> tuple[bytes, bytes]:
+        """Frame one data payload into ``(header, payload)``.
 
         Shared by the native and dict arms so the two cannot put different
-        bytes on the wire.  Vectored write: ``(header, payload)`` goes to
-        writelines so the payload is never copied into a concatenated frame
-        buffer (the join ``encode_frame`` would allocate).
+        bytes on the wire.  **Sync on purpose**: nothing here suspends —
+        compressing and building a header are pure computation — and when this
+        was an ``async def`` every send allocated and awaited a coroutine that
+        never yielded, for 67 ns on a ~700 ns send.  The caller awaits
+        :meth:`_write_many`, which is the only part that can block.
+
+        The pair is written vectored, so the payload is never copied into a
+        concatenated frame buffer (the join ``encode_frame`` would allocate).
         """
         rsv1 = self._compressor is not None
         if rsv1:
             raw = self._compressor.compress(raw)
-        header = encode_frame_header(len(raw), opcode, rsv1=rsv1)
-        await self._write_many((header, raw))
+        return encode_frame_header(len(raw), opcode, rsv1=rsv1), raw
 
     async def _send_close(self, code: int) -> None:
         await self._write(encode_frame(code.to_bytes(2, 'big'),
@@ -1480,18 +1485,46 @@ class WebSocketSender(BaseSender):
     async def __call__(self, body: '_WSSenderEvent | NativeWSMessage',
                        _status: HTTPStatus | None = None,
                        _headers: HeaderList = []):
+        # Dict arm first.  A dict is the one shape here that nothing cheaper
+        # than ``isinstance`` can recognise, and it is what the external-host
+        # edge and the raw (conn, receive, send) compat form emit.  Testing it
+        # first means the compat path pays one check; the native arm below
+        # pays the same one on its way past, where it used to pay one and the
+        # compat path two — the second being a pure type guard.
+        if isinstance(body, dict):
+            event_type = body.get('type', '')
+
+            match event_type:
+
+                case ASGIEvent.WS_SEND:
+                    if 'text' in body and body['text'] is not None:
+                        await self._write_many(self._frame_payload(
+                            body['text'].encode('utf-8'), WSOpcode.TEXT))
+                    else:
+                        await self._write_many(self._frame_payload(
+                            body.get('bytes', b''), WSOpcode.BINARY))
+
+                case ASGIEvent.WS_CLOSE:
+                    await self._send_close(body.get('code', WSCloseCode.NORMAL))
+
+                case ASGIEvent.WS_ACCEPT:
+                    pass  # handshake reply sent by HTTP1Actor._do_ws_handshake()
+                case _:
+                    logger.warning('WebSocketSender: unknown event type %r',
+                                   event_type)
+            return
+
         # Native arm (the WS counterpart of the HTTP ``case NativeResponse():``
-        # seam).  BlackBull's own path emits these; the dict arm below is the
-        # external-host edge and the raw (conn, receive, send) compat surface.
+        # seam).  BlackBull's own object path emits these.
         if isinstance(body, NativeWSMessage):
             match body.kind:
                 case NativeWSMessage.SEND:
                     if body.text is not None:
-                        await self._send_payload(body.text.encode('utf-8'),
-                                                 WSOpcode.TEXT)
+                        await self._write_many(self._frame_payload(
+                            body.text.encode('utf-8'), WSOpcode.TEXT))
                     else:
-                        await self._send_payload(body.data or b'',
-                                                 WSOpcode.BINARY)
+                        await self._write_many(self._frame_payload(
+                            body.data or b'', WSOpcode.BINARY))
                 case NativeWSMessage.CLOSE:
                     await self._send_close(body.code
                                            if body.code is not None
@@ -1503,30 +1536,9 @@ class WebSocketSender(BaseSender):
                                    body.kind)
             return
 
-        if not isinstance(body, dict):
-            raise TypeError(
-                f'WebSocketSender expected a NativeWSMessage or a dict, '
-                f'got {type(body)!r}')
-
-        event_type = body.get('type', '')
-
-        match event_type:
-
-            case ASGIEvent.WS_SEND:
-                if 'text' in body and body['text'] is not None:
-                    await self._send_payload(body['text'].encode('utf-8'),
-                                             WSOpcode.TEXT)
-                else:
-                    await self._send_payload(body.get('bytes', b''),
-                                             WSOpcode.BINARY)
-
-            case ASGIEvent.WS_CLOSE:
-                await self._send_close(body.get('code', WSCloseCode.NORMAL))
-
-            case ASGIEvent.WS_ACCEPT:
-                pass  # handshake reply is sent by HTTP1Actor._do_ws_handshake()
-            case _:
-                logger.warning('WebSocketSender: unknown event type %r', event_type)
+        raise TypeError(
+            f'WebSocketSender expected a NativeWSMessage or a dict, '
+            f'got {type(body)!r}')
 
 
 
