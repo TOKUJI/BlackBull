@@ -31,6 +31,49 @@ so the editable install's metadata catches up.
 
 ## [Unreleased]
 
+### Security
+
+Two instances of one defect class — a path that answers a request without
+reading its body, leaving those octets to be re-read as something else.  Both
+are keep-alive framing desyncs of the shape request smuggling exploits; neither
+has been demonstrated cross-client, and the measured cases are self-inflicted.
+The remedies differ because the RFC treats the two methods differently.
+
+- **A WebSocket handshake that declares content is now refused with `400`.**
+  ⚠️ **Behaviour change** — an upgrade request with `Content-Length` above zero
+  or any `Transfer-Encoding` draws a 400 and a close; nothing switches
+  protocols.  `Content-Length: 0` declares no content and still upgrades.
+  This closes the
+  sibling of the `OPTIONS *` defect below, found while fixing it: the upgrade
+  path leaves the keep-alive loop before the drain, so those bytes were read
+  back after the 101 as WebSocket frames and **delivered to the application as
+  a message** — an HTTP request body arriving in a handler as something no
+  client sent.  Reaching the same drain is not the remedy here, because after
+  a protocol switch the octets carry two contradictory framings and an
+  intermediary may resolve them the other way; refusing removes the
+  disagreement instead of picking a side.  RFC 9110 §9.3.1 gives content on a
+  `GET` no defined semantics, so no real client sends one — verified against
+  `websockets` 16.1.1 (handshake, text/binary/70 KB echo, ping-pong, clean
+  close, all unaffected).
+
+- **`OPTIONS *` carrying a request body desynchronised the connection.**  The
+  server-wide answer (RFC 9112 §3.2.4) replies without routing and without
+  reading the body, and it was the one answered path that skipped the
+  keep-alive drain, so the leftover bytes were parsed as the start of the next
+  request: `OPTIONS *` with `Content-Length: 4`, pipelined with `GET /`,
+  answered `204` then **`405`** — the method had parsed as `bodyGET`.  RFC 9110
+  §9.3.7 explicitly permits content on `OPTIONS`, so this is a conforming
+  request shape, and behind a reverse proxy that pools upstream connections the
+  desync is the standard request-smuggling shape (not demonstrated
+  cross-client here — the measured case is self-inflicted).  The drain
+  predicate now lives in the loop tail with no per-path exemption, so every
+  request that stays on the connection reaches it, and the 64 KiB bound applies
+  uniformly: a body past it closes the connection instead of draining
+  unboundedly.
+  Http11Probe covers bodyless `OPTIONS *` and origin-form `OPTIONS /` with a
+  body, but never the product and never with a pipelined follow-up, so its
+  159/159 was clean on both sides of the defect.
+
 ## [0.71.0] — 2026-08-07
 
 ### Fixed

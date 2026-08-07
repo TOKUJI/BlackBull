@@ -286,9 +286,14 @@ class TestHTTP11KeepAlive:
         req1_first_line, req1_rest = req1.split(b'\r\n', 1)
         paths = []
 
-        async def capturing_app(scope, receive, send):
-            # BlackBull's server threads the native Connection for HTTP.
-            paths.append(scope.path)
+        async def capturing_app(app_arg, receive, send):
+            # BlackBull's server threads the native Connection for HTTP;
+            # ``BB_FORCE_ASGI_SCOPE=1`` hands the app a plain ASGI dict
+            # instead.  The claim under test is that the keep-alive loop
+            # re-derives the target per request, which holds in both lanes —
+            # so the envelope is read the way each lane exposes it.
+            paths.append(app_arg['path'] if isinstance(app_arg, dict)
+                         else app_arg.path)
 
         actor = HTTP1Actor(_FakeReader(req1_rest + req2), _FakeWriter(),
                            capturing_app, None, request=req1_first_line + b'\r\n')
