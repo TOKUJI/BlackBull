@@ -53,6 +53,7 @@ PATHSPEC="${PATHSPEC:-blackbull/}"
 ROUNDS="${ROUNDS:-3}"
 PORT="${PORT:-8443}"
 BB_UVLOOP="${BB_UVLOOP:-0}"
+BB_WORKERS="${BB_WORKERS:-1}"
 PHASES="${PHASES:-null real}"
 WS_VUS="${WS_VUS:-100}"
 WS_DURATION="${WS_DURATION:-10s}"
@@ -60,6 +61,11 @@ WS_TICK_MS="${WS_TICK_MS:-1}"
 WS_BURST="${WS_BURST:-8}"
 WS_LIFETIME_MS="${WS_LIFETIME_MS:-8000}"
 WS_PATH="${WS_PATH:-/ws}"
+# Per-arm extra environment applied to the server launch (env-difference mode):
+# e.g. BASE_EXTRA_ENV='BB_WS_QUEUE_DEPTH=0' TREAT_EXTRA_ENV='BB_WS_QUEUE_DEPTH=256'
+# lets a session compare two runtime settings on the SAME build (same ref).
+BASE_EXTRA_ENV="${BASE_EXTRA_ENV:-}"
+TREAT_EXTRA_ENV="${TREAT_EXTRA_ENV:-}"
 # Server and load generator on disjoint cores — same bimodality argument as
 # ab_commit.sh: unpinned, the two fight for the same cores and the
 # distribution goes bimodal, swamping a refactor-scale delta.
@@ -104,8 +110,15 @@ HEAD_REF="$(git rev-parse HEAD)"
 # --- the file set under test ----------------------------------------------
 mapfile -t FILES < <(git diff --name-only "$REF_BASE" "$REF_TREAT" -- $PATHSPEC)
 if [ "${#FILES[@]}" -eq 0 ]; then
-    echo "ab_commit_ws.sh: $SHA_BASE..$SHA_TREAT touch nothing under $PATHSPEC" >&2
-    exit 1
+    if [ "$REF_BASE" = "$REF_TREAT" ]; then
+        # Identical refs = env-difference mode (BASE_EXTRA_ENV/TREAT_EXTRA_ENV
+        # carry the variable that differs).  No file swap needed; the import
+        # proof still runs against a known both-refs module.
+        echo "ab_commit_ws.sh: identical refs $SHA_BASE — env-difference mode"
+    else
+        echo "ab_commit_ws.sh: $SHA_BASE..$SHA_TREAT touch nothing under $PATHSPEC" >&2
+        exit 1
+    fi
 fi
 
 for f in "${FILES[@]}"; do
@@ -129,6 +142,11 @@ for f in "${FILES[@]}"; do
         break
     fi
 done
+# Env-difference mode: no swapped files, so prove the ref's bytes via a known
+# both-refs module (blackbull/app.py exists in every build under test).
+if [ -z "$PROOF_FILE" ] && [ "$REF_BASE" = "$REF_TREAT" ]; then
+    PROOF_FILE="blackbull/app.py"
+fi
 
 _swap_file_set() {  # $1 = ref (or HEAD_REF for restore)
     local ref="$1" f
@@ -190,7 +208,9 @@ PY
 }
 
 start_server() {
-    BB_UVLOOP="$BB_UVLOOP" BB_WORKERS=1 BB_ACCESS_LOG=0 \
+    # shellcheck disable=SC2086  # CURRENT_ARM_ENV is a deliberate word-split list
+    env $CURRENT_ARM_ENV \
+        BB_UVLOOP="$BB_UVLOOP" BB_WORKERS="$BB_WORKERS" BB_ACCESS_LOG=0 \
         setsid "${PIN_SERVER[@]}" "$BB" bench.peers.native_app:app \
             --bind "127.0.0.1:${PORT}" \
             >"$OUTDIR/server.log" 2>&1 &
@@ -236,6 +256,8 @@ run_arm() {
     [ "$phase" = "null" ] && ref="$REF_TREAT"
     tag="${phase}_r${round}_${arm}"
 
+    CURRENT_ARM_ENV="$BASE_EXTRA_ENV"
+    [ "$arm" = "treat" ] && CURRENT_ARM_ENV="$TREAT_EXTRA_ENV"
     kill_server
     local proof
     proof="$(swap_to "$ref")" || { echo "swap to $ref failed: $proof" >&2; return 1; }
@@ -280,7 +302,7 @@ restore_tree
 {
     echo "# WS A/B — $SHA_BASE (base) vs $SHA_TREAT (treat)"
     echo ""
-    echo "Local box, WebSocket echo (k6 flood), single worker."
+    echo "Local box, WebSocket echo (k6 flood), $BB_WORKERS worker(s)."
     echo ""
     echo "| | |"
     echo "|---|---|"

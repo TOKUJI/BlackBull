@@ -121,6 +121,22 @@ cd ~/work/HttpArena
 ./scripts/benchmark.sh blackbull baseline # one profile
 ```
 
+## Local validation (WSL2) and the EC2 gate
+
+Validation is correctness-only and hardware-independent, so the standard flow
+runs the full 20-profile `validate.sh` on the local box and lets the EC2 run
+skip it in favour of the minimal `ready_check.sh` smoke:
+
+```bash
+bash bench/httparena/validate_local.sh HEAD   # verdict: bench/results/httparena-local/<UTC>/verdict.txt
+bash bench/httparena/build_wheel.sh HEAD      # wheel path + sha256 for BB_WHEEL_PATH
+```
+
+`validate_local.sh` clones `MDA2AV/HttpArena` to `~/HttpArena`, applies
+`patch_httparena.py` / `patch_cpuset.sh`, stages this directory as the
+`blackbull` framework, pre-builds the image, and runs `validate.sh` under a
+wall-clock bound.  See `USAGE.md` for the manual path.
+
 ## Versioning + apples-to-apples
 
 The Dockerfile pins `blackbull[compression]` to an explicit PyPI

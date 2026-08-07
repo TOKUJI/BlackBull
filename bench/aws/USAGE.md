@@ -244,7 +244,10 @@ bash bench/aws/httparena_compare.sh
 - `PROFILES` : 走らせる HttpArena プロファイル
 - `FRAMEWORKS` : 比較対象フレームワーク
 - `BLACKBULL_VERSION` : EC2 コンテナ内にインストールする BlackBull のバージョン
-- `SKIP_VALIDATE=1` : validate を飛ばして benchmark のみ実施
+- `SKIP_VALIDATE=1` : フル validate を飛ばし、`run_httparena.sh` が最小
+  `ready_check.sh`（コンテナ起動 / ポート / WS / TLS / h2c / gRPC）を実施。
+  **wheel を WSL2 で `validate_local.sh` により検証済みの場合に使う**（同一
+  wheel を `BB_WHEEL_PATH` で渡すこと）。未検証コードの場合は 0 のまま。
 - `KEEP_INSTANCE=1` : 失敗解析のため EC2 を残す
 
 ### 5-4. この連携の意味

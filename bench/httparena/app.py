@@ -218,43 +218,43 @@ async def healthz():
     return Response(b'ok', content_type=_PLAIN)
 
 
-# HttpArena `echo-ws` profile — RFC 6455 WebSocket echo.  First
-# message after accept is the receive loop; text frames echo as text,
-# binary frames echo as bytes.
-@app.route(path='/ws', methods=[HTTPMethod.GET], scheme=Scheme.websocket)
-async def ws_echo(scope, receive, send):
-    event = await receive()
-    if event.get('type') != 'websocket.connect':
-        return
-    await send({'type': 'websocket.accept'})
-    while True:
-        event = await receive()
-        t = event.get('type', '')
-        if t == 'websocket.disconnect':
-            break
-        if t != 'websocket.receive':
-            continue
-        text = event.get('text')
-        if text is not None:
-            await send({'type': 'websocket.send', 'text': text})
-        else:
-            await send({'type': 'websocket.send',
-                        'bytes': event.get('bytes') or b''})
-
-
-# The same echo in object form.  `/ws` above is the raw ASGI form — it mints a
-# `websocket.receive` dict per message and sends dicts back — so the echo-ws
-# profiles measure the compat boundary and say nothing about the native
-# channel.  This endpoint takes `next_message()` / `NativeWSMessage` instead;
-# point a run at it (HttpArena's echo-ws URL, or WS_PATH in ab_commit_ws.sh)
-# to measure the two channels against each other on one build.
+# HttpArena `echo-ws` profile — RFC 6455 WebSocket echo.  Text frames echo
+# as text, binary frames echo as bytes.
+#
+# The handler is the **native form** when the installed BlackBull ships the
+# WebSocket object (v0.63.0+): accept, then echo each complete message over
+# the native channel (`next_message()` / `NativeWSMessage`) — no ASGI dicts
+# are minted, so once ``requirements.txt`` is bumped past the native world
+# the echo-ws / echo-ws-pipeline profiles measure the native channel.  On the
+# pinned install (v0.56.0 today, which predates the WebSocket object) it
+# falls back to the raw ASGI triplet — byte-identical echo over the compat
+# boundary, same contract.
 if WebSocket is not None:
-    @app.route(path='/ws-object', methods=[HTTPMethod.GET],
-               scheme=Scheme.websocket)
-    async def ws_echo_object(ws: WebSocket):
+    @app.route(path='/ws', methods=[HTTPMethod.GET], scheme=Scheme.websocket)
+    async def ws_echo(ws: WebSocket):
         await ws.accept()
         async for message in ws:
             await ws.send(message)
+else:
+    @app.route(path='/ws', methods=[HTTPMethod.GET], scheme=Scheme.websocket)
+    async def ws_echo(scope, receive, send):
+        event = await receive()
+        if event.get('type') != 'websocket.connect':
+            return
+        await send({'type': 'websocket.accept'})
+        while True:
+            event = await receive()
+            t = event.get('type', '')
+            if t == 'websocket.disconnect':
+                break
+            if t != 'websocket.receive':
+                continue
+            text = event.get('text')
+            if text is not None:
+                await send({'type': 'websocket.send', 'text': text})
+            else:
+                await send({'type': 'websocket.send',
+                            'bytes': event.get('bytes') or b''})
 
 
 # ---------------------------------------------------------------------------
@@ -311,12 +311,15 @@ async def crud_items_create(body: bytes, db_conn=Depends(db.get_db_conn)):
 
 # get-by-id is cache-first: inject the *pool* (plain-async provider), not a
 # per-request connection — a Redis hit must not check a connection out.
+# The ``x-cache`` header (MISS/HIT) is part of the HttpArena crud contract.
 @app.route(path='/crud/items/{item_id:int}', methods=[HTTPMethod.GET])
 async def crud_items_get(item_id: int, pool=Depends(db.get_pool)):
-    item = await db.crud_get(pool, item_id)
+    item, cache_hit = await db.crud_get(pool, item_id)
     if item is None:
         return Response(b'not found', status=404, content_type=_PLAIN)
-    return JSONResponse(item)
+    return JSONResponse(
+        item,
+        headers=[(b'x-cache', b'HIT' if cache_hit else b'MISS')])
 
 
 @app.route(path='/crud/items/{item_id:int}', methods=[HTTPMethod.PUT])

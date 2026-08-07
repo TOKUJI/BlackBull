@@ -183,6 +183,27 @@ by the static route rather than falling through to another route that
 also matches the prefix.  Fully-static routes still resolve first, so
 only an overlapping *parametrised* route is affected.
 
+### `@as_middleware`: the ASGI form is selected by parameter *name*
+
+A middleware's request argument is a native
+[`Connection`](docs/guide/middleware.md) — not an ASGI `scope` dict, which is
+not subscriptable, so `scope['method']` raises `TypeError`.  Since v0.71.0 a
+middleware whose first parameter is *literally named* `scope` is handed a real
+ASGI scope dict instead, and is adapted at both its own edges: the events its
+`send` wrapper observes are ASGI dicts, and its emissions are converted back to
+native below it.
+
+The selector is the **name**, decided once from the signature at decoration
+time and recorded as `__blackbull_asgi_scope__`.  Any other name (`conn`,
+`connection`, `request`, …) is native and is not adapted at all, so the default
+path pays nothing.  The consequence to plan around: naming a native
+middleware's first parameter `scope` for unrelated reasons silently changes the
+type it receives.  Name-based dispatch was chosen over a decorator flag because
+it makes existing ASGI middleware — which already calls the parameter `scope` —
+work unmodified; the trade is that the name is now load-bearing.
+
+Handlers are unaffected: they always receive a `Connection`.
+
 ### `Depends` is deliberately minimal; query params are scalars only
 
 The v0.56.0 dependency-injection surface is fenced by design

@@ -142,6 +142,34 @@ cd ~/work/HttpArena
 
 ---
 
+## 自動化されたローカル検証（WSL2 validate → EC2 ready-check）
+
+correctness 検証はハードウェア非依存のため、フル 20 プロファイルの
+`validate.sh` をローカルで実行し、EC2 では最小 ready-check のみにするのが
+標準フローです（EC2 時間を 1 回あたり約 15 分節約）。
+
+```bash
+# 1. 任意の git ref から wheel をビルドし sha256 を記録
+bash bench/httparena/build_wheel.sh HEAD
+
+# 2. その wheel に対して HttpArena の validate.sh を全プロファイル実行
+bash bench/httparena/validate_local.sh HEAD
+#    → bench/results/httparena-local/<UTC>/verdict.txt（PASS / FAIL / …）
+```
+
+`validate_local.sh` は初回に `MDA2AV/HttpArena` を `~/HttpArena` へ clone し、
+`patch_httparena.py` / `patch_cpuset.sh` を適用、フレームワーク staging・
+イメージ pre-build（validate.sh の 300 秒 watchdog 対策）・
+`VALIDATE_WALL` バウンド付きで `validate.sh` を実行します。
+
+EC2 側は **同じ wheel ファイル** を `BB_WHEEL_PATH` で渡し、
+`SKIP_VALIDATE=1` にすると `run_httparena.sh` がフル validate の代わりに
+`ready_check.sh`（コンテナ起動 / ポート / WS エコー / TLS / h2c / gRPC unary
+の最小スモーク）を実行します。同一性の規律（検証と計測で同一 wheel）を
+守ってください。
+
+---
+
 ## 注意点
 
 - このディレクトリは「HttpArena 連携の準備段階」にあるため、現在はローカル検証向けです。
