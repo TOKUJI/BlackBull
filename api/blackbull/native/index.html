@@ -3414,10 +3414,32 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#blackbull.native.NativeResponse.complete" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        complete
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.native.NativeResponse.to_asgi" class="md-nav__link">
     <span class="md-ellipsis">
       
         to_asgi
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.native.NativeResponse.with_trailers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        with_trailers
       
     </span>
   </a>
@@ -5024,10 +5046,32 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#blackbull.native.NativeResponse.complete" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        complete
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.native.NativeResponse.to_asgi" class="md-nav__link">
     <span class="md-ellipsis">
       
         to_asgi
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.native.NativeResponse.with_trailers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        with_trailers
       
     </span>
   </a>
@@ -5199,6 +5243,28 @@ trailers would otherwise corrupt chunked framing).</p>
 <div class="doc doc-object doc-function">
 
 
+<h4 id="blackbull.native.NativeResponse.complete" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">complete</span><span class="p">(</span><span class="n">status</span><span class="p">,</span> <span class="n">header</span><span class="p">,</span> <span class="n">body</span><span class="p">)</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-classmethod"><code>classmethod</code></small>
+  </span>
+
+<a href="#blackbull.native.NativeResponse.complete" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Header plus terminal body — a whole response in one object.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
 <h4 id="blackbull.native.NativeResponse.to_asgi" class="doc doc-heading">
             <code class="highlight language-python"><span class="n">to_asgi</span><span class="p">()</span></code>
 
@@ -5213,6 +5279,33 @@ conversion boundaries — the external ASGI edge (external hosts /
 <code>asgi=True</code>) and the middleware native-read arms (cache,
 compression); the native H1 sender path never materialises these
 dicts.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.native.NativeResponse.with_trailers" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">with_trailers</span><span class="p">(</span><span class="n">status</span><span class="p">,</span> <span class="n">header</span><span class="p">,</span> <span class="n">body</span><span class="p">,</span> <span class="n">trailers</span><span class="p">)</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-classmethod"><code>classmethod</code></small>
+  </span>
+
+<a href="#blackbull.native.NativeResponse.with_trailers" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Header, body and trailers together — the gRPC unary shape.</p>
+<p><code>more_body</code> is True by construction, and load-bearing:
+<code>HTTP2Sender</code> only takes its trailers-coalescing path for a
+<em>non-terminal</em> body chunk, holding HEADERS + DATA so they flush with
+the trailing HEADERS in one write.  END_STREAM rides the trailers
+either way (RFC 9113 §8.1).</p>
 
 
     </div>
