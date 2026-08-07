@@ -31,6 +31,8 @@ so the editable install's metadata catches up.
 
 ## [Unreleased]
 
+## [0.71.0] — 2026-08-07
+
 ### Fixed
 
 - **A static file larger than the `StaticFiles` cache threshold (4 MiB),
