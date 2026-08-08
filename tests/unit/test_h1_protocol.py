@@ -250,3 +250,41 @@ class TestReaderSurface:
         assert proto.reader.peek(3) == b'abc'
         assert proto.reader.buffered_len() == 6
         assert await proto.reader.read(6) == b'abcdef'
+
+
+class TestWriteSide:
+    async def test_drain_returns_without_awaiting_when_not_paused(self, wired):
+        """One loop turn per send is exactly the cost being removed on the read
+        side; the write side must not reintroduce it."""
+        proto, _ = wired
+        coro = proto.drain()
+        try:
+            coro.send(None)
+        except StopIteration:
+            pass
+        else:
+            coro.close()
+            pytest.fail('drain suspended with the transport unpaused')
+
+    async def test_drain_blocks_while_paused_and_resumes(self, wired):
+        proto, _ = wired
+        proto.pause_writing()
+        task = asyncio.create_task(proto.drain())
+        await asyncio.sleep(0)
+        assert not task.done()
+        proto.resume_writing()
+        await asyncio.wait_for(task, timeout=1)
+
+    async def test_connection_lost_unblocks_a_parked_drain(self, wired):
+        """A peer that vanishes mid-response must not strand the sender.
+
+        Without this the write path waits for a resume_writing that can never
+        arrive, holding the connection for its whole lifetime.
+        """
+        proto, _ = wired
+        proto.pause_writing()
+        task = asyncio.create_task(proto.drain())
+        await asyncio.sleep(0)
+        proto.connection_lost(ConnectionResetError('peer gone'))
+        with pytest.raises(ConnectionResetError):
+            await asyncio.wait_for(task, timeout=1)

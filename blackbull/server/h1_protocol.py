@@ -144,6 +144,7 @@ class H1Protocol(asyncio.BufferedProtocol):
         self._eof = False
         self._exc: BaseException | None = None
         self._paused = False
+        self._drain_waiter: asyncio.Future[None] | None = None
 
     # -- state -------------------------------------------------------------
 
@@ -190,12 +191,61 @@ class H1Protocol(asyncio.BufferedProtocol):
         self._eof = True
         self._exc = exc
         self._wake()
+        # A sender parked in ``drain`` waiting for the peer to read must not
+        # wait for a peer that is gone: resolve it so the write path raises or
+        # unwinds instead of hanging for the connection's lifetime.
+        waiter, self._drain_waiter = self._drain_waiter, None
+        if waiter is not None and not waiter.done():
+            if exc is not None:
+                waiter.set_exception(exc)
+            else:
+                waiter.set_result(None)
 
-    def pause_writing(self) -> None:      # pragma: no cover - transport-driven
-        pass
+    # -- write side -------------------------------------------------------
+    #
+    # ``AsyncioWriter`` needs only ``write(bytes)`` + ``async drain()``, so the
+    # protocol supplies them directly and the whole existing sender stack —
+    # the ``_write_many`` join-vs-vectored gate, ``BB_WRITE_TIMEOUT``, the
+    # deadline scanner — is reused untouched.  This is the inbound path's
+    # replacement; the outbound path is already leaner than both peers.
 
-    def resume_writing(self) -> None:     # pragma: no cover - transport-driven
-        pass
+    def write(self, data) -> None:
+        if self.transport is not None:
+            self.transport.write(data)
+
+    async def drain(self) -> None:
+        """Block only while the transport is over its high-water mark.
+
+        Returns without awaiting in the common case, which matters: an
+        unconditional await here is one loop turn per response send, the very
+        cost the inbound rewrite is removing on the read side.
+        """
+        if self._exc is not None:
+            raise self._exc
+        if self._drain_waiter is None:
+            return
+        await asyncio.shield(self._drain_waiter)
+
+    def pause_writing(self) -> None:
+        if self._drain_waiter is None:
+            self._drain_waiter = asyncio.get_running_loop().create_future()
+
+    def resume_writing(self) -> None:
+        waiter, self._drain_waiter = self._drain_waiter, None
+        if waiter is not None and not waiter.done():
+            waiter.set_result(None)
+
+    def get_extra_info(self, name, default=None):
+        if self.transport is None:
+            return default
+        return self.transport.get_extra_info(name, default)
+
+    def is_closing(self) -> bool:
+        return self.transport is None or self.transport.is_closing()
+
+    def close(self) -> None:
+        if self.transport is not None:
+            self.transport.close()
 
     # -- waiting -----------------------------------------------------------
 
