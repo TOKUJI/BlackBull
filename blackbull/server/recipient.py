@@ -265,8 +265,65 @@ class AbstractReader(ABC):
         return 0
 
     def peek(self, n: int) -> bytes:
-        """Up to *n* buffered bytes without consuming them.  Default empty."""
-        return b''
+        """Up to *n* buffered bytes without consuming them.
+
+        Returns whatever the default :meth:`fill` parked, so detection can
+        inspect it; a reader that owns its buffer overrides this to read
+        straight out of it.
+        """
+        buf = self.__dict__.get('_ahead_buf')
+        return bytes(buf[:n]) if buf else b''
+
+    async def fill(self, n: int) -> bool:
+        """Buffer up to *n* bytes for peeking.  ``False`` if EOF came first.
+
+        This is what lets connection detection choose a protocol without
+        eating the bytes it inspected.  A reader that owns its buffer
+        overrides this and genuinely consumes nothing.
+
+        The default cannot: it has only :meth:`read`, so it *does* consume,
+        and parks what it took in :attr:`_ahead`.  :meth:`take_ahead` hands
+        that back to the caller, which restores the stream by wrapping this
+        reader in a :class:`PrefixReader`.  Same outcome, one indirection more
+        — and it keeps every reader, including test doubles, usable for
+        detection without each one reimplementing pushback.
+        """
+        ahead = self._ahead
+        if len(ahead) >= n:
+            return True
+        # One read, not a loop to exactly *n*.  A plain reader returns whatever
+        # has arrived, and asking again for the remainder would block a peer
+        # that sent a complete short frame — the shared-port MQTT hang this
+        # detection path exists to avoid.  The caller re-peeks and calls again,
+        # so it converges without ever waiting for bytes that may not come.
+        chunk = await self.read(n - len(ahead))
+        if not chunk:
+            return False
+        ahead += chunk
+        return True
+
+    @property
+    def _ahead(self) -> bytearray:
+        # Lazily attached so subclasses need no cooperating __init__ — several
+        # are test doubles, and one that forgot to call super() would fail
+        # only during detection.
+        buf = self.__dict__.get('_ahead_buf')
+        if buf is None:
+            buf = self.__dict__['_ahead_buf'] = bytearray()
+        return buf
+
+    def take_ahead(self) -> bytes:
+        """Bytes this reader consumed while filling, cleared.
+
+        Empty for a reader whose :meth:`fill` truly peeks — which is the whole
+        point: the caller wraps only when there is something to replay.
+        """
+        buf = self.__dict__.get('_ahead_buf')
+        if not buf:
+            return b''
+        out = bytes(buf)
+        buf.clear()
+        return out
 
     def at_eof(self) -> bool:
         """Return True once the peer has closed and the buffer is drained.
@@ -315,8 +372,27 @@ class AsyncioReader(AbstractReader):
                 f"got {type(stream_reader)}"
             )
         self._sr = stream_reader
+        # Bytes read ahead of what a caller asked for, held so they can be
+        # served back first.  Only ``fill`` ever puts anything here, so a
+        # connection that never peeks pays a single empty-bytearray test per
+        # read.  This is why detection needs no ``PrefixReader``: the reader
+        # itself is the thing that remembers.
+        self._readahead = bytearray()
+
+    async def fill(self, n: int) -> bool:
+        """Read ahead to *n* buffered bytes without consuming them."""
+        while len(self._readahead) < n:
+            chunk = await self._sr.read(n - len(self._readahead))
+            if not chunk:
+                return False
+            self._readahead += chunk
+        return True
 
     async def read(self, n: int) -> bytes:
+        if self._readahead:
+            chunk = bytes(self._readahead[:n])
+            del self._readahead[:n]
+            return chunk
         try:
             return await self._sr.read(n)
         except asyncio.IncompleteReadError as exc:
@@ -327,12 +403,43 @@ class AsyncioReader(AbstractReader):
         return bool(at_eof()) if at_eof is not None else False
 
     async def readuntil(self, sep: bytes) -> bytes:
+        # Common case first: nothing was read ahead, so the stream's own
+        # native buffered readuntil runs with no added work.
+        if not self._readahead:
+            try:
+                return await self._sr.readuntil(sep)
+            except asyncio.IncompleteReadError as exc:
+                raise IncompleteReadError(exc.partial) from exc
+        idx = self._readahead.find(sep)
+        if idx != -1:
+            end = idx + len(sep)
+            chunk = bytes(self._readahead[:end])
+            del self._readahead[:end]
+            return chunk
+        # The separator may straddle the seam, so re-resolve against the join
+        # and push back whatever the underlying read overshot.
+        head = bytes(self._readahead)
+        self._readahead.clear()
         try:
-            return await self._sr.readuntil(sep)
+            combined = head + await self._sr.readuntil(sep)
         except asyncio.IncompleteReadError as exc:
-            raise IncompleteReadError(exc.partial) from exc
+            raise IncompleteReadError(head + exc.partial) from exc
+        end = combined.find(sep) + len(sep)
+        self._readahead[:0] = combined[end:]
+        return combined[:end]
 
     async def readexactly(self, n: int) -> bytes:
+        if self._readahead:
+            if len(self._readahead) >= n:
+                chunk = bytes(self._readahead[:n])
+                del self._readahead[:n]
+                return chunk
+            head = bytes(self._readahead)
+            self._readahead.clear()
+            try:
+                return head + await self._sr.readexactly(n - len(head))
+            except asyncio.IncompleteReadError as exc:
+                raise IncompleteReadError(head + exc.partial) from exc
         try:
             return await self._sr.readexactly(n)
         except asyncio.IncompleteReadError as exc:
@@ -341,8 +448,11 @@ class AsyncioReader(AbstractReader):
     def has_buffered(self) -> bool:
         # asyncio.StreamReader keeps every byte the transport has delivered
         # in ``_buffer`` until a read consumes it, so "buffer non-empty" is
-        # the honest "a read won't block" probe.  A virtual
-        # A buffer-owning reader exposes ``buffered_len()`` instead.
+        # the honest "a read won't block" probe.  A buffer-owning reader
+        # exposes ``buffered_len()`` instead.  Read-ahead counts too: those
+        # bytes are ours and a read will not block for them.
+        if self._readahead:
+            return True
         buf = getattr(self._sr, '_buffer', None)
         if buf is not None:
             return bool(buf)
@@ -351,10 +461,18 @@ class AsyncioReader(AbstractReader):
     def buffered_len(self) -> int:
         buf = getattr(self._sr, '_buffer', None)
         if buf is not None:
-            return len(buf)
-        return getattr(self._sr, 'buffered', 0)
+            return len(self._readahead) + len(buf)
+        return len(self._readahead) + getattr(self._sr, 'buffered', 0)
 
     def peek(self, n: int) -> bytes:
+        if self._readahead:
+            # Read-ahead sits in front of everything the stream still holds.
+            if len(self._readahead) >= n:
+                return bytes(self._readahead[:n])
+            return (bytes(self._readahead) + self._peek_stream(n))[:n]
+        return self._peek_stream(n)
+
+    def _peek_stream(self, n: int) -> bytes:
         buf = getattr(self._sr, '_buffer', None)
         if buf is not None:
             return bytes(buf[:n])

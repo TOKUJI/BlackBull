@@ -116,6 +116,19 @@ class BufferReader(AbstractReader):
     def at_eof(self) -> bool:
         return self._proto.at_eof and not self._buf.available
 
+    async def fill(self, n: int) -> bool:
+        """Wait until *n* bytes are resident, consuming nothing.
+
+        Free here: resident bytes are already the buffer's normal state, so
+        peeking is just not calling ``take``.  It is the reason detection can
+        hand the winning binding this very reader with the stream still whole.
+        """
+        while self._buf.available < n:
+            if self._proto.at_eof:
+                return False
+            await self._proto.wait_for_data()
+        return True
+
     # -- the one-scan header read ------------------------------------------
 
     async def read_head(self, limit: int) -> bytes:

@@ -143,37 +143,39 @@ class ConnectionActor(Actor):
 
     async def _peek_and_select(
         self, order: 'tuple[ProtocolBinding, ...]',
-    ) -> 'tuple[bytes, ProtocolBinding | None]':
-        """Peek the smallest discriminating prefix and return ``(prefix, binding)``.
+    ) -> 'ProtocolBinding | None':
+        """Inspect the smallest discriminating prefix and return the binding.
 
-        Reads incrementally up to ``max(detect_prefix_len)`` and stops the
-        instant a binding claims — so a short non-HTTP frame (e.g. a 15-byte
-        MQTT CONNECT) is recognised on its first byte and never blocks waiting
-        for HTTP-sized input.  This is the fix for the shared-port MQTT
+        Grows the peek one step at a time up to ``max(detect_prefix_len)`` and
+        stops the instant a binding claims — so a short non-HTTP frame (e.g. a
+        15-byte MQTT CONNECT) is recognised on its first byte and never blocks
+        waiting for HTTP-sized input.  This is the fix for the shared-port MQTT
         ``readuntil`` hang (decouple-connection-detection symptom #4).
+
+        Nothing is consumed: the bytes stay in the reader, so the winning
+        binding gets a stream still positioned at its own first byte and there
+        is no prefix to replay.
         """
         max_len = max((b.detect_prefix_len for b in order), default=0)
-        prefix = bytearray()
         at_eof = False
+        want = 1
         while True:
-            binding = self._select(bytes(prefix), at_eof, order)
+            prefix = self._reader.peek(max_len)
+            binding = self._select(prefix, at_eof, order)
             if binding is not None or at_eof or len(prefix) >= max_len:
-                return bytes(prefix), binding
-            chunk = await self._reader.read(max_len - len(prefix))
-            if not chunk:
+                return binding
+            want = max(want + 1, len(prefix) + 1)
+            if not await self._reader.fill(min(want, max_len)):
                 at_eof = True
-            else:
-                prefix += chunk
 
-    async def _peek(self, n: int) -> bytes:
-        """Read up to *n* bytes (fewer on EOF) for an ALPN-committed binding."""
-        buf = bytearray()
-        while len(buf) < n:
-            chunk = await self._reader.read(n - len(buf))
-            if not chunk:
-                break
-            buf += chunk
-        return bytes(buf)
+    async def _peek(self, n: int) -> None:
+        """Buffer up to *n* bytes for an ALPN-committed binding, unconsumed.
+
+        ALPN has already decided the protocol; this exists only so a peer that
+        connects and then says nothing is timed out by the caller's deadline
+        rather than holding a slot.
+        """
+        await self._reader.fill(n)
 
     async def _dispatch(self) -> None:
         from ..env import get_settings as _get_settings  # noqa: PLC0415
@@ -203,22 +205,22 @@ class ConnectionActor(Actor):
             await self._bound_binding.serve(self._make_conn(self._reader, dl))
             return
 
-        # Peek-and-replay detection (decouple-connection-detection, Stage 2):
-        # ``ConnectionActor`` peeks only a protocol-agnostic discriminator — no
-        # hardcoded byte counts, delimiters, or HTTP knowledge — and replays it
-        # to the winning binding via a ``PrefixReader``.  Each binding then reads
-        # its own framing (the 24-byte preface / the ``\r\n`` request line) from
-        # a reader still positioned at the start of the stream.
+        # Non-consuming detection: ``ConnectionActor`` inspects only a
+        # protocol-agnostic discriminator — no hardcoded byte counts,
+        # delimiters, or HTTP knowledge — and consumes none of it.  Each
+        # binding then reads its own framing (the 24-byte preface / the
+        # ``\r\n`` request line) from a reader still positioned at the start
+        # of the stream, because the bytes never left it.
         alpn_binding = self._registry.by_alpn(self._alpn)
         try:
             if alpn_binding is not None:
-                # ALPN pre-commits the protocol; still peek its declared prefix
-                # length under the deadline so a silent peer is timed out.
-                prefix = await self._guarded(
+                # ALPN pre-commits the protocol; still wait for its declared
+                # prefix length under the deadline so a silent peer is timed out.
+                await self._guarded(
                     dl, deadline, self._peek(alpn_binding.detect_prefix_len))
                 binding = alpn_binding
             else:
-                prefix, binding = await self._guarded(
+                binding = await self._guarded(
                     dl, deadline,
                     self._peek_and_select(self._registry.detection_order))
         except (asyncio.TimeoutError, TimeoutError):
@@ -236,7 +238,14 @@ class ConnectionActor(Actor):
             # no http1 fallback (it always does for HTTP listeners).  Close.
             return
         self._served_protocol = binding.name
-        await binding.serve(self._make_conn(PrefixReader(prefix, self._reader), dl))
+        # A buffer-owning reader peeked without consuming, so this is empty and
+        # the binding gets the reader itself.  A reader that could only read
+        # ahead hands back what it took, and the replay wrapper restores the
+        # stream — the indirection exists exactly where it is still needed and
+        # nowhere else.
+        ahead = self._reader.take_ahead()
+        reader = PrefixReader(ahead, self._reader) if ahead else self._reader
+        await binding.serve(self._make_conn(reader, dl))
 
     @staticmethod
     async def _guarded(dl: ConnectionDeadline, deadline: 'float | None', coro):

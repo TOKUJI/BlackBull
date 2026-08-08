@@ -844,12 +844,35 @@ class HTTP1Actor(Actor):
                 # requests are bounded by keep_alive_timeout so a peer
                 # that has vanished silently (process crash, NAT drop,
                 # mobile network change) doesn't hold a ghost connection.
+                # The next head goes through the same budgeted read as the
+                # first.  A bare ``readuntil(_REQ_END)`` here would be
+                # *unbounded* on a buffer-owning reader — asyncio's StreamReader
+                # used to impose its own 64 KiB ceiling, and nothing replaces it
+                # — so a keep-alive peer could send a head of any size and never
+                # draw the 431 that the same head draws on its first request.
                 try:
                     if cfg.keep_alive_timeout > 0:
                         with dl.guard(cfg.keep_alive_timeout):
-                            next_chunk = await self._reader.readuntil(_REQ_END)
+                            next_chunk = await self._read_next_head(
+                                cfg.header_max_total)
                     else:
-                        next_chunk = await self._reader.readuntil(_REQ_END)
+                        next_chunk = await self._read_next_head(
+                            cfg.header_max_total)
+                except HeaderTooLargeError as exc:
+                    logger.warning('431 Request Header Fields Too Large: %s', exc)
+                    log_cap_hit('header_max_total',
+                                requested=self._reader.buffered_len(),
+                                limit=cfg.header_max_total,
+                                peer=self._peername, protocol='http1')
+                    await self._send_error_and_close(
+                        send, b'431 Request Header Fields Too Large',
+                        HTTPStatus.REQUEST_HEADER_FIELDS_TOO_LARGE)
+                    break
+                except BadRequestError as exc:
+                    logger.warning('400 Bad Request: %s', exc)
+                    await self._send_error_and_close(
+                        send, b'400 Bad Request', HTTPStatus.BAD_REQUEST)
+                    break
                 except TimeoutError:
                     break  # idle too long — drop the connection
                 except IncompleteReadError:
@@ -872,6 +895,30 @@ class HTTP1Actor(Actor):
     # ------------------------------------------------------------------
     # Private helpers
     # ------------------------------------------------------------------
+
+    async def _read_next_head(self, max_total: int) -> bytes:
+        """Read the next keep-alive head, budget enforced.
+
+        Returns the head (terminator included), or the bare terminator for the
+        stray-CRLF case the caller treats as end-of-connection.  Raises the
+        same 431/400 the first request would draw for the same bytes.
+        """
+        read_head = getattr(self._reader, 'read_head', None)
+        if read_head is not None:
+            try:
+                head = await read_head(max_total)
+            except HeadTooLargeError:
+                _reject_oversized_head(
+                    self._reader.peek(min(self._reader.buffered_len(),
+                                          max_total + 2)),
+                    max_total)
+            if not head:
+                raise IncompleteReadError(b'')
+            return head
+        head = await self._reader.readuntil(_REQ_END)
+        if max_total > 0 and len(head) > max_total:
+            _reject_oversized_head(head, max_total)
+        return head
 
     @staticmethod
     async def _send_error_and_close(send, body: bytes, status: HTTPStatus) -> None:
