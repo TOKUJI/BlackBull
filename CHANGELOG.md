@@ -46,7 +46,26 @@ so the editable install's metadata catches up.
   than left opt-in: an unmeasured, untested, slower duplicate of the header
   read is worse than either path alone.
 
+### Fixed
+
+- **Every HTTP/2 server push raised `AttributeError` under
+  `BB_FORCE_ASGI_SCOPE=1`.**  `_handle_push` read the push parent's headers
+  through a dual-shape ternary whose compat branch returned the scope's raw
+  `list[tuple]`, then called `.get(b'host')` on it.  The parent is now always
+  the native `Connection`, so the read is a plain attribute and the failure is
+  gone by construction rather than by patch.  Native-lane pushes were never
+  affected.
+
 ### Changed
+
+- **HTTP/2 keeps native state end-to-end.**  `stream.conn` is a `Connection`
+  on every lane, and the only place an ASGI scope comes into existence is the
+  app boundary — the pattern HTTP/1.1 already used.  Nine dual-shape branches
+  and the second conversion site are gone.  ⚠️ One delta, compat lane only: a
+  `PRIORITY_UPDATE` arriving after dispatch still reaches the application
+  through `scope['extensions']['http.response.priority']` (shared by
+  reference), but no longer rewrites the deprecated top-level
+  `scope['http2_priority']` alias, which is now a dispatch-time snapshot.
 
 - ⚠️ **An over-budget header block with no line terminator in it is now
   answered `400`, not `431`.**  `BB_HEADER_MAX_TOTAL` can be overrun two ways
