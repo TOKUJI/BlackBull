@@ -1,9 +1,13 @@
-"""H/1.1 transport front end: `asyncio.BufferedProtocol` over one owned buffer.
+"""Connection transport front end: `asyncio.BufferedProtocol` over one buffer.
 
-This is what replaces `asyncio.StreamReader` on the H/1.1 inbound path.  The
+One of these per accepted connection, created before the protocol is known —
+the shared listener detects HTTP/1.1, h2c, and MQTT off the same resident
+bytes, so the buffer belongs to the *connection*, not to any one protocol.
+
+This is what replaces `asyncio.StreamReader` on the inbound path.  The
 kernel writes straight into the connection's :class:`~.read_buffer.ReadBuffer`
-through :meth:`H1Protocol.get_buffer`, and the actor's coroutine parks on a
-future that :meth:`H1Protocol.buffer_updated` resolves.
+through :meth:`ConnectionProtocol.get_buffer`, and the actor's coroutine parks on a
+future that :meth:`ConnectionProtocol.buffer_updated` resolves.
 
 **The actor invariant is intact.**  One coroutine still owns the connection's
 state and processes one request at a time; it is woken by the protocol instead
@@ -13,8 +17,12 @@ never the coroutine — it was reading through a second buffer.
 
 :class:`BufferReader` presents the :class:`~.recipient.AbstractReader` surface
 so the body recipient and the WebSocket/h2c successors work unchanged, and adds
-:meth:`BufferReader.read_head` — the one-scan header read the actor uses
+:meth:`BufferReader.read_head` — the one-scan header read the H/1.1 actor uses
 instead of a `readuntil` per line.
+
+Because peeked bytes stay resident, protocol detection can decide without
+consuming: there is nothing to replay to the winning binding, which is what
+retires `PrefixReader` on this path.
 """
 from __future__ import annotations
 
@@ -23,7 +31,7 @@ import asyncio
 from .read_buffer import ReadBuffer
 from .recipient import AbstractReader, IncompleteReadError
 
-__all__ = ('BufferReader', 'H1Protocol', 'HeadTooLargeError')
+__all__ = ('BufferReader', 'ConnectionProtocol', 'HeadTooLargeError')
 
 #: Stop reading from the transport once this many unconsumed bytes are resident.
 #: Backpressure's memory half: without it a fast peer feeding a slow handler
@@ -44,7 +52,7 @@ class HeadTooLargeError(Exception):
 
 
 class BufferReader(AbstractReader):
-    """`AbstractReader` over a :class:`ReadBuffer` fed by :class:`H1Protocol`.
+    """`AbstractReader` over a :class:`ReadBuffer` fed by :class:`ConnectionProtocol`.
 
     Every method serves from resident bytes first and only parks when it needs
     more.  A pipelined or keep-alive peer's next head is usually already
@@ -55,7 +63,7 @@ class BufferReader(AbstractReader):
 
     __slots__ = ('_buf', '_proto')
 
-    def __init__(self, buf: ReadBuffer, proto: 'H1Protocol') -> None:
+    def __init__(self, buf: ReadBuffer, proto: 'ConnectionProtocol') -> None:
         self._buf = buf
         self._proto = proto
 
@@ -133,7 +141,7 @@ class BufferReader(AbstractReader):
             await self._proto.wait_for_data()
 
 
-class H1Protocol(asyncio.BufferedProtocol):
+class ConnectionProtocol(asyncio.BufferedProtocol):
     """Buffered-protocol front end for one H/1.1 connection."""
 
     def __init__(self) -> None:
@@ -182,10 +190,12 @@ class H1Protocol(asyncio.BufferedProtocol):
     def eof_received(self) -> bool:
         self._eof = True
         self._wake()
-        # False: let asyncio close the transport.  A half-open connection buys
-        # nothing here — the response path writes through the same transport,
-        # and every framing decision is already made from what arrived.
-        return False
+        # True keeps the transport open for writing.  Returning False would
+        # have asyncio close it the moment the peer half-closes — and a client
+        # that sends its request then calls ``shutdown(SHUT_WR)`` is doing
+        # exactly that, legitimately, while still waiting for the response.
+        # The write half is ours to close, once the response has shipped.
+        return True
 
     def connection_lost(self, exc: BaseException | None) -> None:
         self._eof = True
@@ -247,6 +257,62 @@ class H1Protocol(asyncio.BufferedProtocol):
         if self.transport is not None:
             self.transport.close()
 
+    async def linger_close(self, max_bytes: int = 65536,
+                           timeout: float = 0.25) -> None:
+        """Close after briefly discarding whatever the peer is still sending.
+
+        Closing a socket with unread bytes in its receive queue makes the
+        kernel send RST, and an RST discards data we already wrote — so a peer
+        that is still mid-send when we answer never sees the response.  That
+        is not hypothetical: it is how a 431 for an over-budget header block
+        goes missing, because rejecting at the budget means, by design, not
+        reading the rest.
+
+        nginx calls this ``lingering_close``.  Both bounds matter: reading
+        without a byte cap hands an attacker the unbounded read the budget
+        exists to refuse, and reading without a deadline lets a slow peer hold
+        the connection open after it has been answered.
+
+        Skipped unless we are closing with bytes we chose not to consume.  A
+        completed request leaves the buffer empty, so the normal close stays a
+        bare close — lingering on every connection would put a timeout on the
+        teardown path that ``AsyncioWriter.close`` deliberately keeps free of
+        even one extra loop turn, for the burst-keepalive workload.
+        """
+        if self.transport is None:
+            return
+        if self._eof or not self._rb.available:
+            self.close()
+            return
+        try:
+            # FIN tells the peer we are done writing, so it stops waiting for
+            # more response and closes its end.
+            if self.transport.can_write_eof():
+                self.transport.write_eof()
+            loop = asyncio.get_running_loop()
+            deadline = loop.time() + timeout
+            discarded = self._rb.available
+            self._rb.consume(discarded)
+            while not self._eof and discarded < max_bytes:
+                remaining = deadline - loop.time()
+                if remaining <= 0:
+                    break
+                try:
+                    await asyncio.wait_for(self.wait_for_data(), remaining)
+                except (asyncio.TimeoutError, TimeoutError):
+                    break
+                except Exception:
+                    break
+                n = self._rb.available
+                self._rb.consume(n)
+                discarded += n
+        except Exception:
+            # Teardown is best-effort: the response is already on the wire and
+            # the close below is what actually matters.
+            pass
+        finally:
+            self.close()
+
     # -- waiting -----------------------------------------------------------
 
     async def wait_for_data(self) -> None:
@@ -261,7 +327,7 @@ class H1Protocol(asyncio.BufferedProtocol):
             return
         if self._waiter is not None:
             raise RuntimeError(
-                'H1Protocol.wait_for_data is not re-entrant — one connection '
+                'ConnectionProtocol.wait_for_data is not re-entrant — one connection '
                 'is driven by one actor coroutine')
         self._waiter = asyncio.get_running_loop().create_future()
         try:

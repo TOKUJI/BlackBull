@@ -1,4 +1,4 @@
-"""``H1Protocol`` / ``BufferReader`` — the transport front end over one buffer.
+"""``ConnectionProtocol`` / ``BufferReader`` — the transport front end over one buffer.
 
 The protocol replaces ``asyncio.StreamReader`` on the H/1.1 inbound path: the
 kernel writes into the connection's own buffer via ``get_buffer``, and the
@@ -14,7 +14,7 @@ import asyncio
 
 import pytest
 
-from blackbull.server.h1_protocol import H1Protocol
+from blackbull.server.connection_protocol import ConnectionProtocol
 
 
 class _FakeTransport:
@@ -39,7 +39,7 @@ class _FakeTransport:
         return self.closed
 
 
-def _deliver(proto: H1Protocol, data: bytes) -> int:
+def _deliver(proto: ConnectionProtocol, data: bytes) -> int:
     """Feed *data* the way the selector transport does.
 
     A real transport writes at most ``len(get_buffer(...))`` per read and stops
@@ -63,7 +63,7 @@ pytestmark = pytest.mark.asyncio
 
 @pytest.fixture
 def wired():
-    proto = H1Protocol()
+    proto = ConnectionProtocol()
     transport = _FakeTransport()
     proto.connection_made(transport)
     return proto, transport
@@ -166,7 +166,7 @@ class TestHeadScan:
         assert proto.reader.buffered_len() == 4
 
     async def test_head_over_budget_raises_the_actor_s_error(self, wired):
-        from blackbull.server.h1_protocol import HeadTooLargeError
+        from blackbull.server.connection_protocol import HeadTooLargeError
         proto, _ = wired
         _deliver(proto, b'x' * 5000)
         with pytest.raises(HeadTooLargeError):

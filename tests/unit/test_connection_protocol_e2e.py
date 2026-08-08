@@ -15,7 +15,7 @@ import socket
 
 import pytest
 
-from blackbull.server.h1_protocol import H1Protocol
+from blackbull.server.connection_protocol import ConnectionProtocol
 from blackbull.server.http1_actor import HTTP1Actor
 from blackbull.server.sender import AsyncioWriter
 
@@ -28,7 +28,7 @@ async def _echo_app(conn, receive, send):
     await send({'type': 'http.response.body', 'body': b'ok'})
 
 
-class _ServedProtocol(H1Protocol):
+class _ServedProtocol(ConnectionProtocol):
     """Runs an `HTTP1Actor` over itself once the transport is up.
 
     Mirrors what `ConnectionActor` will do after the cut-over: the actor reads

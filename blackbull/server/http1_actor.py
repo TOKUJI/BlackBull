@@ -20,7 +20,7 @@ from ..connection import (
     Connection, bind_receive_channel, disconnected, mark_disconnected)
 from ..headers import Headers
 from .deadline import ConnectionDeadline
-from .h1_protocol import HeadTooLargeError
+from .connection_protocol import HeadTooLargeError
 from .recipient import (AbstractReader, HTTP1Recipient, IncompleteReadError,
                         RecipientFactory, _WS_READ_INLINE)
 from .sender import AbstractWriter, SenderFactory
@@ -300,6 +300,26 @@ class UnsupportedVersionError(Exception):
     (RFC9112-2.3-INVALID-VERSION).  Answered with 505 HTTP Version Not
     Supported and the connection is closed.  Distinct from
     :class:`BadRequestError`: the request *grammar* was valid."""
+
+
+def _reject_oversized_head(head: bytes, max_total: int) -> None:
+    """Raise the right rejection for a head that overran the total budget.
+
+    Two RFC rules can be broken by the same overrun, and they get different
+    answers.  If the *first* CRLF lands beyond the budget the start-line never
+    ended: that is a malformed request-line (RFC 9112 §3) and the answer is
+    **400** — a 100 KiB method token is not "too many header fields".  When the
+    lines are well-formed and merely numerous, it is **431** (RFC 6585 §5).
+
+    Always raises.
+    """
+    first_eol = head.find(b'\r\n')
+    if first_eol < 0 or first_eol >= max_total:
+        raise BadRequestError(
+            f'request line exceeds BB_HEADER_MAX_TOTAL={max_total} '
+            f'without a line terminator')
+    raise HeaderTooLargeError(
+        f'header block {len(head)} bytes > BB_HEADER_MAX_TOTAL={max_total}')
 
 
 def _declares_content(headers: 'Headers') -> bool:
@@ -1569,7 +1589,15 @@ class HTTP1Actor(Actor):
             try:
                 head = await read_head(max_total)
             except HeadTooLargeError as exc:
-                raise HeaderTooLargeError(str(exc)) from exc
+                # Same rule as the line loop, one implementation — see
+                # ``_reject_oversized_head``.  Testing for "no CRLF at all"
+                # would not do: the whole request usually arrives in one
+                # burst, terminator included, so the question is whether the
+                # *first* CRLF is inside the budget.
+                _reject_oversized_head(
+                    self._reader.peek(min(self._reader.buffered_len(),
+                                          max_total + 2)),
+                    max_total)
             if not head:
                 # EOF without a complete head.  ``run()`` tells an idle close
                 # from a truncated one by whether bytes arrived, so surface
@@ -1594,9 +1622,7 @@ class HTTP1Actor(Actor):
             buf += line
             if max_total > 0 and len(buf) > max_total:
                 self._request = bytes(buf)
-                raise HeaderTooLargeError(
-                    f'header block {len(buf)} bytes > '
-                    f'BB_HEADER_MAX_TOTAL={max_total}')
+                _reject_oversized_head(bytes(buf), max_total)
         self._request = bytes(buf)
 
     def _should_keep_alive(self, conn) -> bool:
