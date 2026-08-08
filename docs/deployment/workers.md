@@ -115,8 +115,10 @@ total.
 ### Oversized headers — memory exhaustion
 
 Two limits stop a 1 GB `X-Foo: <random bytes>` header from
-sitting in `readuntil`'s buffer until the line terminator
-arrives:
+accumulating in the connection's read buffer while the server
+waits for a line terminator that may never arrive.  Both bound
+the head read itself, on every request of a connection rather
+than only the first:
 
 | Limit | Default | Triggered when |
 |---|---|---|
@@ -125,7 +127,17 @@ arrives:
 
 A request that exceeds either limit gets
 `431 Request Header Fields Too Large` and the connection is
-closed.  The defaults match Apache's `LimitRequestLine` /
+closed.  The exception is a `BB_HEADER_MAX_TOTAL` overrun with no
+line terminator inside the budget: that start-line never ended, so
+it is answered `400 Bad Request` — 431 would tell a peer to send
+fewer header fields than the zero it has sent.
+
+Either way the server discards a bounded amount of what the peer
+is still sending before it closes, because a close with unread
+bytes queued makes the kernel send RST and the peer would never
+see the rejection it was just given.
+
+The defaults match Apache's `LimitRequestLine` /
 `LimitRequestFieldsize` and nginx's `large_client_header_buffers`.
 
 ### Connection cap and per-request timeout

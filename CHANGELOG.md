@@ -46,15 +46,49 @@ so the editable install's metadata catches up.
   than left opt-in: an unmeasured, untested, slower duplicate of the header
   read is worse than either path alone.
 
+### Changed
+
+- ⚠️ **An over-budget header block with no line terminator in it is now
+  answered `400`, not `431`.**  `BB_HEADER_MAX_TOTAL` can be overrun two ways
+  and they are different violations: many well-formed field lines is "your
+  header fields are too large" (RFC 6585 §5, still `431`), but 64 KiB with no
+  CRLF anywhere is a start-line that never ended (RFC 9112 §3).  Telling that
+  peer to retry with fewer header fields names a cause it does not have.
+  Requests that draw `431` today are unaffected.
+
+- **The head budget now applies to every request on a connection.**  It
+  previously bounded only the first: subsequent keep-alive heads were read with
+  an unbounded `readuntil`, backstopped in practice by `asyncio.StreamReader`'s
+  own 64 KiB buffer limit, which the new front end does not have.  A keep-alive
+  peer can no longer send a head of any size and escape the `431` the same
+  bytes draw on its first request.
+
 ### Internal
 
-- **New H/1.1 inbound foundation** (`ReadBuffer`, `H1Protocol`,
-  `BufferReader`), not yet wired into the server: one `bytearray` per
-  connection written directly by the kernel through
-  `BufferedProtocol.get_buffer()`, a resumable head scan, bodies as
-  `memoryview`, and keep-alive surplus that is simply the bytes between the
-  read and write cursors.  `HTTP1Actor` uses it when the connection's reader
-  provides it.  This is the replacement the removal above clears the way for.
+- **The H/1.1 inbound path is one buffer and one cursor.**
+  `ConnectionProtocol` (an `asyncio.BufferedProtocol`) has the kernel write
+  straight into the connection's `ReadBuffer`; the server accepts through
+  `loop.create_server` with a protocol factory instead of a `StreamReader`
+  callback pair.  Three workarounds go with the second buffer that is no
+  longer there: protocol detection consumes nothing (so the winning binding
+  needs no replayed prefix), the message head is found in one resumable scan
+  rather than a `readuntil` per line, and an upgrade hand-off to WebSocket or
+  h2c carries nothing because the peer's surplus is already resident.
+
+- **`read_head` is part of `AbstractReader`, not a capability callers sniff
+  for.**  One call returns a head, `b''` for an idle close, or
+  `IncompleteReadError` carrying the partial for a truncated one;
+  `ReadLimitExceeded` reports a budget breach and carries the bytes so the
+  protocol — not the reader — decides between `400` and `431`.  The keep-alive
+  loop no longer has a second head-read path of its own: every request after
+  the first re-enters the same read, differing only in which idle window
+  applies.  `tests/unit/test_read_head_contract.py` holds all three reader
+  kinds to identical answers.
+
+- **`NativeTestServer` accepts through the production protocol factory.**  It
+  used `asyncio.start_server`, so the large share of the suite that runs
+  through it was exercising the legacy read path rather than the one that
+  ships.
 
 ## [0.72.0] — 2026-08-08
 
