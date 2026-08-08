@@ -4979,6 +4979,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#keep-alive-drain-invariant" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Keep-alive drain invariant
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#send-path-invariant" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5391,6 +5402,17 @@
     <span class="md-ellipsis">
       
         Receive-path invariant
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#keep-alive-drain-invariant" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Keep-alive drain invariant
       
     </span>
   </a>
@@ -5886,6 +5908,49 @@ mean ± SE over 5 runs:</p>
 </table>
 <p>267 ns/chunk, or <strong>4.27 µs saved on a 64 KiB upload</strong> — and the dict count
 for that upload goes from 16 to 0.</p>
+<h2 id="keep-alive-drain-invariant">Keep-alive drain invariant<a class="headerlink" href="#keep-alive-drain-invariant" title="Permanent link">&para;</a></h2>
+<p>On HTTP/1.1 the connection is a byte stream with no framing of its own:
+the only thing separating request <em>N</em> from request <em>N+1</em> is that
+exactly as many body bytes were consumed as the headers declared.  So
+every request that stays on the connection passes through the drain in
+<code>HTTP1Actor</code>'s loop tail before the connection is reused — not just the
+ones a handler answered:</p>
+<div class="highlight"><pre><span></span><code><span class="k">if</span> <span class="n">inner_receive</span><span class="o">.</span><span class="n">needs_drain</span><span class="p">():</span>          <span class="c1"># loop tail — one site, no exceptions</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="k">await</span> <span class="n">inner_receive</span><span class="o">.</span><span class="n">drain</span><span class="p">(</span><span class="n">_MAX_KEEPALIVE_DRAIN</span><span class="p">):</span>
+        <span class="k">break</span>                            <span class="c1"># over the bound → close instead</span>
+</code></pre></div>
+<p>The predicate belongs to the loop, not to any one answer path.  A
+handler that ignores <code>receive</code> (a POST that 404s) is the obvious case,
+but a request can also be answered <em>before</em> routing — <code>OPTIONS *</code> is
+answered server-wide per RFC 9112 §3.2.4, and RFC 9110 §9.3.7 permits
+content on it.  Any such path that skipped the drain would leave the
+body in the reader, where the next <code>readuntil</code> parses it as a
+request-line: <code>body</code> followed by <code>GET / HTTP/1.1</code> becomes the method
+<code>bodyGET</code>.  The client's <em>next</em> request is then destroyed by the
+framing of the previous one, and behind a reverse proxy that pools
+upstream connections the leftover bytes prefix <strong>another client's</strong>
+request — the standard request-smuggling shape.</p>
+<p>Draining is bounded (<code>_MAX_KEEPALIVE_DRAIN</code>, 64 KiB) so an unbounded
+read is never the price of keeping a connection alive; past the bound
+the connection closes, which is safe because any desync dies with it.
+A recipient that has already seen a chunked-framing violation reports
+<code>needs_drain()</code> as <code>False</code> for the same reason — that stream is
+desynced, so draining it would be reading smuggled bytes rather than
+discarding them.</p>
+<p>A <strong>WebSocket upgrade</strong> leaves the loop before the tail is reached, so
+it cannot rely on the drain — and it must not.  After a 101 the same
+octets are request content (per <code>Content-Length</code>) <em>and</em> the first
+frames (per the switch); left alone they were read back as frames and
+delivered to the application as a message.  That contradiction is what
+a front end and this server would disagree about, so
+<code>_do_ws_handshake</code> <strong>refuses</strong> a handshake that declares content —
+400, before anything switches — instead of resolving it in one
+direction.  RFC 9110 §9.3.1 gives content on <code>GET</code> no defined
+semantics, so nothing legitimate is refused; <code>Content-Length: 0</code> is
+not content and still upgrades.  This is the one place where the
+drain's logic and the framing decision differ, and it differs because
+<code>OPTIONS</code> is the opposite case: §9.3.7 <em>permits</em> content there, which
+is exactly why that path drains rather than refusing.</p>
 <h2 id="send-path-invariant">Send-path invariant<a class="headerlink" href="#send-path-invariant" title="Permanent link">&para;</a></h2>
 <p>Protocol senders never choose between joining and vectored I/O
 themselves.  They always call <code>BaseSender._write_many(parts)</code>,

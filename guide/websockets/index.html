@@ -817,6 +817,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="permessage-deflate (RFC 7692)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#handshakes-that-carry-a-body-are-refused" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Handshakes that carry a body are refused
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -5219,6 +5236,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="permessage-deflate (RFC 7692)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#handshakes-that-carry-a-body-are-refused" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Handshakes that carry a body are refused
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -5630,6 +5664,21 @@ connection).</p>
 </tr>
 </tbody>
 </table>
+<h3 id="handshakes-that-carry-a-body-are-refused">Handshakes that carry a body are refused<a class="headerlink" href="#handshakes-that-carry-a-body-are-refused" title="Permanent link">&para;</a></h3>
+<p>A handshake request that declares content — <code>Content-Length</code> above
+zero, or any <code>Transfer-Encoding</code> — is answered <code>400 Bad Request</code> and
+the connection closes.  Nothing switches protocols.</p>
+<p>The reason is framing, not policy.  After the <code>101</code> the connection
+belongs to WebSocket, so those octets would be request content by the
+handshake's own headers and the first frames by the switch — and a
+reverse proxy in front may pick the other reading.  Left unresolved,
+the bytes arrive in your handler as an ordinary message that no client
+ever sent.</p>
+<p>RFC 9110 §9.3.1 gives content on a <code>GET</code> no defined semantics, so no
+real client is affected: <code>websockets</code>, browsers, and the usual proxies
+send no body here.  <code>Content-Length: 0</code> declares no content and still
+upgrades normally, which is what matters for the clients and proxies
+that attach it to <code>GET</code> requests by habit.</p>
 <h2 id="transport-http11-upgrade-vs-http2-extended-connect">Transport: HTTP/1.1 Upgrade vs HTTP/2 Extended CONNECT<a class="headerlink" href="#transport-http11-upgrade-vs-http2-extended-connect" title="Permanent link">&para;</a></h2>
 <p>WebSocket is always available over the HTTP/1.1 <code>Upgrade</code>
 handshake (RFC 6455 §4).  Over HTTP/2 it is <strong>opt-in</strong> via
