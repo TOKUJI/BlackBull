@@ -31,6 +31,31 @@ so the editable install's metadata catches up.
 
 ## [Unreleased]
 
+### Removed
+
+- **`BB_H1_PROTOCOL` and its buffer-owning read front end.**  The flag shipped
+  as an explicit measurement gate — "not a supported switch … will either
+  become the default or be removed once that measurement lands" — and the
+  measurement landed: it is **slower**, by 2.02 % ± 0.11 at a browser-like
+  header count and 2.9–4.8 % at wrk's default (local ABBA paired by round,
+  against a +0.00 % ± 0.14 A/A null floor).  The cause is structural rather
+  than incidental: the reader was layered *over* `asyncio.StreamReader`, so it
+  was a third buffer rather than a replacement, and its premise — "one loop
+  turn per header line today" — does not hold, because `StreamReader.readuntil`
+  only suspends when the separator is not already buffered.  Removed rather
+  than left opt-in: an unmeasured, untested, slower duplicate of the header
+  read is worse than either path alone.
+
+### Internal
+
+- **New H/1.1 inbound foundation** (`ReadBuffer`, `H1Protocol`,
+  `BufferReader`), not yet wired into the server: one `bytearray` per
+  connection written directly by the kernel through
+  `BufferedProtocol.get_buffer()`, a resumable head scan, bodies as
+  `memoryview`, and keep-alive surplus that is simply the bytes between the
+  read and write cursors.  `HTTP1Actor` uses it when the connection's reader
+  provides it.  This is the replacement the removal above clears the way for.
+
 ## [0.72.0] — 2026-08-08
 
 ### Security

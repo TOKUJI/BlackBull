@@ -342,7 +342,7 @@ class AsyncioReader(AbstractReader):
         # asyncio.StreamReader keeps every byte the transport has delivered
         # in ``_buffer`` until a read consumes it, so "buffer non-empty" is
         # the honest "a read won't block" probe.  A virtual
-        # ``AbstractReader`` (BufferedH1Reader) exposes ``buffered`` instead.
+        # A buffer-owning reader exposes ``buffered_len()`` instead.
         buf = getattr(self._sr, '_buffer', None)
         if buf is not None:
             return bool(buf)
