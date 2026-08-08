@@ -456,6 +456,15 @@ Callers must never call `transport.writelines` directly with
 small parts.  The gate is the single decision point, and the
 invariant keeps performance predictable across payload sizes.
 
+The obligation runs the other way too: **anything the sender writes
+through must implement both branches.**  A backing object with only
+`write` serves every response under 32 KiB and fails every response
+above it — and because the gate's own tests use a double that has both,
+that failure is invisible to them.  Whatever is under `AsyncioWriter`
+owes it `write`, `writelines`, `drain`, `close`, and a `transport`
+(for `sendfile`); `tests/architecture/test_writer_backing_contract.py`
+reads that list out of the sender's source rather than restating it.
+
 ### Response values that come from tables
 
 Two values are rebuilt on every single response and drawn from a
