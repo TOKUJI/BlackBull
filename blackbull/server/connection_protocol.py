@@ -236,6 +236,19 @@ class ConnectionProtocol(asyncio.BufferedProtocol):
         if self.transport is not None:
             self.transport.write(data)
 
+    def writelines(self, parts) -> None:
+        """Vectored write — the other half of the send-path size gate.
+
+        ``BaseSender._write_many`` joins below 32 KiB and comes here above it,
+        so a protocol that offers only :meth:`write` serves small responses and
+        fails large ones.  Delegated to the transport rather than joined here:
+        the selector transport reaches ``sendmsg(iovec, …)`` and uvloop does a
+        real vectored write, which is the entire reason the gate has an upper
+        branch.
+        """
+        if self.transport is not None:
+            self.transport.writelines(parts)
+
     async def drain(self) -> None:
         """Block only while the transport is over its high-water mark.
 

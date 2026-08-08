@@ -179,6 +179,9 @@ def render(raw: Path) -> str:
     by_round = _load_by_round(raw)
     paired = {p: r for p in ('null', 'real')
               if (r := _paired_delta(by_round.get(p, {}))) is not None}
+    #: ``(index, surviving deltas)`` once a round is found to be carrying the
+    #: result — every verdict downstream reads this instead of the full mean.
+    contaminated: tuple[int, list[float]] | None = None
     if paired:
         w('### Paired by round')
         w('')
@@ -222,6 +225,7 @@ def render(raw: Path) -> str:
                     if z > dist:
                         worst, dist, kept = i, z, rest
                 if worst is not None and dist > 5:
+                    contaminated = (worst, kept)
                     w('> **One round carries the result.** Round %d (Δ %+.2f '
                       '%%) sits %.0f SE from the mean of the other rounds, '
                       'which give %+.2f %% ± %.2f between them. That is the '
@@ -231,24 +235,61 @@ def render(raw: Path) -> str:
                       % (worst + 1, ds[worst], dist, st.mean(kept),
                          _se(kept), d))
                     w('')
-            same_sign = all(x > 0 for x in ds) or all(x < 0 for x in ds)
-            if not same_sign:
-                w('Per-round Δs disagree in sign — the effect is not '
-                  'resolvable at this round count whatever the mean says.')
-            elif abs(d) > sed and abs(d) > floor:
-                w('Paired Δ = %+.2f %% ± %.2f clears both its own SE and the '
-                  'paired null floor (%.2f %%), and every round agrees in '
-                  'sign.' % (d, sed, floor))
+            if contaminated is not None:
+                # Every verdict below this point would be read off a mean the
+                # paragraph above just disowned.  Re-derive them from the
+                # rounds that survived instead: a report whose warning and
+                # whose conclusion disagree gets quoted by its conclusion.
+                _, kept = contaminated
+                kd, ksed = st.mean(kept), _se(kept)
+                same_sign = all(x > 0 for x in kept) or all(x < 0 for x in kept)
+                if not same_sign:
+                    w('Surviving rounds disagree in sign — no verdict.')
+                elif abs(kd) > ksed and abs(kd) > floor:
+                    w('**Verdict on the surviving rounds: Δ = %+.2f %% ± '
+                      '%.2f**, clearing both its own SE and the paired null '
+                      'floor (%.2f %%). The %+.2f %% pooled figure above is '
+                      'not the result.' % (kd, ksed, floor, d))
+                else:
+                    w('**Verdict on the surviving rounds: Δ = %+.2f %% ± '
+                      '%.2f**, which does not clear its SE or the paired null '
+                      'floor (%.2f %%).' % (kd, ksed, floor))
             else:
-                w('Paired Δ = %+.2f %% ± %.2f does not clear its SE (%.2f %%) '
-                  'or the paired null floor (%.2f %%).'
-                  % (d, sed, sed, floor))
+                same_sign = all(x > 0 for x in ds) or all(x < 0 for x in ds)
+                if not same_sign:
+                    w('Per-round Δs disagree in sign — the effect is not '
+                      'resolvable at this round count whatever the mean says.')
+                elif abs(d) > sed and abs(d) > floor:
+                    w('Paired Δ = %+.2f %% ± %.2f clears both its own SE and '
+                      'the paired null floor (%.2f %%), and every round agrees '
+                      'in sign.' % (d, sed, floor))
+                else:
+                    w('Paired Δ = %+.2f %% ± %.2f does not clear its SE '
+                      '(%.2f %%) or the paired null floor (%.2f %%).'
+                      % (d, sed, sed, floor))
         w('')
 
     if 'real' in summary:
         d, sed, _ = summary['real']
         floor = abs(summary['null'][0]) + summary['null'][1] if 'null' in summary else 0.0
-        if abs(d) <= sed:
+        if contaminated is not None:
+            # The pooled figures share the contaminated round, and the pooled
+            # analysis cannot even see it — it has already thrown the rounds
+            # away.  Say what it would have said and why it is not being said.
+            w('Pooled verdict withheld: the pooled analysis differences two '
+              'grand means and cannot exclude the round flagged above. Read '
+              'the paired verdict.')
+        elif 'real' in paired:
+            # The paired verdict above is strictly better informed — it uses
+            # the blocking factor this schedule was built to create.  Printing
+            # a second, weaker verdict as its equal is how a report ends up
+            # contradicting itself; label it as the sensitivity floor it is.
+            w('For reference, the *unpaired* view of the same runs gives '
+              '|Δ| = %.2f %% against a %.2f %% SE — it charges the comparison '
+              'for between-round drift, so it is the weaker test and is not '
+              'the verdict. Where the two disagree, the paired one is the one '
+              'the design supports.' % (abs(d), sed))
+        elif abs(d) <= sed:
             w('|Δ| = %.2f %% is within its own 1 SE (%.2f %%) — **consistent '
               'with no change**.' % (abs(d), sed))
         elif abs(d) <= floor:
