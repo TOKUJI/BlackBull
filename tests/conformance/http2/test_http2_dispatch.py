@@ -707,7 +707,7 @@ class TestHTTP2ServerPush:
 
         async def app(conn, receive, send):
             scopes.append(conn)
-            if conn.path == '/':
+            if (conn['path'] if isinstance(conn, dict) else conn.path) == '/':
                 await send({
                     'type': 'http.response.push',
                     'path': '/pushed.css',
@@ -723,12 +723,16 @@ class TestHTTP2ServerPush:
         assert len(scopes) == 2, (
             f'app must be called twice (original + push); got {len(scopes)} call(s)'
         )
-        push_conn = next((s for s in scopes if s.path == '/pushed.css'), None)
+        push_conn = next((s for s in scopes
+                          if (s['path'] if isinstance(s, dict) else s.path)
+                          == '/pushed.css'), None)
         assert push_conn is not None, (
             "No synthetic request with path='/pushed.css' was delivered to the app"
         )
-        assert push_conn.method == 'GET', (
-            f"Pushed request must have method=GET; got {push_conn.method!r}"
+        method = (push_conn['method'] if isinstance(push_conn, dict)
+                  else push_conn.method)
+        assert method == 'GET', (
+            f"Pushed request must have method=GET; got {method!r}"
         )
 
     async def test_scope_has_push_extension(self):
@@ -747,7 +751,8 @@ class TestHTTP2ServerPush:
         await handler.run()
 
         assert scopes, 'app must have been called'
-        exts = scopes[0].extensions or {}
+        exts = (scopes[0]['extensions'] if isinstance(scopes[0], dict)
+                else scopes[0].extensions) or {}
         assert 'http.response.push' in exts, (
             f"conn.extensions must contain 'http.response.push'; got {exts!r}"
         )
@@ -976,7 +981,9 @@ class TestHTTP2PriorityScope:
         await handler.run()
 
         assert scopes, 'app must have been called'
-        assert scopes[0].extensions.get('http.response.priority') == {'urgency': 3, 'incremental': False}
+        exts = (scopes[0]['extensions'] if isinstance(scopes[0], dict)
+                else scopes[0].extensions)
+        assert exts.get('http.response.priority') == {'urgency': 3, 'incremental': False}
 
     async def test_priority_update_before_headers_populates_scope(self):
         pu_frame = self._make_priority_update_frame(
@@ -993,7 +1000,9 @@ class TestHTTP2PriorityScope:
         await handler.run()
 
         assert scopes, 'app must have been called'
-        assert scopes[0].extensions.get('http.response.priority') == {'urgency': 1, 'incremental': True}
+        exts = (scopes[0]['extensions'] if isinstance(scopes[0], dict)
+                else scopes[0].extensions)
+        assert exts.get('http.response.priority') == {'urgency': 1, 'incremental': True}
 
     async def test_priority_header_fallback_populates_scope(self):
         encoder = Encoder()
@@ -1017,7 +1026,9 @@ class TestHTTP2PriorityScope:
         await handler.run()
 
         assert scopes, 'app must have been called'
-        assert scopes[0].extensions.get('http.response.priority') == {'urgency': 6, 'incremental': False}
+        exts = (scopes[0]['extensions'] if isinstance(scopes[0], dict)
+                else scopes[0].extensions)
+        assert exts.get('http.response.priority') == {'urgency': 6, 'incremental': False}
 
 
 # ---------------------------------------------------------------------------
@@ -1061,7 +1072,9 @@ class TestHTTP2ScopeHeaders:
         await handler.run()
 
         assert scopes, 'app must have been called'
-        assert list(scopes[0].headers) != [], (
+        headers = (scopes[0]['headers'] if isinstance(scopes[0], dict)
+                   else scopes[0].headers)
+        assert list(headers) != [], (
             "conn.headers is empty — Cookie and other request headers "
             "are missing from the HTTP/2 request"
         )
@@ -1082,12 +1095,20 @@ class TestHTTP2ScopeHeaders:
         assert scopes, 'app must have been called'
         conn = scopes[0]
 
-        assert isinstance(conn.headers, Headers), (
-            f"conn.headers must be a Headers instance; got {type(conn.headers)!r}"
-        )
-        cookie_val = conn.headers.get(b'cookie')
+        if isinstance(conn, dict):
+            # BB_FORCE_ASGI_SCOPE lane: the scope's headers are the ASGI wire
+            # shape — a list of (name, value) bytes tuples.
+            cookie_val = next(
+                (v for k, v in conn['headers'] if k == b'cookie'), b'')
+        else:
+            assert isinstance(conn.headers, Headers), (
+                f"conn.headers must be a Headers instance; "
+                f"got {type(conn.headers)!r}"
+            )
+            cookie_val = conn.headers.get(b'cookie')
         assert cookie_val == b'session_id=abc123', (
-            f"Expected cookie b'session_id=abc123' in conn.headers; got {cookie_val!r}"
+            f"Expected cookie b'session_id=abc123' in conn.headers; "
+            f"got {cookie_val!r}"
         )
 
 
@@ -1128,9 +1149,11 @@ class TestHTTP2PerStreamRecipient:
         received_bodies: dict[str, bytes] = {}
 
         async def app(conn, receive, send):
-            if conn.method == 'POST':
+            method = conn['method'] if isinstance(conn, dict) else conn.method
+            path = conn['path'] if isinstance(conn, dict) else conn.path
+            if method == 'POST':
                 event = await receive()
-                received_bodies[conn.path or '?'] = event.get('body', b'<none>')
+                received_bodies[path or '?'] = event.get('body', b'<none>')
 
         handler, _ = _make_h2_actor(app=app)
         handler.receive = AsyncMock(side_effect=[h_get, h_post, d_post, None])

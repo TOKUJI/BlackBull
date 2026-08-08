@@ -165,12 +165,24 @@ class TestHeadScan:
         assert head == b'GET / HTTP/1.1\r\nhost: x\r\naccept: */*\r\n\r\n'
         assert proto.reader.buffered_len() == 4
 
-    async def test_head_over_budget_raises_the_actor_s_error(self, wired):
-        from blackbull.server.connection_protocol import HeadTooLargeError
+    async def test_head_over_budget_reports_the_bytes_it_saw(self, wired):
+        """The reader reports the breach; the protocol decides the status.
+
+        Which means the evidence has to travel with the exception — the actor
+        answers 400 for an over-budget blob with no line terminator in it and
+        431 for one that is merely a long head, and it must reach that verdict
+        the same way whichever reader it is sitting on.
+        """
+        from blackbull.server.recipient import ReadLimitExceeded
         proto, _ = wired
         _deliver(proto, b'x' * 5000)
-        with pytest.raises(HeadTooLargeError):
+        with pytest.raises(ReadLimitExceeded) as caught:
             await proto.reader.read_head(limit=4096)
+        assert caught.value.seen.startswith(b'xxx')
+        assert b'\r\n' not in caught.value.seen
+        # Not consumed: the lingering close still has bytes to discard, which
+        # is what keeps the response from being RST away.
+        assert proto.reader.buffered_len() == 5000
 
     async def test_head_read_waits_for_the_terminator(self, wired):
         proto, _ = wired
@@ -189,11 +201,20 @@ class TestHeadScan:
     async def test_eof_mid_head_is_distinguishable_from_idle_eof(self, wired):
         """``run()`` answers 400 for a partial head and closes silently for an
         idle one, so the two must not collapse into one signal."""
+        from blackbull.server.recipient import IncompleteReadError
         proto, _ = wired
         _deliver(proto, b'GET / HTTP/1.1\r\n')
         proto.eof_received()
+        with pytest.raises(IncompleteReadError) as caught:
+            await proto.reader.read_head(limit=8192)
+        assert caught.value.partial == b'GET / HTTP/1.1\r\n'
+
+    async def test_idle_eof_is_an_empty_head_not_an_error(self, wired):
+        """A peer that opens a connection and closes it without sending
+        anything is not a truncated request — it gets no response at all."""
+        proto, _ = wired
+        proto.eof_received()
         assert await proto.reader.read_head(limit=8192) == b''
-        assert proto.reader.buffered_len() == 16      # the partial head remains
 
 
 class TestUpgradeHandoff:

@@ -364,8 +364,7 @@ class TestHTTPDisconnect:
         reader = _AsyncioReader(backing)
 
         actor = HTTP1Actor(reader, _FakeWriter(), app, None,
-                           request=b'GET / HTTP/1.1\r\n')
-        actor._request = raw
+                           request=raw)
         await actor.run()
 
         assert any(e.get('type') == 'http.disconnect' for e in disconnect_received)
@@ -384,8 +383,7 @@ class TestHTTPDisconnect:
         reader = _AsyncioReader(backing)
 
         actor = HTTP1Actor(reader, _FakeWriter(), app, None,
-                           request=b'GET / HTTP/1.1\r\n')
-        actor._request = raw
+                           request=raw)
         await actor.run()
 
         assert 'http.disconnect' in [e.get('type') for e in events]
@@ -427,8 +425,7 @@ class TestHTTP11Expect100Continue:
         reader.readexactly = AsyncMock(return_value=body)
 
         actor = HTTP1Actor(reader, writer, app, None,
-                           request=b'POST /upload HTTP/1.1\r\n')
-        actor._request = raw
+                           request=raw)
         await actor.run()
 
         assert body_read_position is not None
@@ -449,8 +446,7 @@ class TestHTTP11Expect100Continue:
         reader.readexactly = AsyncMock(return_value=body)
 
         actor = HTTP1Actor(reader, _FakeWriter(), app, None,
-                           request=b'POST /upload HTTP/1.1\r\n')
-        actor._request = raw
+                           request=raw)
         await actor.run()
 
         assert received_body == body
@@ -470,8 +466,7 @@ class TestHTTP11Expect100Continue:
         reader.readexactly = AsyncMock(return_value=body)
 
         actor = HTTP1Actor(reader, writer, noop_app, None,
-                           request=b'POST / HTTP/1.1\r\n')
-        actor._request = raw
+                           request=raw)
         await actor.run()
 
         assert b'100' not in bytes(writer.written)
@@ -490,8 +485,7 @@ class TestHTTP11Expect100Continue:
         reader.readexactly = AsyncMock(return_value=b'hello')
 
         actor = HTTP1Actor(reader, writer, app, None,
-                           request=b'POST /upload HTTP/1.1\r\n')
-        actor._request = raw
+                           request=raw)
         await actor.run()
 
         assert b'100' in bytes(writer.written)
@@ -511,8 +505,7 @@ class TestHTTP11Expect100Continue:
         reader.readexactly = AsyncMock(return_value=body)
 
         actor = HTTP1Actor(reader, writer, app, None,
-                           request=b'POST /upload HTTP/1.1\r\n')
-        actor._request = raw
+                           request=raw)
         await actor.run()
 
         wire = bytes(writer.written)

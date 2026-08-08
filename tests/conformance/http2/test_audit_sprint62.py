@@ -255,7 +255,7 @@ async def test_trailers_do_not_respawn_request():
     calls = []
 
     async def app(conn, receive, send):
-        calls.append(conn.path)
+        calls.append(conn['path'] if isinstance(conn, dict) else conn.path)
         # Drain the body to completion (trailers deliver the clean EOS).
         while True:
             ev = await receive()

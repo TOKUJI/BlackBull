@@ -20,9 +20,9 @@ from ..connection import (
     Connection, bind_receive_channel, disconnected, mark_disconnected)
 from ..headers import Headers
 from .deadline import ConnectionDeadline
-from .connection_protocol import HeadTooLargeError
 from .recipient import (AbstractReader, HTTP1Recipient, IncompleteReadError,
-                        RecipientFactory, _WS_READ_INLINE)
+                        ReadLimitExceeded, RecipientFactory, _HEAD_END,
+                        _WS_READ_INLINE)
 from .sender import AbstractWriter, SenderFactory
 from .access_log import (AccessLogRecord as _AccessLogRecord,
                          _make_disconnect_detecting_receive,
@@ -34,7 +34,9 @@ from .cap_log import log_cap_hit
 
 logger = logging.getLogger(__name__)
 
-_REQ_END = b'\r\n\r\n'
+#: End of the message head.  Owned by the reader contract (``read_head`` is what
+#: searches for it); aliased here because the loop still names it.
+_REQ_END = _HEAD_END
 _WS_GUID = b'258EAFA5-E914-47DA-95CA-C5AB0DC85B11'  # RFC 6455 §1.3
 # Methods advertised in the Allow header of a server-wide ``OPTIONS *``
 # response (RFC 9112 §3.2.4).  The origin implements the standard set; route
@@ -604,11 +606,21 @@ class HTTP1Actor(Actor):
         connection_id: str = '',
     ) -> None:
         super().__init__()
+        # *request* is bytes that already arrived on this connection, so they
+        # go back in front of the stream rather than into a parsed-head slot.
+        # The actor then has exactly one way to obtain a head — read it — and
+        # a caller that hands over a partial one (a first line, say) gets the
+        # budget check and the framing rules that a wire read would give it.
+        if request:
+            from .recipient import PrefixReader  # noqa: PLC0415
+            reader = PrefixReader(request, reader)
         self._reader = reader
         self._writer = writer
         self._app = app
         self._aggregator = aggregator
-        self._request = request
+        #: The head of the request being served, set by ``_read_headers`` on
+        #: every exit path — including the failing ones, which report it.
+        self._request = b''
         self._peername = peername
         self._sockname = sockname
         self._ssl = ssl
@@ -652,6 +664,9 @@ class HTTP1Actor(Actor):
         _loop_start_cpu: float = 0.0
         # Built on the first request that needs one, rebound thereafter.
         inner_receive: HTTP1Recipient | None = None
+        # False for the first request on the connection, True for every one
+        # after it — set by the keep-alive tail at the bottom of the loop.
+        keep_alive = False
         try:
             while True:
                 if _PHASE_TRACE:
@@ -663,9 +678,11 @@ class HTTP1Actor(Actor):
                 # well-behaved monitoring client can tell us apart from a
                 # peer-side disconnect.  ``header_timeout=0`` disables the
                 # deadline (legacy behaviour for trusted local use).
+                idle_window = (cfg.keep_alive_timeout if keep_alive
+                               else cfg.header_timeout)
                 try:
-                    if cfg.header_timeout > 0:
-                        with dl.guard(cfg.header_timeout):
+                    if idle_window > 0:
+                        with dl.guard(idle_window):
                             await self._read_headers(cfg.header_max_total)
                     else:
                         await self._read_headers(cfg.header_max_total)
@@ -701,7 +718,24 @@ class HTTP1Actor(Actor):
                         send, b'431 Request Header Fields Too Large',
                         HTTPStatus.REQUEST_HEADER_FIELDS_TOO_LARGE)
                     return
+                except BadRequestError as exc:
+                    # The other half of the budget verdict: over the limit with
+                    # no line terminator in sight is a start-line that never
+                    # ended (RFC 9112 §3), not a header block with too many
+                    # fields.  Answered here rather than only around ``_parse``
+                    # — the head read is the first place that can reach it, and
+                    # a peer that gets no answer at all cannot tell a rejection
+                    # from a crash.
+                    logger.warning('400 Bad Request: %s', exc)
+                    await self._send_error_and_close(
+                        send, b'400 Bad Request', HTTPStatus.BAD_REQUEST)
+                    return
                 except (asyncio.TimeoutError, TimeoutError):
+                    if keep_alive:
+                        # Idle too long between requests — drop it silently.
+                        # A 408 here would arrive on a connection the peer has
+                        # most likely already abandoned.
+                        return
                     logger.warning(
                         '408 Request Timeout (slowloris defence) — peer=%r '
                         'sent %d bytes in %.1fs without completing headers',
@@ -712,6 +746,14 @@ class HTTP1Actor(Actor):
                                 peer=self._peername, protocol='http1')
                     await self._send_error_and_close(
                         send, b'408 Request Timeout', HTTPStatus.REQUEST_TIMEOUT)
+                    return
+
+                if keep_alive and self._request == _REQ_END:
+                    # Nothing but the terminator after a completed response:
+                    # trailing CRLFs from a client that appends them to a body
+                    # (RFC 9112 §2.2 tells us to tolerate empty lines before a
+                    # request-line, and there is no request-line coming).  Not
+                    # an error — just the end of the connection.
                     return
 
                 try:
@@ -839,51 +881,15 @@ class HTTP1Actor(Actor):
                     break
 
                 self._request = b''
-                # Idle keep-alive timeout (replaces per-accept SO_KEEPALIVE).
-                # The first request used header_timeout above; *subsequent*
-                # requests are bounded by keep_alive_timeout so a peer
-                # that has vanished silently (process crash, NAT drop,
-                # mobile network change) doesn't hold a ghost connection.
-                # The next head goes through the same budgeted read as the
-                # first.  A bare ``readuntil(_REQ_END)`` here would be
-                # *unbounded* on a buffer-owning reader — asyncio's StreamReader
-                # used to impose its own 64 KiB ceiling, and nothing replaces it
-                # — so a keep-alive peer could send a head of any size and never
-                # draw the 431 that the same head draws on its first request.
-                try:
-                    if cfg.keep_alive_timeout > 0:
-                        with dl.guard(cfg.keep_alive_timeout):
-                            next_chunk = await self._read_next_head(
-                                cfg.header_max_total)
-                    else:
-                        next_chunk = await self._read_next_head(
-                            cfg.header_max_total)
-                except HeaderTooLargeError as exc:
-                    logger.warning('431 Request Header Fields Too Large: %s', exc)
-                    log_cap_hit('header_max_total',
-                                requested=self._reader.buffered_len(),
-                                limit=cfg.header_max_total,
-                                peer=self._peername, protocol='http1')
-                    await self._send_error_and_close(
-                        send, b'431 Request Header Fields Too Large',
-                        HTTPStatus.REQUEST_HEADER_FIELDS_TOO_LARGE)
-                    break
-                except BadRequestError as exc:
-                    logger.warning('400 Bad Request: %s', exc)
-                    await self._send_error_and_close(
-                        send, b'400 Bad Request', HTTPStatus.BAD_REQUEST)
-                    break
-                except TimeoutError:
-                    break  # idle too long — drop the connection
-                except IncompleteReadError:
-                    # Peer cleanly closed between requests — silent close
-                    # is correct (no 400, no 408): the previous response
-                    # already shipped, and the spec allows either side
-                    # to close a persistent connection at any time.
-                    break
-                if next_chunk == _REQ_END:
-                    break
-                self._request = next_chunk
+                # Every later request re-enters the loop and reads its head the
+                # same way the first one did.  Only two things differ, and both
+                # are policy rather than mechanism: the idle window is
+                # ``keep_alive_timeout`` (a peer that vanished silently — crash,
+                # NAT drop, network change — must not hold a ghost connection),
+                # and neither a timeout nor an EOF gets a status, because the
+                # previous response already shipped and either side may close a
+                # persistent connection at any time (RFC 9112 §9.3).
+                keep_alive = True
 
         except IncompleteReadError:
             # Safety net: any IncompleteReadError that escapes the
@@ -895,30 +901,6 @@ class HTTP1Actor(Actor):
     # ------------------------------------------------------------------
     # Private helpers
     # ------------------------------------------------------------------
-
-    async def _read_next_head(self, max_total: int) -> bytes:
-        """Read the next keep-alive head, budget enforced.
-
-        Returns the head (terminator included), or the bare terminator for the
-        stray-CRLF case the caller treats as end-of-connection.  Raises the
-        same 431/400 the first request would draw for the same bytes.
-        """
-        read_head = getattr(self._reader, 'read_head', None)
-        if read_head is not None:
-            try:
-                head = await read_head(max_total)
-            except HeadTooLargeError:
-                _reject_oversized_head(
-                    self._reader.peek(min(self._reader.buffered_len(),
-                                          max_total + 2)),
-                    max_total)
-            if not head:
-                raise IncompleteReadError(b'')
-            return head
-        head = await self._reader.readuntil(_REQ_END)
-        if max_total > 0 and len(head) > max_total:
-            _reject_oversized_head(head, max_total)
-        return head
 
     @staticmethod
     async def _send_error_and_close(send, body: bytes, status: HTTPStatus) -> None:
@@ -1596,81 +1578,37 @@ class HTTP1Actor(Actor):
         return True, inner_receive
 
     async def _read_headers(self, max_total: int) -> None:
-        """Drain bytes from the reader until ``\\r\\n\\r\\n`` is at the end of
-        ``self._request``.  Enforces the configured total-block size limit;
-        raises :class:`HeaderTooLargeError` when the buffer overshoots.
+        """Read the next message head into ``self._request``.
 
-        Read **one CRLF-terminated line per iteration** rather than scanning
-        for the contiguous ``\\r\\n\\r\\n`` delimiter.  A
-        ``readuntil(b'\\r\\n\\r\\n')`` shape deadlocks when
-        :class:`ConnectionActor` had already consumed the first line's
-        ``\\r\\n`` via its protocol-detect ``readuntil(b'\\r\\n')`` and the
-        remaining buffer contained only the terminating empty line's
-        ``\\r\\n`` (two bytes, half of the contiguous delimiter the loop
-        was searching for).  A minimally-valid HTTP/1.0 request
-        (``GET / HTTP/1.0\\r\\n\\r\\n``, no headers) would hang here until
-        the client closed its write side.  Reading line-by-line handles
-        the case naturally: each iteration consumes one CRLF, and the
-        empty header-block terminator (line == ``b'\\r\\n'``) makes
-        ``self._request`` end with ``\\r\\n\\r\\n`` regardless of how the
-        request was split across the two reader stages.
+        One call, one head, whatever reader is underneath — the reader decides
+        whether that is a single scan of its own buffer or a ``readuntil`` per
+        line, and the actor does not ask which.
 
-        asyncio's StreamReader has its own buffer limit (default 64 KiB,
-        triggering ``LimitOverrunError``) which is converted into the same
-        :class:`HeaderTooLargeError` here so callers can handle one
-        exception class regardless of which side caught the overflow.
+        ``self._request`` is set on every exit path, including the failing
+        ones: ``run()`` reads it to tell an idle close from a truncated
+        request, and to report how many bytes an over-budget peer sent.
         """
-        import asyncio  # noqa: PLC0415
-        read_head = getattr(self._reader, 'read_head', None)
-        # The scan applies only when nothing has been consumed on this
-        # message's behalf.  A non-empty ``_request`` means bytes were taken
-        # off the stream upstream (protocol detection's replayed prefix, or a
-        # complete head handed in) — scanning then would consume the *next*
-        # message's head instead of finding this one's.  The buffer-owning
-        # front end never pre-consumes, so it always takes this path.
-        if read_head is not None and not self._request:
-            # Dispatch on the reader's capability rather than a setting: which
-            # reader a connection has is decided at accept.  The line-by-line
-            # loop below lives only as long as connections still arrive
-            # through ``asyncio.StreamReader``.
-            try:
-                head = await read_head(max_total)
-            except HeadTooLargeError as exc:
-                # Same rule as the line loop, one implementation — see
-                # ``_reject_oversized_head``.  Testing for "no CRLF at all"
-                # would not do: the whole request usually arrives in one
-                # burst, terminator included, so the question is whether the
-                # *first* CRLF is inside the budget.
-                _reject_oversized_head(
-                    self._reader.peek(min(self._reader.buffered_len(),
-                                          max_total + 2)),
-                    max_total)
-            if not head:
-                # EOF without a complete head.  ``run()`` tells an idle close
-                # from a truncated one by whether bytes arrived, so surface
-                # what did rather than an empty request.
-                self._request = self._reader.peek(self._reader.buffered_len())
-                raise IncompleteReadError(self._request)
-            self._request = head
-            return
-        # Accumulate into a bytearray (amortised O(1) append) instead of the
-        # O(n²) bytes ``+=`` growth, then publish back as bytes.  The loop
-        # condition and size check are byte-for-byte equivalent to the prior
-        # form.
-        buf = bytearray(self._request)
-        while not buf.endswith(_REQ_END):
-            try:
-                line = await self._reader.readuntil(b'\r\n')
-            except asyncio.LimitOverrunError as exc:
-                self._request = bytes(buf)
-                raise HeaderTooLargeError(
-                    f'asyncio buffer overflow ({exc.consumed} bytes) '
-                    f'while reading headers') from exc
-            buf += line
-            if max_total > 0 and len(buf) > max_total:
-                self._request = bytes(buf)
-                _reject_oversized_head(bytes(buf), max_total)
-        self._request = bytes(buf)
+        try:
+            head = await self._reader.read_head(max_total)
+        except ReadLimitExceeded as exc:
+            # Over budget with nothing that looks like a head is a peer talking
+            # some other protocol at us, not a request with too many fields —
+            # 400, not 431.  Testing for "no CRLF at all" would not do: the
+            # whole request usually arrives in one burst, terminator included,
+            # so the question is whether the *first* CRLF is inside the budget.
+            self._request = exc.seen
+            _reject_oversized_head(exc.seen, max_total)
+            raise   # unreachable: _reject_oversized_head always raises
+        except IncompleteReadError as exc:
+            self._request = exc.partial
+            raise
+        if not head:
+            # Clean EOF with nothing sent — an idle peer closing, not a
+            # truncated request.  ``run()`` distinguishes them by this being
+            # empty.
+            self._request = b''
+            raise IncompleteReadError(b'')
+        self._request = head
 
     def _should_keep_alive(self, conn) -> bool:
         """Return True if the connection should persist after this request.

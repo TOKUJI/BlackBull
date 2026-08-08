@@ -29,9 +29,9 @@ from __future__ import annotations
 import asyncio
 
 from .read_buffer import ReadBuffer
-from .recipient import AbstractReader, IncompleteReadError
+from .recipient import AbstractReader, IncompleteReadError, ReadLimitExceeded
 
-__all__ = ('BufferReader', 'ConnectionProtocol', 'HeadTooLargeError')
+__all__ = ('BufferReader', 'ConnectionProtocol')
 
 #: Stop reading from the transport once this many unconsumed bytes are resident.
 #: Backpressure's memory half: without it a fast peer feeding a slow handler
@@ -41,14 +41,6 @@ _HIGH_WATER = 128 * 1024
 #: Resume once the buffer falls back to this.  A gap between the two stops the
 #: transport being paused and resumed on alternate reads.
 _LOW_WATER = 32 * 1024
-
-
-class HeadTooLargeError(Exception):
-    """The message head exceeded the caller's budget.
-
-    Distinct from the buffer's `LIMIT_EXCEEDED` sentinel because the actor
-    answers 431 for it; the buffer itself owns no HTTP semantics.
-    """
 
 
 class BufferReader(AbstractReader):
@@ -132,25 +124,33 @@ class BufferReader(AbstractReader):
     # -- the one-scan header read ------------------------------------------
 
     async def read_head(self, limit: int) -> bytes:
-        """The message head, terminator included.
+        """The message head, terminator included — found in one scan.
 
-        Returns ``b''`` at EOF without a complete head — the caller
-        distinguishes an idle close from a truncated one by whether bytes are
-        still buffered, exactly as the streams path did via
-        ``IncompleteReadError``'s partial.  Raises :class:`HeadTooLargeError`
-        past *limit*.
+        The override the whole rewrite exists for: the terminator is looked for
+        once, across everything resident, and the head leaves the buffer in a
+        single copy.  Resumable, so bytes already scanned are not scanned again
+        when the head arrives split across reads.
+
+        Contract as documented on :meth:`AbstractReader.read_head` — an idle
+        close returns ``b''`` and a truncated one raises with the partial.
         """
         while True:
             end = self._buf.find_head_end(limit=limit)
             if end == ReadBuffer.LIMIT_EXCEEDED:
-                raise HeadTooLargeError(
-                    f'header block exceeds {limit} bytes')
+                # The bytes stay resident: the caller classifies them, and the
+                # lingering close still has something to discard.
+                raise ReadLimitExceeded(
+                    f'head exceeds {limit} bytes',
+                    bytes(self._buf.view(min(self._buf.available, limit + 2))))
             if end >= 0:
                 out = self._buf.take(end)
                 self._proto.maybe_resume()
                 return out
             if self._proto.at_eof:
-                return b''
+                partial = self._buf.take(self._buf.available)
+                if not partial:
+                    return b''
+                raise IncompleteReadError(partial)
             await self._proto.wait_for_data()
 
 

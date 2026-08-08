@@ -481,20 +481,26 @@ class NativeTestServer:
 
         self._bb_server = Server(self.app, **self._server_kwargs)
 
-        async def _accept(reader, writer):
-            # The only thing layered over the production callback: count the
-            # accept.  A test asserting keep-alive reuse needs to know how many
-            # TCP connections its requests actually opened, and the honest
-            # place to learn that is the accept path — not a response header
-            # the server merely *may* send, and not httpx's private pool.
-            self.connections_served += 1
-            await self._bb_server.client_connected_cb(reader, writer)
+        # The production protocol factory, not a StreamReader callback: a test
+        # server that accepted connections a different way would leave the read
+        # path the server actually ships untested, and that is most of what
+        # these tests are for.
+        protocol_factory = self._bb_server.connection_protocol_factory()
 
-        # ``asyncio.start_server`` rather than ``Server.open_socket``: the
-        # latter binds 0.0.0.0 + :: (right for a real deployment, wrong for a
-        # test that should never leave the loopback).  The callback below
-        # accept is the production one, so everything after it is identical.
-        self._asyncio_server = await asyncio.start_server(
+        def _accept():
+            # The only thing layered over it: count the accept.  A test
+            # asserting keep-alive reuse needs to know how many TCP connections
+            # its requests actually opened, and the honest place to learn that
+            # is the accept path — not a response header the server merely
+            # *may* send, and not httpx's private pool.
+            self.connections_served += 1
+            return protocol_factory()
+
+        # ``loop.create_server`` rather than ``Server.open_socket``: the latter
+        # binds 0.0.0.0 + :: (right for a real deployment, wrong for a test
+        # that should never leave the loopback).  Everything downstream of
+        # accept is the production path.
+        self._asyncio_server = await asyncio.get_running_loop().create_server(
             _accept, self.host, self.port, backlog=self._backlog)
         sockets = self._asyncio_server.sockets or ()
         if not sockets:
