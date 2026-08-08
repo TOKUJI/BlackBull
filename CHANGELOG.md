@@ -31,6 +31,8 @@ so the editable install's metadata catches up.
 
 ## [Unreleased]
 
+## [0.72.0] — 2026-08-08
+
 ### Security
 
 Two instances of one defect class — a path that answers a request without
