@@ -65,7 +65,6 @@ first-hit-then-summary rate-limit model.
 
 | Variable | Default | Controls |
 |---|---|---|
-| `BB_H1_PROTOCOL` | `0` | Read request heads through the buffer-owning front end: one `find(b'\r\n\r\n')` scan over an accumulated buffer instead of one `readuntil(b'\r\n')` per header line, keeping any surplus so a keep-alive or pipelined peer's next head is usually already in hand.  **Experimental measurement gate**, not a supported switch — it exists so the two read paths can be A/B'd on identical builds, and will either become the default or be removed once that measurement lands.  Both paths pass the same HTTP/1.1 conformance suite; enabling it changes how bytes arrive, never what a request means. |
 
 ## Logging
 

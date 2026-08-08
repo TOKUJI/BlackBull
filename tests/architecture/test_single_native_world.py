@@ -67,8 +67,9 @@ _RESPONSE_DICT_ALLOWED: dict[str, str] = {
 _TO_ASGI_SCOPE_ALLOWED: dict[str, str] = {
     'blackbull/server/http1_actor.py::HTTP1Actor._dispatch_request':
         'boundary — BB_FORCE_ASGI_SCOPE=1, the dual-path conformance lane',
-    'blackbull/server/http2_actor.py::HTTP2Actor._conn_to_asgi_scope':
-        'boundary — the same lane on H2, plus the push target',
+    'blackbull/server/http2_actor.py::HTTP2Actor._dispatch_target':
+        'boundary — the same lane on H2; the actor is native everywhere else, '
+        'so requests and pushed requests both convert here or not at all',
     'blackbull/middleware/utils.py::_adapt':
         'boundary — builds the scope a `scope`-declaring middleware asked for',
 }

@@ -550,14 +550,24 @@ async def test_header_timeout_logs(caps_caplog, monkeypatch):
     reset_settings_cache()
 
     class _SlowReader(AbstractReader):
+        """A peer that connected, sent a request line, and then went quiet.
+
+        Every access method blocks, because a reader may look for the head
+        line by line via ``readuntil`` or by scanning what it has via
+        ``read``.  A fake that blocks in one and returns EOF (``b''``) in the
+        other is not a slow peer at all under the second: it is a peer that
+        hung up, which draws a 400 instead of the 408 this test is about.  No
+        socket behaves that way, so the shape is scripted once, for both.
+        """
         async def read(self, n: int = -1) -> bytes:
+            await asyncio.sleep(10.0)
             return b''
         async def readuntil(self, sep: bytes) -> bytes:
-            # Never return the header terminator — timeout will fire.
             await asyncio.sleep(10.0)
             return b''
         async def readexactly(self, n: int) -> bytes:
-            raise asyncio.IncompleteReadError(b'', n)
+            await asyncio.sleep(10.0)
+            return b''
 
     writer = _FakeWriter()
     # Pass only the request line; _read_headers will try to read more
@@ -651,6 +661,8 @@ async def test_h2_ws_max_streams_per_connection_logs(caps_caplog, monkeypatch):
     """When WS stream count reaches the per-connection cap, _handle_h2_websocket
     logs the cap-hit and sends RST_STREAM REFUSED_STREAM."""
     from unittest.mock import MagicMock, AsyncMock
+    from blackbull.connection import Connection
+    from blackbull.headers import Headers
     from blackbull.server.sender import AsyncioWriter
     from blackbull.server.http2_actor import HTTP2Actor
     from blackbull.env import reset_settings_cache
@@ -668,7 +680,11 @@ async def test_h2_ws_max_streams_per_connection_logs(caps_caplog, monkeypatch):
     actor._ws_stream_count = 3  # at cap → next WS stream refused
 
     stream = MagicMock(spec=Stream)
-    stream.conn = {'path': '/ws', 'type': 'websocket'}
+    # ``stream.conn`` is the native Connection on every lane, WebSocket
+    # included — the cap log reads ``conn.path`` straight off it.
+    stream.conn = Connection(type='websocket', method='GET', path='/ws',
+                             raw_path=b'/ws', http_version='2',
+                             headers=Headers([]))
     stream.stream_id = 5
     tg = MagicMock(spec=asyncio.TaskGroup)
     log_record = MagicMock()

@@ -48,23 +48,19 @@ class _StreamRecipient(Protocol):
     def put_DATAFrame(self, frame) -> bool: pass
 
 
-def _req_headers(target) -> Headers:
-    """Request headers of a dispatch *target* — the native :class:`Connection`
-    (attribute) or, on the ``force_asgi`` / WebSocket lanes, an ASGI scope dict.
+def _req_headers(conn: Connection) -> Headers:
+    """Request headers of the connection being dispatched.
 
-    Always returns a :class:`Headers`.  A scope dict's ``headers`` is a plain
-    ``list`` of ``(bytes, bytes)`` tuples (the ASGI wire shape), so it is wrapped
-    here — callers rely on ``Headers`` methods (``_resolve_priority`` calls
-    ``.get()``); iterating one (``_extract_content_length``) works either way.
-    Wrapping happens only on the compat lane; the native path returns the
-    ``Connection``'s ``Headers`` as-is."""
-    if isinstance(target, Connection):
-        return target.headers
-    raw = target.get('headers', [])
-    return raw if isinstance(raw, Headers) else Headers(raw)
+    The actor's state is native on every lane, so this is the ``Connection``'s
+    own ``Headers``.  It survives as a named helper because both callers read
+    the request's headers for reasons that have nothing to do with each other
+    (``_resolve_priority`` wants ``priority``, ``_extract_content_length``
+    wants ``content-length``), and naming the shared read keeps them from
+    drifting onto different sources."""
+    return conn.headers
 
 
-def _extract_content_length(target) -> int | None:
+def _extract_content_length(conn: Connection) -> int | None:
     """Return the int value of the request's content-length, or None.
 
     Returns None when the header is absent OR when the value does not parse
@@ -72,7 +68,7 @@ def _extract_content_length(target) -> int | None:
     request as malformed in the latter case).  RFC 9113 §8.1.2.6 covers the
     "must equal sum of DATA payloads" semantics enforced by the caller.
     """
-    for name, value in _req_headers(target):
+    for name, value in _req_headers(conn):
         nb = name if isinstance(name, bytes) else bytes(name)
         if nb == b'content-length':
             try:
@@ -171,10 +167,10 @@ async def _run_guarded(coro, sem):
 # Priority helper (mirrors server.py; consolidated in a later step)
 # ---------------------------------------------------------------------------
 
-def _resolve_priority(stream: 'Stream', target) -> dict[str, int | bool]:
+def _resolve_priority(stream: 'Stream', conn: Connection) -> dict[str, int | bool]:
     if stream.priority_hint is not None:
         return stream.priority_hint
-    raw = _req_headers(target).get(b'priority', b'')
+    raw = _req_headers(conn).get(b'priority', b'')
     if raw:
         from ..protocol.frame_types import parse_priority_field
         return parse_priority_field(raw.decode('ascii', errors='replace'))
@@ -561,19 +557,6 @@ class HTTP2Actor(Actor):
             conn.client = tuple(self._peername[:2])
         if self._sockname:
             conn.server = tuple(self._sockname[:2])
-
-    def _conn_to_asgi_scope(self, conn: Connection) -> dict:
-        """Materialize an ASGI scope dict for the **compat lanes only**.
-
-        The native HTTP/2 dispatch path never calls this — it threads the
-        :class:`Connection` itself, WebSocket included. The one
-        boundary that still needs an ASGI scope is **``BB_FORCE_ASGI_SCOPE``**
-        (§4.3): a pure ASGI scope round-tripped back through ``from_scope`` at
-        the app boundary. Also used to synthesize the pushed-request scope for
-        server push.
-        """
-        return (conn.to_asgi_scope(force_asgi=True) if self._force_asgi
-                else conn.to_asgi_scope())
 
     @log
     async def send_frame(self, frame: FrameBase) -> None:
@@ -1018,20 +1001,44 @@ class HTTP2Actor(Actor):
 
         _signal_recipients(self._recipients)
 
+    def _dispatch_target(self, conn: Connection) -> 'dict | Connection':
+        """The object the application receives — the single native→ASGI point.
+
+        The actor's own state is native everywhere (``stream.conn`` included),
+        so this is the one place a scope can come into existence, and it runs
+        after every pre-dispatch mutation of *conn*.  That ordering is the
+        contract: the scope is a **snapshot**, so anything written to *conn*
+        later is visible only through the fields the two share by reference.
+        H/1.1 has the same rule for the same reason (its HEAD→GET rewrite must
+        precede the snapshot or the router sees the wrong method).
+        """
+        if not self._force_asgi:
+            return conn
+        scope = conn.to_asgi_scope(force_asgi=True)
+        # ``http2_priority`` — deprecation alias, derived from the extensions
+        # rather than passed in, so the request and server-push paths cannot
+        # disagree about it.  ``extensions`` itself is shared by reference, so
+        # a PRIORITY_UPDATE arriving after dispatch still reaches the app under
+        # ``extensions['http.response.priority']``; this top-level copy is a
+        # snapshot and does not track it.
+        priority = (conn.extensions or {}).get('http.response.priority')
+        if priority is not None:
+            scope['http2_priority'] = priority
+        return scope
+
     def _spawn_stream_task(
         self,
         tg: asyncio.TaskGroup,
         stream_id: int,
-        conn: 'dict | Connection',
+        conn: Connection,
         recipient,
         send,
         log_record,
     ) -> None:
         """Spawn a StreamActor (aggregator path) or legacy _run_with_log task.
 
-        *conn* is the dispatch target the handler receives — the native
-        :class:`Connection` on the HTTP path, or an ASGI scope dict on the
-        WebSocket / ``force_asgi`` compat lanes.
+        *conn* is always the native :class:`Connection`; the compat lane's ASGI
+        scope is derived here, at the app boundary, and nowhere else.
 
         Increments ``_active_stream_count`` and registers ``_on_stream_done``
         so the counter is decremented when the task finishes.
@@ -1041,12 +1048,14 @@ class HTTP2Actor(Actor):
         completes normally (does not cancel the TaskGroup).
         """
         self._active_stream_count += 1
+        target = self._dispatch_target(conn)
 
         # Bind the *raw* recipient onto the Connection for lazy ``conn.body()``
         # before the disconnect-detecting wrapper is built, so ``conn._receive``
         # never captures ``conn`` through the wrapper (per-request cycle → cyclic
         # GC = v0.60.0 tail-latency regression). Idempotent (binds when unset).
-        bind_receive_channel(conn, recipient)
+        # A pure scope carries no stash, so this is a no-op on the compat lane.
+        bind_receive_channel(target, recipient)
 
         if self._aggregator is not None:
             # Wrap receive for disconnect detection only when a listener observes
@@ -1055,12 +1064,12 @@ class HTTP2Actor(Actor):
             # (conn.body() → ClientDisconnected) is independent of this wrapper.
             if _disconnect_events_observed(self._aggregator):
                 dispatch_receive = _make_disconnect_detecting_receive(
-                    recipient, conn, self._aggregator)
+                    recipient, target, self._aggregator)
             else:
                 dispatch_receive = recipient
             stream_actor = StreamActor(
                 stream_id=stream_id,
-                conn=conn,
+                conn=target,
                 receive=dispatch_receive,
                 send=send,
                 app=self.app,
@@ -1072,13 +1081,13 @@ class HTTP2Actor(Actor):
         else:
             from .server import _run_with_log  # noqa: PLC0415
             coro = _run_with_log(
-                self.app(conn, recipient, send),
+                self.app(target, recipient, send),
                 log_record,
             )
 
         timeout = self._request_timeout
         if timeout > 0:
-            _sp = conn.path if isinstance(conn, Connection) else conn.get('path')
+            _sp = conn.path
 
             async def _timed(c=coro, sid=stream_id, t=timeout, sp=_sp):
                 try:
@@ -1102,25 +1111,19 @@ class HTTP2Actor(Actor):
         self._stream_tasks[stream_id] = task
         task.add_done_callback(self._make_done_cb(stream_id))
 
-    def _apply_priority_and_extensions(self, stream: 'Stream', target) -> None:
+    def _apply_priority_and_extensions(self, stream: 'Stream',
+                                       conn: Connection) -> None:
         """Resolve stream priority and attach the H/2 request extensions.
 
-        Shared by the HEADERS and CONTINUATION completion paths. On the native
-        path *target* is the :class:`Connection` the handler receives, so the H/2
-        extensions go straight onto ``conn.extensions`` (read as
-        ``conn.extensions['http.response.priority']``). On the ``force_asgi`` /
-        WebSocket lanes *target* is an ASGI scope dict; there the deprecation
-        alias ``scope['http2_priority']`` is also populated (one release).
+        Shared by the HEADERS and CONTINUATION completion paths.  Writes to the
+        native :class:`Connection` on every lane; the compat lane's scope picks
+        the extensions up when it is derived at the app boundary, and shares
+        the dict by reference from then on.
         """
-        priority = _resolve_priority(stream, target)
-        extensions = _build_h2_extensions(
+        priority = _resolve_priority(stream, conn)
+        conn.extensions = _build_h2_extensions(
             stream.stream_id, priority,
             self._peer_initial_window_size, self._conn_window.size)
-        if isinstance(target, Connection):
-            target.extensions = extensions
-        else:
-            target['http2_priority'] = priority
-            target['extensions'] = extensions
 
     async def _on_headers_frame(
         self,
@@ -1189,14 +1192,13 @@ class HTTP2Actor(Actor):
             await self._handle_h2_websocket(stream, tg, log_record)
             return True
 
-        # Native HTTP dispatch: thread the Connection itself — no ASGI scope dict,
-        # no ``from_scope`` rebuild at the app boundary. The BB_FORCE_ASGI_SCOPE
-        # compat lane still emits a pure ASGI scope (§4.3).
-        target = self._conn_to_asgi_scope(conn) if self._force_asgi else conn
-        stream.expected_content_length = _extract_content_length(target)
-        stream.conn = target
+        # Native HTTP dispatch: the actor's state stays the Connection itself.
+        # The BB_FORCE_ASGI_SCOPE compat lane (§4.3) still hands the app a pure
+        # ASGI scope, derived once in ``_spawn_stream_task``.
+        stream.expected_content_length = _extract_content_length(conn)
+        stream.conn = conn
 
-        self._apply_priority_and_extensions(stream, target)
+        self._apply_priority_and_extensions(stream, conn)
         stream_recipient = self._make_stream_recipient(stream.stream_id)
         self._recipients[stream.stream_id] = stream_recipient
         stream.on_headers_received(end_stream=bool(frame.end_stream))
@@ -1220,7 +1222,7 @@ class HTTP2Actor(Actor):
         else:
             log_record = None
             dispatch_send = send
-        self._spawn_stream_task(tg, stream.stream_id, target, stream_recipient, dispatch_send, log_record)
+        self._spawn_stream_task(tg, stream.stream_id, conn, stream_recipient, dispatch_send, log_record)
         return True
 
     async def _on_continuation_frame(
@@ -1293,22 +1295,20 @@ class HTTP2Actor(Actor):
         # split across CONTINUATION frames threads its Connection through the
         # generic dispatch (``__call__`` routes it by ``conn.type == 'websocket'``)
         # rather than through ``_handle_h2_websocket``.
-        target = self._conn_to_asgi_scope(conn) if self._force_asgi else conn
-        stream.expected_content_length = _extract_content_length(target)
+        stream.expected_content_length = _extract_content_length(conn)
 
         if self._active_stream_count >= self.max_concurrent_streams:
             log_cap_hit('h2_max_concurrent_streams',
                         requested=self._active_stream_count + 1,
                         limit=self.max_concurrent_streams,
-                        scope_path=(target.path if isinstance(target, Connection)
-                                    else target.get('path')),
+                        scope_path=conn.path,
                         protocol='http2')
             await self.send_frame(
                 self.factory.rst_stream(stream.stream_id, ErrorCodes.REFUSED_STREAM))
             return True
 
-        self._apply_priority_and_extensions(stream, target)
-        stream.conn = target
+        self._apply_priority_and_extensions(stream, conn)
+        stream.conn = conn
         stream_recipient = self._make_stream_recipient(stream.stream_id)
         self._recipients[stream.stream_id] = stream_recipient
         # Same consumer-gate as the HEADERS path: skip the record + inline
@@ -1320,7 +1320,7 @@ class HTTP2Actor(Actor):
         else:
             log_record = None
             dispatch_send = send
-        self._spawn_stream_task(tg, stream.stream_id, target, stream_recipient, dispatch_send, log_record)
+        self._spawn_stream_task(tg, stream.stream_id, conn, stream_recipient, dispatch_send, log_record)
         return True
 
     async def _on_data_frame(self, frame, stream: 'Stream') -> None:
@@ -1446,7 +1446,7 @@ class HTTP2Actor(Actor):
             log_cap_hit('h2_ws_max_streams_per_connection',
                         requested=self._ws_stream_count + 1,
                         limit=ws_cap,
-                        scope_path=_ws_conn.path if isinstance(_ws_conn, Connection) else None,
+                        scope_path=_ws_conn.path,
                         protocol='h2-ws')
             await self.send_frame(self.factory.rst_stream(
                 stream.stream_id, ErrorCodes.REFUSED_STREAM))
@@ -1537,16 +1537,22 @@ class HTTP2Actor(Actor):
         path = event.get('path', '/')
 
         parent_stream = self.root_stream.find_child(parent_stream_id)
-        parent = (parent_stream.conn
-                  if (parent_stream and parent_stream.conn is not None) else {})
-        # The parent is the native Connection (HTTP) or an ASGI scope dict (WS /
-        # force_asgi lane); read the shared request fields from either.
-        parent_headers = (parent.headers if isinstance(parent, Connection)
-                          else parent.get('headers', Headers([])))
-        parent_scheme = (parent.scheme if isinstance(parent, Connection)
-                         else parent.get('scheme', 'https'))
-        _parent_client = (parent.client if isinstance(parent, Connection)
-                          else parent.get('client'))
+        parent = parent_stream.conn if parent_stream is not None else None
+        # ``stream.conn`` is the native Connection on every lane, so the push
+        # parent's fields are plain attribute reads.  The dict branch this
+        # replaced called ``.get()`` on a scope's header *list* and raised
+        # AttributeError for every push under BB_FORCE_ASGI_SCOPE.
+        #
+        # A missing parent is still possible — a push requested against a
+        # stream that has already been evicted — and it inherits the same
+        # defaults the empty-dict sentinel used to supply, minus the sentinel's
+        # habit of turning a typo into a silent empty value.
+        if parent is not None:
+            parent_headers = parent.headers
+            parent_scheme = parent.scheme
+            _parent_client = parent.client
+        else:
+            parent_headers, parent_scheme, _parent_client = Headers([]), 'https', None
         # F.1b maps ``:authority`` into the request's ``host`` header, so any
         # dispatched parent stream carries one; ``localhost`` only covers a
         # parent with none.
@@ -1594,11 +1600,6 @@ class HTTP2Actor(Actor):
                 self._peer_initial_window_size,
                 self._conn_window.size),
         )
-        push_target: 'dict | Connection' = pushed_conn
-        if self._force_asgi:
-            push_target = self._conn_to_asgi_scope(pushed_conn)
-            push_target['http2_priority'] = _DEFAULT_PRIORITY  # deprecation alias
-
         push_recipient = RecipientFactory.http2(queue_depth=self._stream_queue_depth)
         # Pushed requests have no body — same lazy-queue path as GETs with END_STREAM on HEADERS.
         push_recipient.mark_end_of_stream_on_headers()
@@ -1613,7 +1614,7 @@ class HTTP2Actor(Actor):
 
         if self._task_group is not None:
             self._spawn_stream_task(
-                self._task_group, push_stream_id, push_target,
+                self._task_group, push_stream_id, pushed_conn,
                 push_recipient, capturing_send, log_record,
             )
 

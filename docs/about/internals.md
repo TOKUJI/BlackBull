@@ -141,9 +141,23 @@ server and under external ASGI hosts.
   `StreamActor`.
 - Owns the connection-level send window; `StreamActor`s block
   on it when the window is exhausted.
+- Keeps its state **native**: `stream.conn` is a `Connection` on
+  every lane, and the one place an ASGI scope can come into
+  existence is the app boundary in `_dispatch_target`, matching
+  what HTTP/1.1 does.  Anything that reads the request mid-flight
+  — a late `PRIORITY_UPDATE`, a server push reading its parent —
+  reads attributes, never a dict.
 - Supervisor strategy: **propagate** — a framing error on the
   connection is fatal.  `HTTP2Actor` sends GOAWAY and exits,
   causing `ConnectionActor` to close.
+
+The boundary is a **snapshot**, taken after every pre-dispatch
+mutation of the `Connection`.  Fields the two share by reference
+(`state`, `extensions`) stay live afterwards — which is how a
+`PRIORITY_UPDATE` arriving after dispatch still reaches the
+application under `extensions['http.response.priority']`.  The
+deprecated top-level `scope['http2_priority']` alias is a copy and
+does not track it.
 
 ### `StreamActor`
 
@@ -259,6 +273,90 @@ colocated with their respective actors.
 | `ConnectionActor` unhandled | Log + close connection | One connection's failure is bounded |
 | `ASGIServer` accept error | Backoff + retry | Server stays alive across transient errors |
 
+## Read-path invariant
+
+A connection owns **one buffer**, and every protocol reads by moving a
+cursor over it.
+
+`ConnectionProtocol` is an `asyncio.BufferedProtocol`: the kernel writes
+straight into the connection's `ReadBuffer` through `get_buffer`, and the
+actor's coroutine parks on a future that `buffer_updated` resolves.  There
+is no second buffer between the socket and the parser — which is the
+whole point, because the cost being removed was never the parked
+coroutine but reading *through* another layer that had already copied the
+bytes once.
+
+Three consequences follow, and each retires a workaround that existed
+only because the buffer was somewhere else:
+
+- **Protocol detection consumes nothing.**  `ConnectionActor` inspects
+  the smallest discriminating prefix via `AbstractReader.fill`, which for
+  a buffer-owning reader is just "do not call `take`".  The winning
+  binding receives a stream still positioned at its own first byte, so
+  there is no prefix to replay.
+- **The message head is found in one scan.**  `read_head(limit)` looks
+  for `\r\n\r\n` across everything resident, resumably, and the head
+  leaves the buffer in a single copy — rather than one `readuntil` call
+  per header line.
+- **A hand-off carries nothing.**  When an upgrade passes the connection
+  to WebSocket or h2c, whatever the peer already sent is *already*
+  resident; the successor gets the same reader.
+
+### `read_head` is a contract, not a capability
+
+`read_head` lives on `AbstractReader`, so a protocol asks for a head the
+same way whatever is underneath it, and never branches on which reader it
+holds.  Three outcomes, because the caller answers each differently:
+
+| outcome | means | HTTP/1.1 answers |
+|---|---|---|
+| the head | complete | parse it |
+| `b''` | EOF, nothing sent | close, silently |
+| `IncompleteReadError` | EOF part-way in | 400, with `.partial` as evidence |
+| `ReadLimitExceeded` | over the byte budget | see below |
+
+`BufferReader` overrides it with the single scan; the default
+implementation is the line-by-line loop, which is what a reader holding
+only `readuntil` can do.  Both are held to the same behaviour by
+`tests/unit/test_read_head_contract.py`, which drives every reader kind
+through the same cases — a reader that disagreed on one of them would put
+a hole in exactly one deployment shape.
+
+`limit` is what makes the read bounded, and it applies to *every* request
+on the connection, not just the first.  A keep-alive peer's second head
+gets the same budget as its first.
+
+### One breach, two verdicts
+
+`ReadLimitExceeded` carries the bytes the reader saw, and the protocol
+decides what they were:
+
+- the first CRLF lands **inside** the budget → the lines are well-formed
+  and merely numerous → **431** (RFC 6585 §5);
+- the first CRLF lands **beyond** it, or there is none → the start-line
+  never ended → **400** (RFC 9112 §3).  Telling a peer its header fields
+  are too large when it never sent a header field is a misdiagnosis, and
+  it advises a retry that cannot help.
+
+The evidence travels with the exception rather than being re-derived from
+the reader, so both reader kinds reach the same verdict from the same
+bytes.
+
+### Rejecting requires lingering
+
+Enforcing a byte budget means, by construction, *not* reading the rest —
+and closing a socket with unread bytes in its receive queue makes the
+kernel send RST, which discards data already written.  The 431 or 400
+would never arrive.  `ConnectionProtocol.linger_close` briefly discards
+what the peer is still sending before closing, bounded both by bytes and
+by time: no byte cap would hand an attacker the unbounded read the budget
+exists to refuse, and no deadline would let a slow peer hold an
+already-answered connection open.  nginx calls this `lingering_close`.
+
+It is skipped unless the connection is closing with bytes it chose not to
+consume — a completed request leaves the buffer empty, so the ordinary
+close stays a bare close.
+
 ## Receive-path invariant
 
 The request body crosses the framework as **`bytes`**, and the end of
@@ -323,9 +421,9 @@ handler that ignores `receive` (a POST that 404s) is the obvious case,
 but a request can also be answered *before* routing — `OPTIONS *` is
 answered server-wide per RFC 9112 §3.2.4, and RFC 9110 §9.3.7 permits
 content on it.  Any such path that skipped the drain would leave the
-body in the reader, where the next `readuntil` parses it as a
-request-line: `body` followed by `GET / HTTP/1.1` becomes the method
-`bodyGET`.  The client's *next* request is then destroyed by the
+body resident in the connection's buffer, where the next `read_head`
+finds it and the parser reads it as a request-line: `body` followed by
+`GET / HTTP/1.1` becomes the method `bodyGET`.  The client's *next* request is then destroyed by the
 framing of the previous one, and behind a reverse proxy that pools
 upstream connections the leftover bytes prefix **another client's**
 request — the standard request-smuggling shape.
@@ -371,6 +469,15 @@ decides the path:
 Callers must never call `transport.writelines` directly with
 small parts.  The gate is the single decision point, and the
 invariant keeps performance predictable across payload sizes.
+
+The obligation runs the other way too: **anything the sender writes
+through must implement both branches.**  A backing object with only
+`write` serves every response under 32 KiB and fails every response
+above it — and because the gate's own tests use a double that has both,
+that failure is invisible to them.  Whatever is under `AsyncioWriter`
+owes it `write`, `writelines`, `drain`, `close`, and a `transport`
+(for `sendfile`); `tests/architecture/test_writer_backing_contract.py`
+reads that list out of the sender's source rather than restating it.
 
 ### Response values that come from tables
 

@@ -235,14 +235,16 @@ class Http1Binding(ProtocolBinding):
 
     async def serve(self, conn: ConnectionView) -> None:
         from .http1_actor import HTTP1Actor  # noqa: PLC0415
-        # The request line is the binding's own framing, not the dispatcher's:
-        # read it here from the replayed stream.  For the common case the line
-        # is wholly inside the peeked prefix, so this is a buffer slice, not a
-        # syscall (decouple-connection-detection, Stage 2).
-        request_line = await conn.reader.readuntil(b'\r\n')
+        # Nothing is pre-read.  The binding used to pull the request line here
+        # because detection had consumed and replayed a prefix, and someone had
+        # to re-establish where the message started.  Detection no longer
+        # consumes, so the actor reads the whole head in one scan — pulling the
+        # first line here would split that scan in two and, worse, hand the
+        # actor a head it must then treat as already-read, skipping the budget
+        # check that guards it.
         actor = HTTP1Actor(
             conn.reader, conn.writer, conn.app, conn.aggregator,
-            request=request_line,
+            request=b'',
             peername=conn.peername, sockname=conn.sockname, ssl=conn.ssl,
             ws_queue_depth=conn.ws_queue_depth,
             deadline=conn.deadline,

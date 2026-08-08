@@ -17,6 +17,7 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock
 from hpack import Encoder
 
+from blackbull.connection import Connection
 from blackbull.headers import Headers
 from blackbull.server.http2_actor import HTTP2Actor
 from blackbull.server.parser import parse_headers
@@ -256,10 +257,14 @@ class TestPushPromiseAuthority:
     async def test_push_promise_uses_scope_host(self):
         handler, app = _make_h2_actor()
         parent = handler.root_stream.add_child(1)
-        parent.conn = {
-            'type': 'http', 'scheme': 'https',
-            'headers': Headers([(b'host', b'example.com:8443')]),
-        }
+        # The push parent is the native Connection the actor holds — on every
+        # lane, including BB_FORCE_ASGI_SCOPE.  Handing this a scope dict is
+        # what hid the defect: the dict shape answered ``.get('headers')`` and
+        # the real one never reached the code being tested.
+        parent.conn = Connection(
+            type='http', scheme='https', method='GET', path='/',
+            raw_path=b'/', http_version='2',
+            headers=Headers([(b'host', b'example.com:8443')]))
         await handler._handle_push({'path': '/style.css'}, 1)
         pp = None
         for call in handler.send_frame.call_args_list:

@@ -158,17 +158,28 @@ async def test_shared_port_detector_claims_before_http1() -> None:
 
 
 async def test_shared_port_prefix_is_replayed_to_serve() -> None:
-    """The peeked discriminator bytes are replayed to the winning binding's
-    serve — a shared-port frame with **no CRLF** (which the old
-    readuntil(b'\\r\\n') detection would have hung on) reaches the handler whole.
-    Locks the decouple-connection-detection bug-#4 fix."""
+    """The inspected discriminator bytes still reach the winning binding —
+    a shared-port frame with **no CRLF** (which the old readuntil(b'\\r\\n')
+    detection would have hung on) arrives whole and in order.
+    Locks the decouple-connection-detection bug-#4 fix.
+
+    Read in a loop, not once: detection now consumes only what it inspected
+    (nothing at all, for a buffer-owning reader), so how the frame is split
+    across reads is a property of the reader, not of the contract.  The
+    contract is that no byte is lost or reordered.
+    """
     reg = ProtocolRegistry()
     reg.register('fake', AsyncMock(), detector=_FirstByteDetector(0x10))
     seen: list[bytes] = []
 
     async def _serve(conn):
-        # The handler reads the full stream back, including the peeked prefix.
-        seen.append(await conn.reader.read(64))
+        got = bytearray()
+        while len(got) < 11:
+            chunk = await conn.reader.read(64)
+            if not chunk:
+                break
+            got += chunk
+        seen.append(bytes(got))
 
     reg.raw_bindings['fake'].serve = _serve   # type: ignore[method-assign]
     # A short MQTT-shaped CONNECT, no CRLF anywhere.

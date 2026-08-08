@@ -131,13 +131,17 @@ class LifespanManager:
 async def SocketManager(socket_cb_pairs, ssl_context):
     """Async context manager that creates asyncio servers from already-bound sockets.
 
-    *socket_cb_pairs* is an iterable of ``(sock, callback)`` — each socket is
-    served by its own accept callback.  The shared HTTP listener uses
-    :meth:`Server.client_connected_cb`; port-bound non-ASGI protocols
-    use a per-binding raw callback.
+    *socket_cb_pairs* is an iterable of ``(sock, protocol_factory)`` — each
+    socket is served by its own factory.  The shared HTTP listener and each
+    port-bound non-ASGI protocol both come from
+    :meth:`Server.connection_protocol_factory`, differing only in whether a
+    binding is pre-committed.
 
-    On enter: wraps each socket in asyncio.start_server (TCP) or
-    asyncio.start_unix_server (AF_UNIX) and yields the list.
+    On enter: wraps each socket in ``loop.create_server`` (TCP) or
+    ``loop.create_unix_server`` (AF_UNIX) and yields the list.  Not
+    ``start_server``: that pairs a StreamReader/StreamWriter over asyncio's
+    own buffering with every connection, and the whole point of the buffered
+    protocol is that the connection owns exactly one buffer.
     On exit: closes all asyncio servers.
 
     Dispatches by ``sock.family``: AF_INET / AF_INET6 take the TCP
@@ -153,8 +157,9 @@ async def SocketManager(socket_cb_pairs, ssl_context):
     # (notably some Windows builds where socket.AF_UNIX is not defined).
     # Use a sentinel so the family comparison never raises AttributeError.
     _af_unix = getattr(_socket, 'AF_UNIX', None)
+    loop = asyncio.get_running_loop()
     servers = []
-    for sock, cb in socket_cb_pairs:
+    for sock, factory in socket_cb_pairs:
         # ssl_handshake_timeout is meaningful only when SSL is enabled.
         kwargs = {'sock': sock, 'ssl': ssl_context, 'backlog': _backlog}
         if ssl_context is not None:
@@ -163,9 +168,9 @@ async def SocketManager(socket_cb_pairs, ssl_context):
             # AF_UNIX needs the dedicated unix-server entry point — the
             # TCP create_server() rejects non-INET families at family-
             # validation time.
-            srv = await asyncio.start_unix_server(cb, **kwargs)
+            srv = await loop.create_unix_server(factory, **kwargs)
         else:
-            srv = await asyncio.start_server(cb, **kwargs)
+            srv = await loop.create_server(factory, **kwargs)
         servers.append(srv)
     try:
         yield servers
@@ -283,6 +288,61 @@ class Server:
         self.ssl_context.verify_mode = ssl.CERT_REQUIRED
         self.ssl_context.load_verify_locations(cafile=ca_cert)
 
+    def connection_protocol_factory(self, bound_binding=None):
+        """Factory for `loop.create_server` — one buffered protocol per accept.
+
+        Replaces the ``start_server`` callback pair: instead of a StreamReader
+        and StreamWriter over asyncio's own buffering, the connection owns a
+        single buffer the kernel writes into, and the actor reads by cursor.
+
+        The protocol spawns the serving task itself because a protocol factory
+        is synchronous.  ``connection_made`` fires after the TLS handshake on
+        an SSL transport, so ALPN is already decided by the time the task runs
+        — same ordering the callback form relied on.
+        """
+        from .connection_protocol import ConnectionProtocol  # noqa: PLC0415
+        from .sender import AsyncioWriter  # noqa: PLC0415
+        from ..env import get_settings as _get_settings  # noqa: PLC0415
+
+        server = self
+        write_timeout = _get_settings().write_timeout
+
+        class _ServedConnection(ConnectionProtocol):
+            def connection_made(self, transport):
+                super().connection_made(transport)
+                task = asyncio.create_task(self._serve())
+                # A protocol factory cannot await, so the task is detached.
+                # Held for the connection's lifetime and given a done-callback
+                # so a failure surfaces as a log line rather than asyncio's
+                # "Task exception was never retrieved" at GC time.
+                self._serve_task = task
+                task.add_done_callback(self._serve_done)
+
+            async def _serve(self):
+                try:
+                    await server._serve_connection(
+                        self.reader,
+                        AsyncioWriter(self, write_timeout=write_timeout),
+                        bound_binding=bound_binding,
+                        transport=self.transport,
+                    )
+                finally:
+                    # Lingering close, not a bare close: a peer still sending
+                    # when we answered would otherwise RST away the response
+                    # it was waiting for.
+                    await self.linger_close()
+
+            @staticmethod
+            def _serve_done(task):
+                if task.cancelled():
+                    return
+                exc = task.exception()
+                if exc is not None:
+                    logger.exception(
+                        'connection task failed', exc_info=exc)
+
+        return _ServedConnection
+
     async def client_connected_cb(self, reader, writer):
         """Accept callback for the shared HTTP listener."""
         await self._serve_connection(reader, writer)
@@ -312,19 +372,25 @@ class Server:
             context.set_session_cache_mode(ssl.SESS_CACHE_SERVER)  # type: ignore[attr-defined]
         return context
 
-    async def _serve_connection(self, reader, writer, *, bound_binding=None):
+    async def _serve_connection(self, reader, writer, *, bound_binding=None,
+                                transport=None):
         """Wrap the transport and run one :class:`ConnectionActor`.
 
         *bound_binding* is set for port-bound non-ASGI protocols —
         the connection skips HTTP detection and is handed straight to the
         binding's raw handler.
+
+        *transport* is passed explicitly by the buffered-protocol path, which
+        has no `StreamWriter` to carry it.  Peer/socket names and the TLS
+        object are read from it, so it is the one thing that path cannot infer.
         """
         from .conn_id import new_connection_id  # noqa: PLC0415
         from .connection_actor import ConnectionActor  # noqa: PLC0415
         from .sender import AsyncioWriter  # noqa: PLC0415
         from .recipient import AsyncioReader  # noqa: PLC0415
 
-        transport = getattr(writer, 'transport', None)
+        if transport is None:
+            transport = getattr(writer, 'transport', None)
         peername = transport.get_extra_info('peername') if transport else None
         sockname = transport.get_extra_info('sockname') if transport else None
         # AF_UNIX sockname is the path string; AF_INET[6] is a tuple.
@@ -599,11 +665,12 @@ class Server:
         # LifespanManager drives the ASGI lifespan protocol; nesting it inside
         # SocketManager guarantees: startup completes before serve_forever() is
         # called, and shutdown completes before sockets are closed.
-        pairs = [(s, self.client_connected_cb) for s in self.raw_sockets]
-        raw_clear = [(s, self._raw_connected_cb(binding))
+        pairs = [(s, self.connection_protocol_factory())
+                 for s in self.raw_sockets]
+        raw_clear = [(s, self.connection_protocol_factory(binding))
                      for socks, binding in self._protocol_sockets
                      if not binding.tls for s in socks]
-        raw_tls = [(s, self._raw_connected_cb(binding))
+        raw_tls = [(s, self.connection_protocol_factory(binding))
                    for socks, binding in self._protocol_sockets
                    if binding.tls for s in socks]
         if raw_tls and self.ssl_context is None:
