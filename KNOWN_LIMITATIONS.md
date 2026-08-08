@@ -259,6 +259,26 @@ Handlers that must answer keepalives during long work should set
 `BB_WS_QUEUE_DEPTH` positive (read-ahead answers immediately), or keep
 their own `ping`/`pong` cadence.
 
+### WebSocket: a handshake carrying content is refused
+
+An upgrade request that declares a body — `Content-Length` above zero,
+or any `Transfer-Encoding` — is answered `400 Bad Request` and the
+connection closes.  `Content-Length: 0` declares no content and still
+upgrades.
+
+The fence is about framing, not policy.  After the `101` the connection
+belongs to WebSocket, so those octets are request content by the
+handshake's own headers *and* the first frames by the switch; a reverse
+proxy in front may resolve that the other way, and the bytes then arrive
+in a handler as a message no client sent.  Refusing removes the
+disagreement rather than picking a side of it — and RFC 9110 §9.3.1
+gives content on a `GET` no defined semantics, so nothing a real client
+sends is affected (verified against `websockets`, browsers, and the
+usual proxies).
+
+If you have a client that genuinely needs to post data alongside the
+handshake, send it as a first message after `accept()` instead.
+
 ### gRPC: reflection is v1alpha-only
 
 All four gRPC RPC shapes — unary, server-streaming, client-streaming, and

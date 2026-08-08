@@ -302,6 +302,26 @@ class UnsupportedVersionError(Exception):
     :class:`BadRequestError`: the request *grammar* was valid."""
 
 
+def _declares_content(headers: 'Headers') -> bool:
+    """True if the request's framing headers announce a non-empty body.
+
+    Answers "are there body octets on this connection?", which is a different
+    question from ``HTTP1Recipient.needs_drain()`` ("are unread body octets
+    still buffered?"): this one is asked *before* a recipient exists, on the
+    upgrade path, where the answer decides whether to switch protocols at all.
+
+    Assumes :func:`_validate_message_framing` has already run, so CL/TE
+    conflicts and malformed values cannot reach here — a bare ``chunked`` or a
+    single well-formed ``Content-Length`` is all that is left to classify.
+    """
+    if headers.getlist(b'transfer-encoding'):
+        return True
+    cl = headers.get(b'content-length', b'').strip()
+    # ``Content-Length: 0`` declares an empty body: no octets, nothing to
+    # frame two ways.  ``lstrip(b'0')`` because "000" is also zero.
+    return bool(cl) and bool(cl.lstrip(b'0'))
+
+
 def _validate_message_framing(headers: 'Headers') -> None:
     """RFC 9112 §6 — reject framing-header combinations that are unsafe.
 
@@ -781,14 +801,21 @@ class HTTP1Actor(Actor):
                 if not ok:
                     break  # unhandled error — close connection
 
-                # Drain any request body the handler left unread (e.g. a POST
-                # that 404s, or any handler that ignores ``receive``).  Without
-                # this the leftover body bytes are parsed as the next pipelined
-                # request line — a classic keep-alive framing desync.  A body
-                # larger than the drain bound closes the connection instead.
-                # The server-wide ``OPTIONS *`` path never reads a body, so the
-                # asterisk form skips the drain and falls straight to keep-alive.
-                if not conn._asterisk_form and inner_receive.needs_drain():
+                # Drain any request body left unread — by a handler that
+                # ignores ``receive`` (a POST that 404s), or by a path that
+                # answers before routing at all (the server-wide ``OPTIONS *``).
+                # Without this the leftover body bytes are parsed as the next
+                # pipelined request line — a classic keep-alive framing desync,
+                # and behind a connection-pooling reverse proxy the standard
+                # request-smuggling shape.  The predicate belongs to the loop
+                # tail, not to any one answer path: a per-path exemption is how
+                # the ``OPTIONS *`` gap existed, and the next path added would
+                # reintroduce it.  A body larger than the drain bound closes the
+                # connection instead, so an unbounded read is never the price of
+                # keep-alive.  The WebSocket upgrade leaves ``run()`` above and
+                # never arrives here, which is why it refuses a bodied handshake
+                # outright instead — see ``_do_ws_handshake``.
+                if inner_receive.needs_drain():
                     if not await inner_receive.drain(_MAX_KEEPALIVE_DRAIN):
                         break
 
@@ -1215,7 +1242,8 @@ class HTTP1Actor(Actor):
         """Validate the WebSocket upgrade and store a deferred 101 callback.
 
         Returns True if the handshake is valid and ready to proceed, False if
-        a 400 Bad Request was already sent (bad Sec-WebSocket-Version).
+        a 400 Bad Request was already sent (declared content, bad
+        Sec-WebSocket-Key, or bad Sec-WebSocket-Version).
 
         The actual HTTP 101 response is deferred: it is sent by
         WebSocketActor._send when the ASGI app calls websocket.accept, so that
@@ -1224,6 +1252,27 @@ class HTTP1Actor(Actor):
         """
         send = SenderFactory.http1(self._writer)
         headers = conn.headers
+        # Content on the handshake is refused before anything switches.  Those
+        # octets are request content per ``Content-Length``/``Transfer-Encoding``
+        # *and* the first frames per the 101 — two framings over the same bytes,
+        # which is what a front end and this server would disagree about.  The
+        # upgrade leaves ``run()`` before the keep-alive drain, so left alone
+        # they are read back as frames and handed to the application as a
+        # message.  Refusing beats draining here: RFC 9110 §9.3.1 gives content
+        # on GET no defined semantics (unlike §9.3.7 for OPTIONS, where the
+        # drain is the only correct answer), so nothing legitimate is lost, and
+        # a refusal resolves the ambiguity instead of picking a side of it.
+        # ``Content-Length: 0`` declares no content and so is not ambiguous —
+        # clients and proxies do attach it to GET requests.  CL/TE conflicts and
+        # malformed values are already 400/501 at parse, so a well-formed single
+        # value is all that can reach here.
+        if _declares_content(headers):
+            logger.warning(
+                '400 Bad Request — WebSocket handshake declares content; '
+                'refusing to switch protocols. peer=%r', self._peername)
+            await send(b'', HTTPStatus.BAD_REQUEST,
+                       [(b'content-type', b'text/plain')])
+            return False
         key = headers.get(b'sec-websocket-key', b'').strip()
         # RFC 6455 §4.2.1 — the client MUST send a Sec-WebSocket-Key whose
         # base64-decoded value is 16 bytes.  An absent or malformed key is a

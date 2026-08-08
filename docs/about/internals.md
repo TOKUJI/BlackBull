@@ -303,6 +303,56 @@ mean ± SE over 5 runs:
 267 ns/chunk, or **4.27 µs saved on a 64 KiB upload** — and the dict count
 for that upload goes from 16 to 0.
 
+## Keep-alive drain invariant
+
+On HTTP/1.1 the connection is a byte stream with no framing of its own:
+the only thing separating request *N* from request *N+1* is that
+exactly as many body bytes were consumed as the headers declared.  So
+every request that stays on the connection passes through the drain in
+`HTTP1Actor`'s loop tail before the connection is reused — not just the
+ones a handler answered:
+
+```python
+if inner_receive.needs_drain():          # loop tail — one site, no exceptions
+    if not await inner_receive.drain(_MAX_KEEPALIVE_DRAIN):
+        break                            # over the bound → close instead
+```
+
+The predicate belongs to the loop, not to any one answer path.  A
+handler that ignores `receive` (a POST that 404s) is the obvious case,
+but a request can also be answered *before* routing — `OPTIONS *` is
+answered server-wide per RFC 9112 §3.2.4, and RFC 9110 §9.3.7 permits
+content on it.  Any such path that skipped the drain would leave the
+body in the reader, where the next `readuntil` parses it as a
+request-line: `body` followed by `GET / HTTP/1.1` becomes the method
+`bodyGET`.  The client's *next* request is then destroyed by the
+framing of the previous one, and behind a reverse proxy that pools
+upstream connections the leftover bytes prefix **another client's**
+request — the standard request-smuggling shape.
+
+Draining is bounded (`_MAX_KEEPALIVE_DRAIN`, 64 KiB) so an unbounded
+read is never the price of keeping a connection alive; past the bound
+the connection closes, which is safe because any desync dies with it.
+A recipient that has already seen a chunked-framing violation reports
+`needs_drain()` as `False` for the same reason — that stream is
+desynced, so draining it would be reading smuggled bytes rather than
+discarding them.
+
+A **WebSocket upgrade** leaves the loop before the tail is reached, so
+it cannot rely on the drain — and it must not.  After a 101 the same
+octets are request content (per `Content-Length`) *and* the first
+frames (per the switch); left alone they were read back as frames and
+delivered to the application as a message.  That contradiction is what
+a front end and this server would disagree about, so
+`_do_ws_handshake` **refuses** a handshake that declares content —
+400, before anything switches — instead of resolving it in one
+direction.  RFC 9110 §9.3.1 gives content on `GET` no defined
+semantics, so nothing legitimate is refused; `Content-Length: 0` is
+not content and still upgrades.  This is the one place where the
+drain's logic and the framing decision differ, and it differs because
+`OPTIONS` is the opposite case: §9.3.7 *permits* content there, which
+is exactly why that path drains rather than refusing.
+
 ## Send-path invariant
 
 Protocol senders never choose between joining and vectored I/O

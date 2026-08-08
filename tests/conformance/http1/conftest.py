@@ -14,6 +14,8 @@ differences come from the framework, not the handler:
 * ``QUERY /query`` — replies with the request body verbatim (RFC 10008;
   registered with QUERY only, so any other method on the path draws a 405
   whose Allow header must advertise QUERY)
+* ``WS /ws``       — echoes text messages back with an ``echo:`` prefix, so a
+  test can tell an application-delivered message apart from handshake bytes
 """
 from __future__ import annotations
 
@@ -28,6 +30,7 @@ import pytest
 from blackbull import BlackBull, read_body
 from blackbull.response import StreamingResponse
 from blackbull.server import ASGIServer
+from blackbull.utils import Scheme
 
 
 # ---------------------------------------------------------------------------
@@ -61,6 +64,20 @@ def _make_app() -> BlackBull:
                accept_query=['application/sql', 'text/plain'])
     async def query_typed(body: bytes):
         return body
+
+    @app.route(path='/ws', scheme=Scheme.websocket)
+    async def ws_echo(conn, receive, send):
+        # Echoes each text message back with an ``echo:`` prefix, so a test
+        # can tell an application-delivered message from handshake bytes.
+        await receive()                       # websocket.connect
+        await send({'type': 'websocket.accept'})
+        while True:
+            event = await receive()
+            if event.get('type') == 'websocket.disconnect':
+                break
+            if event.get('text') is not None:
+                await send({'type': 'websocket.send',
+                            'text': 'echo:' + event['text']})
 
     @app.route(path='/chunked')
     async def chunked(scope, receive, send):

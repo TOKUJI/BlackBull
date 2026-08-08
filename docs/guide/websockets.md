@@ -311,6 +311,25 @@ connection).
 | Per-message-deflate strategy | Both `server_no_context_takeover` and `client_no_context_takeover` always advertised. |
 | RSV1 bit | Set on compressed data frames per §7 of the RFC; clients without the negotiated extension that send RSV1 are rejected as protocol violations. |
 
+### Handshakes that carry a body are refused
+
+A handshake request that declares content — `Content-Length` above
+zero, or any `Transfer-Encoding` — is answered `400 Bad Request` and
+the connection closes.  Nothing switches protocols.
+
+The reason is framing, not policy.  After the `101` the connection
+belongs to WebSocket, so those octets would be request content by the
+handshake's own headers and the first frames by the switch — and a
+reverse proxy in front may pick the other reading.  Left unresolved,
+the bytes arrive in your handler as an ordinary message that no client
+ever sent.
+
+RFC 9110 §9.3.1 gives content on a `GET` no defined semantics, so no
+real client is affected: `websockets`, browsers, and the usual proxies
+send no body here.  `Content-Length: 0` declares no content and still
+upgrades normally, which is what matters for the clients and proxies
+that attach it to `GET` requests by habit.
+
 ## Transport: HTTP/1.1 Upgrade vs HTTP/2 Extended CONNECT
 
 WebSocket is always available over the HTTP/1.1 `Upgrade`
