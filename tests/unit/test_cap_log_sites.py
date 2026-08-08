@@ -661,6 +661,8 @@ async def test_h2_ws_max_streams_per_connection_logs(caps_caplog, monkeypatch):
     """When WS stream count reaches the per-connection cap, _handle_h2_websocket
     logs the cap-hit and sends RST_STREAM REFUSED_STREAM."""
     from unittest.mock import MagicMock, AsyncMock
+    from blackbull.connection import Connection
+    from blackbull.headers import Headers
     from blackbull.server.sender import AsyncioWriter
     from blackbull.server.http2_actor import HTTP2Actor
     from blackbull.env import reset_settings_cache
@@ -678,7 +680,11 @@ async def test_h2_ws_max_streams_per_connection_logs(caps_caplog, monkeypatch):
     actor._ws_stream_count = 3  # at cap → next WS stream refused
 
     stream = MagicMock(spec=Stream)
-    stream.conn = {'path': '/ws', 'type': 'websocket'}
+    # ``stream.conn`` is the native Connection on every lane, WebSocket
+    # included — the cap log reads ``conn.path`` straight off it.
+    stream.conn = Connection(type='websocket', method='GET', path='/ws',
+                             raw_path=b'/ws', http_version='2',
+                             headers=Headers([]))
     stream.stream_id = 5
     tg = MagicMock(spec=asyncio.TaskGroup)
     log_record = MagicMock()

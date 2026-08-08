@@ -1,5 +1,4 @@
 from ..protocol.stream import StreamState
-from ..connection import Connection
 from ..protocol.frame_types import (
     ErrorCodes, FrameTypes, PingFrameFlags, SettingFrameFlags,
 )
@@ -272,18 +271,14 @@ class PriorityUpdateResponder(Responder):
         if stream is not None:
             stream.priority_hint = hint
             # Reflect a late PRIORITY_UPDATE onto an already-dispatched request.
-            # Native path: the Connection's H/2 priority extension. Compat lane:
-            # the ASGI scope dict (incl. the ``http2_priority`` deprecation alias).
-            target = stream.conn
-            if isinstance(target, Connection):
-                ext = target.extensions
-                if ext is not None:
-                    ext['http.response.priority'] = hint
-            elif target is not None:
-                target['http2_priority'] = hint
-                ext = target.get('extensions')
-                if ext is not None:
-                    ext['http.response.priority'] = hint
+            # ``stream.conn`` is the native Connection on every lane, and its
+            # ``extensions`` dict is shared by reference with the ASGI scope the
+            # compat lane hands the app — so this one write reaches both.  The
+            # deprecated top-level ``scope['http2_priority']`` alias is a
+            # dispatch-time snapshot and is deliberately not chased here.
+            conn = stream.conn
+            if conn is not None and conn.extensions is not None:
+                conn.extensions['http.response.priority'] = hint
 
 
 class RstStreamResponder(Responder):

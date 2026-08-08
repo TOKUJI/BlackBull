@@ -9,6 +9,8 @@ from blackbull.server.response import (
     WindowUpdateResponder, PriorityResponder, PriorityUpdateResponder,
     SettingsResponder,
 )
+from blackbull.connection import Connection
+from blackbull.headers import Headers
 from blackbull.protocol.frame import FrameFactory
 from blackbull.protocol.frame_types import (
     FrameTypes, SettingFrameFlags, DataFrameFlags, DEFAULT_MAX_FRAME_SIZE,
@@ -428,7 +430,15 @@ async def test_priority_update_existing_stream_stores_hint():
     frame.priority_field = 'u=2'
 
     stream = MagicMock()
-    stream.conn = {}
+    # Native Connection, because that is what ``stream.conn`` holds on every
+    # lane.  A late PRIORITY_UPDATE reaches the application through the
+    # extensions dict — which the compat lane's scope shares by reference —
+    # and not through the deprecated top-level ``http2_priority`` alias, which
+    # is a dispatch-time snapshot.
+    stream.conn = Connection(type='http', method='GET', path='/',
+                             raw_path=b'/', http_version='2',
+                             headers=Headers([]))
+    stream.conn.extensions = {'http.response.priority': {'urgency': 3}}
     handler = MagicMock()
     handler.find_stream.return_value = stream
 
@@ -436,7 +446,7 @@ async def test_priority_update_existing_stream_stores_hint():
     await responder.respond(handler)
 
     assert stream.priority_hint == {'urgency': 2}
-    assert stream.conn['http2_priority'] == {'urgency': 2}
+    assert stream.conn.extensions['http.response.priority'] == {'urgency': 2}
 
 
 @pytest.mark.asyncio
