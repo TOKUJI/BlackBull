@@ -321,10 +321,10 @@ class TestHTTP11KeepAlive:
             call_count += 1
 
         reader = MagicMock(spec=AbstractReader)
-        # Both access patterns are scripted with the same bytes so the test is
-        # front-end agnostic: the streams path completes the header block via
-        # readuntil, the BB_H1_PROTOCOL scan via read.  Either way the peer
-        # sends one whole request and then EOFs, and the app must run once.
+        # Both access patterns are scripted with the same bytes so the test
+        # does not care how the reader under it finds the head — line by line
+        # or by scanning.  Either way the peer sends one whole request and then
+        # EOFs, and the app must run once.
         reader.readuntil = AsyncMock(side_effect=[
             rest,
             IncompleteReadError(b'GET /two HTTP'),

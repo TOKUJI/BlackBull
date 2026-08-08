@@ -552,13 +552,12 @@ async def test_header_timeout_logs(caps_caplog, monkeypatch):
     class _SlowReader(AbstractReader):
         """A peer that connected, sent a request line, and then went quiet.
 
-        Every access method blocks, because the front ends read differently —
-        the default one line-by-line via ``readuntil``, ``BB_H1_PROTOCOL=1``
-        by scanning an accumulated buffer via ``read``.  A fake that blocks in
-        one and returns EOF (``b''``) in the other is not a slow peer at all
-        under the second front end: it is a peer that hung up, which draws a
-        400 instead of the 408 this test is about.  No socket behaves that
-        way, so the shape is scripted once, for both.
+        Every access method blocks, because a reader may look for the head
+        line by line via ``readuntil`` or by scanning what it has via
+        ``read``.  A fake that blocks in one and returns EOF (``b''``) in the
+        other is not a slow peer at all under the second: it is a peer that
+        hung up, which draws a 400 instead of the 408 this test is about.  No
+        socket behaves that way, so the shape is scripted once, for both.
         """
         async def read(self, n: int = -1) -> bytes:
             await asyncio.sleep(10.0)
