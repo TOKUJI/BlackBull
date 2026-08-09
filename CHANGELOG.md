@@ -29,6 +29,64 @@ so the editable install's metadata catches up.
 
 ---
 
+## [Unreleased]
+
+### Security
+
+- **A peer-declared `chunk-size` chose how much the server buffered.**  A
+  `Transfer-Encoding: chunked` chunk was read with a single
+  `readexactly(chunk_size)`, and `chunk-size` is a number the *client* writes —
+  up to ~8190 hex digits within the 8 KiB chunk-line bound.  Worse than an
+  oversized allocation: a read above the backpressure high-water mark must
+  reopen the transport the mark just paused, since it would otherwise be
+  waiting for the bytes its own pause refuses to accept.  Declaring a huge
+  chunk therefore switched backpressure *off* and buffered whatever the peer
+  could push until the body timeout.  `drain()` was affected the same way — its
+  `max_bytes` was consulted only after a whole chunk had been buffered, so it
+  bounded the report rather than the allocation.
+
+  Chunked bodies are now sliced by `BB_BODY_CHUNK_SIZE` (64 KiB, below the
+  mark) exactly as `Content-Length` bodies already were, so no single read is
+  larger than the slice whatever the peer declares.  No limit is imposed on the
+  chunk itself: a large upload still arrives in full, just as several
+  `http.request` events.  Pre-existing — not introduced by v0.73.0, though that
+  release's deadlock fix is what turned an oversized read into a
+  backpressure bypass.
+
+### Fixed
+
+- **A stop signal delivered while the master was still starting up was
+  silently discarded.**  `MultiWorkerServer.run()` installed the SIGTERM /
+  SIGINT handlers first and then reset the flag those handlers set, so any
+  signal arriving during worker spawn — or, under `reload=True`, during the
+  watcher thread's start — was overwritten before the supervision loop ever
+  read it.  The master then kept supervising a shutdown it had already
+  acknowledged in the log, until something SIGKILLed it: an orchestrator that
+  SIGTERMs a slow-starting container waited out its full grace period, and
+  `Ctrl-C` in the first moments of `--reload` did nothing.  The flag is now
+  owned from construction and never re-initialised.  Measured on the reload
+  end-to-end path: SIGTERM-to-exit went from a 15 s SIGKILL to 0.12 s.
+
+### Added
+
+- **`auto-reload: change detected in <paths>`** — the file watcher now logs the
+  change it observed, before handing off to the master.  Previously the first
+  evidence of a reload was the master's own "recycling workers" a tick later,
+  which only appears if the master acted; a reload that never happened gave no
+  way to tell a watcher that stayed silent from a master that ignored it.
+
+### Docs
+
+- **Hot reload** — documented the reload log sequence as a diagnostic ladder,
+  and a caveat that was not previously written down: `watchfiles`' poller
+  (forced on by default under WSL) treats a file as modified only when its
+  mtime moves *forward*, so a backwards clock step — NTP correction, VM
+  resume, WSL2 time resync — silently drops every save for the next few
+  seconds.  Verified: 12/12 saves dropped with an mtime forced into the past,
+  0/12 with the mtime left alone or forced forward.
+
+---
+
 ## [0.73.0] — 2026-08-09
 
 ### Removed

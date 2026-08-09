@@ -186,6 +186,59 @@ def test_master_stops_on_sigterm(plain_app, bound_sockets):
     assert result.get('exited'), f"Master did not exit cleanly: {result.get('error')}"
 
 
+@pytest.mark.timeout(30)
+def test_sigterm_during_startup_is_not_lost(plain_app, bound_sockets):
+    """A stop signal arriving before the supervision loop starts must stick.
+
+    ``run()`` installs the handlers first and only then spawns workers and
+    (under reload) starts the watcher thread, so there is a real window in
+    which the handler can fire before the loop is reached.  T5 above sleeps
+    0.5 s before signalling, which steps over that window; here the signal
+    is delivered from inside the spawn, squarely within it.
+
+    Real delivery matters, so this runs ``run()`` on the main thread —
+    ``_install_signal_handlers`` is a no-op anywhere else, which is why T5
+    has to poke the flag by hand.
+    """
+    if threading.current_thread() is not threading.main_thread():
+        pytest.skip('signal handlers only install on the main thread')
+
+    sockets, _ = bound_sockets
+    mws = MultiWorkerServer(plain_app, sockets, None, workers=1,
+                            shutdown_timeout=3.0)
+
+    # Stubbed: this test is about the flag, not about real children.
+    mws._spawn_all = lambda: os.kill(os.getpid(), signal.SIGTERM)
+    mws._shutdown_all = lambda: None
+
+    # Guarantees termination either way, so a regression fails on an
+    # assertion rather than hanging until the timeout.
+    rescued = threading.Event()
+
+    def _rescue() -> None:
+        rescued.set()
+        mws._stopped = True
+
+    timer = threading.Timer(2.0, _rescue)
+    previous = {
+        signal.SIGTERM: signal.getsignal(signal.SIGTERM),
+        signal.SIGINT: signal.getsignal(signal.SIGINT),
+    }
+    timer.start()
+    try:
+        mws.run()
+    finally:
+        timer.cancel()
+        for signo, handler in previous.items():
+            signal.signal(signo, handler)
+
+    assert not rescued.is_set(), (
+        'run() kept supervising after a SIGTERM delivered during startup: '
+        'the stop flag the handler set was overwritten before the loop '
+        'read it, so the shutdown request was silently dropped'
+    )
+
+
 # ---------------------------------------------------------------------------
 # HTTP scales across workers while a stateful protocol
 # (here: a raw echo, standing in for MQTT) is owned by worker 0 only.
