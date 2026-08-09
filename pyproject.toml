@@ -1,10 +1,14 @@
 [project]
 name = "blackbull"
-# ZeroVer (0.MINOR.PATCH).  MINOR advances at each sprint close (one
-# minor per closed sprint); PATCH covers bug fixes / harness work
-# between sprints.  No 1.0 commitment until the framework's identity
+# ZeroVer (0.MINOR.PATCH).  MINOR advances at a sprint close that changes
+# what users see — a new capability, a new or changed public API, new
+# environment variables, or a behaviour change an application has to react
+# to.  A sprint close alone does not earn one, so the minor number does not
+# track the sprint number (Sprint 97 closed as 0.73.1).  PATCH covers bug
+# fixes, security fixes, and harness work, whether they close a sprint or
+# land between them.  No 1.0 commitment until the framework's identity
 # and surface have stabilised across several sprints.  See CHANGELOG.md.
-version = "0.73.1"
+version = "0.74.0"
 description = "Async native-Connection web framework with ASGI 3.0 interop, a from-scratch HTTP/1.1 parser, HTTP/2 frame layer, and WebSocket codec. HPACK delegates to the hpack library."
 readme = "README.md"
 requires-python = ">=3.11"
