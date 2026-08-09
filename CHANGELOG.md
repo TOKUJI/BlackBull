@@ -31,6 +31,28 @@ so the editable install's metadata catches up.
 
 ## [Unreleased]
 
+### Security
+
+- **A peer-declared `chunk-size` chose how much the server buffered.**  A
+  `Transfer-Encoding: chunked` chunk was read with a single
+  `readexactly(chunk_size)`, and `chunk-size` is a number the *client* writes —
+  up to ~8190 hex digits within the 8 KiB chunk-line bound.  Worse than an
+  oversized allocation: a read above the backpressure high-water mark must
+  reopen the transport the mark just paused, since it would otherwise be
+  waiting for the bytes its own pause refuses to accept.  Declaring a huge
+  chunk therefore switched backpressure *off* and buffered whatever the peer
+  could push until the body timeout.  `drain()` was affected the same way — its
+  `max_bytes` was consulted only after a whole chunk had been buffered, so it
+  bounded the report rather than the allocation.
+
+  Chunked bodies are now sliced by `BB_BODY_CHUNK_SIZE` (64 KiB, below the
+  mark) exactly as `Content-Length` bodies already were, so no single read is
+  larger than the slice whatever the peer declares.  No limit is imposed on the
+  chunk itself: a large upload still arrives in full, just as several
+  `http.request` events.  Pre-existing — not introduced by v0.73.0, though that
+  release's deadlock fix is what turned an oversized read into a
+  backpressure bypass.
+
 ### Fixed
 
 - **A stop signal delivered while the master was still starting up was

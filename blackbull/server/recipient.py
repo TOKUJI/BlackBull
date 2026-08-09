@@ -724,10 +724,11 @@ class HTTP1Recipient(BaseRecipient):
             from ..env import get_settings as _get_settings  # noqa: PLC0415
             chunk_size = _get_settings().body_chunk_size
         self._chunk_size = chunk_size
-        # Body-read deadline.  0 = disabled.  Applied
-        # per ``_read_with_timeout`` call (i.e. per chunk for chunked
-        # bodies, single window for Content-Length).  Mirrors nginx
-        # ``client_body_timeout`` semantics: each read has the same bound.
+        # Body-read deadline.  0 = disabled.  Applied per
+        # ``_read_with_timeout`` call — which is per *slice* on both framings,
+        # since a chunk larger than ``chunk_size`` is delivered in several.
+        # Mirrors nginx ``client_body_timeout`` semantics: each read has the
+        # same bound, so a peer must keep making progress, not merely finish.
         #
         # The deadline is rescheduled on the shared
         # :class:`ConnectionDeadline` rather than allocating a fresh
@@ -770,6 +771,10 @@ class HTTP1Recipient(BaseRecipient):
         self._chunked = (te == b'chunked')
         # Remaining Content-Length bytes; counts down as the body streams.
         self._content_length = int(cl) if cl else None
+        # Octets still owed by the chunk currently being delivered.  Per
+        # request, not per connection: a rebound recipient that inherited a
+        # half-read chunk would splice request N's body into request N+1.
+        self._chunk_remaining = 0
         self._done = False
         # Set once a chunked-framing violation is detected: the byte stream is
         # now desynced, so the connection MUST close rather than keep-alive
@@ -820,6 +825,36 @@ class HTTP1Recipient(BaseRecipient):
         except BaseException:
             self.framing_broken = True
             raise
+
+    async def _read_chunk_slice(self) -> bytes:
+        """Read at most ``_chunk_size`` octets of the chunk in progress.
+
+        ``chunk-size`` is written by the peer, so reading a whole chunk in one
+        ``readexactly`` would let the peer choose how much the server buffers.
+        It also defeats backpressure outright rather than merely straining it:
+        a read larger than the high-water mark has to reopen the transport the
+        mark just paused, because otherwise it would be waiting for bytes its
+        own pause is refusing to accept.  Slicing keeps every read under the
+        mark, so the pause does its job — and it is what the Content-Length
+        path already does with the same setting.
+
+        The exact-bytes contract is unchanged: ``readexactly`` (not the up-to-n
+        ``read``) still backs every slice, so a chunk split across TCP segments
+        cannot return short and silently corrupt the body.
+        """
+        n = min(self._chunk_remaining, self._chunk_size)
+        data = await self._read_with_timeout(self._reader.readexactly(n))
+        self._chunk_remaining -= n
+        if self._chunk_remaining == 0:
+            # RFC 9112 §7.1 — chunk-data is followed by exactly CRLF.  Read
+            # those two octets and verify: reading *until* CRLF would swallow
+            # trailing spill (SMUG-CHUNK-SPILL) up to the next CRLF, and would
+            # tolerate a bare CR/LF terminator.
+            term = await self._read_with_timeout(self._reader.readexactly(2))
+            if term != b'\r\n':
+                self.framing_broken = True
+                raise _bad_request(f'chunk-data not CRLF-terminated: {term!r}')
+        return data
 
     async def _read_chunk_line(self) -> bytes:
         """Read one line of chunked framing (chunk-size line or trailer
@@ -890,6 +925,8 @@ class HTTP1Recipient(BaseRecipient):
             return None
         try:
             if self._chunked:
+                if self._chunk_remaining:
+                    return await self._read_chunk_slice()
                 size_line = await self._read_chunk_line()
                 chunk_size = self._parse_chunk_size_or_400(size_line)
                 if chunk_size == 0:
@@ -916,23 +953,8 @@ class HTTP1Recipient(BaseRecipient):
                                 f'(RFC 9110 §6.5.1)')
                     self._done = True
                     return None
-                # RFC 9112 §7.1 — the chunk-data is exactly ``chunk_size``
-                # octets.  ``readexactly`` (not the up-to-n ``read``) is
-                # required: a chunk split across TCP segments would otherwise
-                # return short, silently corrupting the body.
-                data = await self._read_with_timeout(
-                    self._reader.readexactly(chunk_size))
-                # RFC 9112 §7.1 — chunk-data is followed by exactly CRLF.
-                # Read those two octets and verify: reading *until* CRLF would
-                # swallow trailing spill (SMUG-CHUNK-SPILL) up to the next
-                # CRLF, and would tolerate a bare CR/LF terminator.
-                term = await self._read_with_timeout(
-                    self._reader.readexactly(2))
-                if term != b'\r\n':
-                    self.framing_broken = True
-                    raise _bad_request(
-                        f'chunk-data not CRLF-terminated: {term!r}')
-                return data
+                self._chunk_remaining = chunk_size
+                return await self._read_chunk_slice()
             else:
                 # Stream the Content-Length body in ``chunk_size`` slices so
                 # a large upload is delivered as several ``http.request`` events

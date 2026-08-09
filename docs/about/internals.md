@@ -354,11 +354,16 @@ So parking releases the pause.  A reader about to block is starved, not behind,
 and the condition backpressure exists to prevent is not the one in play.
 `asyncio.StreamReader` resumes at the same point for the same reason.
 
-Two shapes reach this and one does not, which is worth knowing because the
-difference is luck rather than design: a WebSocket frame and a single
-`Transfer-Encoding: chunked` chunk are both read with one `readexactly` of a
-size **the peer chose**, so either can exceed the mark.  A `Content-Length`
-body cannot, because `BB_BODY_CHUNK_SIZE` slices it below the mark first.
+One shape reaches this and the request body does not.  A WebSocket frame is
+read with one `readexactly` of a size **the peer chose**, so it can exceed the
+mark; it is bounded only by `BB_WS_MAX_FRAME_PAYLOAD` (64 MiB), which is a
+ceiling on the damage rather than a slice.  Both HTTP/1.1 body framings are
+sliced by `BB_BODY_CHUNK_SIZE` below the mark before they are read — a
+`Content-Length` body by its remaining count, a `Transfer-Encoding: chunked`
+body by what is left of the chunk in progress.  Slicing the chunked case is
+what keeps a peer-declared `chunk-size` from choosing how much the server
+buffers: reading a whole chunk would have to reopen the very pause the
+high-water mark had just applied.
 
 ### Rejecting requires lingering
 
