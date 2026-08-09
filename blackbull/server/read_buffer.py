@@ -44,6 +44,14 @@ _MIN_READ = 4096
 #: shuffled repeatedly while it is being consumed.
 _COMPACT_MIN = 4096
 
+#: Size at or above which :meth:`ReadBuffer.take` copies through a memoryview
+#: instead of a `bytearray` slice.  Measured crossover is between 8 and 16 KiB
+#: (see the table on ``take``); 8 KiB puts a request head — which every request
+#: pays — on the cheaper side, and every realistic body read on the other.
+#: Deliberately not configurable: it is a property of the interpreter's copy
+#: costs, not of a deployment.
+_VIEW_COPY_THRESHOLD = 8192
+
 
 class ReadBuffer:
     """A cursor-addressed byte buffer fed by `asyncio.BufferedProtocol`."""
@@ -179,27 +187,46 @@ class ReadBuffer:
         because the parse path's `split`/`translate` bulk ops need a real
         buffer object, and those are what keep the parser at C speed.
 
-        *One* copy, hence the memoryview: slicing the `bytearray` directly
-        would build an intermediate `bytearray` and then copy that into
-        `bytes`, doubling peak memory for the duration — 2.0 MiB for a 1 MiB
-        take.  Header-sized takes would not care; multi-MiB ones do, and a
-        body read asks for whatever the peer declared.
+        Two ways to make that copy, and which one wins depends on size — so
+        the size decides, the same shape as the send path's join-vs-vectored
+        gate.  Slicing the `bytearray` allocates an intermediate and copies
+        twice; a `memoryview` slice copies once but pays for building and
+        releasing the view.  Measured on this tree (min of 7, µs/call):
 
-        The view is released explicitly rather than left to refcounting: a
-        `bytearray` with a live export raises `BufferError` on resize, and the
-        next `get_buffer` may resize.  Tying that to when a temporary happens
-        to be collected is how it becomes a load-dependent crash.
+        | n | bytearray slice | memoryview | ratio |
+        |---|---|---|---|
+        | 300 | 0.102 | 0.180 | 1.77× |
+        | 4 KiB | 0.197 | 0.242 | 1.23× |
+        | 8 KiB | 0.270 | 0.289 | 1.07× |
+        | 16 KiB | 0.559 | 0.413 | 0.74× |
+        | 1 MiB | 1052 | 16.4 | 0.02× |
+
+        The crossover sits between 8 and 16 KiB.  Below it the view setup
+        dominates and the double copy is cheaper — and *every request* takes
+        its head through here, so that is the hot path.  Above it the second
+        copy dominates and doubles peak memory besides (2.0 → 1.0 MiB on a
+        1 MiB take), which matters because a body read asks for whatever the
+        peer declared.
+
+        Above the threshold the view is released explicitly rather than left
+        to refcounting: a `bytearray` with a live export raises `BufferError`
+        on resize, and the next `get_buffer` may resize.  Tying that to when a
+        temporary happens to be collected is how it becomes a load-dependent
+        crash.
         """
         r = self._r
-        mv = memoryview(self._buf)
-        try:
-            chunk = mv[r:r + n]
+        if n < _VIEW_COPY_THRESHOLD:
+            out = bytes(self._buf[r:r + n])
+        else:
+            mv = memoryview(self._buf)
             try:
-                out = bytes(chunk)
+                chunk = mv[r:r + n]
+                try:
+                    out = bytes(chunk)
+                finally:
+                    chunk.release()
             finally:
-                chunk.release()
-        finally:
-            mv.release()
+                mv.release()
         self._r = r + n
         self._reset_scan()
         return out

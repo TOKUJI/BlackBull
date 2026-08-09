@@ -103,6 +103,40 @@ async def test_waiting_for_data_releases_the_pause():
     await asyncio.wait_for(waiter, timeout=1)
 
 
+async def test_a_large_read_does_not_churn_pause_resume():
+    """The pause must not be re-armed on every arrival while a reader is parked.
+
+    ``wait_for_data`` would immediately release it again, so arming it costs a
+    ``pause_reading``/``resume_reading`` pair — two ``epoll_ctl`` calls — per
+    ``recv`` for the whole of a large read.  Correctness is unaffected either
+    way, which is exactly why this needs its own assertion: without one the
+    churn can come back silently.
+    """
+    proto = ConnectionProtocol()
+    proto.connection_made(_FakeTransport())
+    want = _HIGH_WATER * 8
+
+    task = asyncio.create_task(proto.reader.readexactly(want))
+    await asyncio.sleep(0)                    # let the reader park
+
+    arrivals = 0
+    while arrivals * 8192 < want:
+        view = proto.get_buffer(-1)
+        take = min(len(view), 8192)
+        view[:take] = b'z' * take
+        proto.buffer_updated(take)
+        arrivals += 1
+        await asyncio.sleep(0)
+
+    assert len(await asyncio.wait_for(task, timeout=5)) == want
+    assert arrivals >= 64, 'harness must deliver many arrivals to be meaningful'
+    # A handful is fine (the waiter briefly clears as it is woken); one per
+    # arrival is the regression.
+    assert proto.transport.pauses <= 4, (
+        f'{proto.transport.pauses} pauses over {arrivals} arrivals — the '
+        f'pause is being re-armed while a reader is parked')
+
+
 async def test_readexactly_past_the_mark_completes():
     """The unit-level form of both end-to-end hangs below."""
     proto = ConnectionProtocol()
