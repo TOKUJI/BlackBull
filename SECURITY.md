@@ -12,9 +12,9 @@ critical vulnerabilities.
 
 | Version | Supported          |
 | ------- | ------------------ |
+| 0.73.x  | :white_check_mark: |
 | 0.72.x  | :white_check_mark: |
-| 0.71.x  | :white_check_mark: |
-| < 0.71  | :x:                |
+| < 0.72  | :x:                |
 
 This table updates with each minor release.
 
@@ -62,6 +62,13 @@ The following are in scope for security reports:
 
 - BlackBull's HTTP/1.1, HTTP/2, and WebSocket protocol
   implementations under `blackbull/server/` and `blackbull/protocol/`.
+- The connection read buffer (`blackbull/server/read_buffer.py`,
+  `connection_protocol.py`) and the bounds it enforces: the head byte
+  budget (`BB_HEADER_MAX_TOTAL`, applied to *every* request on a
+  connection), the backpressure high-water mark, and the lingering
+  close that lets a rejection reach the peer.  A way to make the
+  server buffer without bound, or to read past a configured budget,
+  is a security report.
 - Middleware shipped in `blackbull/middleware/` (Compression,
   StaticFiles, CORS, etc.).
 - Routing, request parsing, and response handling.
