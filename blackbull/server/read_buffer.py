@@ -178,9 +178,28 @@ class ReadBuffer:
         The one copy per message: the head goes to the parser as `bytes`
         because the parse path's `split`/`translate` bulk ops need a real
         buffer object, and those are what keep the parser at C speed.
+
+        *One* copy, hence the memoryview: slicing the `bytearray` directly
+        would build an intermediate `bytearray` and then copy that into
+        `bytes`, doubling peak memory for the duration — 2.0 MiB for a 1 MiB
+        take.  Header-sized takes would not care; multi-MiB ones do, and a
+        body read asks for whatever the peer declared.
+
+        The view is released explicitly rather than left to refcounting: a
+        `bytearray` with a live export raises `BufferError` on resize, and the
+        next `get_buffer` may resize.  Tying that to when a temporary happens
+        to be collected is how it becomes a load-dependent crash.
         """
         r = self._r
-        out = bytes(self._buf[r:r + n])
+        mv = memoryview(self._buf)
+        try:
+            chunk = mv[r:r + n]
+            try:
+                out = bytes(chunk)
+            finally:
+                chunk.release()
+        finally:
+            mv.release()
         self._r = r + n
         self._reset_scan()
         return out

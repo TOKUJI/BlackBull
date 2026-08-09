@@ -155,15 +155,21 @@ async def test_single_chunked_chunk_past_the_mark_is_read():
 
     def _exchange(port: int) -> bytes:
         body = b'z' * _OVER
-        raw = (b'POST /echo HTTP/1.1\r\nHost: x\r\n'
+        # ``Connection: close`` so the read-to-EOF above terminates on the
+        # response rather than on the keep-alive idle timeout.
+        raw = (b'POST /echo HTTP/1.1\r\nHost: x\r\nConnection: close\r\n'
                b'Transfer-Encoding: chunked\r\n\r\n'
                + format(_OVER, 'x').encode() + b'\r\n' + body
                + b'\r\n0\r\n\r\n')
         s = socket.create_connection(('127.0.0.1', port), timeout=15)
         try:
             s.sendall(raw)
+            # Read to EOF, not to the end of the head: the body assertion below
+            # would otherwise depend on the send path happening to put head and
+            # body in one write, and would report a segmented response as "the
+            # connection stalled" — the one thing this test must not misreport.
             out = b''
-            while b'\r\n\r\n' not in out:
+            while True:
                 chunk = s.recv(65536)
                 if not chunk:
                     break

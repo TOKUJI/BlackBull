@@ -192,9 +192,17 @@ class ConnectionProtocol(asyncio.BufferedProtocol):
             self.eof_received()
             return
         self._rb.buffer_updated(nbytes)
-        if not self._paused and self._rb.available >= _HIGH_WATER:
+        if (not self._paused and self._waiter is None
+                and self._rb.available >= _HIGH_WATER):
             # Backpressure: stop the kernel handing us more until the handler
             # catches up.  Paired with ``maybe_resume`` on every consuming read.
+            #
+            # Not while a reader is parked (``_waiter``): that reader is
+            # starved, and ``wait_for_data`` would immediately undo the pause —
+            # so pausing here would cost a pause_reading/resume_reading pair,
+            # two epoll_ctl calls, on *every* arrival for the whole of a large
+            # read.  The rule is the same one stated in ``wait_for_data``;
+            # this is where it stops being paid for.
             self._paused = True
             if self.transport is not None:
                 self.transport.pause_reading()
