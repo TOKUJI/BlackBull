@@ -49,6 +49,46 @@ extension package) explicitly state their per-worker limits — see
 | `BB_WORKERS=N` (`N > 1`) | Production CPU-bound workload — each worker saturates one core. |
 | `BB_WORKERS=0` | Production "use whatever the box has" — resolves to `os.cpu_count()` at start. |
 
+### CPU pinning
+
+Each worker pins its event loop to one core after forking, so the
+hot state it accumulates — the header line table, the HPACK
+dynamic tables — stays resident in that core's L1/L2 instead of
+following the thread around the machine.  `BB_CPU_PINNING`
+controls it:
+
+```bash
+# Default: worker i takes the i-th CPU we are allowed to run on.
+BB_CPU_PINNING=auto BB_WORKERS=8 python app.py
+
+# Pin nothing — leave placement entirely to the operator.
+BB_CPU_PINNING=off python app.py
+
+# Confine workers to a specific set (taskset syntax). 0 is CPU 0,
+# not the off switch.
+BB_CPU_PINNING=8-11 BB_WORKERS=4 python app.py
+```
+
+Two things it deliberately does **not** do:
+
+- **It never widens the mask it was given.**  Placement is drawn
+  from the affinity mask the process already carries, so
+  `taskset -c 8-11`, `numactl`, and a container's cpuset are
+  inputs rather than obstacles.  An explicit list is intersected
+  with that mask, never added to it; a list with nothing in
+  common with it pins nothing and logs a warning.
+- **It never pins the thread pool.**  Linux threads inherit the
+  creating thread's mask, so pinning the loop would otherwise put
+  every `run_in_executor` compression and every
+  `asyncio.to_thread` file read on the one core the loop is
+  already saturating.  Worker threads are handed the full mask
+  back — offloading exists to get off that core.
+
+Set `off` on a shared host, under an orchestrator that already
+does placement, or any time you would rather make this decision
+yourself.  Pinning is Linux-only (`sched_setaffinity`) and
+multi-worker-only; a single-worker server is never pinned.
+
 ## `uvloop`
 
 `uvloop` is a drop-in libuv-based replacement for the standard

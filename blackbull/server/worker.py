@@ -14,6 +14,7 @@ import logging
 import os
 import signal
 
+from .affinity import apply_worker_affinity, make_offload_executor
 from .recipient import _WS_READ_INLINE
 
 logger = logging.getLogger(__name__)
@@ -74,16 +75,11 @@ def run_worker(app, raw_sockets, ssl_context, worker_id: int,
     if not cfg.access_log:
         logging.getLogger('blackbull.access').setLevel(logging.WARNING)
 
-    # Pin this worker to a specific CPU core to improve L1/L2 cache locality
-    # and reduce context switching.  Only attempted on Linux (sched_setaffinity).
-    if hasattr(os, 'sched_setaffinity'):
-        cpu_count = os.cpu_count() or 1
-        cpu = worker_id % cpu_count
-        try:
-            os.sched_setaffinity(0, {cpu})
-            logger.debug('Worker %d pinned to CPU %d', worker_id, cpu)
-        except OSError as exc:
-            logger.debug('CPU affinity pinning unavailable: %s', exc)
+    # Pin this worker's event loop to one core so its hot state (header line
+    # table, HPACK tables) stays cache-resident.  Deliberately after the
+    # async-logging setup above: the log-drain thread is created there and
+    # would otherwise inherit the pin.
+    offload_mask = apply_worker_affinity(worker_id, cfg.cpu_pinning)
 
     server = ASGIServer(app, ssl_context=ssl_context, max_connections=max_connections,
                         stream_queue_depth=stream_queue_depth,
@@ -105,9 +101,19 @@ def run_worker(app, raw_sockets, ssl_context, worker_id: int,
         logger.info('Worker %d owns %d stateful protocol listener(s)',
                     worker_id, len(protocol_sockets))
 
+    async def _serve() -> None:
+        # Threads inherit the loop thread's affinity mask, so a pinned worker
+        # would run every offloaded compression and file read on the one core
+        # the loop is already saturating.  Hand the pool the mask the operator
+        # gave us instead — offloading exists to get off this core.
+        if offload_mask is not None:
+            asyncio.get_running_loop().set_default_executor(
+                make_offload_executor(offload_mask))
+        await server.run()
+
     logger.info('Worker %d starting (PID %d)', worker_id, os.getpid())
     try:
-        asyncio.run(server.run())
+        asyncio.run(_serve())
     except KeyboardInterrupt:
         pass  # SIGINT is ignored, but guard against any race
     finally:

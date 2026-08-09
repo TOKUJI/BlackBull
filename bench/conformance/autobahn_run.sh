@@ -12,6 +12,7 @@
 #   CASES='1.*' bash bench/conformance/autobahn_run.sh  # subset
 #   CASES='1.*,2.*,6.*,7.*' bash bench/conformance/autobahn_run.sh  # PR lane
 #   EXCLUDE_CASES='13.*' bash bench/conformance/autobahn_run.sh  # all but 13.x
+#   AUTOBAHN_IMAGE=crossbario/autobahn-testsuite:latest bash …  # test an upgrade
 #
 # CASES is a comma-separated list of Autobahn case patterns (default '*');
 # EXCLUDE_CASES (optional) is the same shape and fills "exclude-cases"
@@ -27,6 +28,14 @@
 set -e
 
 PORT="${PORT:-9001}"
+
+# Pinned by digest, not by :latest.  A conformance suite that can change
+# under us turns "the wire behaviour regressed" and "the tester changed" into
+# the same red X, and the run that proved 517/517 last week is then not a run
+# anyone can repeat.  Bump this deliberately, in its own commit, with the
+# before/after case counts in the message.
+#   digest of crossbario/autobahn-testsuite:latest as of 2026-08-10
+AUTOBAHN_IMAGE="${AUTOBAHN_IMAGE:-crossbario/autobahn-testsuite@sha256:519915fb568b04c9383f70a1c405ae3ff44ab9e35835b085239c258b6fac3074}"
 
 RESULT_BASE="bench/conformance/results"
 mkdir -p "$RESULT_BASE"
@@ -86,7 +95,7 @@ docker run --rm \
     --add-host=host.docker.internal:host-gateway \
     -v "$(realpath "$OUT/fuzzingclient.json"):/config/fuzzingclient.json:ro" \
     -v "$(realpath "$OUT"):/results" \
-    crossbario/autobahn-testsuite \
+    "$AUTOBAHN_IMAGE" \
     wstest -m fuzzingclient -s /config/fuzzingclient.json
 
 echo ""
