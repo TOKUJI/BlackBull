@@ -49,8 +49,22 @@ permissions:
   contents: read
 
 jobs:
+  skip-check:
+    # Version-bump and docs-only changes don't need the five lanes; the gate
+    # is fail-safe (any anomaly reports skip=false) so a wrongly skipped run
+    # is impossible — see .github/actions/skip-ci-check.
+    name: Skip on version/doc-only changes
+    runs-on: ubuntu-latest
+    outputs:
+      skip: ${{ steps.decide.outputs.skip }}
+    steps:
+      - id: decide
+        uses: ./.github/actions/skip-ci-check
+
   fast:
     name: Fast tier (unit + arch + properties)
+    needs: skip-check
+    if: needs.skip-check.outputs.skip == 'false'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     strategy:
@@ -107,6 +121,8 @@ jobs:
 
   integration:
     name: Integration lane (integration + conformance)
+    needs: skip-check
+    if: needs.skip-check.outputs.skip == 'false'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -143,6 +159,8 @@ jobs:
 
   loop-touches:
     name: Loop-touch budget (hot-path exposure)
+    needs: skip-check
+    if: needs.skip-check.outputs.skip == 'false'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -173,6 +191,8 @@ jobs:
 
   dual-path:
     name: Dual-path lane (BB_FORCE_ASGI_SCOPE=1)
+    needs: skip-check
+    if: needs.skip-check.outputs.skip == 'false'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     # §4.3 of native-connection-interface.md: force the ASGI scope round-trip on
