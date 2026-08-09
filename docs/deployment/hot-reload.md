@@ -45,6 +45,21 @@ generations — no socket is ever closed, so connections in
 flight during a reload finish under the old workers, and new
 connections route to new workers transparently.
 
+Each step logs at `INFO`, so a reload that doesn't happen can be
+attributed rather than guessed at:
+
+```
+auto-reload: watching /srv/app for *.py changes     # watcher armed
+auto-reload: change detected in /srv/app/views.py   # watcher saw the save
+reload: change detected — recycling workers         # master acted on it
+reload: execv /usr/bin/python argv=[...]            # master re-exec'd
+```
+
+A missing line names the stage that stalled: no `change detected`
+means the watcher never saw the edit (see the clock caveat below);
+`change detected` with no `recycling workers` means the master did
+not act on it.
+
 ## Default watch path
 
 If `--reload-path` is not passed, BlackBull watches the current
@@ -61,6 +76,17 @@ working directory.
   seconds after starting the server never notice this; it's
   visible in tests that touch a watched file within the first
   second.
+- **A save can be missed if the system clock steps backwards.**
+  `watchfiles` polls file mtimes (and forces polling by default
+  on WSL), and its poller only treats a file as modified when
+  the mtime moves *forward*.  If the clock is stepped back — an
+  NTP correction, a VM resume, WSL2 time resync — every save for
+  the next few seconds carries an mtime older than the one the
+  poller recorded, and those saves are dropped silently.  Saving
+  again once the clock has caught up is picked up normally.  If a
+  reload doesn't happen, check for `auto-reload: change detected`
+  in the log before suspecting the reload machinery: no line
+  means the watcher never saw the edit.
 - **Watches `*.py` only.**  Template / static file changes
   don't trigger a reload — those usually don't require a
   worker restart anyway since they're read on every request.

@@ -29,6 +29,42 @@ so the editable install's metadata catches up.
 
 ---
 
+## [Unreleased]
+
+### Fixed
+
+- **A stop signal delivered while the master was still starting up was
+  silently discarded.**  `MultiWorkerServer.run()` installed the SIGTERM /
+  SIGINT handlers first and then reset the flag those handlers set, so any
+  signal arriving during worker spawn — or, under `reload=True`, during the
+  watcher thread's start — was overwritten before the supervision loop ever
+  read it.  The master then kept supervising a shutdown it had already
+  acknowledged in the log, until something SIGKILLed it: an orchestrator that
+  SIGTERMs a slow-starting container waited out its full grace period, and
+  `Ctrl-C` in the first moments of `--reload` did nothing.  The flag is now
+  owned from construction and never re-initialised.  Measured on the reload
+  end-to-end path: SIGTERM-to-exit went from a 15 s SIGKILL to 0.12 s.
+
+### Added
+
+- **`auto-reload: change detected in <paths>`** — the file watcher now logs the
+  change it observed, before handing off to the master.  Previously the first
+  evidence of a reload was the master's own "recycling workers" a tick later,
+  which only appears if the master acted; a reload that never happened gave no
+  way to tell a watcher that stayed silent from a master that ignored it.
+
+### Docs
+
+- **Hot reload** — documented the reload log sequence as a diagnostic ladder,
+  and a caveat that was not previously written down: `watchfiles`' poller
+  (forced on by default under WSL) treats a file as modified only when its
+  mtime moves *forward*, so a backwards clock step — NTP correction, VM
+  resume, WSL2 time resync — silently drops every save for the next few
+  seconds.  Verified: 12/12 saves dropped with an mtime forced into the past,
+  0/12 with the mtime left alone or forced forward.
+
+---
+
 ## [0.73.0] — 2026-08-09
 
 ### Removed

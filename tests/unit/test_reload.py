@@ -8,6 +8,7 @@ This file covers the pieces that can be tested in-process.
 """
 from __future__ import annotations
 
+import logging
 import os
 import socket
 import threading
@@ -17,7 +18,12 @@ from pathlib import Path
 import pytest
 
 from blackbull.protocol.rsock import _INHERIT_FDS_ENV, adopt_inherited_sockets
-from blackbull.server.reload import FileChangeWatcher, _default_filter
+from blackbull.server.reload import (
+    _MAX_LOGGED_PATHS,
+    FileChangeWatcher,
+    _default_filter,
+    _describe_changes,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -144,6 +150,76 @@ def test_watcher_ignores_non_py(tmp_path: Path, force_polling_watcher):
         )
     finally:
         watcher.stop()
+
+
+def test_watcher_logs_the_changed_path_before_firing(
+    tmp_path: Path, force_polling_watcher, caplog,
+):
+    """The watcher must name what it saw, *before* handing off to the master.
+
+    Without this line the only evidence a change was observed is the
+    master's own "recycling workers", one tick later — so a reload that
+    never happens cannot be attributed to the watcher or to the master.
+    Ordering is part of the contract: the record has to be on disk before
+    the callback runs, or a callback that re-execs takes the evidence with
+    it.
+    """
+    caplog.set_level(logging.INFO, logger='blackbull.server.reload')
+    target = tmp_path / 'app.py'
+    target.write_text('print("v1")\n')
+
+    logged_before_callback: list[bool] = []
+    fired = threading.Event()
+
+    def _on_change() -> None:
+        # Scoped to our own logger: watchfiles emits its own DEBUG
+        # "N change detected" line, which would satisfy a bare substring
+        # match and make this assertion vacuous.
+        logged_before_callback.append(
+            any('change detected' in r.getMessage() for r in caplog.records
+                if r.name == 'blackbull.server.reload')
+        )
+        fired.set()
+
+    watcher = FileChangeWatcher([str(tmp_path)], _on_change)
+    watcher.start()
+    try:
+        deadline = time.monotonic() + 5.0
+        i = 2
+        while time.monotonic() < deadline and not fired.is_set():
+            target.write_text(f'print("v{i}")\n')
+            fired.wait(timeout=0.4)
+            i += 1
+        assert fired.is_set(), 'watcher never fired; cannot assert on its log'
+    finally:
+        watcher.stop()
+
+    assert logged_before_callback[0], (
+        'callback ran before the change was logged — a re-exec in the '
+        'callback would destroy the only record that the watcher saw it'
+    )
+    messages = [
+        r.getMessage() for r in caplog.records
+        if r.name == 'blackbull.server.reload'
+    ]
+    assert any(str(target) in m for m in messages), (
+        f'no log record named the changed path {target}; got {messages}'
+    )
+
+
+def test_describe_changes_bounds_a_large_batch():
+    """A branch checkout is one batch of hundreds of paths — the line stays readable."""
+    changes = {(None, f'/x/f{i}.py') for i in range(50)}
+    rendered = _describe_changes(changes)
+
+    assert rendered.count(',') == _MAX_LOGGED_PATHS - 1
+    assert rendered.endswith(f'(+{50 - _MAX_LOGGED_PATHS} more)')
+    # Sorted, so the same batch always renders identically.
+    assert _describe_changes(changes) == rendered
+
+
+def test_describe_changes_names_a_single_file_exactly():
+    assert _describe_changes({(None, '/x/app.py')}) == '/x/app.py'
 
 
 def test_watcher_stop_is_idempotent(tmp_path: Path):

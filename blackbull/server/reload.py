@@ -46,6 +46,20 @@ _INHERIT_FDS_ENV = 'BB_INHERIT_FDS'
 _DEFAULT_WATCH_SUFFIXES = ('.py',)
 
 
+#: How many changed paths a single log line names before it summarises.
+#: One editor save is one path; a branch checkout is hundreds, and the
+#: line has to stay readable in both cases.
+_MAX_LOGGED_PATHS = 3
+
+
+def _describe_changes(changes: Iterable[tuple[object, str]]) -> str:
+    """Render one ``watchfiles`` batch as a bounded, stable path list."""
+    paths = sorted({path for _, path in changes})
+    head = ', '.join(paths[:_MAX_LOGGED_PATHS])
+    hidden = len(paths) - _MAX_LOGGED_PATHS
+    return f'{head} (+{hidden} more)' if hidden > 0 else head
+
+
 def _default_filter(change, path: str) -> bool:  # noqa: ARG001
     """watchfiles ``watch_filter`` accepting only ``*.py`` files.
 
@@ -100,13 +114,21 @@ class FileChangeWatcher:
                 # ``stop_event`` is the cooperative shutdown signal.
                 # ``watch_filter`` selects which files we care about
                 # (drops .pyc churn, dotfiles, editor swap files).
-                for _ in watchfiles.watch(
+                for changes in watchfiles.watch(
                     *self._paths,
                     watch_filter=self._watch_filter,
                     stop_event=self._stop_event,
                 ):
                     if self._stop_event.is_set():
                         return
+                    # Logged before the callback, and by the watcher rather
+                    # than by whoever acts on it: the master's own
+                    # "recycling workers" fires a tick later and only if it
+                    # acted, so without this line a reload that never
+                    # happens gives no way to tell a watcher that stayed
+                    # silent from a master that ignored it.
+                    logger.info('auto-reload: change detected in %s',
+                                _describe_changes(changes))
                     try:
                         self._on_change()
                     except Exception:
