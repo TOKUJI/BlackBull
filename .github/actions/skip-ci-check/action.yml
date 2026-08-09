@@ -1,0 +1,77 @@
+name: Skip-CI check
+description: >-
+  Decide whether a push/PR touches only version- or documentation-level files
+  and can therefore skip the test suite.  Fail-safe by construction: any
+  error, a missing base SHA, a schedule, or a workflow_dispatch run reports
+  skip=false (run the suite).  A silently skipped run is the one failure this
+  gate must never have — the suite is the project's regression proof, and a
+  wrongly skipped run is indistinguishable from a green one.
+outputs:
+  skip:
+    description: 'true when the suite can be skipped; false otherwise'
+    value: ${{ steps.decide.outputs.skip }}
+runs:
+  using: composite
+  steps:
+    # No checkout here on purpose: a local action must be resolvable before
+    # its first step runs, so the caller's job checks the repo out first
+    # (with fetch-depth 0 — the gate diffs against the PR base / prior push).
+    - name: Decide
+      id: decide
+      shell: bash
+      run: |
+        # set +e: every error path below must end in skip=false, never in a
+        # failed job — a failed gate would skip its dependents in Actions.
+        set +e
+        skip=false
+        event="${{ github.event_name }}"
+
+        # Scheduled and manual runs have no diff to inspect — always run.
+        if [ "$event" != "push" ] && [ "$event" != "pull_request" ]; then
+          echo "skip=false" >> "$GITHUB_OUTPUT"; exit 0
+        fi
+
+        if [ "$event" = "pull_request" ]; then
+          base="${{ github.event.pull_request.base.sha }}"
+          range="$base...HEAD"
+        else
+          base="${{ github.event.before }}"
+          range="$base..HEAD"
+        fi
+
+        # The first push on a branch has no base — run rather than guess.
+        if [ -z "$base" ] || [ "$base" = "0000000000000000000000000000000000000000" ]; then
+          echo "skip=false" >> "$GITHUB_OUTPUT"; exit 0
+        fi
+
+        changed="$(git diff --name-only "$range")"
+        # A failed diff (unresolvable base) leaves changed empty — same
+        # anomaly, same answer: run.
+        if [ -z "$changed" ]; then
+          echo "skip=false" >> "$GITHUB_OUTPUT"; exit 0
+        fi
+
+        # Any change under a suite-relevant path forces a run.  The set is the
+        # code the suites exercise plus the config files they read; anything
+        # outside it (docs, examples, bench, site, CHANGELOG, …) cannot affect
+        # a run.
+        if printf '%s\n' "$changed" | grep -qE \
+            '^(blackbull/|tests/|justfile|pytest\.ini|logging\.json|san\.cnf|\.github/workflows/|\.github/actions/)'; then
+          echo "skip=false" >> "$GITHUB_OUTPUT"; exit 0
+        fi
+
+        # pyproject.toml carries both the version (bumped by release PRs) and
+        # the dependency set (a change that must run).  A path filter cannot
+        # tell them apart, so the gate inspects the diff: a version-line-only
+        # change is harmless; anything else forces a run.
+        if printf '%s\n' "$changed" | grep -q '^pyproject\.toml$'; then
+          if git diff "$range" -- pyproject.toml | grep -E '^[+-]' \
+              | grep -vE '^(\+\+\+|---)' \
+              | grep -vE '^[+-][[:space:]]*version[[:space:]]*=' \
+              | grep -q .; then
+            echo "skip=false" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+        fi
+
+        echo "skip=true" >> "$GITHUB_OUTPUT"
+        exit 0

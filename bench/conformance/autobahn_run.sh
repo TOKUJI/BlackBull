@@ -11,11 +11,15 @@
 #   bash bench/conformance/autobahn_run.sh            # full fuzzingclient
 #   CASES='1.*' bash bench/conformance/autobahn_run.sh  # subset
 #   CASES='1.*,2.*,6.*,7.*' bash bench/conformance/autobahn_run.sh  # PR lane
+#   EXCLUDE_CASES='13.*' bash bench/conformance/autobahn_run.sh  # all but 13.x
 #
-# CASES is a comma-separated list of Autobahn case patterns (default '*').
+# CASES is a comma-separated list of Autobahn case patterns (default '*');
+# EXCLUDE_CASES (optional) is the same shape and fills "exclude-cases"
+# (wstest runs the case set minus the exclusions — caseset.py resolves both
+# with the same pattern syntax, so '12.*.10' and '13.*' both work).
 # The static autobahn_fuzzingclient.json is a template: a per-run copy with
-# "cases" substituted is rendered into the results dir and mounted instead
-# (P.2 — CASES was once documented but ignored, and subset
+# "cases" / "exclude-cases" substituted is rendered into the results dir and
+# mounted instead (P.2 — CASES was once documented but ignored, and subset
 # runs silently ran all 517 cases).
 #
 # Reports land in bench/conformance/results/autobahn_<timestamp>/.
@@ -58,14 +62,17 @@ CONFIG_DIR="$(cd "$(dirname "$0")" && pwd)"
 # "cases" is replaced.  With CASES unset the rendered "cases" is ["*"] —
 # identical to the template — so the CI job (which sets no CASES) keeps
 # running the full suite.
-CASES="${CASES:-*}" python3 - "$CONFIG_DIR/autobahn_fuzzingclient.json" \
-    "$OUT/fuzzingclient.json" <<'PYEOF'
+CASES="${CASES:-*}" EXCLUDE_CASES="${EXCLUDE_CASES:-}" python3 - \
+    "$CONFIG_DIR/autobahn_fuzzingclient.json" "$OUT/fuzzingclient.json" <<'PYEOF'
 import json, os, sys
 src, dst = sys.argv[1], sys.argv[2]
 with open(src) as f:
     cfg = json.load(f)
 cases = [c.strip() for c in os.environ['CASES'].split(',') if c.strip()]
 cfg['cases'] = cases or ['*']
+excl = [c.strip() for c in os.environ['EXCLUDE_CASES'].split(',') if c.strip()]
+if excl:
+    cfg['exclude-cases'] = excl
 with open(dst, 'w') as f:
     json.dump(cfg, f, indent=3)
 PYEOF
