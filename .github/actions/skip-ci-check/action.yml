@@ -13,11 +13,9 @@ outputs:
 runs:
   using: composite
   steps:
-    - name: Checkout (full history — the base SHA must resolve)
-      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
-      with:
-        fetch-depth: 0
-
+    # No checkout here on purpose: a local action must be resolvable before
+    # its first step runs, so the caller's job checks the repo out first
+    # (with fetch-depth 0 — the gate diffs against the PR base / prior push).
     - name: Decide
       id: decide
       shell: bash

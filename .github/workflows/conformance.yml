@@ -60,6 +60,14 @@ jobs:
     outputs:
       skip: ${{ steps.decide.outputs.skip }}
     steps:
+      # A local action (uses: ./.github/...) must be resolvable on the runner
+      # before the action runs, so the checkout is a job step, not inside the
+      # action.  fetch-depth 0: the gate diffs against the PR base / prior
+      # push commit.
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
+        with:
+          fetch-depth: 0
       - id: decide
         uses: ./.github/actions/skip-ci-check
 
