@@ -154,9 +154,14 @@ serves files three ways at runtime:
   edits with no staleness window, but pays the per-request syscall
   cost.
 - Zero-copy via `loop.sendfile` (cleartext HTTP/1.1, > 4 MiB,
-  no Range) — single kernel-side transfer, no per-chunk
-  event-loop dispatch.  Opted in via the `http.response.pathsend`
-  ASGI extension; cleartext HTTP/1.1 advertises it.
+  no Range) — kernel-side transfer with no per-chunk thread
+  dispatch and no copy into user space.  Issued 1 MiB at a time so
+  `BB_WRITE_TIMEOUT` can bound a stalled peer; since this path only
+  engages above 4 MiB, every file on it takes several calls.  The
+  cost is a handful of `pause_reading`/`resume_reading` cycles per
+  file, which buys the write bound that the single-call form could
+  not express.  Opted in via the `http.response.pathsend` ASGI
+  extension; cleartext HTTP/1.1 advertises it.
 - Chunked through `asyncio.to_thread` (TLS, HTTP/2, Range
   requests) — correct, but every chunk pays thread-pool dispatch
   overhead.  Use the fronting nginx path below if this is on the

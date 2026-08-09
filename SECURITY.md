@@ -12,9 +12,9 @@ critical vulnerabilities.
 
 | Version | Supported          |
 | ------- | ------------------ |
+| 0.74.x  | :white_check_mark: |
 | 0.73.x  | :white_check_mark: |
-| 0.72.x  | :white_check_mark: |
-| < 0.72  | :x:                |
+| < 0.73  | :x:                |
 
 This table updates with each minor release.
 
@@ -69,6 +69,11 @@ The following are in scope for security reports:
   close that lets a rejection reach the peer.  A way to make the
   server buffer without bound, or to read past a configured budget,
   is a security report.
+- The write-side bound (`BB_WRITE_TIMEOUT`) on every response path,
+  including the `sendfile` transfer for large static files.  A
+  response path that a slow-reading peer can stall indefinitely — so
+  holding a connection, its file descriptor, and its transport — is a
+  security report even though no bytes are read from the attacker.
 - Middleware shipped in `blackbull/middleware/` (Compression,
   StaticFiles, CORS, etc.).
 - Routing, request parsing, and response handling.

@@ -84,6 +84,13 @@ every other response body.
 
 ### Internal
 
+- **A mistyped CPU range no longer allocates the range.**  `BB_CPU_PINNING`
+  expanded each range before intersecting it with the process's mask, so
+  `0-20000000` in place of `0-20` built 20 000 001 entries — 1.15 GiB and
+  1.8 s, in every worker, at fork time — and then discarded all of it.  Ranges
+  are clamped to the highest allowed CPU, which nothing above could have
+  survived anyway.  Caught in review; the parser is new this sprint, so no
+  release ever carried it.
 - **The per-connection serve task starts eagerly.**  `connection_made` now
   builds the task with `eager_start=True`, running the serve prologue inline
   instead of queueing its first step for a later loop iteration.  Measured at
