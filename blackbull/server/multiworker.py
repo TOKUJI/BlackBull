@@ -86,6 +86,12 @@ class MultiWorkerServer:
         self._reload = reload
         self._reload_paths = reload_paths
         self._reload_pending = False
+        # Owned from construction, never re-initialised in run(): the signal
+        # handlers are installed before the workers spawn, so a stop signal
+        # can land while startup is still in progress.  Resetting the flag
+        # after that point would discard the request and leave the master
+        # supervising until something SIGKILLs it.
+        self._stopped = False
         self._watcher = None  # set in run() when reload is enabled
         self._processes: list = []
         # The original listening sockets the master adopts/binds.  These
@@ -148,7 +154,6 @@ class MultiWorkerServer:
         if self._reload:
             self._start_watcher()
 
-        self._stopped = False
         tick = _RELOAD_TICK if self._reload else _MONITOR_INTERVAL
         try:
             elapsed_since_reap = 0.0
