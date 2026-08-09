@@ -1289,6 +1289,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#cpu-pinning" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CPU pinning
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -4011,6 +4022,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../api/blackbull/server/affinity/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    affinity
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../api/blackbull/server/cap_log/" class="md-nav__link">
         
   
@@ -5128,6 +5167,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#cpu-pinning" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CPU pinning
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -5314,6 +5364,41 @@ extension package) explicitly state their per-worker limits — see
 </tr>
 </tbody>
 </table>
+<h3 id="cpu-pinning">CPU pinning<a class="headerlink" href="#cpu-pinning" title="Permanent link">&para;</a></h3>
+<p>Each worker pins its event loop to one core after forking, so the
+hot state it accumulates — the header line table, the HPACK
+dynamic tables — stays resident in that core's L1/L2 instead of
+following the thread around the machine.  <code>BB_CPU_PINNING</code>
+controls it:</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># Default: worker i takes the i-th CPU we are allowed to run on.</span>
+<span class="nv">BB_CPU_PINNING</span><span class="o">=</span>auto<span class="w"> </span><span class="nv">BB_WORKERS</span><span class="o">=</span><span class="m">8</span><span class="w"> </span>python<span class="w"> </span>app.py
+
+<span class="c1"># Pin nothing — leave placement entirely to the operator.</span>
+<span class="nv">BB_CPU_PINNING</span><span class="o">=</span>off<span class="w"> </span>python<span class="w"> </span>app.py
+
+<span class="c1"># Confine workers to a specific set (taskset syntax). 0 is CPU 0,</span>
+<span class="c1"># not the off switch.</span>
+<span class="nv">BB_CPU_PINNING</span><span class="o">=</span><span class="m">8</span>-11<span class="w"> </span><span class="nv">BB_WORKERS</span><span class="o">=</span><span class="m">4</span><span class="w"> </span>python<span class="w"> </span>app.py
+</code></pre></div>
+<p>Two things it deliberately does <strong>not</strong> do:</p>
+<ul>
+<li><strong>It never widens the mask it was given.</strong>  Placement is drawn
+  from the affinity mask the process already carries, so
+  <code>taskset -c 8-11</code>, <code>numactl</code>, and a container's cpuset are
+  inputs rather than obstacles.  An explicit list is intersected
+  with that mask, never added to it; a list with nothing in
+  common with it pins nothing and logs a warning.</li>
+<li><strong>It never pins the thread pool.</strong>  Linux threads inherit the
+  creating thread's mask, so pinning the loop would otherwise put
+  every <code>run_in_executor</code> compression and every
+  <code>asyncio.to_thread</code> file read on the one core the loop is
+  already saturating.  Worker threads are handed the full mask
+  back — offloading exists to get off that core.</li>
+</ul>
+<p>Set <code>off</code> on a shared host, under an orchestrator that already
+does placement, or any time you would rather make this decision
+yourself.  Pinning is Linux-only (<code>sched_setaffinity</code>) and
+multi-worker-only; a single-worker server is never pinned.</p>
 <h2 id="uvloop"><code>uvloop</code><a class="headerlink" href="#uvloop" title="Permanent link">&para;</a></h2>
 <p><code>uvloop</code> is a drop-in libuv-based replacement for the standard
 asyncio event loop.  BlackBull installs it as the loop policy

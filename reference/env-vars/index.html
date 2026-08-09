@@ -3999,6 +3999,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../api/blackbull/server/affinity/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    affinity
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../api/blackbull/server/cap_log/" class="md-nav__link">
         
   
@@ -5268,6 +5296,11 @@ on busy production deployments, see
 <td><code>0</code></td>
 <td>Install <code>uvloop</code>'s asyncio policy at startup.  Requires <code>pip install 'blackbull[speed]'</code>; falls back to the standard loop with a warning when uvloop is missing.</td>
 </tr>
+<tr>
+<td><code>BB_CPU_PINNING</code></td>
+<td><code>auto</code></td>
+<td>Per-worker CPU pinning, applied after fork.  <code>auto</code> gives worker <em>i</em> the <em>i</em>-th CPU of the mask the process already has, so <code>taskset</code> / <code>numactl</code> / a cpuset are honoured rather than overridden; <code>off</code> pins nothing; an explicit <code>taskset</code>-style list (<code>2,4,6-9</code>; <code>0</code> is CPU 0, not the off switch) confines workers to those CPUs, intersected with the mask granted to the process.  Only the event loop is pinned — the thread pool behind <code>run_in_executor</code> compression and <code>asyncio.to_thread</code> file reads keeps the full mask, since offloading exists to get off the loop's core.  Multi-worker and Linux only; a single-worker server is never pinned.  Set <code>off</code> on a shared or externally-orchestrated host.</td>
+</tr>
 </tbody>
 </table>
 <h2 id="warm-up">Warm-up<a class="headerlink" href="#warm-up" title="Permanent link">&para;</a></h2>
@@ -5333,7 +5366,7 @@ first-hit-then-summary rate-limit model.</p>
 <tr>
 <td><code>BB_WRITE_TIMEOUT</code></td>
 <td><code>30.0</code></td>
-<td>Seconds the server will wait for a single response write to flush to the peer (via <code>StreamWriter.drain()</code>).  Defends against the <em>slow-read</em> shape of slowloris: a client that reads the response 1 byte/sec eventually fills the kernel send buffer and our drain blocks indefinitely.  On timeout the transport is force-closed and the failure surfaces as a peer-side <code>ConnectionResetError</code> for the sender's existing error path.  Enforced by the shared deadline scanner, so the timeout fires within <code>BB_DEADLINE_TICK_MS</code> of the requested instant rather than exactly on it — ~1 % slop at the 30 s default, and no per-response timer on the hot path.  <code>0</code> disables.</td>
+<td>Seconds the server will wait for a single response write to flush to the peer (via <code>StreamWriter.drain()</code>), or for one megabyte of a <code>sendfile</code> transfer to make progress.  Defends against the <em>slow-read</em> shape of slowloris: a client that reads the response 1 byte/sec eventually fills the kernel send buffer and our drain blocks indefinitely.  The bound is per write, not per response, so a legitimately large static file is never cut off for its size — only for stalling.  On timeout the transport is force-closed and the failure surfaces as a peer-side <code>ConnectionResetError</code> for the sender's existing error path.  Enforced by the shared deadline scanner, so the timeout fires within <code>BB_DEADLINE_TICK_MS</code> of the requested instant rather than exactly on it — ~1 % slop at the 30 s default, and no per-response timer on the hot path.  <code>0</code> disables.</td>
 </tr>
 <tr>
 <td><code>BB_KEEP_ALIVE_TIMEOUT</code></td>

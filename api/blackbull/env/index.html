@@ -3943,6 +3943,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../server/affinity/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    affinity
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../server/cap_log/" class="md-nav__link">
         
   
@@ -5346,7 +5374,7 @@ BB_COMPRESSION_EXECUTOR_THRESHOLD
 BB_COMPRESSION_MAX_INFLIGHT
     Maximum number of compression offloads allowed to be running
     concurrently in the asyncio default thread pool.  When at or above
-    this cap, additional eligible responses are served </strong>uncompressed**
+    this cap, additional eligible responses are served </strong>uncompressed<em><em>
     rather than queued — bounded fall-back rather than unbounded queue
     growth.  Tied to executor size: setting this above Python's default
     <code>ThreadPoolExecutor</code> <code>max_workers</code> provides no benefit.  That
@@ -5381,7 +5409,18 @@ BB_DEADLINE_TICK_MS
     that enforces connection timeouts (<code>BB_HEADER_TIMEOUT</code>,
     <code>BB_BODY_TIMEOUT</code>, <code>BB_WRITE_TIMEOUT</code>, <code>BB_KEEP_ALIVE_TIMEOUT</code>).
     Smaller = tighter timeout granularity at a small CPU cost; larger =
-    more slack but cheaper.  Default: <code>300</code>.</p>
+    more slack but cheaper.  Default: <code>300</code>.
+BB_CPU_PINNING
+    Per-worker CPU pinning, applied after fork in each worker process.
+    <code>auto</code> (default) gives worker </em>i</em> the <em>i</em>-th CPU of the mask the
+    process already carries, so <code>taskset</code>/<code>numactl</code>/cpuset placement is
+    honoured rather than overridden; <code>off</code> pins nothing; an explicit
+    <code>taskset</code>-style list (<code>2,4,6-9</code> — <code>0</code> is CPU 0, not the off
+    switch) confines workers to those CPUs, intersected with the mask we
+    were granted.  Only the event loop is pinned — the thread pool that
+    serves <code>run_in_executor</code> compression and <code>asyncio.to_thread</code> file
+    reads keeps the full mask.  Multi-worker and Linux only; a single-worker
+    server is never pinned.  Default: <code>auto</code>.</p>
 
 
 

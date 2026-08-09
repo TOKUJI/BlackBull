@@ -3818,6 +3818,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../api/blackbull/server/affinity/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    affinity
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../api/blackbull/server/cap_log/" class="md-nav__link">
         
   
@@ -5091,6 +5119,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#sendfile-goes-out-a-megabyte-at-a-time" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        sendfile goes out a megabyte at a time
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#response-values-that-come-from-tables" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5582,6 +5621,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#sendfile-goes-out-a-megabyte-at-a-time" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        sendfile goes out a megabyte at a time
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#response-values-that-come-from-tables" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5751,6 +5801,20 @@ back-channels into other components.</p>
 plain <code>asyncio</code> server that owns the listening socket and
 spawns a <code>ConnectionActor</code> task per accepted connection.
 Everything below it is an <code>Actor</code> subclass.</p>
+<p>That task is started <strong>eagerly</strong>: the coroutine runs inside the
+transport's <code>connection_made</code> callback until its first suspension
+— which is the peek that waits for the peer's first bytes, the
+same place it would have parked anyway.  <code>asyncio.create_task</code>
+would instead queue that first step for a later loop iteration,
+so the prologue (deadline handle, protocol-detection order) costs
+a scheduling hop that a connection pays once.  Measured at 0.387
+µs per accepted connection, so it is churn bookkeeping rather
+than a latency win — an accepted connection waits for the peer's
+packet either way.  Eager start does not move where a failure
+lands: a coroutine that raises before its first suspension
+completes the task with that exception rather than raising out of
+the transport callback, so the connection's done-callback still
+reports it.</p>
 <p>A separate <code>EventAggregator</code> translates the low-level
 inter-actor messages into the wire-level user-facing events
 documented in <a href="../../guide/events/">Events</a> —
@@ -6254,6 +6318,26 @@ that failure is invisible to them.  Whatever is under <code>AsyncioWriter</code>
 owes it <code>write</code>, <code>writelines</code>, <code>drain</code>, <code>close</code>, and a <code>transport</code>
 (for <code>sendfile</code>); <code>tests/architecture/test_writer_backing_contract.py</code>
 reads that list out of the sender's source rather than restating it.</p>
+<h3 id="sendfile-goes-out-a-megabyte-at-a-time"><code>sendfile</code> goes out a megabyte at a time<a class="headerlink" href="#sendfile-goes-out-a-megabyte-at-a-time" title="Permanent link">&para;</a></h3>
+<p><code>AsyncioWriter.sendfile</code> splits the transfer into <code>_SENDFILE_CHUNK</code>
+(1 MiB) calls to <code>loop.sendfile</code> rather than handing it the whole
+file at once.  The kernel copies the same total either way; the
+boundary exists so <code>BB_WRITE_TIMEOUT</code> has somewhere to re-arm.</p>
+<p>Without it, the static-file path was the one response body no
+write bound could reach.  "Send this 4 GiB file within 30 seconds"
+is not a policy any operator can set, so a single unbounded
+<code>loop.sendfile</code> had to go unguarded — and a peer that read a large
+file one byte per second held the connection, its FD, and its
+transport for as long as it liked, which is precisely the
+slow-read slowloris shape the timeout was built to stop.  Per
+chunk the policy becomes "make a megabyte of progress within the
+budget", which bounds a stall without penalising a legitimately
+large transfer.</p>
+<p>The chunk sits far above ordinary web assets deliberately:
+anything smaller still goes out in exactly one call, so the common
+path is unchanged and only genuinely large files pay for the
+loop.  The header flush that precedes the transfer runs under the
+same bound as every other drain.</p>
 <h3 id="response-values-that-come-from-tables">Response values that come from tables<a class="headerlink" href="#response-values-that-come-from-tables" title="Permanent link">&para;</a></h3>
 <p>Two values are rebuilt on every single response and drawn from a
 small, known domain, so both are precomputed once at import:</p>
