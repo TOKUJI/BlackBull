@@ -5160,6 +5160,17 @@ app.run<span class="o">(</span><span class="nv">port</span><span class="o">=</sp
 generations — no socket is ever closed, so connections in
 flight during a reload finish under the old workers, and new
 connections route to new workers transparently.</p>
+<p>Each step logs at <code>INFO</code>, so a reload that doesn't happen can be
+attributed rather than guessed at:</p>
+<div class="highlight"><pre><span></span><code>auto-reload: watching /srv/app for *.py changes     # watcher armed
+auto-reload: change detected in /srv/app/views.py   # watcher saw the save
+reload: change detected — recycling workers         # master acted on it
+reload: execv /usr/bin/python argv=[...]            # master re-exec&#39;d
+</code></pre></div>
+<p>A missing line names the stage that stalled: no <code>change detected</code>
+means the watcher never saw the edit (see the clock caveat below);
+<code>change detected</code> with no <code>recycling workers</code> means the master did
+not act on it.</p>
 <h2 id="default-watch-path">Default watch path<a class="headerlink" href="#default-watch-path" title="Permanent link">&para;</a></h2>
 <p>If <code>--reload-path</code> is not passed, BlackBull watches the current
 working directory.</p>
@@ -5174,6 +5185,17 @@ working directory.</p>
   seconds after starting the server never notice this; it's
   visible in tests that touch a watched file within the first
   second.</li>
+<li><strong>A save can be missed if the system clock steps backwards.</strong>
+  <code>watchfiles</code> polls file mtimes (and forces polling by default
+  on WSL), and its poller only treats a file as modified when
+  the mtime moves <em>forward</em>.  If the clock is stepped back — an
+  NTP correction, a VM resume, WSL2 time resync — every save for
+  the next few seconds carries an mtime older than the one the
+  poller recorded, and those saves are dropped silently.  Saving
+  again once the clock has caught up is picked up normally.  If a
+  reload doesn't happen, check for <code>auto-reload: change detected</code>
+  in the log before suspecting the reload machinery: no line
+  means the watcher never saw the edit.</li>
 <li><strong>Watches <code>*.py</code> only.</strong>  Template / static file changes
   don't trigger a reload — those usually don't require a
   worker restart anyway since they're read on every request.</li>

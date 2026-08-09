@@ -6116,11 +6116,16 @@ connection hangs with no error and no response.</p>
 <p>So parking releases the pause.  A reader about to block is starved, not behind,
 and the condition backpressure exists to prevent is not the one in play.
 <code>asyncio.StreamReader</code> resumes at the same point for the same reason.</p>
-<p>Two shapes reach this and one does not, which is worth knowing because the
-difference is luck rather than design: a WebSocket frame and a single
-<code>Transfer-Encoding: chunked</code> chunk are both read with one <code>readexactly</code> of a
-size <strong>the peer chose</strong>, so either can exceed the mark.  A <code>Content-Length</code>
-body cannot, because <code>BB_BODY_CHUNK_SIZE</code> slices it below the mark first.</p>
+<p>One shape reaches this and the request body does not.  A WebSocket frame is
+read with one <code>readexactly</code> of a size <strong>the peer chose</strong>, so it can exceed the
+mark; it is bounded only by <code>BB_WS_MAX_FRAME_PAYLOAD</code> (64 MiB), which is a
+ceiling on the damage rather than a slice.  Both HTTP/1.1 body framings are
+sliced by <code>BB_BODY_CHUNK_SIZE</code> below the mark before they are read — a
+<code>Content-Length</code> body by its remaining count, a <code>Transfer-Encoding: chunked</code>
+body by what is left of the chunk in progress.  Slicing the chunked case is
+what keeps a peer-declared <code>chunk-size</code> from choosing how much the server
+buffers: reading a whole chunk would have to reopen the very pause the
+high-water mark had just applied.</p>
 <h3 id="rejecting-requires-lingering">Rejecting requires lingering<a class="headerlink" href="#rejecting-requires-lingering" title="Permanent link">&para;</a></h3>
 <p>Enforcing a byte budget means, by construction, <em>not</em> reading the rest —
 and closing a socket with unread bytes in its receive queue makes the

@@ -5358,7 +5358,7 @@ first-hit-then-summary rate-limit model.</p>
 <tr>
 <td><code>BB_BODY_CHUNK_SIZE</code></td>
 <td><code>65536</code></td>
-<td>Slice size (bytes) for streaming an HTTP/1.1 <code>Content-Length</code> request body to the ASGI app.  The body is delivered as successive <code>http.request</code> events (<code>more_body: True</code> until exhausted) instead of one giant <code>readexactly(content_length)</code> allocation — capping per-connection buffering at O(chunk × connections).  64 KiB matches asyncio's default <code>StreamReader</code> buffer.  Must be <code>&gt; 0</code> (invalid values fall back to the default).</td>
+<td>Slice size (bytes) for streaming an HTTP/1.1 request body to the ASGI app, on <strong>both</strong> framings.  The body is delivered as successive <code>http.request</code> events (<code>more_body: True</code> until exhausted) instead of one allocation the size of the declared length — capping per-connection buffering at O(chunk × connections).  It bounds a <code>Content-Length</code> body by the remaining count and a <code>Transfer-Encoding: chunked</code> body by what is left of the chunk in progress, so a peer-declared <code>chunk-size</code> never sets the read size.  64 KiB matches asyncio's default <code>StreamReader</code> buffer and sits below the backpressure high-water mark, which is what lets the pause work.  Must be <code>&gt; 0</code> (invalid values fall back to the default).</td>
 </tr>
 <tr>
 <td><code>BB_STREAM_QUEUE_DEPTH</code></td>
