@@ -342,6 +342,24 @@ The evidence travels with the exception rather than being re-derived from
 the reader, so both reader kinds reach the same verdict from the same
 bytes.
 
+### Backpressure pauses for a handler that is behind, not one that is waiting
+
+The buffer pauses the transport once unconsumed bytes reach a high-water mark,
+so a fast peer cannot grow it without bound while a handler falls behind.  That
+rule inverts for a reader that is **blocked waiting for more**: the bytes it is
+parked on are exactly the ones the pause is refusing to read, and the
+connection hangs with no error and no response.
+
+So parking releases the pause.  A reader about to block is starved, not behind,
+and the condition backpressure exists to prevent is not the one in play.
+`asyncio.StreamReader` resumes at the same point for the same reason.
+
+Two shapes reach this and one does not, which is worth knowing because the
+difference is luck rather than design: a WebSocket frame and a single
+`Transfer-Encoding: chunked` chunk are both read with one `readexactly` of a
+size **the peer chose**, so either can exceed the mark.  A `Content-Length`
+body cannot, because `BB_BODY_CHUNK_SIZE` slices it below the mark first.
+
 ### Rejecting requires lingering
 
 Enforcing a byte budget means, by construction, *not* reading the rest —

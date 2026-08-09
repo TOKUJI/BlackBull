@@ -355,6 +355,18 @@ class ConnectionProtocol(asyncio.BufferedProtocol):
             raise RuntimeError(
                 'ConnectionProtocol.wait_for_data is not re-entrant — one connection '
                 'is driven by one actor coroutine')
+        # Parking here releases the high-water pause.  Backpressure exists to
+        # stop a fast peer outrunning a handler that is *behind*; a reader
+        # about to block is the opposite case — it is starved, and the bytes it
+        # waits for are precisely the ones the pause is refusing to read.
+        # Without this, any single read larger than the mark deadlocks: a
+        # WebSocket frame, or a ``chunked`` chunk whose size the peer chose.
+        # ``asyncio.StreamReader._wait_for_data`` resumes here for the same
+        # reason.
+        if self._paused:
+            self._paused = False
+            if self.transport is not None:
+                self.transport.resume_reading()
         self._waiter = asyncio.get_running_loop().create_future()
         try:
             await self._waiter

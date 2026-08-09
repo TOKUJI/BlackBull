@@ -48,6 +48,18 @@ so the editable install's metadata catches up.
 
 ### Fixed
 
+- **A read larger than the backpressure high-water mark (128 KiB) deadlocked
+  the connection.**  The buffer paused the transport once that many unconsumed
+  bytes were resident, but a reader parked in `readexactly` was waiting for the
+  very bytes the pause was refusing to read — so the connection hung with no
+  error, no log, and no response until the peer gave up.  Reached by a
+  WebSocket frame or a single `Transfer-Encoding: chunked` chunk above the
+  mark, both sized by the *peer*; a `Content-Length` body was unaffected only
+  because `BB_BODY_CHUNK_SIZE` slices it below the mark first.  Parking to wait
+  now releases the pause, which is what `asyncio.StreamReader` does at the same
+  point.  Introduced by this release's buffered read front end and caught by
+  the Autobahn CI lane timing out.
+
 - **Every HTTP/2 server push raised `AttributeError` under
   `BB_FORCE_ASGI_SCOPE=1`.**  `_handle_push` read the push parent's headers
   through a dual-shape ternary whose compat branch returned the scope's raw
