@@ -517,15 +517,6 @@ class Settings:
     #: Maximum concurrent HTTP/2 streams per connection (SETTINGS_MAX_CONCURRENT_STREAMS).
     h2_max_concurrent_streams: int = 100
 
-    #: Read HTTP/1.1 request heads through the buffer-owning front end: one
-    #: ``find(b'\r\n\r\n')`` scan over an accumulated buffer instead of one
-    #: ``readuntil(b'\r\n')`` per header line, with the surplus kept so a
-    #: keep-alive or pipelined peer's next head is usually already in hand
-    #: (zero suspensions between requests).  Off by default — this is a
-    #: measurement gate, not a permanent fork: it flips on, or is removed,
-    #: once the EC2 A/B has judged it.  Set ``BB_H1_PROTOCOL=1``.
-    h1_protocol: bool = False
-
     #: Advertise SETTINGS_ENABLE_CONNECT_PROTOCOL=1 (RFC 8441 §3) so peers may
     #: bootstrap WebSocket over HTTP/2 via Extended CONNECT.  Off by default —
     #: this path has fewer conformance tests than the HTTP/1.1 upgrade path,
@@ -661,7 +652,6 @@ def get_settings() -> Settings:
         h2_initial_window_size=_int_env('BB_H2_INITIAL_WINDOW_SIZE', 65535),
         h2_connection_window_size=_int_env('BB_H2_CONNECTION_WINDOW_SIZE', 65535),
         h2_max_concurrent_streams=_int_env('BB_H2_MAX_CONCURRENT_STREAMS', 100),
-        h1_protocol=_bool_env('BB_H1_PROTOCOL', False),
         h2_enable_websocket=_bool_env('BB_H2_ENABLE_WEBSOCKET', False),
         h2_ws_max_streams_per_connection=_int_env_nonneg(
             'BB_H2_WS_MAX_STREAMS_PER_CONNECTION', 5),

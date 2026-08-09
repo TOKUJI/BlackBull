@@ -166,6 +166,13 @@ jobs:
           done
 
       - name: Run Autobahn|Testsuite
+        # Below the job's 25 min on purpose.  When the *job* hits its limit the
+        # runner terminates it outright and every `if: always()` step is
+        # skipped — so a hang destroys the one artifact that could explain it
+        # (per-case index.json, and the server log with any traceback).
+        # Failing the step instead leaves time for the upload below, which is
+        # the difference between "it timed out again" and knowing which case.
+        timeout-minutes: 18
         run: bash bench/conformance/autobahn_run.sh
 
       - name: Assert no failing Autobahn cases
@@ -210,6 +217,9 @@ jobs:
             bench/conformance/results/autobahn_*
             /tmp/autobahn_server.log
           retention-days: 30
+          # A stalled run writes a case file per *completed* case and no
+          # index.json, so "which case is missing" is the diagnosis — warn
+          # rather than fail, or the upload that carries it never happens.
           if-no-files-found: warn
 
   corpus-replay:

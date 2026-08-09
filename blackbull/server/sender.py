@@ -3,6 +3,7 @@ import os
 import time
 from abc import ABC, abstractmethod
 from http import HTTPStatus
+from inspect import iscoroutinefunction
 from email.utils import formatdate
 from itertools import chain
 
@@ -269,6 +270,14 @@ class AsyncioWriter(AbstractWriter):
         self._write_timeout = write_timeout
         self._deadline = (WriteDeadline(write_timeout)
                           if write_timeout > 0 else None)
+        # Resolved once, and only for a genuine coroutine function.  A bare
+        # ``getattr`` at close time would be satisfied by any ``MagicMock``,
+        # which fabricates every attribute on demand — so the capability
+        # check has to be something a mock cannot accidentally pass.
+        linger = getattr(stream_writer, 'linger_close', None)
+        self._linger = (linger
+                        if linger is not None and iscoroutinefunction(linger)
+                        else None)
 
     async def _drain_with_timeout(self) -> None:
         """Drain the underlying StreamWriter, bounded by ``_write_timeout``.
@@ -341,6 +350,15 @@ class AsyncioWriter(AbstractWriter):
         # transport tears down asynchronously; our coroutine exiting
         # earlier is harmless for the connection-actor path (no
         # follow-up state to flush).
+        #
+        # A buffer-owning protocol offers ``linger_close`` instead: closing
+        # with bytes we deliberately did not read (an over-budget head, say)
+        # makes the kernel send RST, and RST discards the response we just
+        # wrote.  It self-selects — with nothing unread it degrades to exactly
+        # the bare close above, so the burst path keeps its zero extra turns.
+        if self._linger is not None:
+            await self._linger()
+            return
         self._sw.close()
 
     async def sendfile(self, file, offset: int, count: int) -> int:

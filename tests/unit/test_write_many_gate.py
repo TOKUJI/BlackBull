@@ -17,6 +17,8 @@ expressing *what* they have (``_write_many((a, b))``), not *how* to send it.
 """
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 from blackbull.server.sender import (
@@ -110,3 +112,92 @@ async def test_join_path_keeps_peer_close_tolerance():
     await sender._write_many((b'head', b'body'))   # must not raise
 
     assert sender._closed is True
+
+
+# ---------------------------------------------------------------------------
+# The other half of the gate: it has to *work*, not just decide correctly.
+# ---------------------------------------------------------------------------
+
+class TestGateOverARealSocket:
+    """Everything above drives a recording double, which answers "did the gate
+    pick the right branch" and cannot answer "does the branch it picked run".
+
+    The distinction is not academic: the vectored branch reaches
+    ``AsyncioWriter.writelines`` → the underlying writer's ``writelines``, and
+    when the server moved from ``StreamWriter`` to a ``BufferedProtocol`` that
+    method stopped existing.  Every response over 32 KiB became a 500, with
+    the whole suite green — the gate tests passed on a double that had the
+    method, and no end-to-end test sent a body big enough to take the branch.
+
+    So this one sends real bodies over a real socket, straddling the
+    threshold, through the production accept path.
+    """
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize('size', [
+        _VECTORED_JOIN_THRESHOLD // 2,      # join branch
+        _VECTORED_JOIN_THRESHOLD * 4,       # vectored branch
+    ], ids=['join', 'vectored'])
+    async def test_body_round_trips_on_both_branches(self, size):
+        import httpx  # noqa: PLC0415
+
+        from blackbull import BlackBull  # noqa: PLC0415
+        from blackbull.testing.native import NativeTestServer  # noqa: PLC0415
+
+        app = BlackBull()
+
+        @app.route(path='/body')
+        async def _body():
+            return b'x' * size
+
+        async with NativeTestServer(app) as srv:
+            async with httpx.AsyncClient(base_url=srv.url, timeout=10) as c:
+                r = await c.get('/body')
+
+        assert r.status_code == 200, (
+            f'{size} B body came back {r.status_code}, not 200 — the '
+            f'{"vectored" if size > _VECTORED_JOIN_THRESHOLD else "join"} '
+            f'branch of the gate is broken on the real transport')
+        assert len(r.content) == size
+        assert r.content == b'x' * size
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize('size', [
+        _VECTORED_JOIN_THRESHOLD // 2,      # join branch
+        _VECTORED_JOIN_THRESHOLD * 4,       # vectored branch
+    ], ids=['join', 'vectored'])
+    async def test_websocket_message_round_trips_on_both_branches(self, size):
+        """The WebSocket sender goes through the same gate, and failed worse.
+
+        A missing ``writelines`` gave HTTP a 500 the caller could see; here the
+        frame simply never reached the wire and ``receive()`` returned an empty
+        payload, so a large message was *silently* lost.  Both arms of the gate
+        are exercised because a regression that breaks only the large one is
+        exactly the shape that got through.
+        """
+        from blackbull import BlackBull  # noqa: PLC0415
+        from blackbull.client.websocket import WebSocketClient  # noqa: PLC0415
+        from blackbull.testing.native import NativeTestServer  # noqa: PLC0415
+        from blackbull.utils import Scheme  # noqa: PLC0415
+
+        app = BlackBull()
+
+        @app.route(path='/ws', scheme=Scheme.websocket)
+        async def _ws(conn, receive, send):
+            await receive()                                # websocket.connect
+            await send({'type': 'websocket.accept'})
+            event = await receive()
+            await send({'type': 'websocket.send',
+                        'bytes': b'z' * int(event['text'])})
+
+        async with NativeTestServer(app) as srv:
+            async with WebSocketClient('127.0.0.1', srv.port) as client:
+                ws = await client.connect('/ws')
+                await ws.send_text(str(size))
+                event = await asyncio.wait_for(ws.receive(), timeout=10)
+
+        assert len(event.get('bytes') or b'') == size, (
+            f'a {size} B WebSocket message came back '
+            f'{len(event.get("bytes") or b"")} B — the '
+            f'{"vectored" if size > _VECTORED_JOIN_THRESHOLD else "join"} '
+            f'branch of the gate drops frames on the real transport')

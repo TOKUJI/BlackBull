@@ -31,6 +31,96 @@ so the editable install's metadata catches up.
 
 ## [Unreleased]
 
+### Removed
+
+- **`BB_H1_PROTOCOL` and its buffer-owning read front end.**  The flag shipped
+  as an explicit measurement gate — "not a supported switch … will either
+  become the default or be removed once that measurement lands" — and the
+  measurement landed: it is **slower**, by 2.02 % ± 0.11 at a browser-like
+  header count and 2.9–4.8 % at wrk's default (local ABBA paired by round,
+  against a +0.00 % ± 0.14 A/A null floor).  The cause is structural rather
+  than incidental: the reader was layered *over* `asyncio.StreamReader`, so it
+  was a third buffer rather than a replacement, and its premise — "one loop
+  turn per header line today" — does not hold, because `StreamReader.readuntil`
+  only suspends when the separator is not already buffered.  Removed rather
+  than left opt-in: an unmeasured, untested, slower duplicate of the header
+  read is worse than either path alone.
+
+### Fixed
+
+- **A read larger than the backpressure high-water mark (128 KiB) deadlocked
+  the connection.**  The buffer paused the transport once that many unconsumed
+  bytes were resident, but a reader parked in `readexactly` was waiting for the
+  very bytes the pause was refusing to read — so the connection hung with no
+  error, no log, and no response until the peer gave up.  Reached by a
+  WebSocket frame or a single `Transfer-Encoding: chunked` chunk above the
+  mark, both sized by the *peer*; a `Content-Length` body was unaffected only
+  because `BB_BODY_CHUNK_SIZE` slices it below the mark first.  Parking to wait
+  now releases the pause, which is what `asyncio.StreamReader` does at the same
+  point.  Introduced by this release's buffered read front end and caught by
+  the Autobahn CI lane timing out.
+
+- **Every HTTP/2 server push raised `AttributeError` under
+  `BB_FORCE_ASGI_SCOPE=1`.**  `_handle_push` read the push parent's headers
+  through a dual-shape ternary whose compat branch returned the scope's raw
+  `list[tuple]`, then called `.get(b'host')` on it.  The parent is now always
+  the native `Connection`, so the read is a plain attribute and the failure is
+  gone by construction rather than by patch.  Native-lane pushes were never
+  affected.
+
+### Changed
+
+- **HTTP/2 keeps native state end-to-end.**  `stream.conn` is a `Connection`
+  on every lane, and the only place an ASGI scope comes into existence is the
+  app boundary — the pattern HTTP/1.1 already used.  Nine dual-shape branches
+  and the second conversion site are gone.  ⚠️ One delta, compat lane only: a
+  `PRIORITY_UPDATE` arriving after dispatch still reaches the application
+  through `scope['extensions']['http.response.priority']` (shared by
+  reference), but no longer rewrites the deprecated top-level
+  `scope['http2_priority']` alias, which is now a dispatch-time snapshot.
+
+- ⚠️ **An over-budget header block with no line terminator in it is now
+  answered `400`, not `431`.**  `BB_HEADER_MAX_TOTAL` can be overrun two ways
+  and they are different violations: many well-formed field lines is "your
+  header fields are too large" (RFC 6585 §5, still `431`), but 64 KiB with no
+  CRLF anywhere is a start-line that never ended (RFC 9112 §3).  Telling that
+  peer to retry with fewer header fields names a cause it does not have.
+  Requests that draw `431` today are unaffected.
+
+- **The head budget now applies to every request on a connection.**  It
+  previously bounded only the first: subsequent keep-alive heads were read with
+  an unbounded `readuntil`, backstopped in practice by `asyncio.StreamReader`'s
+  own 64 KiB buffer limit, which the new front end does not have.  A keep-alive
+  peer can no longer send a head of any size and escape the `431` the same
+  bytes draw on its first request.
+
+### Internal
+
+- **The H/1.1 inbound path is one buffer and one cursor.**
+  `ConnectionProtocol` (an `asyncio.BufferedProtocol`) has the kernel write
+  straight into the connection's `ReadBuffer`; the server accepts through
+  `loop.create_server` with a protocol factory instead of a `StreamReader`
+  callback pair.  Three workarounds go with the second buffer that is no
+  longer there: protocol detection consumes nothing (so the winning binding
+  needs no replayed prefix), the message head is found in one resumable scan
+  rather than a `readuntil` per line, and an upgrade hand-off to WebSocket or
+  h2c carries nothing because the peer's surplus is already resident.
+
+- **`read_head` is part of `AbstractReader`, not a capability callers sniff
+  for.**  One call returns a head, `b''` for an idle close, or
+  `IncompleteReadError` carrying the partial for a truncated one;
+  `ReadLimitExceeded` reports a budget breach and carries the bytes so the
+  protocol — not the reader — decides between `400` and `431`.  The keep-alive
+  loop no longer has a second head-read path of its own: every request after
+  the first re-enters the same read, differing only in which idle window
+  applies.  `tests/unit/test_read_head_contract.py` holds all three reader
+  kinds to identical answers.
+
+- **`NativeTestServer` accepts through the production protocol factory.**  It
+  used `asyncio.start_server`, so the large share of the suite that runs
+  through it was exercising the legacy read path rather than the one that
+  ships.
+
 ## [0.72.0] — 2026-08-08
 
 ### Security

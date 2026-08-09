@@ -197,9 +197,11 @@ Scope and limits:
 - **Plaintext HTTP/1.1 and WebSocket.** TLS and HTTP/2 are out of
   scope for this tier — use the BlackBull clients + ephemeral port
   pattern below, which negotiates ALPN against a real certificate.
-- **Startup cost is a single `asyncio.start_server`** — no subprocess,
-  no fork.  Per-request cost is loopback TCP, well under a
-  millisecond.
+- **Startup cost is a single `loop.create_server`** — no subprocess, no
+  fork.  Per-request cost is loopback TCP, well under a millisecond.
+- **It accepts through the production protocol factory**, so what your
+  tests exercise is the read path the server actually ships, not a
+  streams-based stand-in for it.
 
 ## Choosing between `native` and `TestClient`
 
