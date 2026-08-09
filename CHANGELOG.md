@@ -76,11 +76,11 @@ every other response body.
 
 ### Added
 
-- **`BB_CPU_AFFINITY`** — `auto` (default, the corrected behaviour above),
+- **`BB_CPU_PINNING`** — `auto` (default, the corrected behaviour above),
   `off` to leave placement alone entirely, or a `taskset`-style CPU list
-  (`2,4,6-9`) intersected with the mask the process was granted.  Pinning had
-  no off switch before this, which is the wrong default for a shared or
-  externally-orchestrated host.
+  (`2,4,6-9`; `0` is CPU 0, not the off switch) intersected with the mask the
+  process was granted.  Pinning had no off switch before this, which is the
+  wrong default for a shared or externally-orchestrated host.
 
 ### Internal
 

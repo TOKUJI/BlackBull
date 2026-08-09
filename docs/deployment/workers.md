@@ -54,18 +54,19 @@ extension package) explicitly state their per-worker limits — see
 Each worker pins its event loop to one core after forking, so the
 hot state it accumulates — the header line table, the HPACK
 dynamic tables — stays resident in that core's L1/L2 instead of
-following the thread around the machine.  `BB_CPU_AFFINITY`
+following the thread around the machine.  `BB_CPU_PINNING`
 controls it:
 
 ```bash
 # Default: worker i takes the i-th CPU we are allowed to run on.
-BB_CPU_AFFINITY=auto BB_WORKERS=8 python app.py
+BB_CPU_PINNING=auto BB_WORKERS=8 python app.py
 
 # Pin nothing — leave placement entirely to the operator.
-BB_CPU_AFFINITY=off python app.py
+BB_CPU_PINNING=off python app.py
 
-# Confine workers to a specific set (taskset syntax).
-BB_CPU_AFFINITY=8-11 BB_WORKERS=4 python app.py
+# Confine workers to a specific set (taskset syntax). 0 is CPU 0,
+# not the off switch.
+BB_CPU_PINNING=8-11 BB_WORKERS=4 python app.py
 ```
 
 Two things it deliberately does **not** do:

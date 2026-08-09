@@ -68,6 +68,15 @@ def test_auto_spreads_workers_across_the_allowed_set():
     assert {c for p in placements for c in p} == set(RESTRICTED)
 
 
+def test_zero_is_cpu_zero_not_an_off_switch():
+    """``0`` is a valid CPU index, not the disable sentinel — a numeric
+    domain must not hand a number to the off switch.  ``off`` disables;
+    ``0`` pins to CPU 0."""
+    assert resolve_worker_cpus('0', 0, UNRESTRICTED) == {0}
+    assert resolve_worker_cpus('0', 3, UNRESTRICTED) == {0}
+    assert resolve_worker_cpus('0, 2', 0, UNRESTRICTED) == {0}
+
+
 @pytest.mark.parametrize(('spec', 'expected'), [
     ('9', [{9}, {9}, {9}]),
     ('8,10', [{8}, {10}, {8}]),
@@ -90,14 +99,14 @@ def test_explicit_list_disjoint_from_allowed_declines_to_pin(caplog):
     """Nothing in common: leave placement alone rather than raise or escape."""
     with caplog.at_level(logging.WARNING, logger='blackbull.server.affinity'):
         assert resolve_worker_cpus('0-3', 0, RESTRICTED) is None
-    assert 'BB_CPU_AFFINITY' in caplog.text
+    assert 'BB_CPU_PINNING' in caplog.text
 
 
 @pytest.mark.parametrize('spec', ['sixteen', '3-', '-3', '4-2', '1,,2', '-1'])
 def test_malformed_spec_declines_to_pin(spec, caplog):
     with caplog.at_level(logging.WARNING, logger='blackbull.server.affinity'):
         assert resolve_worker_cpus(spec, 0, UNRESTRICTED) is None
-    assert 'BB_CPU_AFFINITY' in caplog.text
+    assert 'BB_CPU_PINNING' in caplog.text
 
 
 def test_empty_allowed_set_declines_to_pin():
@@ -190,7 +199,7 @@ def worker_harness(monkeypatch):
 def test_worker_off_leaves_the_process_mask_untouched(worker_harness, monkeypatch):
     from blackbull.server.worker import run_worker
 
-    monkeypatch.setenv('BB_CPU_AFFINITY', 'off')
+    monkeypatch.setenv('BB_CPU_PINNING', 'off')
     before = set(os.sched_getaffinity(0))
     run_worker(object(), [], None, worker_id=0, max_connections=0)
     assert worker_harness['loop_thread'] == before
@@ -205,7 +214,7 @@ def test_worker_pins_the_loop_but_not_the_offload_pool(worker_harness, monkeypat
     if len(allowed) < 2:
         pytest.skip('needs at least two available CPUs to tell the two apart')
 
-    monkeypatch.setenv('BB_CPU_AFFINITY', 'auto')
+    monkeypatch.setenv('BB_CPU_PINNING', 'auto')
     run_worker(object(), [], None, worker_id=1, max_connections=0)
 
     assert worker_harness['loop_thread'] == {sorted(allowed)[1]}

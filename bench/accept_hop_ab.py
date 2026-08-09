@@ -47,6 +47,9 @@ def _queued(park: asyncio.Event) -> asyncio.Task:
 
 
 def _eager(park: asyncio.Event) -> asyncio.Task:
+    # The explicit ``loop=`` is load-bearing: ``Task(..., eager_start=True)``
+    # without it leaves ``_loop`` unset and crashes on 3.12+ (3.14:
+    # ``'NoneType' object has no attribute 'is_running'``).
     return asyncio.Task(_prologue_then_park(park),
                         loop=asyncio.get_running_loop(),
                         eager_start=True)

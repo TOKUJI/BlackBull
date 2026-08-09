@@ -79,7 +79,7 @@ def run_worker(app, raw_sockets, ssl_context, worker_id: int,
     # table, HPACK tables) stays cache-resident.  Deliberately after the
     # async-logging setup above: the log-drain thread is created there and
     # would otherwise inherit the pin.
-    offload_mask = apply_worker_affinity(worker_id, cfg.cpu_affinity)
+    offload_mask = apply_worker_affinity(worker_id, cfg.cpu_pinning)
 
     server = ASGIServer(app, ssl_context=ssl_context, max_connections=max_connections,
                         stream_queue_depth=stream_queue_depth,

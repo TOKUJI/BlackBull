@@ -327,6 +327,10 @@ class Server:
                 # the task with that exception rather than raising out of this
                 # transport callback, so ``_serve_done`` still reports it.
                 if _EAGER_TASKS:
+                    # The explicit ``loop=`` is load-bearing, not cosmetic:
+                    # ``Task(..., eager_start=True)`` without it leaves
+                    # ``_loop`` unset and crashes on 3.12+ (verified on 3.14:
+                    # ``'NoneType' object has no attribute 'is_running'``).
                     task = asyncio.Task(self._serve(),
                                         loop=asyncio.get_running_loop(),
                                         eager_start=True)

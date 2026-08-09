@@ -30,8 +30,11 @@ import os
 
 logger = logging.getLogger(__name__)
 
-#: Spec values that mean "leave placement to the operator".
-_OFF = frozenset({'', 'off', 'none', '0'})
+#: Spec values that mean "leave placement to the operator".  ``'0'`` is
+#: deliberately *not* one of them — it is a valid CPU index, and a numeric
+#: domain must not hand a number to a disable sentinel.  ``off`` is the
+#: switch; ``0`` pins to CPU 0.
+_OFF = frozenset({'', 'off', 'none'})
 
 #: Spec value that means "one worker per available CPU, in order".
 _AUTO = 'auto'
@@ -71,7 +74,7 @@ def resolve_worker_cpus(spec: str, worker_id: int,
     if normalised in _OFF:
         return None
     if not allowed:
-        logger.warning('BB_CPU_AFFINITY=%s: no CPUs available to pin to; '
+        logger.warning('BB_CPU_PINNING=%s: no CPUs available to pin to; '
                        'leaving placement unchanged', spec)
         return None
 
@@ -80,13 +83,13 @@ def resolve_worker_cpus(spec: str, worker_id: int,
     else:
         requested = _parse_cpu_list(normalised)
         if requested is None:
-            logger.warning('BB_CPU_AFFINITY=%r is not a CPU list '
+            logger.warning('BB_CPU_PINNING=%r is not a CPU list '
                            "('auto', 'off', or e.g. '2,4,6-9'); "
                            'leaving placement unchanged', spec)
             return None
         pool = sorted(requested & allowed)
         if not pool:
-            logger.warning('BB_CPU_AFFINITY=%r selects no CPU this process is '
+            logger.warning('BB_CPU_PINNING=%r selects no CPU this process is '
                            'allowed to run on (available: %s); leaving '
                            'placement unchanged', spec, sorted(allowed))
             return None
