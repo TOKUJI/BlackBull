@@ -32,9 +32,11 @@ The runtime version is exposed as `blackbull.__version__` via
 `pyproject.toml`.  Re-run `pip install -e .` after a local version bump
 so the editable install's metadata catches up.
 
+## [Unreleased]
+
 ---
 
-## [Unreleased]
+## [0.74.0] — 2026-08-10
 
 Sprint 98.  The perf-survey T1 remainder.  Two of the three items turned out
 to be defect reports rather than new work: the CPU pinning this sprint was
