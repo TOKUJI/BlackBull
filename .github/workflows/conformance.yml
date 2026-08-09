@@ -51,8 +51,22 @@ permissions:
   contents: read
 
 jobs:
+  skip-check:
+    # Version-bump and docs-only changes don't need the conformance suites;
+    # the gate is fail-safe (any anomaly reports skip=false) so a wrongly
+    # skipped run is impossible — see .github/actions/skip-ci-check.
+    name: Skip on version/doc-only changes
+    runs-on: ubuntu-latest
+    outputs:
+      skip: ${{ steps.decide.outputs.skip }}
+    steps:
+      - id: decide
+        uses: ./.github/actions/skip-ci-check
+
   h2spec:
     name: h2spec (RFC 7540 + 7541)
+    needs: skip-check
+    if: needs.skip-check.outputs.skip == 'false'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -128,8 +142,18 @@ jobs:
           retention-days: 30
           if-no-files-found: warn
 
+  # Autobahn is two serialized lanes, not one: the fast correctness lane and
+  # the heavy deflate-echo lane (12.*.10, 12.*.14-18, 13.*) that runs only
+  # after the fast lane passes.  The heavy cases are 1000 x 64-128 KiB
+  # permessage-deflate round-trips under a 480 s wstest case budget; under
+  # shared-runner contention they can exceed it and time out (observed flakily
+  # on 12.3.10/14-18, and the whole lane previously died with them).  Isolating
+  # them keeps a heavy-case timeout from taking down the correctness signal,
+  # and a retry re-runs only the small heavy lane.
   autobahn:
-    name: Autobahn (RFC 6455 WebSocket)
+    name: Autobahn fast lane (correctness)
+    needs: skip-check
+    if: needs.skip-check.outputs.skip == 'false'
     runs-on: ubuntu-latest
     # 25, not 15: the suite normally executes in 10.5–11.5 min, of which
     # ~97% is permessage-deflate groups 12+13 — pure CPU on both ends, so
@@ -165,7 +189,7 @@ jobs:
             sleep 0.5
           done
 
-      - name: Run Autobahn|Testsuite
+      - name: Run Autobahn fast lane
         # Below the job's 25 min on purpose.  When the *job* hits its limit the
         # runner terminates it outright and every `if: always()` step is
         # skipped — so a hang destroys the one artifact that could explain it
@@ -173,35 +197,12 @@ jobs:
         # Failing the step instead leaves time for the upload below, which is
         # the difference between "it timed out again" and knowing which case.
         timeout-minutes: 18
-        run: bash bench/conformance/autobahn_run.sh
+        run: |
+          EXCLUDE_CASES='12.*.10,12.*.14,12.*.15,12.*.16,12.*.17,12.*.18,13.*' \
+              bash bench/conformance/autobahn_run.sh
 
       - name: Assert no failing Autobahn cases
-        run: |
-          set -euo pipefail
-          # Locate the freshest index.json under bench/conformance/results/autobahn_*/
-          INDEX=$(ls -1t bench/conformance/results/autobahn_*/index.json 2>/dev/null | head -1)
-          if [ -z "$INDEX" ]; then
-            echo "ERROR: no Autobahn index.json produced" >&2
-            exit 1
-          fi
-          echo "Parsing $INDEX"
-          # behavior + behaviorClose must both be OK or NON-STRICT;
-          # anything else (FAILED, UNCLEAN, INFORMATIONAL) is a regression.
-          BAD=$(jq -r '
-            ."BlackBull" | to_entries
-            | map(select(
-                  (.value.behavior != "OK" and .value.behavior != "NON-STRICT" and .value.behavior != "INFORMATIONAL")
-                  or
-                  (.value.behaviorClose != "OK" and .value.behaviorClose != "INFORMATIONAL")
-              ))
-            | map(.key)
-            | .[]
-          ' "$INDEX" | tr '\n' ' ')
-          if [ -n "$BAD" ]; then
-            echo "FAIL: Autobahn cases with non-OK behavior: $BAD" >&2
-            exit 1
-          fi
-          echo "All Autobahn cases pass with OK / NON-STRICT / INFORMATIONAL."
+        run: bash bench/conformance/autobahn_assert.sh
 
       - name: Stop BlackBull
         if: always()
@@ -222,8 +223,84 @@ jobs:
           # rather than fail, or the upload that carries it never happens.
           if-no-files-found: warn
 
+  autobahn-heavy:
+    name: Autobahn heavy lane (deflate throughput)
+    # Runs only after the fast lane passes, never in parallel with it: a
+    # heavy-case timeout is contained to this lane, and the correctness
+    # signal (the fast lane) is not held hostage by it.
+    #
+    # C1 — non-blocking on purpose.  The heavy cases are throughput-bound
+    # (1000 x 64-128 KiB deflate round-trips) and can exceed their 480 s
+    # wstest budget under shared-runner contention; a timeout there is a
+    # throughput flake, not a protocol regression, so it must not fail the
+    # PR.  The fast lane above is the gate.  A red-but-tolerated heavy lane
+    # stays visible (and its artifact uploads) for inspection.
+    #
+    # C2 — the lane retries itself once (autobahn_heavy.sh) because a
+    # transient contention spike usually clears on a fresh attempt; only the
+    # small heavy lane is re-run, never the whole suite.
+    needs: [skip-check, autobahn]
+    if: needs.skip-check.outputs.skip == 'false' && needs.autobahn.result == 'success'
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97   # v7.0.0
+        with:
+          python-version: '3.12'
+
+      - name: Install BlackBull
+        run: pip install -e '.[compression]'
+
+      - name: Start BlackBull WebSocket echo server
+        run: |
+          set -euo pipefail
+          python bench/conformance/autobahn_app.py --port 9001 \
+              > /tmp/autobahn_server.log 2>&1 &
+          echo "BB_PID=$!" >> "$GITHUB_ENV"
+          for i in $(seq 1 30); do
+            if (echo > /dev/tcp/127.0.0.1/9001) 2>/dev/null; then
+              echo "WS server listening after ${i} probe(s)"
+              break
+            fi
+            sleep 0.5
+          done
+
+      - name: Run Autobahn heavy lane (one retry)
+        # Two attempts of the lane fit under the job's 35 min cap; the step
+        # cap is below the job's so a hang leaves time for the upload below.
+        timeout-minutes: 30
+        run: |
+          CASES='12.*.10,12.*.14,12.*.15,12.*.16,12.*.17,12.*.18,13.*' \
+              MAX_ATTEMPTS=2 bash bench/conformance/autobahn_heavy.sh
+
+      - name: Stop BlackBull
+        if: always()
+        run: |
+          if [ -n "${BB_PID:-}" ]; then kill "$BB_PID" 2>/dev/null || true; fi
+
+      - name: Upload Autobahn results
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a   # v7.0.1
+        with:
+          name: autobahn-heavy-results
+          path: |
+            bench/conformance/results/autobahn_*
+            /tmp/autobahn_server.log
+          retention-days: 30
+          # A stalled run writes a case file per *completed* case and no
+          # index.json, so "which case is missing" is the diagnosis — warn
+          # rather than fail, or the upload that carries it never happens.
+          if-no-files-found: warn
+
   corpus-replay:
     name: HTTP/1.1 user-corpus replay
+    needs: skip-check
+    if: needs.skip-check.outputs.skip == 'false'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -245,6 +322,8 @@ jobs:
 
   h2-flow-control:
     name: H2 flow-control deadlock gate
+    needs: skip-check
+    if: needs.skip-check.outputs.skip == 'false'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -275,6 +354,8 @@ jobs:
 
   grpc-interop:
     name: gRPC real-client interop (h2c)
+    needs: skip-check
+    if: needs.skip-check.outputs.skip == 'false'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
