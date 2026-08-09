@@ -3902,6 +3902,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../api/blackbull/server/connection_protocol/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    connection_protocol
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../api/blackbull/server/constants/" class="md-nav__link">
         
   
@@ -3938,34 +3966,6 @@
     
   
     deadline
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../api/blackbull/server/h1_buffer/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    h1_buffer
   
 
     
@@ -4162,6 +4162,34 @@
     
   
     protocol_registry
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/server/read_buffer/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    read_buffer
   
 
     
@@ -4968,6 +4996,67 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#read-path-invariant" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Read-path invariant
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Read-path invariant">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#read_head-is-a-contract-not-a-capability" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        read_head is a contract, not a capability
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#one-breach-two-verdicts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        One breach, two verdicts
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#backpressure-pauses-for-a-handler-that-is-behind-not-one-that-is-waiting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Backpressure pauses for a handler that is behind, not one that is waiting
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#rejecting-requires-lingering" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Rejecting requires lingering
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#receive-path-invariant" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5398,6 +5487,67 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#read-path-invariant" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Read-path invariant
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Read-path invariant">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#read_head-is-a-contract-not-a-capability" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        read_head is a contract, not a capability
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#one-breach-two-verdicts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        One breach, two verdicts
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#backpressure-pauses-for-a-handler-that-is-behind-not-one-that-is-waiting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Backpressure pauses for a handler that is behind, not one that is waiting
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#rejecting-requires-lingering" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Rejecting requires lingering
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#receive-path-invariant" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5679,10 +5829,23 @@ server and under external ASGI hosts.</p>
   <code>StreamActor</code>.</li>
 <li>Owns the connection-level send window; <code>StreamActor</code>s block
   on it when the window is exhausted.</li>
+<li>Keeps its state <strong>native</strong>: <code>stream.conn</code> is a <code>Connection</code> on
+  every lane, and the one place an ASGI scope can come into
+  existence is the app boundary in <code>_dispatch_target</code>, matching
+  what HTTP/1.1 does.  Anything that reads the request mid-flight
+  — a late <code>PRIORITY_UPDATE</code>, a server push reading its parent —
+  reads attributes, never a dict.</li>
 <li>Supervisor strategy: <strong>propagate</strong> — a framing error on the
   connection is fatal.  <code>HTTP2Actor</code> sends GOAWAY and exits,
   causing <code>ConnectionActor</code> to close.</li>
 </ul>
+<p>The boundary is a <strong>snapshot</strong>, taken after every pre-dispatch
+mutation of the <code>Connection</code>.  Fields the two share by reference
+(<code>state</code>, <code>extensions</code>) stay live afterwards — which is how a
+<code>PRIORITY_UPDATE</code> arriving after dispatch still reaches the
+application under <code>extensions['http.response.priority']</code>.  The
+deprecated top-level <code>scope['http2_priority']</code> alias is a copy and
+does not track it.</p>
 <h3 id="streamactor"><code>StreamActor</code><a class="headerlink" href="#streamactor" title="Permanent link">&para;</a></h3>
 <ul>
 <li>Owns one HTTP/2 stream.</li>
@@ -5860,6 +6023,116 @@ colocated with their respective actors.</p>
 </tr>
 </tbody>
 </table>
+<h2 id="read-path-invariant">Read-path invariant<a class="headerlink" href="#read-path-invariant" title="Permanent link">&para;</a></h2>
+<p>A connection owns <strong>one buffer</strong>, and every protocol reads by moving a
+cursor over it.</p>
+<p><code>ConnectionProtocol</code> is an <code>asyncio.BufferedProtocol</code>: the kernel writes
+straight into the connection's <code>ReadBuffer</code> through <code>get_buffer</code>, and the
+actor's coroutine parks on a future that <code>buffer_updated</code> resolves.  There
+is no second buffer between the socket and the parser — which is the
+whole point, because the cost being removed was never the parked
+coroutine but reading <em>through</em> another layer that had already copied the
+bytes once.</p>
+<p>Three consequences follow, and each retires a workaround that existed
+only because the buffer was somewhere else:</p>
+<ul>
+<li><strong>Protocol detection consumes nothing.</strong>  <code>ConnectionActor</code> inspects
+  the smallest discriminating prefix via <code>AbstractReader.fill</code>, which for
+  a buffer-owning reader is just "do not call <code>take</code>".  The winning
+  binding receives a stream still positioned at its own first byte, so
+  there is no prefix to replay.</li>
+<li><strong>The message head is found in one scan.</strong>  <code>read_head(limit)</code> looks
+  for <code>\r\n\r\n</code> across everything resident, resumably, and the head
+  leaves the buffer in a single copy — rather than one <code>readuntil</code> call
+  per header line.</li>
+<li><strong>A hand-off carries nothing.</strong>  When an upgrade passes the connection
+  to WebSocket or h2c, whatever the peer already sent is <em>already</em>
+  resident; the successor gets the same reader.</li>
+</ul>
+<h3 id="read_head-is-a-contract-not-a-capability"><code>read_head</code> is a contract, not a capability<a class="headerlink" href="#read_head-is-a-contract-not-a-capability" title="Permanent link">&para;</a></h3>
+<p><code>read_head</code> lives on <code>AbstractReader</code>, so a protocol asks for a head the
+same way whatever is underneath it, and never branches on which reader it
+holds.  Three outcomes, because the caller answers each differently:</p>
+<table>
+<thead>
+<tr>
+<th>outcome</th>
+<th>means</th>
+<th>HTTP/1.1 answers</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>the head</td>
+<td>complete</td>
+<td>parse it</td>
+</tr>
+<tr>
+<td><code>b''</code></td>
+<td>EOF, nothing sent</td>
+<td>close, silently</td>
+</tr>
+<tr>
+<td><code>IncompleteReadError</code></td>
+<td>EOF part-way in</td>
+<td>400, with <code>.partial</code> as evidence</td>
+</tr>
+<tr>
+<td><code>ReadLimitExceeded</code></td>
+<td>over the byte budget</td>
+<td>see below</td>
+</tr>
+</tbody>
+</table>
+<p><code>BufferReader</code> overrides it with the single scan; the default
+implementation is the line-by-line loop, which is what a reader holding
+only <code>readuntil</code> can do.  Both are held to the same behaviour by
+<code>tests/unit/test_read_head_contract.py</code>, which drives every reader kind
+through the same cases — a reader that disagreed on one of them would put
+a hole in exactly one deployment shape.</p>
+<p><code>limit</code> is what makes the read bounded, and it applies to <em>every</em> request
+on the connection, not just the first.  A keep-alive peer's second head
+gets the same budget as its first.</p>
+<h3 id="one-breach-two-verdicts">One breach, two verdicts<a class="headerlink" href="#one-breach-two-verdicts" title="Permanent link">&para;</a></h3>
+<p><code>ReadLimitExceeded</code> carries the bytes the reader saw, and the protocol
+decides what they were:</p>
+<ul>
+<li>the first CRLF lands <strong>inside</strong> the budget → the lines are well-formed
+  and merely numerous → <strong>431</strong> (RFC 6585 §5);</li>
+<li>the first CRLF lands <strong>beyond</strong> it, or there is none → the start-line
+  never ended → <strong>400</strong> (RFC 9112 §3).  Telling a peer its header fields
+  are too large when it never sent a header field is a misdiagnosis, and
+  it advises a retry that cannot help.</li>
+</ul>
+<p>The evidence travels with the exception rather than being re-derived from
+the reader, so both reader kinds reach the same verdict from the same
+bytes.</p>
+<h3 id="backpressure-pauses-for-a-handler-that-is-behind-not-one-that-is-waiting">Backpressure pauses for a handler that is behind, not one that is waiting<a class="headerlink" href="#backpressure-pauses-for-a-handler-that-is-behind-not-one-that-is-waiting" title="Permanent link">&para;</a></h3>
+<p>The buffer pauses the transport once unconsumed bytes reach a high-water mark,
+so a fast peer cannot grow it without bound while a handler falls behind.  That
+rule inverts for a reader that is <strong>blocked waiting for more</strong>: the bytes it is
+parked on are exactly the ones the pause is refusing to read, and the
+connection hangs with no error and no response.</p>
+<p>So parking releases the pause.  A reader about to block is starved, not behind,
+and the condition backpressure exists to prevent is not the one in play.
+<code>asyncio.StreamReader</code> resumes at the same point for the same reason.</p>
+<p>Two shapes reach this and one does not, which is worth knowing because the
+difference is luck rather than design: a WebSocket frame and a single
+<code>Transfer-Encoding: chunked</code> chunk are both read with one <code>readexactly</code> of a
+size <strong>the peer chose</strong>, so either can exceed the mark.  A <code>Content-Length</code>
+body cannot, because <code>BB_BODY_CHUNK_SIZE</code> slices it below the mark first.</p>
+<h3 id="rejecting-requires-lingering">Rejecting requires lingering<a class="headerlink" href="#rejecting-requires-lingering" title="Permanent link">&para;</a></h3>
+<p>Enforcing a byte budget means, by construction, <em>not</em> reading the rest —
+and closing a socket with unread bytes in its receive queue makes the
+kernel send RST, which discards data already written.  The 431 or 400
+would never arrive.  <code>ConnectionProtocol.linger_close</code> briefly discards
+what the peer is still sending before closing, bounded both by bytes and
+by time: no byte cap would hand an attacker the unbounded read the budget
+exists to refuse, and no deadline would let a slow peer hold an
+already-answered connection open.  nginx calls this <code>lingering_close</code>.</p>
+<p>It is skipped unless the connection is closing with bytes it chose not to
+consume — a completed request leaves the buffer empty, so the ordinary
+close stays a bare close.</p>
 <h2 id="receive-path-invariant">Receive-path invariant<a class="headerlink" href="#receive-path-invariant" title="Permanent link">&para;</a></h2>
 <p>The request body crosses the framework as <strong><code>bytes</code></strong>, and the end of
 the body is carried by the call protocol rather than by a field beside
@@ -5924,9 +6197,9 @@ handler that ignores <code>receive</code> (a POST that 404s) is the obvious case
 but a request can also be answered <em>before</em> routing — <code>OPTIONS *</code> is
 answered server-wide per RFC 9112 §3.2.4, and RFC 9110 §9.3.7 permits
 content on it.  Any such path that skipped the drain would leave the
-body in the reader, where the next <code>readuntil</code> parses it as a
-request-line: <code>body</code> followed by <code>GET / HTTP/1.1</code> becomes the method
-<code>bodyGET</code>.  The client's <em>next</em> request is then destroyed by the
+body resident in the connection's buffer, where the next <code>read_head</code>
+finds it and the parser reads it as a request-line: <code>body</code> followed by
+<code>GET / HTTP/1.1</code> becomes the method <code>bodyGET</code>.  The client's <em>next</em> request is then destroyed by the
 framing of the previous one, and behind a reverse proxy that pools
 upstream connections the leftover bytes prefix <strong>another client's</strong>
 request — the standard request-smuggling shape.</p>
@@ -5968,6 +6241,14 @@ decides the path:</p>
 <p>Callers must never call <code>transport.writelines</code> directly with
 small parts.  The gate is the single decision point, and the
 invariant keeps performance predictable across payload sizes.</p>
+<p>The obligation runs the other way too: <strong>anything the sender writes
+through must implement both branches.</strong>  A backing object with only
+<code>write</code> serves every response under 32 KiB and fails every response
+above it — and because the gate's own tests use a double that has both,
+that failure is invisible to them.  Whatever is under <code>AsyncioWriter</code>
+owes it <code>write</code>, <code>writelines</code>, <code>drain</code>, <code>close</code>, and a <code>transport</code>
+(for <code>sendfile</code>); <code>tests/architecture/test_writer_backing_contract.py</code>
+reads that list out of the sender's source rather than restating it.</p>
 <h3 id="response-values-that-come-from-tables">Response values that come from tables<a class="headerlink" href="#response-values-that-come-from-tables" title="Permanent link">&para;</a></h3>
 <p>Two values are rebuilt on every single response and drawn from a
 small, known domain, so both are precomputed once at import:</p>

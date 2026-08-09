@@ -4095,6 +4095,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../api/blackbull/server/connection_protocol/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    connection_protocol
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../api/blackbull/server/constants/" class="md-nav__link">
         
   
@@ -4131,34 +4159,6 @@
     
   
     deadline
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../api/blackbull/server/h1_buffer/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    h1_buffer
   
 
     
@@ -4355,6 +4355,34 @@
     
   
     protocol_registry
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/server/read_buffer/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    read_buffer
   
 
     
@@ -5334,8 +5362,10 @@ frame header, and the <code>MAX_HEADER_LIST_SIZE</code> SETTING bounds the
 total.</p>
 <h3 id="oversized-headers-memory-exhaustion">Oversized headers — memory exhaustion<a class="headerlink" href="#oversized-headers-memory-exhaustion" title="Permanent link">&para;</a></h3>
 <p>Two limits stop a 1 GB <code>X-Foo: &lt;random bytes&gt;</code> header from
-sitting in <code>readuntil</code>'s buffer until the line terminator
-arrives:</p>
+accumulating in the connection's read buffer while the server
+waits for a line terminator that may never arrive.  Both bound
+the head read itself, on every request of a connection rather
+than only the first:</p>
 <table>
 <thead>
 <tr>
@@ -5359,7 +5389,15 @@ arrives:</p>
 </table>
 <p>A request that exceeds either limit gets
 <code>431 Request Header Fields Too Large</code> and the connection is
-closed.  The defaults match Apache's <code>LimitRequestLine</code> /
+closed.  The exception is a <code>BB_HEADER_MAX_TOTAL</code> overrun with no
+line terminator inside the budget: that start-line never ended, so
+it is answered <code>400 Bad Request</code> — 431 would tell a peer to send
+fewer header fields than the zero it has sent.</p>
+<p>Either way the server discards a bounded amount of what the peer
+is still sending before it closes, because a close with unread
+bytes queued makes the kernel send RST and the peer would never
+see the rejection it was just given.</p>
+<p>The defaults match Apache's <code>LimitRequestLine</code> /
 <code>LimitRequestFieldsize</code> and nginx's <code>large_client_header_buffers</code>.</p>
 <h3 id="connection-cap-and-per-request-timeout">Connection cap and per-request timeout<a class="headerlink" href="#connection-cap-and-per-request-timeout" title="Permanent link">&para;</a></h3>
 <table>

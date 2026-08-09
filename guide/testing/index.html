@@ -4222,6 +4222,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../api/blackbull/server/connection_protocol/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    connection_protocol
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../api/blackbull/server/constants/" class="md-nav__link">
         
   
@@ -4258,34 +4286,6 @@
     
   
     deadline
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../api/blackbull/server/h1_buffer/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    h1_buffer
   
 
     
@@ -4482,6 +4482,34 @@
     
   
     protocol_registry
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/server/read_buffer/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    read_buffer
   
 
     
@@ -5667,9 +5695,11 @@ session:</p>
 <li><strong>Plaintext HTTP/1.1 and WebSocket.</strong> TLS and HTTP/2 are out of
   scope for this tier — use the BlackBull clients + ephemeral port
   pattern below, which negotiates ALPN against a real certificate.</li>
-<li><strong>Startup cost is a single <code>asyncio.start_server</code></strong> — no subprocess,
-  no fork.  Per-request cost is loopback TCP, well under a
-  millisecond.</li>
+<li><strong>Startup cost is a single <code>loop.create_server</code></strong> — no subprocess, no
+  fork.  Per-request cost is loopback TCP, well under a millisecond.</li>
+<li><strong>It accepts through the production protocol factory</strong>, so what your
+  tests exercise is the read path the server actually ships, not a
+  streams-based stand-in for it.</li>
 </ul>
 <h2 id="choosing-between-native-and-testclient">Choosing between <code>native</code> and <code>TestClient</code><a class="headerlink" href="#choosing-between-native-and-testclient" title="Permanent link">&para;</a></h2>
 <p>Both run in-process and neither needs a port, so the difference is not

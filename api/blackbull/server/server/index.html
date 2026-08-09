@@ -3910,6 +3910,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../connection_protocol/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    connection_protocol
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../constants/" class="md-nav__link">
         
   
@@ -3946,34 +3974,6 @@
     
   
     deadline
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../h1_buffer/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    h1_buffer
   
 
     
@@ -4170,6 +4170,34 @@
     
   
     protocol_registry
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../read_buffer/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    read_buffer
   
 
     
@@ -4401,6 +4429,17 @@
     <span class="md-ellipsis">
       
         client_connected_cb
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.server.Server.connection_protocol_factory" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        connection_protocol_factory
       
     </span>
   </a>
@@ -5075,6 +5114,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.server.server.Server.connection_protocol_factory" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        connection_protocol_factory
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.server.server.Server.run" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5303,6 +5353,31 @@ When ssl_context or certfile is set, the HTTP listener runs as HTTPS.</p>
 <div class="doc doc-object doc-function">
 
 
+<h4 id="blackbull.server.server.Server.connection_protocol_factory" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">connection_protocol_factory</span><span class="p">(</span><span class="n">bound_binding</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
+
+<a href="#blackbull.server.server.Server.connection_protocol_factory" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Factory for <code>loop.create_server</code> — one buffered protocol per accept.</p>
+<p>Replaces the <code>start_server</code> callback pair: instead of a StreamReader
+and StreamWriter over asyncio's own buffering, the connection owns a
+single buffer the kernel writes into, and the actor reads by cursor.</p>
+<p>The protocol spawns the serving task itself because a protocol factory
+is synchronous.  <code>connection_made</code> fires after the TLS handshake on
+an SSL transport, so ALPN is already decided by the time the task runs
+— same ordering the callback form relied on.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
 <h4 id="blackbull.server.server.Server.run" class="doc doc-heading">
             <code class="highlight language-python"><span class="n">run</span><span class="p">(</span><span class="n">port</span><span class="o">=</span><span class="mi">80</span><span class="p">)</span></code>
 
@@ -5395,12 +5470,16 @@ shutdown() can deliver 'lifespan.shutdown' to the same task.</p>
     <div class="doc doc-contents ">
 
         <p>Async context manager that creates asyncio servers from already-bound sockets.</p>
-<p><em>socket_cb_pairs</em> is an iterable of <code>(sock, callback)</code> — each socket is
-served by its own accept callback.  The shared HTTP listener uses
-:meth:<code>Server.client_connected_cb</code>; port-bound non-ASGI protocols
-use a per-binding raw callback.</p>
-<p>On enter: wraps each socket in asyncio.start_server (TCP) or
-asyncio.start_unix_server (AF_UNIX) and yields the list.
+<p><em>socket_cb_pairs</em> is an iterable of <code>(sock, protocol_factory)</code> — each
+socket is served by its own factory.  The shared HTTP listener and each
+port-bound non-ASGI protocol both come from
+:meth:<code>Server.connection_protocol_factory</code>, differing only in whether a
+binding is pre-committed.</p>
+<p>On enter: wraps each socket in <code>loop.create_server</code> (TCP) or
+<code>loop.create_unix_server</code> (AF_UNIX) and yields the list.  Not
+<code>start_server</code>: that pairs a StreamReader/StreamWriter over asyncio's
+own buffering with every connection, and the whole point of the buffered
+protocol is that the connection owns exactly one buffer.
 On exit: closes all asyncio servers.</p>
 <p>Dispatches by <code>sock.family</code>: AF_INET / AF_INET6 take the TCP
 server, AF_UNIX takes the unix server.  Both honour the configured

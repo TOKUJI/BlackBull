@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://TOKUJI.github.io/BlackBull/api/blackbull/server/h1_buffer/">
+        <link rel="canonical" href="https://TOKUJI.github.io/BlackBull/api/blackbull/server/read_buffer/">
       
       
-        <link rel="prev" href="../deadline/">
+        <link rel="prev" href="../protocol_registry/">
       
       
-        <link rel="next" href="../http1_actor/">
+        <link rel="next" href="../recipient/">
       
       
         
@@ -27,7 +27,7 @@
     
     
       
-        <title>h1_buffer - BlackBull</title>
+        <title>read_buffer - BlackBull</title>
       
     
     
@@ -72,7 +72,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#blackbullserverh1_buffer" class="md-skip">
+        <a href="#blackbullserverread_buffer" class="md-skip">
           Skip to content
         </a>
       
@@ -108,7 +108,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              h1_buffer
+              read_buffer
             
           </span>
         </div>
@@ -3910,6 +3910,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../connection_protocol/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    connection_protocol
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../constants/" class="md-nav__link">
         
   
@@ -3954,159 +3982,6 @@
   
 
       </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-    
-  
-  
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    h1_buffer
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    h1_buffer
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#blackbull.server.h1_buffer" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        h1_buffer
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="h1_buffer">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.h1_buffer.BufferedH1Reader" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        BufferedH1Reader
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="BufferedH1Reader">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.h1_buffer.BufferedH1Reader.buffered" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        buffered
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.h1_buffer.BufferedH1Reader.fill_until" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        fill_until
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.h1_buffer.BufferedH1Reader.peek" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        peek
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.h1_buffer.BufferedH1Reader.unread" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        unread
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -4303,6 +4178,236 @@
   
 
       </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    read_buffer
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    read_buffer
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#blackbull.server.read_buffer" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        read_buffer
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="read_buffer">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.read_buffer.ReadBuffer" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ReadBuffer
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="ReadBuffer">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.read_buffer.ReadBuffer.available" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        available
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.read_buffer.ReadBuffer.capacity" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        capacity
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.read_buffer.ReadBuffer.examined_bytes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        examined_bytes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.read_buffer.ReadBuffer.buffer_updated" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        buffer_updated
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.read_buffer.ReadBuffer.compact" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        compact
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.read_buffer.ReadBuffer.consume" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        consume
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.read_buffer.ReadBuffer.find" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        find
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.read_buffer.ReadBuffer.find_head_end" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        find_head_end
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.read_buffer.ReadBuffer.get_buffer" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        get_buffer
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.read_buffer.ReadBuffer.take" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        take
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.read_buffer.ReadBuffer.view" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        view
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -5007,34 +5112,34 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#blackbull.server.h1_buffer" class="md-nav__link">
+  <a href="#blackbull.server.read_buffer" class="md-nav__link">
     <span class="md-ellipsis">
       
-        h1_buffer
+        read_buffer
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="h1_buffer">
+    <nav class="md-nav" aria-label="read_buffer">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#blackbull.server.h1_buffer.BufferedH1Reader" class="md-nav__link">
+  <a href="#blackbull.server.read_buffer.ReadBuffer" class="md-nav__link">
     <span class="md-ellipsis">
       
-        BufferedH1Reader
+        ReadBuffer
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="BufferedH1Reader">
+    <nav class="md-nav" aria-label="ReadBuffer">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#blackbull.server.h1_buffer.BufferedH1Reader.buffered" class="md-nav__link">
+  <a href="#blackbull.server.read_buffer.ReadBuffer.available" class="md-nav__link">
     <span class="md-ellipsis">
       
-        buffered
+        available
       
     </span>
   </a>
@@ -5042,10 +5147,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#blackbull.server.h1_buffer.BufferedH1Reader.fill_until" class="md-nav__link">
+  <a href="#blackbull.server.read_buffer.ReadBuffer.capacity" class="md-nav__link">
     <span class="md-ellipsis">
       
-        fill_until
+        capacity
       
     </span>
   </a>
@@ -5053,10 +5158,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#blackbull.server.h1_buffer.BufferedH1Reader.peek" class="md-nav__link">
+  <a href="#blackbull.server.read_buffer.ReadBuffer.examined_bytes" class="md-nav__link">
     <span class="md-ellipsis">
       
-        peek
+        examined_bytes
       
     </span>
   </a>
@@ -5064,10 +5169,87 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#blackbull.server.h1_buffer.BufferedH1Reader.unread" class="md-nav__link">
+  <a href="#blackbull.server.read_buffer.ReadBuffer.buffer_updated" class="md-nav__link">
     <span class="md-ellipsis">
       
-        unread
+        buffer_updated
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.read_buffer.ReadBuffer.compact" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        compact
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.read_buffer.ReadBuffer.consume" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        consume
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.read_buffer.ReadBuffer.find" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        find
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.read_buffer.ReadBuffer.find_head_end" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        find_head_end
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.read_buffer.ReadBuffer.get_buffer" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        get_buffer
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.read_buffer.ReadBuffer.take" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        take
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.read_buffer.ReadBuffer.view" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        view
       
     </span>
   </a>
@@ -5104,49 +5286,39 @@
   
 
 
-<h1 id="blackbullserverh1_buffer"><code>blackbull.server.h1_buffer</code><a class="headerlink" href="#blackbullserverh1_buffer" title="Permanent link">&para;</a></h1>
+<h1 id="blackbullserverread_buffer"><code>blackbull.server.read_buffer</code><a class="headerlink" href="#blackbullserverread_buffer" title="Permanent link">&para;</a></h1>
 
 
 <div class="doc doc-object doc-module">
 
 
 
-<h2 id="blackbull.server.h1_buffer" class="doc doc-heading">
-            <code>blackbull.server.h1_buffer</code>
+<h2 id="blackbull.server.read_buffer" class="doc doc-heading">
+            <code>blackbull.server.read_buffer</code>
 
 
-<a href="#blackbull.server.h1_buffer" class="headerlink" title="Permanent link">&para;</a></h2>
+<a href="#blackbull.server.read_buffer" class="headerlink" title="Permanent link">&para;</a></h2>
 
     <div class="doc doc-contents first">
 
-        <p>Buffer-owning H/1.1 read front end (<code>BB_H1_PROTOCOL</code>).</p>
-<p>Phase 1a of the H/1.1 protocol-mode fast path.  The eventual front end is an
-:class:<code>asyncio.Protocol</code> whose <code>data_received</code> appends straight into a
-<code>bytearray</code>; this module implements the buffer half of that design <em>now</em>,
-layered over the existing reader, so the header scan, the pushback semantics,
-and the keep-alive residency can be built and proven before the transport is
-rewired.  The buffer logic here moves to the protocol unchanged.</p>
-<p><strong>Why the scan needs to own a buffer.</strong> The obvious cheap version of this
-phase — keep <code>StreamReader</code> and swap the per-line <code>readuntil(b'\r\n')</code>
-loop for one <code>readuntil(b'\r\n\r\n')</code> — does not work, twice over:</p>
-<ol>
-<li><code>readuntil</code> on a <em>stream</em> cannot see bytes the protocol-detect stage
-   already moved into the actor's <code>_request</code>.  A minimal
-   <code>GET / HTTP/1.0\r\n\r\n</code> leaves only the terminating <code>\r\n</code> on the
-   stream, and a search for the four-byte delimiter blocks until the peer
-   closes.  That deadlock is why the line-by-line loop exists at all.  Scanning
-   an <em>accumulated</em> buffer that starts with the already-consumed bytes has no
-   such blind spot.</li>
-<li>Any scan that reads in chunks will over-read — past the header block into
-   the body, or into the next pipelined request.  Line-by-line never
-   over-reads, which is precisely why it cannot be replaced without somewhere
-   to put the surplus.  The buffer is that somewhere: leftover stays put and
-   the next read is served from it.</li>
-</ol>
-<p>Point 2 is also where the performance comes from.  A keep-alive or pipelined
-peer usually has the next request head already in the buffer, and a coroutine
-that returns without awaiting does not yield to the loop — so those requests
-cost <strong>zero suspensions</strong>, against one loop turn per line today.</p>
+        <p>The single owned buffer for the H/1.1 inbound path.</p>
+<p>One <code>bytearray</code> per connection, written <strong>directly by the kernel</strong> through
+:meth:<code>ReadBuffer.get_buffer</code> and read by cursor.  Every inbound byte is
+materialised once: the head is sliced out for the parser, the body is handed
+out as a <code>memoryview</code>, and a keep-alive peer's next request is simply the bytes
+that were already sitting between the cursors.</p>
+<p>This replaces reading through <code>asyncio.StreamReader</code>.  The distinction that
+matters is <em>ownership</em>, not buffering — a buffer layered over a reader that is
+already buffering is a third copy, which measured slower than the per-line
+<code>readuntil</code> loop it was meant to beat.  The buffer only pays when it is the
+only one.</p>
+<p>Deliberately free of HTTP semantics.  It reports an over-budget head with
+:data:<code>LIMIT_EXCEEDED</code> rather than raising, because the 431 belongs to the
+actor; it distinguishes "EOF with nothing" from "EOF mid-head" only by leaving
+:attr:<code>available</code> intact, because deciding between a silent close and a 400 is
+also the actor's job.</p>
+<p>Not thread-safe and not concurrency-safe — one connection, one buffer, one
+actor loop, per the actor model.</p>
 
 
 
@@ -5171,26 +5343,18 @@ cost <strong>zero suspensions</strong>, against one loop turn per line today.</p
 
 
 
-<h3 id="blackbull.server.h1_buffer.BufferedH1Reader" class="doc doc-heading">
-            <code>BufferedH1Reader</code>
+<h3 id="blackbull.server.read_buffer.ReadBuffer" class="doc doc-heading">
+            <code>ReadBuffer</code>
 
 
-<a href="#blackbull.server.h1_buffer.BufferedH1Reader" class="headerlink" title="Permanent link">&para;</a></h3>
+<a href="#blackbull.server.read_buffer.ReadBuffer" class="headerlink" title="Permanent link">&para;</a></h3>
 
 
     <div class="doc doc-contents ">
 
 
 
-        <p>Reader that owns its unconsumed bytes.</p>
-<p>Wraps any object exposing <code>read</code> / <code>readuntil</code> / <code>readexactly</code> and
-presents the same three methods, so it is a drop-in for the
-<code>AbstractReader</code> the H/1.1 actor and its recipient already take.  The
-difference is the buffer: bytes read ahead of what a caller asked for are
-kept, not discarded, and every method serves from the buffer before
-touching the underlying reader.</p>
-<p>Not thread-safe and not concurrency-safe — one connection, one reader, one
-actor loop, per the actor model.</p>
+        <p>A cursor-addressed byte buffer fed by <code>asyncio.BufferedProtocol</code>.</p>
 
 
 
@@ -5214,51 +5378,174 @@ actor loop, per the actor model.</p>
 
 
 
-<h4 id="blackbull.server.h1_buffer.BufferedH1Reader.buffered" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">buffered</span></code>
+<h4 id="blackbull.server.read_buffer.ReadBuffer.available" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">available</span></code>
 
   <span class="doc doc-labels">
       <small class="doc doc-label doc-label-property"><code>property</code></small>
   </span>
 
-<a href="#blackbull.server.h1_buffer.BufferedH1Reader.buffered" class="headerlink" title="Permanent link">&para;</a></h4>
+<a href="#blackbull.server.read_buffer.ReadBuffer.available" class="headerlink" title="Permanent link">&para;</a></h4>
 
 
     <div class="doc doc-contents ">
 
-        <p>Bytes currently held, unconsumed.</p>
+        <p>Unconsumed bytes currently resident.</p>
 
     </div>
 
 </div>
 
+<div class="doc doc-object doc-attribute">
 
 
 
-<div class="doc doc-object doc-function">
-
-
-<h4 id="blackbull.server.h1_buffer.BufferedH1Reader.fill_until" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">fill_until</span><span class="p">(</span><span class="n">sep</span><span class="p">,</span> <span class="n">start</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">limit</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span></code>
+<h4 id="blackbull.server.read_buffer.ReadBuffer.capacity" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">capacity</span></code>
 
   <span class="doc doc-labels">
-      <small class="doc doc-label doc-label-async"><code>async</code></small>
+      <small class="doc doc-label doc-label-property"><code>property</code></small>
   </span>
 
-<a href="#blackbull.server.h1_buffer.BufferedH1Reader.fill_until" class="headerlink" title="Permanent link">&para;</a></h4>
+<a href="#blackbull.server.read_buffer.ReadBuffer.capacity" class="headerlink" title="Permanent link">&para;</a></h4>
 
 
     <div class="doc doc-contents ">
 
-        <p>Read until <em>sep</em> appears at or after offset <em>start</em>.</p>
-<p>Returns the index of <em>sep</em>, <code>-1</code> at EOF without a match, or
+        <p>Size of the underlying allocation (diagnostics and tests).</p>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-attribute">
+
+
+
+<h4 id="blackbull.server.read_buffer.ReadBuffer.examined_bytes" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">examined_bytes</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-property"><code>property</code></small>
+  </span>
+
+<a href="#blackbull.server.read_buffer.ReadBuffer.examined_bytes" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Cumulative bytes the head scan has looked at on this connection.</p>
+<p>Exposed so the linear-scan invariant is assertable rather than merely
+intended: a scan that restarted from the front on every arrival would
+make this quadratic in the number of segments, which is a peer-chosen
+CPU cost.  Overlap of up to three bytes per resumption is expected —
+that is the straddled-terminator back-off.</p>
+
+    </div>
+
+</div>
+
+
+
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.server.read_buffer.ReadBuffer.buffer_updated" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">buffer_updated</span><span class="p">(</span><span class="n">nbytes</span><span class="p">)</span></code>
+
+<a href="#blackbull.server.read_buffer.ReadBuffer.buffer_updated" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Declare how much of the last :meth:<code>get_buffer</code> was written.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.server.read_buffer.ReadBuffer.compact" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">compact</span><span class="p">()</span></code>
+
+<a href="#blackbull.server.read_buffer.ReadBuffer.compact" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Move the unconsumed tail to the front.</p>
+<p>Called on message boundaries.  Without it the cursors walk forward for
+the life of a keep-alive connection and the allocation grows to every
+byte ever received on it.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.server.read_buffer.ReadBuffer.consume" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">consume</span><span class="p">(</span><span class="n">n</span><span class="p">)</span></code>
+
+<a href="#blackbull.server.read_buffer.ReadBuffer.consume" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Advance past <em>n</em> bytes handed out by :meth:<code>view</code>.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.server.read_buffer.ReadBuffer.find" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">find</span><span class="p">(</span><span class="n">sep</span><span class="p">)</span></code>
+
+<a href="#blackbull.server.read_buffer.ReadBuffer.find" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Offset of <em>sep</em> within the resident bytes, or <code>-1</code>.</p>
+<p>Unlike :meth:<code>find_head_end</code> this scans from the read cursor every
+call: its callers are the generic <code>readuntil</code> paths (chunk-size lines,
+WebSocket framing), where the search target changes between calls so a
+carried scan offset would be wrong rather than merely wasteful.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.server.read_buffer.ReadBuffer.find_head_end" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">find_head_end</span><span class="p">(</span><span class="n">limit</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span></code>
+
+<a href="#blackbull.server.read_buffer.ReadBuffer.find_head_end" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Length of the message head, terminator included, or a sentinel.</p>
+<p>Returns <code>-1</code> when the terminator has not arrived yet and
 :data:<code>LIMIT_EXCEEDED</code> when <em>limit</em> (0 = unbounded) is passed without
-one.  The limit is not optional in practice: without it a peer that
-never sends the delimiter grows the buffer until the process dies,
-which is the slow-loris shape the header budget exists to bound.</p>
-<p>Rescans only from <code>len(buf) - len(sep) + 1</code> on each new chunk, so a
-delimiter split across two reads is still found without re-scanning the
-whole buffer — the quadratic trap in a naive "search it all again" loop.</p>
+one.</p>
+<p>The scan resumes from where the last call stopped, backed off by three
+bytes so a <code>\r\n\r\n</code> split across two arrivals is still found.
+Without that resumption a peer dribbling one byte per segment makes
+every arrival re-scan the whole head — quadratic, and attacker-chosen.</p>
 
 
     </div>
@@ -5268,21 +5555,18 @@ whole buffer — the quadratic trap in a naive "search it all again" loop.</p>
 <div class="doc doc-object doc-function">
 
 
-<h4 id="blackbull.server.h1_buffer.BufferedH1Reader.peek" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">peek</span><span class="p">(</span><span class="n">n</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
+<h4 id="blackbull.server.read_buffer.ReadBuffer.get_buffer" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">get_buffer</span><span class="p">(</span><span class="n">sizehint</span><span class="p">)</span></code>
 
-<a href="#blackbull.server.h1_buffer.BufferedH1Reader.peek" class="headerlink" title="Permanent link">&para;</a></h4>
+<a href="#blackbull.server.read_buffer.ReadBuffer.get_buffer" class="headerlink" title="Permanent link">&para;</a></h4>
 
 
     <div class="doc doc-contents ">
 
-        <p>Up to <em>n</em> buffered bytes without consuming them.</p>
-<p><code>n=None</code> (the pre-existing no-arg contract the H/1 header scan
-uses, e.g. <code>http1_actor</code>) returns the front buffer in full; <code>n</code>
-bounds the peek and also looks into the underlying reader's buffer.</p>
-<p>The bounded form slices the front buffer before converting, so it
-costs O(n) — never a full copy of a large front buffer (the WS
-send-time servicing calls this per message while data is buffered).</p>
+        <p>Space for the transport to read into.</p>
+<p>asyncio passes <code>-1</code> when it has no preference, and the protocol
+contract requires a non-empty buffer — returning an empty one stalls
+the connection permanently.</p>
 
 
     </div>
@@ -5292,18 +5576,96 @@ send-time servicing calls this per message while data is buffered).</p>
 <div class="doc doc-object doc-function">
 
 
-<h4 id="blackbull.server.h1_buffer.BufferedH1Reader.unread" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">unread</span><span class="p">(</span><span class="n">data</span><span class="p">)</span></code>
+<h4 id="blackbull.server.read_buffer.ReadBuffer.take" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">take</span><span class="p">(</span><span class="n">n</span><span class="p">)</span></code>
 
-<a href="#blackbull.server.h1_buffer.BufferedH1Reader.unread" class="headerlink" title="Permanent link">&para;</a></h4>
+<a href="#blackbull.server.read_buffer.ReadBuffer.take" class="headerlink" title="Permanent link">&para;</a></h4>
 
 
     <div class="doc doc-contents ">
 
-        <p>Push <em>data</em> back to the front of the buffer.</p>
-<p>The seam that makes over-reading safe: the header scan hands back
-whatever followed the header block, and the body reader or the next
-keep-alive iteration picks it up transparently.</p>
+        <p>Materialise and consume the next <em>n</em> bytes.</p>
+<p>The one copy per message: the head goes to the parser as <code>bytes</code>
+because the parse path's <code>split</code>/<code>translate</code> bulk ops need a real
+buffer object, and those are what keep the parser at C speed.</p>
+<p>Two ways to make that copy, and which one wins depends on size — so
+the size decides, the same shape as the send path's join-vs-vectored
+gate.  Slicing the <code>bytearray</code> allocates an intermediate and copies
+twice; a <code>memoryview</code> slice copies once but pays for building and
+releasing the view.  Measured on this tree (min of 7, µs/call):</p>
+<table>
+<thead>
+<tr>
+<th>n</th>
+<th>bytearray slice</th>
+<th>memoryview</th>
+<th>ratio</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>300</td>
+<td>0.102</td>
+<td>0.180</td>
+<td>1.77×</td>
+</tr>
+<tr>
+<td>4 KiB</td>
+<td>0.197</td>
+<td>0.242</td>
+<td>1.23×</td>
+</tr>
+<tr>
+<td>8 KiB</td>
+<td>0.270</td>
+<td>0.289</td>
+<td>1.07×</td>
+</tr>
+<tr>
+<td>16 KiB</td>
+<td>0.559</td>
+<td>0.413</td>
+<td>0.74×</td>
+</tr>
+<tr>
+<td>1 MiB</td>
+<td>1052</td>
+<td>16.4</td>
+<td>0.02×</td>
+</tr>
+</tbody>
+</table>
+<p>The crossover sits between 8 and 16 KiB.  Below it the view setup
+dominates and the double copy is cheaper — and <em>every request</em> takes
+its head through here, so that is the hot path.  Above it the second
+copy dominates and doubles peak memory besides (2.0 → 1.0 MiB on a
+1 MiB take), which matters because a body read asks for whatever the
+peer declared.</p>
+<p>Above the threshold the view is released explicitly rather than left
+to refcounting: a <code>bytearray</code> with a live export raises <code>BufferError</code>
+on resize, and the next <code>get_buffer</code> may resize.  Tying that to when a
+temporary happens to be collected is how it becomes a load-dependent
+crash.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.server.read_buffer.ReadBuffer.view" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">view</span><span class="p">(</span><span class="n">n</span><span class="p">)</span></code>
+
+<a href="#blackbull.server.read_buffer.ReadBuffer.view" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>A view of the next <em>n</em> resident bytes — no copy, not consumed.</p>
+<p>Body bytes reach the application through this, so a request that is
+streamed or sent to a file never allocates a <code>bytes</code> for its payload.</p>
 
 
     </div>

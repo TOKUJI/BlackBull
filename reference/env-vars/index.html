@@ -4083,6 +4083,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../api/blackbull/server/connection_protocol/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    connection_protocol
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../api/blackbull/server/constants/" class="md-nav__link">
         
   
@@ -4119,34 +4147,6 @@
     
   
     deadline
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../api/blackbull/server/h1_buffer/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    h1_buffer
   
 
     
@@ -4343,6 +4343,34 @@
     
   
     protocol_registry
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/server/read_buffer/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    read_buffer
   
 
     
@@ -5387,9 +5415,9 @@ first-hit-then-summary rate-limit model.</p>
 </thead>
 <tbody>
 <tr>
-<td><code>BB_H1_PROTOCOL</code></td>
-<td><code>0</code></td>
-<td>Read request heads through the buffer-owning front end: one <code>find(b'\r\n\r\n')</code> scan over an accumulated buffer instead of one <code>readuntil(b'\r\n')</code> per header line, keeping any surplus so a keep-alive or pipelined peer's next head is usually already in hand.  <strong>Experimental measurement gate</strong>, not a supported switch — it exists so the two read paths can be A/B'd on identical builds, and will either become the default or be removed once that measurement lands.  Both paths pass the same HTTP/1.1 conformance suite; enabling it changes how bytes arrive, never what a request means.</td>
+<td></td>
+<td></td>
+<td></td>
 </tr>
 </tbody>
 </table>
