@@ -8,16 +8,21 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 BlackBull uses [ZeroVer](https://0ver.org/) prior to a 1.0 commitment:
 
 - `0.MINOR.PATCH`
-- `MINOR` advances at each sprint close (one minor per closed sprint).
-  The minor number does **not** equal the sprint number — patch releases
-  and combined-sprint releases have introduced an offset (Sprint 49
-  closed as `v0.43.0`).
+- `MINOR` advances at a sprint close that changes what users see — a new
+  capability, a new or changed public API, new environment variables, or a
+  behaviour change an application has to react to.  Not every sprint earns
+  one: a version bump asks every adopter to work out what changed, and
+  spending one on an unchanged public surface spends their attention for
+  nothing.  The minor number therefore does **not** equal the sprint number —
+  patch releases and combined-sprint releases have introduced an offset
+  (Sprint 49 closed as `v0.43.0`; Sprint 97 closed as `v0.73.1`).
 - **Exception (2026-06-25)**: Sprints 50 through 54 are not independently
   released — they ship together as `v0.44.0` (the next minor after `v0.43.0`),
   the MQTT-broker debut plus its actor-model rebuild and the protocol-agnostic
   connection dispatcher.  Normal per-sprint versioning resumes at the next
   sprint close as `v0.45.0`.
-- `PATCH` covers bug fixes / harness work between sprints.
+- `PATCH` covers bug fixes, security fixes, and harness work — whether they
+  land between sprints or close one.
 - No `1.0.0` until the framework's identity (pure-Python H1 parser,
   BlackBull-internal `ASGIServer`, per-process tick scanner deadline
   subsystem) and public API have stabilised across several sprints.
@@ -30,6 +35,15 @@ so the editable install's metadata catches up.
 ---
 
 ## [Unreleased]
+
+---
+
+## [0.73.1] — 2026-08-09
+
+Sprint 97.  A patch rather than a minor: the public surface is byte-for-byte
+unchanged — no new API, no new environment variable, nothing new to call or
+configure.  What shipped is a security fix, a shutdown-signal fix, one new log
+line, and a test that can now explain its own failures.
 
 ### Security
 
