@@ -250,6 +250,16 @@ BB_DEADLINE_TICK_MS
     ``BB_BODY_TIMEOUT``, ``BB_WRITE_TIMEOUT``, ``BB_KEEP_ALIVE_TIMEOUT``).
     Smaller = tighter timeout granularity at a small CPU cost; larger =
     more slack but cheaper.  Default: ``300``.
+BB_CPU_AFFINITY
+    Per-worker CPU pinning, applied after fork in each worker process.
+    ``auto`` (default) gives worker *i* the *i*-th CPU of the mask the
+    process already carries, so ``taskset``/``numactl``/cpuset placement is
+    honoured rather than overridden; ``off`` pins nothing; an explicit
+    ``taskset``-style list (``2,4,6-9``) confines workers to those CPUs,
+    intersected with the mask we were granted.  Only the event loop is
+    pinned — the thread pool that serves ``run_in_executor`` compression and
+    ``asyncio.to_thread`` file reads keeps the full mask.  Multi-worker and
+    Linux only; a single-worker server is never pinned.  Default: ``auto``.
 """
 import dataclasses
 import functools as _functools
@@ -589,6 +599,13 @@ class Settings:
     #: responses.
     brotli_quality: int = 4
 
+    #: Per-worker CPU pinning policy.  ``auto`` (default) gives worker *i* the
+    #: *i*-th CPU of the mask the process already carries; ``off`` leaves
+    #: placement to the operator; an explicit ``taskset``-style list
+    #: (``2,4,6-9``) confines workers to those CPUs.  Multi-worker only —
+    #: a single-worker server is never pinned.  See blackbull/server/affinity.py.
+    cpu_affinity: str = 'auto'
+
     #: Cooperative yield interval for the HTTP/2 frame loop.  After this many
     #: stream tasks are spawned without a natural yield, ``asyncio.sleep(0)``
     #: is inserted so the event loop can dispatch queued tasks.
@@ -667,6 +684,7 @@ def get_settings() -> Settings:
             'BB_COMPRESSION_MAX_INFLIGHT', max((os.cpu_count() or 1) * 2, 4)),
         brotli_quality=_int_env_nonneg('BB_BROTLI_QUALITY', 4),
         frame_yield_every=_int_env_nonneg('BB_FRAME_YIELD_EVERY', 8),
+        cpu_affinity=_str_env('BB_CPU_AFFINITY', 'auto'),
     )
 
 

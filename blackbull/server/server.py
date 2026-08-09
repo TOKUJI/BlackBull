@@ -3,6 +3,7 @@ import asyncio
 from http import HTTPStatus
 import logging
 import ssl
+import sys
 from collections import defaultdict, deque
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -20,6 +21,11 @@ from .access_log import AccessLogRecord, emit_access_log as _emit_access_log
 from .cap_log import log_cap_hit
 from ..asgi import ASGIEvent
 logger = logging.getLogger(__name__)
+
+#: ``eager_start`` landed in 3.12; the supported floor is 3.11.  A task
+#: constructed with it runs its coroutine synchronously until the first
+#: suspension instead of queueing that first step for the next loop iteration.
+_EAGER_TASKS = sys.version_info >= (3, 12)
 
 async def _run_with_log(coro, record: AccessLogRecord) -> None:
     """Await *coro* then emit one access log entry on 'blackbull.access'.
@@ -310,7 +316,22 @@ class Server:
         class _ServedConnection(ConnectionProtocol):
             def connection_made(self, transport):
                 super().connection_made(transport)
-                task = asyncio.create_task(self._serve())
+                # Started eagerly: the serve prologue — deadline handle,
+                # detection order, first peek — runs inside this callback and
+                # parks at the same read it would have parked at anyway, one
+                # loop iteration earlier.  A connection pays that hop once, so
+                # it is churn latency rather than keep-alive throughput.
+                #
+                # Eager start does not change where a failure lands: a
+                # coroutine that raises before its first suspension completes
+                # the task with that exception rather than raising out of this
+                # transport callback, so ``_serve_done`` still reports it.
+                if _EAGER_TASKS:
+                    task = asyncio.Task(self._serve(),
+                                        loop=asyncio.get_running_loop(),
+                                        eager_start=True)
+                else:
+                    task = asyncio.create_task(self._serve())
                 # A protocol factory cannot await, so the task is detached.
                 # Held for the connection's lifetime and given a done-callback
                 # so a failure surfaces as a log line rather than asyncio's

@@ -61,6 +61,21 @@ plain `asyncio` server that owns the listening socket and
 spawns a `ConnectionActor` task per accepted connection.
 Everything below it is an `Actor` subclass.
 
+That task is started **eagerly**: the coroutine runs inside the
+transport's `connection_made` callback until its first suspension
+— which is the peek that waits for the peer's first bytes, the
+same place it would have parked anyway.  `asyncio.create_task`
+would instead queue that first step for a later loop iteration,
+so the prologue (deadline handle, protocol-detection order) costs
+a scheduling hop that a connection pays once.  Measured at 0.387
+µs per accepted connection, so it is churn bookkeeping rather
+than a latency win — an accepted connection waits for the peer's
+packet either way.  Eager start does not move where a failure
+lands: a coroutine that raises before its first suspension
+completes the task with that exception rather than raising out of
+the transport callback, so the connection's done-callback still
+reports it.
+
 A separate `EventAggregator` translates the low-level
 inter-actor messages into the wire-level user-facing events
 documented in [Events](../guide/events.md) —
@@ -501,6 +516,30 @@ that failure is invisible to them.  Whatever is under `AsyncioWriter`
 owes it `write`, `writelines`, `drain`, `close`, and a `transport`
 (for `sendfile`); `tests/architecture/test_writer_backing_contract.py`
 reads that list out of the sender's source rather than restating it.
+
+### `sendfile` goes out a megabyte at a time
+
+`AsyncioWriter.sendfile` splits the transfer into `_SENDFILE_CHUNK`
+(1 MiB) calls to `loop.sendfile` rather than handing it the whole
+file at once.  The kernel copies the same total either way; the
+boundary exists so `BB_WRITE_TIMEOUT` has somewhere to re-arm.
+
+Without it, the static-file path was the one response body no
+write bound could reach.  "Send this 4 GiB file within 30 seconds"
+is not a policy any operator can set, so a single unbounded
+`loop.sendfile` had to go unguarded — and a peer that read a large
+file one byte per second held the connection, its FD, and its
+transport for as long as it liked, which is precisely the
+slow-read slowloris shape the timeout was built to stop.  Per
+chunk the policy becomes "make a megabyte of progress within the
+budget", which bounds a stall without penalising a legitimately
+large transfer.
+
+The chunk sits far above ordinary web assets deliberately:
+anything smaller still goes out in exactly one call, so the common
+path is unchanged and only genuinely large files pay for the
+loop.  The header flush that precedes the transfer runs under the
+same bound as every other drain.
 
 ### Response values that come from tables
 

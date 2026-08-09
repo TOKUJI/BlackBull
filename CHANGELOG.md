@@ -36,6 +36,72 @@ so the editable install's metadata catches up.
 
 ## [Unreleased]
 
+Sprint 98.  The perf-survey T1 remainder.  Two of the three items turned out
+to be defect reports rather than new work: the CPU pinning this sprint was
+meant to *add* has shipped since `v0.28.0`, unconditionally and undocumented,
+and the `sendfile` path had quietly escaped the write timeout that guards
+every other response body.
+
+### Security
+
+- **A large static file could be held open indefinitely.**  `BB_WRITE_TIMEOUT`
+  bounds every response write except one: `AsyncioWriter.sendfile` issued a
+  single unbounded `loop.sendfile` for the whole file, and flushed the response
+  headers through the raw `drain()` rather than the guarded one.  A peer that
+  requested a large file and then read it a byte per second held the
+  connection, its file descriptor, and its transport for as long as it liked —
+  the exact slow-read slowloris shape the write timeout exists to stop, on the
+  one path it could not reach.  The transfer is now issued in 1 MiB chunks and
+  each chunk re-arms the bound, so the policy is "make a megabyte of progress
+  within the budget" rather than the unsettable "send this whole file within
+  the budget".  A legitimately large transfer that keeps progressing is never
+  cut off for its size, and files below the chunk still go out in exactly one
+  call.
+
+### Fixed
+
+- **Worker CPU pinning overrode the operator's placement.**  Each worker pinned
+  itself to `worker_id % os.cpu_count()`, computed against the machine's core
+  count rather than the affinity mask the process actually held — and since a
+  process may widen its own mask, `taskset -c 8-11 … --workers 4` put its
+  workers on CPUs 0–3.  Placement is now drawn from `sched_getaffinity`, so
+  `taskset`, `numactl`, and a container's cpuset are honoured.  On an
+  unrestricted host the chosen cores are unchanged.
+- **Worker CPU pinning confined the thread pool as well.**  Linux threads
+  inherit the creating thread's affinity mask, so pinning the event loop also
+  pinned every `run_in_executor` compression offload and every
+  `asyncio.to_thread` static-file read to the single core the loop was already
+  saturating — the opposite of what offloading is for.  Pool threads are now
+  handed the full mask back.
+
+### Added
+
+- **`BB_CPU_AFFINITY`** — `auto` (default, the corrected behaviour above),
+  `off` to leave placement alone entirely, or a `taskset`-style CPU list
+  (`2,4,6-9`) intersected with the mask the process was granted.  Pinning had
+  no off switch before this, which is the wrong default for a shared or
+  externally-orchestrated host.
+
+### Internal
+
+- **The per-connection serve task starts eagerly.**  `connection_made` now
+  builds the task with `eager_start=True`, running the serve prologue inline
+  instead of queueing its first step for a later loop iteration.  Measured at
+  **0.387 µs saved per accepted connection** (95% CI 0.343–0.431, five pooled
+  ABBA runs against an A/A null of +0.059 ± 0.025; `bench/accept_hop_ab.py`).
+  That is ~0.8 % of a churn request and ~0.008 % of a request on a
+  100-request keep-alive connection — bookkeeping, not a latency win, since an
+  accepted connection waits for the peer's first packet either way.
+
+### Harness
+
+- **The Autobahn image is pinned by digest.**  `autobahn_run.sh` pulled
+  `crossbario/autobahn-testsuite:latest`, so "the wire behaviour regressed" and
+  "the test suite changed" arrived as the same red X and no passing run was
+  repeatable.  Override with `AUTOBAHN_IMAGE=` to test an upgrade.  The pinned
+  digest is the one Docker Hub's `latest` resolved to on 2026-08-10, so what CI
+  runs is unchanged.
+
 ---
 
 ## [0.73.1] — 2026-08-09

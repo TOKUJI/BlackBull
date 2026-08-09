@@ -6,6 +6,7 @@ from http import HTTPStatus
 from inspect import iscoroutinefunction
 from email.utils import formatdate
 from itertools import chain
+from typing import NoReturn
 
 from ..protocol import hpack_fastpath
 from ..protocol.frame_types import (FrameTypes, HeaderFrameFlags, DataFrameFlags,
@@ -29,6 +30,13 @@ _CRLF = b'\r\n'
 # (TLS, mocked tests).  Matches the static middleware's ``_CHUNK`` so
 # memory-peak guarantees stay consistent across paths.
 _PATHSEND_FALLBACK_CHUNK = 64 * 1024
+
+# Bytes offered to one ``loop.sendfile`` call.  The kernel copies the same
+# total either way; what the boundary buys is somewhere to re-arm the write
+# deadline, so a stalled transfer is bounded by progress rather than by the
+# file's size.  Deliberately far above ordinary web assets: below this a file
+# still goes out in a single call, so the common path is unchanged.
+_SENDFILE_CHUNK = 1024 * 1024
 
 # ``BaseSender._write_many`` size gate: parts totalling at most this many
 # bytes are joined and sent via ``write()``; larger payloads use vectored
@@ -296,26 +304,35 @@ class AsyncioWriter(AbstractWriter):
             with dl:
                 await self._sw.drain()
         except TimeoutError:
-            logger.warning(
-                'write timeout (%.1fs) exceeded — closing connection',
-                self._write_timeout)
-            log_cap_hit('write_timeout',
-                        requested=self._write_timeout,
-                        limit=self._write_timeout)
-            try:
-                self._sw.close()
-            except Exception as close_exc:
-                # Best-effort transport teardown.  We're already in the
-                # timeout error path and the transport may be half-broken
-                # (SSL aborted, FD already reaped by a sibling task, etc.);
-                # swallowing here lets us still raise ConnectionResetError
-                # below so the peer-disconnect handling runs uniformly.
-                logger.debug(
-                    'write timeout: transport.close() also failed (%s) — '
-                    'continuing with ConnectionResetError', close_exc)
-            raise ConnectionResetError(
-                f'write timeout after {self._write_timeout:.1f}s'
-            ) from None
+            self._fail_write_timeout()
+
+    def _fail_write_timeout(self) -> NoReturn:
+        """Tear the connection down after a write bound expired, and raise.
+
+        Shared by every bounded write — the drain and each ``sendfile``
+        chunk — so a slow-read peer meets the same fate whichever path it
+        stalls.  Never returns.
+        """
+        logger.warning(
+            'write timeout (%.1fs) exceeded — closing connection',
+            self._write_timeout)
+        log_cap_hit('write_timeout',
+                    requested=self._write_timeout,
+                    limit=self._write_timeout)
+        try:
+            self._sw.close()
+        except Exception as close_exc:
+            # Best-effort transport teardown.  We're already in the
+            # timeout error path and the transport may be half-broken
+            # (SSL aborted, FD already reaped by a sibling task, etc.);
+            # swallowing here lets us still raise ConnectionResetError
+            # below so the peer-disconnect handling runs uniformly.
+            logger.debug(
+                'write timeout: transport.close() also failed (%s) — '
+                'continuing with ConnectionResetError', close_exc)
+        raise ConnectionResetError(
+            f'write timeout after {self._write_timeout:.1f}s'
+        ) from None
 
     async def write(self, data: bytes) -> None:
         self._sw.write(data)
@@ -362,19 +379,47 @@ class AsyncioWriter(AbstractWriter):
         self._sw.close()
 
     async def sendfile(self, file, offset: int, count: int) -> int:
-        """Zero-copy ``loop.sendfile`` against the underlying transport.
+        """Zero-copy ``loop.sendfile`` against the underlying transport, in
+        bounded chunks.
 
         Raises ``NotImplementedError`` (propagated from the loop) when
         the transport is SSL — TLS framing happens in user-space, so
         the kernel can't see the plaintext to copy.  Callers must catch
-        that and fall back to a read+write loop.
+        that and fall back to a read+write loop.  Support is a property of
+        the transport, so it is decided on the first chunk: a later chunk
+        cannot discover that sendfile was unavailable all along.
 
         Drains any pending writes first so headers we already buffered
-        precede the file bytes in wire order.
+        precede the file bytes in wire order — under the write bound, like
+        every other drain, so the header flush cannot stall unwatched.
+
+        One call per ``_SENDFILE_CHUNK`` rather than one for the whole file:
+        each chunk re-arms ``BB_WRITE_TIMEOUT``, which turns "this transfer
+        is stalled" into something expressible without also declaring a
+        legitimately large file to be too slow.  Returns the octets actually
+        sent, which is short of *count* only when the peer stopped accepting.
         """
-        await self._sw.drain()
+        await self._drain_with_timeout()
         loop = asyncio.get_running_loop()
-        return await loop.sendfile(self._sw.transport, file, offset, count)
+        dl = self._deadline
+        sent = 0
+        while sent < count:
+            want = min(_SENDFILE_CHUNK, count - sent)
+            if dl is None:
+                n = await loop.sendfile(
+                    self._sw.transport, file, offset + sent, want)
+            else:
+                try:
+                    with dl:
+                        n = await loop.sendfile(
+                            self._sw.transport, file, offset + sent, want)
+                except TimeoutError:
+                    self._fail_write_timeout()
+            if not n:
+                # Zero octets is the peer gone, not a chunk to retry.
+                break
+            sent += n
+        return sent
 
 
 # ---------------------------------------------------------------------------
